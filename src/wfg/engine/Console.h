@@ -193,6 +193,16 @@ namespace wfg
         std::function<ImportResult (const ImportRequest&, const std::function<void (const std::string&)>& progress)>
             importSets {};
 
+        /*  A QLAB WORKSPACE IMPORTED (namespace draft §46.3): its cue lists, read
+            for the window's list - each ticked, an empty one greyed - and the
+            import itself, the window's form of `wfg import-qlab`, the workspace
+            the request's one set and the lists its scenes. As the Live set's,
+            neither touches this window's show, and the import is asked off the
+            message thread. */
+        std::function<ImportScenes (const std::string& workspace)> readQlabLists {};
+        std::function<ImportResult (const ImportRequest&, const std::function<void (const std::string&)>& progress)>
+            importQlab {};
+
         /*  THE FIFTH DOOR: THE CANVASES AS THEY ARE (namespace draft 40, the
             author's video monitor). While a monitor window is open the
             renderer draws every canvas small, about ten times a second, and

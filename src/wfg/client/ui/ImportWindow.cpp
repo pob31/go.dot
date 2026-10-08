@@ -43,8 +43,10 @@ namespace wfg::client::ui
                                 : juce::String (sets.size()) + " sets become one show, a performance each, the newest "
                                   "the show's template. The scenes are the template's.";
 
-            intro.setText (what + " Tick the scenes that become GOs - each becomes one, numbered in order. "
-                           "What the import cannot carry is written in a report beside the show.",
+            intro.setText (! scenes.intro.empty()
+                             ? juce::String::fromUTF8 (scenes.intro.c_str())
+                             : what + " Tick the scenes that become GOs - each becomes one, numbered in order. "
+                                      "What the import cannot carry is written in a report beside the show.",
                            juce::dontSendNotification);
             intro.setFont (Look::font (theme, 15.0f));
             intro.setColour (juce::Label::textColourId, Look::colour (theme, "ink"));
@@ -194,7 +196,8 @@ namespace wfg::client::ui
     //==========================================================================
     ImportWindow::ImportWindow (const model::Theme& theme, const juce::StringArray& sets, const ImportScenes& scenes,
                                 const juce::File& parent, const juce::String& name, Actions actionsToUse)
-        : DocumentWindow ("Import Ableton Live set", Look::colour (theme, "ground"), juce::DocumentWindow::closeButton),
+        : DocumentWindow (scenes.title.empty() ? juce::String ("Import Ableton Live set") : juce::String::fromUTF8 (scenes.title.c_str()),
+                          Look::colour (theme, "ground"), juce::DocumentWindow::closeButton),
           actions (std::move (actionsToUse))
     {
         content = std::make_unique<Content> (theme, sets, scenes, parent, name,

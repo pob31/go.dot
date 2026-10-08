@@ -1611,6 +1611,88 @@ namespace
         return result;
     }
 
+    /*  THE WINDOW'S QLAB IMPORT (namespace draft §46.3): a workspace's cue lists
+        for the window's list, each ticked and an empty one greyed, and the
+        import into a new show. */
+    wfg::ImportScenes readQlabLists (const std::string& path)
+    {
+        wfg::ImportScenes out;
+        const juce::File file { juce::String::fromUTF8 (path.c_str()) };
+        const auto read = wfg::import::qlab::readWorkspace (file);
+
+        if (! read.workspace.has_value())
+        {
+            out.error = file.getFileName().toStdString() + ": " + read.error;
+            return out;
+        }
+
+        const auto& workspace = *read.workspace;
+        out.creator = "QLab " + workspace.version;
+        out.title = "Import QLab workspace";
+        out.intro = "One workspace becomes one show: " + file.getFileNameWithoutExtension().toStdString() + " (QLab "
+                    + workspace.version + "). Tick the cue lists to import - each becomes a cue list of the show. What "
+                    "the import cannot carry is written in a report beside the show, and stands as a memo where it was.";
+
+        for (std::size_t at = 0; at < workspace.lists.size(); ++at)
+        {
+            const auto& list = workspace.lists[at];
+            const auto cues = wfg::import::qlab::countCues (list);
+
+            wfg::ImportScene row;
+            row.index = static_cast<int> (at);
+            row.name = list.name;
+            row.firstLine = std::to_string (cues) + " cue(s)" + (list.groupMode == 5 ? std::string (", a cart") : std::string {});
+            row.doesSomething = cues > 0;
+            row.ticked = cues > 0;
+            out.scenes.push_back (std::move (row));
+        }
+
+        return out;
+    }
+
+    wfg::ImportResult importQlab (const wfg::ImportRequest& request,
+                                  const std::function<void (const std::string&)>& progress)
+    {
+        wfg::ImportResult result;
+
+        if (request.sets.empty())
+        {
+            result.said = "no workspace to import";
+            return result;
+        }
+
+        /*  NO LIST TICKED IS NO SHOW, said rather than made: an empty selection
+            would otherwise mean "every list" to the importer. */
+        if (request.scenes.empty())
+        {
+            result.said = "no cue list was ticked, so there is nothing to import";
+            return result;
+        }
+
+        wfg::import::qlab::ImportOptions options;
+        options.into = juce::File (juce::String::fromUTF8 (request.into.c_str()));
+        options.lists = std::set<int> (request.scenes.begin(), request.scenes.end());
+        options.progress = progress;
+
+        const auto outcome = wfg::import::qlab::importWorkspace (juce::File (juce::String::fromUTF8 (request.sets.front().c_str())),
+                                                                 options);
+
+        if (! outcome.ok)
+        {
+            result.said = "the workspace was not imported: " + outcome.error;
+            return result;
+        }
+
+        result.ok = true;
+        result.show = outcome.show.getFullPathName().toStdString();
+        result.report = outcome.report.getFullPathName().toStdString();
+        result.said = "imported " + std::to_string (outcome.cues) + " cue(s) into " + outcome.show.getFileName().toStdString()
+                      + (outcome.approximated + outcome.dropped > 0 || ! outcome.missingMedia.empty()
+                           ? " - the report beside it says what did not come over as it was"
+                           : "");
+        return result;
+    }
+
     /*  AN ABLETON LIVE SET IMPORTED INTO A NEW SHOW (namespace draft §29.3).
         Exit codes: 0 imported with nothing to report, 1 imported with
         approximations or something not imported - the report says which - and
@@ -5861,6 +5943,14 @@ namespace
                                             const std::function<void (const std::string&)>& progress)
                 {
                     return importSets (request, progress);
+                };
+
+                //  A QLab workspace, imported into a new show (§46).
+                clientHost.readQlabLists = [] (const std::string& workspace) { return readQlabLists (workspace); };
+                clientHost.importQlab = [] (const wfg::ImportRequest& request,
+                                            const std::function<void (const std::string&)>& progress)
+                {
+                    return importQlab (request, progress);
                 };
 
                #if JUCE_LINUX

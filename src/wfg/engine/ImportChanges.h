@@ -51,6 +51,12 @@ namespace wfg
         std::string error;                  ///< why the set could not be read; empty when it was
         std::string creator;                ///< "Ableton Live 11.2.6"
         std::vector<ImportScene> scenes;
+
+        /*  THE WINDOW'S WORDS for an import that is not a Live set's - a QLab
+            workspace's cue lists (namespace draft §46.3) - its title and the
+            sentence at its top; empty, the Live set's. */
+        std::string title;
+        std::string intro;
     };
 
     struct ImportRequest

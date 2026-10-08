@@ -117,7 +117,7 @@ namespace wfg::client
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
             menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance, menuUpdateTemplate,
-            menuImportAls,
+            menuImportAls, menuImportQlab,
             menuConvertUsed, menuConvertWhole, menuConvertUsedQuality, menuConvertWholeQuality,
             menuMovieSound, menuCancelConversion, menuDownloadFfmpeg,
             menuSaveTemplate, menuVideoMonitor, menuHideProjectors,
@@ -790,6 +790,7 @@ namespace wfg::client
                     case menuNewPerformance:
                     case menuUpdateTemplate:
                     case menuImportAls:
+                    case menuImportQlab:
                     case menuConvertUsed:
                     case menuConvertWhole:
                     case menuConvertUsedQuality:
@@ -835,6 +836,10 @@ namespace wfg::client
                     //  A new show from an Ableton Live set (§29): nothing of this one is touched.
                     case menuImportAls: return host.importSets != nullptr && host.readImportScenes != nullptr
                                                  && host.openWindow != nullptr && ! importing;
+
+                    //  And from a QLab workspace (§46), the same way.
+                    case menuImportQlab: return host.importQlab != nullptr && host.readQlabLists != nullptr
+                                                  && host.openWindow != nullptr && ! importing;
 
                     //  A performance of a show - with its template, or to be its first.
                     case menuUpdateTemplate: return host.compareWithTemplate != nullptr
@@ -938,6 +943,7 @@ namespace wfg::client
                                                                                        : "Make this the show's template");
                     addMenuItem (menu, menuOpen, "Open show...");
                     addMenuItem (menu, menuImportAls, "Import Ableton Live set...");
+                    addMenuItem (menu, menuImportQlab, "Import QLab workspace...");
                     menu.addSeparator();
                     addMenuItem (menu, menuSave, "Save");
                     addMenuItem (menu, menuSaveAs, "Save as...");
@@ -1073,6 +1079,7 @@ namespace wfg::client
                     case menuNew:       chooseShowFolder (true); break;
                     case menuNewPerformance: askForANewPerformance(); break;
                     case menuImportAls: chooseLiveSets(); break;
+                    case menuImportQlab: chooseQlabWorkspace(); break;
                     case menuUpdateTemplate:
                         if (templateAroundThisDocument())
                             reviewTemplate ({});
@@ -3482,11 +3489,60 @@ namespace wfg::client
                 ui::ImportWindow::Actions actions;
                 actions.import = [this, sets] (const std::vector<int>& ticked, const juce::File& into)
                 {
-                    startImport (sets, ticked, into);
+                    startImport (sets, ticked, into, host.importSets);
                 };
                 actions.cancel = [this] { closeImportWindow(); };
 
                 importWindow = std::make_unique<ui::ImportWindow> (theme, names, scenes, showsFolder(), name,
+                                                                   std::move (actions));
+                importWindow->setVisible (true);
+                importWindow->toFront (true);
+            }
+
+            /*  A QLAB WORKSPACE INTO A NEW SHOW (namespace draft §46.3): the
+                workspace picked, then its cue lists ticked and where the show goes,
+                then the import off the message thread, as a Live set's. */
+            void chooseQlabWorkspace()
+            {
+                if (! host.readQlabLists || ! host.importQlab || importing)
+                    return;
+
+                chooser = std::make_unique<juce::FileChooser> ("Choose a QLab 4 or QLab 5 workspace", showsFolder(),
+                                                               "*.qlab4;*.qlab5");
+
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                      [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()), this]
+                                      (const juce::FileChooser& answered)
+                                      {
+                                          const auto file = answered.getResult();
+
+                                          if (safe == nullptr || file == juce::File())
+                                              return;
+
+                                          offerQlabLists (file);
+                                      });
+            }
+
+            void offerQlabLists (const juce::File& file)
+            {
+                const std::vector<std::string> sets { file.getFullPathName().toStdString() };
+                const auto lists = host.readQlabLists (sets.front());
+
+                if (! lists.error.empty())
+                {
+                    shell->transport.setNotice (juce::String::fromUTF8 (lists.error.c_str()));
+                    return;
+                }
+
+                ui::ImportWindow::Actions actions;
+                actions.import = [this, sets] (const std::vector<int>& ticked, const juce::File& into)
+                {
+                    startImport (sets, ticked, into, host.importQlab);
+                };
+                actions.cancel = [this] { closeImportWindow(); };
+
+                importWindow = std::make_unique<ui::ImportWindow> (theme, juce::StringArray { file.getFileNameWithoutExtension() },
+                                                                   lists, showsFolder(), file.getFileNameWithoutExtension(),
                                                                    std::move (actions));
                 importWindow->setVisible (true);
                 importWindow->toFront (true);
@@ -3502,9 +3558,13 @@ namespace wfg::client
                 });
             }
 
-            void startImport (const std::vector<std::string>& sets, const std::vector<int>& ticked, const juce::File& into)
+            /*  THE IMPORT, whichever importer the window was for - a Live set's or a
+                QLab workspace's (§46) - with the same words in the foot. */
+            void startImport (const std::vector<std::string>& sets, const std::vector<int>& ticked, const juce::File& into,
+                              const std::function<wfg::ImportResult (const wfg::ImportRequest&,
+                                                                     const std::function<void (const std::string&)>&)>& importer)
             {
-                if (importing || ! host.importSets)
+                if (importing || ! importer)
                     return;
 
                 if (into.exists())
@@ -3525,7 +3585,6 @@ namespace wfg::client
                 /*  OFF THE MESSAGE THREAD: a tour copies a gigabyte of sound. Every
                     word back is posted to it, and nothing is touched once this
                     window has gone. */
-                const auto importer = host.importSets;
                 const juce::Component::SafePointer<ui::MainWindow> safe (window.get());
 
                 std::thread ([this, importer, request, safe]
