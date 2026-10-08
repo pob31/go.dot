@@ -519,3 +519,95 @@ TEST_CASE ("video: a HAP frame is drawn still compressed, one upload for every o
     CHECK (std::abs (static_cast<int> ((middle >> 8) & 0xffu) - 65) <= 2);
     CHECK ((middle & 0xffu) <= 2u);
 }
+
+TEST_CASE ("video: a Hap Q frame turned back from YCoCg, and a preview's straight RGBA (R.1)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    /*  AN 8 BY 8 HAP Q FRAME: every block's alpha (Y) 128, its colour 565
+        (16, 32, 0) - which decodes to Co 132, Cg 130 and no scale - so the
+        shader's arithmetic gives (130, 130, 122). */
+    auto q = std::make_shared<video::render::MovieFrame>();
+    q->texture = video::hap::Texture::ycocgDxt5;
+    q->width = 8;
+    q->height = 8;
+    q->index = 0;
+
+    const std::uint16_t colour565 = static_cast<std::uint16_t> ((16u << 11) | (32u << 5));
+
+    for (int block = 0; block < 4; ++block)
+    {
+        const std::uint8_t bytes[16] { 128, 128, 0, 0, 0, 0, 0, 0,
+                                       static_cast<std::uint8_t> (colour565 & 0xffu), static_cast<std::uint8_t> (colour565 >> 8),
+                                       static_cast<std::uint8_t> (colour565 & 0xffu), static_cast<std::uint8_t> (colour565 >> 8),
+                                       0, 0, 0, 0 };
+        q->blocks.insert (q->blocks.end(), bytes, bytes + 16);
+    }
+
+    //  A preview's frame: 6 by 4, straight RGBA, every pixel (200, 100, 50, 255).
+    auto preview = std::make_shared<video::render::MovieFrame>();
+    preview->width = 6;
+    preview->height = 4;
+    preview->index = 0;
+
+    for (int n = 0; n < 6 * 4; ++n)
+        preview->rgba.insert (preview->rgba.end(), { 200, 100, 50, 255 });
+
+    Pictures pictures;
+    pictures.frames["q.mov"] = q;
+    pictures.frames["preview.mp4"] = preview;
+
+    auto left = layerOf ("L1", region::Source::movie, 1.0, 1);
+    left.file = "q.mov";
+    left.canvas = "C1";
+    left.fit = region::Fit::stretch;
+
+    auto right = layerOf ("L2", region::Source::movie, 1.0, 1);
+    right.file = "preview.mp4";
+    right.canvas = "C2";
+    right.fit = region::Fit::stretch;
+
+    region::ConfigReading config;
+    config.canvases.push_back ({ "C1", 16, 16 });
+    config.canvases.push_back ({ "C2", 16, 16 });
+
+    std::vector<float> fromQ, fromPreview;
+    int w = 0, h = 0;
+
+    {
+        video::render::Painter painter (pictures);
+        std::string why;
+        REQUIRE_MESSAGE (painter.make (why), why);
+
+        painter.beginFrame (config, { left, right }, {});
+        painter.canvas ("C1", 100);
+        painter.canvas ("C2", 100);
+        sg_commit();
+
+        REQUIRE (video::gpu::readBack (painter.canvasImage ("C1"), fromQ, w, h));
+        REQUIRE (video::gpu::readBack (painter.canvasImage ("C2"), fromPreview, w, h));
+        painter.endFrame();
+    }
+
+    const auto middleOf = [&w, &h] (const std::vector<float>& rgba)
+    {
+        return rgbOf (rgba.data() + 4 * (static_cast<std::size_t> (h / 2) * static_cast<std::size_t> (w)
+                                         + static_cast<std::size_t> (w / 2)));
+    };
+
+    const auto near = [] (std::uint32_t got, std::uint32_t want)
+    {
+        for (int shift : { 16, 8, 0 })
+            if (std::abs (static_cast<int> ((got >> shift) & 0xffu) - static_cast<int> ((want >> shift) & 0xffu)) > 2)
+                return false;
+
+        return true;
+    };
+
+    INFO ("Hap Q reads " << middleOf (fromQ) << ", the preview " << middleOf (fromPreview));
+    CHECK (near (middleOf (fromQ), 0x82827Au));
+    CHECK (near (middleOf (fromPreview), 0xC86432u));
+}
