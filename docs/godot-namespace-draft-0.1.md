@@ -22587,3 +22587,47 @@ to write out cue by cue, and ZS's chains are what turns those back into one grou
 | QL.6 | `wfg import-qlab`: the show written, its report, `blackbox/import_qlab.py` in both locales |
 | QL.7 | The window: File > Import QLab workspace..., the lists to tick, the import off the message thread, the show and its report opened |
 | QL.8 | The two shows imported from the corpus, compared with what QLab says over OSC; the close-out |
+
+### 46.7 What is built, and what waits
+
+*Written 2026-10-08.* QL.0 `e4e3208`, QL.2 `5b87742` (the shared parts), QL.3 `74443a0` (the decoder), QL.4
+`fa12af0` (the reader), QL.5 `172700d` (the walk), QL.6 `1760425` (the show written, the report, the verb),
+QL.7 `68fa24f` (the window), QL.8 with this section. Where the build departs from what §46 drew, or says
+more than it:
+
+- **A cart is a cue list fired in order, not a sampler group** (ZS drew one). A sampler group's members
+  are launched from faders and pads, and a QLab cart holds any kind of cue; the cart is reported, its
+  grid not imported.
+- **A chain of auto-follows and auto-continues mixed is an automatic sequence**, each auto-continue then
+  waiting for the cue before it to finish, and reported - not the timeline of sequences ZS drew.
+- **Video, Camera, Text, Light, MIDI, MIDI File, Timecode, Pause, Load, Reset and Target cues, and a 2D
+  path fade, are memos in their place** (ZP), the original in their notes. ZX drew a Video cue's file and
+  a MIDI cue as Go.dot's own; neither show holds a MIDI cue, and the video cues of the QLab 4 show are
+  geometry and cameras more than files. Both wait for the probe workspaces (QL.1).
+- **Triggers are reported, never built** (ZY drew MIDI and wall-clock ones as `<Trigger>`): neither show
+  has a MIDI trigger to read the shape of, and a hotkey has no Go.dot equivalent.
+- **Where a level goes** (ZU), measured on both shows: a crosspoint QLab does not store is silence; a
+  route's gain is the output fader, the input's gain and the crosspoint multiplied, the main left on the
+  cue's level; a matrix nobody touched - only its main stored - gets Go.dot's default route, reported,
+  since what QLab does with it is not in the file.
+- **A QLab 4 path from the folder above whose first folder was renamed** is tried again from the
+  workspace's own folder: the La Reprise shows name a folder that is no longer the one they sit in.
+- **The command line reads its arguments as UTF-8** on macOS and Linux. JUCE took each as seven-bit text,
+  so "Histoire(s) du Théâtre" reached every verb as "ThÃ©Ã¢tre" and nothing in it was found - `import-als`
+  included. Windows keeps JUCE's reading of the ANSI code page.
+- **The fixtures are interim** (ZQ): `tests/QlabFixture.h` builds QLab-shaped archives for the unit cases,
+  and `blackbox/import_qlab.py` writes a workspace with Python's plistlib, in a folder whose name is not
+  ASCII, beside a WAV it finds and copies. Nothing of a real production is committed.
+
+**The author's shows, imported:** every save on the drive reads, walks and builds into a show that
+validates - 11 of Love Doll (QLab 5.3.3 to 5.6.3) and 83 of La Reprise (QLab 4.2.3 to 4.4.5). The QLab 5
+test copy is 3 lists and 511 cues: the 126 groups, 348 network cues as OSC cues under the S21 and WFS
+devices - the 73 of several values as lists, the 3 fades as curves - and one memo, a relative fade on one
+cue; `wfg validate` names only its three Mic cues, which have no input yet. The QLab 4 Maubeuge copy is 2
+lists and 396 cues, its auto-follows 27 groups of their own, its 68 video and camera cues memos; `wfg
+validate` calls it valid.
+
+**What waits:** the probe workspaces (QL.1), and with them the MIDI and Video cues, the 2D path fades and
+the triggers; what QLab's S-curve and parametric shapes are, measured, rather than a raised cosine
+sampled at nine points; a comparison of an imported show with what QLab reports over OSC, which the
+extraction (§9.2) did by hand; and a run through an imported show's first scenes against the rig.

@@ -995,6 +995,13 @@ grammars; and the report names every approximation.
 a reading of ZS-ZZ; a look at the list ticks and the report; a run through an imported show's first
 scenes against the rig.
 
+**Built 2026-10-08, QL.0 and QL.2-QL.8** (namespace draft §46.7): the shared parts, the decoder, the
+reader, the walk, `wfg import-qlab` and File > Import QLab workspace.... Every save of the author's two
+shows on the drive - 11 in QLab 5, 83 in QLab 4 - builds into a show that validates. A cart is a list, a
+mixed chain an automatic sequence, and MIDI, video and the triggers wait for the probe workspaces; the
+command line reads its arguments as UTF-8 on macOS and Linux, found on an accented show folder.
+Waiting: the probe set (QL.1), the shapes measured, and a run against the rig.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

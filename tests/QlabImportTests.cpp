@@ -213,3 +213,53 @@ TEST_CASE ("qlab import: cue list numbers as QLab shows them")
     CHECK_FALSE (parseLists ("2-1").has_value());
     CHECK_FALSE (parseLists ("main").has_value());
 }
+
+TEST_CASE ("qlab import: the author's own workspaces build into shows that validate, when WFG_QLAB_CORPUS names a folder of them")
+{
+    /*  REAL SHOWS, NOT COMMITTED (ZQ). Every `.qlab4` and `.qlab5` under the
+        folder - backups and AppleDouble files aside - is walked and built as
+        the import builds it, without its media, and the document must
+        validate; what each came to is printed. */
+    const auto folder = juce::SystemStats::getEnvironmentVariable ("WFG_QLAB_CORPUS", {});
+
+    if (folder.isEmpty())
+        return;
+
+    int workspaces = 0;
+
+    for (const auto& entry : juce::RangedDirectoryIterator (juce::File (folder), true, "*.qlab4;*.qlab5"))
+    {
+        const auto file = entry.getFile();
+
+        if (file.getFileName().startsWith ("._") || file.getFullPathName().contains ("backups"))
+            continue;
+
+        ++workspaces;
+        INFO (file.getFullPathName().toStdString());
+
+        const auto read = readWorkspace (file);
+        REQUIRE (read.workspace.has_value());
+
+        const auto plan = walk (*read.workspace);
+        doc::ShowDocument document;
+        const auto built = build (*read.workspace, plan, {}, document);
+        const auto problems = document.validate();
+
+        INFO ((problems.empty() ? std::string {} : problems.front()));
+        CHECK (problems.empty());
+
+        int approximated = 0, dropped = 0;
+
+        for (const auto& note : plan.notes)
+        {
+            approximated += note.kind == import::Note::Kind::approximated ? 1 : 0;
+            dropped += note.kind == import::Note::Kind::dropped ? 1 : 0;
+        }
+
+        MESSAGE (file.getFileName().toStdString() << ": " << plan.cues << " cues, " << built.cues << " written, "
+                 << plan.placeholders << " memos in place, " << approximated << " approximated, " << dropped
+                 << " not imported, " << plan.devices.size() << " devices");
+    }
+
+    CHECK (workspaces > 0);
+}
