@@ -230,6 +230,10 @@ namespace wfg
             §20.9's `no-fader` and `not-waiting` with the fader taken by touch. */
         inline constexpr const char* notFlipped       = "not-flipped";
 
+        /*  A CURVE ARMED, OR A PASS ASKED, WITH NO OSC CUE ARMED FOR RECORDING
+            (namespace draft 45, O.9) - the curves' `not-flipped`. */
+        inline constexpr const char* notArmed         = "not-armed";
+
         /*  The argument's TYPE was right and its VALUE is not one this command
             accepts - a scope that is neither "round" nor "group", a stop verb
             nobody has heard of.

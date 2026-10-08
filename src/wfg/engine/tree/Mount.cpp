@@ -895,6 +895,7 @@ namespace wfg::tree
         observations.erase (address);
         observedTicks.erase (address);
         firstObservations.erase (address);
+        heardTicks.erase (address);
     }
 
     const osc::Values* MountTable::firstObservedOf (const std::string& address) const
@@ -1053,6 +1054,7 @@ namespace wfg::tree
         observations.erase (address);
         observedTicks.erase (address);
         firstObservations.erase (address);
+        heardTicks.erase (address);
 
         /*  AND AN ANSWER STILL ON ITS WAY is history too (OU): counted, so a
             sweep asked before this write is known for one when it lands. */

@@ -389,6 +389,15 @@ namespace wfg::client::gesture
     Event promoteMessage (const std::string& messageId);
     Event createCurve (const std::string& parentId, int arg);
 
+    /*  RECORDING AN OSC CUE'S CURVES (namespace draft 45, O.9): the cue armed
+        - or let go of - one curve armed or not, a pass from a second of the
+        cue's clock, and the pass ended. */
+    Event curveArm (const std::string& cueId);
+    Event curveFree();
+    Event curveRec (const std::string& curveId, bool on);
+    Event curveRecord (double fromSeconds);
+    Event curveStop();
+
     /** An output's test pattern on or off, to find which projector is which: tonight's. */
     Event identifyVideoOutput (const std::string& outputId, bool on);
 

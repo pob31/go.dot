@@ -473,6 +473,12 @@ namespace wfg::client
                 { send (gesture::promoteMessage (messageId)); };
                 footActions.createCurve = [this] (const std::string& parentId, int arg)
                 { send (gesture::createCurve (parentId, arg)); };
+                footActions.curveArm = [this] (const std::string& cueId) { send (gesture::curveArm (cueId)); };
+                footActions.curveFree = [this] { send (gesture::curveFree()); };
+                footActions.curveRec = [this] (const std::string& curveId, bool on)
+                { send (gesture::curveRec (curveId, on)); };
+                footActions.curveRecord = [this] (double fromSeconds) { send (gesture::curveRecord (fromSeconds)); };
+                footActions.curveStop = [this] { send (gesture::curveStop()); };
                 footActions.close = [this]
                 {
                     /*  SHUT MEANS SHUT, for the one subject that opens itself:

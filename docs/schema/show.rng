@@ -2323,6 +2323,14 @@
           </list>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="tolerance">
+          <a:documentation>How closely a recorded pass is thinned, in the value-s own units: a sample within this of the straight line its neighbours draw is taken out, and the points are written to a tenth of it (namespace draft 45, ZG). Nought, the default, is a thousandth of the curve-s span - its range, else the device-s range for that value, else what the pass rode.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
     </element>
   </define>
 

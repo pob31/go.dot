@@ -358,7 +358,7 @@ namespace wfg::tree
                         {
                             const osc::Values values (args.begin() + 2, args.end());
                             mounts.noteObservation (args[1].getString(), values, context.tick, -1);
-                            mounts.noteHeard (args[0].getString());
+                            mounts.noteHeard (args[0].getString(), args[1].getString(), context.tick);
                             return Outcome::ok (args);
                         } });
 

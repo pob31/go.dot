@@ -506,6 +506,31 @@ namespace wfg::client::gesture
         return { origin::window, "curve.create", { osc::Value::string (parentId), osc::Value::int32 (arg) } };
     }
 
+    Event curveArm (const std::string& cueId)
+    {
+        return { origin::window, "curve.arm", { osc::Value::string (cueId) } };
+    }
+
+    Event curveFree()
+    {
+        return { origin::window, "curve.free", {} };
+    }
+
+    Event curveRec (const std::string& curveId, bool on)
+    {
+        return { origin::window, "curve.rec", { osc::Value::string (curveId), osc::Value::boolean (on) } };
+    }
+
+    Event curveRecord (double fromSeconds)
+    {
+        return { origin::window, "curve.record", { osc::Value::float64 (std::max (fromSeconds, 0.0)) } };
+    }
+
+    Event curveStop()
+    {
+        return { origin::window, "curve.stop", {} };
+    }
+
     Event identifyVideoOutput (const std::string& outputId, bool on)
     {
         return { origin::window, "videoOutput.identify", { osc::Value::string (outputId), osc::Value::boolean (on) } };

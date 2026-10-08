@@ -4525,3 +4525,89 @@ TEST_CASE ("curve lane: a point dragged, added, taken away and typed each write 
         CHECK (sought.front().second == doctest::Approx (2.0).epsilon (0.05));
     }
 }
+
+TEST_CASE ("curve lane: the recorder arms the cue, starts a pass at the playhead and ends it; REC arms the picked curve")
+{
+    std::vector<std::string> said;
+
+    ui::CurveLaneComponent::Actions actions;
+    actions.arm = [&] (const std::string& cueId) { said.push_back ("arm " + cueId); };
+    actions.free = [&] { said.push_back ("free"); };
+    actions.rec = [&] (const std::string& curveId, bool on) { said.push_back ("rec " + curveId + (on ? " on" : " off")); };
+    actions.record = [&] (double from) { said.push_back ("record " + juce::String (from, 1).toStdString()); };
+    actions.stopPass = [&] { said.push_back ("stop"); };
+
+    ui::CurveLaneComponent lane (model::Theme {}, actions);
+    lane.setSize (800, 220);
+
+    model::OscCurvesReading reading;
+    reading.cueId = "CUE00001";
+    reading.duration = 4.0;
+    reading.drawn = 4.0;
+
+    model::CurveView x;
+    x.id = "C0RVE001";
+    x.parentId = "CUE00001";
+    x.label = "positionX";
+    x.points = { { 0.0, 0.0 }, { 4.0, 4.0 } };
+    x.axis = { -10.0, 10.0, true };
+    reading.curves = { x };
+
+    //  At rest the button says the recorder's name, and a click arms the cue.
+    lane.show (reading, false, 0.0, {});
+    CHECK (lane.recordButton().getButtonText() == juce::String (model::laneRecorderName));
+    CHECK_FALSE (lane.freeArmingButton().isVisible());
+    lane.recordButton().onClick();
+    REQUIRE (said.size() == 1u);
+    CHECK (said.back() == "arm CUE00001");
+
+    //  REC on a cue nobody armed arms the cue first, then the curve.
+    lane.curveRecButton().onClick();
+    REQUIRE (said.size() == 3u);
+    CHECK (said[1] == "arm CUE00001");
+    CHECK (said[2] == "rec C0RVE001 on");
+
+    //  Armed: a pass starts where the playhead is; REC again disarms.
+    reading.armedHere = true;
+    reading.curves[0].armed = true;
+    lane.show (reading, true, 1.5, "RUN00001");
+    CHECK (lane.curveRecButton().getToggleState());
+    CHECK (lane.freeArmingButton().isVisible());
+    lane.recordButton().onClick();
+    CHECK (said.back() == "record 1.5");
+    lane.curveRecButton().onClick();
+    CHECK (said.back() == "rec C0RVE001 off");
+
+    //  Recording: the button ends the pass, and the ride is drawn as a trail.
+    reading.recording = true;
+    reading.curves[0].ride = 2.0;
+    lane.show (reading, true, 1.6, "RUN00001");
+    reading.curves[0].ride = 2.5;
+    lane.show (reading, true, 1.7, "RUN00001");
+    CHECK_FALSE (lane.freeArmingButton().isVisible());
+
+    const auto* trail = lane.trailOf ("C0RVE001");
+    REQUIRE (trail != nullptr);
+    REQUIRE (trail->size() == 2u);
+    CHECK (trail->back().levelDb == doctest::Approx (2.5));
+
+    {
+        juce::Image picture (juce::Image::ARGB, 800, 220, true);
+        juce::Graphics g (picture);
+        lane.paintEntireComponent (g, false);
+    }
+
+    lane.recordButton().onClick();
+    CHECK (said.back() == "stop");
+
+    //  A pass begun again starts its trail afresh; the cross lets go of the cue.
+    reading.recording = false;
+    lane.show (reading, false, 0.0, {});
+    lane.freeArmingButton().onClick();
+    CHECK (said.back() == "free");
+
+    reading.recording = true;
+    lane.show (reading, true, 0.1, "RUN00002");
+    REQUIRE (lane.trailOf ("C0RVE001") != nullptr);
+    CHECK (lane.trailOf ("C0RVE001")->size() == 1u);
+}

@@ -90,6 +90,9 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # And a curve moving one value of the cue's own message or of
                 # a further one over the cue's clock.
                 "message", "curve",
+                # And the OSC cue armed for recording its curves (O.9): which,
+                # which curves, whether a pass runs - tonight's, never stored.
+                "curves",
                 # Phase 4's slots (PRD 3.9e). `slot` is what both declared kinds
                 # share and what a Feed refers to; `processorInput` and
                 # `rackChannel` are what each kind adds. There is no `rack`:

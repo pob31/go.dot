@@ -37,6 +37,8 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/CurveCommands.h>
+#include <wfg/engine/cue/CurveTable.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -44,6 +46,7 @@
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
+#include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/log/Replay.h>
@@ -3749,4 +3752,283 @@ TEST_CASE ("network cue: with tx off a curve moves the tree and sends nothing, a
 
         CHECK (rig.mounts.valueRevision() == revision);
     }
+}
+
+//==============================================================================
+/*  CURVES, RECORDED (namespace draft 45, O.9). An OSC cue armed, a curve of it
+    armed, a pass: the cue plays on its clock and each armed curve is written
+    from the first value the device reports for it - heard (O.8), never a
+    read-back - or a hand rides it, until the pass stops; then every curve is
+    written in one `node.setMany`, one step of undo. Go.dot sends nothing of a
+    message the device is reporting, and sends what a hand rides. */
+namespace
+{
+    struct CurveRig : NetworkRig
+    {
+        CurveRig()
+        {
+            tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
+            cue::registerCurveCommands (engine.commands(), engine, runner, document, curves);
+            runner.setCurves (&curves);
+        }
+
+        bool submit (const std::string& name, std::vector<osc::Value> args = {})
+        {
+            return engine.submit ("cli", name, std::move (args));
+        }
+
+        /** What the console reports its fader holds, as a device with rx on does. */
+        void hear (float value, const std::string& address = "/desk/fader")
+        {
+            REQUIRE (engine.submit ("mount:K3PV7WRB", "mount.heard",
+                                    { osc::Value::string ("K3PV7WRB"), osc::Value::string (address),
+                                      osc::Value::float32 (value) }));
+        }
+
+        void ticks (int count)
+        {
+            for (int n = 0; n < count; ++n)
+                tickOnce();
+        }
+
+        std::vector<doc::LanePoint> pointsOf (const std::string& curveId)
+        {
+            const auto text = document.getAttribute ("/godot/curve/" + curveId + "/points").value_or (std::string {});
+            const auto read = doc::readLane (text, std::nullopt);
+            REQUIRE (read.problem.empty());
+            return read.points;
+        }
+
+        /** The datagrams that have arrived, once the wire has gone quiet. */
+        std::size_t settled()
+        {
+            auto count = listener.count();
+
+            while (listener.waitFor (count + 1, 120))
+                count = listener.count();
+
+            return count;
+        }
+
+        juce::File nowhere;
+        cue::CurveTable curves;
+    };
+
+    std::string armedPass (CurveRig& rig, const std::string& points, std::string& curveId)
+    {
+        const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+        curveId = curveOn (rig, cueId, 0, points);
+
+        REQUIRE (rig.submit ("curve.arm", { osc::Value::string (cueId) }));
+        REQUIRE (rig.submit ("curve.rec", { osc::Value::string (curveId), osc::Value::boolean (true) }));
+        REQUIRE (rig.submit ("curve.record"));
+        rig.tickOnce();
+
+        REQUIRE (rig.curves.recording);
+        REQUIRE (! rig.curves.run.empty());
+        return cueId;
+    }
+}
+
+TEST_CASE ("curve record: a pass writes what the device reports from its first report, sending none of it meanwhile")
+{
+    CurveRig rig;
+    std::string curveId;
+    const auto cueId = armedPass (rig, "0 0 4 4", curveId);
+
+    //  Before a report the curve plays: the ramp goes out a tick at a time.
+    rig.ticks (10);
+    CHECK (faderOf (rig) > 0.0f);
+
+    rig.hear (0.5f);
+    rig.ticks (2);
+
+    //  Latched: from here nothing of the fader's message is sent.
+    const auto before = rig.settled();
+
+    rig.ticks (10);
+    rig.hear (0.8f);
+    rig.ticks (10);
+
+    CHECK_FALSE (rig.listener.waitFor (before + 1, 150));
+    CHECK (rig.curves.rides[curveId].latched);
+    CHECK (rig.curves.rides[curveId].value == doctest::Approx (0.8));
+
+    //  (This rig cuts no transactions, as serve's hook does: one is opened
+    //  here, so the undo below takes the pass and nothing before it.)
+    rig.document.beginTransaction ("curve.stop", rig.tick, "window", {});
+    REQUIRE (rig.submit ("curve.stop"));
+    rig.ticks (3);
+
+    CHECK_FALSE (rig.curves.recording);
+    CHECK (rig.curves.lastPass.find (" kept ") != std::string::npos);
+    CHECK (rig.curves.lastPass.find (curveId) != std::string::npos);
+
+    //  A hand that ended the pass stopped the cue too.
+    CHECK (rig.runOf (cueId)->isFinished());
+
+    /*  THE CURVE IS WHAT WAS HEARD where the pass rode, and the ramp before
+        the first report and after the stop. */
+    const auto points = rig.pointsOf (curveId);
+    CHECK (doc::laneValueAt (points, 0.1) == doctest::Approx (0.1).epsilon (0.02));
+    CHECK (doc::laneValueAt (points, 0.4) == doctest::Approx (0.5));
+    CHECK (doc::laneValueAt (points, 0.8) == doctest::Approx (0.8));
+    CHECK (doc::laneValueAt (points, 3.0) == doctest::Approx (3.0).epsilon (0.02));
+
+    //  ONE STEP OF UNDO takes the pass back whole.
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.document.getAttribute ("/godot/curve/" + curveId + "/points").value_or ("") == "0 0 4 4");
+}
+
+TEST_CASE ("curve record: a hand's ride is sent, so the device follows, and written from its first move")
+{
+    CurveRig rig;
+    std::string curveId;
+    armedPass (rig, "0 0 4 0", curveId);
+
+    rig.ticks (10);
+    const auto before = rig.settled();
+
+    REQUIRE (rig.submit ("curve.ride", { osc::Value::string (curveId), osc::Value::float64 (0.7) }));
+    rig.ticks (3);
+
+    CHECK (faderOf (rig) == doctest::Approx (0.7f));
+    CHECK (rig.listener.waitFor (before + 1));
+
+    rig.ticks (10);
+    REQUIRE (rig.submit ("curve.stop"));
+    rig.ticks (3);
+
+    const auto points = rig.pointsOf (curveId);
+    CHECK (doc::laneValueAt (points, 0.1) == doctest::Approx (0.0));
+    CHECK (doc::laneValueAt (points, 0.4) == doctest::Approx (0.7));
+}
+
+TEST_CASE ("curve record: Esc keeps the pass, a double Esc and the lock leave the curve as it was")
+{
+    CurveRig rig;
+    std::string curveId;
+    armedPass (rig, "0 0 4 0", curveId);
+
+    rig.ticks (5);
+    rig.hear (0.5f);
+    rig.ticks (10);
+
+    SUBCASE ("Esc")
+    {
+        REQUIRE (rig.submit ("run.stopAll"));
+        rig.ticks (4);
+
+        CHECK_FALSE (rig.curves.recording);
+        CHECK (rig.curves.lastPass.find (" kept ") != std::string::npos);
+        CHECK (doc::laneValueAt (rig.pointsOf (curveId), 0.25) == doctest::Approx (0.5));
+    }
+
+    SUBCASE ("double Esc")
+    {
+        REQUIRE (rig.submit ("run.killAll"));
+        rig.ticks (4);
+
+        CHECK_FALSE (rig.curves.recording);
+        CHECK (rig.curves.lastPass.find (" dropped") != std::string::npos);
+        CHECK (rig.document.getAttribute ("/godot/curve/" + curveId + "/points").value_or ("") == "0 0 4 0");
+    }
+
+    SUBCASE ("the lock")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+        REQUIRE (rig.submit ("curve.stop"));
+        rig.ticks (4);
+
+        CHECK (rig.curves.lastPass.find (" locked") != std::string::npos);
+        CHECK (rig.document.getAttribute ("/godot/curve/" + curveId + "/points").value_or ("") == "0 0 4 0");
+
+        //  And the arming is let go of, since the lock keeps every curve.
+        rig.ticks (2);
+        CHECK_FALSE (rig.curves.armed());
+    }
+}
+
+TEST_CASE ("curve record: a read-back answer never latches a curve, and a pass nothing moved says so")
+{
+    CurveRig rig;
+    std::string curveId;
+    armedPass (rig, "0 0 4 0", curveId);
+
+    rig.ticks (5);
+
+    //  A sweep's answer, as `mount.readback` keeps it - not the device volunteering.
+    rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.9f), rig.tick, -1);
+    rig.ticks (5);
+
+    CHECK_FALSE (rig.curves.rides[curveId].latched);
+
+    REQUIRE (rig.submit ("curve.stop"));
+    rig.ticks (3);
+
+    CHECK (rig.curves.lastPass.find (" untouched") != std::string::npos);
+    CHECK (rig.document.getAttribute ("/godot/curve/" + curveId + "/points").value_or ("") == "0 0 4 0");
+}
+
+TEST_CASE ("curve record: a curve with no point yet records from nothing, the cue's clock open until the pass stops")
+{
+    CurveRig rig;
+    std::string curveId;
+    const auto cueId = armedPass (rig, "", curveId);
+
+    rig.ticks (5);
+    rig.hear (0.25f);
+    rig.ticks (100);
+
+    //  Two seconds and more, and the cue still plays: nothing ends a pass on an empty curve but a stop.
+    CHECK (rig.runOf (cueId)->state == cue::runState::playing);
+
+    rig.hear (0.75f);
+    rig.ticks (10);
+    REQUIRE (rig.submit ("curve.stop"));
+    rig.ticks (3);
+
+    /*  THE RIDE IS THE CURVE, held at both ends rather than joined back to
+        nought: the move ends where the device left it. */
+    const auto points = rig.pointsOf (curveId);
+    REQUIRE (! points.empty());
+    CHECK (doc::laneValueAt (points, 0.0) == doctest::Approx (0.25));
+    CHECK (doc::laneValueAt (points, 1.0) == doctest::Approx (0.25));
+    CHECK (points.back().levelDb == doctest::Approx (0.75));
+}
+
+TEST_CASE ("curve record: the commands refuse what is not theirs")
+{
+    CurveRig rig;
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+    const auto curveId = curveOn (rig, cueId, 0, "0 0 1 1");
+    const auto other = rig.makeOsc ("/desk/scene", "i:0", "none");
+    const auto otherCurve = curveOn (rig, other, 0, "0 0 1 1");
+
+    /*  The reason a command was refused with, read where a client reads it -
+        or empty when it was applied. */
+    const auto refusal = [&rig] (const std::string& name, std::vector<osc::Value> args = {}) -> std::string
+    {
+        rig.submit (name, std::move (args));
+        const auto result = rig.engine.processTick (rig.tick++);
+
+        if (result.rejected == 0)
+            return {};
+
+        const auto said = rig.engine.lastError();
+        const auto end = said.rfind (" " + name);
+        const auto start = said.rfind (' ', end - 1);
+        return said.substr (start + 1, end - start - 1);
+    };
+
+    CHECK (refusal ("curve.rec", { osc::Value::string (curveId), osc::Value::boolean (true) }) == reason::notArmed);
+    CHECK (refusal ("curve.record") == reason::notArmed);
+    CHECK (refusal ("curve.arm", { osc::Value::string (rig.listId) }) == reason::badValue);
+
+    CHECK (refusal ("curve.arm", { osc::Value::string (cueId) }).empty());
+    CHECK (refusal ("curve.rec", { osc::Value::string (otherCurve), osc::Value::boolean (true) }) == reason::unknownId);
+    CHECK (refusal ("curve.stop") == reason::notRunning);
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    CHECK (refusal ("curve.record") == reason::locked);
 }

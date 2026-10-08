@@ -55,6 +55,7 @@
 #include <wfg/engine/cue/GroupJob.h>
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/CurveJob.h>
+#include <wfg/engine/cue/CurveTable.h>
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/Solver.h>
@@ -571,6 +572,17 @@ namespace wfg::cue
             is recorded, and the lanes a pass ended in arrive from the log
             instead. */
         void setLanes (LaneTable* table) noexcept { lanes = table; }
+
+        /*  THE OSC CURVES ARMED FOR RECORDING (namespace draft 45, O.9), which
+            the pass's hook samples into and `advanceCurves` reads to leave a
+            curve the device is reporting unsent. */
+        void setCurves (CurveTable* table) noexcept { curveTable = table; }
+
+        /*  A PASS ON AN OSC CUE'S CURVES: the cue fired, its clock moved to
+            `from`, the run made or found - `curve.record`'s, as
+            `startLanePass` is `lane.record`'s. Empty when nothing could fire. */
+        std::string startCurvePass (Engine& engine, std::int64_t tick, const std::string& cueId,
+                                    double from, const std::string& runId);
         void resetAudioPreparation() { armedStandby.clear(); }
 
         /*  WHAT A CLOCK MOVE GAVE BACK, handed to the hooks to put back
@@ -2001,6 +2013,12 @@ namespace wfg::cue
             be done by its wait. A hook, before `advanceSends`. */
         void advanceCurves (Engine& engine, std::int64_t tick);
 
+        /*  THE PASS, ONE TICK (O.9): each armed curve takes the device's newest
+            report or the hand's ride, latched from the first, sampled on the
+            cue's clock; at the end the curves are spliced, judged and written
+            in one `node.setMany`. A hook, before `advanceCurves`. */
+        void recordCurves (Engine& engine, std::int64_t tick);
+
         /*  An OSC cue's messages and the curves on them, read off the document:
             its own message first, then each further one, in order. */
         std::vector<CurveTarget> curveTargetsOf (const juce::ValueTree& cue) const;
@@ -2587,6 +2605,11 @@ namespace wfg::cue
         };
 
         LaneTable* lanes = nullptr;
+        CurveTable* curveTable = nullptr;
+
+        /*  The run of the curve pass whose end has been submitted, waiting for
+            the `curve.stop` that says so - an end said once. */
+        std::string curvePassEnded;
         std::map<std::string, LaneBook> laneBooks;
         std::string rideLaneCue;
         std::uint64_t rideLaneRevision = 0;

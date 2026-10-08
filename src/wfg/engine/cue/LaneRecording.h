@@ -77,4 +77,25 @@ namespace wfg::cue
         spelling: a tenth of a millisecond and a hundredth of a decibel, as
         the window writes one (`client/model/Lane`). Empty for no lane. */
     std::string laneText (const std::vector<doc::LanePoint>& lane);
+
+    /*  AN OSC CUE'S CURVE AS TEXT (namespace draft 45, O.9): the same, each
+        value rounded to `step` rather than a hundredth of a decibel - a curve
+        in metres and one between nought and one need different grains (ZG). */
+    std::string curveText (const std::vector<doc::LanePoint>& curve, double step);
+
+    /*  THE TOLERANCE A CURVE IS THINNED TO, and the step it is written at (ZG):
+        `tolerance` when it is set, else a thousandth of `span`; the step a
+        tenth of that, down to a power of ten. A span of nought is a unit. */
+    double curveTolerance (double tolerance, double span) noexcept;
+    double curveStep (double tolerance) noexcept;
+
+    /*  AN OSC CUE'S CURVE AFTER A PASS (O.9): spliced as a lane is, into the
+        curve it rode over - but a curve with no point yet is spliced against
+        nothing, so the pass's first ride is the curve, held before its first
+        point and after its last, and not joined back to nought: a curve holds
+        the value itself (YR), and a move recorded from nothing ends where the
+        hand or the device left it. */
+    std::vector<doc::LanePoint> spliceCurve (const std::vector<doc::LanePoint>& curve,
+                                             const std::vector<RideSegment>& segments,
+                                             double joinSeconds, double tolerance);
 }

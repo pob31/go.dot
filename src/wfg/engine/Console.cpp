@@ -29,6 +29,8 @@
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/LiveRows.h>
+#include <wfg/engine/cue/CurveCommands.h>
+#include <wfg/engine/cue/CurveTable.h>
 #include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/CueCommands.h>
@@ -340,6 +342,8 @@ namespace
             moved by `lane.*` and read by the Runner's hook and the tree. */
         wfg::cue::LaneTable lanes;
         runner.setLanes (&lanes);
+        wfg::cue::CurveTable curveTable;
+        runner.setCurves (&curveTable);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -366,6 +370,7 @@ namespace
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
+        wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
@@ -634,6 +639,8 @@ namespace
             moved by `lane.*` and read by the Runner's hook and the tree. */
         wfg::cue::LaneTable lanes;
         runner.setLanes (&lanes);
+        wfg::cue::CurveTable curveTable;
+        runner.setCurves (&curveTable);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -660,6 +667,7 @@ namespace
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
+        wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
@@ -1265,6 +1273,8 @@ namespace
             moved by `lane.*` and read by the Runner's hook and the tree. */
         wfg::cue::LaneTable lanes;
         runner.setLanes (&lanes);
+        wfg::cue::CurveTable curveTable;
+        runner.setCurves (&curveTable);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -1277,6 +1287,7 @@ namespace
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
+        wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
@@ -3258,6 +3269,8 @@ namespace
             moved by `lane.*` and read by the Runner's hook and the tree. */
         wfg::cue::LaneTable lanes;
         runner.setLanes (&lanes);
+        wfg::cue::CurveTable curveTable;
+        runner.setCurves (&curveTable);
 
         /*  The touch table, for the fader edges (PRD 3.9a): a fader-start
             counts only from a fader released at the bottom, and released is
@@ -3461,6 +3474,7 @@ namespace
         };
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
+        wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
@@ -3994,6 +4008,7 @@ namespace
         const auto surfaceBridge = std::make_shared<wfg::surface::SurfaceBridge> (midiOut, surfaceTable);
         parameters.setSurfaces (&surfaceTable);
         parameters.setLanes (&lanes);
+        parameters.setCurves (&curveTable);
 
         /*  THE PICTURES (Phase 8a, namespace draft 35.4): the region the scene
             lives in, made now and held for the session, and a renderer kept

@@ -80,6 +80,14 @@ namespace wfg::client::ui
             std::function<void (const std::string& messageId)> promoteMessage;
             std::function<void (const std::string& parentId, int arg)> createCurve;
 
+            /*  RECORDING AN OSC CUE'S CURVES (O.9): the cue armed or let go of,
+                a curve armed or not, a pass from a second, the pass ended. */
+            std::function<void (const std::string& cueId)> curveArm;
+            std::function<void()> curveFree;
+            std::function<void (const std::string& curveId, bool on)> curveRec;
+            std::function<void (double fromSeconds)> curveRecord;
+            std::function<void()> curveStop;
+
             /** `send.create`, when a silent fader in the mixer is raised. */
             std::function<void (const std::string& cueId, const std::string& busId, double level)> createSend;
 

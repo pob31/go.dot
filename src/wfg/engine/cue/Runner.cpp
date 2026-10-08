@@ -3184,6 +3184,203 @@ namespace wfg::cue
         return true;
     }
 
+    std::string Runner::startCurvePass (Engine& engine, std::int64_t tick, const std::string& cueId,
+                                        double from, const std::string& runId)
+    {
+        if (! document.findById (cueId).isValid())
+            return {};
+
+        const auto made = fire (engine, tick, cueId, runId);
+
+        if (made.empty())
+            return made;
+
+        //  FROM `from`: the clock of the run the fire made, or found playing.
+        if (from > 0.0 && isCurving (made))
+            seekCurves (made, from, tick);
+
+        return made;
+    }
+
+    void Runner::recordCurves (Engine& engine, std::int64_t tick)
+    {
+        if (curveTable == nullptr || ! curveTable->armed())
+            return;
+
+        /*  THE LOCK KEEPS THE SHOW, and the curves a pass ends in are the show's:
+            under it, an arming with no pass is let go of. */
+        if (! curveTable->recording)
+        {
+            curvePassEnded.clear();
+
+            if (document.isLocked())
+                engine.submit (origin::engine, "curve.free", {});
+
+            return;
+        }
+
+        if (curveTable->run.empty() || curveTable->run == curvePassEnded)
+            return;
+
+        const auto* run = runs.find (curveTable->run);
+        const auto* job = static_cast<const CurveJob*> (nullptr);
+
+        for (const auto& candidate : curving)
+            if (candidate.self == curveTable->run)
+                job = &candidate;
+
+        /*  DROPPED: a kill or a Doh! took the run - what was ridden goes with it
+            (ZL, as the faders' DM). */
+        if (run == nullptr || run->takenBack || beingKilled (*run) || run->skipFooter)
+        {
+            curvePassEnded = curveTable->run;
+            engine.submit (origin::engine, "curve.stop", { osc::Value::string ("dropped") });
+            return;
+        }
+
+        const auto ending = curveTable->stopping || run->isFinished() || run->state == runState::stopping;
+
+        //  SAMPLED, while it plays: each armed curve from its first value heard or ridden.
+        if (! ending && job != nullptr)
+        {
+            auto place = placeOnCurves (job->secondsAt (tick), job->duration, job->loop);
+
+            if (! (job->duration > 0.0) && ! job->loop)
+                place.seconds = std::max (0.0, job->secondsAt (tick));
+
+            for (const auto& target : job->targets)
+                for (const auto& lane : target.lanes)
+                {
+                    if (! curveTable->isArmed (lane.id))
+                        continue;
+
+                    auto& ride = curveTable->rideOf (lane.id);
+
+                    /*  THE DEVICE'S NEWEST REPORT of this address, heard since the
+                        pass began (O.8) - never a read-back sweep's, which may
+                        be asking after what Go.dot itself sent. */
+                    if (mounts != nullptr)
+                        if (const auto* said = mounts->observedOf (target.address))
+                        {
+                            const auto when = mounts->heardAtTick (target.address);
+
+                            if (when >= curveTable->startTick && when > ride.sampledTick
+                                  && lane.arg < said->size() && (*said)[lane.arg].isNumber())
+                            {
+                                ride.value = (*said)[lane.arg].asDouble();
+                                ride.source = "heard";
+                                ride.sampledTick = when;
+                                ride.latched = true;
+                            }
+                        }
+
+                    //  A HAND'S RIDE, since the last sample (O.11's `curve.ride`).
+                    if (ride.source == "hand" && ride.lastTick > ride.sampledTick)
+                    {
+                        ride.sampledTick = ride.lastTick;
+                        ride.latched = true;
+                    }
+
+                    //  LATCHED: written every tick until the pass stops, the last value held (DH).
+                    if (ride.latched)
+                        appendRide (ride.segments, place.seconds, ride.value);
+                }
+
+            return;
+        }
+
+        if (! ending)
+            return;
+
+        curvePassEnded = curveTable->run;
+
+        /*  THE END, ONE STEP OF UNDO (ZL): each armed curve that was moved,
+            spliced into the curve it rode over, thinned to its own scale (ZG),
+            judged - every curve or none - and written in one `node.setMany`. */
+        if (document.isLocked())
+        {
+            engine.submit (origin::engine, "curve.stop", { osc::Value::string ("locked") });
+            return;
+        }
+
+        std::vector<osc::Value> writes;
+        std::string written;
+        std::int32_t points = 0;
+        auto refused = false;
+
+        if (job != nullptr)
+            for (const auto& target : job->targets)
+                for (const auto& lane : target.lanes)
+                {
+                    const auto ridden = curveTable->rides.find (lane.id);
+
+                    if (! curveTable->isArmed (lane.id) || ridden == curveTable->rides.end()
+                          || ridden->second.segments.empty())
+                        continue;
+
+                    const auto base = "/godot/curve/" + lane.id + "/";
+                    std::string problem;
+                    const auto range = doc::readLaneRange (document.getAttribute (base + "range")
+                                                             .value_or (std::string {}), problem);
+
+                    /*  THE SCALE: the curve's range, else the device's for this
+                        value, else what was ridden. */
+                    auto span = 0.0;
+
+                    if (range.has_value())
+                        span = range->high - range->low;
+                    else if (const auto* node = mounts != nullptr ? mounts->nodeAt (target.address) : nullptr;
+                             node != nullptr && node->rangeOf (lane.arg).hasMinimum && node->rangeOf (lane.arg).hasMaximum)
+                        span = node->rangeOf (lane.arg).maximum - node->rangeOf (lane.arg).minimum;
+                    else
+                    {
+                        auto low = ridden->second.segments.front().front().levelDb, high = low;
+
+                        for (const auto& segment : ridden->second.segments)
+                            for (const auto& point : segment)
+                            {
+                                low = std::min (low, point.levelDb);
+                                high = std::max (high, point.levelDb);
+                            }
+
+                        span = high - low;
+                    }
+
+                    const auto tolerance = curveTolerance (osc::parseDouble (document.getAttribute (base + "tolerance")
+                                                                                 .value_or (std::string {})).value_or (0.0),
+                                                           span);
+                    const auto curve = spliceCurve (lane.points, ridden->second.segments, 0.05, tolerance);
+                    const auto text = curveText (curve, curveStep (tolerance));
+                    const auto judged = doc::readLane (text, range);
+
+                    if (! judged.problem.empty())
+                    {
+                        refused = true;
+                        continue;
+                    }
+
+                    writes.push_back (osc::Value::string (base + "points"));
+                    writes.push_back (osc::Value::string (text));
+                    points += static_cast<std::int32_t> (judged.points.size());
+                    written += (written.empty() ? "" : " ") + lane.id;
+                }
+
+        if (refused)
+            engine.submit (origin::engine, "curve.stop", { osc::Value::string ("dropped") });
+        else if (writes.empty())
+            engine.submit (origin::engine, "curve.stop", { osc::Value::string ("untouched") });
+        else
+        {
+            engine.submit (origin::engine, "node.setMany", std::move (writes));
+            engine.submit (origin::engine, "curve.stop",
+                           { osc::Value::string ("kept"), osc::Value::int32 (points), osc::Value::string (written) });
+        }
+
+        //  A HAND THAT ASKED TO STOP stops the cue too, gracefully, as a lane's pass does.
+        if (curveTable->stopping && run != nullptr && ! run->isFinished() && run->state != runState::stopping)
+            engine.submit (origin::engine, "run.stop", one (curveTable->run));
+    }
+
     std::string Runner::startLanePass (Engine& engine, std::int64_t tick, const std::string& cueId,
                                        double from, const std::string& runId)
     {
@@ -12197,6 +12394,7 @@ namespace wfg::cue
                                                          .value_or (std::string {}), problem);
 
                 CurveLane lane;
+                lane.id = child[idProperty].toString().toStdString();
                 lane.arg = static_cast<std::size_t> (arg);
                 lane.points = doc::readLane (document.getAttribute (curveBase + "points").value_or (std::string {}),
                                              range).points;
@@ -12415,7 +12613,12 @@ namespace wfg::cue
             CurveJob takes the run, and this job says nothing more. Never
             prepared ahead (ZH), as a cue of several messages is not. */
         auto targets = curveTargetsOf (cue);
-        const auto curved = hasCurves (targets);
+
+        /*  AND A CUE A PASS IS RECORDING (O.9) plays its clock whatever its
+            curves hold, an empty one included: the pass writes onto it. */
+        const auto recordingThis = curveTable != nullptr && curveTable->recording
+                                     && curveTable->cue() == cue[idProperty].toString().toStdString();
+        const auto curved = hasCurves (targets) || recordingThis;
 
         if (curved)
         {
@@ -12786,7 +12989,13 @@ namespace wfg::cue
                 job.revision = document.revision();
             }
 
-            const auto place = placeOnCurves (job.secondsAt (tick), job.duration, job.loop);
+            /*  A PASS WITH NO DURATION TO END IT RUNS UNTIL IT IS STOPPED (O.9):
+                a curve recorded from nothing has no last point yet. */
+            const auto recordingNow = curveTable != nullptr && curveTable->recording && curveTable->run == job.self;
+            auto place = placeOnCurves (job.secondsAt (tick), job.duration, job.loop);
+
+            if (recordingNow && ! (job.duration > 0.0) && ! job.loop)
+                place = { std::max (0.0, job.secondsAt (tick)), false, 1 };
 
             run->position = place.seconds;
 
@@ -12801,9 +13010,35 @@ namespace wfg::cue
                 if (target.lanes.empty())
                     continue;
 
-                const auto values = valuesAt (target, place.seconds);
+                auto values = valuesAt (target, place.seconds);
 
-                if (values == target.last)
+                /*  WHO MOVES AN ARMED CURVE (ZJ): the device it is reporting -
+                    and then nothing of its message is sent, the device being
+                    the one moving it - or a hand, whose value is sent, so the
+                    device follows. */
+                auto deviceSays = false;
+
+                if (recordingNow)
+                    for (const auto& lane : target.lanes)
+                    {
+                        if (! curveTable->isArmed (lane.id))
+                            continue;
+
+                        const auto found = curveTable->rides.find (lane.id);
+
+                        if (found == curveTable->rides.end() || ! found->second.latched)
+                            continue;
+
+                        if (found->second.source == "heard")
+                            deviceSays = true;
+                        else if (lane.arg < values.size() && values[lane.arg].isNumber())
+                            values[lane.arg] = values[lane.arg].isInt32() ? osc::Value::int32 (static_cast<std::int32_t> (std::lround (found->second.value)))
+                                             : values[lane.arg].isInt64() ? osc::Value::int64 (static_cast<std::int64_t> (std::llround (found->second.value)))
+                                             : values[lane.arg].isFloat64() ? osc::Value::float64 (found->second.value)
+                                                                            : osc::Value::float32 (static_cast<float> (found->second.value));
+                    }
+
+                if (deviceSays || values == target.last)
                     continue;
 
                 std::string why;
@@ -16048,6 +16283,7 @@ namespace wfg::cue
         applyRouting();
         applyEq();
         applyFx();
+        recordCurves (engine, tick);
         advanceCurves (engine, tick);
         advanceSends (engine);
         observeAfterStep (engine, tick);

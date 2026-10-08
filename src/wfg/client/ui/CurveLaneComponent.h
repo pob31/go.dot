@@ -24,6 +24,11 @@
     taken away with a double click on it, or typed in the head's two boxes;
     the playhead while the cue plays, and a click on the ruler to move it.
 
+    AND RECORDED (O.9): the waveform editor's three words on one button - the
+    cue armed, a pass started where the playhead is, the pass ended - and a
+    REC for the picked curve. While a pass runs, each armed curve's ride is
+    drawn as a trail over it, from what the tree says it rides each pass.
+
     A drag is drawn from a copy held here and written once, when the hand lets
     go - one `node.set` of the whole curve, one step of undo - as the level
     lane's is. The waveform editor is left as it was: this is its gestures, not
@@ -38,6 +43,7 @@
 #include <cstddef>
 #include <functional>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -59,6 +65,14 @@ namespace wfg::client::ui
 
             /** A sentence in the panel's head. */
             std::function<void (const juce::String&)> say;
+
+            /*  RECORDING (O.9): the cue armed, let go of, a curve armed or not,
+                a pass from a second of the cue's clock, the pass ended. */
+            std::function<void (const std::string& cueId)> arm;
+            std::function<void()> free;
+            std::function<void (const std::string& curveId, bool on)> rec;
+            std::function<void (double fromSeconds)> record;
+            std::function<void()> stopPass;
         };
 
         CurveLaneComponent (const model::Theme&, Actions);
@@ -83,6 +97,10 @@ namespace wfg::client::ui
         juce::Label& pointAtBox() noexcept { return pointAt; }
         juce::Label& pointValueBox() noexcept { return pointValue; }
         std::size_t pickedCurve() const noexcept { return picked; }
+        juce::Button& recordButton() noexcept { return recordAll; }
+        juce::Button& curveRecButton() noexcept { return curveRec; }
+        juce::Button& freeArmingButton() noexcept { return freeArming; }
+        const std::vector<model::LanePoint>* trailOf (const std::string& curveId) const;
 
     private:
         static constexpr std::size_t none = std::numeric_limits<std::size_t>::max();
@@ -91,6 +109,7 @@ namespace wfg::client::ui
         std::vector<model::LanePoint> pointsOf (const model::CurveView&) const;
         void write (const model::CurveView&, const std::vector<model::LanePoint>&);
         void showPicked();
+        void showRecording();
 
         juce::Rectangle<int> headArea() const;
         juce::Rectangle<int> pictureArea() const;
@@ -119,9 +138,16 @@ namespace wfg::client::ui
         std::string heldCurve;
         int heldPasses = 0;
 
+        /*  WHAT A PASS HAS RIDDEN SO FAR, by curve: the clock's second and
+            the ride the tree said at it, a run broken where a loop goes round.
+            Begun again when a pass begins. */
+        std::map<std::string, std::vector<std::vector<model::LanePoint>>> trails;
+        bool wasRecording = false;
+
         juce::ComboBox curveMenu;
         juce::Label pointAt, pointValue;
         juce::TextButton playButton { "Play" }, stopButton { "Stop" };
+        juce::TextButton recordAll, curveRec { "REC" }, freeArming;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CurveLaneComponent)
     };

@@ -17,6 +17,7 @@
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <wfg/engine/cue/TakeTable.h>
+#include <wfg/engine/cue/CurveTable.h>
 #include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/InsertChain.h>
@@ -3547,6 +3548,49 @@ namespace wfg::tree
             a send's at its mix's `laneRide`. Nothing while nothing is flipped. */
         const auto flipped = lanes != nullptr && lanes->flipped();
         const juce::ValueTree flippedCue = flipped ? document.findById (lanes->cue()) : juce::ValueTree {};
+
+        /*  THE OSC CUE ARMED FOR RECORDING ITS CURVES (namespace draft 45,
+            O.9): which cue, which curves, whether a pass runs and what the last
+            one ended in - every publish, beside the rides they go with. A cue
+            deleted since is no arming: empty, as the faders' flipped cue is. */
+        for (const auto* row : doc::Schema::rowsForOwner ("curves"))
+        {
+            const auto name = std::string (row->name);
+            const auto armedCue = curveTable != nullptr && curveTable->armed()
+                                    && document.findById (curveTable->cue()).isValid();
+            std::string text;
+
+            if (name == "cue" && armedCue)
+                text = curveTable->cue();
+
+            if (name == "rec" && armedCue)
+                for (const auto& id : curveTable->armedCurves())
+                    text += (text.empty() ? "" : " ") + id;
+
+            if (name == "recording")
+                text = curveTable != nullptr && curveTable->recording ? "true" : "false";
+
+            if (name == "pass" && curveTable != nullptr)
+                text = curveTable->lastPass;
+
+            runtime.push_back (makeLeaf (std::string (godot) + "/curves/" + name, *row, text));
+        }
+
+        /*  WHAT EACH ARMED CURVE RIDES: the device's report or the hand's
+            value once one has latched it in a pass, its own curve where the
+            clock is until then. Nothing for a curve nobody armed. */
+        if (const auto* rideRow = rowNamed ("curve", "ride"); rideRow != nullptr && curveTable != nullptr)
+            for (const auto& id : curveTable->armedCurves())
+            {
+                if (! document.findById (id).isValid())
+                    continue;
+
+                const auto found = curveTable->rides.find (id);
+
+                runtime.push_back (makeLeaf (std::string (godot) + "/curve/" + id + "/ride", *rideRow,
+                                             osc::formatDouble (found != curveTable->rides.end()
+                                                                  ? found->second.value : 0.0)));
+            }
 
         if (flipped)
             for (const auto& key : declaredLaneKeys)

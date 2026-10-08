@@ -97,6 +97,7 @@
 #include <wfg/engine/command/Event.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/CurveTable.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/DohSetting.h>
 #include <wfg/engine/cue/LiveEdits.h>
@@ -10504,4 +10505,42 @@ TEST_CASE ("client: an OSC cue's curves read with an axis each, and edited on it
     //  Written at a ten-thousandth of the axis, in the locale-free spelling.
     CHECK (model::stepFor (first.axis) == doctest::Approx (0.001));
     CHECK (model::writeCurve ({ { 0.5, 1.23456 } }, 0.001) == "0.5 1.235");
+
+    /*  RECORDING (O.9), as the tree publishes the curve table: which cue is
+        armed, which curves, whether a pass runs, and what an armed curve
+        rides - nothing for a curve nobody armed. */
+    CHECK_FALSE (reading.armedHere);
+    CHECK_FALSE (first.armed);
+
+    cue::CurveTable curves;
+    rig.parameters.setCurves (&curves);
+    curves.arm (cue);
+    curves.setArmed (ranged, true);
+    curves.rideOf (ranged).value = 1.5;
+    curves.startPass ("RUN00001");
+    curves.lastPass = "40 " + cue + " untouched";
+
+    const auto armed = model::readOscCurves (*rig.publish (10), cue);
+    REQUIRE (armed.curves.size() == 2u);
+    CHECK (armed.armedHere);
+    CHECK_FALSE (armed.armedElsewhere);
+    CHECK (armed.recording);
+    CHECK (armed.lastPass == "40 " + cue + " untouched");
+    CHECK (armed.curves[0].armed);
+    REQUIRE (armed.curves[0].ride.has_value());
+    CHECK (*armed.curves[0].ride == doctest::Approx (1.5));
+    CHECK_FALSE (armed.curves[1].armed);
+    CHECK_FALSE (armed.curves[1].ride.has_value());
+
+    //  Another cue's arming is no arming here.
+    rig.apply (11, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (1), osc::Value::string ("osc"),
+                 osc::Value::string ("Other"), osc::Value::string ("W7THERC9") });
+    curves.endPass ({});
+    curves.arm ("W7THERC9");
+    const auto elsewhere = model::readOscCurves (*rig.publish (12), cue);
+    CHECK_FALSE (elsewhere.armedHere);
+    CHECK (elsewhere.armedElsewhere);
+    CHECK_FALSE (elsewhere.curves[0].armed);
+    rig.parameters.setCurves (nullptr);
 }

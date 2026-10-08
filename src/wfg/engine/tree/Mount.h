@@ -499,11 +499,25 @@ namespace wfg::tree
         /*  HOW MANY REPORTS A DEVICE HAS BEEN HEARD MAKING (namespace draft 45,
             O.8): a readout beside `sent`, the first thing to look at when a
             recording catches nothing - whether the device is talking at all. */
-        void noteHeard (const std::string& mountId) { ++heardCounts[mountId]; }
+        void noteHeard (const std::string& mountId, const std::string& address, std::int64_t tick)
+        {
+            ++heardCounts[mountId];
+            heardTicks.insert_or_assign (address, tick);
+        }
         std::uint64_t heardOf (const std::string& mountId) const
         {
             const auto found = heardCounts.find (mountId);
             return found == heardCounts.end() ? 0u : found->second;
+        }
+
+        /*  WHEN THE DEVICE LAST REPORTED THE ADDRESS ITSELF, or -1 (O.9): the
+            observation a pass records from is one the device volunteered, never
+            a read-back sweep's answer, which may be asking after what Go.dot
+            sent it. Forgotten with the observation. */
+        std::int64_t heardAtTick (const std::string& address) const
+        {
+            const auto found = heardTicks.find (address);
+            return found == heardTicks.end() ? -1 : found->second;
         }
         const osc::Values* observedOf (const std::string& address) const;
         void forgetObservation (const std::string& address);
@@ -572,6 +586,7 @@ namespace wfg::tree
 
         /** The reports heard from each device. See `noteHeard`. */
         std::map<std::string, std::uint64_t> heardCounts;
+        std::map<std::string, std::int64_t> heardTicks;
 
         /*  By mount id, and kept for mounts that are not in `mounts` at all -
             a device refused for having no port never became an entry, and the

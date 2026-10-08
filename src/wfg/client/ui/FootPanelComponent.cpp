@@ -161,6 +161,11 @@ namespace wfg::client::ui
                     note = sentence;
                     repaint();
                 };
+                drawing.arm = actions.curveArm;
+                drawing.free = actions.curveFree;
+                drawing.rec = actions.curveRec;
+                drawing.record = actions.curveRecord;
+                drawing.stopPass = actions.curveStop;
 
                 curves = std::make_unique<CurveLaneComponent> (theme, std::move (drawing));
                 addAndMakeVisible (*curves);

@@ -81,6 +81,14 @@ namespace wfg::client::model
         out.locked = messages.locked;
         out.loop = text (snapshot, "/godot/cue/" + cueId + "/loop") == "true";
 
+        const auto armedCue = text (snapshot, "/godot/curves/cue");
+        out.armedHere = ! armedCue.empty() && armedCue == cueId;
+        out.armedElsewhere = ! armedCue.empty() && armedCue != cueId;
+        out.recording = out.armedHere && text (snapshot, "/godot/curves/recording") == "true";
+        out.lastPass = text (snapshot, "/godot/curves/pass");
+
+        const auto armedCurves = out.armedHere ? " " + text (snapshot, "/godot/curves/rec") + " " : std::string {};
+
         auto last = 0.0;
 
         for (const auto& row : messages.rows)
@@ -128,6 +136,12 @@ namespace wfg::client::model
 
                 if (! view.points.empty())
                     last = std::max (last, view.points.back().seconds);
+
+                view.armed = armedCurves.find (" " + view.id + " ") != std::string::npos;
+
+                if (const auto* ride = snapshot.find ("/godot/curve/" + view.id + "/ride");
+                    out.armedHere && ride != nullptr && ! ride->values.empty() && ride->values[0].isNumber())
+                    view.ride = ride->values[0].asDouble();
 
                 out.curves.push_back (std::move (view));
             }

@@ -132,6 +132,9 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/LaneRecording.cpp
     wfg/engine/cue/LaneCommands.h
     wfg/engine/cue/LaneCommands.cpp
+    wfg/engine/cue/CurveTable.h
+    wfg/engine/cue/CurveCommands.h
+    wfg/engine/cue/CurveCommands.cpp
     wfg/engine/cue/LiveEdits.h
     wfg/engine/cue/LiveEdits.cpp
     wfg/engine/cue/FxValues.h

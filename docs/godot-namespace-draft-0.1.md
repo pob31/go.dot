@@ -22319,3 +22319,33 @@ their curves; the copy of a cue's messages as a foot part.
   and forwarded. The 256 a tick holds even a WFS-DIY of forty sources at thirty values a second well inside the
   queue (ZK). The narrowing of what is submitted to armed curves and described nodes waits for O.9, which arms
   curves.
+- **O.9, recording a pass from heard values** (2026-10-08). `cue/CurveTable` (ZD) holds the cue armed, its armed
+  curves, the pass and each armed curve's ride; `cue/CurveCommands` adds `curve.arm`, `curve.free`, `curve.rec`,
+  `curve.record`, `curve.stop` and `curve.ride` (§45.4), each refused as §45.5 says - `not-armed` with no cue
+  armed, `busy` during a pass, `locked` under the lock. `curve.record` fires the cue (`Runner::startCurvePass`,
+  as `lane.record` does) and its clock runs even with no curve drawn; a pass on a cue with no duration and no
+  last point yet runs until it is stopped. The hook `Runner::recordCurves`, before `advanceCurves`, samples each
+  armed curve every tick from the first value that latches it: the device's newest report of the address -
+  **heard** (O.8), at or after the pass's first tick; never a read-back sweep's answer, which may be asking
+  after what Go.dot sent (mine: `MountTable::heardAtTick`, kept per address beside the observation and forgotten
+  with it) - or a hand's `curve.ride`. Latched, the curve's value is written every tick until the pass stops, so
+  ZI's hold point is the samples themselves. While a curve the device reports is latched nothing of its
+  message is sent; a hand's value replaces its curve's in the message, kept to the value's type, and is sent
+  (ZJ). At the end - the hand's `curve.stop`, Esc, or the cue ending - each moved curve is spliced into the
+  one it rode over, thinned to its tolerance and written at a tenth of it (ZG: the curve's range, else the
+  device's for that value, else what was ridden), judged as the door would, and every curve or none goes in
+  one `node.setMany` (one step of undo), then `curve.stop kept <points> <curves>`; a hand's stop stops the cue
+  too, gracefully. **A curve with no point yet is spliced against nothing** (mine): the ride is the curve, held
+  before its first point and after its last, rather than joined back to nought at either end - a move recorded
+  from nothing ends where the device left it. A double Esc or Doh! taking the run ends the pass `dropped`; the
+  show locked under it, `locked`, the curves as they were, and an arming under the lock is let go of by
+  `curve.free` from the hook. `/godot/curves/cue`, `rec`, `recording`, `pass` and each armed curve's
+  `/godot/curve/<id>/ride` are published on the tree's runtime half; `curve,tolerance` is a row of the show.
+  The window: the curve editor's head carries the waveform editor's recorder - `Autom.` arms the cue,
+  `● Rec` starts a pass where the playhead is, `■ Stop` ends it, the three words the author kept for the
+  lanes - a **REC** beside the curve menu arming the picked curve (arming the cue first when nobody had), and
+  a **✕** letting go; while a pass runs each armed curve's ride is drawn over it as the lanes' trail is, wider
+  and outlined (4.8). REC and ✕ are mine, to put to the author. **Not built: ZK's narrowing.** Every heard
+  report is still submitted, at most 256 a tick: an address Go.dot writes is one Doh! and the Jumps read reports
+  of, whether a curve is armed on it or not, and the count `mount/heard` would stop saying whether the device
+  talks at all. Whether a device streaming all night makes the log too heavy is for the bench (M52).

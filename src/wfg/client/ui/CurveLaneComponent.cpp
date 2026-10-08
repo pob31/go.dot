@@ -16,6 +16,7 @@
 
 #include <wfg/client/ui/CurveLaneComponent.h>
 
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -48,6 +49,12 @@ namespace wfg::client::ui
         {
             return juce::String (osc::formatDouble (std::round (value * 1000.0) / 1000.0));
         }
+
+        /*  THE RECORDER'S THREE WORDS, the waveform editor's (§34): at rest,
+            with this cue armed, and recording. */
+        const char* const recAtRest    = model::laneRecorderName;
+        const char* const recReady     = "\xe2\x97\x8f Rec";
+        const char* const recRecording = "\xe2\x96\xa0 Stop";
     }
 
     CurveLaneComponent::CurveLaneComponent (const model::Theme& themeToUse, Actions actionsToUse)
@@ -117,6 +124,61 @@ namespace wfg::client::ui
                 actions.stop (runId);
         };
         addAndMakeVisible (stopButton);
+
+        /*  THE RECORDER (O.9): what a click does is decided by what the tree
+            says, read again at every click - at rest it arms this cue, armed it
+            starts a pass where the playhead is, recording it ends the pass. */
+        recordAll.setWantsKeyboardFocus (false);
+        recordAll.onClick = [this]
+        {
+            if (reading.recording)
+            {
+                if (actions.stopPass)
+                    actions.stopPass();
+            }
+            else if (reading.armedHere)
+            {
+                if (actions.record)
+                    actions.record (running ? position : 0.0);
+            }
+            else if (actions.arm)
+            {
+                actions.arm (reading.cueId);
+            }
+        };
+        addAndMakeVisible (recordAll);
+
+        /*  THE PICKED CURVE'S REC: armed or not, before a pass or during one.
+            On a cue nobody armed it arms the cue first. */
+        curveRec.setWantsKeyboardFocus (false);
+        curveRec.setTooltip ("Whether a pass writes this curve: from the first value the device reports for it,"
+                             " or a hand moves it, until the pass stops");
+        curveRec.onClick = [this]
+        {
+            const auto* drawn = curve();
+
+            if (drawn == nullptr)
+                return;
+
+            if (! reading.armedHere && actions.arm)
+                actions.arm (reading.cueId);
+
+            if (actions.rec)
+                actions.rec (drawn->id, ! (reading.armedHere && drawn->armed));
+        };
+        addAndMakeVisible (curveRec);
+
+        freeArming.setButtonText (juce::String::fromUTF8 ("\xe2\x9c\x95"));
+        freeArming.setTooltip ("Lets go of this cue: no curve of it is recorded");
+        freeArming.setWantsKeyboardFocus (false);
+        freeArming.onClick = [this]
+        {
+            if (actions.free)
+                actions.free();
+        };
+        addChildComponent (freeArming);
+
+        showRecording();
     }
 
     CurveLaneComponent::~CurveLaneComponent() = default;
@@ -133,6 +195,33 @@ namespace wfg::client::ui
         }
 
         repaint();
+    }
+
+    const std::vector<model::LanePoint>* CurveLaneComponent::trailOf (const std::string& curveId) const
+    {
+        const auto found = trails.find (curveId);
+        return found != trails.end() && ! found->second.empty() ? &found->second.back() : nullptr;
+    }
+
+    void CurveLaneComponent::showRecording()
+    {
+        const auto word = reading.recording ? recRecording : reading.armedHere ? recReady : recAtRest;
+        recordAll.setButtonText (juce::String::fromUTF8 (word));
+        recordAll.setTooltip (reading.recording
+                                ? juce::String ("Ends the pass: every armed curve keeps what it rode")
+                              : reading.armedHere
+                                ? juce::String ("Plays the cue from the playhead and writes every armed curve from its"
+                                                " first value heard or ridden")
+                                : juce::String::fromUTF8 (recAtRest)
+                                    + ": arm this cue, so its curves can be written from what the device reports");
+        recordAll.setToggleState (reading.recording, juce::dontSendNotification);
+
+        const auto* drawn = curve();
+
+        recordAll.setEnabled (reading.recording || (! reading.locked && ! reading.curves.empty()));
+        curveRec.setEnabled (! reading.locked && drawn != nullptr);
+        curveRec.setToggleState (drawn != nullptr && reading.armedHere && drawn->armed, juce::dontSendNotification);
+        freeArming.setVisible (reading.armedHere && ! reading.recording);
     }
 
     const model::CurveView* CurveLaneComponent::curve() const
@@ -205,6 +294,34 @@ namespace wfg::client::ui
         }
 
         curveMenu.setSelectedId (static_cast<int> (picked) + 1, juce::dontSendNotification);
+
+        /*  THE TRAILS: begun again when a pass begins, a sample a pass while it
+            runs - broken where the clock goes back, a loop's wrap. */
+        if (reading.recording && ! wasRecording)
+            trails.clear();
+
+        wasRecording = reading.recording;
+
+        if (reading.recording && running)
+            for (const auto& view : reading.curves)
+            {
+                if (! view.armed || ! view.ride.has_value())
+                    continue;
+
+                auto& runsOf = trails[view.id];
+
+                if (runsOf.empty() || (! runsOf.back().empty() && position < runsOf.back().back().seconds - 1.0e-6))
+                    runsOf.emplace_back();
+
+                auto& trail = runsOf.back();
+
+                if (! trail.empty() && std::abs (trail.back().seconds - position) < 1.0e-6)
+                    trail.back().levelDb = *view.ride;
+                else
+                    trail.push_back ({ position, *view.ride });
+            }
+
+        showRecording();
 
         const auto editable = ! reading.locked && curve() != nullptr;
         pointAt.setEditable (editable, editable, false);
@@ -328,12 +445,18 @@ namespace wfg::client::ui
     {
         auto head = headArea().reduced (2, 3);
 
+        recordAll.setBounds (head.removeFromRight (70));
+        head.removeFromRight (2);
+        freeArming.setBounds (head.removeFromRight (24));
+        head.removeFromRight (6);
         stopButton.setBounds (head.removeFromRight (54));
         head.removeFromRight (4);
         playButton.setBounds (head.removeFromRight (54));
         head.removeFromRight (8);
 
         curveMenu.setBounds (head.removeFromLeft (150));
+        head.removeFromLeft (4);
+        curveRec.setBounds (head.removeFromLeft (40));
         head.removeFromLeft (8);
         pointAt.setBounds (head.removeFromLeft (70));
         head.removeFromLeft (4);
@@ -436,6 +559,33 @@ namespace wfg::client::ui
                 g.fillEllipse (dot);
             else
                 g.drawEllipse (dot.reduced (0.5f), 1.4f);
+        }
+
+        /*  WHAT THE PASS HAS RIDDEN on the picked curve, over it, as the level
+            lane's trail is drawn: wider than the curve and outlined, so it
+            reads apart from it without colour alone (4.8). */
+        if (const auto found = trails.find (drawn->id); found != trails.end())
+        {
+            juce::Path line;
+
+            for (const auto& trail : found->second)
+                for (std::size_t n = 0; n < trail.size(); ++n)
+                {
+                    const auto at = positionAt (trail[n].seconds, trail[n].levelDb).toFloat();
+
+                    if (n == 0)
+                        line.startNewSubPath (at);
+                    else
+                        line.lineTo (at);
+                }
+
+            g.saveState();
+            g.reduceClipRegion (picture.expanded (4, 4));
+            g.setColour (juce::Colours::black.withAlpha (0.8f));
+            g.strokePath (line, juce::PathStrokeType (3.5f));
+            g.setColour (Look::colour (theme, "failed"));
+            g.strokePath (line, juce::PathStrokeType (2.0f));
+            g.restoreState();
         }
 
         //  The playhead, while the cue plays.

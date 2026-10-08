@@ -53,6 +53,7 @@ namespace wfg::cue
     /*  One curve on one value of a message: which value, and its points. */
     struct CurveLane
     {
+        std::string id;
         std::size_t arg = 0;
         std::vector<doc::LanePoint> points;
     };

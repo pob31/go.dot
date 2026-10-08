@@ -73,6 +73,12 @@ namespace wfg::client::model
         double written = 0.0;
         bool integer = false;
 
+        /*  ARMED FOR RECORDING (O.9), and what it rides while its cue is armed:
+            the device's report or a hand's value once one has latched it in a
+            pass, its own curve where the clock is until then. */
+        bool armed = false;
+        std::optional<double> ride;
+
         std::string pointsAddress() const { return "/godot/curve/" + id + "/points"; }
     };
 
@@ -89,6 +95,14 @@ namespace wfg::client::model
         double drawn = 1.0;
         bool loop = false;
         bool locked = false;
+
+        /*  RECORDING (namespace draft 45, O.9): whether this cue is the one
+            armed - or another is, which a click here would take the arming
+            from - whether a pass is running, and what the last one ended in. */
+        bool armedHere = false;
+        bool armedElsewhere = false;
+        bool recording = false;
+        std::string lastPass;
     };
 
     /** The cue's curves, its own message's first, in one pass over the snapshot. */

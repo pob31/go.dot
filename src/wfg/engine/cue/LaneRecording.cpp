@@ -18,8 +18,10 @@
 
 #include <wfg/engine/osc/OscValue.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -185,5 +187,60 @@ namespace wfg::cue
         }
 
         return out;
+    }
+
+    std::string curveText (const std::vector<doc::LanePoint>& curve, double step)
+    {
+        std::string out;
+        auto previous = -1.0;
+
+        for (const auto& point : curve)
+        {
+            const auto seconds = std::round (point.seconds * 10000.0) / 10000.0;
+
+            //  Still climbing once rounded, for `laneText`'s reason.
+            if (! (seconds > previous))
+                continue;
+
+            previous = seconds;
+
+            if (! out.empty())
+                out += ' ';
+
+            const auto value = step > 0.0 ? std::round (point.levelDb / step) * step : point.levelDb;
+            out += osc::formatDouble (seconds) + " " + osc::formatDouble (value);
+        }
+
+        return out;
+    }
+
+    double curveTolerance (double tolerance, double span) noexcept
+    {
+        if (tolerance > 0.0)
+            return tolerance;
+
+        return span > 0.0 ? span / 1000.0 : 0.001;
+    }
+
+    std::vector<doc::LanePoint> spliceCurve (const std::vector<doc::LanePoint>& curve,
+                                             const std::vector<RideSegment>& segments,
+                                             double joinSeconds, double tolerance)
+    {
+        if (! curve.empty())
+            return spliceRide (curve, segments, joinSeconds, tolerance);
+
+        const auto first = std::find_if (segments.begin(), segments.end(),
+                                         [] (const RideSegment& segment) { return ! segment.empty(); });
+
+        if (first == segments.end())
+            return {};
+
+        return spliceRide (thinRide (*first, tolerance), std::vector<RideSegment> (std::next (first), segments.end()),
+                           joinSeconds, tolerance);
+    }
+
+    double curveStep (double tolerance) noexcept
+    {
+        return tolerance > 0.0 ? std::pow (10.0, std::floor (std::log10 (tolerance / 10.0))) : 0.0001;
     }
 }

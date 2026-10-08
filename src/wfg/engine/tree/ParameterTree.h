@@ -80,7 +80,7 @@ namespace wfg::midi { class PortTable; }
 
 namespace wfg::surface { class SurfaceTable; }
 
-namespace wfg::cue { class DcaTable; class LaneTable; class LiveEdits; class TakeTable; }
+namespace wfg::cue { class CurveTable; class DcaTable; class LaneTable; class LiveEdits; class TakeTable; }
 
 namespace wfg::video { class VideoHost; class Converter; }
 namespace wfg::video::ffmpeg { class Installer; }
@@ -321,6 +321,10 @@ namespace wfg::tree
             dump - no lane is armed, which is the truth. */
         void setLanes (const cue::LaneTable* lanesToRead) noexcept { lanes = lanesToRead; }
 
+        /*  The OSC curves armed for recording (namespace draft 45, O.9), read
+            for `/godot/curves/` and each armed curve's `ride`. */
+        void setCurves (const cue::CurveTable* curvesToRead) noexcept { curveTable = curvesToRead; }
+
         /*  WHAT THE RENDERER FOUND (Phase 8a): the displays, whether each video
             output is bound, how its frames are going. Absent - a replay, a tree
             dump - and the outputs read unbound, the renderer stopped. */
@@ -459,6 +463,7 @@ namespace wfg::tree
         const cue::DcaTable* dcas = nullptr;
         const cue::TakeTable* takes = nullptr;
         const cue::LaneTable* lanes = nullptr;
+        const cue::CurveTable* curveTable = nullptr;
         const video::VideoHost* videoHost = nullptr;
         const video::Converter* converter = nullptr;
         const video::ffmpeg::Installer* installer = nullptr;
