@@ -99,11 +99,85 @@ patches/tracktion_engine/series gives; refreshed from the working tree with
 scripts/te-patches.py refresh, which keeps this header. Against Tracktion
 Engine 13b5132 (2026-09-23). Namespace draft section 22.3, decisions DQ-DX.
 
+diff --git a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp b/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp
+index 13f50a9e148..6bad5f599f2 100644
+--- a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp
++++ b/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp
+@@ -79,6 +79,13 @@ public:
+         juce::Array<SampleCount> readPoints;
+         readPoints.ensureStorageAllocated (64);
+ 
++        // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-10-08, by
++        // patches/tracktion_engine/0002-launched-clip-speed.patch: a reader going backwards
++        // through its file wants what is behind it touched, as far back as one going
++        // forwards wants what is in front.
++        juce::Array<SampleCount> backPoints;
++        backPoints.ensureStorageAllocated (64);
++
+         {
+             const juce::ScopedReadLock sl (clientListLock);
+ 
+@@ -93,7 +100,10 @@ public:
+                         if (readPos + readAheadSamples > r->loopStart + loopLength)
+                             readPoints.addIfNotAlreadyThere (r->loopStart);
+ 
+-                    readPoints.addIfNotAlreadyThere (std::max (SampleCount(), readPos));
++                    if (r->readDirection.load() < 0)
++                        backPoints.addIfNotAlreadyThere (std::max (SampleCount(), readPos));
++                    else
++                        readPoints.addIfNotAlreadyThere (std::max (SampleCount(), readPos));
+                 }
+             }
+         }
+@@ -109,6 +119,15 @@ public:
+         for (int distanceAhead = 4096; distanceAhead < 48000; distanceAhead += 8192)
+             for (auto pos : readPoints)
+                 touchAllReaders ({ pos + distanceAhead, pos + distanceAhead + 8192 });
++
++        // MODIFIED BY GO.DOT, 2026-10-08 (patch 0002): the same distance, behind.
++        for (auto pos : backPoints)
++            touchAllReaders ({ std::max (SampleCount(), pos - 4096), pos + 128 });
++
++        for (int distanceBehind = 4096; distanceBehind < 48000; distanceBehind += 8192)
++            for (auto pos : backPoints)
++                touchAllReaders ({ std::max (SampleCount(), pos - distanceBehind - 8192),
++                                   std::max (SampleCount(), pos - distanceBehind) });
+     }
+ 
+     void touchAllReaders (SampleRange range) const
+diff --git a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.h b/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.h
+index 1c6e88cccfa..bcf1733bf21 100644
+--- a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.h
++++ b/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.h
+@@ -63,6 +63,13 @@ public:
+ 
+         void setLoopRange (SampleRange);
+ 
++        /** MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-10-08, by
++            patches/tracktion_engine/0002-launched-clip-speed.patch: which way this reader
++            is going through its file, +1 or -1. A reader read backwards - a launched clip
++            played at a negative speed - has the pages BEHIND its position touched ahead of
++            it instead of those in front, so the audio thread does not meet a page fault. */
++        void setReadDirection (int direction) noexcept    { readDirection = direction < 0 ? -1 : 1; }
++
+         int getNumChannels() const noexcept;
+         double getSampleRate() const noexcept;
+ 
+@@ -72,6 +79,9 @@ public:
+         AudioFileCache& cache;
+         void* file;
+         std::atomic<SampleCount> readPos { 0 }, loopStart { 0 }, loopLength { 0 };
++
++        // MODIFIED BY GO.DOT, 2026-10-08 (patch 0002): +1 forward, -1 backward.
++        std::atomic<int> readDirection { 1 };
+         std::unique_ptr<AudioFormatReaderWithTimeout> fallbackReader;
+ 
+         Reader (AudioFileCache&, void*, std::unique_ptr<AudioFormatReaderWithTimeout>);
 diff --git a/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h b/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h
-index 264346b5f0c..e0ab2b0f7d8 100644
+index 264346b5f0c..e023a4bef03 100644
 --- a/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h
 +++ b/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h
-@@ -74,6 +74,115 @@ public:
+@@ -74,6 +74,123 @@ public:
      /** Moves the playhead by a given number of beats. */
      void nudge (BeatDuration);
  
@@ -188,6 +262,14 @@ index 264346b5f0c..e0ab2b0f7d8 100644
 +            double loopIn = 0.0;
 +            double loopOut = 0.0;
 +            double crossfade = 0.0;         // seconds; nought is a continuous move
++
++            // MODIFIED BY GO.DOT, 2026-10-08 (patch 0002): which way the file plays from
++            // `from` on, +1 forwards or -1 backwards - the reader's position still counts
++            // forwards, at the speed's size - and whether the loop bounces between its
++            // points (ping-pong) rather than starting again at its in-point. A loop with
++            // loopOut not after loopIn is no loop: the file, either way.
++            int direction = 1;
++            bool pingPong = false;
 +        };
 +
 +        /** The segments in force, the earlier first: up to two - the move before the
@@ -219,7 +301,7 @@ index 264346b5f0c..e0ab2b0f7d8 100644
      //==============================================================================
      /** Represents two beat ranges where the play state can be different in each. */
      struct SplitStatus
-@@ -151,6 +260,14 @@ private:
+@@ -151,6 +268,14 @@ private:
      //==============================================================================
      // audio-write/read, message-read/write
      std::atomic<double> nudgeBeats { 0.0 };
@@ -341,10 +423,23 @@ index 90ee2402c5c..fef637df9bd 100644
              }
  
 diff --git a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
-index 1993f02782b..b3cb5b9ca32 100644
+index 1993f02782b..b6bdeea7a56 100644
 --- a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
 +++ b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
-@@ -237,6 +237,271 @@ public:
+@@ -106,6 +106,12 @@ public:
+         reader->setLoopRange (toSamples (loopRange, getSampleRate()));
+     }
+ 
++    // MODIFIED BY GO.DOT, 2026-10-08 (patch 0002): which way it is being read, for the cache.
++    void setReadDirection (int direction)
++    {
++        reader->setReadDirection (direction);
++    }
++
+     void reset() override
+     {}
+ 
+@@ -237,6 +243,402 @@ public:
      const SampleRange loopRange;
  };
  
@@ -372,7 +467,9 @@ index 1993f02782b..b3cb5b9ca32 100644
 +                        LaunchHandle::LoopSource* liveLoopSource = nullptr)
 +        : SingleInputAudioReader (std::move (input)),
 +          own (0, static_cast<SampleCount> (std::llround (loopStartFrame)), loopLengthFrames),
-+          live (liveLoopSource)
++          live (liveLoopSource),
++          // MODIFIED BY GO.DOT, 2026-10-08 (patch 0002): the cache below, told which way.
++          cache (dynamic_cast<AudioFileCacheReader*> (source.get()))
 +    {
 +        if (live != nullptr)
 +            fadeBuffer = choc::buffer::createChannelArrayBuffer (source->getNumChannels(), fadeChunk, [] { return 0.0f; });
@@ -409,6 +506,55 @@ index 1993f02782b..b3cb5b9ca32 100644
 +        {
 +            const auto active = activeAt (position);
 +            const auto& map = active < 0 ? own : moves[active].map;
++
++            // MODIFIED BY GO.DOT, 2026-10-08 (patch 0002): backwards, or bouncing.
++            if (! map.plain())
++            {
++                auto limit = numFrames - done;
++
++                for (int i = 0; i < numMoves; ++i)
++                    if (moves[i].from > position)
++                        limit = std::min (limit, moves[i].from - position);
++
++                const auto first = map.fileFrameFor (position);
++                SampleCount run = 1;
++                SampleCount step = 1;
++
++                if (limit > 1)
++                {
++                    step = map.fileFrameFor (position + 1) - first;
++
++                    if (step == 1 || step == -1)
++                        while (run < limit && map.fileFrameFor (position + run) == first + step * run)
++                            ++run;
++                    else
++                        step = 1;
++                }
++
++                auto section = destBuffer.getFrameRange ({ (FrameCount) done, (FrameCount) (done + run) });
++                tellCache (step < 0 ? -1 : 1);
++
++                if (step < 0 && run > 1)
++                {
++                    source->setPosition (first - run + 1);
++                    allOk = source->readSamples (section) && allOk;
++
++                    for (choc::buffer::ChannelCount c = 0; c < section.getNumChannels(); ++c)
++                        for (SampleCount i = 0, j = run - 1; i < j; ++i, --j)
++                            std::swap (section.getSample (c, (FrameCount) i), section.getSample (c, (FrameCount) j));
++                }
++                else
++                {
++                    source->setPosition (first);
++                    allOk = source->readSamples (section) && allOk;
++                }
++
++                position += run;
++                done += run;
++                continue;
++            }
++
++            tellCache (1);
 +            auto numThisTime = std::min (numFrames - done, map.nextPassAfter (position) - position);
 +
 +            // A move that starts further on ends this read where it starts.
@@ -473,12 +619,68 @@ index 1993f02782b..b3cb5b9ca32 100644
 +        double loopLength = 1.0;        // in frames, with its fraction
 +        SampleCount lastInLoop = 0;     // the furthest a pass reads past its first frame
 +
++        // MODIFIED BY GO.DOT, 2026-10-08 (patch 0002): a map that plays the file backwards,
++        // or bounces between its loop points, is anchored where it starts - the file's frame
++        // `fileAtFrom` at the position `from` - and goes `direction` from there. Such a map
++        // is read by its own arithmetic below; one going forwards without a bounce is read
++        // exactly as it always was.
++        int direction = 1;
++        bool pingPong = false;
++        bool looping = true;
++        SampleCount from = 0, fileAtFrom = 0;
++
 +        Map() = default;
 +
 +        Map (SampleCount shiftToUse, SampleCount start, double length)
 +            : shift (shiftToUse), loopStart (start), loopLength (std::max (length, 1.0)),
 +              lastInLoop (static_cast<SampleCount> (std::ceil (loopLength)) - 1)
 +        {
++        }
++
++        bool plain() const      { return direction > 0 && ! pingPong; }
++
++        // From here on, the file at `fileAt` at position `at`.
++        void reanchor (SampleCount at, SampleCount fileAt)
++        {
++            shift = fileAt - at;
++            from = at;
++            fileAtFrom = fileAt;
++        }
++
++        // The frame of the file a position reads, when the map is not plain.
++        SampleCount bentFrameFor (SampleCount t) const
++        {
++            const auto u = fileAtFrom + (direction < 0 ? from - t : t - from);
++
++            if (! looping)
++                return u;
++
++            const auto v = static_cast<double> (u - loopStart);
++
++            if (pingPong)
++            {
++                // Before the loop on the way in, the file as it is.
++                if (v < 0.0 && direction > 0)
++                    return u;
++
++                const auto period = 2.0 * loopLength;
++                auto w = std::fmod (v, period);
++
++                if (w < 0.0)
++                    w += period;
++
++                const auto into = w < loopLength ? std::floor (w) : std::floor (period - w);
++                return loopStart + std::clamp (static_cast<SampleCount> (into), SampleCount (0), lastInLoop);
++            }
++
++            // Backwards: above the loop, or in it, the file as it is; below its start,
++            // round its end again, pass after pass.
++            if (v >= 0.0)
++                return u;
++
++            const auto pass = std::floor (v / loopLength);
++            const auto intoPass = static_cast<SampleCount> (std::floor (v - pass * loopLength));
++            return loopStart + std::clamp (intoPass, SampleCount (0), lastInLoop);
 +        }
 +
 +        // Which pass a shifted position is in: nought up to the loop's end.
@@ -493,6 +695,9 @@ index 1993f02782b..b3cb5b9ca32 100644
 +        // The frame of the file a position reads.
 +        SampleCount fileFrameFor (SampleCount t) const
 +        {
++            if (! plain())
++                return bentFrameFor (t);
++
 +            const auto u = t + shift;
 +            const auto pass = passOf (u);
 +
@@ -535,6 +740,20 @@ index 1993f02782b..b3cb5b9ca32 100644
 +
 +    const Map own;
 +    LaunchHandle::LoopSource* const live;
++
++    // MODIFIED BY GO.DOT, 2026-10-08 (patch 0002): the file cache below, if that is what
++    // this reads, and which way it was last told the reads go.
++    AudioFileCacheReader* const cache;
++    int cacheDirection = 1;
++
++    void tellCache (int direction)
++    {
++        if (cache != nullptr && direction != cacheDirection)
++        {
++            cacheDirection = direction;
++            cache->setReadDirection (direction);
++        }
++    }
 +    choc::buffer::ChannelArrayBuffer<float> fadeBuffer;
 +    Move moves[2];
 +    int numMoves = 0;
@@ -586,6 +805,13 @@ index 1993f02782b..b3cb5b9ca32 100644
 +            m.from = toFrames (s.from);
 +            m.fade = toFrames (s.crossfade);
 +            m.map = Map (toFrames (s.fileAt) - m.from, toFrames (s.loopIn), (s.loopOut - s.loopIn) * rate);
++
++            // MODIFIED BY GO.DOT, 2026-10-08 (patch 0002): its direction and its bounce.
++            m.map.direction = s.direction < 0 ? -1 : 1;
++            m.map.pingPong = s.pingPong;
++            m.map.looping = s.loopOut > s.loopIn;
++            m.map.from = m.from;
++            m.map.fileAtFrom = toFrames (s.fileAt);
 +        }
 +
 +        if (numMoves == 0)
@@ -608,7 +834,7 @@ index 1993f02782b..b3cb5b9ca32 100644
 +                                            : before.fileFrameFor (position);
 +
 +        latest.from = position;
-+        latest.map.shift = fileAt - position;
++        latest.map.reanchor (position, fileAt);
 +        live->adopted (latest.generation, static_cast<double> (position) / rate, static_cast<double> (fileAt) / rate);
 +    }
 +};
@@ -616,7 +842,7 @@ index 1993f02782b..b3cb5b9ca32 100644
  
  //==============================================================================
  class ResamplerReader : public SingleInputAudioReader
-@@ -266,6 +531,11 @@ public:
+@@ -266,6 +668,11 @@ public:
              resamplers.emplace_back();
              resamplers.back().reset();
          }
@@ -628,7 +854,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      }
  
      void reset() override
-@@ -275,10 +545,25 @@ public:
+@@ -275,10 +682,25 @@ public:
  
          hasBeenReset = true;
          timeSourceIsAheadDueToLatency = {};
@@ -654,7 +880,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          const auto sourcePosition = TimePosition::fromSamples (source->getPosition(), source->getSampleRate());
          return toSamples (sourcePosition - timeSourceIsAheadDueToLatency, destSampleRate);
      }
-@@ -292,10 +577,24 @@ public:
+@@ -292,10 +714,24 @@ public:
      {
          // If the position has jumped, reset so the interpolator doesn't blend in samples from the
          // old position. This also clears the latency offset so it's re-compensated on the next read
@@ -681,7 +907,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      }
  
      /** Sets a ratio to increase or decrease playback speed. */
-@@ -328,6 +627,25 @@ public:
+@@ -328,6 +764,25 @@ public:
          const auto numDestFrames = destBuffer.getNumFrames();
          const int numSourceFramesToRead = static_cast<int> ((numDestFrames * ratio) + 0.5);
  
@@ -707,7 +933,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          if (std::exchange (hasBeenReset, false))
          {
              constexpr auto baseLatencyNumSamples = static_cast<FrameCount> (juce::LagrangeInterpolator::getBaseLatency());
-@@ -340,16 +658,16 @@ public:
+@@ -340,16 +795,16 @@ public:
              auto destScratchView = toBufferView (destDataScratch.buffer);
              destScratchView.clear();
  
@@ -728,7 +954,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      }
  
      const double destSampleRate;
-@@ -360,30 +678,140 @@ public:
+@@ -360,30 +815,140 @@ public:
      float gains[2] = { 1.0f, 1.0f };
      TimeDuration timeSourceIsAheadDueToLatency;
      bool hasBeenReset = true;
@@ -879,7 +1105,7 @@ index 1993f02782b..b3cb5b9ca32 100644
              }
              else
              {
-@@ -391,6 +819,26 @@ public:
+@@ -391,6 +956,26 @@ public:
              }
          }
  
@@ -906,7 +1132,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          return ok;
      }
  };
-@@ -630,7 +1078,8 @@ public:
+@@ -630,7 +1215,8 @@ public:
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
          inputFifo.reset();
          outputFifo.reset();
@@ -916,7 +1142,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      }
  
      void setPosition (TimePosition t) override
-@@ -665,7 +1114,10 @@ public:
+@@ -665,7 +1251,10 @@ public:
          playbackSpeedRatio = speedRatio;
          semitonesShift = semitones;
  
@@ -928,7 +1154,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          assert (ok);
      }
  
-@@ -674,6 +1126,30 @@ public:
+@@ -674,6 +1263,30 @@ public:
          assert (numChannels == (int) destBuffer.getNumChannels());
          const auto numFramesToDo = destBuffer.getNumFrames();
  
@@ -959,7 +1185,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          for (;;)
          {
              // If there are enough output samples in the fifo, read them out
-@@ -684,7 +1160,7 @@ public:
+@@ -684,7 +1297,7 @@ public:
                  break;
              }
  
@@ -968,7 +1194,7 @@ index 1993f02782b..b3cb5b9ca32 100644
                  return false;
          }
  
-@@ -696,6 +1172,10 @@ public:
+@@ -696,6 +1309,10 @@ public:
      static constexpr int chunkSize = 256;
      const int numChannels;
      int latencySamples = 0;
@@ -979,7 +1205,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      TimeStretcher timeStretcher;
      AudioFifo inputFifo { numChannels, chunkSize }, outputFifo { numChannels, chunkSize };
      double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
-@@ -706,7 +1186,15 @@ public:
+@@ -706,7 +1323,15 @@ public:
      }
  
      // Reads source audio, feeds it to the stretcher, and produces output into the FIFO
@@ -996,7 +1222,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      {
          const auto numThisTime = timeStretcher.getFramesNeeded();
  
-@@ -717,7 +1205,12 @@ public:
+@@ -717,7 +1342,12 @@ public:
              auto scratchView = toBufferView (scratchBuffer.buffer);
  
              if (! source->readSamples (scratchView))
@@ -1010,7 +1236,7 @@ index 1993f02782b..b3cb5b9ca32 100644
  
              inputFifo.write (scratchBuffer.buffer);
          }
-@@ -731,27 +1224,67 @@ public:
+@@ -731,27 +1361,67 @@ public:
          return true;
      }
  
@@ -1083,7 +1309,7 @@ index 1993f02782b..b3cb5b9ca32 100644
                  break;
  
              const int available = outputFifo.getNumReady();
-@@ -764,6 +1297,9 @@ public:
+@@ -764,6 +1434,9 @@ public:
                  outputDiscarded += toDiscard;
              }
          }
@@ -1093,7 +1319,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      }
  };
  
-@@ -784,7 +1320,7 @@ public:
+@@ -784,7 +1457,7 @@ public:
          source->setPosition (getReadPosition());
          timeStretcher.reset();
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
@@ -1102,7 +1328,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      }
  
      SampleCount getPosition() override
-@@ -802,7 +1338,7 @@ public:
+@@ -802,7 +1475,7 @@ public:
          source->setPosition (t);
          timeStretcher.reset();
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
@@ -1111,7 +1337,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      }
  
      void setPosition (TimePosition t) override
-@@ -837,7 +1373,10 @@ public:
+@@ -837,7 +1510,10 @@ public:
          playbackSpeedRatio = speedRatio;
          semitonesShift = semitones;
  
@@ -1123,7 +1349,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          assert (ok);
      }
  
-@@ -847,6 +1386,19 @@ public:
+@@ -847,6 +1523,19 @@ public:
          const auto numFramesToDo = static_cast<int> (destBuffer.getNumFrames());
          int startFrame = 0;
  
@@ -1143,7 +1369,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          // Always push one block to keep the input fifo stoked but don't do this for every chunk unless required
          if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
              if (! readSourceAndPushFrames (numToPush))
-@@ -884,6 +1436,7 @@ public:
+@@ -884,6 +1573,7 @@ public:
  
      const int numChannels, chunkSize = 1024;
      int latencySamples = 0;
@@ -1151,7 +1377,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      ReadAheadTimeStretcher timeStretcher { 3 };
      double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
  
-@@ -910,10 +1463,28 @@ public:
+@@ -910,10 +1600,28 @@ public:
  
      // Pre-feeds real audio into the stretcher and discards initial output
      // to handle the stretcher's startup latency locally
@@ -1182,7 +1408,7 @@ index 1993f02782b..b3cb5b9ca32 100644
  
          const auto position = static_cast<SampleCount> (readPosition);
          const auto backupPos = std::max (SampleCount (0), position - latencySamples);
-@@ -928,7 +1499,8 @@ public:
+@@ -928,7 +1636,8 @@ public:
          while (outputDiscarded < numToDiscard)
          {
              if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
@@ -1192,7 +1418,7 @@ index 1993f02782b..b3cb5b9ca32 100644
  
              // Only ever discard up to the target so the stretcher isn't left ahead of readPosition
              const int numThisTime = std::min (chunkSize, numToDiscard - outputDiscarded);
-@@ -940,6 +1512,8 @@ public:
+@@ -940,6 +1649,8 @@ public:
  
              outputDiscarded += numRead;
          }
@@ -1201,7 +1427,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      }
  };
  
-@@ -1149,7 +1723,12 @@ public:
+@@ -1149,7 +1860,12 @@ public:
      {
          const auto numSourceSamples = toSamples (tr.getLength(), getSampleRate());
  
@@ -1215,7 +1441,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          {
              destBuffer.clear();
              return true;
-@@ -1164,7 +1743,12 @@ public:
+@@ -1164,7 +1880,12 @@ public:
  
          setPosition (tr.getStart());
  
@@ -1229,7 +1455,7 @@ index 1993f02782b..b3cb5b9ca32 100644
              reset();
  
          return readSamples (destBuffer);
-@@ -1172,6 +1756,10 @@ public:
+@@ -1172,6 +1893,10 @@ public:
  
      ResamplerReader* resamplerReader = nullptr;
      TimeStretchReaderBase* timeStretchSource = nullptr;
@@ -1240,7 +1466,7 @@ index 1993f02782b..b3cb5b9ca32 100644
  };
  
  
-@@ -1291,6 +1879,12 @@ public:
+@@ -1291,6 +2016,12 @@ public:
          return source->readSamples (destBuffer);
      }
  
@@ -1253,7 +1479,7 @@ index 1993f02782b..b3cb5b9ca32 100644
  private:
      std::unique_ptr<TimeRangeReader> source;
      const BeatRange loopRange;
-@@ -1309,6 +1903,11 @@ private:
+@@ -1309,6 +2040,11 @@ private:
          if (loopRange.isEmpty())
              return readBeatRange (br, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
  
@@ -1265,7 +1491,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          const auto s = linearPositionToLoopPosition (br.getStart(), loopRange);
          const auto e = linearPositionToLoopPosition (br.getEnd(), loopRange);
  
-@@ -2137,6 +2736,12 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
+@@ -2137,6 +2873,12 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
  }
  
  //==============================================================================
@@ -1278,7 +1504,7 @@ index 1993f02782b..b3cb5b9ca32 100644
  void WaveNodeRealTime::setDynamicOffsetBeats (BeatDuration newOffset)
  {
      if (juce::approximatelyEqual (dynamicOffsetBeats->inBeats(), newOffset.inBeats()))
-@@ -2234,6 +2839,38 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
+@@ -2234,6 +2976,49 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
          loopReader = std::move (audioFileCacheReader);
      }
  
@@ -1314,10 +1540,21 @@ index 1993f02782b..b3cb5b9ca32 100644
 +        }
 +    }
 +
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-10-08, by
++    // patches/tracktion_engine/0002-launched-clip-speed.patch: a launched clip that does not
++    // loop gets the same reader too when its handle has a loop source, with no loop of its
++    // own - every frame read as it always was - so a segment can still turn it round: a
++    // speed below nought plays the file backwards from where it is. Nothing above it moves:
++    // the beats it is read at are not looped (`loopIsBelow` stays false).
++    if (launchHandle != nullptr && ! warpMap && loopSectionBeats.isEmpty() && ! loopIsBelow
++         && launchHandle->getLoopSource() != nullptr)
++        loopReader = std::make_unique<UnrolledLoopReader> (std::move (loopReader), 1.0e15, 1.0,
++                                                           launchHandle->getLoopSource());
++
      const bool timestretchDisabled = timeStretcherMode == TimeStretcher::Mode::disabled;
      std::unique_ptr<ResamplerReader> resamplerAudioReader;
  
-@@ -2285,11 +2922,15 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
+@@ -2285,11 +3070,15 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
          }
      }
  
@@ -1333,7 +1570,7 @@ index 1993f02782b..b3cb5b9ca32 100644
          auto editToClipBeatReader    = std::make_unique<EditToClipBeatReader> (std::move (beatRangeReader), editPositionBeats, dynamicOffsetBeats);
          basicEditReader = std::make_unique<EditReader> (std::move (editToClipBeatReader), nullptr);
      }
-@@ -2348,6 +2989,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
+@@ -2348,6 +3137,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
      editReader = other.editReader;
      pitchAdjustReader = other.pitchAdjustReader;
      dynamicOffsetBeats = other.dynamicOffsetBeats;
@@ -1341,7 +1578,7 @@ index 1993f02782b..b3cb5b9ca32 100644
  }
  
  void WaveNodeRealTime::processSection (ProcessContext& pc)
-@@ -2355,6 +2997,40 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2355,6 +3145,40 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
      const auto sectionEditBeats = getEditBeatRange();
      const auto sectionEditTime = getEditTimeRange();
  
@@ -1382,7 +1619,7 @@ index 1993f02782b..b3cb5b9ca32 100644
      // Check that the number of channels requested matches the destination buffer num channels
      assert (destChannels.getNumChannels() == (int) pc.buffers.audio.getNumChannels());
  
-@@ -2401,7 +3077,7 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2401,7 +3225,7 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
          }
          else if (fileTempoSequence != nullptr)
          {
@@ -1391,7 +1628,7 @@ index 1993f02782b..b3cb5b9ca32 100644
              auto sourceBeats = BeatPosition::fromBeats (offsetIntoClip.inBeats() + offsetBeats.inBeats());
  
              if (! loopSectionBeats.isEmpty() && sourceBeats >= loopSectionBeats.getStart())
-@@ -2440,12 +3116,52 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2440,12 +3264,52 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
      if (pitchAdjustReader != nullptr)
          pitchAdjustReader->setKey (getKeyToSyncTo (sectionEditTime.getStart()));
  

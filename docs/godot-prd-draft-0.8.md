@@ -3572,7 +3572,9 @@ Added 2026-09-26 *(proposed)*, with §3.18 and §3.31:
 - **Overdub feedback**, each pass decaying the layers under it.
 - **Varispeed and reverse on a loop** — the conversation about varispeed on files (2026-09-21) is the
   same one. *2026-09-28:* varispeed on FILES is decided (§3.24, namespace draft §22); a loop's is
-  still this proposal.
+  still this proposal. *2026-10-07:* reverse on files is decided and built (namespace draft §41,
+  WX), with a **ping-pong** Range that bounces between its points (the author's "ping-pong type of
+  loop that goes back and forth"); the live looper's own reverse is still this proposal.
 - **A mic cue as a sampler member**: fader-start for a microphone.
 - **The shared rack channel** — a reverb return cues send into, §3.9e's *"bus with a chain"* — and a
   media cue's `Insert` made to sound, both still Phase 9b's.
@@ -3596,7 +3598,10 @@ DT-EH in §22.1 are the author's to overrule; these are what the work left out:
 - **A drawn speed curve in a fade**: a fade's `points` stay the level's.
 - **A group's speed as a trim** its members multiply by. Today a speed fade aimed at a group moves
   nothing and `wfg validate` says so.
-- **Reverse.**
+- ~~**Reverse.**~~ - *decided 2026-10-07, at the author's direction (WX), and built (namespace draft
+  §41):* a speed from -20 to 20, moving through nought while a cue plays - below nought the file plays
+  backwards, a fade from one to minus one turns it round where it crosses nought; for sounds, in
+  varispeed and in timestretch, and for HAP movies (a preview through FFmpeg decodes forwards only).
 - **Pitch as a number of its own**, apart from the speed.
 - ~~**A band-limited resampler above one**~~ - answered 2026-09-29 the author's second way ("or we
   could simply filter out the high frequency content"): above one the file is low-passed before the

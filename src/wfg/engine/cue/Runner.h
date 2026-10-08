@@ -164,6 +164,10 @@ namespace wfg::cue
         /** Passes before playback moves on. Zero is for ever. */
         int loops = 1;
 
+        /*  WHETHER IT BOUNCES (namespace draft §41): out and back between its
+            points, a pass each way, rather than from its in-point again. */
+        bool pingPong = false;
+
         /*  Which range it is, by its identifier: a slice moved while it sounds
             is followed by this rather than by its place in the list, which an
             edit elsewhere in the list can change under it (namespace draft
@@ -329,6 +333,12 @@ namespace wfg::cue
             every rig that plays no speed. */
         virtual bool placeRate (int, std::int64_t, double) { return true; }
 
+        /*  THAT GO.DOT ENDS THIS TRACK'S CLIPS ITSELF (namespace draft §41): a
+            clip that has played backwards no longer ends where its source has
+            played its length, and the Runner places its stop. Cleared at the
+            next arm. Nothing by default. */
+        virtual void endsOutside (int, bool) {}
+
         /*  A SLICE'S LOOP POINTS MOVED UNDER IT (namespace draft §33): from the
             slot's reader position `from` on - seconds of the file, counted on
             through every pass - the file is at `fileAt`, plays to `loopOut` and
@@ -344,6 +354,8 @@ namespace wfg::cue
             double loopIn = 0.0;
             double loopOut = 0.0;
             double crossfade = 0.0;
+            int direction = 1;          ///< -1: the file backwards from `from` on (§41)
+            bool pingPong = false;      ///< the loop bounces between its points (§41)
         };
 
         virtual std::uint64_t placeLoop (int, int, const LoopMove&) { return 0; }
@@ -1599,6 +1611,18 @@ namespace wfg::cue
         void applySlices (Engine& engine, std::int64_t tick);
         void moveSoundingSlice (Run& run, const RangeSpec& wanted, std::int64_t now);
 
+        /*  BACKWARDS AND BOUNCING (namespace draft §41). Where the run's reader
+            is - forwards always, at the speed's size - and where its file is, at
+            a sample; a turn of its direction placed on its slot at a sample; a
+            slice's start placed when it is entered backwards or bouncing; and
+            the end of a cue with no ranges that has played backwards, which
+            Go.dot places itself. */
+        double readerSecondAt (const Run& run, double sample) const;
+        double fileSecondAt (const Run& run, double sample) const;
+        void turnRun (Run& run, double sample, int direction);
+        void anchorSlice (Run& run, int slot, double sample, double readerAt, const Run::SlicePoints& slice);
+        void endTurnedRuns();
+
         /*  THE PASS (§20.9), just after `applyLanes` and before the sum: the
             ride's value while nobody holds it, the hand's level as the voice's
             lane term from the first touch (latch, DH), a sample of it per tick
@@ -2308,6 +2332,13 @@ namespace wfg::cue
             std::string cue;
             std::string rangeId;
             int pass = 0;
+
+            /*  BACKWARDS AND BOUNCING (namespace draft §41): `bounce` is -1
+                while a ping-pong range plays back from its out-point, and the
+                file then goes the other way from the speed's; `pieceStart` is
+                where a movie with no ranges plays back to - its start offset. */
+            int bounce = 1;
+            double pieceStart = 0.0;
 
             /*  WHAT THE DCAS ABOVE IT LEAVE OF ITS OPACITY (namespace draft
                 37.5, WE), as last placed: all of it until one says less. */

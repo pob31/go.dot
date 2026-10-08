@@ -20,6 +20,7 @@
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <cmath>
 #include <string>
 #include <string_view>
 
@@ -95,7 +96,8 @@ namespace wfg::client::model
             `duration` stays the file's own length. For ever at nought. */
         std::string mediaTime (const tree::TreeSnapshot& snapshot, const std::string& cueId)
         {
-            const auto speed = osc::parseDouble (text (snapshot, "/godot/cue/" + cueId + "/rate")).value_or (1.0);
+            //  Its size: a piece backwards lasts as long (namespace draft §41).
+            const auto speed = std::abs (osc::parseDouble (text (snapshot, "/godot/cue/" + cueId + "/rate")).value_or (1.0));
             const auto written = timeText (snapshot, cueId, "duration", speed > 0.0 ? speed : 1.0);
 
             if (! (speed > 0.0) && ! written.empty())

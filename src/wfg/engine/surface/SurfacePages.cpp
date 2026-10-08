@@ -70,27 +70,36 @@ namespace wfg::surface
             turn down past that step lands on nought, a turn up from nought
             lands on it. A speed typed off the grid - or kept to four figures,
             which is a hair off it - joins the grid at the first detent, on the
-            step the turn meets first, so no detent is ever lost to a rounding. */
+            step the turn meets first, so no detent is ever lost to a rounding.
+
+            AND ON BELOW NOUGHT (namespace draft §41, WX): the grid mirrored -
+            a detent down from nought is the lowest step backwards, and each
+            after it a semitone faster backwards - wherever the row's range goes
+            below nought. Read as rungs: nought is rung nought, the lowest step
+            one, each semitone one more, backwards the same rungs below nought;
+            a speed between nought and the lowest step stands on half a rung. */
         double speedTurned (double value, int steps, double minimum, double maximum) noexcept
         {
             const auto lowest = static_cast<double> (dialLowestSemitone);
-            const auto at = value > 0.0 ? 12.0 * std::log2 (value) : lowest - 1.0;
+            const auto size = std::abs (value);
+            const auto magnitude = size > 0.0 ? std::max (0.5, 12.0 * std::log2 (size) - lowest + 1.0) : 0.0;
+            const auto at = value < 0.0 ? -magnitude : magnitude;
             const auto nearest = std::round (at);
 
-            auto semitone = nearest + static_cast<double> (steps);
+            auto rung = nearest + static_cast<double> (steps);
 
             if (std::abs (at - nearest) > 0.02)
-                semitone = (steps > 0 ? std::ceil (at) : std::floor (at))
-                             + static_cast<double> (steps > 0 ? steps - 1 : steps + 1);
+                rung = (steps > 0 ? std::ceil (at) : std::floor (at))
+                         + static_cast<double> (steps > 0 ? steps - 1 : steps + 1);
 
-            if (semitone < lowest)
+            if (std::abs (rung) < 0.5)
                 return std::clamp (0.0, minimum, maximum);
 
-            const auto speed = std::exp2 (semitone / 12.0);
+            const auto speed = std::exp2 ((std::abs (rung) - 1.0 + lowest) / 12.0);
             const auto scale = std::pow (10.0, static_cast<double> (dialSpeedFigures - 1)
                                                  - std::floor (std::log10 (speed)));
 
-            return std::clamp (std::round (speed * scale) / scale, minimum, maximum);
+            return std::clamp (std::copysign (std::round (speed * scale) / scale, rung), minimum, maximum);
         }
 
         /*  Where a value stands between its ends, nought to one: evenly in

@@ -755,9 +755,9 @@
       </optional>
       <optional>
         <attribute name="rate">
-          <a:documentation>The speed the cue plays at, as decided (namespace draft §22): one is the file&apos;s own, a half takes twice as long, two takes half; up to twenty. Nought holds the file where it is - silent in varispeed, a stopped tape, and a held sound in timestretch (decision DR). Heard while the cue sounds: an edit reaches a playing run on the next tick, placed a launch horizon ahead as a launch is, unless a speed fade holds that run. What rateMode says a speed other than one does to the pitch. Rests at one (PRD 4.6).</a:documentation>
+          <a:documentation>The speed the cue plays at, as decided (namespace draft §22): one is the file&apos;s own, a half takes twice as long, two takes half; up to twenty. Nought holds the file where it is - silent in varispeed, a stopped tape, and a held sound in timestretch (decision DR). Heard while the cue sounds: an edit reaches a playing run on the next tick, placed a launch horizon ahead as a launch is, unless a speed fade holds that run. What rateMode says a speed other than one does to the pitch. Rests at one (PRD 4.6). Below nought the file plays BACKWARDS at that speed&apos;s size (namespace draft 41, WX, the author&apos;s pick): a fade from one to minus one stops the sound and plays it back, turning round where it crossed nought; a cue launched at a negative speed plays its piece - its ranges, or its start offset to its end - from the end back to the start.</a:documentation>
           <data type="double">
-            <param name="minInclusive">0</param>
+            <param name="minInclusive">-20</param>
             <param name="maxInclusive">20</param>
           </data>
         </attribute>
@@ -1484,9 +1484,9 @@
       </optional>
       <optional>
         <attribute name="rate">
-          <a:documentation>A movie&apos;s speed, as a sound&apos;s (namespace draft 37, WA): one is the file&apos;s own, a half takes twice as long, two half as long; nought holds the frame. A fade moves it (fade/video pairs). Proposed, waiting for the author.</a:documentation>
+          <a:documentation>A movie&apos;s speed, as a sound&apos;s (namespace draft 37, WA): one is the file&apos;s own, a half takes twice as long, two half as long; nought holds the frame. A fade moves it (fade/video pairs). Proposed, waiting for the author. Below nought the movie plays backwards (namespace draft 41, WX); a movie played as a preview through FFmpeg holds its frame instead, since it decodes forwards only.</a:documentation>
           <data type="double">
-            <param name="minInclusive">0</param>
+            <param name="minInclusive">-20</param>
             <param name="maxInclusive">20</param>
           </data>
         </attribute>
@@ -1619,6 +1619,15 @@
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="pingPong">
+          <a:documentation>Whether the range BOUNCES between its points (namespace draft 41, the author&apos;s ping-pong loop): out to its out-point and back to its in-point, each way a pass, rather than from its in-point again. Played backwards, it bounces the same way round.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
     </element>
@@ -1838,9 +1847,9 @@
       </optional>
       <optional>
         <attribute name="rate">
-          <a:documentation>The speed a fade with rateOn takes its target to, over its duration and along its curve - straight or S-shaped in the ratio itself, since nought has no logarithm (EA). One is the file&apos;s own speed; nought is a tape stop in varispeed and a held sound in timestretch. The drawn points stay the level&apos;s.</a:documentation>
+          <a:documentation>The speed a fade with rateOn takes its target to, over its duration and along its curve - straight or S-shaped in the ratio itself, since nought has no logarithm (EA). One is the file&apos;s own speed; nought is a tape stop in varispeed and a held sound in timestretch. The drawn points stay the level&apos;s. Below nought the target plays backwards (namespace draft 41): a fade through nought turns the sound round where it crosses it.</a:documentation>
           <data type="double">
-            <param name="minInclusive">0</param>
+            <param name="minInclusive">-20</param>
             <param name="maxInclusive">20</param>
           </data>
         </attribute>

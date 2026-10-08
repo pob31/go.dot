@@ -578,7 +578,8 @@ namespace wfg::cue
             no number - as an ambience bed has none. */
         std::optional<double> onTheClock (const juce::ValueTree& node, double fileSeconds) const
         {
-            const auto speed = reader.number (node, "media", "rate");
+            //  Its size (namespace draft §41): a piece backwards lasts as long.
+            const auto speed = std::abs (reader.number (node, "media", "rate"));
 
             if (! (speed > 0.0))
                 return std::nullopt;
@@ -728,7 +729,7 @@ namespace wfg::cue
 
                 /*  AND A CUE AT NOUGHT (namespace draft §22.5): its file never
                     reaches its end, a stopped tape or a held instant. */
-                return reader.number (node, "media", "rate") > 0.0;
+                return std::abs (reader.number (node, "media", "rate")) > 0.0;
             }
 
             if (element != "Group")

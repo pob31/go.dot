@@ -401,7 +401,15 @@ TEST_CASE ("surface pages: the master dial turns a number by what its own row sa
         CHECK (near (turned ("media", "rate", 1.0, -52), 0.04961));
         CHECK (near (turned ("media", "rate", 0.04961, -1), 0.0));
         CHECK (near (turned ("media", "rate", 0.0, 1), 0.04961));
-        CHECK (near (turned ("media", "rate", 0.0, -1), 0.0));
+
+        /*  AND ON BELOW NOUGHT (namespace draft §41): the grid mirrored - a
+            detent down from nought is the lowest step backwards, twelve more an
+            octave faster backwards, and back up through nought the same way. */
+        CHECK (near (turned ("media", "rate", 0.0, -1), -0.04961));
+        CHECK (near (turned ("media", "rate", -1.0, -12), -2.0));
+        CHECK (near (turned ("media", "rate", -1.0, 12), -0.5));
+        CHECK (near (turned ("media", "rate", -0.04961, 1), 0.0));
+        CHECK (near (turned ("media", "rate", 0.04961, -2), -0.04961));
 
         //  Typed off the grid, the first detent joins it on the side the turn goes.
         CHECK (near (turned ("media", "rate", 0.7, 1), 0.7071));

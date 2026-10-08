@@ -123,10 +123,23 @@ namespace wfg::audio
             one drain and the next, on the thread that drains it. */
         const RateClock& clock() const noexcept { return rateClock; }
 
+        /*  THAT GO.DOT ENDS THIS VOICE'S CLIPS (namespace draft §41): one that
+            has played backwards no longer ends where its source has played its
+            length - the reader has gone on forwards while the file went back -
+            and the Runner places its stop instead. Tick thread writes, the
+            audio thread reads; cleared at every arm. */
+        void setEndsOutside (bool outside) noexcept { endsOutside.store (outside, std::memory_order_release); }
+        bool isEndedOutside() const noexcept      { return endsOutside.load (std::memory_order_acquire); }
+
         /*  Any thread, for a test or a readout: breakpoints that arrived after
             their moment had played, and ones the clock had no room for. */
         std::uint32_t lateCount() const noexcept     { return late.load (std::memory_order_relaxed); }
         std::uint32_t refusedCount() const noexcept  { return refused.load (std::memory_order_relaxed); }
+
+    private:
+        std::atomic<bool> endsOutside { false };
+
+    public:
 
     private:
         std::array<Breakpoint, inboxSize> inbox {};

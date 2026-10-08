@@ -151,8 +151,9 @@ namespace wfg::client::model
                     At nought it sounds for ever, which no bar can end. */
                 if (kind == "media")
                 {
-                    const auto speed = osc::parseDouble (text (snapshot, "/godot/cue/" + id + "/rate"))
-                                         .value_or (1.0);
+                    //  Its size: a piece backwards lasts as long (namespace draft §41).
+                    const auto speed = std::abs (osc::parseDouble (text (snapshot, "/godot/cue/" + id + "/rate"))
+                                                   .value_or (1.0));
 
                     if (! (speed > 0.0))
                         return false;

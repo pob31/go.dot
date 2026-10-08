@@ -4175,9 +4175,9 @@ TEST_CASE ("client: a loop join is one handle and two writes")
         moved together - which is the whole reason `Handle::slice` exists. */
     std::vector<model::RangeRow> ranges
     {
-        { "R1", "verse",  1.0, 4.0, 2, 0 },
-        { "R2", "chorus", 4.0, 8.0, 1, 1 },
-        { "R3", "outro", 12.0, 16.0, 1, 2 },
+        { "R1", "verse",  1.0, 4.0, 2, false, 0 },
+        { "R2", "chorus", 4.0, 8.0, 1, false, 1 },
+        { "R3", "outro", 12.0, 16.0, 1, false, 2 },
     };
 
     const auto join = model::hitTest (ranges, 4.02, 0.1);
@@ -4370,9 +4370,9 @@ TEST_CASE ("client: a length copied to the next slice moves its out-point and le
         from the previous". */
     std::vector<model::RangeRow> ranges
     {
-        { "R1", "verse", 1.0, 4.0, 1, 0 },      // three seconds long
-        { "R2", "chorus", 4.0, 12.0, 2, 1 },    // eight, and joined to R1
-        { "R3", "tail", 12.0, 20.0, 1, 2 },
+        { "R1", "verse", 1.0, 4.0, 1, false, 0 },      // three seconds long
+        { "R2", "chorus", 4.0, 12.0, 2, false, 1 },    // eight, and joined to R1
+        { "R3", "tail", 12.0, 20.0, 1, false, 2 },
     };
 
     const auto writes = model::copyLengthToNext (ranges, 0, 30.0);

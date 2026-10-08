@@ -303,6 +303,12 @@ namespace wfg::video
                 bool failed = false;
                 movie::Info info;
                 std::map<int, std::shared_ptr<const MovieFrame>> frames;
+
+                /*  WHICH WAY ITS PLAYHEAD WAS LAST SEEN GOING (namespace draft
+                    §41): the frames read ahead the way it goes, and those it
+                    has left behind let go. */
+                int lastFirst = -1;
+                int heading = 1;
             };
 
             /*  A MOVIE THAT IS NOT HAP, PLAYED AS A PREVIEW (namespace draft
@@ -319,6 +325,7 @@ namespace wfg::video
                 std::unique_ptr<PipedChild> decoder;
                 int next = -1;          ///< the frame the decoder sends next
                 bool ended = false;
+                std::uint32_t restartedAt = 0;  ///< when a step back last started it again (§41)
 
                 double rate() const noexcept  { return static_cast<double> (rateOver) / std::max (1, rateUnder); }
 
@@ -381,9 +388,22 @@ namespace wfg::video
             {
                 const auto rateNow = preview.rate();
 
-                if (preview.decoder == nullptr || current < preview.next - 1
+                /*  A STEP BACK starts it again - but not more than twice a
+                    second (namespace draft §41): a preview decodes forwards only,
+                    so one played backwards steps back a frame at a time, and a
+                    decoder started again every frame would be a new FFmpeg
+                    every frame. It shows the frame it has, held, in between. */
+                const auto nowMs = juce::Time::getMillisecondCounter();
+                const auto back = preview.decoder != nullptr && current < preview.next - 1;
+
+                if (preview.decoder == nullptr || (back && nowMs - preview.restartedAt > 500)
                       || current > preview.next + static_cast<int> (rateNow * 2.0))
+                {
+                    if (back)
+                        preview.restartedAt = nowMs;
+
                     preview.startAt (current);
+                }
 
                 auto worked = false;
                 const auto bytes = static_cast<std::size_t> (preview.width) * static_cast<std::size_t> (preview.height) * 4;
@@ -494,10 +514,30 @@ namespace wfg::video
                             let go. */
                         const auto count = static_cast<int> (file->info().frames.size());
                         const auto first = std::clamp (current, 0, count - 1);
+                        int heading = 1;
+
+                        {
+                            const std::lock_guard<std::mutex> hold (lock);
+
+                            if (const auto found = held.find (path); found != held.end())
+                            {
+                                auto& entry = found->second;
+
+                                //  A step of more than half the file is a wrap, not a turn.
+                                if (entry.lastFirst >= 0 && first != entry.lastFirst)
+                                {
+                                    const auto step = first - entry.lastFirst;
+                                    entry.heading = (std::abs (step) * 2 > count) == (step < 0) ? 1 : -1;
+                                }
+
+                                entry.lastFirst = first;
+                                heading = entry.heading;
+                            }
+                        }
 
                         for (int ahead = 0; ahead < 4 && ! threadShouldExit(); ++ahead)
                         {
-                            const auto index = (first + ahead) % count;
+                            const auto index = ((first + heading * ahead) % count + count) % count;
 
                             {
                                 const std::lock_guard<std::mutex> hold (lock);
@@ -523,7 +563,7 @@ namespace wfg::video
 
                             for (auto at = entry.frames.begin(); at != entry.frames.end();)
                             {
-                                const auto distance = (at->first - first + count) % count;
+                                const auto distance = ((at->first - first) * heading % count + count) % count;
                                 at = distance > 8 ? entry.frames.erase (at) : std::next (at);
                             }
                         }

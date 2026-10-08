@@ -20,6 +20,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -122,7 +123,8 @@ namespace wfg::client::model
             if (! value.has_value())
                 return {};
 
-            if (! (*value > 0.0))
+            //  Nought, not below it: backwards is a speed (namespace draft §41).
+            if (! (std::abs (*value) > 0.0))
                 return "\xc3\x97" "0";
 
             return speedText (*value);

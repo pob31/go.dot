@@ -91,6 +91,7 @@ namespace wfg::client::model
             else if (name == "in")     row.in = seconds (reading);
             else if (name == "out")    row.out = seconds (reading);
             else if (name == "loops")  row.loops = count (reading, 1);
+            else if (name == "pingPong") row.pingPong = reading == "true";
             else if (name == "index")  row.index = count (reading, 0);
         }
 

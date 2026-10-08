@@ -204,6 +204,10 @@ namespace wfg::audio
                 const auto& clock = voice.clock();
                 const auto at = launch.v.inBeats();
 
+                //  Go.dot ends a clip that has played backwards (namespace draft §41).
+                if (voice.isEndedOutside())
+                    return std::nullopt;
+
                 if (clock.isIdentityFrom (at))
                     return te::MonotonicBeat { launch.v + length };
 
@@ -248,7 +252,8 @@ namespace wfg::audio
 
                 for (int i = 0; i < count; ++i)
                     two[i] = { held[i].generation, held[i].from, held[i].fileAt,
-                               held[i].loopIn, held[i].loopOut, held[i].crossfade };
+                               held[i].loopIn, held[i].loopOut, held[i].crossfade,
+                               held[i].direction, held[i].pingPong };
 
                 return count;
             }
@@ -2047,8 +2052,18 @@ namespace wfg::audio
             return voice != nullptr ? voice->adoption() : std::nullopt;
         }
 
+        /*  Go.dot ends this track's clips itself from now on (§41), or no longer. */
+        void setTrackEndsOutside (int trackIndex, bool outside) noexcept
+        {
+            if (trackIndex >= 0 && static_cast<std::size_t> (trackIndex) < rateVoices.size())
+                rateVoices[static_cast<std::size_t> (trackIndex)]->setEndsOutside (outside);
+        }
+
         void clearTrackLoops (int trackIndex)
         {
+            //  A fresh arm ends where its clip says again (§41).
+            setTrackEndsOutside (trackIndex, false);
+
             for (int slot = 0; slot < editSlots; ++slot)
                 if (auto* voice = loopVoiceOf (trackIndex, slot))
                     voice->clear();
@@ -2959,6 +2974,11 @@ namespace wfg::audio
     bool AudioHost::launchTrackAt (int trackIndex, int slot, double monotonicBeat) noexcept
     {
         return impl->launchTrackAt (trackIndex, slot, monotonicBeat);
+    }
+
+    void AudioHost::setTrackEndsOutside (int trackIndex, bool outside) noexcept
+    {
+        impl->setTrackEndsOutside (trackIndex, outside);
     }
 
     bool AudioHost::placeTrackRate (int trackIndex, std::int64_t atSample, double rate) noexcept

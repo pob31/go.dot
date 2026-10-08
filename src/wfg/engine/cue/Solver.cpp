@@ -35,8 +35,9 @@ namespace wfg::cue
             limitation. */
         double speedOf (const Reader& read, const juce::ValueTree& cue)
         {
+            //  Its size (namespace draft §41): backwards takes as long as forwards.
             const auto speed = read.number (cue, "media", "rate");
-            return std::isfinite (speed) ? std::clamp (speed, 0.0, 20.0) : 1.0;
+            return std::isfinite (speed) ? std::clamp (std::abs (speed), 0.0, 20.0) : 1.0;
         }
 
         /*  Seconds of the file as seconds on the clock, at that speed: for

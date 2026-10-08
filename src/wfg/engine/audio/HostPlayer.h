@@ -86,6 +86,7 @@ namespace wfg::audio
         void setOutputGainDb (int firstChannel, int width, double gainDb) override;
         bool placeRate (int track, std::int64_t sample, double rate) override;
         std::uint64_t placeLoop (int track, int slot, const LoopMove& move) override;
+        void endsOutside (int track, bool outside) override;
         std::optional<LoopTaken> loopTaken (int track, int slot) override;
         double stretchSpeedLimit() const override;
         void setRouting (int track, const std::vector<cue::Coefficient>&) override;

@@ -1158,7 +1158,10 @@ TEST_CASE ("document: a media cue's speed is nought to twenty, one when unsaid, 
     CHECK (document.setAttribute (address + "rate", "20").ok);
     CHECK (document.setAttribute (address + "rate", "0.25").ok);
     CHECK (document.setAttribute (address + "rate", "20.5").reason == reason::typeMismatch);
-    CHECK (document.setAttribute (address + "rate", "-0.5").reason == reason::typeMismatch);
+    //  Below nought is backwards (namespace draft §41), down to minus twenty.
+    CHECK (document.setAttribute (address + "rate", "-0.5").ok);
+    CHECK (document.setAttribute (address + "rate", "-20").ok);
+    CHECK (document.setAttribute (address + "rate", "-20.5").reason == reason::typeMismatch);
 
     CHECK (document.setAttribute (address + "rateMode", "timestretch").ok);
     CHECK (document.setAttribute (address + "rateMode", "backwards").reason == reason::typeMismatch);

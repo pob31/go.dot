@@ -524,6 +524,10 @@ namespace wfg::audio
             is below nought, or the queue is full. */
         bool placeTrackRate (int trackIndex, std::int64_t atSample, double rate) noexcept;
 
+        /*  THAT GO.DOT ENDS THIS TRACK'S CLIPS ITSELF (namespace draft §41): a
+            clip that has played backwards. Cleared at the next arm. */
+        void setTrackEndsOutside (int trackIndex, bool outside) noexcept;
+
         /*  AN OUTPUT'S GAIN (namespace draft §38): `gainDb` on the logical
             output channels `firstChannel` to `firstChannel + width - 1`, applied
             after the graph has mixed every cue and send onto them and before

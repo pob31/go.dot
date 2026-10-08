@@ -21603,3 +21603,86 @@ anybody. The pictures come through the region (`Preview`, by canvas) and `VideoH
 - The canvas drawn under the warp in the editor, and the grid drawn on the projector while editing.
 - The display's own shape in the editor.
 - The monitor at full rate or full size.
+
+## 41. Backwards: a speed below nought, and a Range that bounces
+
+Written 2026-10-08, overnight. The author's niggle of 2026-10-07 (§39): *"Could we add reverse playback
+with negative speed? Then we could have also a ping-pong type of loop that goes back and forth."*
+
+### 41.1 What it is, before its names
+
+A cue's speed now runs from minus twenty to twenty. Below nought the file plays backwards at that speed's
+size: minus one is the file backwards at its own pace, minus a half backwards at half. The speed can move
+through nought while the cue plays - a fade from one to minus one slows the sound to a stop and plays it
+back, turning round where it crossed nought, as a tape spun back by hand would; the master dial goes on
+past nought a semitone a detent; an edit of the speed does the same. A cue that starts at a negative
+speed plays its piece - each of its ranges, or its start offset to its file's end - from the end back to
+the start, in the same order as forwards. A Range can **bounce** (ping-pong): out to its out-point and back
+to its in-point, each way a pass, for as many passes as its loop count says. Movies do all of it too.
+
+### 41.2 Decisions
+
+The author's (the option I recommended; the words of each option were mine):
+
+- **WX** a **signed speed, live**, moving through nought while it sounds; ping-pong a choice on a
+  Range's loop; sounds and HAP movies; an FFmpeg preview forward only.
+- Read **backwards directly from the file**, no reversed copies.
+
+Mine (proposed):
+
+- **XK** A cue that starts backwards plays **each piece from its end back to its start, in the same
+  order** - its ranges as they are listed, each the other way; a cue with no ranges from its file's end
+  back to its start offset. (Tracktion's own reverse mirrors a clip's offset and loop points the same
+  way.) A cue whose file's length the show does not know starts forwards, and turns when its speed
+  crosses nought.
+- **XL** A turn while it plays happens **where it is**: the file goes back from the frame it had reached.
+- **XM** A sound that has played backwards is **ended by Go.dot**, where its file reaches its piece's
+  start (or its file's end, forwards again), and not by its clip's own end, which counts what the reader
+  has read rather than where the file is.
+- **XN** A bounce is a pass each way, so a loop count of four is out, back, out, back.
+- **XO** The master dial's grid is **mirrored below nought**: a detent down from nought is the lowest
+  step backwards (about minus 0.05), twelve more an octave faster backwards.
+- **XP** A preview movie played backwards is started again **at most twice a second**, and holds the
+  frame it has in between.
+
+### 41.3 How it works
+
+**The reader goes on forwards.** The run's clock - the speed's breakpoints the Runner and the voice
+share (§22.4) - counts the speed's SIZE, so Tracktion's resampler and stretcher read one unbroken
+stream and nothing above the file's reader moves back. Which way the file goes is a segment on the
+slot's loop source (§33's `LoopSource::Segment`, which gains `direction` and `pingPong`): from this
+position of the reader on, the file is at this second and goes this way. Patch 0002's
+`UnrolledLoopReader` reads such a map a run of frames at a time - backwards, it reads the run forwards
+from its lowest frame and turns it round in place; bouncing, it reflects at the loop's ends. It is now
+built for a launched clip that does not loop as well, with no loop of its own, so a cue without ranges can
+turn too; every frame of a forward cue is read exactly as before (the 215 audio, range and speed cases
+unchanged).
+
+**Through nought.** When the speed changes sign, the Runner places a breakpoint of nought where the
+straight line between the two speeds crosses it - the reader stands still there, so the turn costs no
+frame - and a segment from the reader's position there, with the file where it had got to, the other
+way. The run's playhead, its lane and its sends are read from the last turn (`bentSecondAt`), through
+the slice's loop either way.
+
+**The disk.** Tracktion maps a file whole and touches the pages ahead of each reader so the audio thread
+never meets a page fault; a reader read backwards now has the pages behind it touched instead
+(`AudioFileCache::Reader::setReadDirection`, patch 0002 - which now carries the cache's two files too).
+
+**Movies.** The movie's playhead (§37) goes the way its speed and its bounce say; a backwards stretch ends
+at its range's in-point, a bounce reflects there with no step. The renderer reads HAP frames ahead the way
+the playhead is going and lets go of those behind it.
+
+**Rows.** `media/rate`, `fade/rate`, `video/rate` -20..20 and `run/rate` negative while backwards;
+`range/pingPong` (false). The Range table has a ⇄ toggle beside the loop count. A speed's mark and its
+time column read its size ("×-0.5", a piece backwards lasting as long as forwards); the solver and the
+walk take the size too.
+
+### 41.4 Limits, owed to the bench
+
+- A turn in the middle of a range that loops a set number of times counts its passes by how far the reader
+  has gone, not by the file's wraps, so its last pass can end mid-loop; one that loops for ever, or a
+  bounce, is exact.
+- A slice's points dragged while it plays backwards move without the crossfade a forward jump has.
+- Timestretch backwards is Signalsmith fed the file backwards: by ear on the bench.
+- How a backwards read holds up on a slow disk is the bench's question; the cache touches as far behind as
+  it touches ahead (48 000 frames).

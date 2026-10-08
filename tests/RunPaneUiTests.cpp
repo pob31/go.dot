@@ -903,8 +903,10 @@ TEST_CASE ("range table: every slice shows its times, and the arrow gives the ne
         is the one thing a bare box could never have said. */
     std::vector<juce::ToggleButton*> toggles;
 
+    //  The repeats' toggles - not the ping-pong ones beside them (§41), which say so in their tooltip.
     for (auto* button : buttonsUnder (table))
-        if (auto* toggle = dynamic_cast<juce::ToggleButton*> (button))
+        if (auto* toggle = dynamic_cast<juce::ToggleButton*> (button);
+            toggle != nullptr && ! toggle->getTooltip().startsWith ("Ping-pong"))
             toggles.push_back (toggle);
 
     REQUIRE (toggles.size() == 2);
@@ -945,8 +947,10 @@ TEST_CASE ("range table: a cue with no ranges shows the whole file, and looping 
     //  One row, the whole file, and nothing written just for showing it.
     std::vector<juce::ToggleButton*> toggles;
 
+    //  The repeats' toggles - not the ping-pong ones beside them (§41), which say so in their tooltip.
     for (auto* button : buttonsUnder (table))
-        if (auto* toggle = dynamic_cast<juce::ToggleButton*> (button))
+        if (auto* toggle = dynamic_cast<juce::ToggleButton*> (button);
+            toggle != nullptr && ! toggle->getTooltip().startsWith ("Ping-pong"))
             toggles.push_back (toggle);
 
     REQUIRE (toggles.size() == 1);

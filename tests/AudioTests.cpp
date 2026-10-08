@@ -6445,6 +6445,46 @@ namespace
         /*  A tone of `hertz` for `seconds` as the list's one media cue, at
             `speed` in `mode`, on standby - the host started, four ticks run,
             nothing fired. */
+        /*  A RISING SWEEP, from `from` to `to` hertz over `seconds` (namespace
+            draft §41): played backwards its pitch falls, which a tone cannot
+            show. */
+        static juce::File writeSweep (const juce::File& folder, double from, double to, int seconds)
+        {
+            const auto file = folder.getChildFile ("sweep.wav");
+            folder.createDirectory();
+
+            juce::WavAudioFormat format;
+            std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
+
+            if (stream == nullptr)
+                return {};
+
+            auto writer = format.createWriterFor (stream, juce::AudioFormatWriterOptions{}
+                                                            .withSampleRate (static_cast<double> (rate))
+                                                            .withNumChannels (1)
+                                                            .withBitsPerSample (16));
+
+            if (writer == nullptr)
+                return {};
+
+            const auto length = rate * std::max (1, seconds);
+            juce::AudioBuffer<float> buffer { 1, length };
+            auto* data = buffer.getWritePointer (0);
+
+            for (int n = 0; n < length; ++n)
+            {
+                const auto t = static_cast<double> (n) / rate;
+                const auto phase = 2.0 * juce::MathConstants<double>::pi
+                                     * (from * t + (to - from) * t * t / (2.0 * std::max (1, seconds)));
+                data[n] = 0.25f * static_cast<float> (std::sin (phase));
+            }
+
+            writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+            return file;
+        }
+
+        double sweepTo = 0.0;
+
         bool open (double hertz, int seconds, const char* speed, const char* mode)
         {
             audio::HostSettings settings;
@@ -6459,7 +6499,8 @@ namespace
             if (! rig.host.start (settings) || ! rig.host.buildEdit (spec))
                 return false;
 
-            const auto tone = writeSineTone (rig.storage.folder, rate, hertz, 0.25f, seconds);
+            const auto tone = sweepTo > 0.0 ? writeSweep (rig.storage.folder, hertz, sweepTo, seconds)
+                                            : writeSineTone (rig.storage.folder, rate, hertz, 0.25f, seconds);
 
             if (! tone.existsAsFile())
                 return false;
@@ -6501,9 +6542,15 @@ namespace
             runner.setSamplesPerTick (rate / 50);
             runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
 
+            //  The file's length, as the engine hands the Runner its analysis (§41 needs it).
+            durations[tone.getFileName().toStdString()] = static_cast<double> (seconds);
+            runner.setMediaDurations (&durations);
+
             ticks (4);
             return true;
         }
+
+        std::map<std::string, double> durations;
 
         void oneTick()
         {
@@ -7943,4 +7990,125 @@ TEST_CASE ("audio host: an output's gain trims what leaves on its channels and n
     CHECK (sink[1] == doctest::Approx (sourceAmplitude (0)).epsilon (0.02));
 
     rig.host.setBlockSink (nullptr);
+}
+
+
+//==============================================================================
+/*  NAMESPACE DRAFT §41 (WX, the author's pick): a speed below nought plays the
+    file backwards, moving through nought while it sounds, and a range can
+    bounce between its points. A rising sweep is the witness: forwards its pitch
+    climbs, backwards it falls. */
+TEST_CASE ("audio host: a cue launched at a negative speed plays its file from the end back, its pitch falling, and ends at its start (§41)")
+{
+    for (const auto stretch : { false, true })
+    {
+        INFO ("mode " << std::string (stretch ? "timestretch" : "varispeed"));
+
+        SpeedShow show;
+        show.sweepTo = 2000.0;
+        REQUIRE (show.open (200.0, 4, "-1", stretch ? "timestretch" : "varispeed"));
+        REQUIRE (show.go());
+        show.ticks (10);
+
+        const auto early = risingCrossings (show.record (25));
+        show.ticks (25);
+        const auto later = risingCrossings (show.record (25));
+        INFO ("rising crossings in half a second: " << early << " near the end of the file, " << later << " later");
+        CHECK (early > later + 100);
+
+        //  The playhead goes back from the file's end.
+        const auto& run = show.tone();
+        INFO ("playhead at " << run.position);
+        CHECK (run.position < 3.0);
+        CHECK (run.position > 0.5);
+        CHECK (run.rateNow == doctest::Approx (-1.0));
+
+        //  And it ends where the file starts: four seconds of it, then done.
+        for (int i = 0; i < 300 && ! show.tone().isFinished(); ++i)
+            show.oneTick();
+
+        CHECK (show.tone().isFinished());
+    }
+}
+
+TEST_CASE ("audio host: a fade from one to minus one turns the sound round where it crosses nought (§41)")
+{
+    SpeedShow show;
+    show.sweepTo = 2000.0;
+    REQUIRE (show.open (200.0, 6, "1", "varispeed"));
+    REQUIRE (show.go());
+    show.ticks (100);
+
+    const auto turnedAt = show.tone().position;
+    INFO ("playhead at the fade: " << turnedAt);
+
+    const auto back = show.speedFade (1, "-1", "0.5");
+    REQUIRE (show.fire (back));
+    show.ticks (40);
+
+    //  Going back: the playhead falls, and so does the pitch.
+    const auto before = show.tone().position;
+    const auto first = risingCrossings (show.record (25));
+    const auto second = risingCrossings (show.record (25));
+    const auto after = show.tone().position;
+    INFO ("playhead " << before << " then " << after << "; crossings " << first << " then " << second);
+    CHECK (after < before - 0.8);
+    CHECK (first > second + 20);
+    CHECK (show.tone().rateNow == doctest::Approx (-1.0));
+
+    //  It turned near where it was: within the fade's half second and the horizon.
+    CHECK (before < turnedAt + 0.6);
+
+    //  And forwards again: the playhead climbs.
+    const auto again = show.speedFade (2, "1", "0.2");
+    REQUIRE (show.fire (again));
+    show.ticks (30);
+    const auto lowPoint = show.tone().position;
+    show.ticks (50);
+    CHECK (show.tone().position > lowPoint + 0.8);
+    CHECK (show.rig.host.trackPlayState (0).playing);
+}
+
+TEST_CASE ("audio host: a range that bounces plays out and back between its points, and its playhead says so (§41)")
+{
+    SpeedShow show;
+    show.sweepTo = 2000.0;
+    REQUIRE (show.open (200.0, 4, "1", "varispeed"));
+
+    const auto range = show.document.createRange (show.cueId, 1.0, 2.0);
+    REQUIRE (range.ok);
+    REQUIRE (show.document.setAttribute ("/godot/range/" + range.id + "/loops", "0").ok);
+    REQUIRE (show.document.setAttribute ("/godot/range/" + range.id + "/pingPong", "true").ok);
+
+    REQUIRE (show.go());
+
+    //  Three seconds of it, the playhead read every tick.
+    double lowest = 10.0, highest = -10.0;
+    int turns = 0;
+    double previous = show.tone().position;
+    int heading = 0;
+
+    for (int i = 0; i < 150; ++i)
+    {
+        show.oneTick();
+        const auto now = show.tone().position;
+        lowest = std::min (lowest, now);
+        highest = std::max (highest, now);
+
+        const auto way = now > previous + 1.0e-6 ? 1 : now < previous - 1.0e-6 ? -1 : 0;
+
+        if (way != 0 && heading != 0 && way != heading)
+            ++turns;
+
+        if (way != 0)
+            heading = way;
+
+        previous = now;
+    }
+
+    INFO ("playhead between " << lowest << " and " << highest << ", " << turns << " turns");
+    CHECK (lowest >= 0.99);
+    CHECK (highest <= 2.01);
+    CHECK (turns >= 2);
+    CHECK (show.rig.host.trackPlayState (0).playing);
 }

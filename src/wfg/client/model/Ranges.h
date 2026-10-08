@@ -64,6 +64,7 @@ namespace wfg::client::model
         double in = 0.0;
         double out = 0.0;
         int loops = 1;      ///< nought is for ever
+        bool pingPong = false;  ///< out and back between its points (namespace draft §41)
         int index = 0;      ///< where it sits in the cue's list
 
         double length() const noexcept { return out - in; }

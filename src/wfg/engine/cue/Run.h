@@ -535,6 +535,26 @@ namespace wfg::cue
         double rangeSource = 0.0;
         double laneOutgoingSource = 0.0;
 
+        /*  BACKWARDS (namespace draft §41, WX, the author's pick): a speed below
+            nought plays the file the other way. The clock above still counts
+            the speed's SIZE - the reader goes on forwards, so the resampler and
+            the stretcher read one unbroken stream - and `direction` is which
+            way the file goes now. A run that turns, or bounces between a
+            slice's points, is "bent": its file position is read from the last
+            turn - `turnFile`, the file's second there, and `turnSource`, the
+            clock's count there - rather than from the launch. `turned` says it
+            has once played backwards, after which Go.dot ends it itself
+            (`turnEndPlaced`, the stop it placed); `pieceStart` and `pieceEnd`
+            are the file's seconds a cue with no ranges plays between. */
+        int direction = 1;
+        bool turned = false;
+        bool bent = false;
+        double turnFile = 0.0;
+        double turnSource = 0.0;
+        double pieceStart = 0.0;
+        double pieceEnd = 0.0;
+        std::int64_t turnEndPlaced = 0;
+
         /*  HOW LOUD IT LEFT ITS TRACK over the last tick, in dB below full
             scale (author, 2026-09-25: "On the sampler fader displays of the
             D700 can we have a post fader level meter too?"): the loudest
@@ -714,6 +734,7 @@ namespace wfg::cue
         {
             double in = 0.0;
             double out = 0.0;
+            bool pingPong = false;      ///< the slice bounces between its points (§41)
         };
 
         std::vector<SlicePoints> armedSlices;

@@ -292,6 +292,69 @@ namespace wfg::cue
 
             return 1 + static_cast<std::int64_t> (std::floor ((played - first) / pass));
         }
+
+        /*  A FILE'S SECOND THROUGH A SLICE'S LOOP, either way (namespace draft
+            §41) - the reader's own arithmetic (patch 0002's `bentFrameFor`) in
+            seconds: `u` is where the file would be with no loop; in the slice
+            or above it, it is that; below it going backwards, round its end
+            again; bouncing, out and back. No slice, no loop. */
+        double loopedSecond (double u, const Run::SlicePoints* slice, int direction) noexcept
+        {
+            if (slice == nullptr || ! (slice->out > slice->in))
+                return u;
+
+            const auto length = slice->out - slice->in;
+            const auto v = u - slice->in;
+
+            if (slice->pingPong)
+            {
+                if (v < 0.0 && direction > 0)
+                    return u;
+
+                auto w = std::fmod (v, 2.0 * length);
+
+                if (w < 0.0)
+                    w += 2.0 * length;
+
+                return slice->in + (w < length ? w : 2.0 * length - w);
+            }
+
+            if (v >= 0.0 && (direction < 0 || v < length))
+                return u;
+
+            auto w = std::fmod (v, length);
+
+            if (w < 0.0)
+                w += length;
+
+            return slice->in + w;
+        }
+
+        //  The slice a run is in, if it has ranges.
+        const Run::SlicePoints* sliceOf (const Run& run) noexcept
+        {
+            if (run.range < 0 || static_cast<std::size_t> (run.range) >= run.playingSlices.size())
+                return nullptr;
+
+            return &run.playingSlices[static_cast<std::size_t> (run.range)];
+        }
+
+        /*  WHERE A BENT RUN'S FILE IS AT A SAMPLE: from its last turn, the
+            speed's size times the way it goes, through its slice's loop. A cue
+            with no ranges stays between its piece's two ends. */
+        double bentSecondAt (const Run& run, double sample, double rate) noexcept
+        {
+            const auto moved = std::max (0.0, run.rateClock.sourceAt (sample) - run.turnSource) / rate;
+            const auto u = run.turnFile + static_cast<double> (run.direction) * moved;
+            const auto* slice = sliceOf (run);
+
+            //  An end the show does not know is no bound (§41).
+            if (slice == nullptr)
+                return std::clamp (u, run.pieceStart, run.pieceEnd > run.pieceStart ? run.pieceEnd
+                                                                                     : std::numeric_limits<double>::infinity());
+
+            return loopedSecond (u, slice, run.direction);
+        }
     }
 
     std::vector<RangeSpec> Runner::rangesOf (const juce::ValueTree& cue) const
@@ -325,6 +388,7 @@ namespace wfg::cue
                 possible way to be wrong about it. */
             const auto loops = value ("loops");
             range.loops = loops.empty() ? 1 : std::atoi (loops.c_str());
+            range.pingPong = value ("pingPong") == "true";
 
             out.push_back (range);
         }
@@ -1425,7 +1489,11 @@ namespace wfg::cue
             never nought by accident - an unreadable number read as nought would
             be a stopped tape. */
         const auto speed = osc::parseDouble (textOf (cue, "rate")).value_or (1.0);
-        return std::isfinite (speed) ? std::clamp (speed, 0.0, 20.0) : 1.0;
+
+        /*  ITS SIZE (namespace draft §41): how far the file moves a second,
+            whichever way - what this reading is used for, a time and a place
+            in the file each made of the other. */
+        return std::isfinite (speed) ? std::clamp (std::abs (speed), 0.0, 20.0) : 1.0;
     }
 
     bool Runner::killedSinceLift (const std::string& cueId) const
@@ -3447,7 +3515,7 @@ namespace wfg::cue
         run.armedSlices.clear();
 
         for (const auto& range : request.ranges)
-            run.armedSlices.push_back ({ range.in, range.out });
+            run.armedSlices.push_back ({ range.in, range.out, range.pingPong });
 
         run.playingSlices = run.armedSlices;
         run.slicesRevision = document.showRevision();
@@ -4330,12 +4398,23 @@ namespace wfg::cue
                 job.movieFile = textOf (cue, "file");
                 job.cue = cue[idProperty].toString().toStdString();
                 job.moviePosition = std::max (0.0, numberOf (cue, "startOffset"));
-                job.rate = std::clamp (numberOf (cue, "rate"), 0.0, 20.0);
+                job.rate = std::clamp (numberOf (cue, "rate"), -20.0, 20.0);   // below nought, backwards (§41)
+
+                job.pieceStart = job.moviePosition;
 
                 if (const auto ranges = rangesOf (cue); ! ranges.empty())
                 {
                     job.rangeId = ranges.front().id;
-                    job.moviePosition = std::max (0.0, ranges.front().in);
+                    job.moviePosition = std::max (0.0, job.rate < 0.0 ? ranges.front().out : ranges.front().in);
+                }
+                else if (job.rate < 0.0)
+                {
+                    /*  BACKWARDS FROM THE END (namespace draft §41): its piece
+                        the other way, from the file's end - when the show knows
+                        it; not known, it waits at its start offset. */
+                    if (const auto* known = handlerDurations())
+                        if (const auto found = known->find (job.movieFile); found != known->end() && found->second > job.moviePosition)
+                            job.moviePosition = found->second;
                 }
             }
 
@@ -4665,9 +4744,18 @@ namespace wfg::cue
         run->stretch = textOf (cue, "rateMode") == "timestretch";
         run->rateSeen = osc::parseDouble (textOf (cue, "rate")).value_or (1.0);
         const auto stretchLimit = audio != nullptr ? audio->stretchSpeedLimit() : 0.0;
-        run->ownRate = run->stretch && stretchLimit > 0.0 ? std::min (run->rateSeen, stretchLimit) : run->rateSeen;
+        run->ownRate = run->stretch && stretchLimit > 0.0
+                         ? std::copysign (std::min (std::abs (run->rateSeen), stretchLimit), run->rateSeen)
+                         : run->rateSeen;
         run->ratePlaced = run->ownRate;
         run->rateNow = run->ownRate;
+
+        /*  BACKWARDS FROM THE START (namespace draft §41): fresh at every arm,
+            and Go.dot's own stop cleared with it. */
+        run->direction = run->ownRate < 0.0 ? -1 : 1;
+        run->turned = false;
+        run->bent = false;
+        run->turnEndPlaced = 0;
 
         /*  A RUN THAT ARRIVES OVER A DE-CLICK IS ARMED AT SILENCE (K8's review;
             namespace draft §24, GQ): the level it comes up to is kept, and the
@@ -6104,8 +6192,10 @@ namespace wfg::cue
             stretched cue held to the stretcher's limit, as its own speed is,
             so its clock and its voice agree. */
         const auto stretchLimit = audio != nullptr ? audio->stretchSpeedLimit() : 0.0;
-        const auto wanted = std::isfinite (toRate) ? std::clamp (toRate, 0.0, 20.0) : 1.0;
-        job.toRate = target->stretch && stretchLimit > 0.0 ? std::min (wanted, stretchLimit) : wanted;
+        const auto wanted = std::isfinite (toRate) ? std::clamp (toRate, -20.0, 20.0) : 1.0;   // through nought: backwards (§41)
+        job.toRate = target->stretch && stretchLimit > 0.0
+                       ? std::copysign (std::min (std::abs (wanted), stretchLimit), wanted)
+                       : wanted;
         job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
         job.curve = curve;
         job.stopWhenDone = stopWhenDone;
@@ -15475,6 +15565,7 @@ namespace wfg::cue
             as it stands after this tick's speed. */
         applySlices (engine, tick);
         advanceRanges (engine);
+        endTurnedRuns();
 
         /*  AFTER THE RANGES AND BEFORE THE EDGES, which is the only place it
             can go: it reads the range bookkeeping `advanceRanges` has just
@@ -15882,7 +15973,7 @@ namespace wfg::cue
             if (name == "rate")
             {
                 job.movesRate = true;
-                job.rateTo = std::clamp (*value, 0.0, 20.0);
+                job.rateTo = std::clamp (*value, -20.0, 20.0);
             }
             else if (name == "opacity")  job.to.push_back ({ video::Property::opacity, std::clamp (*value / 100.0, 0.0, 1.0) });
             else if (name == "scale")    job.to.push_back ({ video::Property::scale, *value });
@@ -15926,7 +16017,10 @@ namespace wfg::cue
             if (const auto found = known->find (job.movieFile); found != known->end())
                 duration = found->second;
 
-        auto target = job.moviePosition + job.rate * static_cast<double> (at - job.movieAt) / static_cast<double> (rate);
+        /*  THE WAY IT GOES (namespace draft §41): the speed's sign, turned
+            again while a ping-pong range plays back from its out-point. */
+        const auto velocity = job.rate * static_cast<double> (job.bounce);
+        auto target = job.moviePosition + velocity * static_cast<double> (at - job.movieAt) / static_cast<double> (rate);
 
         /*  ITS RANGES AS THEY ARE NOW (WL, TZ): a range moved while it plays
             is heard at once, one taken away finishes where the playhead is. */
@@ -15941,61 +16035,93 @@ namespace wfg::cue
             return -1;
         };
 
-        /*  WHERE THIS STRETCH ENDS: the range's out point, never past the
-            file; the file's end with no range. Below nought when unknown. */
-        const auto endOf = [&ranges, &indexOf, &job, duration]
+        /*  WHERE THIS STRETCH ENDS, the way it goes: the range's out point
+            forwards, never past the file, and its in point backwards; with no
+            range, the file's end forwards, its start offset backwards. Below
+            nought when unknown. */
+        const auto boundOf = [&ranges, &indexOf, &job, duration] (bool forwards)
         {
             if (job.rangeId.empty())
-                return duration > 0.0 ? duration : -1.0;
+                return forwards ? (duration > 0.0 ? duration : -1.0) : job.pieceStart;
 
             const auto index = indexOf (job.rangeId);
-            const auto out = index >= 0 ? ranges[static_cast<std::size_t> (index)].out : job.moviePosition;
-            return duration > 0.0 ? std::min (out, duration) : out;
+
+            if (index < 0)
+                return forwards ? job.moviePosition : job.moviePosition;
+
+            const auto& playing = ranges[static_cast<std::size_t> (index)];
+
+            if (! forwards)
+                return playing.in;
+
+            return duration > 0.0 ? std::min (playing.out, duration) : playing.out;
         };
 
-        for (int guard = 0; guard < 10000 && job.rate > 0.0; ++guard)
+        for (int guard = 0; guard < 10000; ++guard)
         {
-            const auto end = endOf();
+            const auto way = job.rate * static_cast<double> (job.bounce);
 
-            if (! (end >= 0.0) || target < end)
+            if (! (std::abs (way) > 0.0))
+                break;
+
+            const auto forwards = way > 0.0;
+            const auto end = boundOf (forwards);
+
+            if (! (end >= 0.0) || (forwards ? target < end : target > end))
                 break;
 
             /*  THE SAMPLE THIS STRETCH ENDS ON, between the last point and
                 this one. */
-            const auto reaches = job.movieAt + static_cast<std::int64_t> (std::llround (std::max (0.0, end - job.moviePosition)
-                                                                                         / job.rate * static_cast<double> (rate)));
+            const auto reaches = job.movieAt + static_cast<std::int64_t> (std::llround (std::max (0.0, std::abs (end - job.moviePosition))
+                                                                                         / std::abs (way) * static_cast<double> (rate)));
+
+            const auto index = job.rangeId.empty() ? -1 : indexOf (job.rangeId);
+            const auto* playing = index >= 0 ? &ranges[static_cast<std::size_t> (index)] : nullptr;
+            const auto another = playing != nullptr && (playing->loops == 0 || job.pass + 1 < playing->loops);
+
+            /*  A BOUNCE (§41): the playhead turns at the point, a pass each way,
+                with no step - the file runs on the other way from there. */
+            if (playing != nullptr && playing->pingPong && another)
+            {
+                ++job.pass;
+                job.bounce = -job.bounce;
+                placeVideoPoint (job, video::Property::time, { reaches, end });
+                target = end - (target - end);
+                job.moviePosition = end;
+                job.movieAt = reaches;
+                continue;
+            }
 
             /*  WHERE IT GOES NEXT: this range again for another pass, the next
-                range for the first of its own, or nowhere. */
+                range for the first of its own, or nowhere - entered from its in
+                point forwards, from its out point backwards. */
             std::optional<double> next;
 
-            if (! job.rangeId.empty())
+            if (another && playing != nullptr)
             {
-                const auto index = indexOf (job.rangeId);
-                const auto* playing = index >= 0 ? &ranges[static_cast<std::size_t> (index)] : nullptr;
-
-                if (playing != nullptr && (playing->loops == 0 || job.pass + 1 < playing->loops))
-                {
-                    ++job.pass;
-                    next = playing->in;
-                }
-                else if (index >= 0 && static_cast<std::size_t> (index) + 1 < ranges.size())
-                {
-                    const auto& following = ranges[static_cast<std::size_t> (index) + 1];
-                    job.rangeId = following.id;
-                    job.pass = 0;
-                    next = following.in;
-                }
+                ++job.pass;
+                next = forwards ? playing->in : playing->out;
+            }
+            else if (index >= 0 && static_cast<std::size_t> (index) + 1 < ranges.size())
+            {
+                const auto& following = ranges[static_cast<std::size_t> (index) + 1];
+                job.rangeId = following.id;
+                job.pass = 0;
+                job.bounce = 1;
+                next = job.rate < 0.0 ? following.out : following.in;
             }
 
             if (next.has_value())
             {
                 //  A STEP to where it goes, on that sample.
+                const auto overshoot = target - end;
                 placeVideoPoint (job, video::Property::time, { reaches, end });
                 placeVideoPoint (job, video::Property::time, { reaches, *next });
-                target = *next + (target - end);
                 job.moviePosition = *next;
                 job.movieAt = reaches;
+
+                const auto nowWay = job.rate * static_cast<double> (job.bounce);
+                target = *next + (nowWay > 0.0 ? std::abs (overshoot) : -std::abs (overshoot));
                 continue;
             }
 
@@ -16228,12 +16354,45 @@ namespace wfg::cue
                     cue at one plays exactly as it did before there was a speed. */
                 if (run->kind == "media")
                 {
-                    run->rateClock.start (static_cast<double> (target), run->ownRate);
+                    /*  THE CLOCK COUNTS THE SPEED'S SIZE (namespace draft §41):
+                        the reader goes on forwards whichever way the file goes,
+                        and the way is `direction`. */
+                    run->rateClock.start (static_cast<double> (target), std::abs (run->ownRate));
                     run->launchSource = static_cast<double> (target);
                     run->rangeSource = run->launchSource;
                     run->ratePlaced = run->ownRate;
                     run->rateNow = run->ownRate;
-                    audio->placeRate (run->track, target, run->ownRate);
+                    audio->placeRate (run->track, target, std::abs (run->ownRate));
+
+                    /*  A CUE WITH NO RANGES plays between its start offset and
+                        its file's end; launched backwards, from that end - its
+                        piece the other way, which is what the waveform shows
+                        it would sound like turned round. */
+                    run->pieceStart = run->positionOrigin;
+                    run->pieceEnd = run->positionOrigin;
+
+                    if (durations != nullptr)
+                        if (const auto length = durations->find (textOf (document.findById (run->cue), "file"));
+                            length != durations->end() && length->second > run->positionOrigin)
+                            run->pieceEnd = length->second;
+
+                    /*  A FILE WHOSE LENGTH THE SHOW DOES NOT KNOW has no end to
+                        start from: it plays forwards, and turns when its speed
+                        crosses nought. */
+                    if (run->direction < 0 && ! (run->pieceEnd > run->pieceStart)
+                          && rangesOf (document.findById (run->cue)).empty())
+                        run->direction = 1;
+
+                    if (run->direction < 0 && rangesOf (document.findById (run->cue)).empty())
+                    {
+                        run->turned = true;
+                        run->bent = true;
+                        run->turnSource = run->launchSource;
+                        run->turnFile = run->pieceEnd;
+                        audio->endsOutside (run->track, true);
+                        audio->placeLoop (run->track, 0, { run->positionOrigin, std::max (run->pieceStart, run->pieceEnd - 1.0 / static_cast<double> (audio->sampleRate())),
+                                                           0.0, 0.0, 0.0, -1, false });
+                    }
                 }
 
                 engine.submit (origin::engine, "run.started", one (run->id));
@@ -16309,6 +16468,13 @@ namespace wfg::cue
                     run->loopMove = 0;
                     run->readerAtSliceStart = at < run->armedSlices.size() ? run->armedSlices[at].in : slice.in;
                     run->soundingSlice = slice.id;
+
+                    /*  BACKWARDS OR BOUNCING FROM ITS FIRST FRAME (§41): the slot
+                        told before it launches. */
+                    if (at < run->playingSlices.size()
+                          && (run->direction < 0 || run->playingSlices[at].pingPong))
+                        anchorSlice (*run, static_cast<int> (at), static_cast<double> (target),
+                                     run->readerAtSliceStart, run->playingSlices[at]);
 
                     /*  A BED CARRIED ON INSIDE ITS SLICE (K8's review): the clip
                         was armed that far into its loop, and the slice's start
@@ -16685,7 +16851,7 @@ namespace wfg::cue
                 const auto& armed = run->armedSlices[nextSlot];
 
                 if (incoming.out > incoming.in && incoming.in >= 0.0)
-                    playing = { incoming.in, incoming.out };
+                    playing = { incoming.in, incoming.out, incoming.pingPong };
 
                 incoming.in = playing.in;
                 incoming.out = playing.out;
@@ -16698,9 +16864,22 @@ namespace wfg::cue
                     a transport cue naming the slice it is in - whose reader is
                     still reading. */
                 if (next != run->range)
-                    audio->placeLoop (run->track, next, { armed.in, playing.in, playing.in, playing.out, 0.0 });
+                    audio->placeLoop (run->track, next, { armed.in, playing.in, playing.in, playing.out, 0.0, 1, false });
 
                 run->readerAtSliceStart = armed.in;
+
+                /*  BACKWARDS, OR BOUNCING (§41): from its out-point, or out and
+                    back - the move above replaced, and the file read from the
+                    boundary the way the run goes. */
+                if (next != run->range && (run->direction < 0 || playing.pingPong))
+                {
+                    run->range = next;
+                    anchorSlice (*run, next, static_cast<double> (placeAt), armed.in, playing);
+                }
+                else if (run->bent && ! playing.pingPong && run->direction > 0)
+                {
+                    run->bent = false;
+                }
             }
             else
             {
@@ -16834,6 +17013,18 @@ namespace wfg::cue
                 its loop (K8's review) has a start dated back before the launch,
                 and the count from it is already part-way through a pass. */
             const auto heardTo = std::max (now, run->launchedAtSample);
+
+            /*  BACKWARDS OR BOUNCING (namespace draft §41): from the last turn. */
+            if (run->bent)
+            {
+                run->position = bentSecondAt (*run, static_cast<double> (heardTo), rate);
+
+                const auto inRange = run->range >= 0 && run->rangeStartedAtSample > 0;
+                run->slicePlayed = inRange ? std::max (0.0, run->rateClock.sourceAt (static_cast<double> (heardTo))
+                                                              - run->rangeSource) / rate
+                                           : 0.0;
+                continue;
+            }
 
             if (! run->rateClock.isIdentityFrom (static_cast<double> (run->launchedAtSample)))
             {
@@ -17134,7 +17325,9 @@ namespace wfg::cue
                     if (std::bit_cast<std::uint64_t> (decided) != std::bit_cast<std::uint64_t> (run->rateSeen))
                     {
                         run->rateSeen = decided;
-                        run->ownRate = run->stretch && stretchLimit > 0.0 ? std::min (decided, stretchLimit) : decided;
+                        run->ownRate = run->stretch && stretchLimit > 0.0
+                                         ? std::copysign (std::min (std::abs (decided), stretchLimit), decided)
+                                         : decided;
                     }
                 }
             }
@@ -17157,15 +17350,38 @@ namespace wfg::cue
                 const auto last = run->rateClock.size() > 0 ? run->rateClock.back().at : 0.0;
                 const auto from = std::max (static_cast<double> (now + lead), last);
                 const auto to = from + static_cast<double> (samplesPerTick);
+                const auto before = std::abs (run->ratePlaced);
+                const auto after = std::abs (run->ownRate);
 
                 if (from > last)
                 {
-                    run->rateClock.place (from, run->ratePlaced);
-                    audio->placeRate (run->track, static_cast<std::int64_t> (from), run->ratePlaced);
+                    run->rateClock.place (from, before);
+                    audio->placeRate (run->track, static_cast<std::int64_t> (from), before);
                 }
 
-                run->rateClock.place (to, run->ownRate);
-                audio->placeRate (run->track, static_cast<std::int64_t> (to), run->ownRate);
+                /*  THROUGH NOUGHT (namespace draft §41, WX): the speed's size
+                    comes down to nought where the line crosses it, and the
+                    file turns round there - where the reader stands still, so
+                    the turn costs no frame. */
+                const auto way = run->ownRate < 0.0 ? -1 : run->ownRate > 0.0 ? 1 : 0;
+
+                if (way != 0 && way != run->direction)
+                {
+                    const auto crossing = before + after > 0.0
+                                            ? from + static_cast<double> (samplesPerTick) * before / (before + after)
+                                            : from;
+
+                    if (crossing > from)
+                    {
+                        run->rateClock.place (crossing, 0.0);
+                        audio->placeRate (run->track, static_cast<std::int64_t> (std::llround (crossing)), 0.0);
+                    }
+
+                    turnRun (*run, crossing, way);
+                }
+
+                run->rateClock.place (to, after);
+                audio->placeRate (run->track, static_cast<std::int64_t> (to), after);
                 run->ratePlaced = run->ownRate;
             }
 
@@ -17173,7 +17389,7 @@ namespace wfg::cue
                 now and after, and where the file was at the launch and at the
                 slice's start is kept on the run. */
             run->rateClock.forgetBefore (static_cast<double> (now) - static_cast<double> (samplesPerTick));
-            run->rateNow = run->rateClock.rateAt (static_cast<double> (now));
+            run->rateNow = static_cast<double> (run->direction) * run->rateClock.rateAt (static_cast<double> (now));
         }
     }
 
@@ -17358,6 +17574,145 @@ namespace wfg::cue
         }
     }
 
+    //==========================================================================
+    /*  BACKWARDS AND BOUNCING (namespace draft §41, WX, the author's pick).
+
+        THE READER GOES ON FORWARDS. Its position counts the speed's size on the
+        run's clock, so Tracktion's resampler and stretcher read one unbroken
+        stream and nothing above the reader moves back; which way the file goes
+        under it is a segment on the slot's loop source - from this reader
+        position on, the file is here and goes this way - which patch 0002's
+        `UnrolledLoopReader` reads backwards a run at a time.
+
+        Where the reader is: a cue with no ranges reads the file at its own
+        position, from its start offset at the launch; a slice from where its
+        slot's clip starts (`readerAtSliceStart`). */
+    double Runner::readerSecondAt (const Run& run, double sample) const
+    {
+        const auto rate = static_cast<double> (std::max (1, audio != nullptr ? audio->sampleRate() : 48000));
+        const auto inRange = run.range >= 0 && run.rangeStartedAtSample > 0;
+        const auto origin = inRange ? run.rangeSource : run.launchSource;
+        const auto played = std::max (0.0, run.rateClock.sourceAt (sample) - origin) / rate;
+
+        return (inRange ? run.readerAtSliceStart : run.pieceStart) + played;
+    }
+
+    /*  Where its file is: from its last turn when it is bent, else by the
+        playhead's forward arithmetic. */
+    double Runner::fileSecondAt (const Run& run, double sample) const
+    {
+        const auto rate = static_cast<double> (std::max (1, audio != nullptr ? audio->sampleRate() : 48000));
+
+        if (run.bent)
+            return bentSecondAt (run, sample, rate);
+
+        const auto inRange = run.range >= 0 && run.rangeStartedAtSample > 0;
+        const auto origin = inRange ? run.rangeSource : run.launchSource;
+        auto played = std::max (0.0, run.rateClock.sourceAt (sample) - origin);
+
+        if (inRange && run.firstPassSamples > 0)
+            return secondInSlice (played, run.positionOrigin, run.firstPassFrom,
+                                  static_cast<double> (run.firstPassSamples), static_cast<double> (run.passSamples), rate);
+
+        if (inRange && run.passSamples > 0)
+            played = std::fmod (played, static_cast<double> (run.passSamples));
+
+        return run.positionOrigin + played / rate;
+    }
+
+    /*  THE FILE TURNS ROUND at `sample`, where the speed's size is nought: the
+        run reads on from where its file is there, the other way, and its slot
+        is told from the reader's position there. Once a run has played
+        backwards Go.dot ends it (`endTurnedRuns`), its clip's own end no longer
+        meaning where the file is. */
+    void Runner::turnRun (Run& run, double sample, int direction)
+    {
+        if (audio == nullptr)
+            return;
+
+        const auto fileThere = fileSecondAt (run, sample);
+        const auto readerThere = readerSecondAt (run, sample);
+        const auto* slice = sliceOf (run);
+        const auto slot = std::max (0, run.range);
+
+        run.turnSource = run.rateClock.sourceAt (sample);
+        run.turnFile = fileThere;
+        run.direction = direction;
+        run.bent = true;
+        run.turnEndPlaced = 0;
+
+        if (! run.turned)
+        {
+            run.turned = true;
+            audio->endsOutside (run.track, true);
+        }
+
+        audio->placeLoop (run.track, slot, { readerThere, fileThere,
+                                             slice != nullptr ? slice->in : 0.0,
+                                             slice != nullptr ? slice->out : 0.0,
+                                             0.0, direction, slice != nullptr && slice->pingPong });
+    }
+
+    /*  A SLICE ENTERED BACKWARDS OR BOUNCING: its slot told before it sounds -
+        from its clip's first frame, the file at its out-point going back, or at
+        its in-point going out and back - and the run's file read from there. */
+    void Runner::anchorSlice (Run& run, int slot, double sample, double readerAt, const Run::SlicePoints& slice)
+    {
+        if (audio == nullptr)
+            return;
+
+        const auto rate = static_cast<double> (std::max (1, audio->sampleRate()));
+        const auto fileAt = run.direction < 0 ? std::max (slice.in, slice.out - 1.0 / rate) : slice.in;
+
+        run.turnSource = run.rateClock.sourceAt (sample);
+        run.turnFile = fileAt;
+        run.bent = true;
+
+        audio->placeLoop (run.track, slot, { readerAt, fileAt, slice.in, slice.out, 0.0, run.direction, slice.pingPong });
+    }
+
+    /*  THE END OF A PIECE THAT HAS PLAYED BACKWARDS, with no ranges: where its
+        file reaches its start offset going back, or its file's end going
+        forwards again - placed once it is within a launch horizon, as a range's
+        boundary is. A range's own end is `advanceRanges`', by its passes. */
+    void Runner::endTurnedRuns()
+    {
+        if (audio == nullptr || samplesPerTick <= 0)
+            return;
+
+        const auto now = audio->samplesElapsed();
+        const auto lead = static_cast<std::int64_t> (latencyTicks() + 1) * samplesPerTick;
+        const auto rate = static_cast<double> (std::max (1, audio->sampleRate()));
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
+                continue;
+
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr || ! run->turned || run->range >= 0 || run->launchedAtSample <= 0
+                  || run->turnEndPlaced != 0)
+                continue;
+
+            //  Forwards to an end the show does not know: nothing to place (§41).
+            if (run->direction > 0 && ! (run->pieceEnd > run->pieceStart))
+                continue;
+
+            const auto bound = run->direction < 0 ? run->pieceStart : run->pieceEnd;
+            const auto distance = std::abs (bound - run->turnFile) * rate;
+            const auto when = run->rateClock.whenSourceReaches (run->turnSource + distance);
+
+            if (! when.has_value() || *when > static_cast<double> (now + lead))
+                continue;
+
+            const auto at = std::max<std::int64_t> (static_cast<std::int64_t> (std::llround (*when)),
+                                                    now + 2 * audio->blockSize());
+            audio->stopAtSample (run->track, 0, at);
+            run->turnEndPlaced = at;
+        }
+    }
+
     void Runner::moveSoundingSlice (Run& run, const RangeSpec& wanted, std::int64_t at)
     {
         /*  WHERE THE MOVE LANDS: one launch horizon ahead, as a boundary is
@@ -17383,7 +17738,7 @@ namespace wfg::cue
         const auto readerAt = run.readerAtSliceStart + played / rate;
 
         const auto move = audio->placeLoop (run.track, run.range,
-                                            { readerAt, fileAt, wanted.in, wanted.out, jump ? 0.010 : 0.0 });
+                                            { readerAt, fileAt, wanted.in, wanted.out, jump ? 0.010 : 0.0, 1, false });
 
         /*  A player that does not move loops - a replay's, a test's - leaves
             the voice where it was, and the clock stays with the voice. */
@@ -17416,7 +17771,7 @@ namespace wfg::cue
         run.loopMoveFrom = readerAt;
         run.loopMovePlacedAt = at;
 
-        run.playingSlices[static_cast<std::size_t> (run.range)] = { wanted.in, wanted.out };
+        run.playingSlices[static_cast<std::size_t> (run.range)] = { wanted.in, wanted.out, wanted.pingPong };
     }
 
     void Runner::freeLane() noexcept

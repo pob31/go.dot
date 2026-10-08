@@ -55,7 +55,7 @@ namespace wfg::client::ui
         double bounded (const model::FadeStrip& strip, double value)
         {
             if (isSpeed (strip))
-                return std::clamp (value, 0.0, 20.0);
+                return std::clamp (value, -20.0, 20.0);   // below nought, backwards (§41)
 
             return std::round (std::clamp (value, model::silenceDb, model::loudestDb) * 10.0) / 10.0;
         }

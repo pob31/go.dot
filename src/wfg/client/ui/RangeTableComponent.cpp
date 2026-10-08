@@ -32,6 +32,10 @@ namespace wfg::client::ui
             says whether "how many" is a question at all. */
         juce::ToggleButton forever;
 
+        /*  AND WHETHER IT BOUNCES (namespace draft §41, the author's ping-pong
+            loop): out to its out-point and back, each way a pass. */
+        juce::ToggleButton bounce;
+
         juce::TextButton copy, drop { "x" };
     };
 
@@ -45,12 +49,12 @@ namespace wfg::client::ui
             both ask this for their rectangles. */
         struct Columns
         {
-            juce::Rectangle<int> name, in, out, length, copy, forever, count, drop;
+            juce::Rectangle<int> name, in, out, length, copy, forever, count, bounce, drop;
         };
 
         constexpr int gap = 4;
         constexpr int nameWidth = 76, timeWidth = 62, lengthWidth = 58;
-        constexpr int copyWidth = 24, foreverWidth = 30, countWidth = 40, dropWidth = 22;
+        constexpr int copyWidth = 24, foreverWidth = 30, countWidth = 40, bounceWidth = 30, dropWidth = 22;
 
         int scaled (int base, const model::Theme& theme)
         {
@@ -74,6 +78,7 @@ namespace wfg::client::ui
             out.copy = take (copyWidth);
             out.forever = take (foreverWidth);
             out.count = take (countWidth);
+            out.bounce = take (bounceWidth);
             out.drop = row.removeFromLeft (scaled (dropWidth, theme));
 
             return out;
@@ -82,7 +87,7 @@ namespace wfg::client::ui
         int totalWidth (const model::Theme& theme)
         {
             return scaled (nameWidth + timeWidth * 2 + lengthWidth + copyWidth
-                             + foreverWidth + countWidth + dropWidth + gap * 7,
+                             + foreverWidth + countWidth + bounceWidth + dropWidth + gap * 8,
                            theme);
         }
     }
@@ -404,6 +409,15 @@ namespace wfg::client::ui
             row->forever.onClick = commitLoops;
             row->count.onTextChange = commitLoops;
 
+            //  A shape and a tooltip, never a colour alone (§4.8).
+            row->bounce.setButtonText (juce::String::fromUTF8 (" \xe2\x87\x84"));
+            row->bounce.setWantsKeyboardFocus (false);
+            row->bounce.setTooltip ("Ping-pong: out to the out-point and back to the in-point, each way a pass");
+            row->bounce.onClick = [raw, write]
+            {
+                write ("pingPong", raw->bounce.getToggleState() ? "true" : "false");
+            };
+
             /*  THE WHOLE FILE'S ROW SAYS WHAT IT IS on every box: it is what
                 the cue plays now, and a change here is what makes it a range. */
             if (row->standing)
@@ -420,7 +434,7 @@ namespace wfg::client::ui
             };
 
             juce::Component* children[] { &row->name, &row->in, &row->out, &row->length,
-                                          &row->copy, &row->forever, &row->count, &row->drop };
+                                          &row->copy, &row->forever, &row->count, &row->bounce, &row->drop };
 
             for (auto* child : children)
                 content.addAndMakeVisible (*child);
@@ -513,6 +527,8 @@ namespace wfg::client::ui
                 row.count.setText (juce::String (goesOnForEver ? 1 : range.loops),
                                    juce::dontSendNotification);
 
+            row.bounce.setToggleState (range.pingPong, juce::dontSendNotification);
+
             //  The last range has nothing to copy its length TO.
             row.copy.setEnabled (at + 1 < rows.size());
 
@@ -567,6 +583,7 @@ namespace wfg::client::ui
             line->copy.setBounds (columns.copy.reduced (1, 2));
             line->forever.setBounds (columns.forever);
             line->count.setBounds (columns.count.reduced (0, 1));
+            line->bounce.setBounds (columns.bounce);
             line->drop.setBounds (columns.drop.reduced (1, 2));
 
             y += row;

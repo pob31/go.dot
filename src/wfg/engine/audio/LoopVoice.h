@@ -74,6 +74,13 @@ namespace wfg::audio
             double loopIn = 0.0;
             double loopOut = 0.0;
             double crossfade = 0.0;
+
+            /*  WHICH WAY THE FILE PLAYS from `from` on (namespace draft §41, WX):
+                +1 forwards, -1 backwards - the reader still counts forwards, at
+                the speed's size - and whether the loop bounces between its
+                points. A loopOut not after loopIn is no loop. */
+            int direction = 1;
+            bool pingPong = false;
         };
 
         /*  What a reader did with a segment it met late: applied it from
@@ -193,6 +200,8 @@ namespace wfg::audio
         {
             std::atomic<std::uint64_t> generation { 0 };
             std::atomic<double> from { 0.0 }, fileAt { 0.0 }, loopIn { 0.0 }, loopOut { 0.0 }, crossfade { 0.0 };
+            std::atomic<int> direction { 1 };
+            std::atomic<bool> pingPong { false };
 
             void store (const Segment& s) noexcept
             {
@@ -202,6 +211,8 @@ namespace wfg::audio
                 loopIn.store (s.loopIn, std::memory_order_relaxed);
                 loopOut.store (s.loopOut, std::memory_order_relaxed);
                 crossfade.store (s.crossfade, std::memory_order_relaxed);
+                direction.store (s.direction, std::memory_order_relaxed);
+                pingPong.store (s.pingPong, std::memory_order_relaxed);
             }
 
             Segment load() const noexcept
@@ -211,7 +222,9 @@ namespace wfg::audio
                          fileAt.load (std::memory_order_relaxed),
                          loopIn.load (std::memory_order_relaxed),
                          loopOut.load (std::memory_order_relaxed),
-                         crossfade.load (std::memory_order_relaxed) };
+                         crossfade.load (std::memory_order_relaxed),
+                         direction.load (std::memory_order_relaxed),
+                         pingPong.load (std::memory_order_relaxed) };
             }
         };
 

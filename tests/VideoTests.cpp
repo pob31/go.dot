@@ -1744,3 +1744,108 @@ TEST_CASE ("video: what a picture shows, as one colour - its average, its opacit
     CHECK (video::tintText (0x2040A0u) == "#2040A0");
     CHECK (video::tintText (0u) == "#000000");
 }
+
+//==============================================================================
+/*  NAMESPACE DRAFT §41 (WX): a movie below nought plays backwards, and a Range
+    can bounce, as a sound's can. */
+TEST_CASE ("video: a movie at a negative speed plays its piece from the file's end back to its start offset, and ends there (§41)")
+{
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 2.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov"),
+                                                osc::Value::string ("rate"), osc::Value::string ("-2"),
+                                                osc::Value::string ("startOffset"), osc::Value::string ("0.5") }).applied >= 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+    rig.ticks (3);
+
+    const auto* run = rig.runOf ("VD000060");
+    REQUIRE (run != nullptr);
+    const auto id = run->id;
+    const auto& times = rig.sink.geometry[id][video::Property::time];
+    REQUIRE_FALSE (times.empty());
+    CHECK (times.front().value == doctest::Approx (2.0));
+
+    rig.ticks (60);
+    CHECK (rig.runs.find (id)->isFinished());
+    CHECK (times.back().value == doctest::Approx (0.5));
+
+    for (std::size_t n = 1; n < times.size(); ++n)
+        CHECK (times[n].value <= times[n - 1].value);
+
+    //  1.5 seconds of the file at twice the speed, backwards: 0.75 s.
+    REQUIRE (rig.sink.removed.size() == 1);
+    const auto playedFor = static_cast<double> (rig.sink.removed.front().second - times.front().sample) / 48000.0;
+    CHECK (playedFor == doctest::Approx (0.75).epsilon (0.05));
+}
+
+TEST_CASE ("video: a movie's Range that bounces goes out and back, a pass each way, with no step (§41)")
+{
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 2.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov"),
+                                                osc::Value::string ("rate"), osc::Value::string ("2") }).applied >= 1);
+
+    //  0.5 to 1.5, four passes: out, back, out, back - and it ends at 0.5.
+    const auto range = rig.document.createRange ("VD000060", 0.5, 1.5);
+    REQUIRE (range.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + range.id + "/loops", "4").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + range.id + "/pingPong", "true").ok);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+    rig.ticks (3);
+
+    const auto* run = rig.runOf ("VD000060");
+    REQUIRE (run != nullptr);
+    const auto id = run->id;
+    const auto& times = rig.sink.geometry[id][video::Property::time];
+
+    rig.ticks (150);
+    CHECK (rig.runs.find (id)->isFinished());
+    REQUIRE (times.size() > 4);
+    CHECK (times.back().value == doctest::Approx (0.5));
+
+    int turns = 0;
+    int heading = 0;
+
+    for (std::size_t n = 1; n < times.size(); ++n)
+    {
+        //  Never a step: no two points on one sample at different places.
+        if (times[n].sample == times[n - 1].sample)
+            CHECK (times[n].value == doctest::Approx (times[n - 1].value));
+
+        CHECK (times[n].value >= 0.5 - 1.0e-9);
+        CHECK (times[n].value <= 1.5 + 1.0e-9);
+
+        const auto way = times[n].value > times[n - 1].value + 1.0e-9 ? 1 : times[n].value < times[n - 1].value - 1.0e-9 ? -1 : 0;
+
+        if (way != 0 && heading != 0 && way != heading)
+            ++turns;
+
+        if (way != 0)
+            heading = way;
+    }
+
+    CHECK (turns == 3);
+
+    //  Four seconds of the file at twice the speed: two.
+    REQUIRE (rig.sink.removed.size() == 1);
+    const auto playedFor = static_cast<double> (rig.sink.removed.front().second - times.front().sample) / 48000.0;
+    CHECK (playedFor == doctest::Approx (2.0).epsilon (0.05));
+}
