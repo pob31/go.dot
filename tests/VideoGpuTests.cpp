@@ -62,15 +62,34 @@ namespace
                 how a booth's driver is checked against the reference. */
             video::gpu::OpenOptions options;
             options.software = juce::SystemStats::getEnvironmentVariable ("WFG_GPU_HARDWARE", {}) != "1";
+
+           #if JUCE_WINDOWS
             open = video::gpu::open (options, why);
 
             if (open)
                 MESSAGE ("drawing on " << video::gpu::describe());
 
-           #if JUCE_WINDOWS
             REQUIRE_MESSAGE (open, why);
            #else
-            if (! open)
+            /*  A HOSTED RUNNER HAS NO DEVICE TO DRAW ON (2026-10-08, CI run
+                37767336164): Mesa's llvmpipe on the GitHub Linux runner runs out
+                of memory as the first case starts ("LLVM ERROR: out of memory",
+                "Buffer allocation failed", in a process of its own - so the
+                runner, not the run), and the macOS runner's "Apple Paravirtual
+                device" will not compile the shaders
+                (METAL_SHADER_COMPILATION_FAILED). Neither is a booth's device,
+                and both aborted the case. On a hosted runner the cases are
+                passed over, said, as on a machine with nothing to draw on; WARP
+                on Windows is drawn on there as everywhere, and a machine of
+                somebody's own - the NUC with llvmpipe included - still draws. */
+            if (juce::SystemStats::getEnvironmentVariable ("GITHUB_ACTIONS", {}) == "true")
+                why = "a hosted runner, whose software and virtual devices cannot compile the shaders";
+            else
+                open = video::gpu::open (options, why);
+
+            if (open)
+                MESSAGE ("drawing on " << video::gpu::describe());
+            else
                 MESSAGE ("no device to draw on here (" << why << "): the GPU's pixels are not checked on this machine");
            #endif
         }
