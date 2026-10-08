@@ -42,14 +42,7 @@ namespace wfg::import::als
         //======================================================================
         //  Numbers and words as the document spells them.
 
-        /*  ROUNDED BEFORE THEY ARE WRITTEN: a tenth of a millisecond and a
-            hundredth of a decibel, through the engine's own formatter, so the
-            file reads and no locale moves a digit. */
-        std::string number (double value, int decimals)
-        {
-            const auto scale = std::pow (10.0, decimals);
-            return osc::formatDouble (std::round (value * scale) / scale);
-        }
+        using import::number;
 
         std::string laneText (const std::vector<CurvePoint>& points)
         {
@@ -71,41 +64,10 @@ namespace wfg::import::als
             return out;
         }
 
-        std::uint64_t fnv1a (const std::string& text)
+        /*  THE SET'S IDENTIFIERS (QQ): the shared line of them, salted for Live. */
+        struct Identities : import::Identities
         {
-            std::uint64_t hash = 14695981039346656037ull;
-
-            for (const auto character : text)
-            {
-                hash ^= static_cast<unsigned char> (character);
-                hash *= 1099511628211ull;
-            }
-
-            return hash;
-        }
-
-        /*  IDENTIFIERS, ONE PER KEY, NEVER TWO ALIKE: a key that hashes onto
-            one already given takes the next of its own line, so the answer is
-            still the same every time the same set is imported. */
-        struct Identities
-        {
-            std::map<std::string, std::string> given;
-            std::set<std::string> taken;
-
-            std::string of (const std::string& key)
-            {
-                if (const auto found = given.find (key); found != given.end())
-                    return found->second;
-
-                auto id = idFor (key);
-
-                for (int again = 2; taken.count (id) != 0; ++again)
-                    id = idFor (key + "#" + std::to_string (again));
-
-                taken.insert (id);
-                given[key] = id;
-                return id;
-            }
+            Identities() : import::Identities ("wfg-als:") {}
         };
 
         //======================================================================
@@ -217,77 +179,7 @@ namespace wfg::import::als
         //======================================================================
         //  The media plan: each sound's file on this disk and in the bundle.
 
-        int channelsOf (const juce::File& file)
-        {
-            juce::AudioFormatManager formats;
-            formats.registerBasicFormats();
-
-            const std::unique_ptr<juce::AudioFormatReader> reader { formats.createReaderFor (file) };
-            return reader != nullptr ? static_cast<int> (reader->numChannels) : 0;
-        }
-
-        /*  A FILE NAME WITH ITS ACCENTS FOLDED AWAY, for comparing two
-            spellings of one name. macOS writes a name DECOMPOSED - an "e" and a
-            combining acute - and Live keeps it so in the set; a copy made on
-            another system has it COMPOSED, one "é". The Lazzi sets name five of
-            their files the first way and the disk holds them the second. So a
-            combining mark is dropped, and a composed Latin letter (U+00C0 to
-            U+017F) becomes the letter it is built on, by the table below -
-            Unicode's own decompositions, generated, not typed. */
-        juce::String folded (const juce::String& name)
-        {
-            static constexpr juce::juce_wchar latin[] = {
-                0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0xC6, 0x43, 0x45, 0x45, 0x45, 0x45, 0x49, 0x49, 0x49, 0x49,
-                0xD0, 0x4E, 0x4F, 0x4F, 0x4F, 0x4F, 0x4F, 0xD7, 0xD8, 0x55, 0x55, 0x55, 0x55, 0x59, 0xDE, 0xDF,
-                0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0xE6, 0x63, 0x65, 0x65, 0x65, 0x65, 0x69, 0x69, 0x69, 0x69,
-                0xF0, 0x6E, 0x6F, 0x6F, 0x6F, 0x6F, 0x6F, 0xF7, 0xF8, 0x75, 0x75, 0x75, 0x75, 0x79, 0xFE, 0x79,
-                0x41, 0x61, 0x41, 0x61, 0x41, 0x61, 0x43, 0x63, 0x43, 0x63, 0x43, 0x63, 0x43, 0x63, 0x44, 0x64,
-                0x110, 0x111, 0x45, 0x65, 0x45, 0x65, 0x45, 0x65, 0x45, 0x65, 0x45, 0x65, 0x47, 0x67, 0x47, 0x67,
-                0x47, 0x67, 0x47, 0x67, 0x48, 0x68, 0x126, 0x127, 0x49, 0x69, 0x49, 0x69, 0x49, 0x69, 0x49, 0x69,
-                0x49, 0x131, 0x132, 0x133, 0x4A, 0x6A, 0x4B, 0x6B, 0x138, 0x4C, 0x6C, 0x4C, 0x6C, 0x4C, 0x6C, 0x13F,
-                0x140, 0x141, 0x142, 0x4E, 0x6E, 0x4E, 0x6E, 0x4E, 0x6E, 0x149, 0x14A, 0x14B, 0x4F, 0x6F, 0x4F, 0x6F,
-                0x4F, 0x6F, 0x152, 0x153, 0x52, 0x72, 0x52, 0x72, 0x52, 0x72, 0x53, 0x73, 0x53, 0x73, 0x53, 0x73,
-                0x53, 0x73, 0x54, 0x74, 0x54, 0x74, 0x166, 0x167, 0x55, 0x75, 0x55, 0x75, 0x55, 0x75, 0x55, 0x75,
-                0x55, 0x75, 0x55, 0x75, 0x57, 0x77, 0x59, 0x79, 0x59, 0x5A, 0x7A, 0x5A, 0x7A, 0x5A, 0x7A, 0x17F,
-            };
-
-            juce::String out;
-
-            for (auto character = name.getCharPointer(); ! character.isEmpty(); ++character)
-            {
-                const auto code = *character;
-
-                if (code >= 0x300 && code <= 0x36F)
-                    continue;
-
-                out += code >= 0xC0 && code <= 0x17F ? latin[code - 0xC0] : code;
-            }
-
-            return out;
-        }
-
-        /*  THE NAMES A `:` BECOMES on a copy that left the Mac. */
-        std::vector<std::string> spellings (const std::string& name)
-        {
-            std::vector<std::string> out { name };
-
-            if (name.find (':') == std::string::npos)
-                return out;
-
-            for (const auto instead : { '/', '_', ' ' })
-            {
-                auto spelled = name;
-                std::replace (spelled.begin(), spelled.end(), ':', instead);
-                out.push_back (spelled);
-            }
-
-            /*  And dropped, with the space after it, which is what the Lazzi
-                copy did: "19_CARGO: S.Berger" became "19_CARGO S.Berger". */
-            auto dropped = name;
-            dropped.erase (std::remove (dropped.begin(), dropped.end(), ':'), dropped.end());
-            out.push_back (dropped);
-            return out;
-        }
+        using import::channelsOf;
 
         //======================================================================
         //  The report (QV).
@@ -413,7 +305,7 @@ namespace wfg::import::als
     //==========================================================================
     std::string idFor (const std::string& key)
     {
-        return doc::Id::encode (fnv1a ("wfg-als:" + key) & 0xFFFFFFFFFFull);
+        return import::idFor ("wfg-als:", key);
     }
 
     std::set<int> defaultScenes (const LiveSet& set)
@@ -461,62 +353,8 @@ namespace wfg::import::als
 
     juce::File findMedia (const FileReference& reference, const juce::File& setFolder)
     {
-        /*  BY ITS RELATIVE PATH, a folder at a time, so a `:` in one part is
-            tried as its spellings without the drive-letter reading Windows
-            would give the whole string. */
-        if (! reference.relativePath.empty())
-        {
-            juce::StringArray parts;
-            parts.addTokens (juce::String::fromUTF8 (reference.relativePath.c_str()), "/", {});
-            parts.removeEmptyStrings();
-
-            std::vector<juce::File> here { setFolder };
-
-            for (const auto& part : parts)
-            {
-                std::vector<juce::File> next;
-
-                for (const auto& folder : here)
-                    for (const auto& spelled : spellings (part.toStdString()))
-                        next.push_back (folder.getChildFile (juce::String::fromUTF8 (spelled.c_str())));
-
-                here = std::move (next);
-            }
-
-            for (const auto& candidate : here)
-                if (candidate.existsAsFile())
-                    return candidate;
-        }
-
-        if (! reference.absolutePath.empty())
-            if (const juce::File absolute { juce::String::fromUTF8 (reference.absolutePath.c_str()) };
-                  juce::File::isAbsolutePath (absolute.getFullPathName()) && absolute.existsAsFile())
-                return absolute;
-
-        /*  BY NAME AND SIZE, under the set's folder - the project a set sits in
-            holds its samples, and a size is what tells two takes of one name
-            apart - each name compared with its accents folded, so a name Live
-            kept decomposed finds the file a copy composed. */
-        std::set<juce::String> wanted;
-
-        for (const auto& spelled : spellings (reference.name))
-            wanted.insert (folded (juce::String::fromUTF8 (spelled.c_str())));
-
-        for (const auto& entry : juce::RangedDirectoryIterator (setFolder, true, "*", juce::File::findFiles))
-        {
-            const auto file = entry.getFile();
-
-            if (file.getFullPathName().contains ("Backup") || file.getFileExtension() == ".asd")
-                continue;
-
-            if (wanted.count (folded (file.getFileName())) == 0)
-                continue;
-
-            if (reference.size <= 0 || file.getSize() == reference.size)
-                return file;
-        }
-
-        return {};
+        return import::findFile ({ reference.relativePath, reference.absolutePath, reference.name, reference.size },
+                                 { setFolder });
     }
 
     //==========================================================================
@@ -972,11 +810,7 @@ namespace wfg::import::als
     {
         /*  THE SOUNDS OF ONE OR SEVERAL SETS, copied into one `media/` once each:
             a source file to the name it has there, and the names taken. */
-        struct MediaBook
-        {
-            std::map<juce::String, std::string> copied;
-            std::set<std::string> namesUsed;
-        };
+        using import::MediaBook;
 
         struct Placed
         {
@@ -1018,41 +852,16 @@ namespace wfg::import::als
                         continue;
                     }
 
-                    const auto key = source.getFullPathName();
+                    const auto file = import::placeFile (source, mediaFolder, copy, book, say);
 
-                    if (const auto done = book.copied.find (key); done != book.copied.end())
+                    if (file.copyFailed)
                     {
-                        const auto there = mediaFolder.getChildFile (juce::String::fromUTF8 (done->second.c_str()));
-                        placed.media[sound.key] = { done->second, channelsOf (there.existsAsFile() ? there : source) };
-                        continue;
+                        placed.notes.push_back ({ Note::Kind::dropped, sound.scene, sound.trackName,
+                                                  "the file \"" + file.name + "\" could not be copied into media/" });
+                        placed.missing.push_back (file.name);
                     }
 
-                    /*  ITS OWN NAME, unless another file already took it. */
-                    auto name = source.getFileName().toStdString();
-
-                    for (int again = 2; book.namesUsed.count (name) != 0; ++again)
-                        name = source.getFileNameWithoutExtension().toStdString() + " (" + std::to_string (again) + ")"
-                                 + source.getFileExtension().toStdString();
-
-                    book.namesUsed.insert (name);
-                    book.copied[key] = name;
-
-                    const auto destination = mediaFolder.getChildFile (juce::String::fromUTF8 (name.c_str()));
-
-                    if (copy && ! (destination.existsAsFile() && destination.getSize() == source.getSize()))
-                    {
-                        if (say)
-                            say ("copying " + name);
-
-                        if (! source.copyFileTo (destination))
-                        {
-                            placed.notes.push_back ({ Note::Kind::dropped, sound.scene, sound.trackName,
-                                                      "the file \"" + name + "\" could not be copied into media/" });
-                            placed.missing.push_back (name);
-                        }
-                    }
-
-                    placed.media[sound.key] = { name, channelsOf (copy ? destination : source) };
+                    placed.media[sound.key] = { file.name, file.channels };
                 }
             }
 
@@ -1073,20 +882,12 @@ namespace wfg::import::als
             const auto built = build (set, walked, listName, placed.media, document);
             notes.insert (notes.end(), built.notes.begin(), built.notes.end());
 
-            outcome.problems = document.validate();
-
-            if (! outcome.problems.empty())
-            {
-                outcome.error = "the show built from the set did not validate: " + outcome.problems.front();
-                return outcome;
-            }
-
-            const auto saved = doc::Bundle::save (folder, document);
+            const auto saved = import::saveShow (document, folder, "set");
+            outcome.problems = saved.problems;
 
             if (! saved.ok)
             {
-                outcome.error = "the show could not be saved"
-                                + (saved.problems.empty() ? std::string {} : ": " + saved.problems.front());
+                outcome.error = saved.error;
                 return outcome;
             }
 
@@ -1107,10 +908,7 @@ namespace wfg::import::als
             return outcome;
         }
 
-        bool holdsAShow (const juce::File& folder)
-        {
-            return doc::Bundle::manifestFile (folder).existsAsFile() || doc::Bundle::showFile (folder).existsAsFile();
-        }
+        using import::holdsAShow;
 
         /*  A SET WITH NO ANNOTATIONS AT ALL takes the template's, scene by scene
             (QT): the older Lazzi sets predate Live's annotations, and without this

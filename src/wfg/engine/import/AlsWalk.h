@@ -54,6 +54,7 @@
 */
 
 #include <wfg/engine/import/AlsReader.h>
+#include <wfg/engine/import/ImportCommon.h>
 
 #include <cstddef>
 #include <map>
@@ -91,17 +92,10 @@ namespace wfg::import::als
         double db = 0.0;
     };
 
-    /*  A NOTE FOR THE REPORT: what was seen and what was done about it, where.
-        `approximated` is something that came over changed; `dropped` is
-        something that did not come over; `info` is a fact a designer should
-        know (the hands table's rows are `info`). */
-    struct Note
-    {
-        enum class Kind { info, approximated, dropped } kind = Kind::info;
-        int scene = -1;             ///< the scene's index in the set, -1 for the set as a whole
-        std::string track;          ///< the track's name, empty for none
-        std::string text;
-    };
+    /*  A NOTE FOR THE REPORT, shared with every importer (ImportCommon.h): here
+        `scene` is the scene's index in the set, -1 for the set as a whole, and
+        `track` the track's name. The hands table's rows are `info`. */
+    using Note = import::Note;
 
     /*  A MIX: a return, or the master, that reaches the interface - what a send
         is aimed at. `pair` is the interface's stereo pair from nought (or the

@@ -311,6 +311,8 @@ add_library(wfg_engine STATIC
     wfg/engine/import/AlsReader.h
     wfg/engine/import/AlsWalk.cpp
     wfg/engine/import/AlsWalk.h
+    wfg/engine/import/ImportCommon.cpp
+    wfg/engine/import/ImportCommon.h
     wfg/engine/log/EventLog.cpp
     wfg/engine/log/EventLog.h
     wfg/engine/log/Replay.cpp
