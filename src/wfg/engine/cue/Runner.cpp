@@ -1002,11 +1002,12 @@ namespace wfg::cue
         if (element != "Osc")
             return false;
 
-        /*  NOR A CUE OF SEVERAL MESSAGES (namespace draft 45, ZH): its first
-            alone would be read back and pre-sent, the rest left for its GO -
-            half a cue sent early. One of one message is prepared as it was. */
+        /*  NOR A CUE OF SEVERAL MESSAGES, OR ONE WITH CURVES (namespace draft
+            45, ZH): its first alone would be read back and pre-sent, the rest
+            left for its GO - half a cue sent early - and a curve is a cue that
+            plays. One of one message is prepared as it was. */
         for (const auto& child : cue)
-            if (child.hasType ("Message"))
+            if (child.hasType ("Message") || child.hasType ("Curve"))
                 return false;
 
         /*  AN OSC CUE ONLY WHERE THERE IS SOMETHING TO PUT BACK.
@@ -2874,6 +2875,11 @@ namespace wfg::cue
         if (run.kind == "media")
             return ! run.takenBack && document.findById (run.cue).isValid();
 
+        /*  AN OSC CUE WHOSE CURVES ARE PLAYING (namespace draft 45): its clock
+            moves where it is sought - not one Doh! took back. */
+        if (run.kind == "osc")
+            return ! run.takenBack && isCurving (run.id);
+
         /*  NOR A SCENE DOH! TOOK BACK (K9's review, MV), coming down under
             the Doh's fade as a sound it took back is. */
         if (run.kind != "group" || run.takenBack)
@@ -4236,7 +4242,7 @@ namespace wfg::cue
 
         if (kind == "osc")
         {
-            fireOsc (cue, runId);
+            fireOsc (cue, runId, tick);
             return;
         }
 
@@ -12160,7 +12166,128 @@ namespace wfg::cue
         return reason::needsStrip;
     }
 
-    void Runner::fireOsc (const juce::ValueTree& cue, const std::string& runId)
+    std::vector<CurveTarget> Runner::curveTargetsOf (const juce::ValueTree& cue) const
+    {
+        std::vector<CurveTarget> targets;
+
+        /*  Each message read at its own address - the cue's at /godot/cue, a
+            further one's at /godot/message - with the curves under it, each
+            judged as the door judges it so a curve the show could not have
+            saved is no curve here either. */
+        const auto add = [this, &targets] (const juce::ValueTree& message, const std::string& base)
+        {
+            CurveTarget target;
+            target.address = document.getAttribute (base + "address").value_or (std::string {});
+            target.base = osc::valuesFromAtoms (document.getAttribute (base + "value").value_or (std::string {}))
+                            .value_or (osc::Values {});
+
+            for (const auto& child : message)
+            {
+                if (! child.hasType ("Curve"))
+                    continue;
+
+                const auto curveBase = "/godot/curve/" + child[idProperty].toString().toStdString() + "/";
+                const auto arg = static_cast<int> (child[juce::Identifier ("arg")]);
+
+                if (arg < 0)
+                    continue;
+
+                std::string problem;
+                const auto range = doc::readLaneRange (document.getAttribute (curveBase + "range")
+                                                         .value_or (std::string {}), problem);
+
+                CurveLane lane;
+                lane.arg = static_cast<std::size_t> (arg);
+                lane.points = doc::readLane (document.getAttribute (curveBase + "points").value_or (std::string {}),
+                                             range).points;
+                target.lanes.push_back (std::move (lane));
+            }
+
+            targets.push_back (std::move (target));
+        };
+
+        add (cue, "/godot/cue/" + cue[idProperty].toString().toStdString() + "/");
+
+        for (const auto& child : cue)
+            if (child.hasType ("Message"))
+                add (child, "/godot/message/" + child[idProperty].toString().toStdString() + "/");
+
+        return targets;
+    }
+
+    double Runner::curveDurationOf (const juce::ValueTree& cue, const std::vector<CurveTarget>& targets) const
+    {
+        const auto written = numberOf (cue, "duration");
+        return written > 0.0 ? written : lastPointOf (targets);
+    }
+
+    bool Runner::writeCurve (CurveJob& job, CurveTarget& target, const osc::Values& values,
+                             std::int64_t tick, std::string& why)
+    {
+        target.last = values;
+
+        if (mounts == nullptr)
+            return true;
+
+        /*  THE GO'S WRITE, kept for Doh! as any other (§24.13): the proxy job
+            carries the run, which is all the capture reads of it. */
+        OscJob proxy;
+        proxy.self = job.self;
+
+        std::optional<osc::Values> held;
+        auto captured = false;
+        deskBeforeWrite (proxy, target.address, held, captured);
+
+        const auto written = mounts->write (target.address, values);
+
+        if (! written.ok)
+        {
+            why = written.reason;
+            return false;
+        }
+
+        if (captured)
+            deskAfterWrite (proxy, target.address, held, written.mountId, written.values);
+
+        target.written = written.values;
+
+        /*  ONTO THE WIRE where the device is spoken to, in the run's name, so a
+            double Esc drops what is still queued; `tx` off, the tree alone. */
+        if (const auto* declaration = mounts->declarationOf (written.mountId);
+            declaration != nullptr && declaration->tx && sender_ != nullptr)
+        {
+            target.ticket = sender_->queue (written.mountId,
+                                            { declaration->host, declaration->port,
+                                              declaration->rateCap, declaration->bundles },
+                                            target.address, written.values, job.self);
+            target.ticketTick = tick;
+        }
+
+        return true;
+    }
+
+    bool Runner::isCurving (const std::string& runId) const
+    {
+        return std::any_of (curving.begin(), curving.end(),
+                            [&runId] (const CurveJob& job) { return job.self == runId && ! job.finished; });
+    }
+
+    void Runner::seekCurves (const std::string& runId, double seconds, std::int64_t tick)
+    {
+        for (auto& job : curving)
+        {
+            if (job.self != runId || job.finished)
+                continue;
+
+            /*  WITHIN THE DURATION: a seek past the end of a cue that does not
+                loop lands on its last second, which the next tick ends on. */
+            job.originTick = tick;
+            job.originSeconds = job.loop || ! (job.duration > 0.0) ? seconds
+                                                                   : std::min (seconds, job.duration);
+        }
+    }
+
+    void Runner::fireOsc (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick)
     {
         const auto self = runId;
         auto* selfRun = runs.find (self);
@@ -12283,9 +12410,61 @@ namespace wfg::cue
             remembered answer at the moment it writes and asks afterwards,
             because what it wants to know is whether the device took what it was
             given. Same two operations, opposite order, different question. */
-        if (selfRun->prepare.empty() || ! job.further.empty())
+        /*  A CUE WITH CURVES (namespace draft 45, O.4) writes at GO what its
+            curves say at the clock's nought, then plays them from there: a
+            CurveJob takes the run, and this job says nothing more. Never
+            prepared ahead (ZH), as a cue of several messages is not. */
+        auto targets = curveTargetsOf (cue);
+        const auto curved = hasCurves (targets);
+
+        if (curved)
+        {
+            job.pending = valuesAt (targets.front(), 0.0);
+
+            for (std::size_t n = 0; n < job.further.size() && n + 1 < targets.size(); ++n)
+                job.further[n].pending = valuesAt (targets[n + 1], 0.0);
+        }
+
+        if (selfRun->prepare.empty() || ! job.further.empty() || curved)
         {
             writeOscNow (job);
+
+            if (curved && job.failure.empty() && ! job.left)
+            {
+                CurveJob curves;
+                curves.self = self;
+                curves.cue = cue[idProperty].toString().toStdString();
+                curves.originTick = tick;
+                curves.duration = curveDurationOf (cue, targets);
+                curves.loop = textOf (cue, "loop") == "true";
+                curves.revision = document.revision();
+                curves.targets = std::move (targets);
+
+                /*  WHAT GO WROTE, so the first tick sends only what has moved
+                    since - and its tickets, so a cue whose curves end at once
+                    still waits for them. */
+                const auto wrote = [this, tick] (CurveTarget& target, const osc::Values& pending,
+                                                 std::uint64_t ticket)
+                {
+                    target.last = pending;
+                    const auto* held = mounts->valueOf (target.address);
+                    target.written = held != nullptr ? *held : pending;
+                    target.ticket = ticket;
+                    target.ticketTick = tick;
+                };
+
+                wrote (curves.targets.front(), job.pending, job.ticket);
+
+                for (std::size_t n = 0; n < job.further.size() && n + 1 < curves.targets.size(); ++n)
+                    wrote (curves.targets[n + 1], job.further[n].pending, job.further[n].ticket);
+
+                curving.erase (std::remove_if (curving.begin(), curving.end(),
+                                               [] (const CurveJob& done) { return done.finished; }),
+                               curving.end());
+                curving.push_back (std::move (curves));
+                job.curved = true;
+            }
+
             sending.push_back (job);
             return;
         }
@@ -12551,6 +12730,163 @@ namespace wfg::cue
         sending.push_back (job);
     }
 
+    void Runner::advanceCurves (Engine& engine, std::int64_t tick)
+    {
+        for (auto& job : curving)
+        {
+            if (job.finished)
+                continue;
+
+            auto* run = runs.find (job.self);
+
+            /*  OVER BY ANOTHER ROAD - revoked, taken back by Doh!, ended by a
+                jump: nothing more is written. */
+            if (run == nullptr || run->isFinished())
+            {
+                job.finished = true;
+                continue;
+            }
+
+            /*  ESC, AND A DOUBLE ESC (CLAUDE.md §4.4): the curves stop where
+                they are - the values hold, nothing is put back - and the run
+                ends. A double Esc has already dropped what was still queued. */
+            if (run->state == runState::stopping || beingKilled (*run))
+            {
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                job.finished = true;
+                continue;
+            }
+
+            /*  AN EDIT REACHES A CUE THAT IS PLAYING, on the clock it is on:
+                its curves read again, what was written kept. */
+            if (job.revision != document.revision())
+            {
+                const auto cue = document.findById (job.cue);
+
+                if (! cue.isValid())
+                {
+                    engine.submit (origin::engine, "run.ended", one (job.self));
+                    job.finished = true;
+                    continue;
+                }
+
+                auto fresh = curveTargetsOf (cue);
+
+                for (std::size_t n = 0; n < fresh.size() && n < job.targets.size(); ++n)
+                {
+                    fresh[n].last = job.targets[n].last;
+                    fresh[n].written = job.targets[n].written;
+                    fresh[n].ticket = job.targets[n].ticket;
+                    fresh[n].ticketTick = job.targets[n].ticketTick;
+                }
+
+                job.targets = std::move (fresh);
+                job.duration = curveDurationOf (cue, job.targets);
+                job.loop = textOf (cue, "loop") == "true";
+                job.revision = document.revision();
+            }
+
+            const auto place = placeOnCurves (job.secondsAt (tick), job.duration, job.loop);
+
+            run->position = place.seconds;
+
+            if (job.loop)
+                run->iteration = place.iteration;
+
+            /*  SENT WHEN IT CHANGED (YX): a message whose values a curve moves,
+                written where they differ from what was last written - its rate
+                cap, its `tx` and its bundle as any write to its device. */
+            for (auto& target : job.targets)
+            {
+                if (target.lanes.empty())
+                    continue;
+
+                const auto values = valuesAt (target, place.seconds);
+
+                if (values == target.last)
+                    continue;
+
+                std::string why;
+
+                if (! writeCurve (job, target, values, tick, why))
+                {
+                    engine.submit (origin::engine, "run.failed",
+                                   { osc::Value::string (job.self), osc::Value::string (why) });
+                    job.finished = true;
+                    break;
+                }
+            }
+
+            if (job.finished || ! place.ended)
+                continue;
+
+            /*  THE END OF THE DURATION: the last values are written above, and
+                the run is done by its wait - handed to `advanceSends` as a job
+                already sent, with this tick's tickets for `sent` (a value that
+                left earlier has left) and every message's last values for
+                `verified`. */
+            const auto cue = document.findById (job.cue);
+
+            OscJob done;
+            done.self = job.self;
+            done.wait = oscWaitFrom (textOf (cue, "wait"));
+            done.ticksAllowed = std::max (0, static_cast<int> (std::lround (numberOf (cue, "timeout") * 50.0)));
+
+            for (std::size_t n = 0; n < job.targets.size(); ++n)
+            {
+                const auto& target = job.targets[n];
+                const auto ticket = target.ticketTick == tick ? target.ticket : 0u;
+                const auto& expected = target.written.empty() ? target.last : target.written;
+
+                if (n == 0)
+                {
+                    done.address = target.address;
+                    done.ticket = ticket;
+                    done.expected = expected;
+                    continue;
+                }
+
+                OscJob::Further next;
+                next.address = target.address;
+                next.ticket = ticket;
+                next.expected = expected;
+                done.further.push_back (std::move (next));
+            }
+
+            if (mounts != nullptr)
+            {
+                done.mountId = mounts->mountOf (done.address);
+
+                if (const auto* declaration = mounts->declarationOf (done.mountId))
+                {
+                    done.notSent = ! declaration->tx;
+                    done.host = declaration->host;
+                    done.queryPort = declaration->queryPort;
+                }
+
+                /*  ASKED AFRESH, each forgotten first - the verify's own rule. */
+                if (done.wait == OscWait::verified && ! done.notSent)
+                {
+                    mounts->forgetReadback (done.address);
+
+                    if (const auto* node = mounts->nodeAt (done.address))
+                        done.typeTag = node->typeTags;
+
+                    for (auto& next : done.further)
+                    {
+                        mounts->forgetReadback (next.address);
+
+                        if (const auto* node = mounts->nodeAt (next.address))
+                            next.typeTag = node->typeTags;
+                    }
+                }
+            }
+
+            sending.push_back (std::move (done));
+            job.finished = true;
+        }
+    }
+
     void Runner::advanceSends (Engine& engine)
     {
         for (auto& job : sending)
@@ -12560,6 +12896,14 @@ namespace wfg::cue
                 written or reported for it. */
             if (job.finished)
                 continue;
+
+            /*  ITS CURVES HAVE THE RUN (namespace draft 45, O.4), unless its
+                first write failed - then it fails here, as any cue's would. */
+            if (job.curved && job.failure.empty())
+            {
+                job.finished = true;
+                continue;
+            }
 
             /*  Killed while it waited. A network cue holds no voice either, so
                 the same gap as a fade's: `stopping` with nothing to act on it.
@@ -12710,7 +13054,14 @@ namespace wfg::cue
                 nothing. It still finishes on the tick AFTER the cue fired,
                 because that is when a report is allowed to leave, not because
                 it waited for anything. */
-            if (job.wait == OscWait::none || sender_ == nullptr || job.ticket == 0)
+            /*  NOTHING QUEUED AT ALL, for any of its messages - a curve's last
+                values that had already left (namespace draft 45) - is done
+                as `none` is. */
+            const auto queuedAny = job.ticket != 0
+                                     || std::any_of (job.further.begin(), job.further.end(),
+                                                     [] (const OscJob::Further& next) { return next.ticket != 0; });
+
+            if (job.wait == OscWait::none || sender_ == nullptr || ! queuedAny)
             {
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 job.finished = true;
@@ -12830,8 +13181,8 @@ namespace wfg::cue
             /*  EVERY MESSAGE OF THE CUE (namespace draft 45): one that failed
                 fails it, one still queued keeps it waiting, and it is done when
                 all have left. */
-            auto outcome = sender_->outcomeOf (job.ticket);
-            auto queuedStill = outcome == tree::MountSender::Outcome::pending
+            auto outcome = job.ticket != 0 ? sender_->outcomeOf (job.ticket) : tree::MountSender::Outcome::sent;
+            auto queuedStill = job.ticket != 0 && outcome == tree::MountSender::Outcome::pending
                                  && sender_->stillQueued (job.ticket);
 
             for (const auto& next : job.further)
@@ -15697,6 +16048,7 @@ namespace wfg::cue
         applyRouting();
         applyEq();
         applyFx();
+        advanceCurves (engine, tick);
         advanceSends (engine);
         observeAfterStep (engine, tick);
 
@@ -17165,9 +17517,13 @@ namespace wfg::cue
                     parked on a standby does not read as having played since
                     the show opened; what changes is only that having no VOICE
                     is no longer read as having no PLAYHEAD. */
+                /*  NOR AN OSC CUE WHOSE CURVES ARE PLAYING (namespace draft 45):
+                    `advanceCurves` sets its playhead on its own clock, looped
+                    and sought, which ticks since the GO would overwrite. */
                 if (run->launchRequestedAtTick > 0 && ! run->isWaiting()
                       && run->state != runState::armed
-                      && run->state != runState::preparing)
+                      && run->state != runState::preparing
+                      && ! (run->kind == "osc" && isCurving (run->id)))
                     run->position = static_cast<double> (tick - run->launchRequestedAtTick)
                                       / static_cast<double> (TickClock::rateHz);
 
@@ -19333,6 +19689,14 @@ namespace wfg::cue
                                     spends the resume on it (D2, GN). */
                                 runner.seekingRun (engine, context.tick, runId);
                                 runner.seekMedia (engine, context.tick, runId, seconds, true);
+                                return Outcome::ok (applied);
+                            }
+
+                            /*  AN OSC CUE'S CURVES (namespace draft 45): the
+                                clock reads that second from this tick. */
+                            if (run->kind == "osc" && runner.isCurving (runId))
+                            {
+                                runner.seekCurves (runId, seconds, context.tick);
                                 return Outcome::ok (applied);
                             }
 

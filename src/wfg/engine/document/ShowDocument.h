@@ -475,6 +475,14 @@ namespace wfg::doc
             which has no element of its own to delete. */
         EditResult promoteMessage (const std::string& messageId);
 
+        /*  A CURVE ON ONE VALUE OF A MESSAGE (namespace draft 45): `parentId`
+            an OSC cue - its own message - or a further Message, `arg` the
+            value it moves, from nought. A value the message does not have, or
+            one that is not a number, is refused, and so is a second curve on
+            one value. Its points start empty: the message's value, until
+            somebody draws or records. */
+        EditResult createCurve (const std::string& parentId, int arg, const std::string& id = {});
+
         /*  A VIDEO INPUT (namespace draft 44, YB): a picture another program
             sends under `sender`, over `kind` - ndi, spout or syphon, empty for
             NDI - at the end of the show's video inputs. A kind that is none of

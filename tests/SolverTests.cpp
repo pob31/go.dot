@@ -889,3 +889,33 @@ TEST_CASE ("solve: every message of an OSC cue is placed, the last writer of eac
     CHECK (scene->value == osc::Values { osc::Value::int32 (5) });
     CHECK (scene->writer == later);
 }
+
+//==============================================================================
+/*  A CURVE CUE IS PLANNED AT ITS CURVES' END (namespace draft 45, O.4): what it
+    holds once it is over. One that loops is never over, and the value its curve
+    moves is planned at nothing. */
+TEST_CASE ("solve: an OSC cue's curve is placed at its end, and a looping one is not placed")
+{
+    SolverRig rig;
+
+    const auto ramp = rig.osc (0, "/desk/fader", "f:0");
+    const auto made = rig.document.createCurve (ramp, 0);
+    REQUIRE (made.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/curve/" + made.id + "/points", "0 0 2 0.6").ok);
+
+    const auto circle = rig.osc (1, "/desk/pan", "f:0");
+    const auto round = rig.document.createCurve (circle, 0);
+    REQUIRE (round.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/curve/" + round.id + "/points", "0 -1 1 1").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + circle + "/loop", "true").ok);
+
+    const auto target = rig.document.createCue (rig.listId, 2, "memo", "Here").id;
+    const auto plan = rig.solve (target, -1.0);
+    REQUIRE (plan.ok);
+
+    const auto* fader = rig.valueAt (plan, "/desk/fader");
+    REQUIRE (fader != nullptr);
+    CHECK (fader->value == osc::Values { osc::Value::float32 (0.6f) });
+
+    CHECK (rig.valueAt (plan, "/desk/pan") == nullptr);
+}

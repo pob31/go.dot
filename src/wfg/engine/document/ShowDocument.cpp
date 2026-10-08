@@ -443,6 +443,7 @@ namespace wfg::doc
         /*  AN OSC CUE'S FURTHER MESSAGE (namespace draft 45), at
             /godot/message/<id>. */
         if (element == "Message")                   return "message";
+        if (element == "Curve")                     return "curve";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";
         if (element == "Bus")                       return "bus";
@@ -1246,6 +1247,29 @@ namespace wfg::doc
                     return EditResult::failed (reason::badValue);
 
                 if (! canonical.empty() && ! target.node.getParent().hasType ("Media"))
+                    return EditResult::failed (reason::badValue);
+            }
+
+            /*  And an OSC cue's curve as a curve (namespace draft 45): pairs,
+                seconds climbing from nought, values inside the curve's range
+                when it has one - and a range that is two numbers, lowest first,
+                which the points already drawn still fit. */
+            if (target.attribute->element == "Curve" && name == "points")
+            {
+                std::string problem;
+                const auto range = readLaneRange (target.node[juce::Identifier ("range")].toString().toStdString(), problem);
+
+                if (! readLane (canonical, range).problem.empty())
+                    return EditResult::failed (reason::badValue);
+            }
+
+            if (target.attribute->element == "Curve" && name == "range")
+            {
+                std::string problem;
+                const auto range = readLaneRange (canonical, problem);
+
+                if (! problem.empty()
+                      || ! readLane (target.node[juce::Identifier ("points")].toString().toStdString(), range).problem.empty())
                     return EditResult::failed (reason::badValue);
             }
 
@@ -3078,6 +3102,32 @@ namespace wfg::doc
         return insertObject (cue, endOfSequence, "Message", id, attributes);
     }
 
+    EditResult ShowDocument::createCurve (const std::string& parentId, int arg, const std::string& id)
+    {
+        auto parent = findById (parentId);
+
+        if (! parent.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! parent.hasType ("Osc") && ! parent.hasType ("Message"))
+            return EditResult::failed (reason::typeMismatch);
+
+        /*  A VALUE THE MESSAGE HAS, AND A NUMBER: a curve moves a number
+            between two others, and a word has nowhere in between to be. */
+        const auto values = osc::valuesFromAtoms (parent[juce::Identifier ("value")].toString().toStdString());
+
+        if (! values.has_value() || arg < 0 || static_cast<std::size_t> (arg) >= values->size()
+              || ! (*values)[static_cast<std::size_t> (arg)].isNumber())
+            return EditResult::failed (reason::badValue);
+
+        //  ONE CURVE TO A VALUE: two would be two hands on one number.
+        for (const auto& child : parent)
+            if (child.hasType ("Curve") && static_cast<int> (child[juce::Identifier ("arg")]) == arg)
+                return EditResult::failed (reason::badValue);
+
+        return insertObject (parent, endOfSequence, "Curve", id, { { "arg", std::to_string (arg) } });
+    }
+
     EditResult ShowDocument::promoteMessage (const std::string& messageId)
     {
         if (auto refusal = refuseIfLocked())
@@ -3096,9 +3146,26 @@ namespace wfg::doc
         const auto cueId = cue[idProperty].toString().toStdString();
         const auto base = "/godot/cue/" + cueId + "/";
 
+        /*  THE CUE'S OWN CURVES GO WITH ITS OWN MESSAGE (namespace draft 45):
+            they moved values of an address the cue no longer sends. */
+        std::vector<std::string> ownCurves, comingCurves;
+
+        for (const auto& child : cue)
+            if (child.hasType ("Curve"))
+                ownCurves.push_back (child[idProperty].toString().toStdString());
+
+        for (const auto& child : message)
+            if (child.hasType ("Curve"))
+                comingCurves.push_back (child[idProperty].toString().toStdString());
+
+        for (const auto& curveId : ownCurves)
+            if (const auto edit = remove (curveId); ! edit.ok)
+                return edit;
+
         /*  THE MESSAGE'S WORDS BECOME THE CUE'S, through the cue's own door so
             the schema reads them as it reads any write, and the message goes -
-            all inside the command's one transaction. */
+            all inside the command's one transaction - its curves coming to the
+            cue first, to ride the cue's own message now. */
         for (const auto* row : { "address", "value" })
         {
             const juce::Identifier name { row };
@@ -3107,6 +3174,10 @@ namespace wfg::doc
             if (! edit.ok)
                 return edit;
         }
+
+        for (const auto& curveId : comingCurves)
+            if (const auto edit = move (curveId, cueId, endOfSequence); ! edit.ok)
+                return edit;
 
         const auto removed = remove (messageId);
 
@@ -3727,6 +3798,18 @@ namespace wfg::doc
 
                             if (! curve.problem.empty())
                                 problems.push_back (here + ": \"points\" " + curve.problem);
+                        }
+                        else if (elementName == "Curve" && (attributeName == "points" || attributeName == "range"))
+                        {
+                            std::string problem;
+                            const auto range = readLaneRange (node[juce::Identifier ("range")].toString().toStdString(),
+                                                              problem);
+
+                            if (attributeName == "range" && ! problem.empty())
+                                problems.push_back (here + ": \"range\" " + problem);
+                            else if (attributeName == "points")
+                                if (const auto curve = readLane (canonical, range); ! curve.problem.empty())
+                                    problems.push_back (here + ": \"points\" " + curve.problem);
                         }
                         else if ((elementName == "Media" || elementName == "Send") && attributeName == "levelLane")
                         {

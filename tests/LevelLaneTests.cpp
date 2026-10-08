@@ -116,3 +116,51 @@ TEST_CASE ("level lane: straight in dB between points, held beyond both ends, no
     REQUIRE (judged.problem.empty());
     CHECK (laneLevelDb (judged.points, 4.5) == doctest::Approx (-10.0));
 }
+
+//==============================================================================
+/*  AN OSC CUE'S CURVE (namespace draft 45): the level lane's pairs and rules,
+    the seconds the cue's and the values the number itself, held to the curve's
+    own range when it has one. */
+TEST_CASE ("curve: read as a lane with its own range, or none, and found by halving")
+{
+    std::string problem;
+
+    //  A range is two numbers, the lowest first; empty is none.
+    CHECK_FALSE (doc::readLaneRange ("", problem).has_value());
+    CHECK (problem.empty());
+
+    const auto metres = doc::readLaneRange ("-10 10", problem);
+    REQUIRE (metres.has_value());
+    CHECK (metres->low == doctest::Approx (-10.0));
+    CHECK (metres->high == doctest::Approx (10.0));
+
+    CHECK_FALSE (doc::readLaneRange ("10 -10", problem).has_value());
+    CHECK_FALSE (problem.empty());
+    problem.clear();
+    CHECK_FALSE (doc::readLaneRange ("1 2 3", problem).has_value());
+    CHECK_FALSE (problem.empty());
+
+    //  No range: any value at all - metres, degrees, a scene number.
+    CHECK (doc::readLane ("0 -400 2.5 1200", std::nullopt).problem.empty());
+
+    //  With one, a value outside it is refused, and says so.
+    const auto outside = doc::readLane ("0 0 1 12", doc::LaneRange { -10.0, 10.0 });
+    CHECK_FALSE (outside.problem.empty());
+    CHECK (outside.points.empty());
+
+    //  The level lane's own rules still hold: pairs, climbing from nought.
+    CHECK_FALSE (doc::readLane ("0 1 2", std::nullopt).problem.empty());
+    CHECK_FALSE (doc::readLane ("1 0 1 1", std::nullopt).problem.empty());
+    CHECK_FALSE (doc::readLane ("-1 0", std::nullopt).problem.empty());
+
+    //  Straight between points, held beyond them - over a thousand points.
+    std::vector<doc::LanePoint> points;
+
+    for (int n = 0; n <= 1000; ++n)
+        points.push_back ({ n * 0.01, n * 0.5 });
+
+    CHECK (doc::laneValueAt (points, -1.0) == doctest::Approx (0.0));
+    CHECK (doc::laneValueAt (points, 5.005) == doctest::Approx (250.25));
+    CHECK (doc::laneValueAt (points, 99.0) == doctest::Approx (500.0));
+    CHECK (doc::laneValueAt ({}, 3.0) == doctest::Approx (0.0));
+}

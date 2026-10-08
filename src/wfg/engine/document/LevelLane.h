@@ -39,6 +39,7 @@
     has no reason to know about JUCE.
 */
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -82,4 +83,31 @@ namespace wfg::doc
         after it, and nought for an empty lane. `points` is a lane as
         `readLevelLane` judges one. */
     double laneLevelDb (const std::vector<LanePoint>& points, double seconds) noexcept;
+
+    //==============================================================================
+    /*  AN OSC CUE'S CURVE (namespace draft 45): the same pairs, judged by the
+        same rules, with two differences. Its seconds are the CUE'S, counted
+        from the moment it begins sending, and its values are the number
+        itself in its own units (YR) - so `LanePoint::levelDb` holds a value of
+        whatever kind the curve's argument is, and the bounds are the curve's
+        own `range` when it has one, and none when it has not. */
+    struct LaneRange
+    {
+        double low = 0.0;
+        double high = 0.0;
+    };
+
+    /*  A curve's `range` row: empty is no range, two numbers with the first
+        below the second are one, anything else is `problem`. */
+    std::optional<LaneRange> readLaneRange (std::string_view text, std::string& problem);
+
+    /*  The list, parsed and judged as `readLevelLane` judges a level lane, the
+        values held to `range` when one is given. */
+    LevelLane readLane (std::string_view text, const std::optional<LaneRange>& range);
+
+    /*  What the curve says at a second: straight between the two points either
+        side, the first point's value before it, the last one's after it, and
+        nought for no points. The points found by halving, since a recorded
+        curve may hold thousands. */
+    double laneValueAt (const std::vector<LanePoint>& points, double seconds) noexcept;
 }

@@ -19,8 +19,11 @@
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -53,6 +56,126 @@ namespace wfg::doc
 
             return text;
         }
+    }
+
+    namespace
+    {
+        /*  XSD's list form, as Schema::parseList reads it: whitespace between,
+            leading and trailing ignored, and nothing at all is zero values.
+            nullopt and `problem` set for an element that is not a number. */
+        std::optional<std::vector<double>> numbersOf (std::string_view text, std::string& problem)
+        {
+            std::vector<double> values;
+            std::size_t i = 0;
+
+            while (i < text.size())
+            {
+                while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) != 0)
+                    ++i;
+
+                const auto start = i;
+
+                while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) == 0)
+                    ++i;
+
+                if (i == start)
+                    break;
+
+                const auto token = text.substr (start, i - start);
+                const auto parsed = osc::parseDouble (token);
+
+                if (! parsed)
+                {
+                    problem = "element " + std::to_string (values.size())
+                                + ": expected a number, found \"" + std::string (token) + "\"";
+                    return std::nullopt;
+                }
+
+                values.push_back (*parsed);
+            }
+
+            return values;
+        }
+    }
+
+    std::optional<LaneRange> readLaneRange (std::string_view text, std::string& problem)
+    {
+        const auto values = numbersOf (text, problem);
+
+        if (! values.has_value() || values->empty())
+            return std::nullopt;
+
+        if (values->size() != 2 || ! ((*values)[0] < (*values)[1]))
+        {
+            problem = "a range is two numbers, the lowest first";
+            return std::nullopt;
+        }
+
+        return LaneRange { (*values)[0], (*values)[1] };
+    }
+
+    LevelLane readLane (std::string_view text, const std::optional<LaneRange>& range)
+    {
+        std::string problem;
+        const auto values = numbersOf (text, problem);
+
+        if (! values.has_value())
+            return refused (problem);
+
+        if (values->empty())
+            return {};
+
+        if (values->size() % 2 != 0)
+            return refused (std::to_string (values->size()) + " values, an odd number - each"
+                            " point is a second and a value");
+
+        LevelLane out;
+        out.points.reserve (values->size() / 2);
+
+        for (std::size_t k = 0; k < values->size(); k += 2)
+        {
+            const LanePoint point { (*values)[k], (*values)[k + 1] };
+            const auto index = std::to_string (k / 2);
+
+            if (point.seconds < 0.0)
+                return refused ("point " + index + ": second " + osc::formatDouble (point.seconds)
+                                + " is before the cue starts");
+
+            if (! out.points.empty() && ! (point.seconds > out.points.back().seconds))
+                return refused ("point " + index + ": second " + osc::formatDouble (point.seconds)
+                                + " does not come after " + osc::formatDouble (out.points.back().seconds));
+
+            if (range.has_value() && (point.levelDb < range->low || point.levelDb > range->high))
+                return refused ("point " + index + ": value " + osc::formatDouble (point.levelDb)
+                                + " is outside " + osc::formatDouble (range->low) + ".."
+                                + osc::formatDouble (range->high));
+
+            out.points.push_back (point);
+        }
+
+        return out;
+    }
+
+    double laneValueAt (const std::vector<LanePoint>& points, double seconds) noexcept
+    {
+        if (points.empty())
+            return 0.0;
+
+        if (! (seconds > points.front().seconds))
+            return points.front().levelDb;
+
+        if (! (seconds < points.back().seconds))
+            return points.back().levelDb;
+
+        /*  The first point after the second asked, by halving: the judge's
+            strict climb makes the span below never zero. */
+        const auto after = std::upper_bound (points.begin(), points.end(), seconds,
+                                             [] (double at, const LanePoint& point) { return at < point.seconds; });
+        const auto& to = *after;
+        const auto& from = *std::prev (after);
+        const auto share = (seconds - from.seconds) / (to.seconds - from.seconds);
+
+        return from.levelDb + share * (to.levelDb - from.levelDb);
     }
 
     LevelLane readLevelLane (std::string_view text)

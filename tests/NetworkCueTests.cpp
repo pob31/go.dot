@@ -3529,3 +3529,224 @@ TEST_CASE ("mount sender: a device that does not take bundles is sent each messa
     CHECK (bundles == 1);
     CHECK (plain == 2);
 }
+
+//==============================================================================
+/*  CURVES, PLAYED (namespace draft 45, O.4). A cue's curves run on its own clock
+    - seconds from the tick it began sending, one for every fifty ticks - and a
+    message a curve moves is written each tick its values change, through the
+    device's door and queue; at the end the last values hold and the run is done
+    by its wait. */
+namespace
+{
+    std::string curveOn (NetworkRig& rig, const std::string& parent, int arg, const std::string& points)
+    {
+        const auto made = rig.document.createCurve (parent, arg);
+        REQUIRE (made.ok);
+        REQUIRE (rig.document.setAttribute ("/godot/curve/" + made.id + "/points", points).ok);
+        return made.id;
+    }
+
+    float faderOf (NetworkRig& rig, const std::string& address = "/desk/fader")
+    {
+        const auto* values = rig.mounts.valueOf (address);
+        REQUIRE (values != nullptr);
+        REQUIRE (values->size() == 1u);
+        return values->front().getFloat32();
+    }
+
+    std::size_t sentTo (NetworkRig& rig, const std::string& address)
+    {
+        std::size_t count = 0;
+
+        for (const auto& datagram : rig.listener.all())
+            if (decodedFrom (datagram).address == address)
+                ++count;
+
+        return count;
+    }
+}
+
+TEST_CASE ("network cue: a curve plays on the cue's own clock, sent as it changes, and holds its end")
+{
+    NetworkRig rig;
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+    curveOn (rig, cueId, 0, "0 0 1 1");
+
+    rig.fire (cueId);
+
+    //  Twenty-five ticks is half a second: half way up the ramp.
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    CHECK (faderOf (rig) == doctest::Approx (0.5f));
+    CHECK (rig.runOf (cueId)->state == cue::runState::playing);
+    CHECK (rig.runOf (cueId)->position == doctest::Approx (0.5));
+
+    for (int n = 0; n < 40; ++n)
+        rig.tickOnce();
+
+    //  Done at its end by its wait, the last value held.
+    CHECK (rig.runOf (cueId)->state == cue::runState::done);
+    CHECK (faderOf (rig) == doctest::Approx (1.0f));
+
+    //  One datagram at GO and one a tick up the ramp - and none once it holds.
+    REQUIRE (rig.listener.waitFor (51));
+    const auto sent = rig.listener.count();
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    CHECK_FALSE (rig.listener.waitFor (sent + 1, 150));
+}
+
+TEST_CASE ("network cue: a further message's curve moves its integer by whole numbers, and the rest is sent once")
+{
+    NetworkRig rig;
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0.5", "none");
+    const auto message = rig.document.createMessage (cueId, "/desk/scene", "i:0");
+    REQUIRE (message.ok);
+    curveOn (rig, message.id, 0, "0 0 1 10");
+
+    rig.fire (cueId);
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    const auto* scene = rig.mounts.valueOf ("/desk/scene");
+    REQUIRE (scene != nullptr);
+    CHECK (*scene == osc::Values { osc::Value::int32 (5) });
+
+    for (int n = 0; n < 40; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (cueId)->state == cue::runState::done);
+    REQUIRE (rig.listener.waitFor (11));
+    std::this_thread::sleep_for (std::chrono::milliseconds (100));
+
+    //  The fader has no curve: GO's datagram and nothing more. The scene
+    //  changes ten times, so ten more beside GO's.
+    CHECK (sentTo (rig, "/desk/fader") == 1u);
+    CHECK (sentTo (rig, "/desk/scene") == 11u);
+}
+
+TEST_CASE ("network cue: a looping curve goes round until Esc, which leaves it where it is")
+{
+    NetworkRig rig;
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+    curveOn (rig, cueId, 0, "0 0 1 1");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + cueId + "/loop", "true").ok);
+
+    rig.fire (cueId);
+
+    //  A second and a half: the second round, half way.
+    for (int n = 0; n < 75; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (cueId)->state == cue::runState::playing);
+    CHECK (rig.runOf (cueId)->iteration == 2);
+    CHECK (faderOf (rig) == doctest::Approx (0.5f));
+
+    REQUIRE (rig.engine.submit ("cli", "run.stopAll", {}));
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (rig.runOf (cueId)->isFinished());
+    const auto held = faderOf (rig);
+    const auto revision = rig.mounts.valueRevision();
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.mounts.valueRevision() == revision);
+    CHECK (faderOf (rig) == doctest::Approx (held));
+}
+
+TEST_CASE ("network cue: a duration shorter than the curve cuts it there, and a seek moves its clock")
+{
+    NetworkRig rig;
+
+    SUBCASE ("cut short")
+    {
+        const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+        curveOn (rig, cueId, 0, "0 0 1 1");
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + cueId + "/duration", "0.5").ok);
+
+        rig.fire (cueId);
+
+        for (int n = 0; n < 30; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runOf (cueId)->state == cue::runState::done);
+        CHECK (faderOf (rig) == doctest::Approx (0.5f));
+    }
+
+    SUBCASE ("sought")
+    {
+        const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+        curveOn (rig, cueId, 0, "0 0 2 2");
+
+        rig.fire (cueId);
+        rig.tickOnce();
+
+        const auto* run = rig.runOf (cueId);
+        REQUIRE (run != nullptr);
+        CHECK (run->seekable);
+
+        REQUIRE (rig.engine.submit ("cli", "run.seek", { osc::Value::string (run->id), osc::Value::float64 (1.5) }));
+        rig.tickOnce();
+        rig.tickOnce();
+
+        CHECK (faderOf (rig) == doctest::Approx (1.52f));
+    }
+}
+
+TEST_CASE ("network cue: with tx off a curve moves the tree and sends nothing, and a double Esc ends it")
+{
+    NetworkRig rig;
+
+    SUBCASE ("tx off")
+    {
+        auto declaration = consoleMount (rig.listener.port());
+        declaration.tx = false;
+        REQUIRE (rig.mounts.updateDeclaration (declaration));
+
+        const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+        curveOn (rig, cueId, 0, "0 0 0.5 1");
+
+        rig.fire (cueId);
+
+        for (int n = 0; n < 40; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runOf (cueId)->state == cue::runState::done);
+        CHECK (rig.runOf (cueId)->warning == std::string (cue::runWarning::notSent));
+        CHECK (faderOf (rig) == doctest::Approx (1.0f));
+        CHECK_FALSE (rig.listener.waitFor (1, 150));
+    }
+
+    SUBCASE ("double Esc")
+    {
+        const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+        curveOn (rig, cueId, 0, "0 0 2 1");
+
+        rig.fire (cueId);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.engine.submit ("cli", "run.killAll", {}));
+        rig.tickOnce();
+        rig.tickOnce();
+
+        CHECK (rig.runOf (cueId)->isFinished());
+        const auto revision = rig.mounts.valueRevision();
+
+        for (int n = 0; n < 20; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.mounts.valueRevision() == revision);
+    }
+}

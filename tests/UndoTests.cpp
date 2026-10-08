@@ -1377,3 +1377,53 @@ TEST_CASE ("undo: a message is refused on a cue that cannot take one")
     //  And a memo sends nothing at all.
     CHECK (rig.apply (20, "message.create", { text (inGroupA), text ("/desk/scene") }).rejected == 1);
 }
+
+//==============================================================================
+/*  CURVES (namespace draft 45, O.4): one on a value a message has and that is a
+    number, one to a value; points judged at the door against the curve's range;
+    and a message made the cue's own takes its curves with it, the cue's old
+    ones going with its old message - one step of undo. */
+TEST_CASE ("undo: curves are refused where they cannot move anything, judged at the door, and promoted with their message")
+{
+    Rig rig;
+
+    const std::string message = "M3SS4G01";
+    const std::string onFader = "C0RVE001";
+    const std::string onY = "C0RVE002";
+
+    REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+    REQUIRE (rig.apply (1, "cue.create", { text (mainList), osc::Value::int32 (0),
+                                           text ("osc"), text ("Move"), text (firstCue) }).applied == 1);
+
+    const auto cue = "/godot/cue/" + firstCue + "/";
+    REQUIRE (rig.apply (10, "node.set", { text (cue + "address"), text ("/desk/fader") }).applied == 1);
+    REQUIRE (rig.apply (200, "node.set", { text (cue + "value"), text ("f:0.5") }).applied == 1);
+    REQUIRE (rig.apply (400, "message.create", { text (firstCue), text ("/obj/xyz"),
+                                                 text ("f:0 f:0 s:\"left\""), text (message) }).applied == 1);
+
+    //  A value the message has not got, a word, and a second curve on one value.
+    CHECK (rig.apply (500, "curve.create", { text (message), osc::Value::int32 (3) }).rejected == 1);
+    CHECK (rig.apply (510, "curve.create", { text (message), osc::Value::int32 (2) }).rejected == 1);
+    REQUIRE (rig.apply (520, "curve.create", { text (firstCue), osc::Value::int32 (0), text (onFader) }).applied == 1);
+    CHECK (rig.apply (530, "curve.create", { text (firstCue), osc::Value::int32 (0) }).rejected == 1);
+    REQUIRE (rig.apply (540, "curve.create", { text (message), osc::Value::int32 (1), text (onY) }).applied == 1);
+
+    //  Points that climb, and values inside the range once there is one.
+    const auto points = "/godot/curve/" + onY + "/points";
+    const auto range = "/godot/curve/" + onY + "/range";
+    REQUIRE (rig.apply (600, "node.set", { text (points), text ("0 0 1 5 2 -3") }).applied == 1);
+    CHECK (rig.apply (700, "node.set", { text (points), text ("1 0 1 5") }).rejected == 1);
+    CHECK (rig.apply (800, "node.set", { text (range), text ("0 10") }).rejected == 1);      // -3 is outside
+    REQUIRE (rig.apply (900, "node.set", { text (range), text ("-5 10") }).applied == 1);
+    CHECK (rig.apply (1000, "node.set", { text (points), text ("0 0 1 11") }).rejected == 1);
+
+    //  Promoted: the message's curve comes to the cue, the cue's old one goes.
+    REQUIRE (rig.apply (1200, "message.promote", { text (message) }).applied == 1);
+    CHECK_FALSE (rig.document.findById (onFader).isValid());
+    REQUIRE (rig.document.findById (onY).isValid());
+    CHECK (rig.document.findById (onY).getParent() == rig.document.findById (firstCue));
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("message.promote"));
+    CHECK (rig.document.findById (onFader).isValid());
+    CHECK (rig.document.findById (onY).getParent() == rig.document.findById (message));
+}

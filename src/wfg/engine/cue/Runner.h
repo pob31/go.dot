@@ -54,6 +54,7 @@
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/GroupJob.h>
 #include <wfg/engine/cue/ListState.h>
+#include <wfg/engine/cue/CurveJob.h>
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/Solver.h>
@@ -1114,6 +1115,19 @@ namespace wfg::cue
         /** Every fade in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<FadeJob>& fades() const noexcept { return running; }
 
+        /*  THE OSC CUES WHOSE CURVES ARE PLAYING (namespace draft 45), for a
+            test and a readout. A finished one stays until the next GO tidies. */
+        const std::vector<CurveJob>& curves() const noexcept { return curving; }
+
+        /*  Whether a run's curves are playing - which is what makes it seekable
+            and what keeps the voiceless playhead from overwriting its clock. */
+        bool isCurving (const std::string& runId) const;
+
+        /*  A SEEK OF A CURVE RUN: its clock reads `seconds` from this tick,
+            within its duration, and the next tick writes what the curves say
+            there. Handler-safe: it moves state a replay rebuilds the same way. */
+        void seekCurves (const std::string& runId, double seconds, std::int64_t tick);
+
         /*  ESC, THE GRACEFUL WAY, AS A FADE (author, 2026-09-28: "a 'Panic'
             fade duration that fades out all playing cues. It seems the Panic
             cuts everything with no fade time").
@@ -1894,7 +1908,7 @@ namespace wfg::cue
 
         /*  A network cue firing: one write to a mounted node, queued for the
             end of this tick. No Engine here either, and for the same reason. */
-        void fireOsc (const juce::ValueTree& cue, const std::string& runId);
+        void fireOsc (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick);
         void fireMidi (const juce::ValueTree& cue, const std::string& runId);
 
         /*  `selfCueId` is the fade or stop cue being fired; `targetCueId` is
@@ -1980,6 +1994,27 @@ namespace wfg::cue
         const std::vector<std::string>& dcaChainOf (const std::string& cueId);
 
         void advanceFades (Engine& engine, std::int64_t tick);
+
+        /*  THE OSC CUES' CURVES, ONE TICK (namespace draft 45, O.4): each
+            message whose values a curve moves is written where they changed,
+            and a cue at the end of its duration is handed to `advanceSends` to
+            be done by its wait. A hook, before `advanceSends`. */
+        void advanceCurves (Engine& engine, std::int64_t tick);
+
+        /*  An OSC cue's messages and the curves on them, read off the document:
+            its own message first, then each further one, in order. */
+        std::vector<CurveTarget> curveTargetsOf (const juce::ValueTree& cue) const;
+
+        /*  The duration a cue's curves play: its row, or the longest curve's
+            last point where that is nought. */
+        double curveDurationOf (const juce::ValueTree& cue, const std::vector<CurveTarget>& targets) const;
+
+        /*  One message's values written by a curve: into the tree through the
+            device's door, onto the wire where its device is spoken to. False,
+            and `why` set, when the door refused. */
+        bool writeCurve (CurveJob& job, CurveTarget& target, const osc::Values& values,
+                         std::int64_t tick, std::string& why);
+
         void advanceSends (Engine& engine);
         void advanceWaits (Engine& engine, std::int64_t tick);
         void armStandby (Engine& engine);
@@ -2290,6 +2325,9 @@ namespace wfg::cue
         std::int64_t lastGoTick = -1;
 
         std::vector<OscJob> sending;
+
+        /*  The OSC cues whose curves are playing (namespace draft 45). */
+        std::vector<CurveJob> curving;
 
         /*  ONE PER VIDEO RUN that is up or coming up (Phase 8a): its layer,
             the points placed for it, and - while Esc takes it down - the tick

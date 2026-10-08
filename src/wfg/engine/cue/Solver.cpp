@@ -16,6 +16,7 @@
 
 #include <wfg/engine/cue/Solver.h>
 
+#include <wfg/engine/cue/CurveJob.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/tree/Mount.h>
@@ -44,13 +45,77 @@ namespace wfg::cue
         std::vector<std::pair<std::string, std::string>> messagesOf (const Reader& read,
                                                                      const juce::ValueTree& cue)
         {
-            std::vector<std::pair<std::string, std::string>> out {
-                { read.text (cue, "osc", "address"), read.text (cue, "osc", "value") } };
+            /*  AND WHAT ITS CURVES SAY AT THEIR END (namespace draft 45, O.4):
+                a value a curve moves is planned at the curves' last second - the
+                cue's duration, or the longest curve's last point - which is
+                what it holds once the cue is over. A cue whose curves loop is
+                never over, and a message they move is planned at nothing: where
+                a loop is at a given moment is not a decision anybody wrote. */
+            struct Written
+            {
+                std::string address, text;
+                CurveTarget target;
+            };
+
+            std::vector<Written> messages;
+
+            const auto add = [&read, &messages] (const juce::ValueTree& message, const char* owner)
+            {
+                Written written;
+                written.address = read.text (message, owner, "address");
+                written.text = read.text (message, owner, "value");
+                written.target.base = osc::valuesFromAtoms (written.text).value_or (osc::Values {});
+
+                for (const auto& child : message)
+                {
+                    if (! child.hasType ("Curve"))
+                        continue;
+
+                    const auto arg = osc::parseDouble (read.text (child, "curve", "arg")).value_or (-1.0);
+
+                    if (arg < 0.0)
+                        continue;
+
+                    std::string problem;
+                    const auto range = doc::readLaneRange (read.text (child, "curve", "range"), problem);
+
+                    CurveLane lane;
+                    lane.arg = static_cast<std::size_t> (arg);
+                    lane.points = doc::readLane (read.text (child, "curve", "points"), range).points;
+                    written.target.lanes.push_back (std::move (lane));
+                }
+
+                messages.push_back (std::move (written));
+            };
+
+            add (cue, "osc");
 
             for (const auto& child : cue)
                 if (child.hasType ("Message"))
-                    out.push_back ({ read.text (child, "message", "address"),
-                                     read.text (child, "message", "value") });
+                    add (child, "message");
+
+            std::vector<CurveTarget> targets;
+
+            for (const auto& message : messages)
+                targets.push_back (message.target);
+
+            const auto duration = osc::parseDouble (read.text (cue, "osc", "duration")).value_or (0.0);
+            const auto end = duration > 0.0 ? duration : lastPointOf (targets);
+            const auto loops = read.flag (cue, "osc", "loop");
+
+            std::vector<std::pair<std::string, std::string>> out;
+
+            for (const auto& message : messages)
+            {
+                const auto curved = std::any_of (message.target.lanes.begin(), message.target.lanes.end(),
+                                                 [] (const CurveLane& lane) { return ! lane.points.empty(); });
+
+                if (curved && loops)
+                    continue;
+
+                out.push_back ({ message.address,
+                                 curved ? osc::atomsOf (valuesAt (message.target, end)) : message.text });
+            }
 
             return out;
         }

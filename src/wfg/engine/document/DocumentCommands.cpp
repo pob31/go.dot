@@ -877,6 +877,28 @@ namespace wfg::doc
                                                   osc::Value::string (value), osc::Value::string (edit.id) });
                         } });
 
+        /*  A CURVE ON ONE VALUE OF A MESSAGE (namespace draft 45): under the
+            cue for its own message, under a message for that one. Its points
+            are written with `node.set` at /godot/curve/<id>/points. */
+        registry.add ({ "curve.create",
+                        "Adds a curve to one value of an OSC cue's message - the cue's own, or a further"
+                        " message - moving it over the cue's own time.",
+                        { { "parent", 's', false }, { "arg", 'i', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto parent = args[0].getString();
+                            const auto arg = args[1].getInt32();
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+                            const auto edit = document.createCurve (parent, arg, id);
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok ({ osc::Value::string (parent), osc::Value::int32 (arg),
+                                                  osc::Value::string (edit.id) });
+                        } });
+
         registry.add ({ "message.promote",
                         "Makes a message its OSC cue's own - its address and values the cue's - and takes the"
                         " message away, in one edit.",

@@ -111,7 +111,11 @@ namespace wfg::cue
                 every cue's do. */
             for (const auto* owner : { "cue", "group", "sound", "media", "mic", "input", "range", "fx", "plugin", "fade",
                                        "transport", "feed", "insert", "send",
-                                       "bus", "processorInput", "rackChannel" })
+                                       "bus", "processorInput", "rackChannel",
+                                       /*  An OSC cue's further messages and its curves
+                                           (namespace draft 45): a curve on the first
+                                           value carries no `arg` once saved. */
+                                       "message", "curve" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
                     defaults[std::string (owner) + "/" + std::string (row->name)]
                         = std::string (row->defaultText);

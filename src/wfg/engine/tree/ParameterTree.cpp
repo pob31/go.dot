@@ -630,6 +630,47 @@ namespace wfg::tree
             message's value writes one node. `cue` and `index` are the
             containment read back - the index counted among messages alone, the
             cue's own address and value being its first. */
+        /*  The identifiers of a cue's or a message's curves, space-separated. */
+        std::string curvesOf (const juce::ValueTree& node)
+        {
+            std::string text;
+
+            for (const auto& child : node)
+                if (child.hasType ("Curve") && child.hasProperty (idProperty))
+                    text += (text.empty() ? "" : " ") + child[idProperty].toString().toStdString();
+
+            return text;
+        }
+
+        /*  A CURVE (namespace draft 45), flat at /godot/curve/<id>: its cue and
+            its message read back from where it sits - the message empty for a
+            curve on the cue's own. Its ride is the runtime half's. */
+        void collectCurve (const juce::ValueTree& node, const std::string& cueId,
+                           const std::string& messageId, std::vector<Node>& out)
+        {
+            const auto id = node[idProperty].toString().toStdString();
+
+            if (id.empty())
+                return;
+
+            const auto base = std::string (godot) + "/curve/" + id;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("curve"))
+            {
+                if (row->persist == doc::Persist::none && row->name != "cue" && row->name != "message")
+                    continue;
+
+                const doc::Attribute attribute { "Curve", row };
+                const auto name = std::string (row->name);
+
+                const auto text = name == "cue"     ? cueId
+                                : name == "message" ? messageId
+                                                    : storedText (attribute, node);
+
+                out.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
+        }
+
         void collectMessage (const juce::ValueTree& node, const std::string& cueId,
                              int index, std::vector<Node>& out)
         {
@@ -645,12 +686,17 @@ namespace wfg::tree
                 const doc::Attribute attribute { "Message", row };
                 const auto name = std::string (row->name);
 
-                const auto text = name == "cue"   ? cueId
-                                : name == "index" ? std::to_string (index)
-                                                  : storedText (attribute, node);
+                const auto text = name == "cue"    ? cueId
+                                : name == "index"  ? std::to_string (index)
+                                : name == "curves" ? curvesOf (node)
+                                                   : storedText (attribute, node);
 
                 out.push_back (makeLeaf (base + "/" + name, *row, text));
             }
+
+            for (const auto& child : node)
+                if (child.hasType ("Curve"))
+                    collectCurve (child, cueId, id, out);
         }
 
         /*  A TRIGGER, at a top level address of its own.
@@ -1122,6 +1168,10 @@ namespace wfg::tree
                         if (child.hasType ("Message") && child.hasProperty (idProperty))
                             text += (text.empty() ? "" : " ") + child[idProperty].toString().toStdString();
                 }
+                else if (name == "curves")
+                {
+                    text = curvesOf (node);
+                }
                 else if (isMedia && live != nullptr && name.rfind ("eq", 0) == 0
                            && live->rowOf (id, name) != nullptr)
                 {
@@ -1268,6 +1318,13 @@ namespace wfg::tree
                 if (childElement == "Message")
                 {
                     collectMessage (child, id, messageIndex++, out);
+                    continue;
+                }
+
+                /*  A CURVE ON THE CUE'S OWN MESSAGE (namespace draft 45). */
+                if (childElement == "Curve")
+                {
+                    collectCurve (child, id, {}, out);
                     continue;
                 }
 

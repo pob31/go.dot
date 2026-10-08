@@ -22258,3 +22258,26 @@ their curves; the copy of a cue's messages as a foot part.
   share one goes alone as a plain message, and a bundle of one is still a bundle. A message the rate cap
   holds stays out, in its place, and goes in a later flush's. Each message is answered and counted as itself,
   so `sent`, a `sent` wait and a double Esc's drop read as they did.
+- **ZC, a device's values apart from its shape** (2026-10-08, with O.3). `MountTable::revision` moves with the
+  shape alone, `valueRevision` with every write, `writtenSinceShape` names the addresses written since;
+  `ParameterTree` rebuilds the mounted half for a change of shape and otherwise lays copies of the written
+  nodes over it (`TreeSnapshot`'s fifth argument, read first by `find` and in place by `all`). M9's case now
+  counts one rebuild across a hundred publishes and a write, and a second for a change of shape.
+- **O.4, curves played** (2026-10-08). `<Curve>` under `<Osc>` or `<Message>` (`arg`, `points`, `range`;
+  `cue`, `message` derived; `osc/curves`, `message/curves`), `osc/duration` and `osc/loop`; `curve.create`,
+  refused on a value the message has not got or that is not a number, and on a second curve to one value.
+  `doc::readLane` judges points as the level lane's are, held to the curve's `range` (`readLaneRange`), and
+  `laneValueAt` finds them by halving; the door refuses points or a range that do not fit, and so does the
+  load. `message.promote` brings the message's curves to the cue and takes the cue's old ones with its old
+  message. At GO a cue with a curve writes what its curves say at nought, then a `CurveJob` (`cue/CurveJob.h`)
+  takes the run: `Runner::advanceCurves`, a hook before `advanceSends`, writes each curved message whose values
+  changed - through the device's door, its put-back kept for Doh!, onto the wire where `tx` is on, so the rate
+  cap thins it and a bundle gathers it - an integer rounded to the nearest. At the end of the duration (its row,
+  or the longest curve's last point) the last values are written and the run is handed back as a job already
+  sent, done by its wait: `none` at once, `sent` on this tick's tickets, `verified` on every message's last
+  values. `loop` goes round, counting `run/iteration`; Esc and a double Esc end it where it is; an edit
+  reaches it on its clock; `run.seek` moves the clock (`run/seekable` true while it plays); `run/position` is
+  its clock. The solver plans a curved value at the curves' end, and a looping cue's curved values at nothing.
+  **The sends are outputs, not records** (mine): recomputed from the document and the clock on the night, as
+  a fade's level is, and never logged; the run's start and end are records like any other run's. The replay
+  fixture moves to O.12, with the drivers.

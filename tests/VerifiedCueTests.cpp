@@ -4144,3 +4144,24 @@ TEST_CASE ("verified: a cue of several messages asks every address")
         CHECK (run->error == cue::oscError::disagreed);
     }
 }
+
+//==============================================================================
+/*  A CURVE'S END IS VERIFIED (namespace draft 45, O.4): the run waits, past its
+    duration, for the device to read back what the curve ended on. */
+TEST_CASE ("verified: a cue whose curve ends is done when the device holds its last value")
+{
+    VerifiedRig rig;
+    rig.device.target.says ({ osc::Value::float32 (0.75f) });
+
+    const auto cueId = rig.makeVerified ("f:0");
+    const auto curve = rig.document.createCurve (cueId, 0);
+    REQUIRE (curve.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/curve/" + curve.id + "/points", "0 0 0.2 0.75").ok);
+
+    rig.fire (cueId);
+
+    const auto* run = rig.runUntilFinished (cueId);
+    REQUIRE (run != nullptr);
+    INFO ("state " << run->state << ", error " << run->error);
+    CHECK (run->state == cue::runState::done);
+}

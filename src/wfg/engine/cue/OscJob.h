@@ -198,6 +198,12 @@ namespace wfg::cue
 
         bool finished = false;
 
+        /*  HANDED TO ITS CURVES (namespace draft 45, O.4): the cue's first
+            write went out at GO and its curves play from there - a CurveJob
+            ends the run, and hands a job of this kind back at the end of the
+            duration to be done by the wait. This one says nothing more. */
+        bool curved = false;
+
         /*  THE CUE'S FURTHER MESSAGES (namespace draft 45, YP), written after
             its own in their order in the same tick, all to its device (YV).
             Each is queued and waited for as the first is: a `sent` cue is done

@@ -2162,8 +2162,25 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="duration">
+          <a:documentation>How long the cue-s curves play (namespace draft 45, YW), in seconds of the cue-s own clock - counted from the moment it begins sending, after its pre-wait. Nought, the default, is the last point of the longest curve; longer holds the last values to its end, shorter cuts the curves there. A cue with no curve is sent once at GO, whatever this says.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="enabled">
           <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="loop">
+          <a:documentation>Whether the cue-s curves start again at the end of the duration, round and round until the cue is stopped (namespace draft 45, YW) - Esc stops it where it is, as it stops anything. Off, the last values hold and the cue is done by its wait.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>
@@ -2244,6 +2261,7 @@
         <choice>
           <ref name="Trigger"/>
           <ref name="Message"/>
+          <ref name="Curve"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -2264,6 +2282,45 @@
         <attribute name="value">
           <a:documentation>What this message sends, spelled as the cue-s own value: a list of atoms, every argument of the message, empty for one that carries nothing.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <ref name="Curve"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Curve">
+    <element name="Curve">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="arg">
+          <a:documentation>Which value of its message this curve moves, from nought: the second of /adm/obj/1/xyz f:0 f:0 f:0 is 1 (namespace draft 45). A value the message does not have, or one that is not a number, is refused; one curve to a value.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="points">
+          <a:documentation>The curve, as (second, value) pairs: seconds of the CUE, counted from the moment it begins sending, climbing from nought, and the VALUE ITSELF in the number-s own units - metres, degrees (namespace draft 45, YR, the author-s pick: never an offset). Straight between two points; before the first and after the last it holds what they say. Empty plays the message-s written value. Inside range when the curve has one.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="range">
+          <a:documentation>The lowest and the highest the curve may hold, two numbers, the lowest first - what the editor draws between, what a recording is thinned against, and a bound the points are held to (namespace draft 45). Empty, the default, takes the device-s range for that value where it describes one, and else what the points cover.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
         </attribute>
       </optional>
     </element>

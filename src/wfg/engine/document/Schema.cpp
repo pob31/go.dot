@@ -276,7 +276,7 @@ namespace wfg::doc
                     carries no Route either: what it writes is somebody
                     else's node, named by address, and the mount it belongs
                     to already says where that is. */
-                { "Osc",    true,  { "Trigger", "Message" },          { "cue", "osc" } },
+                { "Osc",    true,  { "Trigger", "Message", "Curve" }, { "cue", "osc" } },
 
                 /*  AN OSC CUE'S FURTHER MESSAGES (namespace draft 45, YP, the
                     author's pick: the OSC cue grows rather than a kind beside
@@ -286,7 +286,13 @@ namespace wfg::doc
                     tick - one bundle where the device takes them. Identified,
                     for the Range argument: a list somebody edits one at a time,
                     where an index would be a position. */
-                { "Message", true, {},                                { "message" } },
+                { "Message", true, { "Curve" },                       { "message" } },
+
+                /*  A CURVE ON ONE VALUE OF A MESSAGE (namespace draft 45): under
+                    the Osc for the cue's own message, under a Message for that
+                    one - the curve rides what it moves, as a send's lane rides
+                    its send. Identified, for undo, its ride and the pass. */
+                { "Curve",   true, {},                                { "curve" } },
 
                 /*  A MIDI CUE IS A NETWORK CUE ON A DIFFERENT WIRE, and it is
                     an element of its own for the reason every other kind is:
