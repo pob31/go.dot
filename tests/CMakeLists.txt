@@ -620,6 +620,17 @@ add_test(NAME wfg.replay.lane-record.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/lane-record.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/lane-record
                  --wfg-locale=${WFG_LOCALE_FR})
+# AN OSC CUE'S CURVES PLAYED, AND A PASS RECORDED FROM A DEVICE'S PUSHES
+# (namespace draft 45, O.12): what the device said is in the log, what the
+# curves sent is not - replayed under both locales, nothing on any wire.
+add_test(NAME wfg.replay.osc-curves.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/osc-curves.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/osc-curves
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.osc-curves.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/osc-curves.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/osc-curves
+                 --wfg-locale=${WFG_LOCALE_FR})
 # A LOCKED SHOW'S EQ AND SENDS RIDDEN LIVE (2026-09-25): rides refused by the
 # document and taken by the live layer in front of it, a send made live with
 # its drawn identifier, then unlocked, kept as one transaction and undone -
@@ -1369,6 +1380,21 @@ add_test(NAME blackbox.lane-record.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_record.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.lane-record.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# AN OSC CUE'S CURVES END TO END (namespace draft 45, O.12): three messages on
+# three curves into mock_target.py --listen as bundles, every value against the
+# drawing (M51), then a pass recorded from what the device pushes down its
+# LISTEN socket (M52), and the session replayed. No hosted audio.
+add_test(NAME blackbox.osc-curves.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/osc_curves.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.osc-curves.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.osc-curves.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/osc_curves.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.osc-curves.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # DOH! END TO END (namespace draft 24.15): the GO pressed too soon and taken back,

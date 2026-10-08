@@ -22197,11 +22197,22 @@ Mine (proposed):
 ### 45.6 Measurements
 
 - **M51** a curve on the wire against its drawing: the largest difference at each datagram's tick, and
-  the datagrams a second.
+  the datagrams a second. *Measured 2026-10-08* (`blackbox/osc_curves.py`, Windows, Debug, against
+  `mock_target.py --listen`): a two-second ramp of x from -5 to 5 m arrived as 101 datagrams - one a tick,
+  each in a bundle with its y and z - and every one lay within 0.029 m of the drawing at the moment it
+  arrived, counted from the first; a tick of that slope is 0.1 m. Judged within 0.25 m, off CI only.
 - **M52** from a value pushed by a device to its sample in the written curve, and how many pushes a
-  second WFS-DIY's 30 ms gives at 50 Hz.
+  second WFS-DIY's 30 ms gives at 50 Hz. *Measured 2026-10-08*, same session: from the mock's push to the
+  value read back at the curve's `ride` over HTTP, 75 to 85 ms - the push, Console's drain at the next
+  tick, the hook's sample at the one after, the publish, and the reader's own polling. By the arithmetic,
+  a push is sampled two ticks after it arrives at most; 33 pushes a second against 50 ticks leave one
+  tick in three with nothing new, and the curve holds the last value there, a sample every tick. Judged
+  within a quarter second, off CI only. How heavy a device streaming all night makes the log is still
+  the bench's (O.9's note).
 - **M53** from a push of the puck to its datagram, and what an integration of a constant push gives
-  against the arithmetic.
+  against the arithmetic. *The arithmetic is checked* (`SpaceMouseTests`: a full push at two units a
+  second steps 0.04 a tick, held to the range); *the time is owed to the bench* - there is no puck on CI
+  or within this session's reach.
 
 ### 45.7 Stages
 
@@ -22396,3 +22407,16 @@ their curves; the copy of a cue's messages as a foot part.
   The words Close 3DxWare..., Inv, the axis menu's `none` and the SpaceMouse line are mine, to put to the
   author. ZM (the left button) stays proposed and unbuilt. The puck itself is the bench's: speeds, letting go
   and an unplug mid-push, with and without 3DxWare, on all three systems.
+- **O.12, the driver, the log, the measurements** (2026-10-08). `tests/blackbox/osc_curves.py` drives
+  `wfg serve` against `mock_target.py --listen` - which now offers HOST_INFO with LISTEN, a WebSocket on its
+  HTTP port, LISTEN and IGNORE, pushes that skip the IP whose datagram caused the change (WFS-DIY's rule), a
+  hand on its own screen (`/_mock/move`), bundles taken apart and every message kept with when it arrived:
+  GO on a cue of three messages and three curves (the device receives bundles of x, y and z together, each x
+  on its drawing - M51), then a pass recorded from three pushes (each reaches the ride - M52 - and Go.dot sends
+  the address nothing while the device moves it; the curve holds 6 and -3 and starts on the old curve), the
+  LISTEN let go of with the arming, and the session replayed - 29 checks, in both locales, in ctest with no
+  hosted audio. `tests/fixtures/logs/osc-curves.wfglog` is that session's log, annotated, replayed against
+  `tests/fixtures/bundles/osc-curves` in both locales. **The driver found a fault O.4 shipped:** Esc on a
+  playing curve, or the stop a pass ends with, logged `run.ended` twice - the sweep that ends stopping runs
+  nobody owns did not count the curves as an owner, since the cue's send job hands its run over to them at
+  GO. It does now, and two unit cases say so. M51 and M52 are measured (45.6); M53's time is the bench's.

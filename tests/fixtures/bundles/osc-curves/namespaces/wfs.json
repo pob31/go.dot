@@ -1,0 +1,25 @@
+{
+  "FULL_PATH": "/wfs",
+  "DESCRIPTION": "Two sources of a wave field processor, as WFS-DIY describes them: a coordinate an address, in metres. Hand-written for the OSC curves driver (namespace draft 45, O.12).",
+  "CONTENTS": {
+    "input": {
+      "FULL_PATH": "/wfs/input",
+      "CONTENTS": {
+        "1": {
+          "FULL_PATH": "/wfs/input/1",
+          "CONTENTS": {
+            "positionX": { "FULL_PATH": "/wfs/input/1/positionX", "TYPE": "f", "ACCESS": 3, "RANGE": [{"MIN": -10.0, "MAX": 10.0}] },
+            "positionY": { "FULL_PATH": "/wfs/input/1/positionY", "TYPE": "f", "ACCESS": 3, "RANGE": [{"MIN": -10.0, "MAX": 10.0}] },
+            "positionZ": { "FULL_PATH": "/wfs/input/1/positionZ", "TYPE": "f", "ACCESS": 3, "RANGE": [{"MIN": -10.0, "MAX": 10.0}] }
+          }
+        },
+        "2": {
+          "FULL_PATH": "/wfs/input/2",
+          "CONTENTS": {
+            "positionX": { "FULL_PATH": "/wfs/input/2/positionX", "TYPE": "f", "ACCESS": 3, "RANGE": [{"MIN": -10.0, "MAX": 10.0}] }
+          }
+        }
+      }
+    }
+  }
+}

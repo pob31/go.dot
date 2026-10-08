@@ -4085,3 +4085,57 @@ TEST_CASE ("curve record: what to listen to is the armed curves' addresses, on a
     REQUIRE (rig.mounts.updateDeclaration (declaration));
     CHECK (rig.runner.listenWanted().empty());
 }
+
+TEST_CASE ("curve record: a hand's stop ends the cue's run once")
+{
+    CurveRig rig;
+    std::string curveId;
+    const auto cueId = armedPass (rig, "0 0 4 0", curveId);
+
+    rig.ticks (5);
+    rig.hear (0.5f);
+    rig.ticks (10);
+
+    REQUIRE (rig.submit ("curve.stop"));
+    rig.ticks (6);
+
+    CHECK (rig.runOf (cueId)->isFinished());
+
+    const auto& said = rig.engine.log().contents();
+    std::size_t ended = 0;
+
+    for (auto at = said.find (" run.ended "); at != std::string::npos; at = said.find (" run.ended ", at + 1))
+        ++ended;
+
+    INFO (said);
+    CHECK (ended == 1u);
+}
+
+TEST_CASE ("network cue: Esc ends a playing curve's run once")
+{
+    NetworkRig rig;
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+    curveOn (rig, cueId, 0, "0 0 4 1");
+
+    rig.fire (cueId);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.engine.submit ("cli", "run.stopAll", {}));
+
+    for (int n = 0; n < 6; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (cueId)->isFinished());
+
+    const auto& said = rig.engine.log().contents();
+    std::size_t ended = 0;
+
+    for (auto at = said.find (" run.ended "); at != std::string::npos; at = said.find (" run.ended ", at + 1))
+        ++ended;
+
+    INFO (said);
+    CHECK (ended == 1u);
+}

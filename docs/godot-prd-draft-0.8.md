@@ -3824,7 +3824,9 @@ Mackie vs HUI first — first week with the D700.
   against its drawing, and the datagrams a second; **M52** - from a value a device pushes to its
   sample in the written curve, and how many of WFS-DIY's 30 ms pushes a 50 Hz tick takes; **M53** -
   from a push of the SpaceMouse to its datagram, and a constant push integrated against the
-  arithmetic.
+  arithmetic. *Measured 2026-10-08* (namespace draft §45.6): M51, 101 datagrams over two seconds, each
+  within 0.029 m of the drawing on a 5 m/s ramp; M52, 75 to 85 ms from a push to the curve's ride read
+  back over HTTP; M53's arithmetic checked, its time owed to the bench.
 
 ---
 

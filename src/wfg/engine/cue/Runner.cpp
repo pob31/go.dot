@@ -13924,7 +13924,11 @@ namespace wfg::cue
                     black, not on the press. */
                 || std::any_of (showing.begin(), showing.end(),
                                 [&snapshot, tick] (const VideoJob& job)
-                                { return job.self == snapshot.id && job.endsAtTick > tick; });
+                                { return job.self == snapshot.id && job.endsAtTick > tick; })
+                /*  AN OSC CUE'S CURVES (namespace draft 45): `advanceCurves` ends
+                    its run where Esc found it - and its send job was handed over
+                    to the curves at GO, so `sending` no longer claims it. */
+                || isCurving (snapshot.id);
 
             if (! owned)
                 engine.submit (origin::engine, "run.ended", one (snapshot.id));

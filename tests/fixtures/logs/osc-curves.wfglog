@@ -1,0 +1,43 @@
+# wfg-log 1
+# fixture osc-curves - an OSC cue's curves played into a device, and a pass
+# recorded from what the device pushed (namespace draft 45, O.12).
+#
+# Taken from a session of tests/blackbox/osc_curves.py against mock_target.py
+# --listen, on the bundle beside it. What the curves SENT is not here, and that
+# is the point: a curve's datagrams are an output of the document and the
+# clock, recomputed on the night and never logged (O.4), so a replay of this
+# log reaches the same tree and puts nothing on any wire. What the device SAID
+# is here - the read-backs after the GO, and the three values a hand pushed
+# while the pass ran, as `mount.heard` - because a replay has no socket to hear
+# them from (O.10).
+#
+# GO on the cue of three messages and three curves; its observation sweep; its
+# run done by its wait at the end of its two seconds.
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+A 1 0 udp:127.0.0.1:50678 cue.fire s:"M0VE0001" s:"YXEGE747"
+A 4 1 mount:WFSMNT01 mount.readback s:"WFSMNT01" s:"/wfs/input/1/positionX" f:-4.9 T h:2
+A 4 2 mount:WFSMNT01 mount.readback s:"WFSMNT01" s:"/wfs/input/1/positionY" f:0.06 T h:2
+A 5 3 mount:WFSMNT01 mount.readback s:"WFSMNT01" s:"/wfs/input/1/positionZ" f:0.94 T h:2
+A 101 4 engine run.ended s:"YXEGE747"
+#
+# The second cue armed, its curve armed, a pass started: the run the pass made.
+A 107 5 udp:127.0.0.1:50679 curve.arm s:"REC00002"
+A 107 6 udp:127.0.0.1:50680 curve.rec s:"CRVR0001" T
+A 116 7 udp:127.0.0.1:50681 curve.record d:0 s:"H028HW28"
+#
+# Three values the device pushed down its LISTEN socket, a hand on its own
+# screen - heard, kept as observations, and sampled into the pass.
+A 139 8 mount:WFSMNT01 mount.heard s:"WFSMNT01" s:"/wfs/input/2/positionX" f:2
+A 167 9 mount:WFSMNT01 mount.heard s:"WFSMNT01" s:"/wfs/input/2/positionX" f:6
+A 196 10 mount:WFSMNT01 mount.heard s:"WFSMNT01" s:"/wfs/input/2/positionX" f:-3
+#
+# The hand stops the pass: the curve written in one node.setMany (one step of
+# undo), the pass said kept, the cue stopped gracefully and its run ended once.
+A 225 11 udp:127.0.0.1:50683 curve.stop
+A 226 12 engine node.setMany s:"/godot/curve/CRVR0001/points" s:"0 0 0.43 0 0.48 2 1.02 2 1.04 6 1.6 6 1.62 -3 2.18 -3 2.23 0 30 0"
+A 226 13 engine curve.stop s:"kept" i:10 s:"CRVR0001"
+A 226 14 engine run.stop s:"H028HW28"
+A 227 15 engine run.ended s:"H028HW28"
+#
+# And the arming let go of, and the LISTEN with it.
+A 229 16 udp:127.0.0.1:50684 curve.free

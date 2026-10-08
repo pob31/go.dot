@@ -960,6 +960,12 @@ back, an old show saves unchanged, and CI is green.
 **Needs from the author:** WFS-DIY live - bundles, LISTEN, no echo, one machine and two; the
 SpaceMouse Compact on each system, with and without 3DxWare; the window's words.
 
+**Built 2026-10-08, O.0-O.12** (namespace draft §45.9): O.6 folded into O.7. The driver
+(`blackbox/osc_curves.py`) plays a cue of three curves into a device as bundles and records a pass from
+what the device pushes over LISTEN, and the session replays; M51 and M52 are measured, M53's time and
+everything above under "Needs from the author" are the bench's. The SpaceMouse is built against a puck
+nobody here has pushed.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

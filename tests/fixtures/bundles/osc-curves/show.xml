@@ -1,0 +1,26 @@
+<Show>
+  <Lists>
+    <List id="R7KQM2X4" name="Cues">
+      <Osc id="M0VE0001" address="/wfs/input/1/positionX" duration="2" name="Source one crosses" number="1" value="f:0">
+        <Curve id="CRVX0001" arg="0" points="0 -5 2 5"/>
+        <Message id="MSGY0001" address="/wfs/input/1/positionY" value="f:0">
+          <Curve id="CRVY0001" arg="0" points="0 0 2 3"/>
+        </Message>
+        <Message id="MSGZ0001" address="/wfs/input/1/positionZ" value="f:1">
+          <Curve id="CRVZ0001" arg="0" points="0 1 2 -1"/>
+        </Message>
+      </Osc>
+      <Osc id="REC00002" address="/wfs/input/2/positionX" name="Source two, recorded" number="2" value="f:0">
+        <Curve id="CRVR0001" arg="0" points="0 0 30 0"/>
+      </Osc>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="WFSMNT01" bundles="true" namespace="namespaces/wfs.json" port="9000" prefix="/wfs" queryPort="5005" readback="oscquery" rx="true"/>
+  </Mounts>
+  <Audio tracks="0"/>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

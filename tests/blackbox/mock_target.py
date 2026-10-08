@@ -26,6 +26,15 @@ WHAT IT IS. A UDP socket that listens for OSC and remembers what it was told,
 and an HTTP server that answers OSCQuery questions about it. Between them that
 is the whole of what a mounted target does.
 
+AND, WITH --listen, A DEVICE THAT PUSHES (namespace draft 45, O.10), as WFS-DIY
+does: HOST_INFO offers LISTEN, the HTTP port takes a WebSocket, a LISTEN or an
+IGNORE names an address, and a value that changes is pushed down the socket as
+one binary OSC message - never to the IP whose datagram caused the change,
+which is WFS-DIY's rule and why Go.dot playing a curve into it cannot loop back.
+`/_mock/move<address>?<value>` is a hand on the device's own screen: a change
+nobody's datagram caused, pushed to every listener. A bundle arriving is taken
+apart and counted, and every message is kept with the moment it arrived.
+
 FOUR BEHAVIOURS, because those are the four a real device has and each sends a
 different person to look at a different thing:
 
@@ -47,12 +56,15 @@ mistake they both made.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import socket
 import struct
 import sys
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 
 HOST = "127.0.0.1"
 
@@ -101,6 +113,118 @@ def osc_decode(data: bytes):
     return address, args
 
 
+def osc_unbundle(data: bytes, out: list) -> bool:
+    """Every message of a packet into `out`, a bundle taken apart however deep.
+    True when the packet was a bundle."""
+    if not data.startswith(b"#bundle\0"):
+        decoded = osc_decode(data)
+
+        if decoded is not None:
+            out.append(decoded)
+
+        return False
+
+    at = 16                                         # the marker and the time tag
+
+    while at + 4 <= len(data):
+        size = struct.unpack_from(">i", data, at)[0]
+        at += 4
+
+        if size < 0 or at + size > len(data):
+            break
+
+        osc_unbundle(data[at:at + size], out)
+        at += size
+
+    return True
+
+
+def osc_encode(address: str, args) -> bytes:
+    """One OSC message of floats, integers and strings: what a push carries."""
+    def pad(raw: bytes) -> bytes:
+        raw += b"\0"
+        return raw + b"\0" * (-len(raw) % 4)
+
+    tags, body = ",", b""
+
+    for arg in args:
+        if isinstance(arg, bool):
+            tags += "T" if arg else "F"
+        elif isinstance(arg, int):
+            tags += "i"; body += struct.pack(">i", arg)
+        elif isinstance(arg, float):
+            tags += "f"; body += struct.pack(">f", arg)
+        else:
+            tags += "s"; body += pad(str(arg).encode("utf-8"))
+
+    return pad(address.encode("utf-8")) + pad(tags.encode("ascii")) + body
+
+
+# --------------------------------------------------------------------------- WebSocket
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+class Listener:
+    """One WebSocket that asked to be told about some addresses."""
+
+    def __init__(self, sock: socket.socket, ip: str):
+        self.sock = sock
+        self.ip = ip
+        self.lock = threading.Lock()
+        self.addresses = set()
+
+    def send(self, opcode: int, payload: bytes) -> None:
+        header = bytes([0x80 | opcode])
+        size = len(payload)
+
+        if size < 126:
+            header += bytes([size])
+        elif size < 65536:
+            header += bytes([126]) + struct.pack(">H", size)
+        else:
+            header += bytes([127]) + struct.pack(">Q", size)
+
+        with self.lock:
+            try:
+                self.sock.sendall(header + payload)
+            except OSError:
+                pass
+
+
+def read_exactly(sock: socket.socket, count: int) -> bytes:
+    data = b""
+
+    while len(data) < count:
+        chunk = sock.recv(count - len(data))
+
+        if not chunk:
+            raise ConnectionError("closed")
+
+        data += chunk
+
+    return data
+
+
+def read_frame(sock: socket.socket):
+    """`(opcode, payload)` of one frame from a client - masked, as RFC 6455
+    requires of every client frame."""
+    first, second = read_exactly(sock, 2)
+    size = second & 0x7F
+
+    if size == 126:
+        size = struct.unpack(">H", read_exactly(sock, 2))[0]
+    elif size == 127:
+        size = struct.unpack(">Q", read_exactly(sock, 8))[0]
+
+    mask = read_exactly(sock, 4) if second & 0x80 else b"\0\0\0\0"
+    payload = bytearray(read_exactly(sock, size))
+
+    for at in range(len(payload)):
+        payload[at] ^= mask[at % 4]
+
+    return first & 0x0F, bytes(payload)
+
+
 # --------------------------------------------------------------------------- state
 class Device:
     """What the box currently believes, and how honest it is about it."""
@@ -112,11 +236,16 @@ class Device:
         self.values = {}
         self.received = 0
         self.messages = []
+        self.timed = []
+        self.bundles = 0
+        self.listeners = []
+        self.started = time.monotonic()
 
-    def note(self, address: str, args):
+    def note(self, address: str, args, sender_ip: "str | None" = None, bundle: int = -1):
         with self.lock:
             self.received += 1
             self.messages.append([address, list(args)])
+            self.timed.append([time.monotonic() - self.started, bundle, address, list(args)])
 
             if not args:
                 return
@@ -125,6 +254,31 @@ class Device:
                 self.values[address] = self.alter_to
             else:
                 self.values[address] = args[0]
+
+        #  AND TOLD TO WHOEVER LISTENS - but never to the IP that said it (WFS-DIY).
+        self.push(address, list(args), skip_ip=sender_ip)
+
+    def move(self, address: str, value) -> None:
+        """A hand on the device's own screen: nobody's datagram, every listener told."""
+        with self.lock:
+            self.values[address] = value
+
+        self.push(address, [value], skip_ip=None)
+
+    def push(self, address: str, args, skip_ip: "str | None") -> None:
+        with self.lock:
+            targets = [listener for listener in self.listeners
+                       if address in listener.addresses and listener.ip != skip_ip]
+
+        packet = osc_encode(address, args)
+
+        for listener in targets:
+            listener.send(0x2, packet)
+
+    def count_bundle(self) -> int:
+        with self.lock:
+            self.bundles += 1
+            return self.bundles
 
     def value_of(self, address: str):
         with self.lock:
@@ -141,6 +295,14 @@ class Device:
         with self.lock:
             return [list(message) for message in self.messages]
 
+    def everything_timed(self) -> list:
+        with self.lock:
+            return [list(message) for message in self.timed]
+
+    def listening(self) -> int:
+        with self.lock:
+            return sum(len(listener.addresses) for listener in self.listeners)
+
 
 # --------------------------------------------------------------------------- UDP
 def listen_udp(device: Device, port_out) -> socket.socket:
@@ -151,27 +313,63 @@ def listen_udp(device: Device, port_out) -> socket.socket:
     def run():
         while True:
             try:
-                data, _ = sock.recvfrom(65536)
+                data, sender = sock.recvfrom(65536)
             except OSError:
                 return
 
-            decoded = osc_decode(data)
+            messages = []
+            bundle = device.count_bundle() if osc_unbundle(data, messages) else -1
 
-            if decoded is not None:
-                device.note(*decoded)
+            for address, args in messages:
+                device.note(address, args, sender_ip=sender[0], bundle=bundle)
 
     threading.Thread(target=run, daemon=True).start()
     return sock
 
 
 # --------------------------------------------------------------------------- HTTP
-def make_handler(device: Device):
+def make_handler(device: Device, listens: bool, osc_port_of):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass                                    # quiet: the driver owns stdout
 
         def do_GET(self):                           # noqa: N802 (http.server's name)
             path, _, query = self.path.partition("?")
+
+            #  A WEBSOCKET, on the HTTP port as WFS-DIY's is (O.10).
+            if listens and self.headers.get("Upgrade", "").lower() == "websocket":
+                self.websocket()
+                return
+
+            if listens and query == "HOST_INFO":
+                self.reply(200, {"NAME": "mock", "OSC_PORT": osc_port_of(), "OSC_TRANSPORT": "UDP",
+                                 "EXTENSIONS": {"VALUE": True, "LISTEN": True}})
+                return
+
+            #  A HAND ON THE DEVICE'S OWN SCREEN, and what arrived when, and how
+            #  many bundles (O.12).
+            if path.startswith("/_mock/move/"):
+                try:
+                    device.move(path[len("/_mock/move"):], float(query))
+                except ValueError:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+
+                self.reply(200, {"VALUE": [True]})
+                return
+
+            if path == "/_mock/timed":
+                self.reply(200, {"VALUE": device.everything_timed()})
+                return
+
+            if path == "/_mock/bundles":
+                self.reply(200, {"VALUE": [device.bundles]})
+                return
+
+            if path == "/_mock/listening":
+                self.reply(200, {"VALUE": [device.listening()]})
+                return
 
             #  HOW MANY DATAGRAMS ARRIVED, which is not OSCQuery and is under a
             #  path no namespace can collide with. A driver that means "only
@@ -216,6 +414,55 @@ def make_handler(device: Device):
 
             self.reply(200, {"VALUE": [value]})
 
+        def websocket(self) -> None:
+            key = self.headers.get("Sec-WebSocket-Key", "")
+            accept = base64.b64encode(hashlib.sha1((key + WS_GUID).encode("ascii")).digest()).decode("ascii")
+            self.send_response(101, "Switching Protocols")
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", accept)
+            self.end_headers()
+            self.wfile.flush()
+
+            listener = Listener(self.connection, self.client_address[0])
+
+            with device.lock:
+                device.listeners.append(listener)
+
+            try:
+                while True:
+                    opcode, payload = read_frame(self.connection)
+
+                    if opcode == 0x8:                       # close
+                        listener.send(0x8, payload[:2])
+                        break
+
+                    if opcode == 0x9:                       # ping
+                        listener.send(0xA, payload)
+                        continue
+
+                    if opcode != 0x1:
+                        continue
+
+                    try:
+                        said = json.loads(payload.decode("utf-8"))
+                    except ValueError:
+                        continue
+
+                    with device.lock:
+                        if said.get("COMMAND") == "LISTEN":
+                            listener.addresses.add(said.get("DATA", ""))
+                        elif said.get("COMMAND") == "IGNORE":
+                            listener.addresses.discard(said.get("DATA", ""))
+            except (ConnectionError, OSError, ValueError):
+                pass
+            finally:
+                with device.lock:
+                    if listener in device.listeners:
+                        device.listeners.remove(listener)
+
+                self.close_connection = True
+
         def reply(self, status: int, body) -> None:
             encoded = json.dumps(body).encode("utf-8")
             self.send_response(status)
@@ -234,6 +481,8 @@ def main() -> int:
                         choices=("agree", "alter", "silent", "deaf"))
     parser.add_argument("--alter-to", type=float, default=0.0,
                         help="what an `alter` device reports instead")
+    parser.add_argument("--listen", action="store_true",
+                        help="offer LISTEN on a WebSocket at the HTTP port, as WFS-DIY does")
     args = parser.parse_args()
 
     device = Device(args.behaviour, args.alter_to)
@@ -245,7 +494,11 @@ def main() -> int:
     server = None
 
     if args.behaviour != "deaf":
-        server = HTTPServer((HOST, 0), make_handler(device))
+        #  Threaded with --listen: a WebSocket holds its request thread for as
+        #  long as it is open, and the questions must still be answered.
+        kind = ThreadingHTTPServer if args.listen else HTTPServer
+        server = kind((HOST, 0), make_handler(device, args.listen, lambda: ports[0]))
+        server.daemon_threads = True
         query_port = server.server_address[1]
 
     # The ports, on one line, flushed: the driver reads this to find out where
