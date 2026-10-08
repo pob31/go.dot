@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -278,6 +279,93 @@ TEST_CASE ("video: the shader header was made from the shader source")
     const auto stamp = header.upToFirstOccurrenceOf ("\n", false, false).trim().toStdString();
 
     CHECK (stamp == "// source-sha256: " + hash);
+}
+
+TEST_CASE ("video gpu: each program and each way of laying draws alone, said as it goes")
+{
+    /*  ONE DRAW AT A TIME, each committed and read back before the next, and
+        each said on the error stream before it is tried - so a driver that
+        falls over on one of them (Mesa's llvmpipe ran out of memory on the
+        Linux runner, 2026-10-08) is named by the line before the fall. */
+    Device device;
+
+    if (! device.open)
+        return;
+
+    const auto say = [] (const std::string& what)
+    {
+        std::fprintf (stderr, "video gpu: drawing %s\n", what.c_str());
+        std::fflush (stderr);
+    };
+
+    say ("on " + video::gpu::describe());
+
+    Pictures pictures;
+    pictures.images["picture.png"] = gradientPicture (8, 6);
+
+    video::render::Painter painter (pictures);
+    std::string why;
+    say ("nothing: the shaders made");
+    REQUIRE_MESSAGE (painter.make (why), why);
+
+    region::ConfigReading config;
+    config.canvases.push_back ({ "C1", 16, 16 });
+
+    std::vector<std::pair<std::string, region::LayerReading>> draws;
+
+    for (const auto& [word, blend] : std::vector<std::pair<std::string, region::Blend>> {
+             { "normal", region::Blend::normal }, { "add", region::Blend::add },
+             { "screen", region::Blend::screen }, { "multiply", region::Blend::multiply } })
+    {
+        auto fill = layerOf ("L1", region::Source::fill, 1.0, 1);
+        fill.paint = 0x808080u;
+        fill.blend = blend;
+        draws.push_back ({ "a fill, " + word, fill });
+    }
+
+    auto shown = layerOf ("L2", region::Source::picture, 1.0, 1);
+    shown.file = "picture.png";
+    draws.push_back ({ "a picture", shown });
+
+    auto graded = shown;
+    graded.grade.contrast = 120.0;
+    draws.push_back ({ "a picture, graded", graded });
+
+    auto shape = layerOf ("L3", region::Source::mask, 1.0, 1);
+    shape.shape.count = 3;
+    shape.shape.x[0] = 0.1f; shape.shape.y[0] = 0.1f;
+    shape.shape.x[1] = 0.9f; shape.shape.y[1] = 0.1f;
+    shape.shape.x[2] = 0.5f; shape.shape.y[2] = 0.9f;
+    draws.push_back ({ "a mask", shape });
+
+    std::int64_t sample = 100;
+
+    for (const auto& [what, layer] : draws)
+    {
+        say (what);
+        painter.beginFrame (config, { layer }, {});
+        painter.canvas ("C1", ++sample);
+        sg_commit();
+
+        std::vector<float> rgba;
+        int w = 0, h = 0;
+        CHECK (video::gpu::readBack (painter.canvasImage ("C1"), rgba, w, h));
+        painter.endFrame();
+    }
+
+    region::OutputReading output;
+    output.id = "O1";
+    output.canvas = "C1";
+    output.cdl.slope[0] = 0.5;
+    say ("an output through its warp, calibrated");
+    painter.beginFrame (config, { draws.front().second }, {});
+    painter.drawOutput (output, ++sample, painter.offscreenTarget ("O1", 16, 16, SG_PIXELFORMAT_RGBA8));
+    sg_commit();
+    std::vector<float> rgba;
+    int w = 0, h = 0;
+    CHECK (video::gpu::readBack (painter.offscreenImage ("O1"), rgba, w, h));
+    painter.endFrame();
+    say ("everything");
 }
 
 TEST_CASE ("video gpu: the GPU composites a canvas as the reference compositor says (R.1)")
