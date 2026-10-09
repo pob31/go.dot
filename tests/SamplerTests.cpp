@@ -32,9 +32,11 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include "TestSupport.h"
+#include "FakeVideoSink.h"
 
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/RunModel.h>
+#include <wfg/engine/video/DcaOpacity.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
@@ -1528,4 +1530,206 @@ TEST_CASE ("sampler: a sound locked to a movie stands in a bank beside its movie
     //  Its movie plays it, never a strip: no strip, where a sound beside it has one.
     CHECK (rig.published ("/godot/cue/" + sound.id + "/stripNow").empty());
     CHECK_FALSE (rig.published ("/godot/cue/" + plain.id + "/stripNow").empty());
+}
+
+namespace
+{
+    /*  PICTURES ON THE RIG'S STRIPS (namespace draft §49): a canvas, a picture
+        side of the test's own, and video members made into a bank. */
+    struct Pictures
+    {
+        explicit Pictures (Rig& rigToUse) : rig (rigToUse)
+        {
+            rig.runner.setVideo (&sink);
+            canvas = rig.document.createCanvas ("Stage").id;
+            REQUIRE_FALSE (canvas.empty());
+        }
+
+        std::string member (const std::string& bank, const std::string& source, const std::string& file = {})
+        {
+            std::vector<std::pair<std::string, std::string>> attributes { { "source", source }, { "canvas", canvas } };
+
+            if (! file.empty())
+                attributes.emplace_back ("file", file);
+
+            auto& members = rig.membersOf[bank];
+            const auto made = rig.document.createCue (bank, static_cast<int> (members.size()), "video",
+                                                      "A " + source, {}, attributes);
+            REQUIRE (made.ok);
+            members.push_back (made.id);
+            return made.id;
+        }
+
+        //  The DCA factor last placed on a picture's layer: how solid its fader leaves it.
+        double factorOf (const std::string& runId)
+        {
+            const auto& placed = sink.geometry[runId][video::Property::dca];
+            return placed.empty() ? 1.0 : placed.back().value;
+        }
+
+        Rig& rig;
+        testing::FakeVideoSink sink;
+        std::string canvas;
+    };
+}
+
+TEST_CASE ("sampler: a picture member is armed onto its strip with no voice, and a sound beside it takes the track (§49)")
+{
+    Rig rig { 1 };
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Mixed", 3, 0);
+    const auto still = pictures.member (bank, "picture", "still.png");
+    const auto sound = rig.document.createCue (bank, 1, "media", "Thunder").id;
+    rig.set ("/godot/cue/" + sound + "/file", "thunder.wav");
+    rig.membersOf[bank].push_back (sound);
+
+    rig.arm (bank);
+
+    /*  ON ITS STRIP, ARMED, WITH NO TRACK: a picture has no voice to hold, and
+        the one track the show has is the sound's. */
+    const auto* picture = rig.liveRunOf (still);
+    REQUIRE (picture != nullptr);
+    CHECK (picture->sampler);
+    CHECK (picture->track < 0);
+    CHECK (picture->state == cue::runState::armed);
+    CHECK (rig.holds (picture, rig.strips[0]));
+
+    const auto* voice = rig.liveRunOf (sound);
+    REQUIRE (voice != nullptr);
+    CHECK (rig.holds (voice, rig.strips[1]));
+    CHECK (voice->track == 0);
+
+    CHECK (rig.published ("/godot/cue/" + still + "/stripNow") == rig.strips[0]);
+
+    /*  AND IT STAYS THE ONE RUN: armed once, not spawned again every tick. */
+    for (int n = 0; n < 100; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runsOf (still) == 1u);
+    CHECK (rig.runsOf (sound) == 1u);
+    CHECK (rig.liveRunOf (still)->track < 0);
+}
+
+TEST_CASE ("sampler: a press brings a picture of any kind up, and its fader is how solid it is (§49, AAV, AAW)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const std::vector<std::pair<std::string, std::string>> kinds {
+        { "fill", "" }, { "mask", "" }, { "picture", "still.png" }, { "movie", "clip.mov" }, { "capture", "" } };
+
+    std::vector<std::string> members;
+
+    for (const auto& [source, file] : kinds)
+        members.push_back (pictures.member (bank, source, file));
+
+    //  The second waits six dB down its fader.
+    rig.set ("/godot/cue/" + members[1] + "/initialLevel", "-6");
+
+    rig.arm (bank);
+
+    for (std::size_t n = 0; n < members.size(); ++n)
+        rig.send ("strip.press", { osc::Value::string (rig.strips[n]) }, "window");
+
+    rig.tickOnce();
+    rig.tickOnce();
+
+    for (std::size_t n = 0; n < members.size(); ++n)
+    {
+        INFO ("a " << kinds[n].first);
+        const auto* run = rig.liveRunOf (members[n]);
+        REQUIRE (run != nullptr);
+        CHECK (run->state == cue::runState::playing);
+
+        const auto* shown = pictures.sink.shownFor (run->id);
+        REQUIRE (shown != nullptr);
+        CHECK (shown->source == kinds[n].first);
+    }
+
+    /*  WHERE ITS FADER WAITS IS HOW SOLID IT COMES UP: along the fader's travel,
+        as a DCA's trim is (WE) - and all of it at nought. */
+    const auto& first = rig.liveRunOf (members[0])->id;
+    const auto& second = rig.liveRunOf (members[1])->id;
+    CHECK (pictures.factorOf (first) == doctest::Approx (1.0));
+    CHECK (pictures.factorOf (second) == doctest::Approx (video::opacityForTrim (-6.0)));
+
+    /*  AND A HAND ON THE FADER RIDES IT. */
+    rig.send ("node.set", { osc::Value::string ("/godot/run/" + first + "/trim"), osc::Value::float64 (-20.0) },
+              "window");
+    rig.tickOnce();
+    CHECK (pictures.factorOf (first) == doctest::Approx (video::opacityForTrim (-20.0)));
+
+    rig.send ("node.set", { osc::Value::string ("/godot/run/" + first + "/trim"), osc::Value::float64 (-120.0) },
+              "window");
+    rig.tickOnce();
+    CHECK (pictures.factorOf (first) == doctest::Approx (0.0));
+}
+
+TEST_CASE ("sampler: a hand landing on a picture's fader brings it up where the fader is, and velocity sets it (§49)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const auto touched = pictures.member (bank, "fill");
+    const auto struck = pictures.member (bank, "fill");
+    rig.set ("/godot/cue/" + touched + "/initialLevel", "-12");
+    rig.set ("/godot/cue/" + struck + "/velocity", "true");
+
+    rig.arm (bank);
+
+    //  TOUCH-START, at the level the fader waits at.
+    const auto trim = "/godot/run/" + rig.liveRunOf (touched)->id + "/trim";
+    rig.send ("node.touch", { osc::Value::string (trim) }, "surface:DESK");
+
+    REQUIRE (rig.tickUntil ([&rig, &touched]
+                            {
+                                const auto* run = rig.liveRunOf (touched);
+                                return run != nullptr && run->state == cue::runState::playing;
+                            }));
+    rig.tickOnce();
+
+    const auto touchedRun = rig.liveRunOf (touched)->id;
+    REQUIRE (pictures.sink.shownFor (touchedRun) != nullptr);
+    CHECK (pictures.factorOf (touchedRun) == doctest::Approx (video::opacityForTrim (-12.0)));
+
+    //  A PAD STRUCK SOFTLY, its velocity the picture's level.
+    rig.send ("strip.press", { osc::Value::string (rig.strips[1]), osc::Value::int32 (40) }, "window");
+    rig.tickOnce();
+
+    const auto* run = rig.liveRunOf (struck);
+    REQUIRE (run != nullptr);
+    CHECK (run->trim < 0.0);
+    CHECK (pictures.factorOf (run->id) == doctest::Approx (video::opacityForTrim (run->trim)));
+}
+
+TEST_CASE ("sampler: two pictures on one layer lie the later pressed on top, and a member fired by name is pressed (§49, AAY)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const auto a = pictures.member (bank, "fill");
+    const auto b = pictures.member (bank, "fill");
+
+    rig.arm (bank);
+
+    //  B first, then A: A comes up later, so it lies on top of B on their one layer.
+    rig.send ("strip.press", { osc::Value::string (rig.strips[1]) }, "window");
+    rig.send ("cue.fire", { osc::Value::string (a) }, "window");
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto* shownA = pictures.sink.shownFor (rig.liveRunOf (a)->id);
+    const auto* shownB = pictures.sink.shownFor (rig.liveRunOf (b)->id);
+    REQUIRE (shownA != nullptr);
+    REQUIRE (shownB != nullptr);
+    CHECK (shownA->layer == shownB->layer);
+    CHECK (shownA->order > shownB->order);
+
+    //  Fired by name, it was a press of its strip: the same run, armed on it.
+    CHECK (rig.runsOf (a) == 1u);
+    CHECK (rig.holds (rig.liveRunOf (a), rig.strips[0]));
 }

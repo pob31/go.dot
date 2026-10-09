@@ -7214,8 +7214,10 @@ namespace wfg::cue
                 if (freeTracks <= 0)
                     break;
 
+                /*  A PICTURE HAS NO VOICE (namespace draft §49): it would take a
+                    track for its file and spend one a sound is waiting for. */
                 if (child->isFinished() || ! child->sampler || child->track >= 0
-                     || child->state != runState::armed)
+                     || child->state != runState::armed || child->kind != "media")
                     continue;
 
                 if (std::find (child->claims.begin(), child->claims.end(), child->strip)
@@ -12297,8 +12299,20 @@ namespace wfg::cue
             else if (origin != origin::engine)
                 liftParkedFader (*run, cue);
 
-            run->launchRequested = true;
-            run->launchRequestedAtTick = tick;
+            /*  A PICTURE COMES UP NOW (namespace draft §49): it has no voice to
+                wait for, so the press fires it, and the next pass of
+                `advanceVideo` places it a horizon ahead - the same horizon a
+                sound's launch is placed on. Not through `launchRun`: a pre-wait
+                is a GO's, and a hand's press ignores it, as a sound's does
+                (ABD). A sound's press asks the audio side to launch. */
+            const auto picture = run->kind == "video";
+
+            if (! picture)
+            {
+                run->launchRequested = true;
+                run->launchRequestedAtTick = tick;
+            }
+
             run->prepare.clear();
 
             if (hold)
@@ -12309,6 +12323,10 @@ namespace wfg::cue
 
             notePlayed (*run);
             step();
+
+            if (picture)
+                fireNow (engine, tick, run->id);
+
             return {};
         }
 
@@ -12330,12 +12348,26 @@ namespace wfg::cue
             return {};
         }
 
+        /*  A PICTURE WITHOUT A PLAYHEAD HAS NO TOP to go back to (namespace
+            draft §49, ABD): a restart of a still, a fill, a mask or a capture
+            does nothing. */
+        const auto movie = run->kind == "video" && textOf (cue, "source") == "movie";
+
+        if (run->kind == "video" && ! movie)
+            return {};
+
         if (byVelocity)
             run->trim = levelForByte (velocity, floor);
 
-        /*  FROM THE TOP, AND ITS FIRST PASS: a restart, not a scrub. */
+        /*  FROM THE TOP, AND ITS FIRST PASS: a restart, not a scrub - a movie
+            from where GO starts it, its locked sounds with it. */
         notePlayed (*run);
-        seekMedia (engine, tick, run->id, 0.0, false);
+
+        if (movie)
+            seekMovie (engine, tick, run->id, movieStartOf (cue).seconds, false);
+        else
+            seekMedia (engine, tick, run->id, 0.0, false);
+
         step();
         return {};
     }
@@ -12448,16 +12480,19 @@ namespace wfg::cue
             same door a sampler member takes a voice by. */
         if (cue.isValid() && cue.hasType ("Mic"))
             armMic (engine, cue, runId);
-        else if (cue.isValid())
+        else if (cue.isValid() && cue.hasType ("Media"))
             armMedia (engine, cue, runId);
+
+        //  A picture has no voice to take (namespace draft §49): nothing to arm.
     }
 
     bool Runner::isSamplerMember (const std::string& cueId) const
     {
         const auto cue = document.findById (cueId);
 
-        //  Not a sound its movie plays (namespace draft §49, ABE): fired by name, it plays as anywhere else.
-        if (! cue.isValid() || kindOfCue (cue) != "media" || followsAMovie (cue))
+        /*  A sound or a picture (namespace draft §49) - not a sound its movie
+            plays (ABE): fired by name, that one plays as anywhere else. */
+        if (! cue.isValid() || (kindOfCue (cue) != "media" && kindOfCue (cue) != "video") || followsAMovie (cue))
             return false;
 
         const auto parent = cue.getParent();
@@ -14270,7 +14305,7 @@ namespace wfg::cue
                 if (const auto* parent = runs.find (parentRun))
                     if (const auto parentCue = document.findById (parent->cue);
                         parentCue.isValid() && textOf (parentCue, "mode") == "sampler"
-                          && kind == "media")
+                          && (kind == "media" || kind == "video"))
                     {
                         adopted->sampler = true;
                         const auto stripId = stripForMember (parentCue, cueId);
@@ -14339,8 +14374,13 @@ namespace wfg::cue
             at every handover" is simply a fresh run. A strip another group's
             clip is still sounding on is WAITED for, and the member is armed
             when it lands: a voice held for a strip nobody can press would be a
-            voice for nothing. */
-        if (kind == "media")
+            voice for nothing.
+
+            A PICTURE THE SAME (namespace draft §49): its strip, and its trim at
+            `initialLevel` - its fader's place, which is how solid it comes up
+            (AAV, AAW). Nothing to arm: no voice, no file opened here - the
+            read-ahead has it (ABF). */
+        if (kind == "media" || kind == "video")
             if (const auto* parent = runs.find (parentRun))
                 if (const auto parentCue = document.findById (parent->cue);
                     parentCue.isValid() && textOf (parentCue, "mode") == "sampler")
@@ -16909,22 +16949,28 @@ namespace wfg::cue
 
     double Runner::videoDcaFactorOf (const Run& run)
     {
-        if (dcas == nullptr)
-            return 1.0;
+        /*  A STRIP'S HAND ON A PICTURE IN A SAMPLER GROUP (namespace draft §49,
+            AAV): its fader's trim is how solid the picture is, along the
+            fader's travel as a DCA's is - asked before the DCAs, so a show with
+            none still has its hand. A group's level is still decibels of sound
+            and stays with the sound: a bank's set level reaches its sounds and
+            not its pictures (ABC, proposed; it was 37.5's for the hand too). */
+        auto total = run.sampler ? run.trim : 0.0;
 
-        /*  THE DCA TERMS ALONE: a group's level and a strip's hand are
-            decibels of sound, and stay with the sound (37.5, proposed). */
+        if (dcas == nullptr)
+            return video::opacityForTrim (total);
+
         const auto termsOf = [this] (const std::string& cueId)
         {
-            auto total = 0.0;
+            auto sum = 0.0;
 
             for (const auto& dcaId : dcaChainOf (cueId))
-                total += dcas->trimOf (dcaId);
+                sum += dcas->trimOf (dcaId);
 
-            return total;
+            return sum;
         };
 
-        auto total = termsOf (run.cue);
+        total += termsOf (run.cue);
         auto parent = run.parent;
 
         /*  BOUNDED BY THE TABLE, as the level's walk is. */

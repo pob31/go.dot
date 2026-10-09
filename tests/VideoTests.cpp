@@ -30,6 +30,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include "TestSupport.h"
+#include "FakeVideoSink.h"
 
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Readiness.h>
@@ -402,60 +403,7 @@ TEST_CASE ("video: a fixture with a picture reads and writes back to the same by
 */
 namespace
 {
-    struct FakeSink final : video::Sink
-    {
-        void show (const video::LayerSpec& spec) override  { shown.push_back (spec); events.push_back ("show " + spec.file); }
-        void restate (const video::LayerSpec& spec) override  { restated.push_back (spec); }
-
-        /*  THE OPACITY'S POINTS by layer, and every other value's by layer and
-            property: what a fade of the geometry is checked against. */
-        void move (const std::string& id, video::Property property, const video::Point& point) override
-        {
-            if (property == video::Property::opacity)
-                points[id].push_back (point);
-            else
-                geometry[id][property].push_back (point);
-        }
-
-        /*  WHAT IS READ AHEAD (namespace draft §48): the last list, every list
-            sent, and - in `events`, with the layers shown - the order the two
-            arrive in, which is what keeps a picture GO has just shown held. */
-        void prepare (const std::vector<video::Preload>& items) override
-        {
-            preloads = items;
-            preloadsSent.push_back (items);
-            prepared.clear();
-
-            for (const auto& item : items)
-                prepared.push_back (item.path);
-
-            events.push_back ("prepare");
-        }
-
-        void remove (const std::string& id, std::int64_t sample) override
-        {
-            removed.push_back ({ id, sample });
-        }
-
-        void clear() override  { ++clears; }
-
-        void canvasLevels (const std::vector<std::pair<std::string, double>>& levels) override
-        {
-            canvasLevelsSent.push_back (levels);
-        }
-
-        std::vector<std::vector<std::pair<std::string, double>>> canvasLevelsSent;
-        std::vector<video::LayerSpec> shown;
-        std::vector<video::LayerSpec> restated;
-        std::map<std::string, std::vector<video::Point>> points;
-        std::map<std::string, std::map<video::Property, std::vector<video::Point>>> geometry;
-        std::vector<std::string> prepared;
-        std::vector<video::Preload> preloads;
-        std::vector<std::vector<video::Preload>> preloadsSent;
-        std::vector<std::string> events;
-        std::vector<std::pair<std::string, std::int64_t>> removed;
-        int clears = 0;
-    };
+    using FakeSink = wfg::testing::FakeVideoSink;
 
     struct VideoRig
     {

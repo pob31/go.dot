@@ -98,15 +98,17 @@ namespace wfg::cue
     {
         std::vector<Placement> out;
 
-        /*  THE MEMBERS A SAMPLER PLAYS: media cues, enabled, in member order
-            - the Runner's `membersOf` narrowed to what a strip can play (a
-            memo among them would take a strip nothing could be played from).
-            Not a sound locked to a movie (namespace draft §49, ABE): its movie
-            plays it, and on a strip of its own it would play without its
-            picture. */
+        /*  THE MEMBERS A SAMPLER PLAYS: media cues and video cues (namespace
+            draft §49, AAZ), enabled, in member order - the Runner's `membersOf`
+            narrowed to what a strip can play (a memo among them would take a
+            strip nothing could be played from). Not a sound locked to a movie
+            (ABE): its movie plays it, and on a strip of its own it would play
+            without its picture. */
         for (const auto& child : group)
         {
-            if (child.getType().toString() != "Media" || followsAMovie (document, child))
+            const auto element = child.getType().toString();
+
+            if ((element != "Media" && element != "Video") || followsAMovie (document, child))
                 continue;
 
             const auto id = idOf (child);
