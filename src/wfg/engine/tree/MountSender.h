@@ -116,6 +116,11 @@ namespace wfg::tree
                 `mount/@bundles` (namespace draft 45). Copied at queue time with
                 the rest, for the same reason. */
             bool bundles = false;
+
+            /*  THE SERIAL PORT IT GOES DOWN instead of the network, when the
+                device's transport is serial (namespace draft §51, PC.11): the
+                datagram's bytes handed to `serialSink` to be framed in SLIP. */
+            std::string serial;
         };
 
         /*  A BUNDLE'S DATAGRAM IS CLOSED AT THIS MANY BYTES (namespace draft
@@ -144,6 +149,12 @@ namespace wfg::tree
             thing constructed, and a sender captured into a command handler
             before it cannot have been given one yet. */
         void setSocket (osc::UdpEndpoint& socket) noexcept { udp = &socket; }
+
+        /*  WHERE A DEVICE ON A SERIAL PORT IS SENT (PC.11): the port's id and
+            the packet's bytes; false when the port could not take it. Unset - a
+            replay, a rig - and such a message fails as one to nowhere does. */
+        using SerialSink = std::function<bool (const std::string& serialId, const std::vector<std::uint8_t>& packet)>;
+        void setSerialSink (SerialSink sink) { serialSink = std::move (sink); }
 
         //======================================================================
         /*  Queues one message. Tick thread.
@@ -230,6 +241,11 @@ namespace wfg::tree
         void sendBundled (const std::vector<const Message*>& messages);
 
         osc::UdpEndpoint* udp = nullptr;
+        SerialSink serialSink;
+
+        /*  One datagram's bytes to where the destination says: its serial port,
+            or its host and port. */
+        bool deliver (const Destination& to, const std::vector<std::uint8_t>& bytes);
 
         std::vector<Message> queued;          // in first-queued order
         std::map<std::string, std::size_t> queuedAt;   // address -> index in queued

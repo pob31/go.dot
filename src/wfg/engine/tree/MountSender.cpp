@@ -147,6 +147,14 @@ namespace wfg::tree
         forgetOldAnswers();
     }
 
+    bool MountSender::deliver (const Destination& to, const std::vector<std::uint8_t>& bytes)
+    {
+        if (! to.serial.empty())
+            return serialSink ? serialSink (to.serial, bytes) : false;
+
+        return udp != nullptr && to.port > 0 && udp->send (to.host, to.port, bytes);
+    }
+
     void MountSender::sendAlone (const Message& message)
     {
         auto ok = false;
@@ -157,8 +165,7 @@ namespace wfg::tree
             point of coalescing, and would be lost if the bytes were built where
             the value arrived. */
         if (const auto bytes = osc::encode (osc::Packet::message (message.address, message.values), error))
-            if (udp != nullptr && message.destination.port > 0)
-                ok = udp->send (message.destination.host, message.destination.port, *bytes);
+            ok = deliver (message.destination, *bytes);
 
         if (ok)
             ++sent[message.mountId];
@@ -192,8 +199,7 @@ namespace wfg::tree
             const auto& to = batch.front()->destination;
 
             if (const auto bytes = osc::encode (osc::Packet::bundle (osc::TimeTag {}, elements), error))
-                if (udp != nullptr && to.port > 0)
-                    ok = udp->send (to.host, to.port, *bytes);
+                ok = deliver (to, *bytes);
 
             for (const auto* message : batch)
             {
@@ -324,7 +330,8 @@ namespace wfg::tree
 
         if (const auto* declaration = mounts.declarationOf (written.mountId); declaration != nullptr && declaration->tx)
             sender.queue (written.mountId,
-                          { declaration->host, declaration->port, declaration->rateCap, declaration->bundles },
+                          { declaration->host, declaration->port, declaration->rateCap, declaration->bundles,
+                            declaration->transport == "serial" ? declaration->serial : std::string {} },
                           address, written.values);
 
         return written;

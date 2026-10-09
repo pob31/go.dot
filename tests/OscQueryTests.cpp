@@ -1953,3 +1953,49 @@ TEST_CASE ("mount listener: a device that does not answer is unreachable, and tr
     listener.stop();
     CHECK (listener.statusOf ("W0RKS000") == tree::listenStatus::off);
 }
+
+TEST_CASE ("heard: a device on a serial port is known by its port, its report kept and a stranger's still a write")
+{
+    /*  PC.11: what a SLIP port said reaches the namespace as `serial:<id>`,
+        and the heard rule keys that device by the same word. */
+    Engine engine;
+    engine.log().openInMemory ({});
+
+    std::vector<std::vector<osc::Value>> set;
+    engine.commands().add ({ "node.set", "Records what it was given.",
+                             { { "address", 's', false }, { "value", '*', false }, { "more", '*', true, true } },
+                             true,
+                             [&set] (CommandContext&, const std::vector<osc::Value>& args)
+                             {
+                                 set.push_back (args);
+                                 return Outcome::ok (args);
+                             } });
+
+    doc::ShowDocument document;
+    tree::MountTable mounts;
+    cue::RunTable runs;
+    tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    tree::TouchTable touches;
+    osc::UdpEndpoint udp;
+    EngineNamespace nameSpace { engine, parameters, touches, udp };
+
+    tree::HeardBox box;
+    auto rule = std::make_shared<tree::HeardRule>();
+    rule->byHost["serial:SR000001"].push_back ({ "ARDU0001", "/sensor" });
+    box.publish (rule);
+    nameSpace.hearFrom (box);
+
+    const osc::Values reading { osc::Value::int32 (512) };
+    nameSpace.write ("serial:SR000001", osc::Packet::message ("/sensor/light", reading));
+    nameSpace.write ("serial:SR000002", osc::Packet::message ("/sensor/light", reading));
+    engine.processTick (0);
+
+    const auto heard = box.drain (256);
+    REQUIRE (heard.size() == 1u);
+    CHECK (heard.front().mountId == "ARDU0001");
+    CHECK (heard.front().values == reading);
+
+    //  The other port is not the device's: its message is a write, as a stranger's datagram is.
+    REQUIRE (set.size() == 1u);
+    CHECK (set[0][0] == osc::Value::string ("/sensor/light"));
+}

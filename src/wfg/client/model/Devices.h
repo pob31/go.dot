@@ -126,13 +126,25 @@ namespace wfg::client::model
         /** A device with no description file. See the header. */
         bool opaque() const { return namespaceFile.empty(); }
 
+        /*  HOW IT IS REACHED (namespace draft §51, PC.11): `udp` at its host and
+            port, or `serial` - OSC over SLIP on the serial port `serial` names. */
+        std::string transport = "udp";
+        std::string serial;
+
         /*  What to put in a menu or a list: the name, or the prefix when there
             is none. A device is never a blank row - somebody has to be able to
             point at it before they have finished naming it. */
         std::string label() const;
     };
 
-    /** Every declared device, in identifier order. */
+/*  WHAT PUTS A DEVICE ON A SERIAL PORT, or back on the network (PC.11), as
+        the writes of one step: its transport and port - and the port made to
+        read OSC packets, which a device on it needs. */
+    std::vector<std::pair<std::string, std::string>> deviceOnSerial (const std::string& deviceId,
+                                                                     const std::string& serialId);
+    std::vector<std::pair<std::string, std::string>> deviceOnNetwork (const std::string& deviceId);
+
+        /** Every declared device, in identifier order. */
     std::vector<DeviceRow> readDevices (const tree::TreeSnapshot&);
 
     /*  Which device an address is aimed at, by identifier, or empty for an

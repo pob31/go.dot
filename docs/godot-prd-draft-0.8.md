@@ -3871,7 +3871,9 @@ ACG-ACU in §51.2 are the author's to overrule:
 - **Serial lines first, then OSC over SLIP as a device.** A port is an object of the show with its own
   tab (Settings, Serial, after MIDI): its path on this machine, its speed, rx and tx, how it is tonight in
   words and the last line it said; a patch hears every line at `[r /godot/serial/<id>/in]` and sends one
-  with `[s /godot/serial/<id>/out]`; each line is a `serial.heard` record, so a replay holds it.
+  with `[s /godot/serial/<id>/out]`; each line is a `serial.heard` record, so a replay holds it. A port
+  reading OSC over SLIP carries a device instead: its transport `serial`, heard, triggered, sent to and
+  recorded from as a device on the network is.
 - **Nothing a patch does is run again in a replay**; what it made Go.dot do is in the log.
 - **A small POSIX-threads stand-in** of Go.dot's own for Windows.
 - **The ready-made patches** `go.avg`, `go.minmax`, `go.smooth`, `go.scale`, `go.deadband`, `go.edge`,

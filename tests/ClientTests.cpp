@@ -11700,3 +11700,48 @@ TEST_CASE ("client: a serial port declared, said where it is, and read with its 
             ++containers;
     CHECK (containers == 1);
 }
+
+TEST_CASE ("client: a device put on a serial port, and back on the network, as the writes of one step")
+{
+    //  PC.11: the port made to read OSC, the device's port and its transport.
+    const auto onSerial = model::deviceOnSerial ("ARDU0001", "SR000001");
+    REQUIRE (onSerial.size() == 3u);
+    CHECK (onSerial[0] == std::pair<std::string, std::string> { "/godot/serial/SR000001/framing", "slip" });
+    CHECK (onSerial[1] == std::pair<std::string, std::string> { "/godot/mount/ARDU0001/serial", "SR000001" });
+    CHECK (onSerial[2] == std::pair<std::string, std::string> { "/godot/mount/ARDU0001/transport", "serial" });
+    CHECK (model::deviceOnNetwork ("ARDU0001")
+             == std::vector<std::pair<std::string, std::string>> { { "/godot/mount/ARDU0001/transport", "udp" } });
+
+    //  Applied through the commands, the device reads as on the port.
+    Rig rig;
+    rig.apply (5, "window", "serial.create", { osc::Value::string ("Arduino"), osc::Value::string ("SR000001") });
+    rig.apply (6, "window", "mount.create", { osc::Value::string ("/sensor"), osc::Value::string ("") });
+    auto devices = model::readDevices (*rig.publish (7));
+    std::string deviceId;
+    for (const auto& device : devices)
+        if (device.prefix == "/sensor")
+            deviceId = device.id;
+    REQUIRE (! deviceId.empty());
+
+    rig.apply (8, "window", "node.setMany", [&]
+    {
+        std::vector<osc::Value> args;
+        for (const auto& [address, value] : model::deviceOnSerial (deviceId, "SR000001"))
+        {
+            args.push_back (osc::Value::string (address));
+            args.push_back (osc::Value::string (value));
+        }
+        return args;
+    }());
+
+    devices = model::readDevices (*rig.publish (9));
+    for (const auto& device : devices)
+        if (device.id == deviceId)
+        {
+            CHECK (device.transport == "serial");
+            CHECK (device.serial == "SR000001");
+        }
+    const auto ports = model::readSerialPorts (*rig.publish (10));
+    REQUIRE (ports.size() == 1u);
+    CHECK (ports[0].framing == "slip");
+}

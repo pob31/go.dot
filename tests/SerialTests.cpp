@@ -326,3 +326,88 @@ TEST_CASE ("serial: the lines heard, by tick - what a patch reads after its last
     CHECK (heard.after (0).size() == 1u);
     CHECK (heard.lastLine ("SR000002") == "a");          // the last line outlives the lines
 }
+
+//==============================================================================
+/*  PC.11: OSC OVER SLIP - the framing a device on a serial port speaks, and a
+    port whose framing is slip reading and writing packets. */
+
+TEST_CASE ("serial: SLIP frames a packet at both ends and escapes what would end it")
+{
+    const std::vector<std::uint8_t> packet { 0x2F, 0xC0, 0x41, 0xDB, 0x00 };
+    const auto framed = slip::encode (packet);
+    const std::string expected { '\xC0', '\x2F', '\xDB', '\xDC', '\x41', '\xDB', '\xDD', '\x00', '\xC0' };
+    CHECK (framed == expected);
+
+    slip::Decoder decoder;
+    const auto back = decoder.feed (framed);
+    REQUIRE (back.size() == 1u);
+    CHECK (back[0] == packet);
+}
+
+TEST_CASE ("serial: SLIP read however the bytes come - split, run together, empty frames between")
+{
+    const std::vector<std::uint8_t> first { 1, 2, 3 };
+    const std::vector<std::uint8_t> second { 0xC0, 9 };
+    const auto both = slip::encode (first) + slip::encode (second);
+
+    slip::Decoder decoder;
+    std::vector<std::vector<std::uint8_t>> got;
+    for (std::size_t at = 0; at < both.size(); at += 2)
+        for (auto& packet : decoder.feed (both.substr (at, 2)))
+            got.push_back (std::move (packet));
+    REQUIRE (got.size() == 2u);
+    CHECK (got[0] == first);
+    CHECK (got[1] == second);
+    CHECK (decoder.dropped() == 0u);
+
+    //  An ESC followed by what may not follow it spoils its frame, and only that one.
+    const std::string spoiled { '\xC0', '\x01', '\xDB', '\x05', '\x02', '\xC0' };
+    CHECK (decoder.feed (spoiled + slip::encode (first)).size() == 1u);
+    CHECK (decoder.dropped() == 1u);
+
+    //  A frame past 64 kB is given up to its END.
+    std::string huge (1, '\xC0');
+    huge.append (slip::largestFrame + 10, 'x');
+    huge.push_back ('\xC0');
+    CHECK (decoder.feed (huge + slip::encode (second)).size() == 1u);
+    CHECK (decoder.dropped() == 2u);
+}
+
+TEST_CASE ("serial: a port reading OSC hands packets, sends them framed, and takes no lines")
+{
+    Bench bench;
+    auto arduino = bench.plug ("COM3");
+    SerialTable table (bench.opener());
+    auto osc = port ("SR000001", "COM3");
+    osc.framing = "slip";
+    table.reconcile ({ osc });
+    REQUIRE (within (2s, [&] { return table.stateOf ("SR000001").state == "open"; }));
+
+    const std::vector<std::uint8_t> packet { '/', 'a', 0, 0, ',', 0, 0, 0 };
+    const auto framed = slip::encode (packet);
+    arduino->say (framed.substr (0, 3));
+    arduino->say (framed.substr (3));
+
+    std::vector<std::vector<std::uint8_t>> got;
+    within (2s, [&]
+    {
+        for (auto& [id, packets] : table.takePackets (64))
+            for (auto& p : packets)
+                got.push_back (std::move (p));
+        return ! got.empty();
+    });
+    REQUIRE (got.size() == 1u);
+    CHECK (got[0] == packet);
+    CHECK (table.takeLines (64).empty());
+
+    CHECK (table.sendPacket ("SR000001", packet));
+    CHECK (within (2s, [&] { return arduino->sent() == framed; }));
+    CHECK_FALSE (table.send ("SR000001", "a line"));
+
+    //  And a port reading lines takes no packet.
+    auto lines = port ("SR000002", "COM4");
+    bench.plug ("COM4");
+    table.reconcile ({ osc, lines });
+    REQUIRE (within (2s, [&] { return table.stateOf ("SR000002").state == "open"; }));
+    CHECK_FALSE (table.sendPacket ("SR000002", packet));
+}

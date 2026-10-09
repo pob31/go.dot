@@ -1900,9 +1900,9 @@ namespace wfg::client::ui
                 g.setColour (Look::colour (theme, "ink-off"));
 
                 const auto cells = cellsFor (heading.withWidth (rowWidth()));
-                const char* names[] { "Port", "Where", "Speed", "Rx", "Tx", "Last line", "State" };
+                const char* names[] { "Port", "Where", "Speed", "Reads", "Rx", "Tx", "Last line", "State" };
 
-                for (auto at = 0; at < 7; ++at)
+                for (auto at = 0; at < 8; ++at)
                     g.drawText (names[at], cells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
             }
 
@@ -1917,7 +1917,9 @@ namespace wfg::client::ui
                 return list.getWidth();
             }
 
-            static std::array<juce::Rectangle<int>, 8> cellsFor (juce::Rectangle<int> row)
+            /*  AND WHAT IT READS (PC.11): lines for a patch, or OSC for a device
+                on it - a click turns one into the other. */
+            static std::array<juce::Rectangle<int>, 9> cellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
@@ -1926,21 +1928,22 @@ namespace wfg::client::ui
                 const auto heard = area.removeFromRight (180);
                 const auto tx = area.removeFromRight (42);
                 const auto rx = area.removeFromRight (42);
+                const auto reads = area.removeFromRight (60);
                 const auto speed = area.removeFromRight (90);
                 const auto where = area.removeFromRight (240);
 
-                return { area, where, speed, rx, tx, heard, state, cross };
+                return { area, where, speed, reads, rx, tx, heard, state, cross };
             }
 
-            enum class Cell { name, where, speed, rx, tx, heard, state, cross };
+            enum class Cell { name, where, speed, reads, rx, tx, heard, state, cross };
 
             static Cell cellAt (int x, int width)
             {
                 const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
-                const Cell order[] { Cell::name, Cell::where, Cell::speed, Cell::rx, Cell::tx, Cell::heard,
-                                     Cell::state, Cell::cross };
+                const Cell order[] { Cell::name, Cell::where, Cell::speed, Cell::reads, Cell::rx, Cell::tx,
+                                     Cell::heard, Cell::state, Cell::cross };
 
-                for (auto at = 0; at < 8; ++at)
+                for (auto at = 0; at < 9; ++at)
                     if (x >= cells[static_cast<std::size_t> (at)].getX() && x < cells[static_cast<std::size_t> (at)].getRight())
                         return order[at];
 
@@ -1972,28 +1975,29 @@ namespace wfg::client::ui
 
                 g.setColour (Look::colour (theme, "ink-dim"));
                 g.drawText (juce::String (entry.baud), cells[2], juce::Justification::centredLeft, true);
+                g.drawText (entry.framing == "slip" ? "OSC" : "lines", cells[3], juce::Justification::centredLeft, true);
 
                 for (auto at = 0; at < 2; ++at)
                 {
                     const auto on = at == 0 ? entry.rx : entry.tx;
                     g.setColour (Look::colour (theme, on ? "ink" : "ink-off"));
-                    g.drawText (on ? "ON" : "OFF", cells[static_cast<std::size_t> (3 + at)], juce::Justification::centredLeft);
+                    g.drawText (on ? "ON" : "OFF", cells[static_cast<std::size_t> (4 + at)], juce::Justification::centredLeft);
                 }
 
                 g.setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain)));
                 g.setColour (Look::colour (theme, entry.lastLine.empty() ? "ink-off" : "ink-dim"));
-                g.drawText (entry.lastLine.empty() ? dash : juce::String::fromUTF8 (entry.lastLine.c_str()), cells[5],
+                g.drawText (entry.lastLine.empty() ? dash : juce::String::fromUTF8 (entry.lastLine.c_str()), cells[6],
                             juce::Justification::centredLeft, true);
 
                 /*  THE STATE IN WORDS, the reason with it - never a colour on its own (4.8). */
                 g.setFont (Look::font (theme, 12.0f));
                 g.setColour (Look::colour (theme, entry.state == "retrying" ? "failed" : "ink-dim"));
-                g.drawText (juce::String (entry.stateWords()), cells[6], juce::Justification::centredLeft, true);
+                g.drawText (juce::String (entry.stateWords()), cells[7], juce::Justification::centredLeft, true);
 
                 if (! locked)
                 {
                     g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[7], juce::Justification::centred);
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[8], juce::Justification::centred);
                 }
             }
 
@@ -2014,6 +2018,7 @@ namespace wfg::client::ui
                     case Cell::name:  renameAt (row, width); return;
                     case Cell::where: chooseAt (row, width, true); return;
                     case Cell::speed: chooseAt (row, width, false); return;
+                    case Cell::reads: send (gesture::setNode (base + "framing", entry.framing == "slip" ? "lines" : "slip")); return;
                     case Cell::heard:
                     case Cell::state: return;
                 }
@@ -2251,6 +2256,8 @@ namespace wfg::client::ui
                                                            return a.id == b.id && a.name == b.name
                                                                && a.prefix == b.prefix
                                                                && a.host == b.host && a.port == b.port
+                                                               && a.transport == b.transport
+                                                               && a.serial == b.serial
                                                                && a.rx == b.rx && a.tx == b.tx
                                                                && a.doh == b.doh
                                                                && a.dohRollback == b.dohRollback
@@ -2448,14 +2455,28 @@ namespace wfg::client::ui
                 g.setFont (Look::font (theme, 12.0f));
                 g.setColour (Look::colour (theme, "ink-dim"));
                 g.drawText (juce::String (entry.prefix), cells[1], juce::Justification::centredLeft, true);
-                g.drawText (juce::String (entry.host), cells[2], juce::Justification::centredLeft, true);
 
-                /*  A PORT OF NOUGHT IS NOT A PORT. The row's own default is
-                    nothing at all, deliberately - no number could be right for
-                    every device - so an empty cell is the honest drawing and a
-                    bold nought would look like a decision somebody took. */
-                g.drawText (entry.port > 0 ? juce::String (entry.port) : juce::String(),
-                            cells[3], juce::Justification::centredLeft);
+                /*  A DEVICE ON A SERIAL PORT (PC.11) says which, by the port's
+                    name, and has no network port. */
+                if (entry.transport == "serial")
+                {
+                    g.drawText ("serial: " + juce::String (serialName (entry.serial)), cells[2],
+                                juce::Justification::centredLeft, true);
+                    g.setColour (Look::colour (theme, "ink-off"));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x80\x93"), cells[3], juce::Justification::centredLeft);
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                }
+                else
+                {
+                    g.drawText (juce::String (entry.host), cells[2], juce::Justification::centredLeft, true);
+
+                    /*  A PORT OF NOUGHT IS NOT A PORT. The row's own default is
+                        nothing at all, deliberately - no number could be right
+                        for every device - so an empty cell is the honest drawing
+                        and a bold nought would look like a decision somebody took. */
+                    g.drawText (entry.port > 0 ? juce::String (entry.port) : juce::String(),
+                                cells[3], juce::Justification::centredLeft);
+                }
 
                 /*  THE THREE SWITCHES, AS WORDS. WFS-DIY's ON and OFF, and the
                     word carries it rather than the colour (4.8): Rx, Tx and
@@ -2537,10 +2558,16 @@ namespace wfg::client::ui
                     case Cell::bundles: send (gesture::setNode (base + "bundles", entry.bundles ? "false" : "true")); return;
                     case Cell::doh:    send (gesture::setNode (base + "doh", entry.doh == "takeBack" ? "leave" : "takeBack")); return;
 
+                    case Cell::host:     chooseWay (row, width); return;
+
+                    case Cell::port:
+                        if (entry.transport == "serial")
+                            return;
+                        editAt (row, cellAt (event.x, width), width);
+                        return;
+
                     case Cell::name:
                     case Cell::prefix:
-                    case Cell::host:
-                    case Cell::port:
                     case Cell::rollback: editAt (row, cellAt (event.x, width), width); return;
 
                     case Cell::problem:
@@ -2573,6 +2600,70 @@ namespace wfg::client::ui
 
                 return {};
             }
+
+            /*  WHERE THE DEVICE IS (PC.11): with no serial port in the show, its
+                host typed in place as ever; with one, a menu first - on the
+                network, at an address, or on one of the show's serial ports. */
+            void chooseWay (int row, int width)
+            {
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                if (serials.empty() && entry.transport != "serial")
+                {
+                    editAt (row, Cell::host, width);
+                    return;
+                }
+
+                juce::PopupMenu menu;
+                menu.addItem (1, "On the network, at an address...", true, entry.transport != "serial");
+                for (std::size_t at = 0; at < serials.size(); ++at)
+                    menu.addItem (static_cast<int> (at) + 2, "On serial port " + juce::String (serials[at].name)
+                                    + (serials[at].path.empty() ? juce::String() : "  (" + juce::String (serials[at].path) + ")"),
+                                  true, entry.transport == "serial" && entry.serial == serials[at].id);
+
+                const auto id = entry.id;
+                const auto ports = serials;
+                menu.showMenuAsync (juce::PopupMenu::Options(),
+                                    [this, id, ports, row, width] (int chosen)
+                                    {
+                                        if (chosen <= 0 || ! send)
+                                            return;
+                                        if (chosen == 1)
+                                        {
+                                            for (const auto& device : rows)
+                                                if (device.id == id && device.transport == "serial")
+                                                    send (gesture::setNodes (model::deviceOnNetwork (id)));
+                                            if (row < static_cast<int> (rows.size()))
+                                                editAt (row, Cell::host, width);
+                                            return;
+                                        }
+                                        const auto at = static_cast<std::size_t> (chosen - 2);
+                                        if (at < ports.size())
+                                            send (gesture::setNodes (model::deviceOnSerial (id, ports[at].id)));
+                                    });
+            }
+
+            std::string serialName (const std::string& id) const
+            {
+                for (const auto& port : serials)
+                    if (port.id == id)
+                        return port.name.empty() ? port.id : port.name;
+                return id.empty() ? std::string ("none") : id;
+            }
+
+        public:
+            /*  The show's serial ports, for the Where menu and a serial device's
+                row (PC.11): read beside the devices every pass. */
+            void showSerials (std::vector<model::SerialRow> ports)
+            {
+                if (ports == serials)
+                    return;
+                serials = std::move (ports);
+                list.repaint();
+            }
+
+        private:
+            std::vector<model::SerialRow> serials;
 
             /*  EDITED IN PLACE, the output list's gesture exactly: one click
                 opens an editor over the cell, Return or clicking away commits,
@@ -7203,6 +7294,7 @@ namespace wfg::client::ui
                 are undoable. Nothing on that tab is applied - a device has no
                 hardware to reopen, so a retyped port reaches the socket on the
                 next tick through the engine's own re-read. */
+            network->showSerials (model::readSerialPorts (snapshot));
             network->show (model::readDevices (snapshot),
                            model::isYes (model::flag (snapshot, "/godot/network/strictSenders")),
                            juce::String (model::text (snapshot, "/godot/network/refused")).getIntValue(),

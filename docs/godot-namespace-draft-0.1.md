@@ -23608,7 +23608,7 @@ Mine, proposed:
 | `serial/<id>/name`, `path`, `baud`, `framing`, `rx`, `tx` | `serial` | | -, -, 115200, `lines`, true, true | ACR |
 | `serial/<id>/state`, `problem`, `lastLine` | `serial` | read | | Open, opening, retrying, closed; why, in words; the last line heard |
 | `/godot/engine/serialPorts` | engine | `s`, read | | This machine's ports, a path and a few words a line |
-| `mount/<id>/transport` gains `serial`; `mount/<id>/serial` | `mount` | | | ACR, OSC over SLIP |
+| `mount/<id>/transport` gains `serial`; `mount/<id>/serial` | `mount` | | `udp`; - | ACR, OSC over SLIP: the port the device is on, whose framing is `slip`; host and port not read |
 
 `cue/kind` and `run/kind` gain `process`.
 
@@ -23760,3 +23760,17 @@ made before it may hold one, and a patch cannot fire that cue by its id.
   `[s /godot/serial/<id>/out]` is a line out, atoms joined by spaces. Settings has a Serial tab after
   MIDI: ADD, the name typed in place, the path from this machine's ports (one the show names that this
   machine lacks kept and marked), the speed from a menu, rx, tx, the last line and the state in words.
+- **PC.11**: OSC over SLIP (ACR). A device's `transport` gains `serial` and its `serial` row names the
+  port, whose framing is `slip`: refused in words when it names none, a port the show lacks or one
+  reading lines, and declared with no host or network port otherwise; changing the transport reloads it.
+  `serial/Slip` frames a packet with END at both ends, as OSC 1.1 asks, and reads frames however the
+  bytes come, an ESC followed by what may not follow it spoiling only its frame and one past 64 kB given
+  up. A port reading OSC hands packets (`SerialTable::takePackets`) and sends them framed (`sendPacket`);
+  it takes no lines, and a port reading lines no packets. `MountSender` hands a serial device's bytes to
+  serve's sink instead of the socket - a message the port could not take fails as one sent nowhere does.
+  Serve takes each port's packets on the tick and gives them to the namespace as a datagram is given,
+  origin `serial:<id>`; the heard rule knows a device on a port by that word, so its reports are heard
+  (`mount.heard`), triggers fire on them and a curve records from them, and anything else is written or
+  fired as a datagram's would be. In the window, a device's Where cell offers the show's serial ports
+  once there is one, and choosing one is one step: the port made to read OSC, the device's port and its
+  transport; the Serial tab's Reads cell turns a port between lines and OSC.

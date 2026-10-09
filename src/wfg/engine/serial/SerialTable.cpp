@@ -44,6 +44,8 @@ namespace wfg::serial
         mutable std::mutex lock;
         std::condition_variable woken;
         std::deque<std::string> lines;      // read, waiting for the tick
+        std::deque<std::vector<std::uint8_t>> packets;   // the same, on a SLIP port
+        slip::Decoder decoder;
         std::deque<std::string> outgoing;   // handed, waiting for the port
         PortState state;
         bool open = false;
@@ -74,6 +76,7 @@ namespace wfg::serial
                     {
                         const std::lock_guard<std::mutex> held (lock);
                         partial.clear();
+                        decoder = slip::Decoder {};
                         outgoing.clear();
                         open = true;
                     }
@@ -127,6 +130,19 @@ namespace wfg::serial
         void heard (const std::string& bytes)
         {
             const std::lock_guard<std::mutex> held (lock);
+
+            if (wanted.framing == "slip")
+            {
+                for (auto& packet : decoder.feed (bytes))
+                {
+                    if (packets.size() < maxWaiting)
+                        packets.push_back (std::move (packet));
+                    else
+                        ++state.dropped;
+                }
+                return;
+            }
+
             for (const char c : bytes)
             {
                 if (c == '\n' || partial.size() >= maxLine)
@@ -276,7 +292,7 @@ namespace wfg::serial
 
         auto& worker = *found->second;
         const std::lock_guard<std::mutex> workerHeld (worker.lock);
-        if (! worker.open)
+        if (! worker.open || worker.wanted.framing == "slip")
             return false;
         if (worker.outgoing.size() >= maxWaiting)
         {
@@ -284,6 +300,47 @@ namespace wfg::serial
             return false;
         }
         worker.outgoing.push_back (line + "\n");
+        return true;
+    }
+
+    std::vector<std::pair<std::string, std::vector<std::vector<std::uint8_t>>>> SerialTable::takePackets (std::size_t perPort)
+    {
+        std::vector<std::pair<std::string, std::vector<std::vector<std::uint8_t>>>> out;
+        const std::lock_guard<std::mutex> held (lock);
+        for (auto& [id, worker] : workers)
+        {
+            std::vector<std::vector<std::uint8_t>> taken;
+            {
+                const std::lock_guard<std::mutex> workerHeld (worker->lock);
+                while (! worker->packets.empty() && taken.size() < perPort)
+                {
+                    taken.push_back (std::move (worker->packets.front()));
+                    worker->packets.pop_front();
+                }
+            }
+            if (! taken.empty())
+                out.emplace_back (id, std::move (taken));
+        }
+        return out;
+    }
+
+    bool SerialTable::sendPacket (const std::string& id, const std::vector<std::uint8_t>& packet)
+    {
+        const std::lock_guard<std::mutex> held (lock);
+        const auto found = workers.find (id);
+        if (found == workers.end() || ! found->second->tx)
+            return false;
+
+        auto& worker = *found->second;
+        const std::lock_guard<std::mutex> workerHeld (worker.lock);
+        if (! worker.open || worker.wanted.framing != "slip")
+            return false;
+        if (worker.outgoing.size() >= maxWaiting)
+        {
+            ++worker.state.dropped;
+            return false;
+        }
+        worker.outgoing.push_back (slip::encode (packet));
         return true;
     }
 

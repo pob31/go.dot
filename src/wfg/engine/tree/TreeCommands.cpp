@@ -111,6 +111,7 @@ namespace wfg::tree
             load-time problem instead of a show-time mystery. */
         declaration.host = document.getAttribute (base + "host").value_or (std::string ("127.0.0.1"));
         declaration.transport = document.getAttribute (base + "transport").value_or (std::string ("udp"));
+        declaration.serial = document.getAttribute (base + "serial").value_or (std::string {});
 
         if (const auto port = document.getAttribute (base + "port"))
             if (const auto parsed = osc::parseDouble (*port))
@@ -160,12 +161,30 @@ namespace wfg::tree
             return MountResult::failed (mountId + ": " + why);
         };
 
-        if (declaration->transport != "udp")
+        /*  OSC OVER SLIP ON A SERIAL PORT (namespace draft §51, PC.11): the port
+            has to be one of the show's, and reading packets rather than lines -
+            a device on a port that reads lines would be sent packets it prints
+            and heard as lines no device sent. */
+        if (declaration->transport == "serial")
+        {
+            if (declaration->serial.empty())
+                return refuse ("it is reached over a serial line and names no serial port");
+
+            const auto framing = document.getAttribute ("/godot/serial/" + declaration->serial + "/framing");
+
+            if (! framing.has_value())
+                return refuse ("it names serial port " + declaration->serial + ", which this show does not have");
+
+            if (*framing != "slip")
+                return refuse ("its serial port reads lines; a device on a serial port needs OSC over SLIP"
+                               " - set the port's framing to slip");
+        }
+        else if (declaration->transport != "udp")
             return refuse ("transport \"" + declaration->transport
                            + "\" is declared but not implemented -"
-                             " Go.dot speaks udp to a mount today");
+                             " Go.dot speaks udp and serial to a mount today");
 
-        if (declaration->port <= 0 || declaration->port > 65535)
+        if (declaration->transport == "udp" && (declaration->port <= 0 || declaration->port > 65535))
             return refuse ("no usable port. A device has to say which port it listens"
                            " on; nothing can be inferred and UDP will never tell you it"
                            " was wrong");
@@ -263,7 +282,9 @@ namespace wfg::tree
                 means what is loaded is about a different thing. */
             if (held == nullptr
                   || held->prefix != wanted->prefix
-                  || held->namespaceFile != wanted->namespaceFile)
+                  || held->namespaceFile != wanted->namespaceFile
+                  || held->transport != wanted->transport
+                  || held->serial != wanted->serial)
             {
                 loadMountFromBundle (document, mounts, bundleFolder, id);
                 continue;

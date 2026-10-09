@@ -115,6 +115,8 @@ namespace wfg::client::model
             else if (name == "heard")      row.heard = number (text (node), 0);
             else if (name == "listen")     row.listen = text (node).empty() ? std::string ("off") : text (node);
             else if (name == "problem")    row.problem = text (node);
+            else if (name == "transport")  row.transport = text (node).empty() ? std::string ("udp") : text (node);
+            else if (name == "serial")     row.serial = text (node);
 
             /*  FAIL-SAFE, as the engine reads it (PRD §3.32): only the exact
                 word takes back; anything else leaves to the operator. */
@@ -220,5 +222,18 @@ namespace wfg::client::model
         }
 
         return choices;
+    }
+
+    std::vector<std::pair<std::string, std::string>> deviceOnSerial (const std::string& deviceId,
+                                                                     const std::string& serialId)
+    {
+        return { { "/godot/serial/" + serialId + "/framing", "slip" },
+                 { "/godot/mount/" + deviceId + "/serial", serialId },
+                 { "/godot/mount/" + deviceId + "/transport", "serial" } };
+    }
+
+    std::vector<std::pair<std::string, std::string>> deviceOnNetwork (const std::string& deviceId)
+    {
+        return { { "/godot/mount/" + deviceId + "/transport", "udp" } };
     }
 }

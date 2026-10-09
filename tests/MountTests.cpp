@@ -43,6 +43,8 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/MountSender.h>
+#include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -1840,4 +1842,76 @@ TEST_CASE ("mount: mount.heard keeps what a device said as an observation, count
 
     //  Nothing written: the node holds no value of Go.dot's.
     CHECK (mounts.valueOf ("/adm/xyz") == nullptr);
+}
+
+TEST_CASE ("mount: a device on a serial port needs a port of the show that reads OSC, and no network port")
+{
+    /*  PC.11: transport serial - OSC over SLIP on the serial port the device
+        names. Refused, in words, with no port named, a port the show lacks, or
+        one reading lines; declared with no host or network port once the port
+        reads OSC. */
+    Rig rig;
+    const auto made = rig.document.createMount ("/sensor", {}, {});
+    REQUIRE (made.ok);
+    const auto id = made.id;
+    const auto base = "/godot/mount/" + id + "/";
+    REQUIRE (rig.document.setAttribute (base + "transport", "serial").ok);
+
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id) == "it is reached over a serial line and names no serial port");
+
+    REQUIRE (rig.document.setAttribute (base + "serial", "SR000009").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id) == "it names serial port SR000009, which this show does not have");
+
+    const auto port = rig.document.createSerial ("Arduino");
+    REQUIRE (port.ok);
+    REQUIRE (rig.document.setAttribute (base + "serial", port.id).ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id).find ("reads lines") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute ("/godot/serial/" + port.id + "/framing", "slip").ok);
+    REQUIRE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).empty());
+    REQUIRE (rig.mounts.declarationOf (id) != nullptr);
+    CHECK (rig.mounts.declarationOf (id)->serial == port.id);
+
+    //  BACK ON THE NETWORK, it needs its port again: the transport changing reloads it.
+    REQUIRE (rig.document.setAttribute (base + "transport", "udp").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.problemOf (id).empty());
+}
+
+TEST_CASE ("mount sender: a device on a serial port is handed its packet's bytes, not sent a datagram")
+{
+    /*  PC.11: the destination names the serial port; the sink takes the
+        bytes and says whether the port took them. */
+    tree::MountSender sender;
+    std::vector<std::pair<std::string, std::vector<std::uint8_t>>> handed;
+    bool takes = true;
+    sender.setSerialSink ([&] (const std::string& port, const std::vector<std::uint8_t>& packet)
+    {
+        handed.emplace_back (port, packet);
+        return takes;
+    });
+
+    tree::MountSender::Destination onSerial;
+    onSerial.serial = "SR000001";
+    const auto ticket = sender.queue ("ARDU0001", onSerial, "/led", osc::Value::int32 (1));
+    sender.flush();
+
+    REQUIRE (handed.size() == 1u);
+    CHECK (handed[0].first == "SR000001");
+    const auto decoded = osc::decode (handed[0].second.data(), handed[0].second.size());
+    REQUIRE (decoded.ok);
+    CHECK (decoded.packet.address == "/led");
+    CHECK (sender.outcomeOf (ticket) == tree::MountSender::Outcome::sent);
+
+    //  A port that cannot take it fails the message, as nowhere to send does.
+    takes = false;
+    const auto refused = sender.queue ("ARDU0001", onSerial, "/led", osc::Value::int32 (0));
+    sender.flush();
+    CHECK (sender.outcomeOf (refused) == tree::MountSender::Outcome::failed);
 }

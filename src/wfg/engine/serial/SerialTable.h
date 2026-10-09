@@ -39,6 +39,7 @@
 */
 
 #include <wfg/engine/serial/SerialLink.h>
+#include <wfg/engine/serial/Slip.h>
 
 #include <atomic>
 #include <chrono>
@@ -93,8 +94,15 @@ namespace wfg::serial
         std::vector<std::pair<std::string, std::vector<std::string>>> takeLines (std::size_t perPort);
 
         /*  A line out, its new line added. False when the port is not
-            declared, does not transmit, or is not open. */
+            declared, does not transmit, is not open, or reads packets. */
         bool send (const std::string& id, const std::string& line);
+
+        /*  A PORT WHOSE FRAMING IS SLIP (PC.11) reads and writes OSC packets
+            rather than lines - for a device on it: the packets it read since
+            the last take, oldest first, at most `perPort` from each; and one
+            packet out, framed. */
+        std::vector<std::pair<std::string, std::vector<std::vector<std::uint8_t>>>> takePackets (std::size_t perPort);
+        bool sendPacket (const std::string& id, const std::vector<std::uint8_t>& packet);
 
         PortState stateOf (const std::string& id) const;
 

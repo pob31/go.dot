@@ -203,6 +203,10 @@ namespace wfg::tree
         int port = 0;
         std::string transport = "udp";
 
+        /*  THE SERIAL PORT IT IS ON when `transport` is serial (namespace draft
+            §51, PC.11): OSC over SLIP, its host and port not read. */
+        std::string serial;
+
         /*  WHETHER IT CAN BE ASKED, and where.
 
             `transport` says how to send and says nothing about the other

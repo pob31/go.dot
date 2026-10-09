@@ -179,6 +179,7 @@ add_library(wfg_engine STATIC
     wfg/engine/process/PatchEditor.cpp
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp
+    wfg/engine/serial/Slip.cpp
     wfg/engine/surface/SurfaceProfile.cpp
     wfg/engine/surface/SurfacePages.h
     wfg/engine/surface/SurfacePages.cpp

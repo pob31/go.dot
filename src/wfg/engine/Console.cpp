@@ -3470,7 +3470,19 @@ namespace
             engine, which needs the commands. setSocket closes that loop further
             down; until it is called this sender queues, coalesces and reports
             exactly as it will afterwards, and sends nothing. */
+        /*  THE SHOW'S SERIAL PORTS (namespace draft §51, ACR; PC.10), each
+            opened on a thread of its own as the show declares it, and opened
+            again, closed or left alone as edits come. Serve only: a replay
+            opens no port and reads what they said from the log. Before the
+            sender, which hands a device on a SLIP port its packets (PC.11) and
+            so must not outlive it. */
+        wfg::serial::SerialTable serialPorts;
+
         wfg::tree::MountSender sender;
+        sender.setSerialSink ([&serialPorts] (const std::string& port, const std::vector<std::uint8_t>& packet)
+                              {
+                                  return serialPorts.sendPacket (port, packet);
+                              });
 
         /*  AND THE THREAD THAT ASKS. A verified cue reads a value back off the
             target's own OSCQuery server, which is an HTTP exchange with a
@@ -3718,11 +3730,7 @@ namespace
         wfg::process::MidiInbox processMidi;
         runner.setProcessMidi (&processMidi);
 
-        /*  THE SHOW'S SERIAL PORTS (namespace draft §51, ACR; PC.10), each
-            opened on a thread of its own as the show declares it, and opened
-            again, closed or left alone as edits come. Serve only: a replay
-            opens no port and reads the lines from the log. */
-        wfg::serial::SerialTable serialPorts;
+        //  The serial ports, opened as the show declares them (declared above).
         serialPorts.reconcile (serialWantedOf (document));
         runner.setSerialPorts (&serialPorts);
 
@@ -4875,6 +4883,17 @@ namespace
                                                         { wfg::osc::Value::string (port),
                                                           wfg::osc::Value::string (std::move (line)) });
 
+                                 /*  AND THE OSC A DEVICE ON A SLIP PORT SENT
+                                     (PC.11), taken as a datagram is - its own
+                                     report heard as `mount.heard`, anything else
+                                     written or fired - under the origin
+                                     `serial:<id>`. A packet that does not decode
+                                     is dropped, as a datagram that does not is. */
+                                 for (auto& [port, packets] : serialPorts.takePackets (64))
+                                     for (const auto& bytes : packets)
+                                         if (const auto decoded = wfg::osc::decode (bytes.data(), bytes.size()); decoded.ok)
+                                             nameSpace.write ("serial:" + port, decoded.packet);
+
                                  /*  A SAVE IN PLUGDATA OR PD, every half second:
                                      the cue's patch as it was saved, one `node.set`
                                      from `pd` (namespace draft §51, ACN). */
@@ -5028,6 +5047,61 @@ namespace
             restarted on every GO would never run out during a show, and the
             one afternoon it was needed would be the one it never wrote. */
         std::uint64_t showRevisionSeen = document.showRevision();
+
+        /*  WHO MAY BE HEARD FROM, AND WHOSE REPORTS ARE HEARD, published once
+            here and again at each edit of the show. Only at an edit until
+            PC.11 found it (namespace draft §51): a show opened with a device
+            whose rx is on heard nothing from it, and strict senders let
+            everyone in, until somebody edited something. */
+        const auto publishHearing = [&document, &senders, &heardBox]
+        {
+            auto rule = std::make_shared<wfg::osc::Allowed>();
+            rule->strict = document.getAttribute (
+                               "/godot/network/strictSenders")
+                             .value_or (std::string ("false")) == "true";
+
+            /*  AND WHOSE REPORTS ARE HEARD (namespace
+                draft 45, O.8): the same devices, each
+                under its own prefixes. */
+            auto hearing = std::make_shared<wfg::tree::HeardRule>();
+
+            for (const auto& mountId : wfg::tree::declaredMountIds (document))
+            {
+                const auto base = "/godot/mount/" + mountId + "/";
+
+                if (document.getAttribute (base + "rx")
+                      .value_or (std::string ("false")) != "true")
+                    continue;
+
+                /*  A DEVICE ON A SLIP PORT is known by its
+                    port, not a host (PC.11), and takes no
+                    part in the senders' gate. */
+                if (document.getAttribute (base + "transport").value_or (std::string ("udp")) == "serial")
+                {
+                    const auto port = document.getAttribute (base + "serial").value_or (std::string {});
+                    if (! port.empty())
+                        hearing->byHost["serial:" + port].push_back (
+                            { mountId, document.getAttribute (base + "prefix")
+                                           .value_or (std::string {}) });
+                    continue;
+                }
+
+                const auto host = document.getAttribute (base + "host")
+                                    .value_or (std::string ("127.0.0.1"));
+
+                if (! host.empty())
+                {
+                    rule->hosts.insert (host);
+                    hearing->byHost[host].push_back (
+                        { mountId, document.getAttribute (base + "prefix")
+                                       .value_or (std::string {}) });
+                }
+            }
+
+            senders.publish (std::move (rule));
+            heardBox.publish (std::move (hearing));
+        };
+        publishHearing();
 
         ticks.setAfterTick ([&] (const wfg::Engine::TickResult& outcome)
                             {
@@ -5269,38 +5343,7 @@ namespace
                                         is: the socket thread cannot read a
                                         document, so the tick thread hands it
                                         something immutable. */
-                                    auto rule = std::make_shared<wfg::osc::Allowed>();
-                                    rule->strict = document.getAttribute (
-                                                       "/godot/network/strictSenders")
-                                                     .value_or (std::string ("false")) == "true";
-
-                                    /*  AND WHOSE REPORTS ARE HEARD (namespace
-                                        draft 45, O.8): the same devices, each
-                                        under its own prefixes. */
-                                    auto hearing = std::make_shared<wfg::tree::HeardRule>();
-
-                                    for (const auto& mountId : wfg::tree::declaredMountIds (document))
-                                    {
-                                        const auto base = "/godot/mount/" + mountId + "/";
-
-                                        if (document.getAttribute (base + "rx")
-                                              .value_or (std::string ("false")) != "true")
-                                            continue;
-
-                                        const auto host = document.getAttribute (base + "host")
-                                                            .value_or (std::string ("127.0.0.1"));
-
-                                        if (! host.empty())
-                                        {
-                                            rule->hosts.insert (host);
-                                            hearing->byHost[host].push_back (
-                                                { mountId, document.getAttribute (base + "prefix")
-                                                               .value_or (std::string {}) });
-                                        }
-                                    }
-
-                                    senders.publish (std::move (rule));
-                                    heardBox.publish (std::move (hearing));
+                                    publishHearing();
                                 }
 
                                 /*  And whether an earlier session's afternoon is

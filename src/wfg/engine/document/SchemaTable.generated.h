@@ -67,7 +67,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_group_advance[] = { "auto", "manual" };
     inline constexpr std::string_view enum_group_selection[] = { "sequential", "shuffle" };
     inline constexpr std::string_view enum_group_takeover[] = { "group", "strip" };
-    inline constexpr std::string_view enum_mount_transport[] = { "udp", "tcp", "ws" };
+    inline constexpr std::string_view enum_mount_transport[] = { "udp", "tcp", "ws", "serial" };
     inline constexpr std::string_view enum_mount_panic[] = { "park", "snap" };
     inline constexpr std::string_view enum_mount_readback[] = { "none", "oscquery" };
     inline constexpr std::string_view enum_mount_listen[] = { "off", "connecting", "listening", "unsupported", "unreachable" };
@@ -2567,10 +2567,18 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "udp",
           false, 0.0, false, 0.0,
-          enum_mount_transport, 3,
+          enum_mount_transport, 4,
           "", 1.0, false, "park",
           "",
-          "How the mounted target is reached. Only udp carries messages today; tcp and ws are declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring either is refused when the show loads rather than going quiet during it." },
+          "How the device is reached. udp, the ordinary kind, at its host and port. serial: OSC over SLIP on the serial port its serial row names, whose framing is slip - an Arduino running CNMAT-s OSC library on USB (namespace draft 51, ACR, PC.11) - heard, triggered, sent to and recorded from as any device; its host and port are then not read. tcp and ws are declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring either is refused when the show loads rather than going quiet during it." },
+        { "mount", "serial",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "serial",
+          "The serial port this device is on when its transport is serial (namespace draft 51, PC.11): a port of the show whose framing is slip. Empty, or a port reading lines, and the device is refused when the show loads, in words." },
         { "mount", "host",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "127.0.0.1",

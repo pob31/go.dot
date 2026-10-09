@@ -2973,12 +2973,19 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="serial">
+          <a:documentation>The serial port this device is on when its transport is serial (namespace draft 51, PC.11): a port of the show whose framing is slip. Empty, or a port reading lines, and the device is refused when the show loads, in words.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="transport">
-          <a:documentation>How the mounted target is reached. Only udp carries messages today; tcp and ws are declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring either is refused when the show loads rather than going quiet during it.</a:documentation>
+          <a:documentation>How the device is reached. udp, the ordinary kind, at its host and port. serial: OSC over SLIP on the serial port its serial row names, whose framing is slip - an Arduino running CNMAT-s OSC library on USB (namespace draft 51, ACR, PC.11) - heard, triggered, sent to and recorded from as any device; its host and port are then not read. tcp and ws are declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring either is refused when the show loads rather than going quiet during it.</a:documentation>
           <choice>
             <value>udp</value>
             <value>tcp</value>
             <value>ws</value>
+            <value>serial</value>
           </choice>
         </attribute>
       </optional>

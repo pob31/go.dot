@@ -144,6 +144,12 @@ namespace wfg::oscquery
                 return;
         }
 
+        /*  AND A DEVICE ON A SERIAL PORT (namespace draft §51, PC.11), known by
+            its port rather than a host: the heard rule keys it `serial:<id>`,
+            the origin serve stamps on what the port said. */
+        if (heard != nullptr && origin.rfind ("serial:", 0) == 0 && heard->take (origin, packet.address, packet.args))
+            return;
+
         /*  An argument-less message to a state node is not a write of nothing.
             It has no value to set, so there is nothing to submit and nothing to
             reject - the engine would be asked to store an absence. */
