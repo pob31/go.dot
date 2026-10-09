@@ -1423,6 +1423,22 @@ add_test(NAME blackbox.osc-curves.fr_FR
 set_tests_properties(blackbox.osc-curves.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# A PROCESS CUE'S PATCH END TO END (namespace draft 51, PC.12): Pure Data inside
+# serve, Go.dot's ready-made patches beside it, a device's reports doubled and
+# sent back to mock_target.py (M57, the time a report takes to come back), a
+# go.edge firing a cue under the patch's own origin, Esc ending it, and the
+# session replayed. No hosted audio.
+add_test(NAME blackbox.process.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/process.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.process.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.process.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/process.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.process.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # DOH! END TO END (namespace draft 24.15): the GO pressed too soon and taken back,
 # over a real Tracktion graph and two mock devices on real sockets - a console that
 # takes back and a lighting desk left to its operator. What each device received,

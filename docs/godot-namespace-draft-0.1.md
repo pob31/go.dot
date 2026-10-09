@@ -23632,11 +23632,24 @@ Mine, proposed:
 - **M56** - what a tick of a patch costs. *Measured 2026-10-09 in the spike that settled ACK, ACQ and
   ACT* (MSVC, Debug, Windows): two patches at once on two threads, each `[r in] -> [* 2.5] -> [s out]`
   beside a `[metro 100]`, fifty ticks in 76 and 84 µs - about 1.6 µs a tick; the metronome banged ten
-  times in fifty ticks; `2.5` read as 2.5 under a French global locale. To take again with fifty
-  objects and ten patches (PC.12).
-- **M57** - from a device's report to what a patch sent on the wire (PC.12).
-- **M58** - how many patches of fifty objects fit in the budget (PC.12).
-- **M59** - the canvas's redraw for two hundred boxes (PC.12).
+  times in fifty ticks; `2.5` read as 2.5 under a French global locale. *Taken again 2026-10-09
+  (PC.12, ProcessTests "M56", MSVC Debug, Windows):* a patch of fifty objects - `[r /in]`, forty-eight
+  `[+ 1]`, `[s /out]` - with a value in and out each tick, 42 µs a tick on average over five hundred,
+  the hand-off to its thread and back included.
+- **M57** - from a device's report to what a patch sent on the wire. *Measured 2026-10-09 (PC.12,
+  `blackbox/process.py`, Debug, Windows):* a report sent to serve's port, doubled by the patch and
+  received by `mock_target.py`, 33 to 67 ms over ten - two to three ticks: the report is a
+  `mount.heard` record on the tick after it arrived, the patch hears it on the next tick's hook, and
+  what it sends leaves with that tick's flush; the driver's own polling of the device adds up to 20
+  ms. Judged against 100 ms, off CI only.
+- **M58** - how many patches of fifty objects fit in the budget. *Measured 2026-10-09 (PC.12,
+  ProcessTests "M58", Debug, Windows):* ten of them at once, each on its own thread, a value in each
+  every tick: 0.33 ms a tick on average and 0.81 ms at worst over 250 ticks, against the default budget
+  of 2 ms (the case runs with 20 ms, for Debug builds on CI), none late, every value answered. Ten
+  such patches leave a show machine's tick most of its time.
+- **M59** - the canvas's redraw for two hundred boxes. *Measured 2026-10-09 (PC.12, RunPaneUiTests
+  "M59", Debug, Windows):* a hundred objects and a hundred message boxes in a grid, each joined to the
+  next, drawn whole into a 1400 by 900 image in 15 ms.
 - *Measured 2026-10-09, what ACK rests on:* with one patch stuck in an endless loop, a patch already
   running ran on (260 ticks in half a second); a patch asked to open waited for ever; and from the
   moment it waited, the running patch stopped (0 ticks in half a second).
@@ -23774,3 +23787,9 @@ made before it may hold one, and a patch cannot fire that cue by its id.
   fired as a datagram's would be. In the window, a device's Where cell offers the show's serial ports
   once there is one, and choosing one is one step: the port made to read OSC, the device's port and its
   transport; the Serial tab's Reads cell turns a port between lines and OSC.
+- **PC.12**: the close-out. `tests/blackbox/process.py`, as `blackbox.process.C` and `.fr_FR`, drives
+  the shipped serve against `mock_target.py` with nothing but datagrams and named commands: a process
+  cue's patch opened in Pd, a device's report doubled and back at the device (M57), a `[go.edge 0.5]`
+  firing a memo under the patch's own origin, Esc ending the run so that a later report is answered
+  by nothing, and the session's log replayed record for record. M56, M58 and M59 measured (§51.6). The
+  driver found the heard rule unpublished until the show's first edit, fixed in PC.11.

@@ -5345,3 +5345,40 @@ TEST_CASE ("patch canvas: Ctrl+E plays the patch - a toggle and a slider reach t
     CHECK (written.size() == 1u);
     CHECK (sent.size() == 4u);
 }
+
+TEST_CASE ("M59: the patch canvas draws two hundred boxes and their lines")
+{
+    /*  PC.12, namespace draft §51.6: a patch of two hundred boxes, a hundred
+        objects and a hundred messages in a grid, each joined to the next,
+        drawn whole into an image twenty times. */
+    wfg::client::ui::PatchCanvasComponent::Actions actions;
+    actions.set = [] (const std::string&, const std::string&) {};
+    actions.say = [] (const juce::String&) {};
+    wfg::client::ui::PatchCanvasComponent canvas (wfg::client::model::Theme {}, std::move (actions));
+    canvas.setSize (1400, 900);
+
+    std::string text = "#N canvas 0 50 1400 900 12;\n";
+    for (int i = 0; i < 200; ++i)
+        text += (i % 2 == 0 ? std::string ("#X obj ") : std::string ("#X msg ")) + std::to_string (20 + (i % 20) * 68) + " "
+                  + std::to_string (20 + (i / 20) * 80) + (i % 2 == 0 ? " + 1;\n" : " set \\$1;\n");
+    for (int i = 0; i + 1 < 200; ++i)
+        text += "#X connect " + std::to_string (i) + " 0 " + std::to_string (i + 1) + " 0;\n";
+
+    wfg::client::model::PatchReading reading;
+    reading.cueId = "PRCS0001";
+    reading.text = text;
+    canvas.show (reading);
+
+    juce::Image image (juce::Image::ARGB, 1400, 900, true);
+    constexpr int draws = 20;
+    const auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < draws; ++i)
+    {
+        juce::Graphics g (image);
+        canvas.paintEntireComponent (g, false);
+    }
+    const auto ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - start).count() / draws;
+
+    MESSAGE ("M59: two hundred boxes and a hundred and ninety-nine lines drawn in " << ms << " ms");
+    CHECK (ms < 250.0);
+}

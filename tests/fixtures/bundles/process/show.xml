@@ -1,0 +1,16 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="7K2QM9X4" name="Main">
+      <Process id="PRCS0001" name="Doubler" number="1" patch="#N canvas 0 50 600 400 12;&#10;#X obj 20 20 r /dev/in;&#10;#X obj 20 60 * 2;&#10;#X obj 20 100 s /dev/out;&#10;#X obj 200 60 go.edge 0.5;&#10;#X msg 200 100 \; /godot/cmd/cue/fire B3NK0001;&#10;#X connect 0 0 1 0;&#10;#X connect 1 0 2 0;&#10;#X connect 0 0 3 0;&#10;#X connect 3 0 4 0;&#10;"/>
+      <Cue id="B3NK0001" name="Bell" number="2"/>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="DEVMNT01" name="Device" port="9000" prefix="/dev" rx="true"/>
+  </Mounts>
+  <Audio tracks="0"/>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

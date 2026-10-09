@@ -4022,11 +4022,14 @@ Mackie vs HUI first — first week with the D700.
   a second later. The light on a projector from a D700 fader is owed to the bench.
 - **Process cues** (§3.21, 2026-10-09, namespace draft §51): **M56** - what a tick of a patch costs;
   **M57** - from a device's report to what a patch sent on the wire; **M58** - how many patches of
-  fifty objects fit in the budget; **M59** - the canvas's redraw for two hundred boxes. *Measured in
-  part 2026-10-09* (§51.6), on the spike that settled the design: two small patches at once, on two
+  fifty objects fit in the budget; **M59** - the canvas's redraw for two hundred boxes. *Measured
+  2026-10-09* (§51.6), on the spike that settled the design: two small patches at once, on two
   threads, about 1.6 µs a tick each on a Debug build; and with one patch stuck, a patch already running
   ran on while a patch asked to open waited for ever and, from then, stopped every patch - which is
-  why Pd is changed only at a quiet point.
+  why Pd is changed only at a quiet point. Then, all on a Debug build on Windows: a fifty-object patch
+  42 µs a tick; a device's report doubled and back at the device in two to three ticks, 33 to 67 ms;
+  ten fifty-object patches at once 0.33 ms a tick on average and 0.81 at worst, none late; two hundred
+  boxes drawn on the canvas in 15 ms.
 
 ---
 

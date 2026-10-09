@@ -1617,3 +1617,105 @@ TEST_CASE ("serial port: a line heard reaches the patch the next tick, and a lin
     CHECK (std::count_if (records.begin(), records.end(), [] (const wfg::LogRecord& r)
                           { return r.command == "serial.heard" && r.kind == wfg::LogRecord::Kind::applied; }) == 2);
 }
+
+//==============================================================================
+/*  PC.12: WHAT PATCHES COST (namespace draft §51.6). M56, a tick of a patch of
+    fifty objects with a value in and out; M58, ten of them at once, each on its
+    own thread, against the budget a tick gives them. Measured and said; held
+    only loosely, since a Debug build on a CI machine is not a show machine -
+    what is held is that the patches answer and none is stuck. */
+namespace
+{
+    /*  [r /in], forty-eight [+ 1] in a row, [s /out]: fifty objects. */
+    std::string fiftyObjects()
+    {
+        std::string text = "#N canvas 0 0 450 300 12;\n#X obj 10 10 r /in;\n";
+        for (int i = 0; i < 48; ++i)
+            text += "#X obj 10 " + std::to_string (30 + 20 * i) + " + 1;\n";
+        text += "#X obj 10 1000 s /out;\n";
+        for (int i = 0; i < 49; ++i)
+            text += "#X connect " + std::to_string (i) + " 0 " + std::to_string (i + 1) + " 0;\n";
+        return text;
+    }
+}
+
+TEST_CASE ("M56: a tick of a patch of fifty objects, a value in and out")
+{
+    PdInstance pd (settingsFor ("m56"));
+    makeAndOpen (pd, fiftyObjects());
+
+    constexpr int ticks = 500;
+    double last = 0.0;
+    const auto start = std::chrono::steady_clock::now();
+
+    for (int tick = 0; tick < ticks; ++tick)
+    {
+        const auto out = numbersSentTo (tickOnce (pd, { { "/in", { Atom::of (static_cast<double> (tick)) } } }), "/out");
+        REQUIRE (out.size() == 1u);
+        last = out[0];
+    }
+
+    const auto micros = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - start).count() / ticks;
+    CHECK (sameNumber (last, 499.0 + 48.0));
+    MESSAGE ("M56: a tick of a fifty-object patch, a value in and out, " << micros
+             << " us on average, the hand-off to its thread and back included");
+    CHECK (micros < 20000.0);
+}
+
+TEST_CASE ("M58: ten patches of fifty objects at once, each on its own thread, against the budget")
+{
+    wfg::process::ProcessHost host (hostSettings ("m58"));
+    std::vector<wfg::process::WantedProcess> wanted;
+    for (int i = 0; i < 10; ++i)
+        wanted.push_back ({ "RUN" + std::to_string (i), "CUE" + std::to_string (i), fiftyObjects() });
+
+    double value = 0.0;
+    const auto inputs = [&value] (const std::string&, const std::vector<std::string>&)
+    {
+        wfg::process::TickInputs in;
+        in.heard.push_back ({ "/in", { Atom::of (value) } });
+        return in;
+    };
+    constexpr auto budget = std::chrono::microseconds (20000);
+
+    //  Made and opened, one step a tick at a quiet point.
+    int running = 0;
+    for (int tick = 0; tick < 200 && running < 10; ++tick)
+    {
+        running = 0;
+        for (const auto& result : host.tick (wanted, inputs, budget, 50))
+            running += result.state == "running" ? 1 : 0;
+    }
+    REQUIRE (running == 10);
+
+    constexpr int ticks = 250;
+    double worst = 0.0, total = 0.0;
+    int answered = 0, late = 0;
+
+    for (int tick = 0; tick < ticks; ++tick)
+    {
+        value = tick;
+        const auto start = std::chrono::steady_clock::now();
+        const auto results = host.tick (wanted, inputs, budget, 50);
+        const auto ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - start).count();
+        worst = std::max (worst, ms);
+        total += ms;
+
+        for (const auto& result : results)
+        {
+            late += result.state == "late" ? 1 : 0;
+            for (const auto& sent : result.sent)
+                answered += sent.to == "/out" ? 1 : 0;
+        }
+    }
+
+    MESSAGE ("M58: ten fifty-object patches at once, a tick in " << total / ticks << " ms on average, "
+             << worst << " ms at worst, " << late << " late of " << ticks * 10 << ", "
+             << answered << " answers");
+
+    /*  A late patch is not handed the next value until it is back, and is
+        handed the newest then: on a slow machine some values are passed over,
+        never the patch. */
+    CHECK (answered >= ticks * 10 / 2);
+    CHECK_FALSE (host.anyStuck());
+}

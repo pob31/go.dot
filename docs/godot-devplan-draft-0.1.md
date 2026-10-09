@@ -1124,6 +1124,14 @@ so; an old show saves unchanged; CI is green.
 **Needs from the author:** the canvas's words and look; a patch of their own made on it and in Pd's
 window; an Arduino on the bench, lines and SLIP.
 
+**Built** 2026-10-09, PC.0 to PC.12, each on main (namespace draft §51.9 says what each did; M56-M59
+in §51.6). Two of the implementer's calls changed while building: Pd's window became plugdata or Pd as a
+program of its own (ACN, for three ways Pd's window on the running patch could end the show), and the
+serial names a patch uses became `/godot/serial/<id>/in` and `/out` (ACR). Found on the way and fixed:
+a show's rx devices were heard only after its first edit (PC.11); `[expr]` printed to stdout (PC.9);
+an identifier Pd would read as a number (PC.9). Owed to the bench: everything under "Needs from the
+author" above, on screen and with an Arduino.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M
