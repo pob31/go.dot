@@ -27,292 +27,216 @@ The specification lives in `docs/`, and it is the spec — not background readin
 - **[`docs/godot-devplan-draft-0.1.md`](docs/godot-devplan-draft-0.1.md)** — the
   phase plan. Each phase ends with something runnable.
 
+**To try it rather than build it**, read the tester's guide —
+[English](docs/Go.dot_TryItOut_English.md) or
+[français](docs/Go.dot_TryItOut_Français.md) — and download a test build from
+the [releases page](https://github.com/pob31/go.dot/releases).
+
 ---
 
-## Status: Phase 4's criterion is met; Phase 2 complete but for the hardware pass
+## Status: test builds, not yet for a performance
 
-Phase 0 — *"a repo that builds on three platforms"* — is complete, and the seven
-Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass).
+Go.dot runs shows. It plays sound and pictures from a cue list, takes GO from
+the keyboard, a control surface or the network, and stops in the three ways
+PRD §4.4 asks for. Test builds for Windows, macOS and Linux are published from
+version tags (the first, v0.1.0, on 2026-09-29). They are for rehearsal rooms
+and for people's own machines, to try and to report on — **not yet for opening
+night**.
 
-**Phase 1 is complete.** Its criterion was that an external OSCQuery client can load a
-document, read and write nodes, move standby, and that the event log replays the session
-bit-for-bit; `tests/blackbox/phase1_session.py` is that sentence as a program, and it runs
-in CI on three platforms under two locales. There is a headless engine, a show document,
-a parameter tree, a 50 Hz clock, a cue list, an OSC codec, an OSCQuery server and a
-`serve` verb that puts them together.
+Much of what touches hardware is built and tested in software only. The devplan
+ends each piece of work with what is still **owed to the bench** — the D700 on
+the unit, a projector on a wall, an Arduino on a serial port, a rate change on
+the Dante under a running show — and none of those counts as done until someone
+has stood in front of the thing.
 
-**Phase 2 makes a sound.** Its criterion was *`Rien à faire` → load show → GO → sound → fade →
-GO → next cue, driven entirely over OSC, and the replay log reproduces it*;
-`tests/blackbox/first_sound.py` is that sentence as a program, and it runs in CI on three
-platforms under two locales against a mock device written in another language.
+### What it does today
 
-Underneath it: Tracktion Engine hosted, one Edit **generated** from the show document and never
-saved, a fixed set of tracks each holding a resident clip in a launcher slot, and Go.dot's own
-output plugin at the end of every one carrying a level and a routing matrix. One output device
-spans the whole rig, so where a cue goes is a coefficient rather than a rewiring of the graph.
-Above that: runs, arming, GO, fades and stops, network cues with a three-valued wait, and a
-mount that now sends.
+- **The cue list and GO.** Cues that play a sound or a picture, fade something,
+  send OSC or MIDI, open a microphone, run a Pure Data patch, or enable, disable
+  or jump to another cue. Waits at both ends; groups that play as a timeline or
+  a sequence, automatic or manual, with headers and footers that always run;
+  shuffled rounds with a seed, so a random scene can be rehearsed; parallel
+  lists; triggers from OSC, MIDI and the wall clock; ranges and loops inside a
+  sound, with loop points that can move while it plays. Two GOs closer than half
+  a second are taken as one bounce of the finger.
+- **Ready before the hand comes down.** Park the pointer on a scene and the scene
+  gets itself ready: its sounds read from disk, the processor inputs it needs
+  claimed, the values the desk should hold sent and checked. Move the pointer
+  away and all of it is given back. Two cues that want the same input wait
+  rather than fight, and the show warns about the overlap while you edit. Jump
+  into the middle of an act and the right cues start at the right offsets.
+- **Editing that cannot lose a show.** Undo, a save that is never half-written,
+  crash-safe autosave with recovery, and an edit lock for the performance that
+  leaves GO and the stops working. A Show is the piece and each night is a
+  Performance, a copy of the show or of an earlier night, with a template cue
+  list to carry good changes back. Save as copies the sounds only when the copy
+  would not find them. A `.wfg` file opens in Go.dot on all three systems, and
+  with nothing given the last show reopens.
+- **Two ways in.** A desktop window, compiled into the same process as the
+  engine, which the launchers open; and a web console the engine serves at
+  `/ui`, plain HTML and ES modules with no build step, kept as the redundancy
+  path. Both change the show only through the engine's named commands, as a
+  hardware surface does. The show settings hold audio, outputs, inputs and the
+  rack, network devices, MIDI, surfaces, serial ports, video and playback.
+- **Sound.** Media cues play through Tracktion Engine, each with its own EQ and a
+  chain of VST3, AU or LV2 plugins run in a separate process — a crashing plugin
+  silences its cue, never the show, and never leaves it playing dry. A cue's
+  level and each of its sends can follow a curve drawn over its waveform or
+  recorded from a fader. Speed from nought to twenty, as varispeed or
+  timestretch, faded while it plays, backwards or bouncing between its loop
+  points. A fade moves anything the cue it aims at owns: level, sends, EQ,
+  plugin values. When the interface disappears the show pauses; when its rate
+  changes the show follows it and resamples.
+- **Live inputs.** Mic cues on named rack channels, through plugins; and live
+  sampling — a take recorded during the show, then looped, layered or cleared.
+- **Control surfaces.** Mackie Control, and the Asparion D700 in full: sampler
+  groups on the strips with fader-start, DCAs, EQ, Send and plugin pages on the
+  rotaries, a master dial, standby on the arrows, and the faders flipped onto
+  one cue to record its level and sends in one pass. A virtual surface panel
+  plays the same groups with a mouse.
+- **Video.** Canvases shown on outputs; fills, masks, stills and HAP movies with
+  their sound locked to them; placement, grade, curves and blends; several
+  canvases on one output, each bent onto a wall that is not flat by a mesh, and
+  a CDL per output to match projectors. Pictures are drawn by a separate process
+  on Direct3D 11, Metal or OpenGL, which Go.dot restarts if it dies, so a slow
+  movie cannot hold up a sound cue. Outputs sent to other programs over NDI,
+  Spout or Syphon, live inputs taken from them, and inserts that pass a cue's
+  picture through another program and back. Pictures in sampler groups, and
+  the next GO's pictures read ahead. A movie in another format plays as a
+  preview while FFmpeg (downloaded the first time it is needed) converts it to
+  HAP.
+- **OSC.** Network devices with an address, ports and receive and send switches;
+  OSC cues carrying several messages, sent as one bundle per device; curves
+  played on the cue's clock and recorded from what a device reports or from a
+  SpaceMouse; a monitor of every message in and out.
+- **Process cues.** A Pure Data patch inside a cue, running while the cue runs at
+  control rate and never in the audio path. It hears device reports, OSC, MIDI
+  and serial lines, and sends to devices, to MIDI and to Go.dot's own commands.
+  It is drawn and played on a canvas at the foot of the window, or opened in Pure
+  Data or plugdata. Go.dot ships ready-made patches for the usual chores
+  ([`pd/`](pd/)) and an example show. Serial ports carry an Arduino's lines, or
+  OSC over SLIP.
+- **Stopping.** Esc fades running cues out over the panic fade and runs their
+  footers, as if they had ended; a persistent cue is paused instead, and the
+  next GO resumes it. A double Esc stops everything Go.dot started, at once,
+  footers skipped. **Doh!** takes back a GO pressed too early: it stops what
+  that GO started, puts the standby back, and can send each device the command
+  that undoes what it was sent.
+- **Importing.** Ableton Live sets (`wfg import-als`, several sets making a tour
+  with a performance for each venue) and QLab 4 and 5 workspaces
+  (`wfg import-qlab`), both also in the window's File menu.
 
-**It is measured rather than asserted**, which is the part worth reading before the code. A cue
-reaches the outputs it names at the gains it names and no others, from one channel into two up
-to eight into sixty-four. A launch lands on the sample it was placed at, across fifteen
-rate-and-block configurations. Arming a second cue while a first is playing leaves the first
-**bit-identical**. A rendered fade follows the curve it was given to within two millionths of a
-decibel, tick by tick, and a fade to −120 dB renders exact zeros rather than something small.
-The numbers are in §11.8 of the namespace draft and in the commit messages of PRs 2.1–2.8.
+### Not built yet
 
-**What is not done is the hardware pass.** `wfg devices` lists what a machine can play through
-and `wfg serve --device=` runs a show on one — both work on the Windows box, where the first
-interface anybody tried granted 480 frames for a request of 256, which is exactly why PRD §6.2
-says the rate is observed and never set. But nothing has been *listened to*: every statement
-above is about counters and return values.
-[`docs/handoffs/2026-09-06-audio-hardware-checklist.md`](docs/handoffs/2026-09-06-audio-hardware-checklist.md)
-is what is left, including M8's mid-show rate change, which needs the Dante because it is the
-only interface here that can change rate under a running process.
+- **Timecode** — chasing and generating LTC and MTC (devplan Phase 10).
+- **Panic values** — every parameter declares a resting state (PRD §3.3), but
+  nothing yet puts a node back to it.
+- **Bindings** — a general way to bind any parameter to any control, with read,
+  touch, latch and write modes (PRD §3.10). Today a surface reaches parameters
+  through Go.dot's own pages.
+- **The tablet** (Phase 7) — the console runs in a tablet's browser, but as a
+  mouse-and-keyboard page, without the touch gestures PRD §3.17 describes.
+- **Group joins** — gap, gapless or crossfade between a sequence's members,
+  decided (PRD §3.6) and waiting for the client's layout to settle.
+- **Video latency offsets and DeckLink output** (Phase 8b).
+- **Integrations and redundancy** — Choufleur, authoring a cue from a processor,
+  device templates, and a backup engine that takes over from the primary
+  (Phases 11 and 12).
 
-Two decisions are still the author's and both are written down rather than guessed:
-§4.2's wording about what Tracktion does inside its own callback, and §6.2's mismatch policy —
-a device that opens at a rate nobody asked for currently **refuses**, which is the one of
-*refuse / warn / resample* that cannot be wrong quietly.
-[`docs/godot-open-questions-0.1.md`](docs/godot-open-questions-0.1.md) carries those, and what
-to check in QLab about fades that compound.
+---
 
-**Phase 3 — groups, triggers, ranges — meets its criterion.** That criterion is *a complex
-background auto-sequence with a looping ambience runs while manual foreground cues fire on
-top; an advance cue exits the loop cleanly; the replay log reproduces all of it*, and
-`tests/blackbox/phase3_groups.py` is that sentence as a program: twenty-nine checks against
-`wfg serve --hosted`, driven over UDP the way a console would, read over HTTP the way a
-client would, and then read back off the WAV that came out. It runs in CI on three platforms
-under two locales. What it builds: groups as runs in a tree with a scheduler whose every
-decision is a logged command, headers and blocking footers, shuffle with materialised rounds, a
-standby pointer that descends into a manual group, parallel lists with a published focus, triggers
-from OSC, MIDI and the wall clock, ranges and in-cue loops as looping clips with every boundary
-placed by Go.dot, and MIDI cues. §12 of the namespace draft is that shape written before the
-code, and §9 records the four decisions the author took with the plan on 2026-09-06 — among them
-that a fade aimed at a group is a *trim*, which is the structure relative fades and DCAs will
-share. Two things the plan found by reading the engine rather than the documents: nothing arms a
-cue at standby yet, and Tracktion's slot node stops a non-looping clip before any rebuild-free
-loop lever can wrap it — so range clips are armed looping and the boundaries are Go.dot's.
+## How it is checked
 
-**What is built so far.** Runs for every cue kind with waits at both ends; groups
-as runs in a tree, timeline and sequence, automatic and manual, with headers and
-blocking footers; a standby pointer that descends into a manual group and climbs
-out of it; rounds — shuffle, `loops`, `play N of M`, a seed that makes a shuffled
-scene rehearsable, and pruning a member for tonight without editing the show;
-parallel lists with a published focus; triggers from OSC, MIDI and the wall
-clock; and the ranges seam — a launcher slot for every region a media cue names,
-as many on every track as the show's widest cue has, each clip armed *looping*
-so its slot builds no stop for it and Go.dot places every boundary itself. Every
-scheduler decision is a logged command, and five replay fixtures say so: an
-automatic chain, a descent through nested manual groups, a shuffled bed pruned
-and left at a boundary, three inputs that are not present on the machine
-replaying them, and the waits fixture Phase 3 opened with.
+**It is measured rather than asserted**, which is the part worth reading before
+the code.
 
-Three measurements decided the shape of ranges and all three came out for it.
-The node identities are unique at every one of 1..64 tracks × 1..8 slots — asked
-of the collection the slots are actually in, which is not the one the check had
-been looking at. Eight slots on thirty-two tracks at 96 kHz cost about seven
-microseconds of a six-hundred-and-sixty-seven-microsecond block more than one
-slot does, which is inside the noise. And of three ways to carry a loop from one
-pass to the next, the clip's own wrap is the cleanest at every block size and
-both sample rates — by between five and twenty thousand times, and at 96 kHz it
-is not a join at all, the render being the reference — so a looping range is
-left alone (`docs/spikes/spike03b-loop-joins.md`).
+- **Each phase's done-when clause is a program.** [`tests/blackbox/`](tests/blackbox/)
+  holds Python drivers — standard library only, nothing of Go.dot's imported —
+  that start the shipped `wfg`, drive it over UDP, HTTP and WebSocket the way a
+  console would, and read back what came out, sometimes off the WAV it rendered.
+  They keep finding what no unit test can: faults at the seam between two things
+  that were each correct alone.
+- **Every session can be replayed.** Every input becomes a named command applied
+  on a 50 Hz tick and written to a tick-indexed log, and `wfg replay` must
+  reproduce a session record for record. A replay fixture per phase runs in CI.
+- **Every serialising test runs twice**, under `C` and under `fr_FR`, because a
+  number written with a decimal comma is a premiere-night bug.
+- **Measurements, numbered M1 to M59 so far**, report rather than gate: where a
+  launch lands to the sample, how closely a rendered fade follows its curve, what
+  a D700 refresh costs a tick, how long a Pd patch takes. They sit in the
+  namespace draft beside the design they tested, and several changed a decision.
+- **CI** builds and tests on Linux, macOS and Windows under both locales, with a
+  strict `-Werror` build, the spikes, a pin gate, and a job running Clang's
+  real-time sanitizer, the second net under PRD §4.2's rule that the audio
+  thread never allocates, locks or calls the system.
 
-Ranges, MIDI cues and group fades as trims all landed after that was
-written, and so did the two items the tree layer owed: a mounted processor's
-namespace is cached apart from the show's now (it cost 3.1 ms of every cue
-rename, which was twenty-nine times the rest of the tree), and an
-identifier-valued attribute says in the parameter table what it must point at,
-so a dangling target is a `wfg validate` warning and a `bad-target` at run time
-rather than something nobody notices until the night it matters.
+---
 
-What is **not** built is rate at arm, which the plan marked droppable and which
-is dropped: rate cannot change on a playing launcher clip at this Tracktion pin,
-so what could be built is half of what §3.24 promises, and half of it in the
-document would be a row that does not do what the PRD says. It goes to the
-author as an amendment instead.
+## How it got here
 
-**Phase 4 opened with a pull request that paid six debts.** It is the phase that makes a rehearsal
-possible rather than a performance: anticipation, so a scene is ready before the
-operator's hand comes down; a shared allocator, so two cues cannot fight over one
-processor input and the show says so at edit time rather than at half past ten at
-night; and a state solver, so an operator can jump into the middle of an act and
-have the right cues playing at the right offsets with the right things claimed.
-§13 of the namespace draft is that shape written before the code, as §11 and §12
-were for the two phases before it, and §9 records the four decisions the author
-took with the plan — where a processor's inputs are declared, what a *preset* is,
-that waypoints are invisible, and that a persistent cue killed from the running
-pane stays killed.
+The order things were built, which is not the devplan's numbering: Phase 9 came
+before 7 and 8, and several items were brought forward from Phases 10 and 11 at
+the author's direction. Each was drawn in the namespace draft before its code
+and says afterwards what was built against what was drawn.
 
-One thing worth knowing about how §13 was written. Every claim it makes about the
-code as it stands was audited one at a time, adversarially, by a reader whose job
-was to refute it — because §12.15 records four such claims that survived an
-ordinary review and were paid for afterwards instead. Thirty-four were checked and
-thirteen came back wrong or incomplete, most of them corrections to a sentence.
-The rest are **debts**, and they are what PR 4.1 does before anything is built on
-them: a `startOffset` row that does nothing at all, two separate ways for a cue to
-hold a voice for the rest of the session, two nodes drawn in these documents and
-emitted by nothing, two log-header lines that these documents show and no code
-writes, and a load refusal that a settled decision asked for and never got. None
-of them is new to Phase 4; all of them are things Phase 4 would have discovered by
-standing on them.
+| Work | What it added | Written up in |
+|---|---|---|
+| Phase 0 | A build on three platforms; seven Tracktion Engine spikes, all passing | [`docs/spikes/`](docs/spikes/) |
+| Phase 1 | The headless engine: show document, parameter tree, 50 Hz clock, cue list, OSC, OSCQuery, the event log and its replay | namespace draft §1–§8 |
+| Phase 2 | First sound: Tracktion hosted, GO, fades, network cues that wait for an answer | §11, [Phase 2 close-out](docs/godot-phase2-closeout-0.1.md) |
+| Phase 3 | Groups, triggers, ranges, MIDI cues | §12, [Phase 3 close-out](docs/godot-phase3-closeout-0.1.md) |
+| Phase 4 | Prepare and commit, the shared allocator, the state solver, load-to-time | §13, [Phase 4 close-out](docs/godot-phase4-closeout-0.1.md) |
+| Phase 5 | Undo, crash-safe save, the edit lock, spectral colour; the console as operator client, then the desktop window | §14 |
+| Show settings | Network devices and MIDI ports | §15 |
+| Phase 6 | Surfaces, strips, DCAs, sampler groups, the D700 | §16 |
+| Phase 9 | Per-cue EQ, the plugin sandbox and inserts; the live rack; live sampling | §17–§19 |
+| Lanes and speed | Level and send lanes, recorded from faders; varispeed and timestretch; fades on what a cue owns | §20, §22, §26, §28, §34 |
+| Phase 10, in part | The stop levels held to PRD §4.4, the panic fade and GO debounce, Doh! | §21, §23, §24 |
+| Shows | Shows and performances, Enable/Disable/Jump, Save as | §25, §27, §32 |
+| Imports | Ableton Live and QLab | §29, §46 |
+| Phase 8 | Video: stills, movies, the native renderer, NDI/Spout/Syphon, read-ahead, pictures in sampler groups, the DCA knob | §35–§37, §40, §44, §47–§50 |
+| OSC cues | Several messages, bundles, recorded curves | §45 |
+| Process cues | Pure Data inside a cue, serial ports | §51 |
 
-**PR 4.1 is those debts paid.** A cue that says it starts two seconds in now does;
-a voice armed and abandoned comes back when the run is killed; `role` and `phase`
-are published, so the running pane stops rendering an empty string where a group's
-phase belongs; the log header carries the clock and one line per media file, which
-is what §11.5 meant by calling the launch tick a pure function of it; and a cue
-that waits for an answer its target cannot give is refused when the show is read
-rather than reported and run anyway. It also gives Go.dot the first thing it has
-ever known about how long a sound is — `/godot/cue/<id>/duration`, read once when
-the show opens — which is the number the state solver cannot work without. Two
-measurements come with it, both reporting rather than gating: whether a second
-launcher slot stops the first on one track, which decides what a sampler group
-claims, and where a clip armed at an offset actually begins.
-
-**PR 4.2 is the pools themselves.** A show can now declare which of a
-processor's inputs it uses and at what width, and how many channels the live
-rack has; a media cue can send into one of those inputs rather than only to a
-bus, and can say which rack channel it goes through. A feed is a routing and a
-claim in one object, which is the point of it: the audio reaches the processor
-through an ordinary bus, and the claim that keeps a second cue out of the
-position and the LFO state behind that input is the same row that carries it
-there. The claiming came in the next pull request (4.3), and the analysis that warns
-you at edit time in the one after (4.4).
-
-**Phase 4 meets its criterion.** That criterion is *load-to-time into the middle of a
-scene lands the right cues at the right offsets with the right slots claimed;
-reordering cues produces the right overlap warnings; a claim on a busy slot waits
-and says so; all headless* — and `tests/blackbox/phase4_prepare.py` is that
-sentence as a program, fifty-two checks against the shipped binary over UDP and
-HTTP, in CI on three platforms under two locales.
-
-What that phrase means in a room: park the pointer on a scene and the scene gets
-itself ready — the disk is paid for, the processor input is claimed, and the value
-the scene wants on the desk is READ, sent and verified before anybody's hand comes
-down. Move the pointer away and the desk goes back to what it held, the voice is
-given back and the claim is released, because anticipation is only as good as its
-revocation. Fire a cue that wants an input another cue is holding and it waits,
-saying *pending* in words rather than fighting for it. Move that cue above the
-scene and the show tells you, at edit time, that the two of them could overlap on
-one input; move it back and the warning goes. Ask what the show would be four
-seconds into the second member of a nested scene, look at the answer, and then
-make it so: the right cues start at the right offsets with the right things
-claimed, and the desk receives only the values that differed from what it was
-last seen to hold.
-
-**Three of those fifty-two checks failed the first time, against real faults.**
-Each was a seam between two things that were separately correct: a scene whose
-header is entirely derived from `preset` marks read *partial* for ever, because
-the word was counted against the written header alone; a plain media cue at the
-pointer held its voice and its processor input after the pointer moved on,
-because the revocation was written for prepared blocks and a lone cue is the
-smallest block there is; and a preset network cue standing second in a scene
-stopped the scene when its own row came round, because the horizon had already
-run it and the member phase was waiting for something to launch. A fourth showed
-up in the replay: a jump is one record whose handler *solves*, and `wfg replay`
-had no media lengths, so it planned a different show — it reads them off the
-log's own `# media` header lines now. None of these was reachable from a unit
-test, and all of them were reachable by driving a whole show.
-
-**What the phase built, in order.** Prepare and commit (§3.12) with a horizon
-that gets a whole block ready and a revocation that is a logged record; presets
-derived into a header, so the line IS the member and there is no second object
-(§13.7); the shared allocator over processor inputs and rack channels, claims
-that wait or degrade by policy, and the edit-time liveness analysis that warns
-about overlaps across lists (§3.9b, §3.9c, §3.9e); the state solver, which is a
-pure function over the document and says what it could not know rather than
-guessing (§3.13, §3.24); `list.loadToTime`, which builds the run tree mid-way and
-hands it to a scheduler that never learns a jump happened; the step history the
-operator does not have to keep, with the world read back at every step; and the
-persistent section, asserted through the solver rather than by a second mechanism
-(§3.29).
-
-Six measurements came with it. Two changed a decision rather than confirming one:
-a second launcher slot does **not** stop the first on a track, which falsified
-the guess §3.25's sampler claim was built on, and the observation sweep is
-cheaper per address than per subtree by two orders of magnitude — 0.6 ms against
-135 ms, which is the difference between three per cent of a tick and seven whole
-ticks, every second. The close-out is
-[`docs/godot-phase4-closeout-0.1.md`](docs/godot-phase4-closeout-0.1.md); the
-handoff to Phase 5 is
-[`docs/handoffs/2026-09-09-phase5-handoff.md`](docs/handoffs/2026-09-09-phase5-handoff.md).
-
-**There is now something to look at, and to work in.** `wfg serve <bundle>
---ui=clients/console` serves a client from `/ui` on the OSCQuery port; open that
-address in a browser and the cue list, the groups nested inside it, the standby
-pointer and the running pane are on screen. It is plain HTML, CSS and ES modules,
-one file per pane, with no build step and no dependency: the engine serves the
-folder as it sits on disk, so a pane is changed by editing its file and
-refreshing the tab.
-
-It reads by polling the tree the engine already publishes and writes by sending
-binary OSC on the WebSocket that answers on the same port — so an edit in its
-inspector is `node.set`, a new cue is `cue.create`, and every one of them arrives
-exactly as it would from a hardware surface: logged, replayable, with no second
-vocabulary for "the UI did it". The inspector is built from the tree rather than
-from a copy of the parameter table, so a row added to the CSV appears in it
-without a line being written.
-
-It arrived ahead of its place in the plan for a reason the author gave: a
-headless engine is one nobody can form an opinion about, and the layout is his to
-design. The plan has since moved to meet it rather than the other way round —
-decisions T and V (2026-09-09, namespace draft §9) make this page Phase 5's
-operator client and PRD §3.17's web client, the one the tablet uses too, grown one
-view per pull request with no build step; the JUCE desktop client is an outline
-(namespace draft §14.16) until the layout stops moving. PRD §3.2's law is intact,
-because every value on that page was already exposed over OSCQuery and already
-driven by a headless test before the page existed.
-
-**And since 2026-09-17 there is a window.** `wfg serve <bundle> … --window` opens
-the compiled client over the engine it runs inside — question E, open since Phase
-2, settled in process (namespace draft §9 and §14.16) — beside the page, not
-instead of it: the page stays the redundancy path, and the window is off by
-default so nothing headless changes. It starts as one transport strip and a GO
-button and grows one milestone at a time, each opened and judged before the next
-is begun. `--theme=clients/desktop/theme.json` lays the page's palette over it and
-F5 re-reads the file, so a change to the look costs a keypress rather than a
-build. It reads the engine through `ParameterTree::snapshot()` and changes the
-show only through `Engine::submit`, with the origin `window` on every record —
-and `ctest client.boundary` reads its source to hold it to that.
-
-The documents come first, and they are the thing to read before the code:
+The documents, besides the PRD and the devplan:
 
 - **[`docs/godot-namespace-draft-0.1.md`](docs/godot-namespace-draft-0.1.md)** — the
   *shape* of the `/godot` namespace and the show document: how a node is addressed, what
   metadata it carries, how a mutation happens and how it is recorded. A living document,
   because Go.dot is not a port of something that already works and there is no finished
-  parameter list to transcribe. Its §11, §12 and §13 draw the shapes Phases 2, 3 and 4 add
-  — runs and the cue kinds, then groups, triggers and ranges, then slots, the prepare
-  horizon and the solver — each written ahead of its code so the pull requests have
-  something to be reviewed against rather than a memory. §11.9 and §12.15 then say what
-  was built against what was drawn, which is where the drawing earns its keep.
+  parameter list to transcribe. Its §9 records every decision taken with the author, by
+  letter, and its later sections are the table above.
 - **[`docs/parameters/godot-parameters.csv`](docs/parameters/godot-parameters.csv)** —
-  *what* exists, added to as each phase lands. One table generating four surfaces: the
-  document schema, the parameter tree, the RELAX NG schema and the OSCQuery reply. WFS-DIY
-  keeps three of those independently and reconciles them with a runtime drift auditor;
-  starting collapsed is cheaper than collapsing later.
+  *what* exists, added to as each piece of work lands. One table generating four surfaces:
+  the document schema, the parameter tree, the RELAX NG schema and the OSCQuery reply.
+  WFS-DIY keeps three of those independently and reconciles them with a runtime drift
+  auditor; starting collapsed is cheaper than collapsing later.
 - **[`docs/godot-reuse-map-0.1.md`](docs/godot-reuse-map-0.1.md)** — what WFS-DIY,
   spatcore and juce_simpleweb already provide, per phase, and what stops each piece being
   used as-is.
-- **The close-outs** —
-  [`docs/godot-phase2-closeout-0.1.md`](docs/godot-phase2-closeout-0.1.md),
-  [`docs/godot-phase3-closeout-0.1.md`](docs/godot-phase3-closeout-0.1.md) and
-  [`docs/godot-phase4-closeout-0.1.md`](docs/godot-phase4-closeout-0.1.md) — one per
-  finished phase: the PRD amendments it proposes (proposed, never applied — the PRD is
-  the author's), what it deliberately left undone, what it measured, and what is still
-  needed from the author. A phase that changed its mind about something says so here.
+- **The close-outs** of Phases 2, 3 and 4 — the PRD amendments each proposed, what it
+  deliberately left undone, what it measured, and what it changed its mind about.
+- **[`docs/godot-open-questions-0.1.md`](docs/godot-open-questions-0.1.md)** — questions
+  that are the author's, written down rather than guessed.
+- **The D700** — [`docs/godot-asparion-d700-protocol-0.1.md`](docs/godot-asparion-d700-protocol-0.1.md),
+  its protocol as measured on the unit, with the byte tables in
+  [`docs/D700_CONTROL_GUIDE.md`](docs/D700_CONTROL_GUIDE.md); and
+  [`docs/godot-surface-pages-draft-0.1.md`](docs/godot-surface-pages-draft-0.1.md), its
+  buttons as Go.dot's pages.
+- **QLab** — [`docs/godot-qlab-import-0.1.md`](docs/godot-qlab-import-0.1.md), the
+  importer, and [`docs/godot-qlab-extraction-0.1.md`](docs/godot-qlab-extraction-0.1.md),
+  what a real workspace held.
+- **[`docs/handoffs/`](docs/handoffs/)** — notes passed between pieces of work, the
+  hardware checklists among them.
 
-**What exists**
+---
 
-- CMake build wired to JUCE, Tracktion Engine and juce_simpleweb as pinned submodules,
-  with the vendor sources compiled exactly once into `wfg_thirdparty`. spatcore is a
-  fourth pin, consumed as headers with no CMake target of its own.
-- **The engine skeleton**: one road in (`Engine::submit` from any thread), one ordered path
-  out (`processTick`, which applies every event in arrival order on the tick thread), a
-  named-command registry, and a tick-indexed event log that a session can be replayed from
-  and must reproduce record for record. Built before there was anything to record, which is
+## Inside the engine
+
+- **One road in, one ordered path out.** `Engine::submit` takes a command from any thread;
+  `processTick` applies every event in arrival order on the tick thread; a named-command
+  registry says what exists; and a tick-indexed event log lets a session be replayed and
+  reproduce itself record for record. Built before there was anything to record, which is
   the only order in which that guarantee is cheap.
 - **`osc::Value`**, the OSC 1.1 value type the whole control plane shares, with a number
   formatter that writes the shortest text reading back as the identical value. Measured:
@@ -320,11 +244,11 @@ The documents come first, and they are the thing to read before the code:
   put the macOS floor at 13.3.
 - **The show document and the bundle it lives in.** A show is a folder: a manifest, a
   canonical `show.xml` holding what someone decided, a `state.xml` holding where the engine
-  had got to, and the OSCQuery descriptions its mounts read. Which of the two files an
-  attribute lands in is the parameter table's `persist` column and nothing else, enforced in
-  both directions. Nothing in a bundle records when or where it was written, so opening one
-  and saving it again produces the same bytes — which is what lets a replay compare against
-  a saved show directly instead of through a normaliser.
+  had got to, its media, and the OSCQuery descriptions its devices read. Which of the two
+  files an attribute lands in is the parameter table's `persist` column and nothing else,
+  enforced in both directions. Nothing in a bundle records when or where it was written, so
+  opening one and saving it again produces the same bytes — which is what lets a replay
+  compare against a saved show directly instead of through a normaliser.
 - **[`docs/schema/show.rng`](docs/schema/show.rng)**, the bundle's grammar in RELAX NG,
   generated from the parameter table and committed. The engine validating a document against
   its own schema can only prove it is self-consistent; this is what lets somebody else's
@@ -336,8 +260,7 @@ The documents come first, and they are the thing to read before the code:
   the event log's ordering key; it measures its own lateness in samples and keeps the
   worst, because that is the number an operator wants when a show feels loose. Not a
   `juce::Timer`: spike 05 measured that instrument's own idle floor at 0.76 ms median and
-  2.60 ms at the 99th percentile, before doing any work. A paced stand-in for the audio
-  device drives it; `--device=` opens a real one, and `wfg devices` lists what a machine has.
+  2.60 ms at the 99th percentile, before doing any work.
 - **The `/godot` parameter tree**, published once per tick as an immutable snapshot. It is a
   projection and owns no value: a node under `/godot/cue` reads an attribute of `show.xml`,
   one under `/godot/engine` reads a counter the tick thread keeps, and a write to either is
@@ -352,13 +275,12 @@ The documents come first, and they are the thing to read before the code:
   echoing it back. Holding and releasing are commands like everything else, because a replay
   that did not re-apply them would send a different set of messages from the session it
   claims to reproduce.
-- **Mounts**: somebody else's namespace, read from an OSCQuery description in the bundle and
-  published at its own prefix. PRD §3.22 makes the template format *be* an OSCQuery
-  description, so a capture from a running processor and a file written by hand are the same
-  kind of thing to the engine — the fixtures are one of each, and they go through one reader.
-  Phase 1 read a mount, published it, accepted writes to it, logged them and sent nothing; from Phase 2 it sends,
-  what keeps that stub honest is that a captured value is dropped rather than believed, a
-  read-only node still refuses a write, and every mounted node carries the four declarations
+- **Devices are mounts**: somebody else's namespace, read from an OSCQuery description in
+  the bundle and published at its own prefix — or, for a desk that describes nothing, an
+  *opaque* device sent to blind. PRD §3.22 makes the template format *be* an OSCQuery
+  description, so a capture from a running processor and a file written by hand are the
+  same kind of thing to the engine. A captured value is dropped rather than believed, a
+  read-only node refuses a write, and every mounted node carries the four declarations
   PRD §3.3 requires.
 - **A JSON reader of our own**, because JUCE's accumulates a plain integer literal into an
   `int64` and only switches to the correctly-rounded path when it meets a `.` or an `e`. A
@@ -366,77 +288,52 @@ The documents come first, and they are the thing to read before the code:
   different number. A namespace file's numbers are somebody else's range bounds, and a bound
   that changes on the way in is one Go.dot would enforce against a target that never declared
   it.
-- **The standby pointer** (PRD §3.5): where GO will act, one per cue list, and the commands
-  that move it. It stores an identifier rather than an index or a cue number, so reordering
-  the list moves nothing and renumbering during tech moves nothing. A list's standby must
-  name one of that list's own top-level children, enforced at the document's single write
-  door — so the commands, a client's direct write, and restoring a saved show are all checked
-  identically. Deleting the cue it is parked on advances it to the next one; moving that cue
-  elsewhere clears it, both inside the applied command so a replay reproduces them for free.
-- `wfg`, a console binary: `--version` prints the JUCE and TE versions it actually linked,
-  `selftest` stands the JUCE message thread up headless, `commands` lists the registered
-  command set, `canon` rewrites a show document in canonical form, `validate` checks a bundle
-  and reports every problem, `schema` writes or checks the grammar, `tree` prints the
-  parameter tree as OSCQuery JSON with no server in the way, and `replay` re-executes a log
-  and reports whether it reproduced itself.
+- **The standby pointer** (PRD §3.5): where GO will act, one per cue list. It stores an
+  identifier rather than an index or a cue number, so reordering the list moves nothing and
+  renumbering during tech moves nothing.
 - **The OSC 1.1 codec and a UDP endpoint that says who sent each datagram.** Written
   rather than borrowed, because a decoder reads somebody else's bytes: every read is
   bounds-checked and refuses, an element is parsed against its own extent and not the whole
   packet, the size bound cannot overflow, nesting is capped, and a refusal carries a stable
-  atom the log can group by as well as a sentence a person can read. Each of those is a
-  defect in the parser it replaces, named in the header beside the rule.
+  atom the log can group by as well as a sentence a person can read.
 - **An OSCQuery server on one port**, HTTP and WebSocket, with `LISTEN`/`IGNORE`, binary
   OSC both ways, per-tick coalescing, and pushes withheld from the client that caused them
   and from anyone holding the node. Four HTTP answers to four different questions, because
-  a server that collapses them into 200-or-404 makes a client guess.
-- **`wfg serve`** — the whole of Phase 1 running. Both ports take 0, bind an ephemeral one
-  and print what they got, which is what lets two instances share a machine. `--hosted` puts
-  a real playback graph under the clock with no hardware attached, generated from the show's
-  own `<Audio>`; `--render=<wav>` writes what came out of it. The width of that imaginary rig
-  is not a flag — it is the furthest channel the show's buses reach, because that is where the
-  author said a channel exists.
-- `wfg_tests`, a doctest suite — the toolchain facts a green compile does not prove (the
-  JUCE pin at *runtime*, the module configuration actually reaching our targets), plus the
-  skeleton's own guarantees, every case run twice, under `C` and under `fr_FR`.
-- **[`tests/blackbox/phase1_session.py`](tests/blackbox/phase1_session.py)**, the phase's
-  done-when clause as a program: it launches the shipped binary on a throwaway bundle,
-  talks to it over HTTP, WebSocket and UDP, saves, and then makes the engine reproduce its
-  own log. Stdlib Python, nothing of ours imported. It found two bugs no unit test could —
-  a first tree published after the socket opened, and a parameter tree nobody marked stale,
-  which made every write invisible to every client while still being logged as applied and
-  written to disk.
-- GitHub Actions CI for Linux, macOS and Windows, plus a pin gate and an
-  isolated job that builds the spikes.
-- `spikes/`, for the seven Tracktion Engine validation programs of PRD §6.1.
-  They are throwaway by construction: they may link `wfg::thirdparty` and never
-  `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
+  a server that collapses them into 200-or-404 makes a client guess. It does not advertise
+  itself over mDNS, speaks no TLS (`deps.no-openssl` asserts on the shipped binary that no
+  OpenSSL came with it), and resolves an address to exactly one node. Bundle time tags are
+  carried and preserved but not scheduled: honouring one would tell a client its timing had
+  been respected when it had not.
+- **Helper processes for what may crash.** Plugins are scanned, hosted and given their
+  editor windows by `wfg` started again as a child, and pictures are drawn by another. A
+  plugin host or a renderer that dies is started again, and a crash in one costs at most
+  the cues it was serving, never the engine.
 
-**What does not exist yet.** Phase 5 is half built, one pull request at a time against §14 of the
-namespace draft: undo, an atomic save with a `dirty` that is true, the edit lock, crash-safe
-autosave and recovery, `document.revert` and `document.saveAs`, the spectral-colour cache with
-`wfg analyse`, the colour a playing clip publishes with the route its pyramid is served on, and a
-fade's drawn curve — `Fade/@points`, the first list any client can write — have landed. The
-console's Phase 5 views have not, the spectral bar and the curve editor among them; control surfaces
-and bindings are Phase 6's. What
-this paragraph listed before Phase 3 — a group runtime, arming at standby, pre- and post-waits the
-scheduler reads, and finished runs that kept their addresses for ever — Phase 3 built or fixed: a
-finished run is now published for five seconds and then retires from the tree. Everything a tick
-writes to a mounted node leaves together at the end of it, so the twelve messages of one GO are one
-gesture rather than a dribble (§3.4) — that part is Phase 2's and does exist.
+### The `wfg` binary
 
-The OSCQuery server does not advertise itself over mDNS — clients are pointed at a host and
-a port, and `juce::NetworkServiceDiscovery` is not mDNS. It speaks no TLS, and
-`deps.no-openssl` asserts on the shipped binary that no OpenSSL came with it. It resolves an
-address to exactly one node: a client sending a pattern is told so, in its own words, rather
-than told the node does not exist. Bundle time tags are carried and preserved but not
-scheduled — Phase 4 built the state solver without them, and honouring one now would
-tell a client its timing had been respected when it had not.
+One binary, named in PRD §7. The launchers run `wfg serve` with a window; everything else
+is for checking, converting and testing.
 
-No compiled UI, no third-party plugin hosting, no video: the one UI is the web console served
-at `/ui`, plugins are Phase 9's and video Phase 8's. There is an audio graph, exact and measured,
-and GO fires a cue into it.
+| Verb | What it does |
+|---|---|
+| `serve <bundle>` | Runs a show: the engine, its OSC and OSCQuery ports, and with `--window` the desktop client. `--device[=<name>]` plays through an interface, `--hosted` through no hardware (`--render=<wav>` keeps what came out), `--ui=<dir>` serves the web console. Both ports take 0, bind a free one and print it |
+| `devices`, `midi` | The audio devices and MIDI ports this machine has |
+| `validate <bundle>` | Checks a bundle against the schema and reports every problem |
+| `canon <file>` | Rewrites a show document in canonical form |
+| `schema` | Writes the RELAX NG grammar, or checks the committed copy |
+| `tree <bundle>` | Prints the parameter tree as OSCQuery JSON, with no server in the way |
+| `replay <log>` | Replays a session's log into a fresh engine and checks it reproduces itself |
+| `analyse <bundle>` | Works out the spectral colour of every sound a show names, and caches it |
+| `plugins` | Scans for VST3, AU and LV2 plugins, out of process, or lists the last scan |
+| `import-als`, `import-qlab` | Ableton Live sets, or a QLab 4 or 5 workspace, into a new show |
+| `template` | A performance against its show's template cue list: what differs, or bring changes in |
+| `associate` | Linux: makes `.wfg` shows open with this copy of Go.dot |
+| `commands`, `selftest`, `--version` | The named commands; a headless boot; the linked JUCE and Tracktion versions |
 
-**Open questions, deliberately unanswered anywhere in this tree**
+`video-render`, `plugin-host` and `plugin-editor` are the helper processes above. Go.dot
+starts them itself; nobody types them.
+
+### Open questions, deliberately unanswered anywhere in this tree
 
 The devplan lists these under Phase 0's *"Needs from the author"*. A default
 picked here would be an answer to a question that has not been asked, so there
@@ -452,8 +349,10 @@ either of them anywhere in the build:
 2. **Target sample rates and buffer sizes.** Same treatment (`--sample-rate=N
    --buffer=N`). PRD §3.4's "96 kHz / 64 frames" is an arithmetic illustration,
    not a specification.
-   *Partly answered 2026-09-04 by PRD §6.2's 0.8 amendment: the rate is observed,
-   never set; the mismatch policy and buffer sizes stay open.*
+   *Partly answered: the rate is observed, never set (PRD §6.2, amended in 0.8),
+   and a rate that changes under a running show is followed by resampling (the
+   author, 2026-09-21). A show file authored at another rate doing the same is
+   still (proposed); buffer sizes stay open.*
 
 Three smaller things this scaffold decided and would rather have overruled early
 than late: the SPDX suffix is `GPL-3.0-or-later` (`GPL-3.0-only` is equally
@@ -508,20 +407,27 @@ It runs the console's pure modules under `node --test` as the ctest entry
 entry is left out and configure prints a line saying why; the page itself needs
 no Node, no build and no install, now or later.
 
+**At run time, none of these is needed to build, and each is optional:** Pure
+Data or plugdata, to open a process cue's patch in a program of its own (the
+canvas inside Go.dot needs neither); the NDI runtime, for pictures over NDI,
+found where its installer put it and never shipped with Go.dot; and FFmpeg,
+which Go.dot downloads itself the first time a movie needs converting to HAP.
+
 ### Step by step
 
-**1. Clone with submodules**
+**1. Clone, then fetch the submodules one level deep**
 
 ```bash
-git clone --recurse-submodules https://github.com/pob31/go.dot.git
+git clone https://github.com/pob31/go.dot.git
 cd go.dot
+git submodule update --init     # every pinned submodule, and none of theirs
 ./scripts/bootstrap.sh          # scripts\bootstrap.ps1 on Windows
 ```
 
-`bootstrap` is idempotent — re-run it any time. It initialises the four
-submodules, populates the one nested submodule that is wanted, checks the pins,
-and disarms Tracktion Engine's nested SSH JUCE submodule so the blanket
-recursive command below cannot bite you later.
+That is what CI does: every top-level submodule, then the one nested submodule
+that is wanted. `bootstrap` is idempotent — re-run it any time. It populates
+that nested submodule, disarms Tracktion Engine's nested SSH JUCE submodule so
+the blanket recursive command below cannot bite you later, and checks the pins.
 
 > **Important:** do **not** use a **blanket** `--recursive` on the submodule
 > update, and do not use `--depth 1`.
@@ -533,7 +439,13 @@ recursive command below cannot bite you later.
 > names neither Go.dot nor Tracktion Engine. Every CI runner is in exactly that
 > position. Go.dot pins JUCE itself, so TE's vendored copy is redundant: our
 > CMake adds `ThirdParty/tracktion_engine/modules` and never TE's root, and that
-> directory can stay empty forever.
+> directory can stay empty forever. `git clone --recurse-submodules` is the same
+> blanket recursion, which is why step 1 clones first and fetches the submodules
+> in a command of its own.
+>
+> libpd's own nested `pure-data` stays empty for the same reason: Go.dot pins
+> Pure Data itself at `ThirdParty/pure-data`, and check (h) of `check-pins.py`
+> holds libpd's gitlink equal to that pin.
 >
 > **There is exactly one exception, and it is scoped by name:**
 >
@@ -570,10 +482,16 @@ no test project there. Locally, point `ctest` at the tree you built.
 
 The suite runs the unit binary twice (once under `C`, once under `fr_FR`); the
 product binary once per serialising verb per locale (`canon`, `replay`, `schema`,
-`validate`, `commands`) plus `--version` and `selftest`; and two Python gates —
-the generated schema header against the parameter table, and every show fixture
-against the committed RELAX NG grammar through lxml. Where Node.js is new enough,
-`console.unit` runs the console's own tests as well.
+`tree`, `validate`, `commands`) plus `--version`, `selftest`, `midi` and the
+plugin scans; every replay fixture; the black-box drivers against the shipped
+binary, most of them under both locales; and the Python gates — the generated
+schema header against the parameter table, every show fixture against the
+committed RELAX NG grammar through lxml, the desktop client's boundary
+(`client.boundary`), no comment delimiter hidden inside a comment
+(`source.comments`), and no OpenSSL in the binary. The GPU
+renderer's pictures are held to the reference compositor where the machine has
+a device (`video.gpu`). On Windows the native-window checks run too (`ui.*`).
+Where Node.js is new enough, `console.unit` runs the console's own tests as well.
 
 On **Windows**, `dev` needs an *x64 Native Tools Command Prompt for VS* (or a
 shell where `vcvars64.bat` has run) — Ninja cannot find `cl.exe` from a plain
@@ -628,16 +546,24 @@ Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …
 | `wfg::warnings` | INTERFACE | The warning policy. Linked to **our** targets only, never to vendor code |
 | `wfg::thirdparty` | STATIC | The one place JUCE and Tracktion Engine module sources compile |
 | `wfg::engine` | STATIC | The engine library. Its public headers name no JUCE or TE type |
+| `wfg::client_model` | STATIC | The desktop client's half with no JUCE type: what a label shows, the theme's tokens, the command each gesture submits — so the tests can assert them with no window |
+| `wfg::client_ui` | STATIC | The desktop window itself. Not linked by the engine: `main()` hands it over as a factory, and `client.boundary` holds the split |
+| `wfg_pd` | STATIC | Pure Data and libpd, one Pd instance per patch on a thread of its own |
+| `wfg_hidapi` | STATIC | hidapi's one platform file, for the SpaceMouse |
+| `wfg_syphon` | STATIC | macOS only: Syphon's Metal half and Go.dot's own server on it |
 | `wfg` | executable | The product binary (PRD §7's binary name) |
 | `wfg_tests` | executable | doctest runner, registered with CTest under both locales |
+| `wfg_audio_ui_tests` | executable | Windows only: the native-window checks, against a live device |
+| `wfg_windows_launcher` / `wfg_macos_launcher` | executables | `Go.dot.exe`, and the app's launcher on macOS, in a test build |
 | `spike01…07_*` | executables | PRD §6.1 validation programs, behind `WFG_BUILD_SPIKES` |
 
 ### Test builds
 
 `.github/workflows/release.yml` makes one download per platform for people to
 try. Windows and Linux get a folder: the `wfg` binary, `console/` (the web
-client), an empty show in `Untitled/`, a launcher (`Go.dot.exe` or `go.dot.sh`)
-and a `README.txt` for the tester. macOS gets the same inside `Go.dot.app`, in a
+client), `pd/` (Go.dot's ready-made Pure Data patches), an empty show in
+`Untitled/`, example shows in `Examples/`, a launcher (`Go.dot.exe` or
+`go.dot.sh`) and a `README.txt` for the tester. macOS gets the same inside `Go.dot.app`, in a
 DMG that is **signed with the author's Developer ID, notarized and stapled** by
 `scripts/package-macos.sh`, from the secrets in the protected `go-dot`
 environment. Windows also gets that folder as an **Inno Setup installer**
@@ -683,6 +609,9 @@ live in `packaging/`.
 |---|---|---|
 | JUCE | 8.0.13+7 (on `develop`) | `37c894f83d379179b2070d437ccd0f1cd9af9576` |
 | Tracktion Engine | develop (3.5.0) | `13b51326693e3227ddef91b224114d12af6433ce` |
+| juce_simpleweb (the OSCQuery server's HTTP and WebSocket; the author's fork) | `pob31/juce_simpleweb` | `b72ec947548654cdd0a7e72b71ab5826fe574847` |
+| spatcore (the author's shared control-plane code, headers only) | main, after PR #18 | `5803830150e408ad76c296cd9edbd5d9eba35dc3` |
+| hidapi (the SpaceMouse) | 0.15.0 | `d6b2a974608dec3b76fb1e36c189f22b9cf3650c` |
 | sokol (the video renderer's graphics) | master, 2026-10-06 | `401f21f8b7039258c35fef75c11d9a8a0e616771` |
 | Spout's SpoutDX (vendored in `ThirdParty/spout`, Windows) | master | `c2bcc12147711d12ace7d5f08e869d774d840f8a` |
 | Syphon (`ThirdParty/Syphon`, macOS) | main, 2026-09-21 | `f4761677a45b8034a3c2069ec0f3d2553da81fba` |
@@ -700,7 +629,7 @@ equality true is the whole job of `scripts/check-pins.py`.
 
 Tracktion is built with a short series of changes of Go.dot's own, in
 `patches/tracktion_engine/` - today, what a media cue's speed needs (namespace
-draft §22.3). **The build applies them**: every configure puts the series on the
+draft §22.3) and a loop moved while it plays (§33). **The build applies them**: every configure puts the series on the
 submodule's working tree before a Tracktion source is read, or finds it already
 on and touches nothing (`cmake/WfgTracktionPatches.cmake`). So:
 
@@ -769,21 +698,37 @@ contributor ever types.
 ```
 CMakeLists.txt       orchestration only; defines no source target
 CMakePresets.json    every preset here is run by CI
-cmake/               guards, options, third-party wiring
-docs/                the PRD and the development plan — the spec
-scripts/             bootstrap, the Linux package list, the pin gate, and
-                     package-macos.sh (sign, DMG, notarize, staple)
+cmake/               guards, options, third-party wiring, the install list,
+                     and the step that puts Go.dot's patches on Tracktion
+docs/                the spec: the PRD, the development plan, the namespace
+                     draft, the parameter table, the grammar - and the
+                     tester's guides, in English and in French
+scripts/             bootstrap, the Linux package list, the pin gate, the
+                     generators (schema, shaders, Pd patches, icons), the
+                     gates' scripts and the packaging scripts
+patches/             Go.dot's own changes to Tracktion Engine, applied by the
+                     build (see below)
 packaging/           what a test build carries beside the binary: the
-                     launchers, the tester's README.txt, an empty show, and
-                     macos/ - Go.dot.app's launcher, Info.plist, entitlements
+                     launchers, the tester's README.txt, an empty show, the
+                     example shows, the icons, macos/ (Go.dot.app's launcher,
+                     Info.plist, entitlements) and windows/ (the installer)
+pd/                  Go.dot's ready-made Pure Data patches, each with a help
+                     patch, written by scripts/make-pd-patches.py
 clients/console/     the web client the engine serves at /ui; reads by polling,
                      writes binary OSC, no build step, no dependency
-src/                 wfg_engine (the library) and wfg (the binary)
+clients/desktop/     theme.json, the window's palette, re-read on F5
+src/wfg/engine/      wfg_engine, the library
+src/wfg/client/      the desktop window, in the same process as the engine
+src/wfg/app/         main(), and nothing else
 tests/               the doctest suite and every add_test() in the project;
-                     tests/console/ holds the page's node --test files
+                     tests/blackbox/ holds the drivers and tests/console/ the
+                     page's node --test files
+tools/               the real-time sanitizer's suppression list
 spikes/              throwaway PRD §6.1 validation programs
-ThirdParty/          JUCE, tracktion_engine, juce_simpleweb (+ its nested asio)
-                     and spatcore, all pinned submodules
+ThirdParty/          the pinned submodules - JUCE, tracktion_engine,
+                     juce_simpleweb (+ its nested asio), spatcore, sokol,
+                     Syphon, hidapi, libpd and pure-data - and two vendored
+                     folders, spout/ and ndi/
 ```
 
 Two directories that do **not** exist here, and will not:
@@ -811,7 +756,7 @@ Two directories that do **not** exist here, and will not:
 - Engine before UI, always. Nothing gets a UI before the engine exposes it over
   OSCQuery and a headless test drives it.
 - Anything marked *(proposed)* in the PRD is not built without a recorded yes.
-  Decision points under *"Needs from the author"* are his — surface them as
+  Decision points under *"Needs from the author"* are the author's — surface them as
   questions, do not resolve them by picking the reasonable-looking option.
 - Spikes are throwaway. They live in `spikes/`, never migrate into `src/`, and
   each ends in a written pass/fail in `docs/spikes/` — not an exit code, which is
