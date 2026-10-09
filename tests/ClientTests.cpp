@@ -10969,3 +10969,48 @@ TEST_CASE ("client: a new insert is numbered by kind and given both its names on
     const auto own = model::ownSendNames ({ sending, display }, inserts);
     CHECK (own == std::vector<std::string> { "Go.dot - Face", "Go.dot - Spout insert 1 (send)", "Go.dot - insert Blur" });
 }
+
+TEST_CASE ("client: every warp of the show is offered to copy onto, and a copy writes the shape alone in one step (§47.12)")
+{
+    Rig rig { "video" };
+
+    //  The fixture's output on its canvas, and a second output with a zone on another canvas.
+    const auto other = rig.document.createCanvas ("Cyclo");
+    REQUIRE (other.ok);
+    const auto back = rig.document.createVideoOutput ("Back", "VD000011");
+    REQUIRE (back.ok);
+    const auto zone = rig.document.createZone (back.id, other.id);
+    REQUIRE (zone.ok);
+
+    const auto snapshot = rig.publish (1);
+    const auto targets = model::warpTargets (*snapshot);
+
+    REQUIRE (targets.size() == 3);
+    CHECK (targets[0].base == "/godot/videoOutput/VD000021/");
+    CHECK (targets[0].outputLabel == "Face");
+    CHECK (targets[0].label == "Stage - the output's own");
+    CHECK (targets[1].base == "/godot/videoOutput/" + back.id + "/");
+    CHECK (targets[1].outputLabel == "Back");
+    CHECK (targets[2].base == "/godot/zone/" + zone.id + "/");
+    CHECK (targets[2].outputId == back.id);
+    CHECK (targets[2].label == "Zone 1: Cyclo");
+
+    //  A shape of three by two, onto the zone: its grid and its points, nothing else.
+    auto shape = model::WarpPoints::whole (3, 2);
+    shape.x[0] = 0.1;
+    const auto writes = model::warpCopyWrites (shape, targets[2].base);
+
+    REQUIRE (writes.size() == 3);
+    CHECK (writes[0] == std::pair<std::string, std::string> { targets[2].base + "meshColumns", "3" });
+    CHECK (writes[1] == std::pair<std::string, std::string> { targets[2].base + "meshRows", "2" });
+    CHECK (writes[2].first == targets[2].base + "mesh");
+    CHECK (writes[2].second == model::warpText (shape));
+
+    //  And the engine takes it as one edit, the zone's canvas left as it was.
+    const auto event = gesture::setNodes (writes);
+    CHECK (event.command == "node.setMany");
+    rig.apply (2, "window", event.command, event.args);
+    const auto after = rig.publish (3);
+    CHECK (model::text (*after, targets[2].base + "meshColumns") == "3");
+    CHECK (model::text (*after, targets[2].base + "canvas") == other.id);
+}

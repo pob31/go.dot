@@ -14,7 +14,7 @@
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-#include <wfg/client/ui/WarpEditorWindow.h>
+#include <wfg/client/ui/WarpEditorPanel.h>
 
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Text.h>
@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -64,7 +65,7 @@ namespace wfg::client::ui
     }
 
     //==============================================================================
-    class WarpEditorWindow::Editor final : public juce::Component
+    class WarpEditorPanel::Editor final : public juce::Component
     {
     public:
         Editor (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
@@ -72,7 +73,7 @@ namespace wfg::client::ui
         {
             setWantsKeyboardFocus (true);
 
-            for (auto* button : { &addZone, &removeZone, &moreColumns, &fewerColumns, &moreRows, &fewerRows, &whole })
+            for (auto* button : { &addZone, &removeZone, &moreColumns, &fewerColumns, &moreRows, &fewerRows, &whole, &copyTo })
             {
                 button->setWantsKeyboardFocus (false);
                 addAndMakeVisible (*button);
@@ -115,6 +116,9 @@ namespace wfg::client::ui
             moreRows.setTooltip ("One more row of points");
             fewerRows.setTooltip ("One row of points fewer");
             whole.setTooltip ("Put the picked warp back over the whole output");
+            copyTo.setTooltip ("Put the picked warp's shape - its points and its splits - on another warp of this"
+                               " output or another; that warp keeps its canvas, blend and opacity");
+            copyTo.onClick = [this] { chooseCopyTarget(); };
 
             for (int n = 0; n < 4; ++n)
                 blendBox.addItem (blends[n], n + 1);
@@ -179,15 +183,24 @@ namespace wfg::client::ui
 
         void open (const std::string& output, const tree::TreeSnapshot& snapshot)
         {
+            /*  EACH OUTPUT'S PICK KEPT (§47.12): going to another output and
+                back finds the warp that was being worked on. */
             if (output != outputId)
             {
+                if (! outputId.empty())
+                    pickedFor[outputId] = pickedLayer;
+
                 outputId = output;
-                pickedLayer = 0;
+                const auto found = pickedFor.find (output);
+                pickedLayer = found != pickedFor.end() ? found->second : 0;
                 pickedPoint.reset();
+                dragging = false;
             }
 
             refresh (snapshot);
         }
+
+        const std::string& output() const noexcept { return outputId; }
 
         void refresh (const tree::TreeSnapshot& snapshot)
         {
@@ -217,6 +230,9 @@ namespace wfg::client::ui
             }
 
             canvases = model::readCanvases (snapshot);
+
+            //  Every warp of the show, for "Copy to...".
+            targets = model::warpTargets (snapshot);
 
             /*  A DRAG IN HAND IS NOT UNDONE BY THE PICTURE CATCHING UP: the
                 warp being dragged keeps the window's own points until the
@@ -317,7 +333,9 @@ namespace wfg::client::ui
             moreRows.setBounds (grid.reduced (2, 0));
             side.removeFromTop (6);
 
-            whole.setBounds (side.removeFromTop (28).reduced (0, 2));
+            auto lastRow = side.removeFromTop (28);
+            whole.setBounds (lastRow.removeFromLeft (lastRow.getWidth() / 2).reduced (0, 2).withTrimmedRight (2));
+            copyTo.setBounds (lastRow.reduced (0, 2).withTrimmedLeft (2));
             side.removeFromTop (8);
             hint.setBounds (side);
         }
@@ -576,7 +594,7 @@ namespace wfg::client::ui
             canvasBox.setEnabled (layer != nullptr && ! locked);
             addZone.setEnabled (! locked);
 
-            for (auto* button : { &moreColumns, &fewerColumns, &moreRows, &fewerRows, &whole })
+            for (auto* button : { &moreColumns, &fewerColumns, &moreRows, &fewerRows, &whole, &copyTo })
                 button->setEnabled (layer != nullptr && ! locked);
 
             pointX.setEnabled (point && ! locked);
@@ -642,9 +660,50 @@ namespace wfg::client::ui
             repaint();
         }
 
+        /*  COPY TO (§47.12, the author's picks): the picked warp's shape onto
+            any other warp of the show, by output and then by warp - its grid
+            and its points, one `node.setMany`, one undo step. */
+        void chooseCopyTarget()
+        {
+            const auto* layer = picked();
+
+            if (layer == nullptr || locked || ! send)
+                return;
+
+            juce::PopupMenu menu;
+            std::string section;
+
+            for (std::size_t n = 0; n < targets.size(); ++n)
+            {
+                const auto& target = targets[n];
+
+                if (target.outputLabel != section)
+                {
+                    section = target.outputLabel;
+                    menu.addSectionHeader (juce::String (section));
+                }
+
+                menu.addItem (static_cast<int> (n) + 1, juce::String (target.label), target.base != layer->base);
+            }
+
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&copyTo),
+                                [safe = juce::Component::SafePointer<Editor> (this), warp = layer->warp] (int chosen)
+                                {
+                                    if (safe == nullptr || chosen <= 0 || safe->locked || ! safe->send
+                                          || static_cast<std::size_t> (chosen) > safe->targets.size())
+                                        return;
+
+                                    const auto& target = safe->targets[static_cast<std::size_t> (chosen - 1)];
+                                    safe->send (gesture::setNodes (model::warpCopyWrites (warp, target.base)));
+                                });
+        }
+
         //==========================================================================
         model::Theme theme;
         std::function<void (Event)> send;
+
+        std::vector<model::WarpTarget> targets;
+        std::map<std::string, std::size_t> pickedFor;
 
         std::string outputId;
         std::vector<Layer> layers;
@@ -659,45 +718,112 @@ namespace wfg::client::ui
 
         juce::TextButton addZone { "+ Zone" }, removeZone { "Remove zone" };
         juce::TextButton moreColumns { "+ col" }, fewerColumns { "- col" }, moreRows { "+ row" }, fewerRows { "- row" };
-        juce::TextButton whole { "Whole output" };
+        juce::TextButton whole { "Whole output" }, copyTo { "Copy to..." };
         juce::ComboBox canvasBox, blendBox;
         juce::Label opacityBox, pointX, pointY;
         juce::Label canvasLabel, blendLabel, opacityLabel, pointLabel, gridLabel, hint;
     };
 
     //==============================================================================
-    WarpEditorWindow::WarpEditorWindow (const model::Theme& theme, std::function<void (Event)> send)
-        : DocumentWindow ("Warps", Look::colour (theme, "ground"), juce::DocumentWindow::closeButton),
-          editor (std::make_unique<Editor> (theme, std::move (send)))
+    WarpEditorPanel::WarpEditorPanel (const model::Theme& themeToUse, std::function<void (Event)> send,
+                                      std::function<void()> backToUse)
+        : theme (themeToUse), back (std::move (backToUse)),
+          editor (std::make_unique<Editor> (themeToUse, std::move (send)))
     {
-        setUsingNativeTitleBar (true);
-        setResizable (true, false);
-        setResizeLimits (720, 460, 4000, 3000);
-        setContentNonOwned (editor.get(), true);
-        centreWithSize (editor->getWidth(), editor->getHeight());
+        addAndMakeVisible (*editor);
+
+        title.setText ("Warps and zones", juce::dontSendNotification);
+        title.setFont (Look::font (theme, 15.0f));
+        title.setColour (juce::Label::textColourId, Look::colour (theme, "ink"));
+        addAndMakeVisible (title);
+
+        /*  ANOTHER OUTPUT WITHOUT LEAVING (the author, 2026-10-09: "a way to
+            select which output we're working on ... to avoid closing and
+            reopening to simply switch from one output to the next"). */
+        outputBox.setWantsKeyboardFocus (false);
+        outputBox.setTooltip ("The output whose warps are drawn");
+        outputBox.onChange = [this]
+        {
+            const auto at = outputBox.getSelectedItemIndex();
+
+            if (at >= 0 && static_cast<std::size_t> (at) < outputKeys.size())
+                pendingOutput = outputKeys[static_cast<std::size_t> (at)];
+        };
+        addAndMakeVisible (outputBox);
+
+        backButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\x90 Video"));
+        backButton.setWantsKeyboardFocus (false);
+        backButton.setTooltip ("Back to the Video tab");
+        backButton.onClick = [this] { if (back) back(); };
+        addAndMakeVisible (backButton);
     }
 
-    WarpEditorWindow::~WarpEditorWindow()
-    {
-        clearContentComponent();
-    }
+    WarpEditorPanel::~WarpEditorPanel() = default;
 
-    void WarpEditorWindow::open (const std::string& outputId, const tree::TreeSnapshot& snapshot)
+    void WarpEditorPanel::open (const std::string& outputId, const tree::TreeSnapshot& snapshot)
     {
+        pendingOutput.clear();
         editor->open (outputId, snapshot);
-        setName ("Warps - " + juce::String (editor->outputName.empty() ? outputId : editor->outputName));
-        setVisible (true);
-        toFront (true);
+        refresh (snapshot);
+        editor->grabKeyboardFocus();
     }
 
-    void WarpEditorWindow::refresh (const tree::TreeSnapshot& snapshot)
+    void WarpEditorPanel::refresh (const tree::TreeSnapshot& snapshot)
     {
-        if (isVisible())
+        //  An output picked from the bar, opened on this pass's snapshot.
+        if (! pendingOutput.empty())
+        {
+            editor->open (pendingOutput, snapshot);
+            pendingOutput.clear();
+        }
+        else
+        {
             editor->refresh (snapshot);
+        }
+
+        //  THE OUTPUTS, by name, the one shown ticked - rebuilt only when they change.
+        std::vector<std::string> keys;
+        std::vector<std::string> labels;
+
+        for (const auto& output : model::readVideoOutputs (snapshot))
+        {
+            keys.push_back (output.id);
+            labels.push_back (output.label());
+        }
+
+        if (keys != outputKeys || labels != outputLabels)
+        {
+            outputKeys = keys;
+            outputLabels = labels;
+            outputBox.clear (juce::dontSendNotification);
+
+            for (std::size_t n = 0; n < labels.size(); ++n)
+                outputBox.addItem (juce::String (labels[n]), static_cast<int> (n) + 1);
+        }
+
+        for (std::size_t n = 0; n < outputKeys.size(); ++n)
+            if (outputKeys[n] == editor->output() && outputBox.getSelectedItemIndex() != static_cast<int> (n))
+                outputBox.setSelectedItemIndex (static_cast<int> (n), juce::dontSendNotification);
     }
 
-    void WarpEditorWindow::closeButtonPressed()
+    void WarpEditorPanel::paint (juce::Graphics& g)
     {
-        setVisible (false);
+        g.fillAll (Look::colour (theme, "panel"));
+        g.setColour (Look::colour (theme, "rule"));
+        g.drawHorizontalLine (44, 0.0f, static_cast<float> (getWidth()));
+    }
+
+    void WarpEditorPanel::resized()
+    {
+        auto area = getLocalBounds();
+        auto bar = area.removeFromTop (44).reduced (12, 8);
+
+        backButton.setBounds (bar.removeFromLeft (100));
+        bar.removeFromLeft (16);
+        title.setBounds (bar.removeFromLeft (150));
+        bar.removeFromLeft (8);
+        outputBox.setBounds (bar.removeFromLeft (std::min (320, bar.getWidth())));
+
+        editor->setBounds (area);
     }
 }

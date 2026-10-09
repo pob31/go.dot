@@ -2,7 +2,7 @@
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/Look.h>
-#include <wfg/client/ui/WarpEditorWindow.h>
+#include <wfg/client/ui/WarpEditorPanel.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
@@ -6103,30 +6103,17 @@ namespace wfg::client::ui
             }
 
         public:
-            /*  THE WARP EDITOR (namespace draft 40), one window for whichever
-                output it was last opened on, fed every pass from the snapshot. */
-            void follow (const tree::TreeSnapshot& snapshot)
-            {
-                if (! pendingWarps.empty())
-                {
-                    if (warps == nullptr)
-                        warps = std::make_unique<WarpEditorWindow> (theme, send);
+            /*  THE WARP EDITOR (namespace draft 40; §47.12): laid over the whole
+                of Show settings by the panel, which this asks. */
+            std::function<void (const std::string& outputId)> onWarps;
 
-                    warps->open (pendingWarps, snapshot);
-                    pendingWarps.clear();
-                }
-                else if (warps != nullptr)
-                {
-                    warps->refresh (snapshot);
-                }
+            void openWarps (const std::string& outputId)
+            {
+                if (onWarps)
+                    onWarps (outputId);
             }
 
-            //  Opened on the next pass, with that pass's snapshot.
-            void openWarps (const std::string& outputId) { pendingWarps = outputId; }
-
         private:
-            std::string pendingWarps;
-            std::unique_ptr<WarpEditorWindow> warps;
 
             template <typename Row>
             static std::string freeName (const std::vector<Row>& rows, const char* stem)
@@ -6644,6 +6631,12 @@ namespace wfg::client::ui
             plugins = std::make_unique<PluginsPage> (theme, send);
             rackPage = std::make_unique<RackPage> (theme, send);
             video = std::make_unique<VideoPage> (theme, send);
+
+            /*  THE WARPS OVER EVERYTHING (namespace draft §47.12, the author's
+                ask): a press on an output's Warp... opens the editor over the
+                whole window on the next pass, with that pass's snapshot. */
+            video->onWarps = [this] (const std::string& outputId) { pendingWarps = outputId; };
+            warpTheme = theme;
             templates = std::make_unique<TemplatesPage> (theme, send);
             playback = std::make_unique<PlaybackPage> (theme, send);
 
@@ -6870,7 +6863,30 @@ namespace wfg::client::ui
                 the renderer's state, the engine's - re-read every pass, since
                 every cell lands at once and a projector plugged in has to reach
                 the menu without the show being edited (Phase 8a). */
-            video->follow (snapshot);
+            if (! pendingWarps.empty())
+            {
+                if (warps == nullptr)
+                {
+                    warps = std::make_unique<WarpEditorPanel> (warpTheme, send, [this]
+                    {
+                        if (warps != nullptr)
+                            warps->setVisible (false);
+                    });
+
+                    addChildComponent (*warps);
+                    warps->setBounds (getLocalBounds());
+                }
+
+                warps->open (pendingWarps, snapshot);
+                warps->setVisible (true);
+                warps->toFront (false);
+                pendingWarps.clear();
+            }
+            else if (warps != nullptr && warps->isVisible())
+            {
+                warps->refresh (snapshot);
+            }
+
             video->show (model::readCanvases (snapshot), model::readVideoOutputs (snapshot),
                          model::readDisplays (snapshot), model::text (snapshot, "/godot/videoOutput/renderer"),
                          model::text (snapshot, "/godot/videoOutput/rendererProblem"),
@@ -6948,6 +6964,10 @@ namespace wfg::client::ui
             auto options = area.removeFromBottom (32);
             save.setBounds (options.removeFromLeft (340)); defaults.setBounds (options);
             tabs.setBounds (area);
+
+            if (warps != nullptr)
+                warps->setBounds (getLocalBounds());
+
             auto form = interfacePage.getLocalBounds().reduced (22);
             enabled.setBounds (form.removeFromTop (34)); form.removeFromTop (12);
             auto row = [&form] (juce::Label& label, juce::ComboBox& box)
@@ -7081,6 +7101,11 @@ namespace wfg::client::ui
         std::unique_ptr<OutputPage> outputList;
         std::unique_ptr<InputPage> inputList;
         std::unique_ptr<VideoPage> video;
+
+        //  The warp editor over the whole window, made the first time it is asked for (§47.12).
+        std::unique_ptr<WarpEditorPanel> warps;
+        std::string pendingWarps;
+        model::Theme warpTheme;
         std::unique_ptr<TemplatesPage> templates;
         std::unique_ptr<NetworkPage> network;
         std::unique_ptr<MidiPage> midi;

@@ -22906,3 +22906,25 @@ the connection whenever a cue made a new one. What changed:
 Owed to the bench: the round trip with TouchDesigner, and Syphon's list, which names a server by its
 application and name, so Go.dot's own Syphon sends are not yet left out of it by name alone.
 
+### 47.12 The warp editor over Show settings, an output menu, and Copy to (the author's, 2026-10-09)
+
+The author, on the warp editor: *"clicking on the warp for a given output doesn't respond"*. It did open -
+a window of its own, centred, under Show settings, which stays on top while Go.dot is in front (§39.6,
+2026-09-30) and, since it was made wider, covered it whole. Asked *"Could the warp&zone window become an
+overlay taking up the whole window of the Show parameters"*, then *"a way to select which output we're
+working on ... to avoid closing and reopening"* and *"a way to 'copy to' from canvas to another within the
+same output or a different one"*:
+
+- **Warp... lays the editor over the whole of Show settings** (`ui/WarpEditorPanel`, which was
+  `WarpEditorWindow`), above its tabs and its buttons, sized with the window. Its bar holds **"← Video"**,
+  back to the tab where it was; **"Warps and zones"**; and **a menu of the show's outputs**, which moves the
+  editor to another without leaving it, each output keeping the warp last picked on it. Esc stays Panic, as
+  in every window of the show. Everything else is as §40.5 drew it.
+- **Copy to...** puts the picked warp's **shape** - its grid and its points - on **any other warp of the
+  show**, listed output by output: each output's own and each zone, as the editor's list names them. The
+  target keeps its canvas, blend and opacity; points are fractions of the display, so a shape copied to an
+  output of another shape stretches with it. One `node.setMany`, one undo step (`model::warpTargets`,
+  `model::warpCopyWrites`). The author chose both, from the options I offered: any existing warp, rather
+  than also making a new zone; the shape only, rather than with the blend and opacity. To copy onto a
+  canvas an output does not show yet, a zone is added first and the shape copied to it.
+

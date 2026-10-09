@@ -23,20 +23,31 @@
     and map for each a different canvas", edited live - the projector follows
     while a point is dragged (his pick).
 
+    OVER THE WHOLE OF SHOW SETTINGS (namespace draft §47.12, the author's ask,
+    2026-10-09): "Could the warp&zone window become an overlay taking up the
+    whole window of the Show parameters". It was a window of its own, and the
+    settings window - on top while Go.dot is in front - covered it, so a press
+    on Warp... seemed to do nothing. Its bar says which output it is on, a menu
+    to go to another without leaving, and "← Video" back to the tab. Esc stays
+    Panic, as in every window of the show.
+
     THE PICTURE is the output, the shape of its display; over it, each warp the
     output draws: its own canvas first, then each zone, bottom first. The one
     picked is drawn bright with its control points; the others are outlines. A
     point is dragged with the mouse, or picked and moved by the arrow keys (a
     thousandth of the display, a hundredth with Shift), or typed. The splits
     are added and taken away by column and by row, and the warp keeps its shape
-    as they are (`model::regridded`). "Whole output" puts a warp back.
+    as they are (`model::regridded`). "Whole output" puts a warp back, and
+    "Copy to..." puts the picked warp's shape - its points and its splits - on
+    any other warp of the show, this output's or another's (the author's two
+    picks, 2026-10-09); the target keeps its canvas, blend and opacity.
 
     THE LIST beside it says each warp's canvas, blend and opacity in words; a
     zone is added on top, taken away, and its canvas, blend and opacity chosen.
 
     EVERY CHANGE IS A COMMAND (§3.2): a drag is a run of `node.set` on one
-    address, which the document folds into one undo step; a split is one
-    `node.setMany` of the grid and its points.
+    address, which the document folds into one undo step; a split and a copy
+    are one `node.setMany` of the grid and its points.
 */
 
 #include <wfg/client/model/Theme.h>
@@ -48,28 +59,41 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace wfg::tree { class TreeSnapshot; }
 
 namespace wfg::client::ui
 {
-    class WarpEditorWindow final : public juce::DocumentWindow
+    class WarpEditorPanel final : public juce::Component
     {
     public:
-        WarpEditorWindow (const model::Theme& theme, std::function<void (Event)> send);
-        ~WarpEditorWindow() override;
+        /*  `send` carries every edit; `back` is the bar's "← Video", which the
+            settings window answers by putting the panel away. */
+        WarpEditorPanel (const model::Theme& theme, std::function<void (Event)> send, std::function<void()> back);
+        ~WarpEditorPanel() override;
 
         /** Opens it on one output, from the snapshot it is drawn from. */
         void open (const std::string& outputId, const tree::TreeSnapshot& snapshot);
 
-        /** Every pass while it is open: the output's warps as the show says them now. */
+        /** Every pass while it is showing: the warps as the show says them now. */
         void refresh (const tree::TreeSnapshot& snapshot);
 
-        void closeButtonPressed() override;
+        void paint (juce::Graphics&) override;
+        void resized() override;
 
         class Editor;
 
     private:
+        model::Theme theme;
+        std::function<void()> back;
         std::unique_ptr<Editor> editor;
+
+        juce::Label title;
+        juce::ComboBox outputBox;
+        juce::TextButton backButton;
+        std::vector<std::string> outputKeys;
+        std::vector<std::string> outputLabels;
+        std::string pendingOutput;
     };
 }

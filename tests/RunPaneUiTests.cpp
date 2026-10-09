@@ -12,6 +12,7 @@
 #include <wfg/client/ui/OscMessagesComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
+#include <wfg/client/ui/WarpEditorPanel.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
@@ -37,6 +38,11 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/plugin/EditorHost.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
+#include <wfg/engine/cue/Run.h>
+#include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/Engine.h>
 
 #include <algorithm>
 #include <cmath>
@@ -4752,4 +4758,91 @@ TEST_CASE ("waveform: a movie's pictures stay inside their strip and end where t
         CHECK (png.writeImageToStream (canvas, out));
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
+}
+
+TEST_CASE ("warps: the editor over Show settings goes from output to output on its bar, and back to the tab (§47.12)")
+{
+    /*  The author, 2026-10-09: "Could the warp&zone window become an overlay
+        taking up the whole window of the Show parameters", and "a way to select
+        which output we're working on in the warp&zone panel". The panel alone,
+        as Show settings lays it over its tabs: its bar's menu lists the
+        outputs and moves to another, "Copy to..." is there, and "← Video"
+        asks to be put away. With WFG_SNAPSHOT_DIR set, warp-overlay.png. */
+    wfg::Engine engine;
+    wfg::doc::ShowDocument document;
+    wfg::tree::MountTable mounts;
+    wfg::cue::RunTable runs;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    wfg::tree::EngineState state;
+
+    const auto canvas = document.createCanvas ("Stage");
+    REQUIRE (canvas.ok);
+    const auto front = document.createVideoOutput ("Front", canvas.id);
+    REQUIRE (front.ok);
+    const auto back = document.createVideoOutput ("Back", canvas.id);
+    REQUIRE (back.ok);
+    REQUIRE (document.createZone (back.id, canvas.id).ok);
+
+    const auto snapshot = parameters.publish (1, state);
+
+    std::vector<wfg::Event> sent;
+    auto backPressed = false;
+    ui::WarpEditorPanel panel (model::Theme {}, [&sent] (wfg::Event event) { sent.push_back (std::move (event)); },
+                               [&backPressed] { backPressed = true; });
+    panel.setSize (1100, 700);
+    panel.open (front.id, *snapshot);
+
+    juce::ComboBox* outputs = nullptr;
+    juce::Button* toVideo = nullptr;
+    juce::Button* copyTo = nullptr;
+
+    std::function<void (juce::Component&)> find = [&] (juce::Component& at)
+    {
+        if (auto* box = dynamic_cast<juce::ComboBox*> (&at); box != nullptr && box->getTooltip() == "The output whose warps are drawn")
+            outputs = box;
+
+        if (auto* button = dynamic_cast<juce::Button*> (&at))
+        {
+            if (button->getButtonText() == juce::String::fromUTF8 ("\xe2\x86\x90 Video"))
+                toVideo = button;
+            else if (button->getButtonText() == "Copy to...")
+                copyTo = button;
+        }
+
+        for (auto* child : at.getChildren())
+            find (*child);
+    };
+
+    find (panel);
+
+    REQUIRE (outputs != nullptr);
+    REQUIRE (toVideo != nullptr);
+    REQUIRE (copyTo != nullptr);
+    CHECK (outputs->getNumItems() == 2);
+    CHECK (outputs->getText() == "Front");
+    CHECK (copyTo->isEnabled());
+
+    //  Another output from the bar, opened on the next pass's snapshot.
+    outputs->setSelectedItemIndex (1, juce::sendNotificationSync);
+    panel.refresh (*snapshot);
+    CHECK (outputs->getText() == "Back");
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("warp-overlay.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    toVideo->onClick();
+    CHECK (backPressed);
+    CHECK (sent.empty());       // looking and moving between outputs edits nothing
 }

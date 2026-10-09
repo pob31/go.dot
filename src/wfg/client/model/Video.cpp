@@ -291,6 +291,43 @@ namespace wfg::client::model
         return out;
     }
 
+    std::vector<WarpTarget> warpTargets (const tree::TreeSnapshot& snapshot)
+    {
+        const auto canvases = readCanvases (snapshot);
+        const auto canvasName = [&canvases] (const std::string& id)
+        {
+            for (const auto& canvas : canvases)
+                if (canvas.id == id)
+                    return canvas.label();
+
+            return id.empty() ? std::string ("no canvas") : id;
+        };
+
+        std::vector<WarpTarget> out;
+
+        for (const auto& output : readVideoOutputs (snapshot))
+        {
+            const auto base = "/godot/videoOutput/" + output.id + "/";
+            out.push_back ({ base, output.id, output.label(), canvasName (output.canvas) + " - the output's own" });
+
+            auto number = 1;
+
+            for (const auto& zone : readZones (snapshot, output.id))
+                out.push_back ({ "/godot/zone/" + zone.id + "/", output.id, output.label(),
+                                 "Zone " + std::to_string (number++) + ": "
+                                   + (zone.name.empty() ? canvasName (zone.canvas) : zone.name) });
+        }
+
+        return out;
+    }
+
+    std::vector<std::pair<std::string, std::string>> warpCopyWrites (const WarpPoints& warp, const std::string& targetBase)
+    {
+        return { { targetBase + "meshColumns", std::to_string (warp.columns) },
+                 { targetBase + "meshRows", std::to_string (warp.rows) },
+                 { targetBase + "mesh", warpText (warp) } };
+    }
+
     std::vector<ZoneRow> readZones (const tree::TreeSnapshot& snapshot, const std::string& outputId)
     {
         std::vector<ZoneRow> out;

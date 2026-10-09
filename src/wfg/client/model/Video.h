@@ -213,6 +213,25 @@ namespace wfg::client::model
     /** An output's zones, in /godot/videoOutput/<id>/zones order. */
     std::vector<ZoneRow> readZones (const tree::TreeSnapshot&, const std::string& outputId);
 
+    /*  EVERY WARP OF THE SHOW (namespace draft §47.12), for the warp editor's
+        "Copy to...": each output's own and each of its zones, bottom first,
+        output by output in the show's order - where its rows live, which
+        output it is on, and what the editor's list calls it. */
+    struct WarpTarget
+    {
+        std::string base;           ///< "/godot/videoOutput/<id>/" or "/godot/zone/<id>/"
+        std::string outputId;
+        std::string outputLabel;
+        std::string label;
+    };
+
+    std::vector<WarpTarget> warpTargets (const tree::TreeSnapshot&);
+
+    /*  A WARP'S SHAPE PUT ON ANOTHER (the author's pick, 2026-10-09: "the shape
+        only"): its grid and its points, the writes of one `node.setMany` - the
+        target keeps its canvas, blend and opacity. */
+    std::vector<std::pair<std::string, std::string>> warpCopyWrites (const WarpPoints& warp, const std::string& targetBase);
+
     /** The displays this machine has, by the names the system gives them. */
     std::vector<std::string> readDisplays (const tree::TreeSnapshot&);
 
