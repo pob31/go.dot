@@ -45,6 +45,7 @@ namespace wfg::client::model
             case Subject::Kind::fade:      return "fade";
             case Subject::Kind::messages:  return "messages";
             case Subject::Kind::picture:   return "picture";
+            case Subject::Kind::patch:     return "patch";
             case Subject::Kind::none:      break;
         }
 
@@ -56,7 +57,7 @@ namespace wfg::client::model
         for (const auto kind : { Subject::Kind::waveform, Subject::Kind::sends, Subject::Kind::timeline,
                                  Subject::Kind::curve, Subject::Kind::eq, Subject::Kind::fx,
                                  Subject::Kind::take, Subject::Kind::fade, Subject::Kind::messages,
-                                 Subject::Kind::picture })
+                                 Subject::Kind::picture, Subject::Kind::patch })
             if (wordFor (kind) == word)
                 return kind;
 
@@ -120,6 +121,10 @@ namespace wfg::client::model
             /*  AND A PICTURE'S PLACE AND COLOUR (namespace draft §47, AAG): how
                 this cue looks is a question about the cue in hand. */
             case Subject::Kind::picture:   return true;
+
+            /*  AND A PROCESS CUE'S PATCH (namespace draft §51): what this cue
+                runs is a question about the cue in hand. */
+            case Subject::Kind::patch:     return true;
             case Subject::Kind::none:      break;
         }
 
@@ -177,6 +182,7 @@ namespace wfg::client::model
             case Subject::Kind::take:
             case Subject::Kind::fade:
             case Subject::Kind::messages:
+            case Subject::Kind::patch:
             case Subject::Kind::none:      break;
         }
 
@@ -332,6 +338,7 @@ namespace wfg::client::model
             case Subject::Kind::take:
             case Subject::Kind::fade:
             case Subject::Kind::messages:
+            case Subject::Kind::patch:
                 break;
         }
 
@@ -470,6 +477,16 @@ namespace wfg::client::model
 
             if (out.oscMessages.rows.empty())
                 out.notice = "Not an OSC cue";
+        }
+
+        /*  A PROCESS CUE'S PATCH (namespace draft §51, PC.5), the lock with it. */
+        if (subject.kind == Subject::Kind::patch)
+        {
+            out.patch = readPatchFoot (snapshot, out.subject.objectId);
+            out.locked = out.patch.locked;
+
+            if (out.patch.cueId.empty())
+                out.notice = "Only a process cue has a patch";
         }
 
         if (subject.kind == Subject::Kind::fade)

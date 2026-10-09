@@ -10,6 +10,8 @@
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/CurveLaneComponent.h>
 #include <wfg/client/ui/OscMessagesComponent.h>
+#include <wfg/client/ui/PatchCanvasComponent.h>
+#include <wfg/engine/process/PatchText.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
 #include <wfg/client/ui/WarpEditorPanel.h>
@@ -5063,4 +5065,88 @@ TEST_CASE ("warps: the editor over Show settings goes from output to output on i
     toVideo->onClick();
     CHECK (backPressed);
     CHECK (sent.empty());       // looking and moving between outputs edits nothing
+}
+
+//==============================================================================
+/*  THE PATCH CANVAS (namespace draft §51, PC.5): a drag is one write of the
+    whole patch when the hand lets go, Delete takes the picked boxes and their
+    lines, a band picks what it touches, and the lock writes nothing. */
+TEST_CASE ("patch canvas: a drag is one write, Delete takes boxes with their lines, a band picks, the lock writes nothing")
+{
+    std::vector<std::pair<std::string, std::string>> written;
+    wfg::client::ui::PatchCanvasComponent::Actions actions;
+    actions.set = [&written] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.say = [] (const juce::String&) {};
+
+    wfg::client::ui::PatchCanvasComponent canvas (wfg::client::model::Theme {}, std::move (actions));
+    canvas.setSize (600, 300);
+
+    wfg::client::model::PatchReading reading;
+    reading.cueId = "PRCS0001";
+    reading.text = "#N canvas 0 50 450 300 12;\n"
+                   "#X obj 10 20 metro 100;\n"
+                   "#X msg 10 60 bang;\n"
+                   "#X obj 200 200 print;\n"
+                   "#X connect 0 0 1 0;\n"
+                   "#X connect 1 0 2 0;\n";
+    canvas.show (reading);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+    const auto mouse = [&] (juce::Point<float> at, bool dragged)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, left, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &canvas, &canvas, now, at, now, 1, dragged);
+    };
+
+    //  A DRAG OF [metro 100]: nothing written until the hand lets go, then the whole patch.
+    const auto onMetro = canvas.onScreen (40.0, 30.0);
+    canvas.mouseDown (mouse (onMetro, false));
+    canvas.mouseDrag (mouse (onMetro.translated (10.0f, 5.0f), true));
+    canvas.mouseDrag (mouse (onMetro.translated (20.0f, 10.0f), true));
+    CHECK (written.empty());
+    canvas.mouseUp (mouse (onMetro.translated (20.0f, 10.0f), true));
+
+    REQUIRE (written.size() == 1u);
+    CHECK (written[0].first == "/godot/cue/PRCS0001/patch");
+    CHECK (written[0].second.find ("#X obj 30 30 metro 100;\n") != std::string::npos);
+    CHECK (written[0].second.find ("#X msg 10 60 bang;\n") != std::string::npos);
+    CHECK (canvas.pickedBoxes() == std::set<std::size_t> { 0u });
+
+    //  The tree has not caught up: what was sent is drawn, not the old text.
+    canvas.show (reading);
+    reading.text = written[0].second;
+    canvas.show (reading);
+
+    //  DELETE takes the box and both its lines go with it... the one into [bang( at least.
+    CHECK (canvas.keyPressed (juce::KeyPress (juce::KeyPress::deleteKey)));
+    REQUIRE (written.size() == 2u);
+    const auto left1 = wfg::process::parsePatch (written[1].second);
+    CHECK (left1.boxesOn (0).size() == 2u);
+    REQUIRE (left1.lines.size() == 1u);
+    CHECK (left1.lines[0].fromBox == 0);     // [bang( is now box 0
+    CHECK (left1.lines[0].toBox == 1);
+    reading.text = written[1].second;
+    canvas.show (reading);
+
+    //  A BAND from an empty corner picks what it touches.
+    canvas.mouseDown (mouse (canvas.onScreen (150.0, 150.0), false));
+    canvas.mouseDrag (mouse (canvas.onScreen (260.0, 240.0), true));
+    canvas.mouseUp (mouse (canvas.onScreen (260.0, 240.0), true));
+    CHECK (canvas.pickedBoxes() == std::set<std::size_t> { 1u });   // [print]
+
+    //  SPACE AND ESC ARE NOT THE CANVAS'S: GO and the PANIC still have them.
+    CHECK_FALSE (canvas.keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK_FALSE (canvas.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+
+    //  LOCKED, a drag and a Delete write nothing.
+    reading.locked = true;
+    canvas.show (reading);
+    const auto onPrint = canvas.onScreen (210.0, 205.0);
+    canvas.mouseDown (mouse (onPrint, false));
+    canvas.mouseDrag (mouse (onPrint.translated (30.0f, 0.0f), true));
+    canvas.mouseUp (mouse (onPrint.translated (30.0f, 0.0f), true));
+    canvas.keyPressed (juce::KeyPress (juce::KeyPress::deleteKey));
+    CHECK (written.size() == 2u);
 }

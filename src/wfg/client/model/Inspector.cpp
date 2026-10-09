@@ -1173,6 +1173,12 @@ namespace wfg::client::model
                 sends, every value of each, and the curves on them. */
             offer ("Messages, what this cue sends and the curves on it", "messages");
         }
+        else if (kind == "process")
+        {
+            /*  A PROCESS CUE'S PATCH (namespace draft §51, PC.5): picking one
+                opens it, as a fade's mixer opens - offered so it can be shut. */
+            offer ("Patch, the boxes and lines this cue runs", "patch");
+        }
 
         return out;
     }

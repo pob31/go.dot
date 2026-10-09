@@ -102,6 +102,9 @@ namespace wfg::client::model
         //  A picture's place and colour wear the video cue's own (namespace draft §47).
         if (subject == "picture")  return Icon::video;
 
+        //  A process cue's patch wears the process cue's own (namespace draft §51).
+        if (subject == "patch")    return Icon::process;
+
         return Icon::none;
     }
 

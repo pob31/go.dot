@@ -70,6 +70,7 @@
 #include <wfg/client/model/View.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/Patch.h>
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/FadeMix.h>
@@ -11311,4 +11312,154 @@ TEST_CASE ("client: a process run says what its patch is doing, beside its name"
     CHECK (words() == "stuck - Pure Data is held until Go.dot starts again");
     run->error = "pd-held";
     CHECK (words() == "not opened - another patch is stuck");
+}
+
+//==============================================================================
+/*  THE PATCH CANVAS'S MODEL (namespace draft §51, PC.5): Pd's sizes, ports,
+    hits, and the edits as texts. */
+namespace
+{
+    const char* const canvasPatch =
+        "#N canvas 0 50 450 300 12;\n"
+        "#X obj 10 20 metro 100;\n"
+        "#X msg 10 60 bang;\n"
+        "#X floatatom 100 20 5 0 0 0 - - - 0;\n"
+        "#X obj 100 60 route a b c;\n"
+        "#N canvas 0 0 200 200 inner 0;\n"
+        "#X obj 10 10 inlet;\n"
+        "#X obj 60 10 inlet;\n"
+        "#X obj 10 60 outlet;\n"
+        "#X restore 200 20 pd inner;\n"
+        "#X obj 200 100 tgl 15 0 /out empty empty 17 7 0 10 #fcfcfc #000000 #000000 0 1;\n"
+        "#X connect 0 0 1 0;\n"
+        "#X connect 1 0 3 0;\n"
+        "#X connect 0 0 3 0;\n";
+}
+
+TEST_CASE ("client: a patch is drawn where Pd draws it, each box Pd's size, with Pd's inlets and outlets")
+{
+    const auto patch = process::parsePatch (canvasPatch);
+    const auto view = model::viewPatch (patch);
+
+    CHECK (view.font.charWidth == doctest::Approx (7.0));
+    CHECK (view.font.lineHeight == doctest::Approx (16.0));
+    CHECK (model::pdFontFor (10).charWidth == doctest::Approx (6.0));
+    CHECK (model::pdFontFor (14).size == 12);
+
+    REQUIRE (view.boxes.size() == 6u);
+
+    //  [metro 100]: nine characters at seven pixels, four of margin; a line and five.
+    const auto& metro = view.boxes[0];
+    CHECK (metro.x == doctest::Approx (10.0));
+    CHECK (metro.w == doctest::Approx (67.0));
+    CHECK (metro.h == doctest::Approx (21.0));
+    CHECK (metro.inlets == 2);
+    CHECK (metro.outlets == 1);
+    CHECK (metro.lines == std::vector<std::string> { "metro 100" });
+
+    //  A message is at least three characters wide; an atom box its width's.
+    CHECK (view.boxes[1].kind == process::BoxKind::message);
+    CHECK (view.boxes[1].w == doctest::Approx (4.0 * 7.0 + 4.0));
+    CHECK (view.boxes[2].kind == process::BoxKind::number);
+    CHECK (view.boxes[2].w == doctest::Approx (5.0 * 7.0 + 2.0));
+    CHECK (view.boxes[2].h == doctest::Approx (20.0));
+
+    //  [route a b c]: an outlet each and one for the rest.
+    CHECK (view.boxes[3].inlets == 1);
+    CHECK (view.boxes[3].outlets == 4);
+
+    //  A subpatch has its [inlet]s and [outlet]s.
+    CHECK (view.boxes[4].kind == process::BoxKind::subpatch);
+    CHECK (view.boxes[4].inlets == 2);
+    CHECK (view.boxes[4].outlets == 1);
+
+    //  A toggle is its size square, and with a send name it has no outlet.
+    CHECK (view.boxes[5].w == doctest::Approx (15.0));
+    CHECK (view.boxes[5].inlets == 1);
+    CHECK (view.boxes[5].outlets == 0);
+
+    //  The lines, from an outlet's foot to an inlet's head.
+    REQUIRE (view.lines.size() == 3u);
+    CHECK (view.lines[0].x1 == doctest::Approx (10.0 + 3.0));
+    CHECK (view.lines[0].y1 == doctest::Approx (20.0 + 21.0));
+    CHECK (view.lines[0].y2 == doctest::Approx (60.0));
+}
+
+TEST_CASE ("client: what is under a point - an outlet before its box, a box, a line, nothing")
+{
+    const auto view = model::viewPatch (process::parsePatch (canvasPatch));
+
+    const auto outlet = model::hitPatch (view, 12.0, 40.0);
+    CHECK (outlet.what == model::PatchHit::What::outlet);
+    CHECK (outlet.item == 0u);
+
+    const auto inlet = model::hitPatch (view, 12.0 + 60.0, 21.0);
+    CHECK (inlet.what == model::PatchHit::What::inlet);
+    CHECK (inlet.port == 1);
+
+    CHECK (model::hitPatch (view, 40.0, 30.0).what == model::PatchHit::What::box);
+
+    //  Half way down the line from [metro] to [route].
+    const auto& line = view.lines[2];
+    const auto onLine = model::hitPatch (view, (line.x1 + line.x2) / 2.0, (line.y1 + line.y2) / 2.0);
+    CHECK (onLine.what == model::PatchHit::What::line);
+    CHECK (onLine.item == 2u);
+
+    CHECK (model::hitPatch (view, 400.0, 250.0).what == model::PatchHit::What::nothing);
+
+    CHECK (model::boxesTouched (view, 0.0, 0.0, 90.0, 50.0) == std::vector<std::size_t> { 0u });
+}
+
+TEST_CASE ("client: boxes moved and deleted are texts, Pd's lines renumbered and the rest untouched")
+{
+    const std::string text = canvasPatch;
+
+    //  Moved: only the moved box's record changes.
+    const auto moved = model::patchMoved (text, { 1 }, 5, -100);
+    CHECK (moved.find ("#X msg 15 0 bang;\n") != std::string::npos);
+    CHECK (moved.find ("#X obj 10 20 metro 100;\n") != std::string::npos);
+    CHECK (model::patchMoved (text, { 1 }, 0, 0) == text);
+
+    //  Deleted: [bang( goes with its two lines, and [metro] -> [route] becomes 0 -> 2.
+    const auto deleted = process::parsePatch (model::patchDeleted (text, { 1 }, {}));
+    REQUIRE (deleted.problem.empty());
+    CHECK (deleted.boxesOn (0).size() == 5u);
+    REQUIRE (deleted.lines.size() == 1u);
+    CHECK (deleted.lines[0].fromBox == 0);
+    CHECK (deleted.lines[0].toBox == 2);
+
+    //  A line alone.
+    const auto oneLess = process::parsePatch (model::patchDeleted (text, {}, { 0 }));
+    CHECK (oneLess.lines.size() == 2u);
+    CHECK (oneLess.boxesOn (0).size() == 6u);
+
+    //  A subpatch goes whole, its canvas with it; the box after it moves up.
+    const auto noInner = process::parsePatch (model::patchDeleted (text, { 7 }, {}));
+    REQUIRE (noInner.problem.empty());
+    CHECK (noInner.canvases.size() == 1u);
+    CHECK (noInner.boxesOn (0).size() == 5u);
+    CHECK (noInner.lines.size() == 3u);
+}
+
+TEST_CASE ("client: the canvas at the foot reads a process cue's patch, and its lock")
+{
+    Rig rig;
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("process"), osc::Value::string ("Mapper"),
+                                            osc::Value::string ("PRCS0001"),
+                                            osc::Value::string ("patch"), osc::Value::string (canvasPatch) });
+    auto reading = model::readPatchFoot (*rig.publish (2), "PRCS0001");
+    CHECK (reading.cueId == "PRCS0001");
+    CHECK (reading.text == canvasPatch);
+    CHECK_FALSE (reading.locked);
+    CHECK (reading.runId.empty());
+
+    CHECK (model::readPatchFoot (*rig.publish (3), "B3N8R5TW").cueId.empty());   // not a process cue
+
+    const auto foot = model::readFoot (*rig.publish (4), { model::Subject::Kind::patch, "PRCS0001" }, {});
+    CHECK (foot.patch.cueId == "PRCS0001");
+    CHECK (foot.notice.empty());
+    CHECK (model::followsPick (model::Subject::Kind::patch));
+    CHECK (model::wordFor (model::Subject::Kind::patch) == "patch");
+    CHECK (model::iconForPanel ("patch") == model::Icon::process);
 }

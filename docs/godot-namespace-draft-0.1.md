@@ -23664,3 +23664,13 @@ would give that (the option ACE did not take).
   the running pane says what its patch is doing - opening, late, stuck, or the last line it printed -
   and what a failure means for Pd; the Playback tab has "Time a tick waits for patches" (ms) and "A
   patch is stuck after" (ticks). The browser console lists the kind and its rows.
+- **PC.5**: the canvas, round one (ACD). A process cue picked opens its patch at the foot - shut by
+  hand, it stays shut for that cue - drawn where Pd draws it: Pd's own font table and margins
+  (`model/Patch`: a `[metro 100]` at size 12 is 67 by 21), message boxes with Pd's flag, atom boxes
+  with their corner cut, comments with no outline, GUI boxes their own size; inlets and outlets from a
+  table of the vanilla objects a show uses, a subpatch's from its `[inlet]`s and `[outlet]`s, anything
+  else from its lines. Panned by the wheel or Alt-drag, zoomed with Ctrl/Cmd on the wheel or a pinch;
+  boxes and lines picked by a click, Shift adding, or a band; the picked boxes dragged or nudged by the
+  arrows and deleted with Delete, their lines with them and Pd's numbering kept. Each gesture is one
+  `node.set` of the whole patch when the hand lets go, the sent text drawn until the tree has it;
+  locked, it shows and says so. Space and Esc stay GO's and the PANIC's.

@@ -64,6 +64,9 @@ namespace wfg::client::ui
         if (picture != nullptr)
             picture->applyTheme (theme);
 
+        if (patchCanvas != nullptr)
+            patchCanvas->applyTheme (theme);
+
         if (messages != nullptr)
             messages->applyTheme (theme);
 
@@ -129,9 +132,27 @@ namespace wfg::client::ui
         fx.reset();
         takePanel.reset();
         picture.reset();
+        patchCanvas.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::patch:
+            {
+                /*  A PROCESS CUE'S PATCH (namespace draft §51, PC.5): drawn
+                    where Pd draws it, its boxes moved and deleted by hand. */
+                PatchCanvasComponent::Actions drawing;
+                drawing.set = actions.set;
+                drawing.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                patchCanvas = std::make_unique<PatchCanvasComponent> (theme, std::move (drawing));
+                addAndMakeVisible (*patchCanvas);
+                break;
+            }
+
             case model::Subject::Kind::picture:
             {
                 /*  A VIDEO CUE'S PICTURE (namespace draft §47, AAG): its place
@@ -469,6 +490,10 @@ namespace wfg::client::ui
                 wanted = "Picture";
                 break;
 
+            case model::Subject::Kind::patch:
+                wanted = "Patch";
+                break;
+
             case model::Subject::Kind::none:
                 break;
         }
@@ -528,6 +553,9 @@ namespace wfg::client::ui
 
         if (picture != nullptr)
             picture->show (reading, media);
+
+        if (patchCanvas != nullptr)
+            patchCanvas->show (reading.patch);
     }
 
     std::optional<double> FootPanelComponent::heldEdge() const
@@ -682,6 +710,9 @@ namespace wfg::client::ui
 
         if (picture != nullptr)
             picture->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (patchCanvas != nullptr)
+            patchCanvas->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
 
         /*  THE TABLE ON THE LEFT AND THE CURVES ON THE RIGHT, the table as
             wide as the inspector and the cue list's own column would allow it

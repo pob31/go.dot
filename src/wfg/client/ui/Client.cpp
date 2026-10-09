@@ -488,7 +488,8 @@ namespace wfg::client
                         the same fade again leaves it closed and picking a
                         different one opens it. */
                     if (shell->footSubject().kind == model::Subject::Kind::curve
-                          || shell->footSubject().kind == model::Subject::Kind::fade)
+                          || shell->footSubject().kind == model::Subject::Kind::fade
+                          || shell->footSubject().kind == model::Subject::Kind::patch)
                         shutCurveFor = shell->footSubject().objectId;
 
                     shell->setFoot ({});
@@ -2134,6 +2135,20 @@ namespace wfg::client
                               && shell->footSubject().objectId == selection.anchor()))
                 {
                     shell->setFoot ({ model::Subject::Kind::fade, selection.anchor() });
+                    menuItemsChanged();
+                }
+
+                /*  AND A PROCESS CUE OPENS ITS PATCH (namespace draft §51, PC.5),
+                    for the fade's reason: what it runs is not a row, and a patch
+                    nobody could see until they went looking for it would be a
+                    cue nobody could read. Shut, it stays shut for that cue. */
+                if (! selection.anchor().empty()
+                      && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "process"
+                      && shutCurveFor != selection.anchor()
+                      && ! (shell->footSubject().kind == model::Subject::Kind::patch
+                              && shell->footSubject().objectId == selection.anchor()))
+                {
+                    shell->setFoot ({ model::Subject::Kind::patch, selection.anchor() });
                     menuItemsChanged();
                 }
 

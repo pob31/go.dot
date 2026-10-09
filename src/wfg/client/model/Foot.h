@@ -54,6 +54,7 @@
 #include <wfg/client/model/Lane.h>
 #include <wfg/client/model/OscCurves.h>
 #include <wfg/client/model/OscMessages.h>
+#include <wfg/client/model/Patch.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Surfaces.h>
@@ -69,7 +70,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take, fade, messages, picture };
+        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take, fade, messages, picture, patch };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -248,6 +249,9 @@ namespace wfg::client::model
         /*  A VIDEO CUE'S PICTURE (namespace draft §47, AAG): where it lies on
             its canvas, its grade and curves, its mask, its colour. */
         PictureReading picture;
+
+        /*  A PROCESS CUE'S PATCH (namespace draft §51, PC.5), for the canvas. */
+        PatchReading patch;
 
         /*  AND ITS CURVES, beside the table (namespace draft 45, O.7): each on
             the cue's own time, against an axis of its own. */
