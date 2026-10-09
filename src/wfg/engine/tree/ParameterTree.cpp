@@ -1018,6 +1018,12 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("video"))
                     rows.push_back (row);
 
+            /*  AND A SAMPLER MEMBER'S ROWS, a sound's or a picture's (namespace
+                draft §49, ABB): last, as they are on the element. */
+            if (isMedia || isVideo)
+                for (auto* row : doc::Schema::rowsForOwner ("member"))
+                    rows.push_back (row);
+
             if (isFade)
                 for (auto* row : doc::Schema::rowsForOwner ("fade"))
                     rows.push_back (row);
@@ -1134,11 +1140,11 @@ namespace wfg::tree
                     the list put on each strip before it (author, 2026-09-25),
                     from a cache keyed like the analysis above - the menu's
                     words, computed where the placement rule lives. */
-                else if (name == "stripNow" && isMedia)
+                else if (name == "stripNow" && (isMedia || isVideo))
                 {
                     text = layout.stripOf (id);
                 }
-                else if (name == "stripsBefore" && isMedia)
+                else if (name == "stripsBefore" && (isMedia || isVideo))
                 {
                     text = layout.stripsBeforeOf (id);
                 }

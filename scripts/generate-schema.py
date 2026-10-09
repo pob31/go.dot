@@ -80,6 +80,11 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # named input it takes, the rack channel it plays through and
                 # its fade-in. Its sound rows are `sound`'s.
                 "mic",
+                # What a sampler group's member carries, a sound or a picture
+                # (namespace draft §49, ABB): the strip it is played from, how
+                # a press and a release play it, and where its fader waits.
+                # A media cue and a video cue both carry it.
+                "member",
                 # `transport` was `stop` until 2026-09-22. A cue that ADVANCES
                 # is not a cue that stops, and the verb list had grown past the
                 # name: hard, fade, afterMember, afterIteration, advance - the

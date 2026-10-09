@@ -90,14 +90,17 @@ namespace wfg::client::model
 
                 /*  A VIDEO CUE (Phase 8a): what it shows, where, how high in
                     the stack, how solid and in what colour, then how it comes
-                    in. */
+                    in - and last, as a sound's, what a hand on its strip does
+                    (namespace draft §49). */
                 { "video",   { "source", "canvas", "videoInput", "file", "fit", "layer", "blend", "opacity", "dca",
                                "videoInsert", "paint", "fadeIn",
                                "startOffset", "rate",
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
                                "contrast", "saturation", "gamma", "hue",
                                "curveLuma", "curveRed", "curveGreen", "curveBlue",
-                               "shape", "feather", "invert" } },
+                               "shape", "feather", "invert",
+                               "strip", "initialLevel", "release", "secondPress", "velocity", "velocityFloor",
+                               "pressure", "releaseFade" } },
 
                 /*  What it moves - a cue, or a DCA instead - then where to and
                     how. Each thing a fade can move is a switch and then where it
@@ -930,7 +933,8 @@ namespace wfg::client::model
                 return;
             }
 
-            if (kind != "media")
+            //  A sound's and a picture's alike (namespace draft §49).
+            if (kind != "media" && kind != "video")
                 return;
 
             /*  THE PARENT'S MODE, read where it lives. A cue at the top of a
@@ -1470,8 +1474,9 @@ namespace wfg::client::model
             sampler member - which is most of them - and they were the bottom
             half of what a media cue does. Moved whole and in the order they
             had, so a sampler member reads as it did, one heading further down;
-            `dca` stays behind, since a DCA trims any cue (see `samplerRows`). */
-        if (out.kind == "media")
+            `dca` stays behind, since a DCA trims any cue (see `samplerRows`).
+            A video cue's too, since a picture plays from a strip (§49). */
+        if (out.kind == "media" || out.kind == "video")
         {
             std::stable_partition (doesBlock.fields.begin(), doesBlock.fields.end(),
                                    [] (const Field& field) { return ! named (samplerRows, field.name); });

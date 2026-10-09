@@ -65,7 +65,8 @@ namespace wfg::doc::parts
                 { Part::mix, "mix", { "Media", "Mic", "Video" },
                   { "level", "dca", "colour", "directOut", "sharedOut" }, {}, {} },
 
-                { Part::play, "play", { "Media" },
+                //  How a strip plays it, a sound's or a picture's (namespace draft §49).
+                { Part::play, "play", { "Media", "Video" },
                   { "release", "secondPress", "velocity", "velocityFloor", "pressure",
                     "releaseFade", "initialLevel" }, {}, {} },
 
@@ -165,7 +166,7 @@ namespace wfg::doc::parts
             return { Part::mix, Part::play, Part::eq, Part::sends, Part::fx, Part::speed };
 
         if (element == "Video")
-            return { Part::mix, Part::picture, Part::speed };
+            return { Part::mix, Part::play, Part::picture, Part::speed };
 
         return {};
     }

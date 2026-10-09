@@ -118,6 +118,14 @@ const KIND_ORDER = {
             "eqB2On", "eqB2Freq", "eqB2Gain", "eqB2Q",
             "eqB3On", "eqB3Freq", "eqB3Gain", "eqB3Q",
             "eqB4On", "eqB4Shape", "eqB4Freq", "eqB4Gain", "eqB4Q"],
+  // A video cue (Phase 8a) in the desktop's order - and last, as a sound's, what a hand on its
+  // strip does (namespace draft §49).
+  video:   ["source", "canvas", "videoInput", "file", "fit", "layer", "blend", "opacity", "dca",
+            "videoInsert", "paint", "fadeIn", "startOffset", "rate",
+            "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
+            "contrast", "saturation", "gamma", "hue", "curveLuma", "curveRed", "curveGreen", "curveBlue",
+            "shape", "feather", "invert",
+            "strip", "initialLevel", "release", "secondPress", "velocity", "velocityFloor", "pressure", "releaseFade"],
   // Each thing a fade moves is a switch, then where it goes: level, then speed (§22.7).
   fade:    ["target", "dca", "levelOn", "level", "rateOn", "rate", "sends", "eq", "fx", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],

@@ -192,6 +192,10 @@ TEST_CASE ("cue parts: the words, and which kinds of cue each part fits")
     CHECK_FALSE (doc::parts::fits (Part::time, "Mic"));
     CHECK (doc::parts::fits (Part::picture, "Video"));
 
+    //  How a strip plays it, a sound's or a picture's (namespace draft §49).
+    CHECK (doc::parts::fits (Part::play, "Video"));
+    CHECK_FALSE (doc::parts::fits (Part::play, "Mic"));
+
     /*  The 23 EQ rows, every one a row the schema gives a sound. */
     CHECK (doc::parts::rowsOf (Part::eq).size() == 23);
 
@@ -227,7 +231,7 @@ TEST_CASE ("cue parts: the words, and which kinds of cue each part fits")
 
     /*  WP: a template carries everything but what is bound to the file. */
     CHECK (doc::parts::templatePartsFor ("Media").size() == 6);
-    CHECK (doc::parts::templatePartsFor ("Video").size() == 3);
+    CHECK (doc::parts::templatePartsFor ("Video").size() == 4);
     CHECK (doc::parts::templatePartsFor ("Mic").empty());
 }
 

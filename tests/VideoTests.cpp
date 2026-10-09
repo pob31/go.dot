@@ -191,11 +191,20 @@ TEST_CASE ("video: a video cue is a cue, then a picture - and nothing of a sound
     CHECK (rig.at (cue + "paint") == "#2040A0");
     CHECK (rig.at (cue + "fadeIn") == "1");
 
-    for (const auto* soundRow : { "level", "directOut", "sends", "eqB1Freq", "input", "strip" })
+    for (const auto* soundRow : { "level", "directOut", "sends", "eqB1Freq", "input" })
     {
         INFO (soundRow);
         CHECK_FALSE (rig.exists (cue + soundRow));
     }
+
+    /*  BUT A SAMPLER MEMBER'S ROWS, as a sound's (namespace draft §49, ABB):
+        where its fader waits, what letting go and a second press do - their
+        defaults a sound's. */
+    CHECK (rig.at (cue + "strip").empty());
+    CHECK (rig.at (cue + "initialLevel") == "0");
+    CHECK (rig.at (cue + "release") == "playOut");
+    CHECK (rig.at (cue + "secondPress") == "restart");
+    CHECK (rig.exists (cue + "stripNow"));
 
     /*  MADE AS ANY CUE IS, born with its source and its canvas - what a line
         of the new-cue list sends - and a fill of black at full opacity on

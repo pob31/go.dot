@@ -185,9 +185,15 @@ namespace wfg::doc
                     source - level, routing, the DCA, the EQ, the inserts, the
                     sends - which a mic cue carries too. `media` keeps what is
                     about a file. The addresses do not move: every row is still
-                    /godot/cue/<id>/<row>. */
+                    /godot/cue/<id>/<row>.
+
+                    AND THE `member` ROWS LAST (namespace draft §49, ABB): what a
+                    sampler group's member carries - its strip, how a press and
+                    a release play it, where its fader waits - which a video cue
+                    carries too. Last, as they were the last of `media`'s, so a
+                    saved show's attributes keep their order. */
                 { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" },
-                                                          { "cue", "sound", "media" } },
+                                                          { "cue", "sound", "media", "member" } },
 
                 /*  A LIVE INPUT PLAYED AS A CUE (Phase 9b, decisions BW and CE):
                     a cue first, a sound second - the same level, routing, DCA,
@@ -205,8 +211,10 @@ namespace wfg::doc
                     for every source, because what the cue list cares about is
                     the same whatever it shows; a kind per source would be
                     added again to every list above. Not a sound: no Route, no
-                    Send, nothing of a voice. */
-                { "Video",  true,  { "Trigger", "Range" }, { "cue", "video" } },
+                    Send, nothing of a voice. And a sampler member's rows, as a
+                    sound's (namespace draft §49): played from a strip, its
+                    fader is how solid it is. */
+                { "Video",  true,  { "Trigger", "Range" }, { "cue", "video", "member" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,

@@ -263,7 +263,7 @@ namespace wfg::client::model
             if ((part == "time" || part == "speed") && ! timed)
                 return false;
 
-            if (part == "play" && element != "Media")
+            if (part == "play" && ! timed)
                 return false;
 
             if (part == "picture" && element != "Video")

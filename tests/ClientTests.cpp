@@ -8362,6 +8362,9 @@ TEST_CASE ("client: a sampler row is greyed on a cue no hand can press, and draw
     const auto member = rig.document.createCue (pads.id, 0, "media", "Thunder");
     REQUIRE (member.ok);
 
+    const auto still = rig.document.createCue (list, 3, "video", "Logo");
+    REQUIRE (still.ok);
+
     /*  A HEADER'S CUE HAS THE GROUP FOR ITS PARENT in the tree, and is still no
         member: a header is the group's preparation, and no strip holds one. */
     const auto header = rig.document.createRole (pads.id, "header");
@@ -8386,6 +8389,19 @@ TEST_CASE ("client: a sampler row is greyed on a cue no hand can press, and draw
 
     //  The DCA is not one of them: a DCA trims any media cue.
     CHECK (appliesIn (outside, "dca"));
+
+    /*  A PICTURE HAS THEM TOO (namespace draft §49): in the drawer a sound's
+        are in, and greyed outside a sampler group as a sound's are. */
+    const auto picture = model::inspect (*snapshot, still.id);
+    CHECK (namesUnder (picture, "sampler") == std::vector<std::string> { "strip", "initialLevel", "release",
+                                                                         "secondPress", "velocity", "velocityFloor",
+                                                                         "pressure", "releaseFade" });
+
+    for (const auto& name : samplerRows)
+    {
+        INFO ("a picture's row " << name);
+        CHECK_FALSE (appliesIn (picture, name));
+    }
 
     const auto prepared = model::inspect (*snapshot, preload.id);
     CHECK_FALSE (appliesIn (prepared, "release"));
