@@ -73,6 +73,9 @@
       <optional>
         <ref name="CueTemplates"/>
       </optional>
+      <optional>
+        <ref name="SerialPorts"/>
+      </optional>
     </element>
   </define>
 
@@ -3996,6 +3999,70 @@
         <attribute name="parts">
           <a:documentation>What the template carries, as the fragment `cue.pastePart` takes: a &lt;Fragment part=&quot;…&quot;&gt; holding a stripped copy of the cue it was saved from (namespace draft §38, WP: everything not bound to the file - level, DCA, routing, colour, EQ, sends, effects, speed, how a sample answers a hand; a picture-s canvas, layer, blend, opacity, geometry, grade and mask). Written by `cueTemplate.create` and `cueTemplate.save`, read by `cueTemplate.apply` and `cue.createFrom`. A template is stamped into a cue, never linked (PRD 4.12): a template saved again changes no cue already made.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="SerialPorts">
+    <element name="SerialPorts">
+      <zeroOrMore>
+        <ref name="Serial"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Serial">
+    <element name="Serial">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="baud">
+          <a:documentation>The speed, as the sketch-s Serial.begin says it: 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800 or 921600. Eight bits, no parity, one stop bit, no flow control. Changing it opens the port again.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1200</param>
+            <param name="maxInclusive">921600</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="framing">
+          <a:documentation>How the bytes become messages. lines: each line one message, split on spaces and commas with numbers as numbers - what Serial.println sends - heard by a process cue-s patch at [r /godot/serial/&lt;id&gt;/in], and [s /godot/serial/&lt;id&gt;/out] writes one (namespace draft 51, ACR). slip: OSC packets in SLIP frames, for a device whose transport is this port (PC.11).</a:documentation>
+          <choice>
+            <value>lines</value>
+            <value>slip</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the show calls this port - &apos;Light sensor&apos;, &apos;The Arduino&apos; - which the Devices tab lists. Where it is on this machine is its path.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="path">
+          <a:documentation>Where the port is on this machine: COM3 on Windows, /dev/cu.usbmodem14101 on a Mac, /dev/ttyACM0 or a /dev/serial/by-id name on Linux - which stays the same when the cable moves to another socket. Empty, the port is not opened. OPENING ONE RESETS AN ARDUINO, so it is opened once and kept open, and tried again after a pause that grows when it fails, never every tick.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="rx">
+          <a:documentation>Whether what arrives is heard. Off, the port is still open and what it says is dropped.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="tx">
+          <a:documentation>Whether lines are sent to it. Off, a patch-s line out is dropped.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
     </element>

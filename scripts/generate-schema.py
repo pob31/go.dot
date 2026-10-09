@@ -91,6 +91,9 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 "mark",
                 # A process cue: its patch, as Pure Data-s text (namespace draft 51).
                 "process",
+                # A serial port (namespace draft 51, ACR; PC.10): an Arduino on
+                # USB, its path on this machine and its speed.
+                "serial",
                 # `transport` was `stop` until 2026-09-22. A cue that ADVANCES
                 # is not a cue that stops, and the verb list had grown past the
                 # name: hard, fade, afterMember, afterIteration, advance - the

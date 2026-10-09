@@ -85,6 +85,7 @@ namespace wfg::cue { class CurveTable; class DcaTable; class LaneTable; class Li
 
 namespace wfg::video { class VideoHost; class Converter; }
 namespace wfg::video::ffmpeg { class Installer; }
+namespace wfg::serial { class SerialTable; class HeardLines; }
 
 namespace wfg::tree
 {
@@ -120,6 +121,10 @@ namespace wfg::tree
             plugdata, Pd, or empty; and Pd's download, as ffmpegInstall is said. */
         std::string patchEditor;
         std::string patchEditorInstall;
+
+        /*  THE SERIAL PORTS THIS MACHINE HAS (namespace draft §51, ACR), a
+            path, a tab and a few words a line; looked for by serve. */
+        std::string serialPorts;
 
         /** `dummy` in Phase 1, `hosted` or `device` from Phase 2. */
         std::string clock = "dummy";
@@ -355,6 +360,16 @@ namespace wfg::tree
         /*  FFmpeg being downloaded on first use (namespace draft 37.5, WN). */
         void setInstaller (const video::ffmpeg::Installer* installerToRead) noexcept { installer = installerToRead; }
 
+        /*  THE SERIAL PORTS (namespace draft §51, PC.10): how each is tonight -
+            open, retrying and why - from the table serve opens them with, and
+            the last line each said, from what `serial.heard` noted. Either may
+            be absent: a replay has the lines and no ports, a tree dump neither. */
+        void setSerial (const serial::SerialTable* table, const serial::HeardLines* heard) noexcept
+        {
+            serialTable = table;
+            serialHeard = heard;
+        }
+
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
             four `none` rows under /godot/plugin/<id>. The surface table's
@@ -486,6 +501,8 @@ namespace wfg::tree
         const video::VideoHost* videoHost = nullptr;
         const video::Converter* converter = nullptr;
         const video::ffmpeg::Installer* installer = nullptr;
+        const serial::SerialTable* serialTable = nullptr;
+        const serial::HeardLines* serialHeard = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;
@@ -557,6 +574,9 @@ namespace wfg::tree
             renderer found of it tonight. */
         std::vector<std::string> declaredVideoInputs;
         std::vector<std::string> declaredVideoInserts;
+
+        /*  And every serial port (§51, PC.10), for how it is tonight. */
+        std::vector<std::string> declaredSerials;
 
         /** Every plugin of the set, in document order - the chain's order. */
         std::vector<std::string> declaredPlugins;

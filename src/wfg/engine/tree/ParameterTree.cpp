@@ -16,6 +16,8 @@
 
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <wfg/engine/serial/SerialTable.h>
+
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/cue/CurveTable.h>
 #include <wfg/engine/cue/LaneTable.h>
@@ -1528,6 +1530,7 @@ namespace wfg::tree
         std::vector<std::string> videoOutputOrder;
         std::vector<std::string> videoInputOrder;
         std::vector<std::string> videoInsertOrder;
+        std::vector<std::string> serialOrder;
         std::vector<std::string> pluginOrder;
         std::vector<DeclaredInput> inputOrder;
 
@@ -1987,6 +1990,33 @@ namespace wfg::tree
                         nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
                                                    storedText (attribute, object)));
                     }
+                }
+            }
+            else if (containerName == "SerialPorts")
+            {
+                /*  THE SHOW'S SERIAL PORTS (namespace draft §51, ACR): what the
+                    show decided - name, path, speed, framing, rx and tx. How a
+                    port is tonight is the runtime half's. */
+                for (const auto& object : container)
+                {
+                    const auto id = object[idProperty].toString().toStdString();
+
+                    if (id.empty())
+                        continue;
+
+                    const auto base = std::string (godot) + "/serial/" + id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("serial"))
+                    {
+                        if (row->persist == doc::Persist::none)
+                            continue;
+
+                        const doc::Attribute attribute { "Serial", row };
+                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
+                                                   storedText (attribute, object)));
+                    }
+
+                    serialOrder.push_back (id);
                 }
             }
             else if (containerName == "VideoInputs" || containerName == "VideoInserts")
@@ -2615,6 +2645,7 @@ namespace wfg::tree
         declaredVideoOutputs = std::move (videoOutputOrder);
         declaredVideoInputs = std::move (videoInputOrder);
         declaredVideoInserts = std::move (videoInsertOrder);
+        declaredSerials = std::move (serialOrder);
         declaredPlugins = std::move (pluginOrder);
         declaredInputs = std::move (inputOrder);
         declaredStrips = std::move (stripOrder);
@@ -3064,6 +3095,7 @@ namespace wfg::tree
             else if (name == "spaceMouseName") text = state.spaceMouseName;
             else if (name == "patchEditor")    text = state.patchEditor;
             else if (name == "patchEditorInstall") text = state.patchEditorInstall;
+            else if (name == "serialPorts")    text = state.serialPorts;
             else                               text = std::string (row->defaultText);
 
             engineValue (*row, "engine", text);
@@ -3932,6 +3964,34 @@ namespace wfg::tree
                 }
             }
 
+            /*  HOW EACH SERIAL PORT IS TONIGHT (namespace draft §51, PC.10), and
+                the last line it said. */
+            for (const auto& serialId : declaredSerials)
+            {
+                const auto base = std::string (godot) + "/serial/" + serialId + "/";
+                const auto port = serialTable != nullptr ? serialTable->stateOf (serialId) : serial::PortState {};
+
+                for (const auto* row : doc::Schema::rowsForOwner ("serial"))
+                {
+                    if (row->persist != doc::Persist::none)
+                        continue;
+
+                    const auto name = std::string (row->name);
+                    std::string text;
+
+                    if (name == "state")
+                        text = port.state;
+                    else if (name == "problem")
+                        text = port.problem;
+                    else if (name == "lastLine")
+                        text = serialHeard != nullptr ? serialHeard->lastLine (serialId) : std::string {};
+                    else
+                        continue;
+
+                    runtime.push_back (makeLeaf (base + name, *row, text));
+                }
+            }
+
             /*  AND EACH VIDEO INSERT (§44, YE, YH): what comes back, how often,
                 how long since the last, and why a cue shows black. */
             for (const auto& insertId : declaredVideoInserts)
@@ -4158,6 +4218,9 @@ namespace wfg::tree
 
         for (const auto& id : declaredVideoInserts)
             ownedByTheDocument.push_back (std::string (godot) + "/videoInsert/" + id);
+
+        for (const auto& id : declaredSerials)
+            ownedByTheDocument.push_back (std::string (godot) + "/serial/" + id);
 
         for (const auto& id : declaredPlugins)
             ownedByTheDocument.push_back (std::string (godot) + "/plugin/" + id);

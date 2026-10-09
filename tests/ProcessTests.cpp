@@ -41,6 +41,7 @@
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/ProcessHost.h>
+#include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountSender.h>
 
@@ -1518,4 +1519,101 @@ TEST_CASE ("ready-made: the example show opens, and its two patches play with th
     const auto desk = numbersSentTo (tickOnce (slider, { { "/slider", { Atom::of (64.0) } } }), "/desk/fader/1");
     REQUIRE (desk.size() == 1u);
     CHECK (std::abs (desk[0] - 64.0 / 127.0) < 1e-5);
+}
+
+//==============================================================================
+/*  PC.10: A SERIAL PORT IN A PATCH - a line heard as a `serial.heard` record
+    reaches [r /godot/serial/<id>/in] the next tick, and a line a patch sends
+    to [s /godot/serial/<id>/out] reaches the port. The port is a fake: what
+    is written to it is kept, and it says nothing of its own. */
+namespace
+{
+    struct WrittenDown final : wfg::serial::Link
+    {
+        explicit WrittenDown (std::shared_ptr<std::pair<std::mutex, std::string>> into) : kept (std::move (into)) {}
+
+        std::optional<std::string> read (std::chrono::milliseconds) override
+        {
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+            return std::string {};
+        }
+
+        bool write (const std::string& bytes) override
+        {
+            const std::lock_guard<std::mutex> held (kept->first);
+            kept->second += bytes;
+            return true;
+        }
+
+        std::string problem() const override { return {}; }
+
+        std::shared_ptr<std::pair<std::mutex, std::string>> kept;
+    };
+}
+
+TEST_CASE ("serial port: a line heard reaches the patch the next tick, and a line it sends reaches the port")
+{
+    ProcessRig rig ("pc10-serial");
+
+    auto written = std::make_shared<std::pair<std::mutex, std::string>>();
+    wfg::serial::SerialTable ports ([written] (const std::string&, int, std::string&) -> std::unique_ptr<wfg::serial::Link>
+    {
+        return std::make_unique<WrittenDown> (written);
+    });
+    wfg::serial::Wanted arduino;
+    arduino.id = "SR000001";
+    arduino.path = "COM3";
+    ports.reconcile ({ arduino });
+    const auto until = std::chrono::steady_clock::now() + 2s;
+    while (ports.stateOf ("SR000001").state != "open" && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for (2ms);
+    REQUIRE (ports.stateOf ("SR000001").state == "open");
+    rig.runner.setSerialPorts (&ports);
+
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 r /godot/serial/SR000001/in;\n"
+                                      "#X obj 10 40 * 2;\n"
+                                      "#X obj 10 70 s /dev/out;\n"
+                                      "#X msg 100 40 led \\$1;\n"
+                                      "#X obj 100 70 s /godot/serial/SR000001/out;\n"
+                                      "#X connect 0 0 1 0;\n"
+                                      "#X connect 1 0 2 0;\n"
+                                      "#X connect 0 0 3 0;\n"
+                                      "#X connect 3 0 4 0;\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    rig.listener.clear();
+    rig.submit ("serial.heard", { wfg::osc::Value::string ("SR000001"), wfg::osc::Value::string ("21") });
+    CHECK (rig.runner.heardLines().lastLine ("SR000001") == "21");
+    rig.tickOnce();
+
+    const auto doubled = rig.listener.valueAt ("/dev/out");
+    REQUIRE (doubled.has_value());
+    CHECK (sameNumber (*doubled, 42.0));
+
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    std::string seen;
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        {
+            const std::lock_guard<std::mutex> held (written->first);
+            seen = written->second;
+        }
+        if (! seen.empty())
+            break;
+        std::this_thread::sleep_for (2ms);
+    }
+    CHECK (seen == "led 21\n");
+
+    //  Every line, not only a changed one: the same line twice is heard twice.
+    rig.listener.clear();
+    rig.submit ("serial.heard", { wfg::osc::Value::string ("SR000001"), wfg::osc::Value::string ("21") });
+    rig.tickOnce();
+    CHECK (rig.listener.valueAt ("/dev/out").has_value());
+
+    //  In the log as the port said it.
+    const auto records = rig.records();
+    CHECK (std::count_if (records.begin(), records.end(), [] (const wfg::LogRecord& r)
+                          { return r.command == "serial.heard" && r.kind == wfg::LogRecord::Kind::applied; }) == 2);
 }

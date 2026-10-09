@@ -442,6 +442,11 @@ namespace wfg::client::gesture
         return { origin::window, "port.create", { osc::Value::string (name) } };
     }
 
+    Event createSerial (const std::string& name)
+    {
+        return { origin::window, "serial.create", { osc::Value::string (name) } };
+    }
+
     Event createSurface (const std::string& profile, const std::string& name)
     {
         /*  NO NAME IS NO ARGUMENT, rather than an empty one: the engine's

@@ -1663,3 +1663,48 @@ TEST_CASE ("show settings UI: the SpaceMouse's line, and the driver's button onl
     CHECK_FALSE (closeDriver->isVisible());
     CHECK (rig.sent.empty());
 }
+
+TEST_CASE ("show settings UI: the Serial tab declares a port and says what this machine has")
+{
+    Rig rig;
+    rig.state.serialPorts = "COM3\tUSBSER000";
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    const auto index = tabs->getTabNames().indexOf ("Serial");
+    REQUIRE (index == tabs->getTabNames().indexOf ("MIDI") + 1);
+    tabs->setCurrentTabIndex (index);
+
+    auto* page = tabs->getTabContentComponent (index);
+    REQUIRE (page != nullptr);
+
+    //  ADD DECLARES A PORT by a name, and nothing about where it is.
+    auto* add = button (*page, "ADD");
+    REQUIRE (add != nullptr);
+    const auto before = rig.sent.size();
+    add->onClick();
+    REQUIRE (rig.sent.size() == before + 1);
+    CHECK (rig.sent.back().command == "serial.create");
+    REQUIRE (rig.sent.back().args.size() == 1u);
+    CHECK (rig.sent.back().args[0].getString() == "Serial 1");
+
+    //  WHAT THIS MACHINE HAS, in words under the list.
+    bool said = false;
+    std::function<void (juce::Component&)> look = [&] (juce::Component& at)
+    {
+        if (auto* label = dynamic_cast<juce::Label*> (&at))
+            if (label->getText().contains ("1 serial port on this machine"))
+                said = true;
+        for (auto* child : at.getChildren())
+            look (*child);
+    };
+    look (*page);
+    CHECK (said);
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (add->isVisible());
+}

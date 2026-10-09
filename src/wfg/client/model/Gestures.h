@@ -348,6 +348,10 @@ namespace wfg::client::gesture
         two are different kinds of fact (PRD 4.10). */
     Event createPort (const std::string& name);
 
+    /*  A SERIAL PORT the show declares (namespace draft §51, PC.10), by the
+        name a person reads; its path on this machine is said afterwards. */
+    Event createSerial (const std::string& name);
+
     /*  A CONTROL SURFACE, AND THE STRIPS ITS PROFILE IMPLIES, in one command
         (PRD §3.16): eight for the virtual panel and a Mackie unit, sixteen for
         the D700 and for pads. `profile` is one of the four words

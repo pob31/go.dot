@@ -177,6 +177,8 @@ add_library(wfg_engine STATIC
     wfg/engine/process/ProcessHost.cpp
     wfg/engine/process/PatchEditor.h
     wfg/engine/process/PatchEditor.cpp
+    wfg/engine/serial/SerialLink.cpp
+    wfg/engine/serial/SerialTable.cpp
     wfg/engine/surface/SurfaceProfile.cpp
     wfg/engine/surface/SurfacePages.h
     wfg/engine/surface/SurfacePages.cpp
@@ -558,6 +560,7 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Curve.cpp
     wfg/client/model/DirectOuts.h
     wfg/client/model/MidiPorts.cpp
+    wfg/client/model/SerialPorts.cpp
     wfg/client/model/MidiPorts.h
     wfg/client/model/Surfaces.cpp
     wfg/client/model/Surfaces.h

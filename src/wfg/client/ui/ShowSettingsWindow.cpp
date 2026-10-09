@@ -6,6 +6,7 @@
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
+#include <wfg/client/model/SerialPorts.h>
 #include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/InputList.h>
@@ -1802,6 +1803,363 @@ namespace wfg::client::ui
 
             std::vector<model::PortRow> rows;
             std::vector<std::string> inputs, outputs;
+            bool locked = false;
+        };
+
+        //==============================================================================
+        /*  THE SERIAL TAB (namespace draft §51, ACR; PC.10): an Arduino on USB
+            and its kind - each port the show declares, where it is on this
+            machine, its speed, rx and tx, how it is tonight in words and the
+            last line it said. A port's lines reach a process cue's patch at
+            [r /godot/serial/<id>/in]. One editor and one menu, moved to the
+            cell clicked, as the MIDI tab's are. */
+        class SerialPage final : public juce::Component,
+                                 private juce::ListBoxModel
+        {
+        public:
+            SerialPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch))
+            {
+                list.setModel (this);
+                list.setRowHeight (34);
+                list.setOutlineThickness (0);
+                list.setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                addAndMakeVisible (list);
+
+                addAndMakeVisible (addPort);
+                addPort.setTooltip ("Declare a serial port - an Arduino on USB, or any device that sends lines."
+                                    " Name it for what it is, then choose where it is on this machine.");
+                addPort.onClick = [this]
+                {
+                    if (send)
+                        send (gesture::createSerial (freeName()));
+                };
+
+                addChildComponent (cellEditor);
+                cellEditor.setEditable (false, true, false);
+                cellEditor.setColour (juce::Label::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                cellEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                cellEditor.onEditorHide = [this] { commitName(); };
+
+                addChildComponent (chooser);
+                chooser.onChange = [this] { commitChoice(); };
+
+                addAndMakeVisible (summary);
+                summary.setJustificationType (juce::Justification::centredLeft);
+            }
+
+            void show (std::vector<model::SerialRow> ports, std::vector<model::SystemSerialPort> machine, bool editable)
+            {
+                const auto sameRows = ports == rows;
+                const auto sameLock = locked == ! editable;
+
+                rows = std::move (ports);
+                found = std::move (machine);
+                locked = ! editable;
+
+                addPort.setVisible (editable);
+
+                summary.setText (found.empty()
+                                   ? juce::String ("This machine has no serial ports now. Plug the Arduino in;"
+                                                   " the list is looked at again every five seconds.")
+                                   : juce::String (static_cast<int> (found.size())) + " serial port"
+                                       + (found.size() == 1 ? "" : "s") + " on this machine. A patch hears a"
+                                         " port's lines at [r /godot/serial/<id>/in] and sends one with"
+                                         " [s /godot/serial/<id>/out]. Opening a port resets an Arduino.",
+                                 juce::dontSendNotification);
+
+                if (! sameRows)
+                    list.updateContent();
+
+                if (! sameRows || ! sameLock)
+                    list.repaint();
+            }
+
+            /*  For the UI suite: the rows as last shown. */
+            const std::vector<model::SerialRow>& shownRows() const noexcept { return rows; }
+            juce::TextButton& addButton() noexcept { return addPort; }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+
+                auto bar = area.removeFromTop (30);
+                addPort.setBounds (bar.removeFromLeft (128).reduced (3, 0));
+
+                summary.setBounds (area.removeFromBottom (32));
+
+                area.removeFromTop (6);
+                heading = area.removeFromTop (20);
+                area.removeFromTop (2);
+                list.setBounds (area);
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                g.setFont (Look::font (theme, 11.0f));
+                g.setColour (Look::colour (theme, "ink-off"));
+
+                const auto cells = cellsFor (heading.withWidth (rowWidth()));
+                const char* names[] { "Port", "Where", "Speed", "Rx", "Tx", "Last line", "State" };
+
+                for (auto at = 0; at < 7; ++at)
+                    g.drawText (names[at], cells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
+            }
+
+        private:
+            int rowWidth() const
+            {
+                if (const auto* viewport = list.getViewport())
+                    if (const auto* viewed = viewport->getViewedComponent())
+                        if (viewed->getWidth() > 0)
+                            return viewed->getWidth();
+
+                return list.getWidth();
+            }
+
+            static std::array<juce::Rectangle<int>, 8> cellsFor (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+
+                const auto cross = area.removeFromRight (24);
+                const auto state = area.removeFromRight (240);
+                const auto heard = area.removeFromRight (180);
+                const auto tx = area.removeFromRight (42);
+                const auto rx = area.removeFromRight (42);
+                const auto speed = area.removeFromRight (90);
+                const auto where = area.removeFromRight (240);
+
+                return { area, where, speed, rx, tx, heard, state, cross };
+            }
+
+            enum class Cell { name, where, speed, rx, tx, heard, state, cross };
+
+            static Cell cellAt (int x, int width)
+            {
+                const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
+                const Cell order[] { Cell::name, Cell::where, Cell::speed, Cell::rx, Cell::tx, Cell::heard,
+                                     Cell::state, Cell::cross };
+
+                for (auto at = 0; at < 8; ++at)
+                    if (x >= cells[static_cast<std::size_t> (at)].getX() && x < cells[static_cast<std::size_t> (at)].getRight())
+                        return order[at];
+
+                return Cell::state;
+            }
+
+            int getNumRows() override { return static_cast<int> (rows.size()); }
+
+            void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return;
+
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                g.setColour (Look::colour (theme, row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, height));
+                const auto dash = juce::String::fromUTF8 ("\xe2\x80\x93");
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText (juce::String (entry.name), cells[0], juce::Justification::centredLeft, true);
+
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, entry.path.empty() ? "ink-off" : "ink-dim"));
+                g.drawText (entry.path.empty() ? dash : juce::String (entry.path), cells[1], juce::Justification::centredLeft, true);
+
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (entry.baud), cells[2], juce::Justification::centredLeft, true);
+
+                for (auto at = 0; at < 2; ++at)
+                {
+                    const auto on = at == 0 ? entry.rx : entry.tx;
+                    g.setColour (Look::colour (theme, on ? "ink" : "ink-off"));
+                    g.drawText (on ? "ON" : "OFF", cells[static_cast<std::size_t> (3 + at)], juce::Justification::centredLeft);
+                }
+
+                g.setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain)));
+                g.setColour (Look::colour (theme, entry.lastLine.empty() ? "ink-off" : "ink-dim"));
+                g.drawText (entry.lastLine.empty() ? dash : juce::String::fromUTF8 (entry.lastLine.c_str()), cells[5],
+                            juce::Justification::centredLeft, true);
+
+                /*  THE STATE IN WORDS, the reason with it - never a colour on its own (4.8). */
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, entry.state == "retrying" ? "failed" : "ink-dim"));
+                g.drawText (juce::String (entry.stateWords()), cells[6], juce::Justification::centredLeft, true);
+
+                if (! locked)
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[7], juce::Justification::centred);
+                }
+            }
+
+            void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+            {
+                if (locked || row < 0 || static_cast<std::size_t> (row) >= rows.size() || ! send)
+                    return;
+
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth() : list.getWidth();
+                const auto base = "/godot/serial/" + entry.id + "/";
+
+                switch (cellAt (event.x, width))
+                {
+                    case Cell::cross: send (gesture::deleteObject (entry.id)); return;
+                    case Cell::rx:    send (gesture::setNode (base + "rx", entry.rx ? "false" : "true")); return;
+                    case Cell::tx:    send (gesture::setNode (base + "tx", entry.tx ? "false" : "true")); return;
+                    case Cell::name:  renameAt (row, width); return;
+                    case Cell::where: chooseAt (row, width, true); return;
+                    case Cell::speed: chooseAt (row, width, false); return;
+                    case Cell::heard:
+                    case Cell::state: return;
+                }
+            }
+
+            void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
+
+            void renameAt (int row, int width)
+            {
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                editing = entry.id;
+                cellEditor.setBounds (cellsFor (place.withWidth (width).withX (list.getX()))[0]);
+                cellEditor.setText (juce::String (entry.name), juce::dontSendNotification);
+                cellEditor.setVisible (true);
+                cellEditor.showEditor();
+            }
+
+            /*  WHERE: "(none)", this machine's ports, and a path the show names
+                that this machine lacks, marked rather than dropped (the MIDI
+                tab's rule). SPEED: the speeds a port opens at. */
+            void chooseAt (int row, int width, bool where)
+            {
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                choosing = entry.id;
+                choosingWhere = where;
+                choices.clear();
+                chooser.clear (juce::dontSendNotification);
+
+                auto selected = 0;
+
+                if (where)
+                {
+                    choices.push_back ({});
+                    chooser.addItem ("(none)", 1);
+
+                    for (const auto& port : found)
+                    {
+                        choices.push_back (port.path);
+                        chooser.addItem (juce::String (port.path) + (port.about.empty() ? juce::String()
+                                                                                         : "  (" + juce::String (port.about) + ")"),
+                                         static_cast<int> (choices.size()));
+                        if (port.path == entry.path)
+                            selected = static_cast<int> (choices.size());
+                    }
+
+                    if (selected == 0 && entry.path.empty())
+                        selected = 1;
+
+                    if (selected == 0)
+                    {
+                        choices.push_back (entry.path);
+                        chooser.addItem (juce::String (entry.path) + "  (not on this machine)", static_cast<int> (choices.size()));
+                        selected = static_cast<int> (choices.size());
+                    }
+                }
+                else
+                {
+                    for (const auto speed : model::serialSpeeds())
+                    {
+                        choices.push_back (std::to_string (speed));
+                        chooser.addItem (juce::String (speed), static_cast<int> (choices.size()));
+                        if (speed == entry.baud)
+                            selected = static_cast<int> (choices.size());
+                    }
+                }
+
+                chooser.setSelectedId (selected, juce::dontSendNotification);
+                chooser.setBounds (cellsFor (place.withWidth (width).withX (list.getX()))[where ? 1u : 2u]);
+                chooser.setVisible (true);
+                chooser.showPopup();
+            }
+
+            void commitName()
+            {
+                const auto id = editing;
+
+                editing.clear();
+                cellEditor.setVisible (false);
+
+                if (id.empty() || ! send)
+                    return;
+
+                const auto typed = cellEditor.getText().trim();
+
+                for (const auto& entry : rows)
+                    if (entry.id == id && typed != juce::String (entry.name))
+                        send (gesture::setNode ("/godot/serial/" + id + "/name", typed.toStdString()));
+            }
+
+            void commitChoice()
+            {
+                const auto id = choosing;
+                const auto at = chooser.getSelectedId() - 1;
+
+                if (id.empty() || ! send || at < 0 || at >= static_cast<int> (choices.size()))
+                    return;
+
+                const auto& chosen = choices[static_cast<std::size_t> (at)];
+
+                for (const auto& entry : rows)
+                    if (entry.id == id && chosen != (choosingWhere ? entry.path : std::to_string (entry.baud)))
+                        send (gesture::setNode ("/godot/serial/" + id + (choosingWhere ? "/path" : "/baud"), chosen));
+            }
+
+            std::string freeName() const
+            {
+                for (auto at = 1; at < 1000; ++at)
+                {
+                    const auto candidate = "Serial " + std::to_string (at);
+                    auto taken = false;
+
+                    for (const auto& entry : rows)
+                        if (entry.name == candidate)
+                            taken = true;
+
+                    if (! taken)
+                        return candidate;
+                }
+
+                return "Serial";
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+
+            juce::ListBox list;
+            juce::TextButton addPort { "ADD" };
+            juce::Label summary;
+            juce::Rectangle<int> heading;
+
+            juce::Label cellEditor;
+            juce::ComboBox chooser;
+            std::string editing, choosing;
+            bool choosingWhere = true;
+            std::vector<std::string> choices;
+
+            std::vector<model::SerialRow> rows;
+            std::vector<model::SystemSerialPort> found;
             bool locked = false;
         };
 
@@ -6498,6 +6856,8 @@ namespace wfg::client::ui
                     { "Network",      "The devices the show talks to over OSC - a desk, a processor, a video"
                                       " server - and where their addresses begin." },
                     { "MIDI",         "The MIDI ports cues send to and triggers listen on." },
+                    { "Serial",       "Serial ports - an Arduino on USB - whose lines a process cue's patch hears"
+                                      " and sends." },
                     { "Surfaces",     "Control surfaces and what their faders, pads and dials do, and the DCAs"
                                       " that trim groups of cues." },
                     { "Plugins",      "Scanning this machine for plugins, and the set a cue's FX can switch in." },
@@ -6651,6 +7011,7 @@ namespace wfg::client::ui
             inputList = std::make_unique<InputPage> (theme, send);
             network = std::make_unique<NetworkPage> (theme, send);
             midi = std::make_unique<MidiPage> (theme, send);
+            serialPage = std::make_unique<SerialPage> (theme, send);
             surfaces = std::make_unique<SurfacesPage> (theme, send);
             plugins = std::make_unique<PluginsPage> (theme, send);
             rackPage = std::make_unique<RackPage> (theme, send);
@@ -6731,6 +7092,10 @@ namespace wfg::client::ui
             tabs.addTab ("Input patch", background, inputs.get(), false);
             tabs.addTab ("Network", background, network.get(), false);
             tabs.addTab ("MIDI", background, midi.get(), false);
+
+            /*  AFTER MIDI: the other ports a show talks through, an Arduino on
+                USB and its kind (namespace draft §51, PC.10). */
+            tabs.addTab ("Serial", background, serialPage.get(), false);
 
             /*  AFTER MIDI, because a surface is reached through the ports
                 declared there: the tab a person fills in first comes first. */
@@ -6854,6 +7219,9 @@ namespace wfg::client::ui
                         model::readMidiInputs (snapshot),
                         model::readMidiOutputs (snapshot),
                         ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+
+            serialPage->show (model::readSerialPorts (snapshot), model::readSystemSerialPorts (snapshot),
+                              ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 
             /*  THE SURFACES, THEIR STRIPS AND THE DCAs are the document's and
                 re-read every pass for the ports' reason; the strips' words are
@@ -7135,6 +7503,7 @@ namespace wfg::client::ui
         std::unique_ptr<TemplatesPage> templates;
         std::unique_ptr<NetworkPage> network;
         std::unique_ptr<MidiPage> midi;
+        std::unique_ptr<SerialPage> serialPage;
         std::unique_ptr<SurfacesPage> surfaces;
         std::unique_ptr<PluginsPage> plugins;
         std::unique_ptr<RackPage> rackPage;

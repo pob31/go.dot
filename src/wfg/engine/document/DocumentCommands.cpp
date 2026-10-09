@@ -737,6 +737,28 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  A SERIAL PORT (namespace draft §51, ACR; PC.10): an Arduino on USB
+            and its kind, by the name a person reads. Its path on this machine
+            and its speed are said afterwards with `node.set`. The drawn
+            identifier rides last, as dca.create's does. */
+        registry.add ({ "serial.create",
+                        "Declares a serial port: an Arduino or any device on a serial line.",
+                        { { "name", 's', true }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto name = args.empty() ? std::string {} : args[0].getString();
+                            const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto edit = document.createSerial (name, id);
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok ({ osc::Value::string (name),
+                                                  osc::Value::string (edit.id) });
+                        } });
+
+        //----------------------------------------------------------------------
         /*  PHASE 8a'S CANVASES AND OUTPUTS (namespace draft 35): what video
             cues are laid onto, and the displays that show it. The drawn
             identifier rides last, as dca.create's does, so a replay makes the

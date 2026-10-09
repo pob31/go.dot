@@ -23535,15 +23535,18 @@ Mine, proposed:
   would read as 2. Each patch's thread sets its own number format to C, the rest of Go.dot untouched,
   so the fr_FR run of every test keeps its power (measured, §51.6). libpd is built not to set the
   process's locale.
-- **ACR** **Serial, lines first.** A serial port is an object of the show (`<Serial>`, §51.4) with a
-  name, the port's path on this machine, a speed and a framing. Its lines arrive split on spaces and
-  commas, numbers as numbers, at `[r /godot/serial/<id>/rx]`; `[s /godot/serial/<id>/tx]` writes one.
-  Opening a port resets an Arduino; a port that fails is tried again after a pause that grows, never
-  every tick. Then **OSC over SLIP** (an Arduino running CNMAT's OSC library): a device whose transport
+- **ACR** **Serial, lines first.** A serial port is an object of the show (`<Serial>` in
+  `<SerialPorts>`, §51.4) with a name, the port's path on this machine, a speed and a framing, and `rx`
+  and `tx` as a device has them. Its lines arrive split on spaces and commas, numbers as numbers, at
+  `[r /godot/serial/<id>/in]`; `[s /godot/serial/<id>/out]` writes one. *(The names were `rx` and `tx`
+  until PC.10 built them; those are the port's on and off rows, as a device's are, and a patch's own
+  `[s]` and `[r]` of one name would hear each other inside Pd.)* Opening a port resets an Arduino; a
+  port that fails is tried again after a pause that grows, never every tick. Then **OSC over SLIP** (an Arduino running CNMAT's OSC library): a device whose transport
   is `serial`, and everything a device can do - heard, triggers, cues, curves - works on it unchanged.
 - **ACS** **Replay.** A patch never runs in a replay: what it made Go.dot do is in the log, with its
-  origin; what it wrote to devices is not, as a curve's is not. A serial line is logged as `serial.heard`
-  when a patch hears it; a MIDI message a patch heard is not logged (a limit, §51.8).
+  origin; what it wrote to devices is not, as a curve's is not. Every line a serial port hears is logged
+  as `serial.heard` (PC.10: every line, a patch hearing it or not, as a device's report is - the record
+  is what a patch reads); a MIDI message a patch heard is not logged (a limit, §51.8).
 - **ACT** **Threads.** libpd is built with an instance per patch, each bound to its own thread
   (`PDINSTANCE`, `PDTHREADS`). Pd needs POSIX threads, which MSVC lacks: a small stand-in over Windows'
   slim locks (`ThirdParty/pthread-shim`), Go.dot's own, measured with two patches at once (§51.6).
@@ -23577,14 +23580,14 @@ Mine, proposed:
 |---|---|
 | `[r /<device address>]` | What a device whose prefix holds the address last reported, the tick it arrived (rx on, §45 YZ): a number, a word or a list |
 | `[r /godot/<row>]` | A row of the show or the engine - `/godot/run/<id>/level`, `/godot/dca/<id>/trim` - sent when it changes |
-| `[r /godot/serial/<id>/rx]` | A line from a serial port, split into atoms |
+| `[r /godot/serial/<id>/in]` | A line from a serial port, split into atoms - every line, not only a changed one |
 | `[r /godot/puck]` | The SpaceMouse's six axes, while a patch listens to it (the puck is opened for it as for a curve) |
 | `[r in]` | Everything a patch could hear, as `/address atoms...`, for names a patch builds as it runs |
 | `[notein]`, `[ctlin]`, ... | MIDI from the port the cue's `process/midiIn` names |
 | `[s /<device address>]` | A write to that device, as a cue's |
 | `[s /godot/cmd/<command>]` | A named command (§2.6): `cue/fire` with a cue's name fires it, `go`, `standby/set`, `run/stopAll` - and Enable, Disable and Jump to are transport cues a patch fires by name (§27), as a GO would |
 | `[s /godot/<row>]` | A `node.set` of that row, refused under the lock as any is, ridden live where the live layer rides (§17.14) |
-| `[s /godot/serial/<id>/tx]` | A line to a serial port |
+| `[s /godot/serial/<id>/out]` | A line to a serial port, its atoms joined by spaces |
 | `[s out]` | Any of the above, as `/address atoms...` |
 | `[noteout]`, `[ctlout]`, ... | MIDI to the port `process/midiOut` names |
 | `[print]` | The run's `process/said` - the last line - and Pd's own complaints the same way |
@@ -23603,7 +23606,8 @@ Mine, proposed:
 | `/godot/list/processBudget` | `lists` | `d`, ms | 2 | ACJ |
 | `/godot/list/processStuckAfter` | `lists` | `i`, ticks | 50 | ACJ |
 | `serial/<id>/name`, `path`, `baud`, `framing`, `rx`, `tx` | `serial` | | -, -, 115200, `lines`, true, true | ACR |
-| `serial/<id>/state`, `problem` | `serial` | read | | Open, closed, retrying; why, in words |
+| `serial/<id>/state`, `problem`, `lastLine` | `serial` | read | | Open, opening, retrying, closed; why, in words; the last line heard |
+| `/godot/engine/serialPorts` | engine | `s`, read | | This machine's ports, a path and a few words a line |
 | `mount/<id>/transport` gains `serial`; `mount/<id>/serial` | `mount` | | | ACR, OSC over SLIP |
 
 `cue/kind` and `run/kind` gain `process`.
@@ -23615,10 +23619,12 @@ Mine, proposed:
 - `process.send s run s name [atoms...]` - hands atoms to a name a running patch receives: the
   canvas's live boxes, a surface, a test.
 - `pd.install` - Pure Data 0.56-5 downloaded into Go.dot's own folder (ACO), as `ffmpeg.install`.
-- `serial.create`, then `node.set` on its rows; `object.delete` removes one.
+- `serial.create [s name] [s id]`, then `node.set` on its rows; `object.delete` removes one.
 - Records: a stuck patch is `run.failed <run> process-stuck`, and a run that cannot be opened because
   another patch is stuck `run.failed <run> pd-held` - the existing record, a new reason each; and
-  `serial.heard serial line` (engine).
+  `serial.heard serial line`, origin `serial:<id>`, a line each, at most 64 a tick from a port (the rest
+  the next tick): taken on the tick from the port's thread, as `mount.heard` is from the socket's, and
+  what a patch and the tree read, so a replay holds the same lines.
 - Refusals: `pd-missing`.
 
 ### 51.6 Measurements
@@ -23738,3 +23744,19 @@ made before it may hold one, and a patch cannot fire that cue by its id.
   thinned. Pd 0.56-5's `[expr]` printed a debugging line to stdout on every long expression: the build's
   copy of `x_vexp.c` does not. Go.dot no longer draws an identifier Pd reads as a number (§51.8). The
   .deb recommends `puredata-gui`; the release jobs check `pd/` and validate the example.
+- **PC.10**: serial ports (ACR). `<Serial>` in `<SerialPorts>`, the show's last container, made by the
+  first `serial.create`; its rows name, path, baud (115200), framing (`lines`; `slip` waits for PC.11),
+  rx and tx, and the readouts state, problem and lastLine; `/godot/engine/serialPorts` lists this
+  machine's ports every five seconds. `serial/SerialLink` opens a port with Windows' and POSIX's own
+  calls - eight bits, no parity, one stop bit, no flow control, never inherited by a program Go.dot
+  starts - not asio's, which Go.dot builds with its serial port switched off; `serial/SerialTable` gives
+  each declared port a thread that opens it, reads lines (a new line ends one, a carriage return before
+  it dropped, 4096 bytes at most, 512 waiting at most) and writes the lines it is handed, and tries a
+  port that will not open or went away again after half a second, one, two, four, then every eight.
+  Serve reconciles it with the show at each edit, and turns what each port read into `serial.heard`
+  records on the tick, at most 64 a port a tick, origin `serial:<id>`; the record's handler notes the
+  line (`serial::HeardLines`), which is what a patch hears at `/godot/serial/<id>/in` the next tick -
+  every line, split on spaces and commas, numbers as numbers - and the tree's last line. A patch's
+  `[s /godot/serial/<id>/out]` is a line out, atoms joined by spaces. Settings has a Serial tab after
+  MIDI: ADD, the name typed in place, the path from this machine's ports (one the show names that this
+  machine lacks kept and marked), the speed from a menu, rx, tx, the last line and the state in words.

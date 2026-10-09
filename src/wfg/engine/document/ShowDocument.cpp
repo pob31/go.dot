@@ -428,6 +428,9 @@ namespace wfg::doc
         if (element == "VideoInputs")  return "videoInput";
         if (element == "VideoInserts") return "videoInsert";
 
+        /*  And namespace draft §51's: `/godot/serial/<id>/path`. */
+        if (element == "SerialPorts")  return "serial";
+
         /*  And namespace draft §38's: `/godot/cueTemplate/order` beside
             `/godot/cueTemplate/<id>/name`. */
         if (element == "CueTemplates") return "cueTemplate";
@@ -525,6 +528,9 @@ namespace wfg::doc
         /*  NAMESPACE DRAFT §38. The cue templates and their container. */
         if (element == "CueTemplates")              return "cueTemplates";
         if (element == "CueTemplate")               return "cueTemplate";
+
+        /*  NAMESPACE DRAFT §51. A serial port; its container carries nothing. */
+        if (element == "Serial")                    return "serial";
 
         return {};
     }
@@ -816,6 +822,7 @@ namespace wfg::doc
         if (segment == "videoInput")  return showNode.getChildWithName ("VideoInputs");
         if (segment == "videoInsert") return showNode.getChildWithName ("VideoInserts");
         if (segment == "cueTemplate") return showNode.getChildWithName ("CueTemplates");
+        if (segment == "serial")      return showNode.getChildWithName ("SerialPorts");
         return {};
     }
 
@@ -2976,6 +2983,31 @@ namespace wfg::doc
         }
 
         return container;
+    }
+
+    EditResult ShowDocument::createSerial (const std::string& name, const std::string& id)
+    {
+        /*  ASKED HERE AS WELL AS AT THE DOOR, for createCanvas's reason: a
+            locked show must not gain an empty container from a refusal. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        /*  AT THE END OF THE SHOW, made by the first port and outside the
+            history as the video containers are: every container the schema
+            declares before it is either always there or inserted before it
+            by its own first create, so the canonical order holds. */
+        auto container = showNode.getChildWithName ("SerialPorts");
+        if (! container.isValid())
+        {
+            container = juce::ValueTree ("SerialPorts");
+            showNode.addChild (container, -1, nullptr);
+        }
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        return insertObject (container, endOfSequence, "Serial", id, attributes);
     }
 
     EditResult ShowDocument::createCanvas (const std::string& name, const std::string& id)

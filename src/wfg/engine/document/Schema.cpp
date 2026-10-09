@@ -118,7 +118,7 @@ namespace wfg::doc
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts", "Network",
                                      "Surfaces", "Dcas", "Canvases", "VideoOutputs", "VideoInputs", "VideoInserts",
-                                     "CueTemplates" },
+                                     "CueTemplates", "SerialPorts" },
                                                                           { "document" } },
                 /*  THE CONTAINER CARRIES A VALUE, which is why it is no
                     longer an empty pair of brackets. `focus` is a fact about
@@ -486,6 +486,15 @@ namespace wfg::doc
                     so no show written before them gains a line. */
                 { "CueTemplates", false, { "CueTemplate" }, { "cueTemplates" } },
                 { "CueTemplate",  true,  {},                { "cueTemplate" } },
+
+                /*  THE SHOW'S SERIAL PORTS (namespace draft §51, ACR; PC.10): an
+                    Arduino on USB and its kind, each a path on this machine and
+                    a speed. Made on demand at the end of the show, after every
+                    other container, so no show written before them gains a
+                    line. NAMED `SerialPorts` and not `Serials`, beside
+                    `MidiPorts`. */
+                { "SerialPorts",  false, { "Serial" },      {} },
+                { "Serial",       true,  {},                { "serial" } },
             };
 
             return table;

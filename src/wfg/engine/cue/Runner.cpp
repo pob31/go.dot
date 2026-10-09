@@ -13380,6 +13380,18 @@ namespace wfg::cue
                 if (const auto* values = mounts->observedOf (address))
                     heard.push_back ({ address, patchAtomsOf (*values) });
 
+        /*  AND WHAT THE SERIAL PORTS SAID (PC.10): every line of the
+            `serial.heard` records since, split into words, at
+            /godot/serial/<id>/in - each line, not only a changed one. */
+        for (const auto& [port, line] : serialHeard.after (processHeardTick))
+        {
+            process::Atoms atoms;
+            for (const auto& word : serial::wordsOfLine (line))
+                atoms.push_back (word.isNumber ? process::Atom::of (word.number) : process::Atom::of (word.text));
+            heard.push_back ({ "/godot/serial/" + port + "/in", std::move (atoms) });
+        }
+        serialHeard.forgetBefore (tick - 50);
+
         processHeardTick = tick - 1;
 
         /*  AND THE ROWS OF THE SHOW EACH PATCH HEARS, off the tree as last
@@ -13579,6 +13591,32 @@ namespace wfg::cue
                     }
 
                 engine.submit (from, name, std::move (args));
+                continue;
+            }
+
+            /*  A LINE TO A SERIAL PORT (PC.10): its atoms joined by spaces, the
+                port's new line added - `[s /godot/serial/<id>/out]`. Dropped
+                when the port is not open or its tx is off, as a device's write
+                is, and not logged. */
+            static constexpr std::string_view serialRoot = "/godot/serial/";
+            static constexpr std::string_view serialOut = "/out";
+
+            if (address.rfind (serialRoot, 0) == 0 && address.size() > serialRoot.size() + serialOut.size()
+                  && address.compare (address.size() - serialOut.size(), serialOut.size(), serialOut) == 0)
+            {
+                if (serialPorts == nullptr)
+                    continue;
+
+                const auto port = address.substr (serialRoot.size(),
+                                                  address.size() - serialRoot.size() - serialOut.size());
+                std::string line;
+                for (const auto& atom : atoms)
+                {
+                    if (! line.empty())
+                        line += ' ';
+                    line += atom.isNumber ? osc::formatDouble (atom.number) : atom.word;
+                }
+                serialPorts->send (port, line);
                 continue;
             }
 
@@ -21896,6 +21934,21 @@ namespace wfg::cue
                             if (! runner.queuePatchInput (args[0].getString(), std::move (input)))
                                 return Outcome::rejected (reason::unknownId);
 
+                            return Outcome::ok (args);
+                        } });
+
+        /*  A LINE A SERIAL PORT READ (namespace draft §51, ACR; PC.10), taken on
+            the tick from the port's thread as `mount.heard` is from the
+            socket's - origin `serial:<id>` - and noted where the patches hear
+            it and the tree reads its last line. In the log, so a replay holds
+            the same lines. */
+        registry.add ({ "serial.heard",
+                        "A line a serial port read: what a process cue's patch hears at /godot/serial/<id>/in.",
+                        { { "serial", 's', false }, { "line", 's', false } },
+                        true,
+                        [&runner] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            runner.noteSerialLine (args[0].getString(), args[1].getString(), context.tick);
                             return Outcome::ok (args);
                         } });
 

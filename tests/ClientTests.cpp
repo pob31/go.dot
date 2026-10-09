@@ -72,6 +72,8 @@
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Patch.h>
 #include <wfg/engine/process/PatchEditor.h>
+#include <wfg/engine/serial/SerialTable.h>
+#include <wfg/client/model/SerialPorts.h>
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/FadeMix.h>
@@ -693,6 +695,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::setPatchSettled (true), gesture::setPatchSettled (false),
         gesture::createRange ("B3N8R5TW", 1.0, 4.0),
         gesture::fireCue ("B3N8R5TW"),
+        gesture::createSerial ("Arduino"),
         gesture::processSend ("R4NID001", "/light", { process::Atom::of (1.0) }),
         gesture::processSend ("R4NID001", "/hit", {}),
         gesture::processSend ("R4NID001", "/say", { process::Atom::of (std::string ("on")), process::Atom::of (0.5) }),
@@ -11634,4 +11637,66 @@ TEST_CASE ("client: a running patch's ports read as values, its GUI boxes known,
     CHECK (press (4, 0.5, 0.5, 7.0, 150.0) == "100");   // inside its range
     CHECK (press (5, 0.6, 0.5) == "2");                 // a radio: the cell under the hand
     CHECK (press (5, 1.0, 0.5) == "3");
+}
+
+//==============================================================================
+/*  PC.10: THE SERIAL TAB'S READING - a port declared through the command,
+    where it is and its speed said with node.set, how it is tonight and the
+    last line it said, and the ports this machine has. */
+
+TEST_CASE ("client: a serial port declared, said where it is, and read with its state and last line")
+{
+    Rig rig;
+    rig.apply (6, "window", "serial.create", { osc::Value::string ("Arduino") });
+
+    auto ports = model::readSerialPorts (*rig.publish (7));
+    REQUIRE (ports.size() == 1u);
+    const auto id = ports[0].id;
+    CHECK (ports[0].name == "Arduino");
+    CHECK (ports[0].path.empty());
+    CHECK (ports[0].baud == 115200);
+    CHECK (ports[0].framing == "lines");
+    CHECK (ports[0].rx);
+    CHECK (ports[0].tx);
+    CHECK (ports[0].state == "closed");
+    CHECK (ports[0].stateWords() == "no port chosen");
+
+    //  THE SHOW'S LAST CONTAINER, made by the first port.
+    const auto root = rig.document.root();
+    CHECK (root.getChild (root.getNumChildren() - 1).getType().toString() == "SerialPorts");
+
+    rig.apply (8, "window", "node.set", { osc::Value::string ("/godot/serial/" + id + "/path"), osc::Value::string ("COM3") });
+    rig.apply (9, "window", "node.set", { osc::Value::string ("/godot/serial/" + id + "/baud"), osc::Value::string ("9600") });
+
+    wfg::serial::HeardLines heard;
+    heard.note (id, "512 13", 9);
+    rig.parameters.setSerial (nullptr, &heard);
+
+    ports = model::readSerialPorts (*rig.publish (10));
+    REQUIRE (ports.size() == 1u);
+    CHECK (ports[0].path == "COM3");
+    CHECK (ports[0].baud == 9600);
+    CHECK (ports[0].lastLine == "512 13");
+    CHECK (ports[0].stateWords() == "closed");
+
+    //  WHAT THIS MACHINE HAS, a path and a few words a line.
+    EngineState state;
+    state.serialPorts = "COM3\tUSBSER000\nCOM4\t";
+    rig.parameters.markStale();
+    const auto machine = model::readSystemSerialPorts (*rig.parameters.publish (11, state));
+    REQUIRE (machine.size() == 2u);
+    CHECK (machine[0].path == "COM3");
+    CHECK (machine[0].about == "USBSER000");
+    CHECK (machine[1].path == "COM4");
+    CHECK (machine[1].about.empty());
+
+    //  UNDER THE LOCK, refused - and no second container.
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    rig.apply (12, "window", "serial.create", { osc::Value::string ("Another") });
+    CHECK (model::readSerialPorts (*rig.publish (13)).size() == 1u);
+    int containers = 0;
+    for (const auto& child : rig.document.root())
+        if (child.getType().toString() == "SerialPorts")
+            ++containers;
+    CHECK (containers == 1);
 }

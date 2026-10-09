@@ -43,6 +43,7 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/ProcessHost.h>
+#include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -2624,6 +2625,36 @@ namespace
 
     /*  WHAT THE SHOW SAYS EACH OF ITS MIDI PORTS SHOULD BE PUT ON, read the
         same way at start and after every show edit. */
+    /*  THE SERIAL PORTS AS THE SHOW DECLARES THEM (namespace draft §51, ACR):
+        what SerialTable::reconcile opens, closes and opens again. */
+    std::vector<wfg::serial::Wanted> serialWantedOf (const wfg::doc::ShowDocument& document)
+    {
+        std::vector<wfg::serial::Wanted> wanted;
+        const auto ports = document.root().getChildWithName ("SerialPorts");
+
+        for (const auto& port : ports)
+        {
+            wfg::serial::Wanted wish;
+            wish.id = port[juce::Identifier ("id")].toString().toStdString();
+
+            if (wish.id.empty())
+                continue;
+
+            const auto base = "/godot/serial/" + wish.id + "/";
+            const auto reads = [&document, &base] (const char* row, const char* otherwise)
+            { return document.getAttribute (base + row).value_or (std::string (otherwise)); };
+
+            wish.path = reads ("path", "");
+            wish.baud = static_cast<int> (wfg::osc::parseDouble (reads ("baud", "115200")).value_or (115200.0));
+            wish.framing = reads ("framing", "lines");
+            wish.rx = reads ("rx", "true") != "false";
+            wish.tx = reads ("tx", "true") != "false";
+            wanted.push_back (std::move (wish));
+        }
+
+        return wanted;
+    }
+
     std::vector<wfg::midi::PortWish> portWishesOf (const wfg::doc::ShowDocument& document)
     {
         std::vector<wfg::midi::PortWish> wishes;
@@ -3687,6 +3718,14 @@ namespace
         wfg::process::MidiInbox processMidi;
         runner.setProcessMidi (&processMidi);
 
+        /*  THE SHOW'S SERIAL PORTS (namespace draft §51, ACR; PC.10), each
+            opened on a thread of its own as the show declares it, and opened
+            again, closed or left alone as edits come. Serve only: a replay
+            opens no port and reads the lines from the log. */
+        wfg::serial::SerialTable serialPorts;
+        serialPorts.reconcile (serialWantedOf (document));
+        runner.setSerialPorts (&serialPorts);
+
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
             std::cerr << "    " << problem << std::endl;
 
@@ -4233,6 +4272,7 @@ namespace
         wfg::video::ffmpeg::Installer ffmpegInstaller;
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), &ffmpegInstaller);
         parameters.setInstaller (&ffmpegInstaller);
+        parameters.setSerial (&serialPorts, &runner.heardLines());
 
         /*  A PROCESS CUE'S PATCH OPENED IN PLUGDATA OR PD (namespace draft §51,
             ACN, ACO): its file in the engine's cache, watched for saves, and Pd
@@ -4242,6 +4282,7 @@ namespace
         wfg::process::editor::Installer pdInstaller;
         wfg::process::editor::registerCommands (engine.commands(), document, &patchEditing, &pdInstaller);
         std::string patchEditorFound;
+        std::string serialPortsFound;
         videoHost.configure (document);
 
         /*  The show's revision the video configuration was last read at: the
@@ -4823,6 +4864,17 @@ namespace
                                      devices, and lets them go when nothing is. */
                                  listener.want (runner.listenWanted());
 
+                                 /*  WHAT THE SERIAL PORTS READ since the last tick
+                                     (namespace draft §51, PC.10): a line a record,
+                                     at most 64 a port a tick - the rest the next
+                                     tick - origin `serial:<id>`, as a device's
+                                     report is `mount:<id>`. */
+                                 for (auto& [port, lines] : serialPorts.takeLines (64))
+                                     for (auto& line : lines)
+                                         engine.submit ("serial:" + port, "serial.heard",
+                                                        { wfg::osc::Value::string (port),
+                                                          wfg::osc::Value::string (std::move (line)) });
+
                                  /*  A SAVE IN PLUGDATA OR PD, every half second:
                                      the cue's patch as it was saved, one `node.set`
                                      from `pd` (namespace draft §51, ACN). */
@@ -5191,6 +5243,12 @@ namespace
                                         on the message thread, which is where
                                         enumerating them may block. What came of
                                         it is taken below, on a later tick. */
+                                    /*  THE SERIAL PORTS AS THE EDIT LEFT THEM:
+                                        a new path or speed opens the port
+                                        again, on its own thread; the tick
+                                        never waits for one. */
+                                    serialPorts.reconcile (serialWantedOf (document));
+
                                     if (portBinder.want (portWishesOf (document)))
                                         juce::MessageManager::callAsync ([&portBinder]
                                                                          {
@@ -5351,7 +5409,14 @@ namespace
                                 {
                                     const auto found = wfg::process::editor::find();
                                     patchEditorFound = found.has_value() ? found->name : std::string {};
+
+                                    /*  And the serial ports this machine has, for
+                                        the Devices tab's path menu (PC.10). */
+                                    serialPortsFound.clear();
+                                    for (const auto& port : wfg::serial::systemPorts())
+                                        serialPortsFound += (serialPortsFound.empty() ? "" : "\n") + port.path + "\t" + port.about;
                                 }
+                                state.serialPorts = serialPortsFound;
                                 state.patchEditor = patchEditorFound;
                                 if (const auto install = pdInstaller.status(); ! install.state.empty())
                                     state.patchEditorInstall = install.state + "\t" + std::to_string (install.percent)

@@ -271,7 +271,7 @@ namespace wfg::doc::Template
                 { "Dcas", "DCAs" }, { "Lists", "list settings" }, { "Show", "show settings" },
                 { "Canvases", "video canvases" }, { "VideoOutputs", "video outputs and their mapping" },
                 { "VideoInputs", "video inputs" }, { "VideoInserts", "video inserts" },
-                { "CueTemplates", "cue templates" },
+                { "CueTemplates", "cue templates" }, { "SerialPorts", "serial ports" },
             };
 
             const auto known = words.find (container);

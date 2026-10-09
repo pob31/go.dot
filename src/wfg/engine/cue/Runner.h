@@ -68,6 +68,7 @@
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/process/ProcessHost.h>
+#include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/video/VideoSink.h>
 
 #include <array>
@@ -675,6 +676,21 @@ namespace wfg::cue
         /*  WHAT ARRIVED ON THE MIDI PORTS (PC.3), for the patches whose cue
             listens on a port: filled by the input thread, taken once a tick. */
         void setProcessMidi (process::MidiInbox* inbox) noexcept { processMidi = inbox; }
+
+        /*  THE SHOW'S SERIAL PORTS, OPEN (namespace draft §51, ACR; PC.10): where
+            a patch's line to `/godot/serial/<id>/out` goes. Serve only; null -
+            a replay, a rig - and the line goes nowhere, as a device write does. */
+        void setSerialPorts (serial::SerialTable* ports) noexcept { serialPorts = ports; }
+
+        /*  A LINE A SERIAL PORT READ, as `serial.heard` applies it: what the
+            patches hear at the next tick and the tree's last line - in a replay
+            too, which opens no port. */
+        void noteSerialLine (const std::string& port, const std::string& line, std::int64_t tick)
+        {
+            serialHeard.note (port, line, tick);
+        }
+
+        const serial::HeardLines& heardLines() const noexcept { return serialHeard; }
 
         /*  THE SPACEMOUSE'S SIX AXES THIS TICK (PC.3), or none when the puck is
             not live - handed in by serve before `beforeTick`, for a patch that
@@ -2509,6 +2525,11 @@ namespace wfg::cue
 
         /*  The tick up to which heard values have been handed to the patches. */
         std::int64_t processHeardTick = -1;
+
+        /*  The serial ports' lines, as `serial.heard` noted them, and where a
+            patch's lines go out (PC.10). */
+        serial::HeardLines serialHeard;
+        serial::SerialTable* serialPorts = nullptr;
 
         /*  WHERE A MOVIE STARTS (§37, WL; §41): the second its playhead is put
             at by GO, how fast and which way it goes, the first range it plays,

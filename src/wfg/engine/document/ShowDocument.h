@@ -441,6 +441,12 @@ namespace wfg::doc
         /** A DCA (PRD §3.28), at the end of the show's DCAs. */
         EditResult createDca (const std::string& name, const std::string& id = {});
 
+        /** A SERIAL PORT (namespace draft §51, ACR), at the end of the show's
+            serial ports, the container made at the end of the show by the
+            first. Where it is on this machine is said afterwards, `path` by
+            `node.set`, as a MIDI port's device is. */
+        EditResult createSerial (const std::string& name, const std::string& id = {});
+
         /** PHASE 8a: a canvas - the flat picture video cues are laid onto - at
             the end of the show's canvases, 1920 by 1080 until somebody says. */
         EditResult createCanvas (const std::string& name, const std::string& id = {});
