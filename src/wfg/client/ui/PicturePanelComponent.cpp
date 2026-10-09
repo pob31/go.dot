@@ -810,28 +810,35 @@ namespace wfg::client::ui
 
         /*  A SWATCH THAT WRITES AS IT IS MOVED: each change a `node.set` on the
             one row, which the document folds into one undo step. */
-        class Picker final : public juce::ColourSelector, private juce::ChangeListener
+        class Picker final : public juce::ColourSelector, private juce::Timer
         {
         public:
             Picker (PicturePanelComponent& ownerToUse, juce::Colour start)
                 : juce::ColourSelector (juce::ColourSelector::showColourAtTop | juce::ColourSelector::showSliders
                                         | juce::ColourSelector::showColourspace),
-                  owner (&ownerToUse)
+                  owner (&ownerToUse), written (start)
             {
                 setCurrentColour (start, juce::dontSendNotification);
                 setSize (300, 320);
-                addChangeListener (this);
+                startTimerHz (20);
             }
 
-            ~Picker() override { removeChangeListener (this); }
+            ~Picker() override { stopTimer(); }
 
         private:
             juce::Component::SafePointer<PicturePanelComponent> owner;
+            juce::Colour written;
 
-            void changeListenerCallback (juce::ChangeBroadcaster*) override
+            //  The colour looked at twenty times a second, and written when it moved.
+            void timerCallback() override
             {
-                if (owner != nullptr)
-                    owner->write ("paint", paintText (getCurrentColour()));
+                const auto now = getCurrentColour();
+
+                if (owner == nullptr || now == written)
+                    return;
+
+                written = now;
+                owner->write ("paint", paintText (now));
             }
         };
 
