@@ -42,6 +42,7 @@
 #include <juce_graphics/juce_graphics.h>
 #include <sokol/sokol_gfx.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -149,6 +150,20 @@ namespace wfg::video::render
             their warps, calibrated, dithered, into `into` - and its test
             pattern over it when on. Outside any pass. */
         void drawOutput (const region::OutputReading& output, std::int64_t sample, const Target& into);
+
+        /*  THE STILLS READ AHEAD, PUT ON THE DEVICE BEFORE GO (namespace draft
+            §48, AAT), in the engine's order: each already there kept through
+            this frame's sweep, and at most ONE more uploaded a frame - a large
+            picture's upload is a frame's worth of work - while all held ahead
+            stay within `budgetBytes`. One decoded past the budget is uploaded
+            when it is drawn, and counts as settled. After beginFrame. */
+        void keepPictures (const std::vector<std::string>& paths, std::size_t budgetBytes);
+
+        /*  Whether one of those is settled - on the device at its newest
+            reading, or decoded and past the budget - and how many uploads the
+            read-ahead has made: the session's, and a test's. */
+        bool settledAhead (const std::string& path) const;
+        std::uint64_t uploadsAhead() const noexcept;
 
         /*  After sg_commit: the pictures, frames and tables no draw used this
             frame let go. */

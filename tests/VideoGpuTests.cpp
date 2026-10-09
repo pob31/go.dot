@@ -38,6 +38,7 @@
 #include <juce_graphics/juce_graphics.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -693,6 +694,164 @@ TEST_CASE ("video gpu: a HAP frame is drawn still compressed, one upload for eve
     CHECK (((middle >> 16) & 0xffu) >= 253u);
     CHECK (std::abs (static_cast<int> ((middle >> 8) & 0xffu) - 65) <= 2);
     CHECK ((middle & 0xffu) <= 2u);
+}
+
+TEST_CASE ("video gpu: stills read ahead go onto the device before a layer draws them, one a frame, within their budget (§48)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    Pictures pictures;
+
+    for (const auto* path : { "a.png", "b.png", "c.png" })
+        pictures.images[path] = gradientPicture (64, 32);
+
+    constexpr std::size_t onePicture = 64 * 32 * 4;
+    constexpr std::size_t plenty = std::size_t { 512 } * 1024 * 1024;
+
+    region::ConfigReading config;
+    config.canvases.push_back ({ "C1", 160, 90 });
+
+    video::render::Painter painter (pictures);
+    std::string why;
+    REQUIRE_MESSAGE (painter.make (why), why);
+
+    std::int64_t sample = 1000;
+
+    const auto frame = [&] (const std::vector<std::string>& keep, std::size_t budget,
+                            std::vector<region::LayerReading> layers = {})
+    {
+        painter.beginFrame (config, std::move (layers), [] (const std::string&) { return 1.0; });
+        painter.keepPictures (keep, budget);
+        painter.canvas ("C1", ++sample);
+        sg_commit();
+        painter.endFrame();
+    };
+
+    const std::vector<std::string> all { "a.png", "b.png", "c.png" };
+
+    /*  ONE A FRAME, in the list's order: the first frame puts the first on the
+        device, and three frames all three - before any layer has drawn one. */
+    frame (all, plenty);
+    CHECK (painter.uploadsAhead() == 1);
+    CHECK (painter.settledAhead ("a.png"));
+    CHECK_FALSE (painter.settledAhead ("b.png"));
+
+    frame (all, plenty);
+    frame (all, plenty);
+    CHECK (painter.uploadsAhead() == 3);
+    CHECK (painter.settledAhead ("c.png"));
+
+    /*  KEPT, NOT MADE AGAIN: another frame, and one drawing the first on a
+        layer, upload nothing. */
+    frame (all, plenty);
+
+    auto shown = layerOf ("RUN00001", region::Source::picture, 1.0, 1);
+    shown.file = "a.png";
+    frame (all, plenty, { shown });
+    CHECK (painter.uploadsAhead() == 3);
+
+    /*  DROPPED FROM THE LIST, let go at the frame's end: named again, it is
+        uploaded again. */
+    frame ({ "a.png" }, plenty);
+    frame (all, plenty);
+    CHECK (painter.uploadsAhead() == 4);
+
+    /*  THE BUDGET: room for two - the third is settled as read, and left to be
+        uploaded when it is drawn. */
+    frame ({ "a.png" }, plenty);
+    const auto before = painter.uploadsAhead();
+    frame (all, onePicture * 2);
+    frame (all, onePicture * 2);
+    frame (all, onePicture * 2);
+    CHECK (painter.uploadsAhead() == before + 1);
+    CHECK (painter.settledAhead ("b.png"));
+    CHECK (painter.settledAhead ("c.png"));
+}
+
+/*  M54b (namespace draft §48): THE FRAME GO SHOWS A 4K STILL ON, with the
+    still on the device ahead against one only decoded - whose upload falls in
+    that frame. Timed to the device's own finish (a read-back), on the bench
+    only: WFG_VIDEO_BENCH=1, and WFG_GPU_HARDWARE=1 for the machine's own card
+    rather than the software rasteriser. Opens no window. */
+TEST_CASE ("video gpu: M54b, the frame a 4K still comes up on, kept on the device ahead or uploaded in it")
+{
+    if (juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_BENCH", {}).isEmpty())
+        return;
+
+    Device device;
+
+    if (! device.open)
+        return;
+
+    const auto still = [] (juce::Colour colour)
+    {
+        juce::Image image (juce::Image::ARGB, 3840, 2160, true, juce::SoftwareImageType());
+        juce::Graphics g (image);
+        g.fillAll (colour);
+        g.setColour (colour.contrasting());
+
+        for (int n = 0; n < 40; ++n)
+            g.fillRect (n * 96, n * 54, 64, 64);
+
+        return image;
+    };
+
+    Pictures pictures;
+    pictures.images["decoded.png"] = still (juce::Colours::darkred);
+    pictures.images["ahead.png"] = still (juce::Colours::darkblue);
+
+    region::ConfigReading config;
+    config.canvases.push_back ({ "C1", 1920, 1080 });
+
+    video::render::Painter painter (pictures);
+    std::string why;
+    REQUIRE_MESSAGE (painter.make (why), why);
+
+    std::int64_t sample = 1000;
+    std::vector<float> rgba;
+    int readWidth = 0, readHeight = 0;
+
+    //  One frame, from its start to the device's finish, in milliseconds.
+    const auto frame = [&] (const std::vector<std::string>& keep, std::vector<region::LayerReading> layers)
+    {
+        const auto began = std::chrono::steady_clock::now();
+        painter.beginFrame (config, std::move (layers), [] (const std::string&) { return 1.0; });
+        painter.keepPictures (keep, std::size_t { 512 } * 1024 * 1024);
+        painter.canvas ("C1", ++sample);
+        sg_commit();
+        REQUIRE (video::gpu::readBack (painter.canvasImage ("C1"), rgba, readWidth, readHeight));
+        painter.endFrame();
+        return std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - began).count();
+    };
+
+    const auto layerShowing = [] (const char* file)
+    {
+        auto layer = layerOf ("RUN00001", region::Source::picture, 1.0, 1);
+        layer.file = file;
+        return layer;
+    };
+
+    //  The pipelines made, and the device warm.
+    for (int n = 0; n < 5; ++n)
+        frame ({}, {});
+
+    const auto empty = frame ({}, {});
+
+    //  Only decoded: its upload falls in the frame it comes up on.
+    const auto uploadedAtGo = frame ({}, { layerShowing ("decoded.png") });
+
+    //  Read ahead: uploaded in a frame before GO, then shown.
+    const auto keptBefore = frame ({ "ahead.png" }, {});
+    const auto aheadAtGo = frame ({ "ahead.png" }, { layerShowing ("ahead.png") });
+
+    MESSAGE ("M54b on " << video::gpu::describe() << ", 3840x2160 still: a frame with nothing "
+             << empty << " ms; GO on one only decoded " << uploadedAtGo << " ms; the frame before GO that put one on the device "
+             << keptBefore << " ms, and GO on it " << aheadAtGo << " ms");
+
+    CHECK (painter.settledAhead ("ahead.png"));
 }
 
 TEST_CASE ("video gpu: a Hap Q frame turned back from YCoCg, and a preview's straight RGBA (R.1)")

@@ -472,6 +472,57 @@ namespace wfg::video::render
             return &held;
         }
 
+        /*  THE READ-AHEAD'S STILLS (namespace draft §48, AAT): kept, and one
+            more put on the device a frame, within the budget. */
+        void keepPictures (const std::vector<std::string>& paths, std::size_t budget)
+        {
+            settled.clear();
+            std::size_t heldBytes = 0;
+            auto uploaded = false;
+
+            for (const auto& path : paths)
+            {
+                std::uint64_t version = 0;
+                const auto image = sources.picture (path, version);
+
+                //  Not read yet: nothing to put on the device.
+                if (! image.isValid() || image.getFormat() != juce::Image::ARGB)
+                    continue;
+
+                const auto bytes = static_cast<std::size_t> (image.getWidth()) * static_cast<std::size_t> (image.getHeight()) * 4;
+
+                //  Past the budget: drawn, it is uploaded then - settled as read.
+                if (heldBytes + bytes > budget)
+                {
+                    settled.insert (path);
+                    continue;
+                }
+
+                if (const auto found = pictures.find (path);
+                    found != pictures.end() && found->second.image.id != SG_INVALID_ID && found->second.version == version)
+                {
+                    found->second.used = true;
+                    heldBytes += bytes;
+                    settled.insert (path);
+                    continue;
+                }
+
+                if (uploaded)
+                    continue;
+
+                if (picture (path) != nullptr)
+                {
+                    uploaded = true;
+                    ++uploadedAhead;
+                    heldBytes += bytes;
+                    settled.insert (path);
+                }
+            }
+        }
+
+        std::set<std::string> settled;
+        std::uint64_t uploadedAhead = 0;
+
         /*  A MOVIE'S FRAME ON THE DEVICE, uploaded still compressed when it is
             not the one already there - one upload a frame of the movie, however
             many outputs show it. */
@@ -1328,6 +1379,21 @@ namespace wfg::video::render
     void Painter::drawOutput (const region::OutputReading& output, std::int64_t sample, const Target& into)
     {
         impl->drawOutput (output, sample, into);
+    }
+
+    void Painter::keepPictures (const std::vector<std::string>& paths, std::size_t budgetBytes)
+    {
+        impl->keepPictures (paths, budgetBytes);
+    }
+
+    bool Painter::settledAhead (const std::string& path) const
+    {
+        return impl->settled.count (path) > 0;
+    }
+
+    std::uint64_t Painter::uploadsAhead() const noexcept
+    {
+        return impl->uploadedAhead;
     }
 
     void Painter::endFrame()

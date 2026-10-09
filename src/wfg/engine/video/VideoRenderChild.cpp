@@ -2214,7 +2214,27 @@ namespace wfg::video
                 changed.wait_for (hold, std::chrono::seconds (2), [this] { return taken == generation || stopped; });
             }
 
+            /*  WHETHER THIS LOOP IS DRAWING FRAMES - it draws for a projector,
+                a sender or an insert, and not otherwise - and which stills named
+                to read ahead it holds settled on the device (namespace draft
+                §48, AAT): a still is ready only once there while frames are
+                drawn. Any thread. */
+            bool drawing() const
+            {
+                const std::lock_guard<std::mutex> hold (aheadLock);
+                return lastDrawn > 0 && steadyNanos() - lastDrawn < 1'000'000'000;
+            }
+
+            bool settledAhead (const std::string& path) const
+            {
+                const std::lock_guard<std::mutex> hold (aheadLock);
+                return std::find (settled.begin(), settled.end(), path) != settled.end();
+            }
+
         private:
+            /*  What the read-ahead may hold on the device at once (AAT). */
+            static constexpr std::size_t keepBudget = std::size_t { 512 } * 1024 * 1024;
+
             struct Frames
             {
                 std::int64_t last = 0;
@@ -2283,6 +2303,10 @@ namespace wfg::video
                 std::unique_ptr<render::Painter> painter;
                 std::uint64_t have = 0;
                 std::string deviceProblem;
+
+                //  The stills named to read ahead, and the list they were read from (§48, AAT).
+                std::vector<std::string> keep;
+                std::uint32_t keepUnder = 0xffffffffu;
                 ClockReader clock;
                 std::int64_t nextStates = 0;
                 std::int64_t nextDiscovery = 0;
@@ -2712,6 +2736,19 @@ namespace wfg::video
                     painter->beginFrame (config, readLayers (r),
                                          [this] (const std::string& id) { return region::canvasLevelOf (r, id); });
 
+                    /*  THE STILLS READ AHEAD, onto the device before GO (§48,
+                        AAT): the list read again when the engine wrote it. */
+                    if (r.preparedSeq.load (std::memory_order_acquire) != keepUnder)
+                    {
+                        keep.clear();
+
+                        for (const auto& item : region::readPrepared (r, &keepUnder))
+                            if (! item.movie)
+                                keep.push_back (item.path);
+                    }
+
+                    painter->keepPictures (keep, keepBudget);
+
                     /*  EACH INSERT'S PICTURE (YF): the holding cue's alone, for
                         the sample a frame on, sent once the frame is committed. */
                     {
@@ -2848,6 +2885,20 @@ namespace wfg::video
                     }
 
                     painter->endFrame();
+
+                    /*  AND WHAT OF THE READ-AHEAD IS SETTLED ON THE DEVICE, for
+                        the session to say ready (§48, AAT). */
+                    {
+                        std::vector<std::string> settledNow;
+
+                        for (const auto& path : keep)
+                            if (painter->settledAhead (path))
+                                settledNow.push_back (path);
+
+                        const std::lock_guard<std::mutex> hold (aheadLock);
+                        settled = std::move (settledNow);
+                        lastDrawn = began;
+                    }
                 }
 
                 surfaces.clear();
@@ -2910,6 +2961,11 @@ namespace wfg::video
             std::uint64_t generation = 0;
             std::uint64_t taken = 0;
             bool stopped = false;
+
+            //  The read-ahead's stills settled on the device, and when a frame was last drawn (§48).
+            mutable std::mutex aheadLock;
+            std::vector<std::string> settled;
+            std::int64_t lastDrawn = 0;
         };
 
         //==============================================================================
@@ -3462,8 +3518,20 @@ namespace wfg::video
                 now.reserve (preparedNow.size());
 
                 for (const auto& item : preparedNow)
-                    now.push_back (item.movie ? movies.statusOf (item.path, item.seconds, item.direction)
-                                              : pictures.statusOf (item.path));
+                {
+                    auto status = item.movie ? movies.statusOf (item.path, item.seconds, item.direction)
+                                             : pictures.statusOf (item.path);
+
+                    /*  A STILL IS READY ON THE DEVICE while frames are drawn
+                        (AAT): decoded is not enough when a projector would wait
+                        on its upload. With no frames drawn - headless, nothing
+                        on - decoded is all there is to wait for. */
+                    if (! item.movie && status.state == region::HeldState::ready
+                          && loop != nullptr && loop->drawing() && ! loop->settledAhead (item.path))
+                        status.state = region::HeldState::reading;
+
+                    now.push_back (std::move (status));
+                }
 
                 const auto same = heldWritten.size() == now.size()
                                     && std::equal (now.begin(), now.end(), heldWritten.begin(),
