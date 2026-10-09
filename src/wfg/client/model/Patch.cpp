@@ -523,6 +523,216 @@ namespace wfg::client::model
         return changed ? process::writePatch (patch) : text;
     }
 
+    namespace
+    {
+        /*  Typed words as Pd writes them: split on spaces, a semicolon or a comma
+            its own word, each escaped. */
+        std::vector<std::string> typedWords (const std::string& typed)
+        {
+            std::vector<std::string> out;
+            std::string word;
+            const auto finish = [&]
+            {
+                if (! word.empty())
+                    out.push_back (process::escaped (word));
+                word.clear();
+            };
+            for (const char c : typed)
+            {
+                if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+                    finish();
+                else if (c == ';' || c == ',')
+                {
+                    finish();
+                    out.push_back (process::escaped (std::string (1, c)));
+                }
+                else
+                    word += c;
+            }
+            finish();
+            return out;
+        }
+
+        const char* const emptyCanvas = "#N canvas 0 50 640 400 12;\n";
+    }
+
+    std::string patchTyped (const std::string& text, std::size_t box, const std::string& typed)
+    {
+        auto patch = process::parsePatch (text);
+        if (box >= patch.boxes.size())
+            return text;
+
+        const auto kind = patch.boxes[box].kind;
+        if (kind != BoxKind::object && kind != BoxKind::message && kind != BoxKind::comment)
+            return text;
+
+        auto words = typedWords (typed);
+        if (words.empty() && kind != BoxKind::comment)
+            return patchDeleted (text, { box }, {});
+        if (words.empty())
+            words.push_back ("comment");
+
+        const auto& old = patch.records[patch.boxes[box].record].words;
+        std::vector<std::string> record (old.begin(),
+                                         old.begin() + static_cast<std::ptrdiff_t> (std::min<std::size_t> (4, old.size())));
+        record.insert (record.end(), words.begin(), words.end());
+        if (patch.boxes[box].width > 0)
+        {
+            record.push_back (",");
+            record.push_back ("f");
+            record.push_back (std::to_string (patch.boxes[box].width));
+        }
+
+        auto made = process::recordOf (std::move (record));
+        if (made.raw == patch.records[patch.boxes[box].record].raw)
+            return text;
+        patch.records[patch.boxes[box].record] = std::move (made);
+        return process::writePatch (patch);
+    }
+
+    std::string patchPlaced (const std::string& text, Placed what, int x, int y, const std::string& typed)
+    {
+        auto base = process::parsePatch (text).canvases.empty() ? std::string (emptyCanvas) + text : text;
+        if (! base.empty() && base.back() != '\n')
+            base += '\n';
+
+        std::vector<std::string> words { "#X" };
+        switch (what)
+        {
+            case Placed::object:  words.push_back ("obj"); break;
+            case Placed::message: words.push_back ("msg"); break;
+            case Placed::number:  words.push_back ("floatatom"); break;
+            case Placed::symbol:  words.push_back ("symbolatom"); break;
+            case Placed::comment: words.push_back ("text"); break;
+        }
+        words.push_back (std::to_string (std::max (0, x)));
+        words.push_back (std::to_string (std::max (0, y)));
+
+        if (what == Placed::number || what == Placed::symbol)
+        {
+            //  Pd's own: a width, no range, no label, no names.
+            for (const auto* field : { what == Placed::number ? "5" : "10", "0", "0", "0", "-", "-", "-", "0" })
+                words.push_back (field);
+        }
+        else
+        {
+            const auto typedOnes = typedWords (typed);
+            words.insert (words.end(), typedOnes.begin(), typedOnes.end());
+            if (what == Placed::comment && typedOnes.empty())
+                words.push_back ("comment");
+        }
+
+        return base + process::recordOf (std::move (words)).raw;
+    }
+
+    std::string patchConnected (const PatchView& view, const std::string& text,
+                                std::size_t fromView, int outlet, std::size_t toView, int inlet)
+    {
+        //  The patch's own canvas only: a line is added at the end of the text,
+        //  which is that canvas's.
+        if (view.canvas != 0 || fromView >= view.boxes.size() || toView >= view.boxes.size() || fromView == toView
+             || outlet < 0 || inlet < 0
+             || outlet >= view.boxes[fromView].outlets || inlet >= view.boxes[toView].inlets)
+            return text;
+
+        for (const auto& line : view.lines)
+            if (line.fromView == fromView && line.toView == toView && line.outlet == outlet && line.inlet == inlet)
+                return text;
+
+        auto out = text;
+        if (! out.empty() && out.back() != '\n')
+            out += '\n';
+        return out + process::recordOf ({ "#X", "connect", std::to_string (fromView), std::to_string (outlet),
+                                          std::to_string (toView), std::to_string (inlet) }).raw;
+    }
+
+    std::string patchCopied (const std::string& text, const std::vector<std::size_t>& boxes)
+    {
+        const auto patch = process::parsePatch (text);
+        const std::set<std::size_t> picked (boxes.begin(), boxes.end());
+
+        //  Only boxes on the patch's own canvas, numbered in its order.
+        const auto onTop = patch.boxesOn (0);
+        std::map<int, int> renumber;
+        std::string out;
+
+        for (std::size_t n = 0; n < onTop.size(); ++n)
+        {
+            const auto b = onTop[n];
+            if (picked.count (b) == 0)
+                continue;
+            renumber[static_cast<int> (n)] = static_cast<int> (renumber.size());
+
+            const auto& box = patch.boxes[b];
+            auto first = box.record;
+            if (box.kind == BoxKind::subpatch)
+                for (const auto& canvas : patch.canvases)
+                    if (canvas.parent == std::optional<std::size_t> (0) && canvas.boxInParent == n)
+                        first = canvas.record;
+            for (auto r = first; r <= box.record; ++r)
+                out += patch.records[r].raw;
+        }
+
+        for (const auto& line : patch.lines)
+        {
+            if (line.canvas != 0)
+                continue;
+            const auto from = renumber.find (line.fromBox), to = renumber.find (line.toBox);
+            if (from == renumber.end() || to == renumber.end())
+                continue;
+            out += process::recordOf ({ "#X", "connect", std::to_string (from->second), std::to_string (line.outlet),
+                                        std::to_string (to->second), std::to_string (line.inlet) }).raw;
+        }
+        return out;
+    }
+
+    Pasted patchPasted (const std::string& text, const std::string& piece, int dx, int dy)
+    {
+        Pasted out;
+        auto base = process::parsePatch (text).canvases.empty() ? std::string (emptyCanvas) + text : text;
+        if (! base.empty() && base.back() != '\n')
+            base += '\n';
+
+        //  The piece read under a canvas of its own, so its numbers are its own.
+        const auto pieceAlone = process::parsePatch (std::string (emptyCanvas) + piece);
+        const auto before = process::parsePatch (base);
+        const auto firstNumber = static_cast<int> (before.boxesOn (0).size());
+
+        std::string added;
+        for (std::size_t r = 1; r < pieceAlone.records.size(); ++r)
+        {
+            auto words = pieceAlone.records[r].words;
+            if (words.size() >= 2 && words[0] == "#X" && words[1] == "connect" && words.size() >= 6)
+            {
+                words[2] = std::to_string (intOf (words[2]) + firstNumber);
+                words[4] = std::to_string (intOf (words[4]) + firstNumber);
+                added += process::recordOf (std::move (words)).raw;
+                continue;
+            }
+
+            //  A box of the piece's own canvas moves; a subpatch's inside does not.
+            const bool topLevel = std::any_of (pieceAlone.boxes.begin(), pieceAlone.boxes.end(),
+                                               [&] (const process::PatchBox& b) { return b.record == r && b.canvas == 0; });
+            if (topLevel && words.size() >= 4 && words[0] == "#X" && words[1] != "array")
+            {
+                words[2] = std::to_string (std::max (0, intOf (words[2]) + dx));
+                words[3] = std::to_string (std::max (0, intOf (words[3]) + dy));
+                added += process::recordOf (std::move (words)).raw;
+            }
+            else
+            {
+                added += pieceAlone.records[r].raw;
+            }
+        }
+
+        out.text = base + added;
+        const auto after = process::parsePatch (out.text);
+        const auto now = after.boxesOn (0);
+        for (std::size_t n = static_cast<std::size_t> (firstNumber); n < now.size(); ++n)
+            out.boxes.push_back (now[n]);
+        return out;
+    }
+
     std::string patchDeleted (const std::string& text, const std::vector<std::size_t>& boxes,
                               const std::vector<std::size_t>& lines)
     {

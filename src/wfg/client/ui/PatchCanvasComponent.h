@@ -33,8 +33,16 @@
     sent is drawn, so the boxes do not jump back. Under the lock it draws and
     changes nothing, and says so.
 
+    THE SECOND ROUND (PC.6): a double click on a box types into it - Return or
+    a click elsewhere commits, an object or a message typed empty goes; Ctrl or
+    Cmd with 1 to 5 places an object, a message, a number, a symbol or a
+    comment where the pointer is, as Pd's do, and types into it; a drag from an
+    outlet to an inlet draws a line; Ctrl or Cmd with A picks every box, with C
+    copies the picked boxes and the lines between them, as Pd's own text, X
+    cuts, V pastes beside where they were and D duplicates.
+
     IT TAKES THE KEYS IT USES AND NO OTHER: Space is still GO and Esc still the
-    PANIC, from wherever the focus is.
+    PANIC, from wherever the focus is - typing into a box included.
 */
 
 #include <wfg/client/model/Patch.h>
@@ -72,6 +80,8 @@ namespace wfg::client::ui
         void mouseDown (const juce::MouseEvent&) override;
         void mouseDrag (const juce::MouseEvent&) override;
         void mouseUp (const juce::MouseEvent&) override;
+        void mouseMove (const juce::MouseEvent&) override;
+        void mouseDoubleClick (const juce::MouseEvent&) override;
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
         void mouseMagnify (const juce::MouseEvent&, float scaleFactor) override;
         bool keyPressed (const juce::KeyPress&) override;
@@ -82,6 +92,12 @@ namespace wfg::client::ui
         const std::set<std::size_t>& pickedLines() const noexcept { return lines; }
         juce::Point<float> onScreen (double x, double y) const;
         double zoom() const noexcept { return scale; }
+
+        /*  FOR A TEST: the box being typed into, its editor, and the text the
+            clipboard would take. */
+        std::optional<std::size_t> typingBox() const noexcept { return typing; }
+        juce::TextEditor& typingEditor() noexcept { return editor; }
+        void commitTyping();
 
     private:
         model::Theme theme;
@@ -99,8 +115,31 @@ namespace wfg::client::ui
         double scale = 1.0;
         juce::Point<double> origin;         // the canvas point at the component's top-left
 
-        enum class Hand { none, moving, banding, panning };
+        enum class Hand { none, moving, banding, panning, connecting };
         Hand hand = Hand::none;
+        std::size_t connectFrom = 0;        // a view box's index
+        int connectOutlet = 0;
+        juce::Point<double> pointer { 20.0, 20.0 };   // where a placed box goes
+
+        /*  THE BOX BEING TYPED INTO, by its index in the patch, and the editor
+            laid over it. Esc goes on to the PANIC: it never stays here. */
+        class Typing final : public juce::TextEditor
+        {
+        public:
+            bool keyPressed (const juce::KeyPress& key) override
+            {
+                if (key.getKeyCode() == juce::KeyPress::escapeKey)
+                    return false;
+                return juce::TextEditor::keyPressed (key);
+            }
+        };
+        Typing editor;
+        std::optional<std::size_t> typing;
+
+        void startTyping (std::size_t box);
+        void place (model::Placed what);
+        void copyPicked();
+        void paste (const juce::String& piece);
         juce::Point<double> downAt, now;    // canvas points
         juce::Point<float> panFrom;
         juce::Point<double> originAtDown;

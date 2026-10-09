@@ -11463,3 +11463,63 @@ TEST_CASE ("client: the canvas at the foot reads a process cue's patch, and its 
     CHECK (model::wordFor (model::Subject::Kind::patch) == "patch");
     CHECK (model::iconForPanel ("patch") == model::Icon::process);
 }
+
+TEST_CASE ("client: a box typed is written as Pd writes it, and an object typed empty goes")
+{
+    const std::string text = canvasPatch;
+
+    CHECK (model::patchTyped (text, 0, "metro 250").find ("#X obj 10 20 metro 250;\n") != std::string::npos);
+    CHECK (model::patchTyped (text, 1, "; /x 1, 2 $1").find ("#X msg 10 60 \\; /x 1 \\, 2 \\$1;\n") != std::string::npos);
+    CHECK (model::patchTyped (text, 0, "metro 100") == text);
+
+    //  Typed empty, [metro] goes, and its lines with it.
+    const auto gone = process::parsePatch (model::patchTyped (text, 0, "  "));
+    CHECK (gone.boxesOn (0).size() == 5u);
+    CHECK (gone.lines.size() == 1u);
+}
+
+TEST_CASE ("client: a box placed by Pd's Ctrl+1 to Ctrl+5, a line drawn, a piece copied and pasted")
+{
+    const std::string text = canvasPatch;
+
+    const auto withObject = model::patchPlaced (text, model::Placed::object, 300, 40, "+ 1");
+    CHECK (withObject.substr (text.size()) == "#X obj 300 40 + 1;\n");
+    CHECK (model::patchPlaced (text, model::Placed::number, 5, 6).substr (text.size())
+           == "#X floatatom 5 6 5 0 0 0 - - - 0;\n");
+    CHECK (model::patchPlaced (text, model::Placed::comment, 5, 6).substr (text.size()) == "#X text 5 6 comment;\n");
+
+    //  An empty patch is given its canvas first.
+    const auto fresh = process::parsePatch (model::patchPlaced ("", model::Placed::message, 1, 2, "bang"));
+    CHECK (fresh.problem.empty());
+    REQUIRE (fresh.boxes.size() == 1u);
+    CHECK (fresh.boxes[0].kind == process::BoxKind::message);
+
+    //  A line from [metro]'s outlet to the number box's inlet; and the ones refused.
+    const auto view = model::viewPatch (process::parsePatch (text));
+    CHECK (model::patchConnected (view, text, 0, 0, 2, 0).substr (text.size()) == "#X connect 0 0 2 0;\n");
+    CHECK (model::patchConnected (view, text, 0, 0, 1, 0) == text);   // already there
+    CHECK (model::patchConnected (view, text, 0, 0, 0, 0) == text);   // to itself
+    CHECK (model::patchConnected (view, text, 0, 0, 2, 3) == text);   // no such inlet
+    CHECK (model::patchConnected (view, text, 0, 1, 2, 0) == text);   // no such outlet
+
+    //  [metro] and [bang( copied: their records, and the line between them from nought.
+    const auto piece = model::patchCopied (text, { 0, 1 });
+    CHECK (piece == "#X obj 10 20 metro 100;\n#X msg 10 60 bang;\n#X connect 0 0 1 0;\n");
+
+    //  Pasted beside, numbered after the six boxes there.
+    const auto pasted = model::patchPasted (text, piece, 10, 10);
+    const auto after = process::parsePatch (pasted.text);
+    REQUIRE (after.problem.empty());
+    CHECK (after.boxesOn (0).size() == 8u);
+    CHECK (pasted.boxes.size() == 2u);
+    CHECK (after.boxes[pasted.boxes[0]].x == 20);
+    CHECK (after.lines.back().fromBox == 6);
+    CHECK (after.lines.back().toBox == 7);
+
+    //  A subpatch copied goes whole, and pastes whole.
+    const auto inner = model::patchCopied (text, { 7 });
+    CHECK (inner.find ("#N canvas 0 0 200 200 inner 0;\n") == 0u);
+    const auto twice = process::parsePatch (model::patchPasted (text, inner, 0, 100).text);
+    CHECK (twice.canvases.size() == 3u);
+    CHECK (twice.problem.empty());
+}

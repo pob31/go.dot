@@ -5150,3 +5150,69 @@ TEST_CASE ("patch canvas: a drag is one write, Delete takes boxes with their lin
     canvas.keyPressed (juce::KeyPress (juce::KeyPress::deleteKey));
     CHECK (written.size() == 2u);
 }
+
+TEST_CASE ("patch canvas: Ctrl+1 places a box to type into, a drag from an outlet draws a line, Ctrl+D duplicates")
+{
+    std::vector<std::pair<std::string, std::string>> written;
+    wfg::client::ui::PatchCanvasComponent::Actions actions;
+    actions.set = [&written] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.say = [] (const juce::String&) {};
+
+    wfg::client::ui::PatchCanvasComponent canvas (wfg::client::model::Theme {}, std::move (actions));
+    canvas.setSize (600, 300);
+
+    wfg::client::model::PatchReading reading;
+    reading.cueId = "PRCS0001";
+    reading.text = "#N canvas 0 50 450 300 12;\n"
+                   "#X obj 10 20 metro 100;\n"
+                   "#X obj 10 100 print;\n";
+    canvas.show (reading);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+    const auto mouse = [&] (juce::Point<float> at, bool dragged)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, left, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &canvas, &canvas, now, at, now, 1, dragged);
+    };
+    const auto moveTo = [&] (juce::Point<float> at)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        canvas.mouseMove (juce::MouseEvent (source, at, juce::ModifierKeys(), juce::MouseInputSource::defaultPressure,
+                                            0.0f, 0.0f, 0.0f, 0.0f, &canvas, &canvas, now, at, now, 0, false));
+    };
+
+    //  A DRAG FROM [metro]'s OUTLET TO [print]'s INLET: one line.
+    const auto outlet = canvas.onScreen (12.0, 40.0);
+    const auto inlet = canvas.onScreen (12.0, 101.0);
+    canvas.mouseDown (mouse (outlet, false));
+    canvas.mouseDrag (mouse (inlet, true));
+    canvas.mouseUp (mouse (inlet, true));
+    REQUIRE (written.size() == 1u);
+    CHECK (written[0].second.find ("#X connect 0 0 1 0;\n") != std::string::npos);
+    reading.text = written[0].second;
+    canvas.show (reading);
+
+    //  CTRL+1 where the pointer is: an object, and its words typed in.
+    moveTo (canvas.onScreen (200.0, 30.0));
+    CHECK (canvas.keyPressed (juce::KeyPress ('1', juce::ModifierKeys::commandModifier, 0)));
+    REQUIRE (written.size() == 2u);
+    CHECK (written[1].second.find ("#X obj 200 30;\n") != std::string::npos);
+    REQUIRE (canvas.typingBox().has_value());
+    canvas.typingEditor().setText ("* 2", juce::dontSendNotification);
+    canvas.commitTyping();
+    REQUIRE (written.size() == 3u);
+    CHECK (written[2].second.find ("#X obj 200 30 * 2;\n") != std::string::npos);
+    reading.text = written[2].second;
+    canvas.show (reading);
+
+    //  CTRL+D on the picked box: a copy beside it.
+    CHECK (canvas.keyPressed (juce::KeyPress ('D', juce::ModifierKeys::commandModifier, 0)));
+    REQUIRE (written.size() == 4u);
+    CHECK (wfg::process::parsePatch (written[3].second).boxesOn (0).size() == 4u);
+    CHECK (written[3].second.find ("#X obj 210 40 * 2;\n") != std::string::npos);
+
+    //  Esc, typing or not, is the PANIC's.
+    CHECK_FALSE (canvas.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+}

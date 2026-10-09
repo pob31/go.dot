@@ -23674,3 +23674,11 @@ would give that (the option ACE did not take).
   arrows and deleted with Delete, their lines with them and Pd's numbering kept. Each gesture is one
   `node.set` of the whole patch when the hand lets go, the sent text drawn until the tree has it;
   locked, it shows and says so. Space and Esc stay GO's and the PANIC's.
+- **PC.6**: the canvas, round two. A double click on an object, a message or a comment types into it -
+  Return or a click elsewhere commits, written as Pd writes it (a semicolon, a comma and a dollar sign
+  escaped), and an object or a message typed empty goes as in Pd; Ctrl or Cmd with 1 to 5 places an
+  object, a message, a number, a symbol or a comment where the pointer is and types into it; a drag from
+  an outlet to an inlet, or to the box and its nearest inlet, draws a line - none to itself, none twice,
+  none to a port the box has not got; Ctrl or Cmd with A picks every box, C copies the picked boxes and
+  the lines between them as Pd's own text, X cuts, V pastes them beside where they were, numbered after
+  the boxes there, and D duplicates. Esc while typing is still the PANIC.

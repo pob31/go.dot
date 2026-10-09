@@ -38,6 +38,103 @@ namespace wfg::client::ui
         setWantsKeyboardFocus (true);
         setTitle ("Patch");
         setDescription ("The boxes and lines this process cue runs");
+
+        addChildComponent (editor);
+        editor.setMultiLine (false);
+        editor.setReturnKeyStartsNewLine (false);
+        editor.onReturnKey = [this]
+        {
+            commitTyping();
+            grabKeyboardFocus();
+        };
+        editor.onFocusLost = [this] { commitTyping(); };
+        editor.setTitle ("A box's words");
+    }
+
+    void PatchCanvasComponent::startTyping (std::size_t box)
+    {
+        const auto* shown = view.viewOf (box);
+        if (shown == nullptr || ! editable())
+            return;
+        if (shown->kind != BoxKind::object && shown->kind != BoxKind::message && shown->kind != BoxKind::comment)
+            return;
+
+        //  Its words as Pd shows them, on one line.
+        std::string words;
+        for (const auto& word : process::splitWords (patch.boxes[box].text))
+            words += (words.empty() ? "" : " ") + process::unescaped (word);
+
+        typing = box;
+        const auto at = onScreen (shown->x, shown->y);
+        editor.setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(),
+                                                       static_cast<float> (view.font.lineHeight * scale * 0.82),
+                                                       juce::Font::plain)));
+        editor.setBounds (juce::Rectangle<float> (at.x, at.y,
+                                                  std::max (static_cast<float> (shown->w * scale), 140.0f),
+                                                  static_cast<float> ((view.font.lineHeight + 6.0) * scale))
+                              .toNearestInt());
+        editor.setText (juce::String::fromUTF8 (words.c_str()), juce::dontSendNotification);
+        editor.setVisible (true);
+        editor.grabKeyboardFocus();
+        editor.selectAll();
+    }
+
+    void PatchCanvasComponent::commitTyping()
+    {
+        if (! typing.has_value())
+            return;
+
+        const auto box = *typing;
+        typing.reset();
+        editor.setVisible (false);
+        write (model::patchTyped (drawnText, box, editor.getText().toStdString()));
+    }
+
+    void PatchCanvasComponent::place (model::Placed what)
+    {
+        if (! editable())
+            return;
+
+        const auto x = static_cast<int> (std::round (pointer.x));
+        const auto y = static_cast<int> (std::round (pointer.y));
+        write (model::patchPlaced (drawnText, what, x, y));
+
+        //  The box placed is the last, and the words it needs are typed into it.
+        if (! patch.boxes.empty())
+        {
+            boxes = { patch.boxes.size() - 1 };
+            lines.clear();
+            if (what == model::Placed::object || what == model::Placed::message || what == model::Placed::comment)
+                startTyping (patch.boxes.size() - 1);
+        }
+    }
+
+    void PatchCanvasComponent::copyPicked()
+    {
+        if (! boxes.empty())
+            juce::SystemClipboard::copyTextToClipboard (
+                juce::String::fromUTF8 (model::patchCopied (drawnText, { boxes.begin(), boxes.end() }).c_str()));
+    }
+
+    void PatchCanvasComponent::paste (const juce::String& piece)
+    {
+        if (! editable())
+            return;
+
+        const auto text = piece.toStdString();
+        const auto parsed = process::parsePatch ("#N canvas 0 0 10 10 12;\n" + text);
+        if (! parsed.problem.empty() || parsed.boxes.empty())
+        {
+            if (actions.say)
+                actions.say ("Nothing to paste: the clipboard holds no boxes");
+            return;
+        }
+
+        const auto pasted = model::patchPasted (drawnText, text, 10, 10);
+        write (pasted.text);
+        boxes = { pasted.boxes.begin(), pasted.boxes.end() };
+        lines.clear();
+        repaint();
     }
 
     void PatchCanvasComponent::applyTheme (const model::Theme& themeToUse)
@@ -264,6 +361,17 @@ namespace wfg::client::ui
         for (std::size_t n = 0; n < view.boxes.size(); ++n)
             drawBox (g, view.boxes[n], offsetOf (n), boxes.count (view.boxes[n].box) > 0);
 
+        //  THE LINE a hand is drawing from an outlet.
+        if (hand == Hand::connecting && connectFrom < view.boxes.size())
+        {
+            const auto& from = view.boxes[connectFrom];
+            const auto a = onScreen (model::portX (from, connectOutlet, from.outlets) + (model::portWidth - 1.0) / 2.0,
+                                     from.y + from.h);
+            const auto b = onScreen (now.x, now.y);
+            g.setColour (Look::colour (theme, "picked"));
+            g.drawLine (a.x, a.y, b.x, b.y, std::max (1.0f, static_cast<float> (scale)));
+        }
+
         //  THE BAND a hand is drawing.
         if (hand == Hand::banding)
         {
@@ -286,10 +394,24 @@ namespace wfg::client::ui
         }
     }
 
+    void PatchCanvasComponent::mouseMove (const juce::MouseEvent& e)
+    {
+        pointer = toCanvas (e.position);
+    }
+
+    void PatchCanvasComponent::mouseDoubleClick (const juce::MouseEvent& e)
+    {
+        const auto at = toCanvas (e.position);
+        const auto hit = model::hitPatch (view, at.x, at.y);
+        if (hit.what == model::PatchHit::What::box)
+            startTyping (view.boxes[hit.item].box);
+    }
+
     void PatchCanvasComponent::mouseDown (const juce::MouseEvent& e)
     {
+        commitTyping();
         grabKeyboardFocus();
-        downAt = now = toCanvas (e.position);
+        downAt = now = pointer = toCanvas (e.position);
 
         if (e.mods.isMiddleButtonDown() || e.mods.isAltDown())
         {
@@ -315,6 +437,16 @@ namespace wfg::client::ui
             else
                 lines.insert (line);
             hand = Hand::none;
+            repaint();
+            return;
+        }
+
+        //  AN OUTLET GRABBED starts a line (PC.6).
+        if (hit.what == model::PatchHit::What::outlet && editable() && ! adding)
+        {
+            hand = Hand::connecting;
+            connectFrom = hit.item;
+            connectOutlet = hit.port;
             repaint();
             return;
         }
@@ -382,6 +514,29 @@ namespace wfg::client::ui
             for (const auto n : model::boxesTouched (view, downAt.x, downAt.y, now.x, now.y))
                 boxes.insert (view.boxes[n].box);
         }
+        else if (was == Hand::connecting)
+        {
+            //  Let go over an inlet - or the box, its nearest inlet then - joins them.
+            const auto hit = model::hitPatch (view, now.x, now.y);
+            if (hit.what == model::PatchHit::What::inlet)
+                write (model::patchConnected (view, drawnText, connectFrom, connectOutlet, hit.item, hit.port));
+            else if (hit.what == model::PatchHit::What::box && view.boxes[hit.item].inlets > 0)
+            {
+                const auto& to = view.boxes[hit.item];
+                int nearest = 0;
+                double best = 1e9;
+                for (int p = 0; p < to.inlets; ++p)
+                {
+                    const auto d = std::abs (model::portX (to, p, to.inlets) + model::portWidth / 2.0 - now.x);
+                    if (d < best)
+                    {
+                        best = d;
+                        nearest = p;
+                    }
+                }
+                write (model::patchConnected (view, drawnText, connectFrom, connectOutlet, hit.item, nearest));
+            }
+        }
 
         if (! editable() && was == Hand::none && ! reading.cueId.empty() && reading.locked && actions.say)
             actions.say ("The show is locked: unlock it to edit the patch");
@@ -413,6 +568,59 @@ namespace wfg::client::ui
     bool PatchCanvasComponent::keyPressed (const juce::KeyPress& key)
     {
         const auto code = key.getKeyCode();
+        const auto command = key.getModifiers().isCommandDown();
+
+        //  PD'S CTRL+1 TO CTRL+5: an object, a message, a number, a symbol, a comment.
+        if (command && code >= '1' && code <= '5')
+        {
+            static constexpr model::Placed placed[] = { model::Placed::object, model::Placed::message,
+                                                        model::Placed::number, model::Placed::symbol,
+                                                        model::Placed::comment };
+            place (placed[code - '1']);
+            return true;
+        }
+
+        if (command && (code == 'A' || code == 'a'))
+        {
+            boxes.clear();
+            for (std::size_t b = 0; b < patch.boxes.size(); ++b)
+                if (patch.boxes[b].canvas == 0 && patch.boxes[b].kind != BoxKind::other)
+                    boxes.insert (b);
+            lines.clear();
+            repaint();
+            return true;
+        }
+
+        if (command && (code == 'C' || code == 'c'))
+        {
+            copyPicked();
+            return true;
+        }
+
+        if (command && (code == 'X' || code == 'x'))
+        {
+            copyPicked();
+            if (! boxes.empty() && editable())
+            {
+                const auto text = model::patchDeleted (drawnText, { boxes.begin(), boxes.end() }, {});
+                boxes.clear();
+                write (text);
+            }
+            return true;
+        }
+
+        if (command && (code == 'V' || code == 'v'))
+        {
+            paste (juce::SystemClipboard::getTextFromClipboard());
+            return true;
+        }
+
+        if (command && (code == 'D' || code == 'd'))
+        {
+            if (! boxes.empty())
+                paste (juce::String::fromUTF8 (model::patchCopied (drawnText, { boxes.begin(), boxes.end() }).c_str()));
+            return true;
+        }
 
         if (code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey)
         {

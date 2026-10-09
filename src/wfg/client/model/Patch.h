@@ -149,4 +149,37 @@ namespace wfg::client::model
         goes whole. */
     std::string patchDeleted (const std::string& text, const std::vector<std::size_t>& boxes,
                               const std::vector<std::size_t>& lines);
+
+    /*  A BOX'S WORDS TYPED AGAIN (PC.6): as a person types them, written as Pd
+        writes them - a semicolon, a comma and a dollar sign escaped - its place
+        and its width kept. An object or a message typed empty goes, as in Pd. */
+    std::string patchTyped (const std::string& text, std::size_t box, const std::string& typed);
+
+    /*  A BOX PLACED (PC.6) at (x, y) on the patch's own canvas: an object, a
+        message, a number, a symbol or a comment, Pd's Ctrl+1 to Ctrl+5 - with
+        the words typed, or none yet. An empty patch is given its canvas first.
+        Its index in Patch::boxes is the last. */
+    enum class Placed { object, message, number, symbol, comment };
+    std::string patchPlaced (const std::string& text, Placed what, int x, int y, const std::string& typed = {});
+
+    /*  A LINE DRAWN (PC.6) from one box's outlet to another's inlet, both on
+        one canvas: the same text when it would join a box to itself, already
+        exists, or names a port the boxes have not got. */
+    std::string patchConnected (const PatchView& view, const std::string& text,
+                                std::size_t fromView, int outlet, std::size_t toView, int inlet);
+
+    /*  THE PICKED BOXES AS A PIECE OF PATCH (PC.6): their records, a subpatch
+        whole, and the lines between them numbered from nought - what a copy
+        puts on the clipboard, in Pd's own text, so it pastes into Pd too. */
+    std::string patchCopied (const std::string& text, const std::vector<std::size_t>& boxes);
+
+    /*  A PIECE OF PATCH PASTED (PC.6) onto the patch's own canvas, moved by
+        (dx, dy), its lines numbered after the boxes already there. Answers the
+        text and the indexes in Patch::boxes of what it put there. */
+    struct Pasted
+    {
+        std::string text;
+        std::vector<std::size_t> boxes;
+    };
+    Pasted patchPasted (const std::string& text, const std::string& piece, int dx, int dy);
 }
