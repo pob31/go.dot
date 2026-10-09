@@ -44,6 +44,8 @@
 #include <wfg/engine/video/Grade.h>
 #include <wfg/engine/video/Mask.h>
 
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -110,6 +112,42 @@ namespace wfg::video
         std::string insert {};
     };
 
+    /*  ONE FILE TO READ AHEAD OF GO (namespace draft §48): a whole path the
+        engine resolved, and for a movie the second GO will put its playhead at
+        and which way it will play from there - so the frames read before GO
+        are the frames GO shows. */
+    struct Preload
+    {
+        std::string path;
+        bool movie = false;
+        double seconds = 0.0;       ///< a movie's starting second; nought for a still
+        int direction = 1;          ///< 1 forwards, -1 backwards (§41)
+    };
+
+    /*  At most this many read ahead (AAO): a sampler bank's worth, when one
+        comes, with the standby's beside it. The region holds as many. */
+    constexpr std::size_t preloadsAtMost = 32;
+
+    /*  The same file read from the same second, compared by hand: a defaulted
+        `==` on a double is what GCC's -Wfloat-equal refuses. */
+    inline bool samePreload (const Preload& a, const Preload& b) noexcept
+    {
+        return a.path == b.path && a.movie == b.movie && a.direction == b.direction
+                 && std::abs (a.seconds - b.seconds) < 1.0e-9;
+    }
+
+    inline bool samePreloads (const std::vector<Preload>& a, const std::vector<Preload>& b) noexcept
+    {
+        if (a.size() != b.size())
+            return false;
+
+        for (std::size_t at = 0; at < a.size(); ++at)
+            if (! samePreload (a[at], b[at]))
+                return false;
+
+        return true;
+    }
+
     /*  Where a value is at one sample of Go.dot's own clock. A sample below
         nought is "now": a show with no clock to place it on (§35.4). */
     struct Point
@@ -151,10 +189,11 @@ namespace wfg::video
             projector. */
         virtual void clear() = 0;
 
-        /*  THE PICTURES TO HAVE READY, as whole paths: the standby's, read
-            before GO so GO only shows them (VX). Replaces the last list. A sink
-            that reads no picture has nothing to do. */
-        virtual void prepare (const std::vector<std::string>&) {}
+        /*  THE FILES TO HAVE READY BEFORE GO (VX; namespace draft §48): what
+            the next GO starts, stills and movies, in the order they matter -
+            the focused list's first. Replaces the last list; sent only when it
+            changed. A sink that reads no picture has nothing to do. */
+        virtual void prepare (const std::vector<Preload>&) {}
 
         /*  EVERY CANVAS'S LEVEL (namespace draft §38, WT): how much of each
             composited canvas reaches its outputs, 1 all and 0 black - its

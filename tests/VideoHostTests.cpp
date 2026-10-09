@@ -876,7 +876,7 @@ TEST_CASE ("video host: a picture read off the disk by a renderer with no window
 
         /*  READ AHEAD, then shown: the middle of the canvas is the picture's
             middle - and a quarter canvas to the left, its right half. */
-        host.sink().prepare ({ png.getFullPathName().toStdString() });
+        host.sink().prepare ({ { png.getFullPathName().toStdString() } });
 
         video::LayerSpec layer;
         layer.id = "RUN00001";

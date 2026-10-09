@@ -551,7 +551,14 @@ namespace wfg::cue
         /*  THE PICTURE SIDE (Phase 8a, namespace draft 35): null is legal and
             means a show that draws nothing - a replay, a rig - as a null
             Player is one that plays nothing. */
-        void setVideo (video::Sink* sink) noexcept { videoSink = sink; }
+        void setVideo (video::Sink* sink) noexcept
+        {
+            videoSink = sink;
+
+            //  A new picture side has been told nothing to read ahead yet.
+            preloadsSent.clear();
+            revisionPrepared = 0;
+        }
 
         /*  THE CLOCK A VIDEO POINT IS PLACED ON, now: the audio's samples when
             there is a player, the tick's otherwise, -1 with no tick schedule -
@@ -1584,12 +1591,18 @@ namespace wfg::cue
             Doh!'s for a picture seen (VK). */
         void fadeOutVideo (const std::string& runId, std::int64_t tick, int ticks);
 
-        /*  The standby's pictures, handed to the picture side to read ahead of
-            GO (§36, VX), when they changed. */
-        void prepareStandbyPictures();
-        std::vector<std::string> picturesPrepared;
-        std::vector<std::string> standbysPrepared;
+        /*  WHAT THE NEXT GO STARTS, READ AHEAD OF IT (VX; namespace draft §48):
+            its stills and movies handed to the picture side, and every cue got
+            ready - its sounds too - written as `ListState::ahead`. Made again
+            only when the show changed (a standby, the focus, an edit) or the
+            lengths a backwards movie starts from did; and while a file is
+            missing, looked for again once a second, so one put back is found. */
+        void prepareStandbyVideo();
+        std::vector<video::Preload> preloadsSent;
         std::uint64_t revisionPrepared = 0;
+        const std::map<std::string, double>* durationsPrepared = nullptr;
+        bool aheadMissing = false;
+        std::int64_t aheadLookedTick = -1;
 
         /*  Where a video point lands: Go.dot's sample now, plus a launch
             horizon - the audio clock when there is one, the tick's otherwise

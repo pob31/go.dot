@@ -16574,47 +16574,106 @@ namespace wfg::cue
             }
     }
 
-    void Runner::prepareStandbyPictures()
+    void Runner::prepareStandbyVideo()
     {
-        /*  THE STANDBY'S PICTURE, READ BEFORE GO (VX): every list's standby
-            that is a picture cue, as whole paths - a short list, said again
-            only when it changed. */
-        std::vector<std::string> standbys;
+        /*  ONLY WHEN SOMETHING MOVED: the show - a standby, the focus and every
+            edit are changes of it - or the lengths a backwards movie starts
+            from. Asked of two numbers, since this is the tick thread and every
+            tick; finding the cues walks the show. A file missing is looked for
+            again once a second, which is when the rest is made again too. */
+        const auto* known = handlerDurations();
+        const auto lookAgain = aheadMissing && currentTick - aheadLookedTick >= TickClock::rateHz;
 
-        for (const auto& list : document.root().getChildWithName ("Lists"))
-            if (const auto listId = list[idProperty].toString().toStdString(); ! listId.empty())
-                standbys.push_back (document.getAttribute ("/godot/list/" + listId + "/standby").value_or (std::string {}));
-
-        /*  ONLY WHEN SOMETHING MOVED - a standby, or the show - since finding a
-            cue walks the show, and this is the tick thread. */
-        if (standbys == standbysPrepared && document.revision() == revisionPrepared)
+        if (revisionPrepared == document.revision() && durationsPrepared == known && ! lookAgain)
             return;
 
-        standbysPrepared = standbys;
         revisionPrepared = document.revision();
+        durationsPrepared = known;
+        aheadLookedTick = currentTick;
+        aheadMissing = false;
 
-        std::vector<std::string> wanted;
+        std::vector<video::Preload> wanted;
+        std::vector<ListState::Ahead> ahead;
 
-        for (const auto& standby : standbys)
+        /*  A STILL OR A MOVIE WITH A FILE, read ahead (AAL): its whole path,
+            and for a movie the second GO will start it at and which way it
+            plays - `movieStartOf`, GO's own answer. A file the bundle does not
+            have is not sent and is said missing (AAU) - the check `armMedia`
+            makes for a sound, and like it only for a show with a media folder.
+            The same cue twice - two lists on one scene - once. */
+        const auto readAhead = [&] (const juce::ValueTree& leaf)
         {
-            if (standby.empty())
+            if (! leaf.hasType ("Video"))
+                return;
+
+            const auto source = textOf (leaf, "source");
+            const auto named = textOf (leaf, "file");
+
+            if ((source != "picture" && source != "movie") || named.empty())
+                return;
+
+            const auto cueId = leaf[idProperty].toString().toStdString();
+
+            for (const auto& already : ahead)
+                if (already.cue == cueId)
+                    return;
+
+            video::Preload item;
+            item.path = mediaPathOf (named);
+            item.movie = source == "movie";
+
+            if (item.movie)
+            {
+                const auto start = movieStartOf (leaf);
+                item.seconds = start.seconds;
+                item.direction = start.rate < 0.0 ? -1 : 1;
+            }
+
+            const auto missing = ! mediaFolder.empty() && ! juce::File (juce::String (item.path)).existsAsFile();
+            aheadMissing = aheadMissing || missing;
+
+            ahead.push_back ({ cueId, item.movie ? "movie" : "picture", item.path, missing });
+
+            if (! missing && wanted.size() < video::preloadsAtMost)
+                wanted.push_back (std::move (item));
+        };
+
+        /*  THE FOCUSED LIST FIRST, which is the one GO acts on: what its
+            standby starts - its sounds as `armablesFor` arms them, its pictures
+            and movies from the same walk. Then every other list's (AAP), after
+            it, so the cap drops theirs first. */
+        const auto focused = focus.list (document);
+
+        if (focused.isValid())
+            if (const auto standby = document.findById (focused[juce::Identifier ("standby")].toString().toStdString());
+                standby.isValid())
+            {
+                for (auto& sound : armablesFor (standby))
+                    ahead.push_back ({ std::move (sound), "sound" });
+
+                for (const auto& leaf : launchedFirst (standby))
+                    readAhead (leaf);
+            }
+
+        for (const auto& list : document.root().getChildWithName ("Lists"))
+        {
+            if (list == focused)
                 continue;
 
-            const auto cue = document.findById (standby);
-
-            if (! cue.isValid() || ! cue.hasType ("Video") || textOf (cue, "source") != "picture")
-                continue;
-
-            if (const auto path = mediaPathOf (textOf (cue, "file")); ! path.empty())
-                wanted.push_back (path);
+            if (const auto standby = document.findById (list[juce::Identifier ("standby")].toString().toStdString());
+                standby.isValid())
+                for (const auto& leaf : launchedFirst (standby))
+                    readAhead (leaf);
         }
 
-        if (wanted != picturesPrepared)
+        lists.setAhead (std::move (ahead));
+
+        if (! video::samePreloads (wanted, preloadsSent))
         {
-            picturesPrepared = wanted;
+            preloadsSent = wanted;
 
             if (videoSink != nullptr)
-                videoSink->prepare (wanted);
+                videoSink->prepare (preloadsSent);
         }
     }
 
@@ -16668,7 +16727,6 @@ namespace wfg::cue
     {
         juce::ignoreUnused (tick);
 
-        prepareStandbyPictures();
         followCanvasLevels();
 
         //  The show moved since the last tick: a playing picture may have been edited (§47, AAE).
@@ -16806,6 +16864,14 @@ namespace wfg::cue
                            const auto* run = runs.find (job.self);
                            return job.removed && (run == nullptr || run->isFinished());
                        });
+
+        /*  AND WHAT THE NEXT GO STARTS, read ahead - LAST, after every layer
+            above is written (namespace draft §48). A GO moves the standby, so
+            this tick's list no longer names the picture GO has just shown;
+            written before its layer, the renderer could read the list in
+            between, hold the picture nowhere, and let go of the file it had
+            read ahead for exactly this frame. */
+        prepareStandbyVideo();
     }
 
     double Runner::videoValueOf (const VideoJob& job, video::Property property, std::int64_t sample) const noexcept

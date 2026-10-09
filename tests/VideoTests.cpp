@@ -393,7 +393,7 @@ namespace
 {
     struct FakeSink final : video::Sink
     {
-        void show (const video::LayerSpec& spec) override  { shown.push_back (spec); }
+        void show (const video::LayerSpec& spec) override  { shown.push_back (spec); events.push_back ("show " + spec.file); }
         void restate (const video::LayerSpec& spec) override  { restated.push_back (spec); }
 
         /*  THE OPACITY'S POINTS by layer, and every other value's by layer and
@@ -406,7 +406,20 @@ namespace
                 geometry[id][property].push_back (point);
         }
 
-        void prepare (const std::vector<std::string>& paths) override  { prepared = paths; }
+        /*  WHAT IS READ AHEAD (namespace draft §48): the last list, every list
+            sent, and - in `events`, with the layers shown - the order the two
+            arrive in, which is what keeps a picture GO has just shown held. */
+        void prepare (const std::vector<video::Preload>& items) override
+        {
+            preloads = items;
+            preloadsSent.push_back (items);
+            prepared.clear();
+
+            for (const auto& item : items)
+                prepared.push_back (item.path);
+
+            events.push_back ("prepare");
+        }
 
         void remove (const std::string& id, std::int64_t sample) override
         {
@@ -426,6 +439,9 @@ namespace
         std::map<std::string, std::vector<video::Point>> points;
         std::map<std::string, std::map<video::Property, std::vector<video::Point>>> geometry;
         std::vector<std::string> prepared;
+        std::vector<video::Preload> preloads;
+        std::vector<std::vector<video::Preload>> preloadsSent;
+        std::vector<std::string> events;
         std::vector<std::pair<std::string, std::int64_t>> removed;
         int clears = 0;
     };
@@ -811,6 +827,235 @@ TEST_CASE ("video: a picture cue at standby is named to the renderer to read, an
     const auto& points = rig.sink.points[spec.id];
     REQUIRE_FALSE (points.empty());
     CHECK (points.back().value == doctest::Approx (0.5));
+}
+
+//==============================================================================
+/*  READ AHEAD WHERE SOUNDS ARE ARMED (namespace draft §48, AAL): what the next
+    GO starts, walked as `armablesFor` walks it - the cue, a sequence's first
+    member, a timeline's members with no pre-wait - its stills and movies handed
+    to the picture side before GO, a movie with the second GO will start it at.
+*/
+namespace
+{
+    std::string videoCueIn (VideoRig& rig, const std::string& parent, int index, const std::string& source,
+                            const std::string& file, const std::string& name = "Picture")
+    {
+        const auto made = rig.document.createCue (parent, index, "video", name);
+        INFO (made.reason, " making ", file, " at ", index);
+        REQUIRE (made.ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + made.id + "/canvas", "VD000011").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + made.id + "/source", source).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + made.id + "/file", file).ok);
+        return made.id;
+    }
+
+    std::string groupIn (VideoRig& rig, int index, const std::string& mode)
+    {
+        const auto made = rig.document.createCue ("VD000001", index, "group", "Scene");
+        INFO (made.reason);
+        REQUIRE (made.ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + made.id + "/mode", mode).ok);
+        return made.id;
+    }
+
+    void standbyOn (VideoRig& rig, const std::string& cueId, const std::string& listId = "VD000001")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/list/" + listId + "/standby", cueId).ok);
+        rig.ticks (2);
+    }
+
+    std::vector<std::string> namesOf (const std::vector<video::Preload>& items)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& item : items)
+            out.push_back (juce::File (juce::String (item.path)).getFileName().toStdString());
+
+        return out;
+    }
+}
+
+TEST_CASE ("video read-ahead: a scene's first pictures and movies are read before GO, as its first sounds are armed")
+{
+    VideoRig rig;
+
+    /*  A SEQUENCE: its first member, and only it. */
+    const auto sequence = groupIn (rig, 0, "sequence");
+    videoCueIn (rig, sequence, 0, "picture", "first.png");
+    videoCueIn (rig, sequence, 1, "picture", "second.png");
+
+    standbyOn (rig, sequence);
+    CHECK (namesOf (rig.sink.preloads) == std::vector<std::string> { "first.png" });
+
+    /*  A TIMELINE: every member with no pre-wait - a still and a movie - and
+        neither the one two seconds in nor a disabled one. */
+    const auto timeline = groupIn (rig, 1, "timeline");
+    videoCueIn (rig, timeline, 0, "picture", "wash.png");
+    const auto later = videoCueIn (rig, timeline, 1, "picture", "later.png");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + later + "/preWait", "2").ok);
+    const auto off = videoCueIn (rig, timeline, 2, "picture", "off.png");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + off + "/enabled", "false").ok);
+    videoCueIn (rig, timeline, 3, "movie", "clip.mov");
+    videoCueIn (rig, timeline, 4, "fill", {});
+
+    standbyOn (rig, timeline);
+    REQUIRE (namesOf (rig.sink.preloads) == std::vector<std::string> { "wash.png", "clip.mov" });
+    CHECK_FALSE (rig.sink.preloads[0].movie);
+    CHECK (rig.sink.preloads[1].movie);
+    CHECK (rig.sink.preloads[1].seconds == doctest::Approx (0.0));
+    CHECK (rig.sink.preloads[1].direction == 1);
+
+    /*  A SAMPLER GROUP: nothing - a hand starts its members, not a GO. The
+        show takes no picture into one (§3.27, video TBC), so this one is a
+        scene with a picture in it turned into a sampler afterwards. */
+    const auto sampler = groupIn (rig, 2, "timeline");
+    videoCueIn (rig, sampler, 0, "picture", "pad.png");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + sampler + "/mode", "sampler").ok);
+
+    standbyOn (rig, sampler);
+    CHECK (rig.sink.preloads.empty());
+
+    /*  AND THE READOUT says what is got ready, cue by cue. */
+    standbyOn (rig, timeline);
+    const auto& ahead = rig.runner.listState().ahead();
+    REQUIRE (ahead.size() == 2);
+    CHECK (ahead[0].kind == "picture");
+    CHECK (ahead[1].kind == "movie");
+    CHECK_FALSE (ahead[0].missing);
+}
+
+TEST_CASE ("video read-ahead: a movie is read from the second GO starts it at, and which way it plays")
+{
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 6.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    const auto movie = videoCueIn (rig, "VD000001", 0, "movie", "clip.mov", "Clip");
+
+    //  Its start offset.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/startOffset", "3").ok);
+    standbyOn (rig, movie);
+    REQUIRE (rig.sink.preloads.size() == 1);
+    CHECK (rig.sink.preloads[0].seconds == doctest::Approx (3.0));
+    CHECK (rig.sink.preloads[0].direction == 1);
+
+    //  Backwards with no range: from the file's end (§41).
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/rate", "-1").ok);
+    rig.ticks (2);
+    REQUIRE (rig.sink.preloads.size() == 1);
+    CHECK (rig.sink.preloads[0].seconds == doctest::Approx (6.0));
+    CHECK (rig.sink.preloads[0].direction == -1);
+
+    //  With ranges: the first range's in point, or its out point backwards.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/startOffset", "0").ok);
+    REQUIRE (rig.document.createRange (movie, 1.5, 4.0).ok);
+    REQUIRE (rig.document.createRange (movie, 5.0, 5.5).ok);
+    rig.ticks (2);
+    CHECK (rig.sink.preloads[0].seconds == doctest::Approx (4.0));
+    CHECK (rig.sink.preloads[0].direction == -1);
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/rate", "1").ok);
+    rig.ticks (2);
+    CHECK (rig.sink.preloads[0].seconds == doctest::Approx (1.5));
+    CHECK (rig.sink.preloads[0].direction == 1);
+
+    /*  AND GO PUTS THE PLAYHEAD WHERE IT WAS READ: one answer, `movieStartOf`. */
+    rig.submitAndTick ("go");
+    rig.ticks (3);
+
+    const auto* run = rig.runOf (movie);
+    REQUIRE (run != nullptr);
+    const auto& times = rig.sink.geometry[run->id][video::Property::time];
+    REQUIRE_FALSE (times.empty());
+    CHECK (times.front().value == doctest::Approx (1.5));
+}
+
+TEST_CASE ("video read-ahead: the focused list's come first, another list's after, and no more than the region holds")
+{
+    VideoRig rig;
+
+    /*  ANOTHER LIST'S STANDBY PICTURE is still read (AAP), after the focused
+        list's. */
+    const auto other = rig.document.createList ("Second");
+    REQUIRE (other.ok);
+    const auto elsewhere = videoCueIn (rig, other.id, 0, "picture", "elsewhere.png");
+    const auto here = videoCueIn (rig, "VD000001", 0, "picture", "here.png");
+
+    REQUIRE (rig.document.setAttribute ("/godot/list/" + other.id + "/standby", elsewhere).ok);
+    standbyOn (rig, here);
+    CHECK (namesOf (rig.sink.preloads) == std::vector<std::string> { "here.png", "elsewhere.png" });
+
+    /*  FORTY STILLS STARTING AT ONCE: the first thirty-two, in their order. */
+    const auto timeline = groupIn (rig, 1, "timeline");
+
+    for (int n = 0; n < 40; ++n)
+        videoCueIn (rig, timeline, n, "picture", "still" + std::to_string (n) + ".png");
+
+    standbyOn (rig, timeline);
+    const auto names = namesOf (rig.sink.preloads);
+    REQUIRE (names.size() == video::preloadsAtMost);
+    CHECK (names.front() == "still0.png");
+    CHECK (names.back() == "still31.png");
+}
+
+TEST_CASE ("video read-ahead: a file the show does not have is not sent and is said missing, and found when it comes back")
+{
+    VideoRig rig;
+
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("wfg-read-ahead-" + juce::String (juce::Time::currentTimeMillis()));
+    REQUIRE (folder.createDirectory());
+    REQUIRE (folder.getChildFile ("there.png").replaceWithText ("not really a picture"));
+    rig.runner.setMediaFolder (folder.getFullPathName().toStdString());
+
+    const auto timeline = groupIn (rig, 0, "timeline");
+    videoCueIn (rig, timeline, 0, "picture", "there.png");
+    const auto gone = videoCueIn (rig, timeline, 1, "picture", "gone.png");
+
+    standbyOn (rig, timeline);
+    CHECK (namesOf (rig.sink.preloads) == std::vector<std::string> { "there.png" });
+
+    const auto& ahead = rig.runner.listState().ahead();
+    REQUIRE (ahead.size() == 2);
+    CHECK_FALSE (ahead[0].missing);
+    CHECK (ahead[1].cue == gone);
+    CHECK (ahead[1].missing);
+
+    /*  PUT BACK, it is found within a second, with no edit to the show. */
+    REQUIRE (folder.getChildFile ("gone.png").replaceWithText ("back again"));
+    rig.ticks (60);
+    CHECK (namesOf (rig.sink.preloads) == std::vector<std::string> { "there.png", "gone.png" });
+    CHECK_FALSE (rig.runner.listState().ahead()[1].missing);
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("video read-ahead: in the tick after GO, the layer is shown before the list that no longer names it")
+{
+    VideoRig rig;
+
+    const auto first = videoCueIn (rig, "VD000001", 0, "picture", "first.png");
+    videoCueIn (rig, "VD000001", 1, "picture", "second.png");
+
+    standbyOn (rig, first);
+    REQUIRE (namesOf (rig.sink.preloads) == std::vector<std::string> { "first.png" });
+
+    rig.sink.events.clear();
+    rig.submitAndTick ("go");
+    rig.ticks (2);
+
+    /*  THE PICTURE GO SHOWS IS ON A LAYER BEFORE THE LIST DROPS IT: written
+        the other way round, the renderer could read the list in between, hold
+        the file nowhere, and let go of what it read ahead for this frame. */
+    const auto shown = std::find_if (rig.sink.events.begin(), rig.sink.events.end(),
+                                     [] (const std::string& event) { return juce::String (event).endsWith ("first.png"); });
+    const auto dropped = std::find (rig.sink.events.begin(), rig.sink.events.end(), std::string ("prepare"));
+
+    REQUIRE (shown != rig.sink.events.end());
+    REQUIRE (dropped != rig.sink.events.end());
+    CHECK (shown < dropped);
+    CHECK (namesOf (rig.sink.preloads) == std::vector<std::string> { "second.png" });
 }
 
 TEST_CASE ("video: a fade cue moves a picture's opacity, scale, offset and turn, and stops it when told")

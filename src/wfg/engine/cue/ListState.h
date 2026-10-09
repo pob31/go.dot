@@ -282,6 +282,26 @@ namespace wfg::cue
         void setDohReport (const DohReport& report) { dohReportNow = report; }
         const DohReport& dohReport() const noexcept { return dohReportNow; }
 
+        /*  WHAT IS GOT READY AHEAD OF GO (namespace draft §48): one entry per
+            cue the next GO starts that has a file - the focused list's
+            standby's sounds, pictures and movies, then the other lists'
+            pictures and movies (AAP) - with its kind, its file as a whole path
+            for a picture or a movie, and whether that file was found (AAU).
+            The rows' words are made from it with what the runs and the renderer
+            say. A READOUT, written by the hook that hands the pictures to the
+            renderer; no handler reads it, so a replay, which never writes it,
+            decides every GO the same. */
+        struct Ahead
+        {
+            std::string cue;
+            std::string kind;           ///< "sound", "picture" or "movie"
+            std::string path {};        ///< empty for a sound: its run says the rest
+            bool missing = false;
+        };
+
+        void setAhead (std::vector<Ahead> now) { aheadNow = std::move (now); }
+        const std::vector<Ahead>& ahead() const noexcept { return aheadNow; }
+
         void setResume (const std::string& list, const std::string& text)
         {
             if (text.empty())
@@ -359,5 +379,6 @@ namespace wfg::cue
         std::map<std::string, std::string> resumes;
         DohForget dohForgetNow;
         DohReport dohReportNow;
+        std::vector<Ahead> aheadNow;
     };
 }
