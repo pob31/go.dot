@@ -6925,22 +6925,40 @@ namespace wfg::cue
 
     const std::vector<std::string>& Runner::dcaChainOf (const std::string& cueId)
     {
+        static const std::vector<std::string> none;
+        const auto* mark = dcaMarkOf (cueId);
+        return mark != nullptr ? mark->chain : none;
+    }
+
+    const Runner::DcaMarkSpec* Runner::dcaMarkOf (const std::string& cueId)
+    {
         /*  READ ONCE PER SHOW REVISION, because it is a walk of the document
-            and this is asked for every run on every tick. A mark or a nesting
-            is an edit to the show, and an edit moves the revision; nothing
-            else can change the answer. */
+            and this is asked for every run on every tick. A mark, a nesting or
+            what a mark carries is an edit to the show, and an edit moves the
+            revision; nothing else can change the answer. */
         if (! dcaChainsRead || dcaChainsRevision != document.showRevision())
         {
-            dcaChains.clear();
+            dcaMarks.clear();
             dcaChainsRead = true;
             dcaChainsRevision = document.showRevision();
 
             const auto root = document.root();
             const juce::Identifier dcaProperty { "dca" };
+            const juce::Identifier curveProperty { "dcaCurve" };
+            const juce::Identifier offsetProperty { "dcaOffset" };
             const auto chainFrom = [this] (std::string first) { return dcaNestingFrom (std::move (first)); };
 
+            /*  WHAT THE MARK CARRIES (namespace draft §50, ABT), nought when it
+                is absent - the canonical writer leaves a default out, and both
+                rows' default is nought: a new cue starts straight (ABR). */
+            const auto numberAt = [] (const juce::ValueTree& node, const juce::Identifier& name)
+            {
+                return osc::parseDouble (node[name].toString().toStdString()).value_or (0.0);
+            };
+
             std::function<void (const juce::ValueTree&)> visit;
-            visit = [this, &visit, &chainFrom, &dcaProperty] (const juce::ValueTree& node)
+            visit = [this, &visit, &chainFrom, &numberAt, &dcaProperty, &curveProperty,
+                     &offsetProperty] (const juce::ValueTree& node)
             {
                 const auto element = node.getType().toString();
 
@@ -6950,7 +6968,9 @@ namespace wfg::cue
                 if (element == "Media" || element == "Mic" || element == "Video" || element == "Group")
                     if (const auto mark = node[dcaProperty].toString().toStdString(); ! mark.empty())
                         if (auto chain = chainFrom (mark); ! chain.empty())
-                            dcaChains[node[idProperty].toString().toStdString()] = std::move (chain);
+                            dcaMarks[node[idProperty].toString().toStdString()]
+                                = DcaMarkSpec { std::move (chain), numberAt (node, curveProperty),
+                                                numberAt (node, offsetProperty) };
 
                 for (const auto& child : node)
                     visit (child);
@@ -6960,9 +6980,27 @@ namespace wfg::cue
                 visit (showLists);
         }
 
-        static const std::vector<std::string> none;
-        const auto found = dcaChains.find (cueId);
-        return found != dcaChains.end() ? found->second : none;
+        const auto found = dcaMarks.find (cueId);
+        return found != dcaMarks.end() ? &found->second : nullptr;
+    }
+
+    double Runner::dcaTermsOf (const std::string& cueId)
+    {
+        const auto* mark = dcaMarkOf (cueId);
+
+        if (mark == nullptr)
+            return 0.0;
+
+        auto total = 0.0;
+
+        if (dcas != nullptr)
+            for (const auto& dcaId : mark->chain)
+                total += dcas->trimOf (dcaId);
+
+        /*  AND ITS SOUND OFFSET (namespace draft §50, ABV), once for the mark
+            beside its DCAs' trims - and never where those trims are silence: a
+            DCA at the bottom of its fader is off, whatever the mark says. */
+        return total <= silenceDb ? total : total + mark->offsetDb;
     }
 
     std::vector<std::string> Runner::dcaNestingFrom (std::string first) const
@@ -19700,19 +19738,9 @@ namespace wfg::cue
             order-independent, which is the property that matters - cues arrive
             in whatever order the operator pressed GO - and a DCA trims a group
             the way a group trims its members, through the group run's own
-            terms reaching every member underneath it. */
-        const auto dcaTermsOf = [this] (const std::string& cueId)
-        {
-            auto total = 0.0;
-
-            if (dcas != nullptr)
-                for (const auto& dcaId : dcaChainOf (cueId))
-                    total += dcas->trimOf (dcaId);
-
-            return total;
-        };
-
-        const auto effectiveOf = [this, &dcaTermsOf] (const Run& run)
+            terms reaching every member underneath it. A mark's sound offset
+            is one of its terms (namespace draft §50, `dcaTermsOf`). */
+        const auto effectiveOf = [this] (const Run& run)
         {
             auto total = run.ownLevel + run.trim + dcaTermsOf (run.cue);
             auto parent = run.parent;

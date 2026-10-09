@@ -1787,6 +1787,49 @@ TEST_CASE ("video: a movie fires its locked sound with it, and stops it with it"
     CHECK (alone->parent.empty());
 }
 
+TEST_CASE ("video: a movie's DCA mark carries its sound offset to the sound locked to it, and not to that sound fired alone (§50, ABV)")
+{
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 20.0 }, { "clip (sound).wav", 20.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    const auto screens = rig.document.createDca ("Screens").id;
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov") }).applied >= 1);
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (1),
+                                                osc::Value::string ("media"), osc::Value::string ("Clip sound"),
+                                                osc::Value::string ("VD000061"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip (sound).wav") }).applied >= 1);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000061/lockedTo", "VD000060").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/dca", screens).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/dcaOffset", "-5").ok);
+
+    //  UNDER ITS MOVIE: the movie's mark reaches it, offset and all - the sound under its picture.
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+    rig.ticks (2);
+
+    const auto* sound = rig.runOf ("VD000061");
+    REQUIRE (sound != nullptr);
+    CHECK (std::abs (sound->level - -5.0) < 1.0e-9);
+
+    rig.submitAndTick ("run.stop", { osc::Value::string (rig.runOf ("VD000060")->id) });
+    rig.ticks (4);
+
+    //  FIRED ALONE it has no movie above it, and plays at its own level.
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000061") });
+    rig.ticks (1);
+    const auto* alone = rig.runOf ("VD000061");
+    REQUIRE (alone != nullptr);
+    CHECK (alone->parent.empty());
+    CHECK (std::abs (alone->level) < 1.0e-9);
+}
+
 /*  ARMED WITH ITS MOVIE: the standby on the movie makes its sound ready, as
     it would a sound of its own, and the GO takes that run - the one the arm
     made - as the movie's child, so it launches where the picture comes up. */

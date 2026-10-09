@@ -225,7 +225,7 @@
       </optional>
       <optional>
         <attribute name="dca">
-          <a:documentation>The DCA this group is assigned to, by identifier, or empty. Adds the DCA&apos;s trim to the group run&apos;s own, which reaches every member through the sum a group already is (PRD 3.6, 3.28).</a:documentation>
+          <a:documentation>The DCA this group is assigned to, by identifier, or empty. Adds the DCA&apos;s trim to the group run&apos;s own, which reaches every member through the sum a group already is (PRD 3.6, 3.28), with the mark&apos;s dcaOffset on its sounds and its dcaCurve on its pictures (namespace draft 50).</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -462,7 +462,7 @@
       </optional>
       <optional>
         <attribute name="dca">
-          <a:documentation>The DCA this cue is assigned to, by identifier, or empty. A mark on the member and never a list on the DCA (PRD 3.28), so assigning eight cues is a multi-select edit and nothing flows downward (4.12). Adds that DCA&apos;s trim, and the trim of every DCA it sits inside, to the level of every run of this cue - level only, one to one in dB; a mapping per assignment comes later.</a:documentation>
+          <a:documentation>The DCA this cue is assigned to, by identifier, or empty. A mark on the member and never a list on the DCA (PRD 3.28), so assigning eight cues is a multi-select edit and nothing flows downward (4.12). Adds that DCA&apos;s trim, and the trim of every DCA it sits inside, to the level of every run of this cue - level only, one to one in dB, and the mark&apos;s own dcaOffset beside them (namespace draft 50), which never lifts a DCA at the bottom.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -929,7 +929,7 @@
       </optional>
       <optional>
         <attribute name="dca">
-          <a:documentation>The DCA this cue is assigned to, by identifier, or empty. A mark on the member and never a list on the DCA (PRD 3.28), so assigning eight cues is a multi-select edit and nothing flows downward (4.12). Adds that DCA&apos;s trim, and the trim of every DCA it sits inside, to the level of every run of this cue - level only, one to one in dB; a mapping per assignment comes later.</a:documentation>
+          <a:documentation>The DCA this cue is assigned to, by identifier, or empty. A mark on the member and never a list on the DCA (PRD 3.28), so assigning eight cues is a multi-select edit and nothing flows downward (4.12). Adds that DCA&apos;s trim, and the trim of every DCA it sits inside, to the level of every run of this cue - level only, one to one in dB, and the mark&apos;s own dcaOffset beside them (namespace draft 50), which never lifts a DCA at the bottom.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

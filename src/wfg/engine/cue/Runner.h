@@ -2052,9 +2052,26 @@ namespace wfg::cue
 
         /*  THE DCAS ABOVE A CUE, nearest first: its own mark, the DCA that one
             sits inside, and so on up - read off the document once per show
-            revision into `dcaChains` and summed per run per tick. Empty for a
+            revision into `dcaMarks` and summed per run per tick. Empty for a
             cue marked with nothing. */
         const std::vector<std::string>& dcaChainOf (const std::string& cueId);
+
+        /*  A CUE'S DCA MARK AS THE RUNNER READS IT (namespace draft §50): the
+            DCAs above it, nearest first, and what the mark carries - the
+            picture's curve in % and the sound's offset in dB (ABT). Null for a
+            cue marked with nothing, or with a DCA the show does not declare. */
+        struct DcaMarkSpec
+        {
+            std::vector<std::string> chain;
+            double curve = 0.0;
+            double offsetDb = 0.0;
+        };
+
+        const DcaMarkSpec* dcaMarkOf (const std::string& cueId);
+
+        /*  What a mark adds to the level of every run it reaches: its DCAs'
+            trims, and its offset - which never lifts silence (ABV). */
+        double dcaTermsOf (const std::string& cueId);
 
         void advanceFades (Engine& engine, std::int64_t tick);
 
@@ -2631,10 +2648,11 @@ namespace wfg::cue
 
         std::map<std::string, StripEdgeState> stripEdges;
 
-        /*  The DCA chain of every cue that has one, keyed by cue, and the show
-            revision it was read at. Rebuilt when the show changes - a mark or a
-            nesting edited - and never on a tick that changed nothing. */
-        std::map<std::string, std::vector<std::string>> dcaChains;
+        /*  The DCA mark of every cue that has one - its chain and what it
+            carries - keyed by cue, and the show revision it was read at.
+            Rebuilt when the show changes - a mark, a nesting or a mapping
+            edited - and never on a tick that changed nothing. */
+        std::map<std::string, DcaMarkSpec> dcaMarks;
         std::uint64_t dcaChainsRevision = 0;
         bool dcaChainsRead = false;
 

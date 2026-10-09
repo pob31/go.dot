@@ -283,6 +283,75 @@ TEST_CASE ("dca: a group marked with a DCA trims every member through the group"
     CHECK (near (rig.levelOf (wind), -14.0));
 }
 
+TEST_CASE ("dca: a mark's sound offset adds beside its trims, once for the mark, and never lifts a DCA at the bottom (§50, ABV)")
+{
+    Rig rig;
+
+    const auto everything = rig.dca ("Everything");
+    const auto band = rig.dca ("Band");
+    rig.set ("/godot/dca/" + band + "/dca", everything);
+
+    const auto guitar = rig.media (rig.listId, 0, "guitar", -3);
+    rig.set ("/godot/cue/" + guitar + "/dca", band);
+    rig.set ("/godot/cue/" + guitar + "/dcaOffset", "-4");
+
+    //  An offset on a cue with no DCA is nothing: it is the mark's.
+    const auto loose = rig.media (rig.listId, 1, "loose", -3);
+    rig.set ("/godot/cue/" + loose + "/dcaOffset", "-4");
+
+    rig.apply ("cue.fire", { osc::Value::string (guitar) });
+    rig.apply ("cue.fire", { osc::Value::string (loose) });
+    rig.tickOnce();
+
+    CHECK (near (rig.levelOf (guitar), -7.0));
+    CHECK (near (rig.levelOf (loose), -3.0));
+
+    //  ONCE FOR THE MARK, not once for each DCA it reaches: -3, -6, -2 and -4.
+    rig.apply ("node.set", { osc::Value::string ("/godot/dca/" + band + "/trim"), osc::Value::float64 (-6.0) });
+    rig.apply ("node.set", { osc::Value::string ("/godot/dca/" + everything + "/trim"), osc::Value::float64 (-2.0) });
+    rig.tickOnce();
+    CHECK (near (rig.levelOf (guitar), -15.0));
+
+    //  A DCA AT THE BOTTOM IS OFF, whatever the mark says: a raised offset does not lift it.
+    rig.set ("/godot/cue/" + guitar + "/dcaOffset", "12");
+    rig.apply ("node.set", { osc::Value::string ("/godot/dca/" + band + "/trim"), osc::Value::float64 (-120.0) });
+    rig.tickOnce();
+    CHECK (near (rig.levelOf (guitar), -125.0));
+
+    //  AN EDIT WHILE IT PLAYS is heard the next tick: Band at nought, Everything at -2, +12.
+    rig.apply ("node.set", { osc::Value::string ("/godot/dca/" + band + "/trim"), osc::Value::string ("0") });
+    rig.tickOnce();
+    CHECK (near (rig.levelOf (guitar), 7.0));
+}
+
+TEST_CASE ("dca: a group's sound offset reaches its members through the group, and a member's own adds (§50, ABV)")
+{
+    Rig rig;
+
+    const auto ambiences = rig.dca ("Ambiences");
+    const auto scene = rig.document.createCue (rig.listId, 0, "group", "The scene").id;
+    rig.set ("/godot/cue/" + scene + "/mode", "timeline");
+    rig.set ("/godot/cue/" + scene + "/dca", ambiences);
+    rig.set ("/godot/cue/" + scene + "/dcaOffset", "-6");
+
+    const auto rain = rig.media (scene, 0, "rain", 0);
+    const auto wind = rig.media (scene, 1, "wind", -4);
+    rig.set ("/godot/cue/" + wind + "/dca", ambiences);
+    rig.set ("/godot/cue/" + wind + "/dcaOffset", "3");
+
+    rig.apply ("cue.fire", { osc::Value::string (scene) });
+
+    REQUIRE (rig.tickUntil ([&rig, &rain, &wind]
+                            {
+                                return rig.runOf (rain) != nullptr && rig.runOf (wind) != nullptr;
+                            }));
+    rig.tickOnce();
+
+    //  Rain: the group's -6. Wind: its -4, its own mark's +3, the group's -6.
+    CHECK (near (rig.levelOf (rain), -6.0));
+    CHECK (near (rig.levelOf (wind), -7.0));
+}
+
 TEST_CASE ("dca: one DCA trims two cues in two different groups")
 {
     /*  The devplan's own clause for Phase 6: a DCA assigned to two cues in
