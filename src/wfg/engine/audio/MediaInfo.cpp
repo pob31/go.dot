@@ -205,8 +205,8 @@ namespace wfg::audio
         std::set<std::string> seen;
 
         /*  THE PICTURES A SHOW SHOWS (Phase 8a, namespace draft 36): what a
-            copy carries beside its sounds. Never handed to the analyser - a
-            picture has no waveform. */
+            copy carries beside its sounds. Handed to the analyser for its size
+            alone (namespace draft §47, AAG) - a picture has no waveform. */
         const std::function<void (const juce::ValueTree&)> visit =
             [&] (const juce::ValueTree& node)
         {

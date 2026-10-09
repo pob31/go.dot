@@ -48,6 +48,7 @@
 #include <wfg/client/model/Curve.h>
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/Dual.h>
+#include <wfg/client/model/Picture.h>
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
@@ -1586,7 +1587,8 @@ TEST_CASE ("client: every kind wears an icon and an accent the theme declares")
     for (const auto kind : { model::Subject::Kind::waveform, model::Subject::Kind::sends,
                              model::Subject::Kind::timeline, model::Subject::Kind::curve,
                              model::Subject::Kind::eq, model::Subject::Kind::fx, model::Subject::Kind::take,
-                             model::Subject::Kind::fade, model::Subject::Kind::messages })
+                             model::Subject::Kind::fade, model::Subject::Kind::messages,
+                             model::Subject::Kind::picture })
     {
         const auto word = model::wordFor (kind);
         INFO ("panel " << word);
@@ -10676,8 +10678,8 @@ TEST_CASE ("client: a movie offers its strip at the top of the inspector, and th
         return out;
     };
 
-    CHECK (subjectsOf (model::inspect (*snapshot, movie.id)) == std::vector<std::string> { "waveform" });
-    CHECK (subjectsOf (model::inspect (*snapshot, still.id)).empty());
+    CHECK (subjectsOf (model::inspect (*snapshot, movie.id)) == std::vector<std::string> { "waveform", "picture" });
+    CHECK (subjectsOf (model::inspect (*snapshot, still.id)) == std::vector<std::string> { "picture" });     // no strip
 
     const auto reading = model::readFoot (*snapshot, { model::Subject::Kind::waveform, movie.id });
     CHECK (reading.movie);
@@ -10737,14 +10739,15 @@ TEST_CASE ("client: either line of a movie and its sound shows both halves, each
         CHECK (std::find (names.begin(), names.end(), "startOffset") == names.end());     // the movie's
         CHECK (std::find (names.begin(), names.end(), "rate") == names.end());
 
-        //  The strip on the movie, the EQ, FX and sends on the sound.
+        //  The strip and the picture on the movie, the EQ, FX and sends on the sound.
         std::vector<std::pair<std::string, std::string>> panels;
 
         for (const auto& panel : both.panels)
             panels.emplace_back (panel.value, panel.address);
 
         CHECK (panels == std::vector<std::pair<std::string, std::string>> {
-                             { "waveform", movie.id }, { "eq", sound.id }, { "fx", sound.id }, { "sends", sound.id } });
+                             { "waveform", movie.id }, { "picture", movie.id },
+                             { "eq", sound.id }, { "fx", sound.id }, { "sends", sound.id } });
     }
 
     //  A cue that is not half of a pair is inspected as it always was.
@@ -10756,4 +10759,162 @@ TEST_CASE ("client: either line of a movie and its sound shows both halves, each
     CHECK (model::footCueForPick (*snapshot, model::Subject::Kind::waveform, sound.id) == movie.id);
     CHECK (model::footCueForPick (*snapshot, model::Subject::Kind::waveform, rain.id) == rain.id);
     CHECK (model::footCueForPick (*snapshot, model::Subject::Kind::eq, rain.id) == rain.id);
+}
+
+//==============================================================================
+/*  THE PICTURE PANEL (namespace draft §47, AAG). */
+TEST_CASE ("client: a picture's frame is where the projector draws it, and a drag moves, scales and turns it (§47, AAG)")
+{
+    model::PictureReading reading;
+    reading.cueId = "VD000002";
+    reading.source = "picture";
+    reading.canvasWidth = 1920.0;
+    reading.canvasHeight = 1080.0;
+
+    //  A square picture fitted to a wide canvas: as tall as it, centred.
+    reading.pictureWidth = 1000.0;
+    reading.pictureHeight = 1000.0;
+    auto corners = model::frameCorners (reading);
+    CHECK (corners[0].x == doctest::Approx (-540.0));
+    CHECK (corners[0].y == doctest::Approx (-540.0));
+    CHECK (corners[2].x == doctest::Approx (540.0));
+    CHECK (corners[2].y == doctest::Approx (540.0));
+
+    //  Filled, it covers the width; stretched, the canvas.
+    reading.fit = "fill";
+    CHECK (model::frameCorners (reading)[2].x == doctest::Approx (960.0));
+    CHECK (model::frameCorners (reading)[2].y == doctest::Approx (960.0));
+    reading.fit = "stretch";
+    CHECK (model::frameCorners (reading)[2].y == doctest::Approx (540.0));
+
+    //  The same corners `Placement` gives the projector, turned and moved.
+    reading.fit = "fit";
+    reading.rotation = 30.0;
+    reading.offsetX = 10.0;
+    reading.scale = 50.0;
+    double x = 0.0, y = 0.0;
+    model::placementOf (reading).toCanvas (1.0, 1.0, x, y);
+    CHECK (model::frameCorners (reading)[2].x == doctest::Approx (x));
+    CHECK (model::frameCorners (reading)[2].y == doctest::Approx (y));
+
+    //  A fill is the canvas's shape whatever size is known.
+    reading.source = "fill";
+    reading.rotation = 0.0;
+    reading.offsetX = 0.0;
+    reading.scale = 100.0;
+    CHECK (model::frameCorners (reading)[2].x == doctest::Approx (960.0));
+    reading.source = "picture";
+
+    //  A move of a tenth of the canvas across and up: ten percent each way.
+    const auto [movedX, movedY] = model::offsetsMoved (reading, 0.0, 0.0, { 0.0, 0.0 }, { 192.0, 108.0 });
+    CHECK (movedX == doctest::Approx (10.0));
+    CHECK (movedY == doctest::Approx (10.0));
+
+    //  A corner taken twice as far from the middle: twice the size.
+    CHECK (model::scaleDragged (reading, 100.0, { 100.0, 0.0 }, { 200.0, 0.0 }) == doctest::Approx (200.0));
+
+    //  A quarter turn of the pointer from the right to straight down is ninety degrees clockwise.
+    CHECK (model::rotationDragged (reading, 0.0, { 100.0, 0.0 }, { 0.0, -100.0 }, false) == doctest::Approx (90.0));
+    CHECK (model::rotationDragged (reading, 0.0, { 100.0, 0.0 }, { 100.0, -20.0 }, true) == doctest::Approx (15.0));
+
+    //  The arrows: a tenth, or one.
+    CHECK (model::nudged (1.0, 1, false) == doctest::Approx (1.1));
+    CHECK (model::nudged (1.0, -1, true) == doctest::Approx (0.0));
+}
+
+TEST_CASE ("client: a mask's outline and a picture's curves are edited as points, written as their rows are (§47, AAG)")
+{
+    //  A triangle; a corner added on the edge nearest the press, moved, taken away.
+    const std::vector<model::MaskPoint> triangle { { 0.1, 0.1 }, { 0.9, 0.1 }, { 0.5, 0.9 } };
+    CHECK (model::maskPointNear (triangle, 0.11, 0.1, 0.02) == 0);
+    CHECK (model::maskPointNear (triangle, 0.5, 0.5, 0.02) == -1);
+
+    const auto square = model::maskWithPointAdded (triangle, 0.5, 0.05);
+    REQUIRE (square.size() == 4);
+    CHECK (square[1] == model::MaskPoint { 0.5, 0.05 });     // between the first two
+
+    CHECK (model::maskWithPointMoved (square, 1, 5.0, -3.0)[1] == model::MaskPoint { 2.0, -1.0 });
+    CHECK (model::maskWithPointRemoved (square, 1).size() == 3);
+    CHECK (model::maskWithPointRemoved (triangle, 0).size() == 3);      // never fewer than three
+    CHECK (model::maskText (triangle) == "0.1 0.1 0.9 0.1 0.5 0.9");
+
+    //  A curve starts as the straight line; its ends move only up and down.
+    const auto line = model::curveOrLine ({});
+    REQUIRE (line.size() == 2);
+    auto curve = model::curveWithPointAdded ({}, 0.5, 0.7);
+    REQUIRE (curve.size() == 3);
+    CHECK (curve[1].first == doctest::Approx (0.5));
+
+    curve = model::curveWithPointMoved (curve, 0, 0.4, 0.2);
+    CHECK (curve[0].first == doctest::Approx (0.0));
+    CHECK (curve[0].second == doctest::Approx (0.2));
+
+    curve = model::curveWithPointMoved (curve, 1, 2.0, 0.7);
+    CHECK (curve[1].first == doctest::Approx (1.0));          // held by its neighbour
+
+    CHECK (model::curveWithPointRemoved (curve, 0).size() == 3);       // an end stays
+    CHECK (model::curveWithPointRemoved (curve, 1).size() == 2);
+    CHECK (model::curveText ({ { 0.0, 0.0 }, { 1.0, 0.5 } }) == "0 0 1 0.5");
+}
+
+TEST_CASE ("client: a video cue's place, colour and mask are its picture panel's, and leave the inspector (§47, AAG)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto picture = rig.document.createCue (list, 0, "video", "Logo", {}, { { "source", "picture" } });
+    REQUIRE (picture.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + picture.id + "/curveRed", "0 0 1 0.5").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + picture.id + "/scale", "50").ok);
+    const auto fade = rig.document.createCue (list, 1, "fade", "Down");
+    REQUIRE (fade.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/points", "0 0 1 -120").ok);
+
+    const auto snapshot = rig.publish (1);
+
+    //  The inspector keeps what it is, where and how it comes in.
+    const auto inspection = model::inspect (*snapshot, picture.id);
+    std::vector<std::string> names;
+
+    for (const auto& block : inspection.blocks)
+        for (const auto& field : block.fields)
+            names.push_back (field.name);
+
+    for (const auto* gone : { "scale", "offsetX", "rotation", "contrast", "curveRed", "shape", "paint", "fit" })
+        CHECK (std::find (names.begin(), names.end(), gone) == names.end());
+
+    for (const auto* kept : { "source", "canvas", "opacity", "blend", "layer" })
+        CHECK (std::find (names.begin(), names.end(), kept) != names.end());
+
+    std::vector<std::string> panels;
+
+    for (const auto& panel : inspection.panels)
+        panels.push_back (panel.value);
+
+    CHECK (panels == std::vector<std::string> { "picture" });
+
+    //  The panel reads them, curves whole.
+    const auto reading = model::readFoot (*snapshot, { model::Subject::Kind::picture, picture.id });
+    CHECK (reading.notice.empty());
+    CHECK (reading.picture.cueId == picture.id);
+    CHECK (reading.picture.scale == doctest::Approx (50.0));
+    REQUIRE (reading.picture.curves[1].size() == 2);
+    CHECK (reading.picture.curves[1][1].second == doctest::Approx (0.5));
+    CHECK (reading.picture.graded());
+    CHECK_FALSE (reading.picture.painted());
+    CHECK (model::partForPanel (model::Subject::Kind::picture) == "picture");
+
+    //  Not a video cue: said, not drawn.
+    CHECK_FALSE (model::readFoot (*snapshot, { model::Subject::Kind::picture, fade.id }).notice.empty());
+
+    //  And a list row the inspector still shows is read whole, where it read blank.
+    const auto fading = model::inspect (*snapshot, fade.id);
+    std::string points;
+
+    for (const auto& block : fading.blocks)
+        for (const auto& field : block.fields)
+            if (field.name == "points")
+                points = field.value;
+
+    CHECK (points == "0 0 1 -120");
 }

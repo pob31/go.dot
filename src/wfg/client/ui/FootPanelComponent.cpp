@@ -61,6 +61,9 @@ namespace wfg::client::ui
         if (fadeMixer != nullptr)
             fadeMixer->applyTheme (theme);
 
+        if (picture != nullptr)
+            picture->applyTheme (theme);
+
         if (messages != nullptr)
             messages->applyTheme (theme);
 
@@ -125,9 +128,28 @@ namespace wfg::client::ui
         curves.reset();
         fx.reset();
         takePanel.reset();
+        picture.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::picture:
+            {
+                /*  A VIDEO CUE'S PICTURE (namespace draft §47, AAG): its place
+                    on its canvas, its colour, its mask - dragged and typed. */
+                PicturePanelComponent::Actions placing;
+                placing.set = actions.set;
+                placing.setMany = actions.setMany;
+                placing.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                picture = std::make_unique<PicturePanelComponent> (theme, std::move (placing));
+                addAndMakeVisible (*picture);
+                break;
+            }
+
             case model::Subject::Kind::messages:
             {
                 /*  AN OSC CUE'S MESSAGES (namespace draft 45, O.5): a table of
@@ -442,6 +464,10 @@ namespace wfg::client::ui
                 wanted = "Messages";
                 break;
 
+            case model::Subject::Kind::picture:
+                wanted = "Picture";
+                break;
+
             case model::Subject::Kind::none:
                 break;
         }
@@ -498,6 +524,9 @@ namespace wfg::client::ui
 
         if (takePanel != nullptr)
             takePanel->show (reading, std::move (takes));
+
+        if (picture != nullptr)
+            picture->show (reading, media);
     }
 
     void FootPanelComponent::setPasteable (bool pasteable, const juce::String& why)
@@ -628,6 +657,9 @@ namespace wfg::client::ui
 
         if (fadeMixer != nullptr)
             fadeMixer->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (picture != nullptr)
+            picture->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
 
         /*  THE TABLE ON THE LEFT AND THE CURVES ON THE RIGHT, the table as
             wide as the inspector and the cue list's own column would allow it

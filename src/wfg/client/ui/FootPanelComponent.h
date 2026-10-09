@@ -34,6 +34,7 @@
 #include <wfg/client/ui/FadeMixerComponent.h>
 #include <wfg/client/ui/CurveLaneComponent.h>
 #include <wfg/client/ui/OscMessagesComponent.h>
+#include <wfg/client/ui/PicturePanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/Icons.h>
 #include <wfg/client/ui/SendMixerComponent.h>
@@ -222,6 +223,7 @@ namespace wfg::client::ui
         std::string dialed;
         std::unique_ptr<FxPanelComponent> fx;
         std::unique_ptr<TakePanelComponent> takePanel;
+        std::unique_ptr<PicturePanelComponent> picture;
         std::map<std::string, std::string> editorWords;
         juce::TextButton shut { "x" };
 

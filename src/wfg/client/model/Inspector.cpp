@@ -22,6 +22,7 @@
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Picture.h>
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
@@ -205,6 +206,18 @@ namespace wfg::client::model
 
             field.boolean = node.typeTags == "T" || node.typeTags == "F";
             field.value = text (&node);
+
+            /*  A LIST ROW READ WHOLE (namespace draft §47): `text` answers empty
+                for one - four numbers have no single text - and a box showing
+                nothing for a curve that has points was a box that lied. Its
+                values in words, as it is typed. */
+            if (node.values.size() > 1)
+            {
+                field.value.clear();
+
+                for (const auto& value : node.values)
+                    field.value += (field.value.empty() ? "" : " ") + text (value);
+            }
 
             /*  A DECIDED NUMBER WITHOUT ITS LONG TAIL (namespace draft §47,
                 AAB): what a dial turn, a fade or a sum left as 0.30000000000000004
@@ -1074,6 +1087,11 @@ namespace wfg::client::model
                 fill, a picture or a capture has no length to draw. */
             if (source == "movie")
                 offer ("Strip, in and out points", "waveform");
+
+            /*  AND ITS PICTURE (namespace draft §47, AAG): the author, "another
+                foot panel with all colour and geometry adjustments rather
+                listing them in the inspector". */
+            offer ("Picture, place, colour and mask", "picture");
         }
         else if (kind == "mic")
         {
@@ -1404,6 +1422,15 @@ namespace wfg::client::model
             so a show that set it still opens. */
         if (out.kind == "media" || out.kind == "mic")
             std::erase_if (decided, [] (const Field& field) { return field.name == "stereoToMono"; });
+
+        /*  AND A PICTURE'S PLACE, COLOUR AND MASK ARE ITS PANEL'S (namespace
+            draft §47, AAG): a frame dragged on its canvas, curves drawn, a mask
+            outlined - the inspector keeps what it is, where and how it comes
+            in. */
+        if (out.kind == "video")
+            std::erase_if (decided, [] (const Field& field)
+                                    { return std::find (pictureRows().begin(), pictureRows().end(), field.name)
+                                               != pictureRows().end(); });
 
         /*  AND WHAT ELSE A FADE MOVES IS ITS MIXER'S (namespace draft §26, PG):
             a send, an EQ number or a plugin value is a strip, a box or a

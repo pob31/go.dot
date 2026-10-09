@@ -44,6 +44,7 @@ namespace wfg::client::model
             case Subject::Kind::take:      return "take";
             case Subject::Kind::fade:      return "fade";
             case Subject::Kind::messages:  return "messages";
+            case Subject::Kind::picture:   return "picture";
             case Subject::Kind::none:      break;
         }
 
@@ -54,7 +55,8 @@ namespace wfg::client::model
     {
         for (const auto kind : { Subject::Kind::waveform, Subject::Kind::sends, Subject::Kind::timeline,
                                  Subject::Kind::curve, Subject::Kind::eq, Subject::Kind::fx,
-                                 Subject::Kind::take, Subject::Kind::fade, Subject::Kind::messages })
+                                 Subject::Kind::take, Subject::Kind::fade, Subject::Kind::messages,
+                                 Subject::Kind::picture })
             if (wordFor (kind) == word)
                 return kind;
 
@@ -114,6 +116,10 @@ namespace wfg::client::model
                 messages this cue sends is a question about the cue in hand
                 (namespace draft 45). */
             case Subject::Kind::messages:  return true;
+
+            /*  AND A PICTURE'S PLACE AND COLOUR (namespace draft §47, AAG): how
+                this cue looks is a question about the cue in hand. */
+            case Subject::Kind::picture:   return true;
             case Subject::Kind::none:      break;
         }
 
@@ -159,6 +165,9 @@ namespace wfg::client::model
             case Subject::Kind::sends:     return "sends";
             case Subject::Kind::eq:        return "eq";
             case Subject::Kind::fx:        return "fx";
+
+            //  How a picture lies on its canvas, and its colour (§38's part, §47's panel).
+            case Subject::Kind::picture:   return "picture";
 
             /*  A timeline is a group's members, a curve and a fade's mixer
                 are a fade's own, a take is the channel's: none is a part of a
@@ -314,6 +323,7 @@ namespace wfg::client::model
                 return dual.sound;
 
             case Subject::Kind::waveform:
+            case Subject::Kind::picture:
                 return dual.movie;
 
             case Subject::Kind::none:
@@ -437,6 +447,17 @@ namespace wfg::client::model
 
         if (subject.kind == Subject::Kind::curve)
             out.curve = readCurve (snapshot, out.subject.objectId);
+
+        /*  A VIDEO CUE'S PICTURE (namespace draft §47, AAG), and why there
+            is nothing to draw for a cue that has none. */
+        if (subject.kind == Subject::Kind::picture)
+        {
+            out.picture = readPicture (snapshot, out.subject.objectId);
+            out.locked = out.picture.locked;
+
+            if (out.picture.cueId.empty())
+                out.notice = "Only a video cue has a picture to place and colour.";
+        }
 
         /*  AN OSC CUE'S MESSAGES (namespace draft 45), with the lock read
             here, as the waveform reads its own: nothing on the table is

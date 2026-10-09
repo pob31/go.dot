@@ -4313,7 +4313,8 @@ namespace
         for (const auto& named : wfg::audio::mediaFilesNamedBy (document))
             analyser.queue (named);
 
-        for (const auto& named : wfg::audio::movieFilesNamedBy (document))
+        //  And every file a video cue names: a movie's length and size, a picture's size (§47, AAG).
+        for (const auto& named : wfg::audio::pictureFilesNamedBy (document))
             analyser.queue (named);
 
         if (! udp.start (requestedOsc,
@@ -5037,7 +5038,7 @@ namespace
                                     for (const auto& named : wfg::audio::mediaFilesNamedBy (document))
                                         analyser.queue (named);
 
-                                    for (const auto& named : wfg::audio::movieFilesNamedBy (document))
+                                    for (const auto& named : wfg::audio::pictureFilesNamedBy (document))
                                         analyser.queue (named);
 
                                     /*  AND WHAT THE SHOW NOW SAYS ABOUT ITS

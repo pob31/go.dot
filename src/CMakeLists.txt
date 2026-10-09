@@ -581,6 +581,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Selection.cpp
     wfg/client/model/Dual.h
     wfg/client/model/Dual.cpp
+    wfg/client/model/Picture.h
+    wfg/client/model/Picture.cpp
     wfg/client/model/Icons.h
     wfg/client/model/Icons.cpp
     wfg/client/model/Inspector.h
@@ -668,6 +670,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/SendMixerComponent.cpp
     wfg/client/ui/FadeMixerComponent.h
     wfg/client/ui/FadeMixerComponent.cpp
+    wfg/client/ui/PicturePanelComponent.h
+    wfg/client/ui/PicturePanelComponent.cpp
     wfg/client/ui/EqPanelComponent.h
     wfg/client/ui/EqPanelComponent.cpp
     wfg/client/ui/FxPanelComponent.h

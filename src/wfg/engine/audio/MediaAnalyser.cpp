@@ -36,10 +36,32 @@
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
+#include <juce_graphics/juce_graphics.h>
 #include <juce_cryptography/juce_cryptography.h>
 
 namespace wfg::audio
 {
+    namespace
+    {
+        /*  A STILL PICTURE'S NAME, by its extension - the kinds a video cue's
+            picture is (client/model/Video's list). */
+        bool isStillPictureName (const std::string& name)
+        {
+            const auto dot = name.find_last_of ('.');
+
+            if (dot == std::string::npos)
+                return false;
+
+            auto extension = name.substr (dot + 1);
+
+            for (auto& c : extension)
+                if (c >= 'A' && c <= 'Z')
+                    c = static_cast<char> (c - 'A' + 'a');
+
+            return extension == "png" || extension == "jpg" || extension == "jpeg" || extension == "gif";
+        }
+    }
+
     namespace
     {
         using Clock = std::chrono::steady_clock;
@@ -487,12 +509,49 @@ namespace wfg::audio
                 pyramid. */
             if (video::movie::isMovieName (named))
             {
-                const auto seconds = video::movie::durationOf (resolveMediaPath (folder, named));
+                const auto path = resolveMediaPath (folder, named);
+                const auto seconds = video::movie::durationOf (path);
 
                 if (seconds > 0.0 && media != nullptr)
                 {
                     MediaRecord record;
                     record.seconds = seconds;
+
+                    /*  AND ITS SIZE (namespace draft §47, AAG), from the same
+                        index, for the picture panel's frame. A movie Go.dot
+                        does not play itself is nought, drawn the canvas's shape. */
+                    video::movie::MovieFile file;
+                    std::string why;
+
+                    if (file.open (path, why))
+                    {
+                        record.width = file.info().width;
+                        record.height = file.info().height;
+                    }
+
+                    media->publish (named, std::move (record));
+                }
+
+                const std::lock_guard<std::mutex> lock { guard };
+
+                if (pending > 0)
+                    --pending;
+
+                continue;
+            }
+
+            /*  A STILL PICTURE (namespace draft §47, AAG): no length and no
+                waveform, only its size, read by decoding it - a second at the
+                worst, on this thread, once. */
+            if (isStillPictureName (named))
+            {
+                const auto image = juce::ImageFileFormat::loadFrom (juce::File (resolveMediaPath (folder, named)));
+
+                if (image.isValid() && media != nullptr)
+                {
+                    MediaRecord record;
+                    record.width = image.getWidth();
+                    record.height = image.getHeight();
                     media->publish (named, std::move (record));
                 }
 

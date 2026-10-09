@@ -111,6 +111,12 @@ namespace wfg::audio
             zoomed-in waveform takes its height from. Published with the
             pyramid, from the same pass. */
         std::shared_ptr<const PeakTrack> peaks;
+
+        /*  A PICTURE'S OR A MOVIE'S OWN SIZE, in pixels (namespace draft §47,
+            AAG): what a fitted picture's frame is shaped by in the picture
+            panel. Nought for a sound, and until the analyser has read it. */
+        int width = 0;
+        int height = 0;
     };
 
     /*  One record per file the show named when it was opened, by that path. */

@@ -97,6 +97,9 @@ namespace wfg::client::model
         //  An OSC cue's messages wear the OSC cue's own picture (namespace draft 45).
         if (subject == "messages") return Icon::osc;
 
+        //  A picture's place and colour wear the video cue's own (namespace draft §47).
+        if (subject == "picture")  return Icon::video;
+
         return Icon::none;
     }
 

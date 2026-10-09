@@ -35,6 +35,8 @@
 #include "HapMovieWriter.h"
 #include "TestSupport.h"
 
+#include <wfg/engine/audio/MediaAnalyser.h>
+#include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/Compositor.h>
@@ -1701,4 +1703,54 @@ TEST_CASE ("video host: a layer restated takes its new look and keeps its points
     auto other = fill ("NOBODY01", "CANVAS01", 1, 1, 0x000000);
     sink.restate (other);
     CHECK (layersOf (r).size() == 1);
+}
+
+TEST_CASE ("video host: the analyser reads a picture's size and a movie's, for the picture panel's frame (§47)")
+{
+    /*  THE PICTURE PANEL (namespace draft §47, AAG) draws a fitted picture's
+        frame in its own shape: the analyser, which every file a video cue
+        names now reaches, reads a still's size by decoding it and a movie's
+        from its index. */
+    auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getNonexistentChildFile ("wfg-picture-sizes", {}, false);
+    REQUIRE (folder.createDirectory());
+
+    {
+        juce::Image still (juce::Image::RGB, 40, 30, true, juce::SoftwareImageType());
+        juce::FileOutputStream out (folder.getChildFile ("logo.png"));
+        REQUIRE (out.openedOk());
+        REQUIRE (juce::PNGImageFormat().writeImageToStream (still, out));
+    }
+
+    using namespace wfg::testing::hapmovie;
+    writeMovie (folder, "clip.mov", hapMovie (16, 8, { section (0xAB, solidDxt1 (16, 8, 0xFF8000)) }, 25));
+
+    doc::ShowDocument document;
+    const auto mediaFolder = folder.getFullPathName().toStdString();
+    audio::MediaInfo info { document, mediaFolder };
+    audio::MediaAnalyser analyser { info, mediaFolder };
+
+    CHECK (analyser.queue ("logo.png"));
+    CHECK (analyser.queue ("clip.mov"));
+    REQUIRE (analyser.start());
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds (60);
+
+    while (analyser.outstanding() > 0 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+
+    const auto records = info.snapshot();
+
+    REQUIRE (records->count ("logo.png") == 1u);
+    CHECK (records->at ("logo.png").width == 40);
+    CHECK (records->at ("logo.png").height == 30);
+    CHECK (records->at ("logo.png").pyramid == nullptr);      // a picture has no waveform
+
+    REQUIRE (records->count ("clip.mov") == 1u);
+    CHECK (records->at ("clip.mov").width == 16);
+    CHECK (records->at ("clip.mov").height == 8);
+    CHECK (records->at ("clip.mov").seconds > 0.0);
+
+    analyser.stop();
+    folder.deleteRecursively();
 }

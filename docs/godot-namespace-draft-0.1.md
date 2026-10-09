@@ -22792,3 +22792,37 @@ same GO uses and the monitor will (AAH) - and:
 Under the lock an edit is refused, so nothing moves. Esc's fade and a stop's are the run's own: a picture
 on its way out takes no edit.
 
+### 47.8 The picture panel (AAG, mine)
+
+Every video cue's inspector offers **Picture, place, colour and mask** at its head (the word *Picture* and
+the button's other words are mine). The panel draws the cue's canvas, in its shape, with the picture's
+frame where the projector draws it - `video::Placement`'s own arithmetic, so the outline dragged is the
+picture drawn - and beside it the numbers:
+
+- **Where it lies:** the fit (*fit*, *fill*, *stretch*), the two flips (*Flip across*, *Flip up and
+  down*), and the size, the offsets across and up, and the turn, each a slider with its number. On the
+  canvas the frame is dragged to move the picture, by a corner to scale it about its middle, by the round
+  handle above it to turn it, fifteen degrees a step with Shift; the arrow keys nudge it a tenth of a
+  percent, one with Shift.
+- **Its colour**, for a picture, a movie and a capture: contrast, saturation, gamma and hue, and the four
+  curves drawn - the luminosity's and red's, green's and blue's, one picked by its letter, the others
+  faint behind; a press adds a point, a drag moves it (the ends only up and down), a right click takes it
+  away, *Straight* puts the picked one back to the line that changes nothing.
+- **A fill's and a mask's colour** from a swatch, which opens a colour picker that writes as it moves; the
+  hex beside it. **A mask** draws its outline on the canvas instead of a frame: a corner dragged, a double
+  click on an edge adds one (on an empty mask, a small triangle), a right click on a corner takes it away
+  (never below three); its feather, and *Inside out*.
+
+What the panel holds **left the inspector**: the fit, the size, offsets and turn, the flips, the grade,
+the four curves, the outline, the feather, inside-out and the colour. The inspector keeps what a cue is,
+where and how it comes in: its source, canvas, input, file, layer, blend, opacity, DCA, insert, fade-in,
+start and speed. A drag is a run of `node.set` on one address, folded into one undo step; the offsets one
+`node.setMany`. Copy and Paste on the panel's head carry §38's *picture* part. Under the lock it shows,
+and changes nothing; a picture up follows each change at once (§47.7).
+
+Two things changed under it. **A list row reads whole in the inspector** - a fade's points, a route's gains
+- where a list of numbers read blank (`text` answers empty for several values). And **every file a video
+cue names reaches the analyser**, which records a still's size by decoding it and a movie's from its index
+(`MediaRecord::width`, `height`), so a fitted picture's frame has the picture's own shape; until it is
+read, or for a movie Go.dot does not play itself, the frame is the canvas's shape.
+
