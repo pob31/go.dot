@@ -22826,3 +22826,26 @@ cue names reaches the analyser**, which records a still's size by decoding it an
 (`MediaRecord::width`, `height`), so a fitted picture's frame has the picture's own shape; until it is
 read, or for a movie Go.dot does not play itself, the frame is the canvas's shape.
 
+### 47.9 The picked cue on the video monitor (AAH, the author's)
+
+While the picture panel is open on a video cue, or a movie's strip is open, the **video monitor** opens
+by itself - behind nothing, but without the keyboard, which stays where GO is - and shows above its
+canvas tiles the **picked cue alone, large, as it will look on its canvas**: its picture or fill, placed,
+graded and masked, at its opacity, playing or not. For a movie, at the second **under an in or out
+point being dragged**; else where it is playing; else at the strip's playhead; else where it starts. The
+line under it says which cue, which second and why - "Cue 12 Intro - 0:12.40, in point being dragged".
+The same picture is drawn under the picture panel's frame, so the hand sees what it moves. The monitor
+shuts when the panel shuts if the panel opened it; shut by a hand while the panel is open, it stays
+shut until the panel moves on to another cue.
+
+How it travels: the window asks for a cue and a second (`ClientHost::previewCue`); the tick reads that
+cue off the document with `cue::pictureSpecOf` - the reading GO uses - and writes it into the region as a
+layer like any other, its opacity and playhead one point each, again whenever the show moves, so an edit
+is seen in the tile as on a projector (`VideoHost::showTile`, region version 16: `tileWanted`,
+`tileSerial`, `tileLayer`, `tile`). The renderer draws it through the reference compositor, at most 512
+by 288 in its canvas's shape, over black, about ten times a second for three seconds after each request
+- long enough for its picture or frame to be read - and for as long as a capture is live; a movie's
+frame is read by a store of the tile's own, so the frame looked at never pulls a playing layer of the
+same file away. The window reads it back (`ClientHost::cueTile`). **While a monitor watches the renderer
+runs**, with no output switched on as with one; no window is made for no output.
+

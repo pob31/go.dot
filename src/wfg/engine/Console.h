@@ -220,6 +220,24 @@ namespace wfg
 
         std::function<void (bool wanted)> monitorCanvases {};
         std::function<std::vector<CanvasPicture>()> canvasPictures {};
+
+        /*  AND THE PICKED CUE, ALONE (namespace draft §47, AAH): the author,
+            2026-10-09, "We need to open the monitor window for the media when
+            adjusting". The window asks for a cue at a second of its file - the
+            playhead, or the frame under an in point being dragged - and the
+            renderer draws it as it would look on its canvas, playing or not;
+            an empty cue lets it go. Read back with the request it answers. As
+            the canvases are: a picture of a cue, nothing the show decided, so
+            no command and no record. Message thread; empty with no video. */
+        struct CueTile
+        {
+            unsigned serial = 0;
+            int width = 0, height = 0;
+            std::vector<unsigned char> rgb;     ///< rows from the top-left, three bytes a pixel
+        };
+
+        std::function<void (const std::string& cueId, double seconds)> previewCue {};
+        std::function<CueTile()> cueTile {};
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

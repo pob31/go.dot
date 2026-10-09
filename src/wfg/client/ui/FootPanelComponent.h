@@ -47,6 +47,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -174,6 +175,14 @@ namespace wfg::client::ui
         /*  The EQ band a surface's rotary last turned, ringed on the EQ panel
             while it is the one open (2026-09-25); -1 lets it go. */
         void showEditedEqHandle (int handle);
+
+        /*  THE MONITOR'S TILE OF THE PICKED CUE (namespace draft §47, AAH): the
+            strip's held edge and playhead, which second the tile is of; and the
+            tile itself, drawn under the picture panel's frame. */
+        std::optional<double> heldEdge() const;
+        std::string heldEdgeWord() const;
+        std::optional<double> stripPlayhead() const;
+        void setCuePicture (const juce::Image& cuePicture);
 
         /** The number the master dial turns, marked in whichever panel draws it. */
         void showDial (const std::string& address);

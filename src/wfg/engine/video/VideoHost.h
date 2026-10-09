@@ -212,6 +212,24 @@ namespace wfg::video
         void setMonitoring (bool wanted) noexcept;
         std::vector<CanvasPicture> canvasPictures() const;
 
+        /*  THE PICKED CUE'S TILE (namespace draft §47, AAH): the cue alone, as
+            it would look on its canvas, drawn by the renderer while a monitor
+            wants it - `spec` as `cue::pictureSpecOf` reads it, at `seconds` of
+            a movie and at `opacity` 0..1. A new request each call; `hideTile`
+            takes it away. Tick thread. `cueTile` hands back the latest drawn,
+            with the request it answers. Any thread; a copy. */
+        void showTile (const LayerSpec& spec, double seconds, double opacity);
+        void hideTile();
+
+        struct CueTile
+        {
+            std::uint32_t serial = 0;
+            int width = 0, height = 0;
+            std::vector<std::uint8_t> rgb;      ///< rows from the top-left, three bytes a pixel
+        };
+
+        CueTile cueTile() const;
+
         /** The region itself, for a test that reads what the renderer wrote. */
         region::Region* regionForTests() noexcept;
 

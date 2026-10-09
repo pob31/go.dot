@@ -189,7 +189,11 @@ namespace wfg::video
         void manage()
         {
             const auto now = std::chrono::steady_clock::now();
-            const auto wanted = wantRenderer.load (std::memory_order_acquire);
+            /*  AND WHILE A MONITOR WATCHES (namespace draft §47, AAH): the
+                picked cue's tile is drawn by the renderer, with no output
+                switched on as with one - no window is made for no output. */
+            const auto wanted = wantRenderer.load (std::memory_order_acquire)
+                                  || monitoring.load (std::memory_order_acquire);
             const auto running = child != nullptr && child->isRunning();
 
             if (! wanted)
@@ -455,6 +459,7 @@ namespace wfg::video
         bool locked = false;    // the show's lock, as `configure` last read it
 
         std::atomic<bool> wantRenderer { false };
+        std::atomic<bool> monitoring { false };
         std::atomic<bool> stopping { false };
         std::thread host;
 
@@ -713,8 +718,70 @@ namespace wfg::video
 
     void VideoHost::setMonitoring (bool wanted) noexcept
     {
+        impl->monitoring.store (wanted, std::memory_order_release);
+
         if (impl->r != nullptr)
             impl->r->previewWanted.store (wanted ? 1u : 0u, std::memory_order_release);
+    }
+
+    void VideoHost::showTile (const LayerSpec& spec, double seconds, double opacity)
+    {
+        if (impl->r == nullptr)
+            return;
+
+        auto& slot = impl->r->tileLayer;
+
+        region::beginWrite (slot.seq);
+        writeLayerSpec (slot, spec);
+
+        for (auto& ring : slot.rings)
+            ring.written.store (0, std::memory_order_relaxed);
+
+        //  ONE POINT EACH: its opacity, and a movie's second - held from there on.
+        const auto put = [&slot] (Property property, double value)
+        {
+            auto& ring = slot.rings[static_cast<std::size_t> (property)];
+            ring.points[0].sample.store (0, std::memory_order_relaxed);
+            ring.points[0].value.store (value, std::memory_order_relaxed);
+            ring.written.store (1, std::memory_order_relaxed);
+        };
+
+        put (Property::opacity, std::clamp (opacity, 0.0, 1.0));
+        put (Property::time, std::max (0.0, seconds));
+        slot.removeAt.store (region::notRemoved, std::memory_order_relaxed);
+        region::endWrite (slot.seq);
+
+        impl->r->tileSerial.fetch_add (1, std::memory_order_acq_rel);
+        impl->r->tileWanted.store (1, std::memory_order_release);
+    }
+
+    void VideoHost::hideTile()
+    {
+        if (impl->r != nullptr)
+            impl->r->tileWanted.store (0, std::memory_order_release);
+    }
+
+    VideoHost::CueTile VideoHost::cueTile() const
+    {
+        CueTile out;
+
+        if (impl->r == nullptr || impl->r->tileWanted.load (std::memory_order_acquire) == 0)
+            return out;
+
+        const auto& tile = impl->r->tile;
+
+        const auto read = region::readConsistent (tile.seq, [&]
+        {
+            out.serial = tile.serial.load (std::memory_order_relaxed);
+            out.width = std::clamp (static_cast<int> (tile.width.load (std::memory_order_relaxed)), 0, region::tileWidth);
+            out.height = std::clamp (static_cast<int> (tile.height.load (std::memory_order_relaxed)), 0, region::tileHeight);
+            out.rgb.assign (tile.rgb, tile.rgb + 3 * out.width * out.height);
+        });
+
+        if (! read)
+            return {};
+
+        return out;
     }
 
     std::vector<VideoHost::CanvasPicture> VideoHost::canvasPictures() const

@@ -71,6 +71,16 @@ namespace wfg::client::ui
         void open();
         bool watching() const noexcept;
 
+        /*  OPENED BY A PANEL (namespace draft §47, AAH): shown and watching,
+            but behind the show's window and without the keyboard, which stays
+            where GO is. */
+        void openQuietly();
+
+        /*  THE PICKED CUE, ALONE, above the canvases: its picture as the
+            renderer drew it and a line saying which cue and which second; an
+            invalid picture and an empty line take it away. */
+        void showCue (const juce::String& caption, const juce::Image& picture);
+
         void closeButtonPressed() override;
         bool keyPressed (const juce::KeyPress& key) override;
 

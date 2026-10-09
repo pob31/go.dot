@@ -100,6 +100,14 @@ namespace wfg::client::ui
         /** The reading for this pass, and the analyser's table the columns come from. */
         void show (const model::FootReading&, std::shared_ptr<const audio::MediaRecords>);
 
+        /*  WHAT THE MONITOR SHOWS OF A MOVIE (namespace draft §47, AAH): the
+            second an in or out point being dragged is at, and which - "in
+            point", "out point", "slice" - or nothing while none is; and where
+            the playhead stands. */
+        std::optional<double> heldEdge() const noexcept  { return edgeHeld; }
+        std::string heldEdgeWord() const;
+        double playhead() const noexcept                 { return point; }
+
         void paint (juce::Graphics&) override;
         void resized() override;
 
@@ -270,6 +278,7 @@ namespace wfg::client::ui
 
         model::Hit hover;
         model::Hit grabbed;
+        std::optional<double> edgeHeld;
 
         /*  THE LANE AS THE HAND HAS IT. A drag moves a copy and sends the
             whole list ONCE, on release (the fade editor's rule: a write per

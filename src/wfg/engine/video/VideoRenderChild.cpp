@@ -2738,6 +2738,30 @@ namespace wfg::video
                 std::map<std::string, int> moviesWanted;
                 const auto now = clock.sampleAt (r, steadyNanos());
 
+                /*  AND THE PICKED CUE'S, while the monitor wants its tile
+                    (namespace draft §47, AAH): its picture read with the
+                    others, its movie by a store of its own - the frame it is
+                    looked at, which a playing layer of the same file must not
+                    be pulled away from. */
+                region::LayerReading tileLayer;
+                const auto tileUp = r.tileWanted.load (std::memory_order_acquire) != 0
+                                      && region::readLayer (r.tileLayer, tileLayer);
+
+                if (tileUp && tileLayer.source == region::Source::picture && ! tileLayer.file.empty())
+                    wanted.insert (tileLayer.file);
+
+                if (tileUp && tileLayer.source == region::Source::movie && ! tileLayer.file.empty())
+                {
+                    tileMovies.want ({ { tileLayer.file, std::max (0, tileMovies.frameAt (tileLayer.file,
+                                                                                          valueOf (tileLayer, Property::time, 0, 0.0))) } });
+                    tileMovieHeld = true;
+                }
+                else if (tileMovieHeld)
+                {
+                    tileMovies.want ({});
+                    tileMovieHeld = false;
+                }
+
                 for (const auto& layer : layers)
                 {
                     if (layer.source == region::Source::picture && ! layer.file.empty())
@@ -2775,6 +2799,20 @@ namespace wfg::video
                     //  And each canvas small, while a monitor wants them (namespace draft 40).
                     if (r.previewWanted.load (std::memory_order_acquire) != 0)
                         writePreviews (config, layers);
+
+                    /*  AND THE PICKED CUE'S TILE (§47, AAH): for three seconds after
+                        each new request - long enough for its picture or its
+                        frame to be read - and for as long as a capture is live. */
+                    const auto serial = r.tileSerial.load (std::memory_order_acquire);
+
+                    if (serial != tileSerialSeen)
+                    {
+                        tileSerialSeen = serial;
+                        tileFreshUntil = ticks + 300;
+                    }
+
+                    if (tileUp && (ticks <= tileFreshUntil || tileLayer.source == region::Source::capture))
+                        writeTile (config, tileLayer, serial);
                 }
             }
 
@@ -2846,6 +2884,51 @@ namespace wfg::video
             }
 
             std::vector<std::uint8_t> previewScratch;
+
+            /*  THE PICKED CUE ALONE (namespace draft §47, AAH): its canvas's
+                shape at most 512 by 288, over black, through the reference
+                compositor the previews use - the cue at its own opacity and,
+                for a movie, the frame at the second asked, from the tile's own
+                movie store. Its point samples are nought, so it is read there. */
+            void writeTile (const region::ConfigReading& config, const region::LayerReading& layer, std::uint32_t serial)
+            {
+                const auto* canvas = canvasIn (config, layer.canvas);
+                const auto canvasWidth = static_cast<double> (canvas != nullptr ? std::max (1, canvas->width) : 1920);
+                const auto canvasHeight = static_cast<double> (canvas != nullptr ? std::max (1, canvas->height) : 1080);
+                const auto across = canvasWidth / canvasHeight >= static_cast<double> (region::tileWidth) / region::tileHeight;
+                const auto width = across ? region::tileWidth
+                                          : std::max (1, static_cast<int> (std::lround (region::tileHeight * canvasWidth / canvasHeight)));
+                const auto height = across ? std::max (1, static_cast<int> (std::lround (region::tileWidth * canvasHeight / canvasWidth)))
+                                           : region::tileHeight;
+                const std::vector<const region::LayerReading*> alone { &layer };
+
+                tileScratch.resize (static_cast<std::size_t> (3 * width * height));
+
+                for (int row = 0; row < height; ++row)
+                    for (int column = 0; column < width; ++column)
+                    {
+                        const auto x = ((column + 0.5) / width - 0.5) * canvasWidth;
+                        const auto y = (0.5 - (row + 0.5) / height) * canvasHeight;
+                        const auto rgb = colourAt (alone, 0, canvasWidth, canvasHeight, x, y, &tileSampler);
+                        auto* pixel = tileScratch.data() + 3 * (row * width + column);
+                        pixel[0] = static_cast<std::uint8_t> ((rgb >> 16) & 0xffu);
+                        pixel[1] = static_cast<std::uint8_t> ((rgb >> 8) & 0xffu);
+                        pixel[2] = static_cast<std::uint8_t> (rgb & 0xffu);
+                    }
+
+                auto& tile = r.tile;
+                region::beginWrite (tile.seq);
+                tile.serial.store (serial, std::memory_order_relaxed);
+                tile.width.store (width, std::memory_order_relaxed);
+                tile.height.store (height, std::memory_order_relaxed);
+                std::copy (tileScratch.begin(), tileScratch.end(), tile.rgb);
+                region::endWrite (tile.seq);
+            }
+
+            std::vector<std::uint8_t> tileScratch;
+            std::uint32_t tileSerialSeen = 0;
+            std::int64_t tileFreshUntil = -1;
+            bool tileMovieHeld = false;
 
             /*  THE TINTS, through the compositor the probe uses, from the
                 pictures and frames the stores already hold: each layer alone
@@ -3079,6 +3162,10 @@ namespace wfg::video
             PictureStore pictures;
             MovieStore movies;
             StoreSampler sampler;
+
+            //  The picked cue's movie, read apart from what plays (§47, AAH).
+            MovieStore tileMovies;
+            StoreSampler tileSampler { pictures, tileMovies };
             std::set<std::string> lastWanted;
             std::vector<std::unique_ptr<OutputWindow>> windows;
             std::unique_ptr<RenderLoop> loop;

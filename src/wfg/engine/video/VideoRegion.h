@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 15;
+    constexpr std::uint32_t version = 16;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -98,6 +98,12 @@ namespace wfg::video::region
         across and down - drawn small, on the CPU, while a window wants it. */
     constexpr int previewWidth = 256;
     constexpr int previewHeight = 144;
+
+    /*  THE MONITOR'S TILE OF THE PICKED CUE (namespace draft §47, AAH): the
+        cue alone, as it would look on its canvas, at most this many pixels
+        across and down. */
+    constexpr int tileWidth = 512;
+    constexpr int tileHeight = 288;
 
     /*  ONE MOVING VALUE'S POINTS, at most, held at once; a power of two. A
         ring per value, so a fade placing a point a tick on one never pushes
@@ -293,6 +299,17 @@ namespace wfg::video::region
         std::uint8_t rgb[previewWidth * previewHeight * 3];
     };
 
+    /*  THE PICKED CUE'S PICTURE, as the monitor sees it (namespace draft
+        §47, AAH): 8-bit RGB rows from the top-left, in its canvas's shape. */
+    struct Tile
+    {
+        std::atomic<std::uint32_t> seq;
+        std::atomic<std::uint32_t> serial;
+        std::atomic<std::int32_t> width;
+        std::atomic<std::int32_t> height;
+        std::uint8_t rgb[tileWidth * tileHeight * 3];
+    };
+
     struct PointSlot
     {
         std::atomic<std::int64_t> sample;
@@ -480,6 +497,17 @@ namespace wfg::video::region
 
         /** Renderer to engine (§44, YE): each video insert, in the configuration's order. */
         InsertState inserts[maxInserts];
+
+        /*  THE PICKED CUE'S TILE (namespace draft §47, AAH). Engine to
+            renderer: whether the monitor wants it, and the cue as it would be
+            put up - a layer like any other, under its own `seq`, its opacity
+            and its playhead one point each - its `serial` bumped with each new
+            request. Renderer to engine: the tile, under its own `seq`, saying
+            which request it answers. */
+        std::atomic<std::uint32_t> tileWanted;
+        std::atomic<std::uint32_t> tileSerial;
+        Layer tileLayer;
+        Tile tile;
     };
 
     static_assert (std::atomic<std::uint32_t>::is_always_lock_free
@@ -524,6 +552,7 @@ namespace wfg::video::region
         mix (static_cast<std::uint32_t> (sizeof (Tint)));
         mix (static_cast<std::uint32_t> (sizeof (Zone)));
         mix (static_cast<std::uint32_t> (sizeof (Preview)));
+        mix (static_cast<std::uint32_t> (sizeof (Tile)));
         return hash;
     }
 

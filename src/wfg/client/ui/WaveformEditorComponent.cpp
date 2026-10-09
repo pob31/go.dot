@@ -468,6 +468,22 @@ namespace wfg::client::ui
         transport.setEnabled (sounding || reading.cueKind == "media" || reading.movie);
     }
 
+    std::string WaveformEditorComponent::heldEdgeWord() const
+    {
+        if (! edgeHeld.has_value())
+            return {};
+
+        switch (grabbed.handle)
+        {
+            case model::Handle::in:     return "in point";
+            case model::Handle::out:    return "out point";
+            case model::Handle::slice:  return "slice";
+            case model::Handle::none:   break;
+        }
+
+        return {};
+    }
+
     void WaveformEditorComponent::applyTheme (const model::Theme& themeToUse)
     {
         theme = themeToUse;
@@ -1526,6 +1542,10 @@ namespace wfg::client::ui
             actions.set (model::rangeAddress (write.rangeId, write.attribute),
                          osc::formatDouble (write.seconds));
 
+        //  Where the edge is now, for the monitor's tile of a movie (§47, AAH).
+        if (! writes.empty())
+            edgeHeld = writes.front().seconds;
+
         if (! writes.empty() && actions.say != nullptr)
             actions.say (juce::String (grabbed.handle == model::Handle::slice
                                          ? "loop point at " : "edge at ")
@@ -1601,6 +1621,7 @@ namespace wfg::client::ui
         }
 
         grabbed = {};
+        edgeHeld.reset();
         panning = false;
 
         if (actions.say != nullptr)

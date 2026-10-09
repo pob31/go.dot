@@ -529,6 +529,27 @@ namespace wfg::client::ui
             picture->show (reading, media);
     }
 
+    std::optional<double> FootPanelComponent::heldEdge() const
+    {
+        return waveform != nullptr ? waveform->heldEdge() : std::nullopt;
+    }
+
+    std::string FootPanelComponent::heldEdgeWord() const
+    {
+        return waveform != nullptr ? waveform->heldEdgeWord() : std::string {};
+    }
+
+    std::optional<double> FootPanelComponent::stripPlayhead() const
+    {
+        return waveform != nullptr ? std::optional<double> (waveform->playhead()) : std::nullopt;
+    }
+
+    void FootPanelComponent::setCuePicture (const juce::Image& cuePicture)
+    {
+        if (picture != nullptr)
+            picture->setPicture (cuePicture);
+    }
+
     void FootPanelComponent::setPasteable (bool pasteable, const juce::String& why)
     {
         if (pasteButton.isEnabled() != pasteable)

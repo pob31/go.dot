@@ -28,6 +28,7 @@
 #include <wfg/engine/import/QlabImport.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/PictureSpec.h>
 #include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/cue/CurveCommands.h>
@@ -120,6 +121,7 @@
 #include <csignal>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -4209,6 +4211,23 @@ namespace
             only then. */
         std::uint64_t videoRevisionSeen = document.showRevision();
 
+        /*  WHAT THE WINDOW WANTS OF THE PICKED CUE'S TILE (namespace draft §47,
+            AAH): a cue and a second, written on the message thread when they
+            change and read by the tick under a lock held for a copy. The tick
+            reads the cue off the document - which only the tick may - and asks
+            the renderer for it, again whenever the show moves. */
+        struct TileWish
+        {
+            std::mutex lock;
+            std::string cue;
+            double seconds = 0.0;
+            std::uint64_t serial = 0;
+        };
+
+        TileWish tileWish;
+        std::uint64_t tileWishSeen = 0;
+        std::uint64_t tileRevisionSeen = 0;
+
         /*  And the lock it was read under: a projector put away while the show
             is unlocked comes back when it is locked (§39), and the lock is
             engine state, which moves no show revision. */
@@ -4790,6 +4809,46 @@ namespace
                                      videoRevisionSeen = revision;
                                      videoLockSeen = document.isLocked();
                                      videoHost.configure (document);
+                                 }
+
+                                 /*  THE PICKED CUE'S TILE (§47, AAH): asked again
+                                     when the window wants another cue or second,
+                                     and when the show moved - an edit is seen in
+                                     the tile as it is on a projector. */
+                                 {
+                                     std::string tileCue;
+                                     double tileSeconds = 0.0;
+                                     std::uint64_t tileSerial = 0;
+
+                                     {
+                                         const std::lock_guard<std::mutex> hold { tileWish.lock };
+                                         tileCue = tileWish.cue;
+                                         tileSeconds = tileWish.seconds;
+                                         tileSerial = tileWish.serial;
+                                     }
+
+                                     const auto revision = document.showRevision();
+
+                                     if (tileSerial != tileWishSeen || (! tileCue.empty() && revision != tileRevisionSeen))
+                                     {
+                                         tileWishSeen = tileSerial;
+                                         tileRevisionSeen = revision;
+
+                                         auto spec = tileCue.empty() ? wfg::video::LayerSpec {}
+                                                                     : wfg::cue::pictureSpecOf (document, tileCue, mediaFolder);
+
+                                         if (spec.source.empty())
+                                         {
+                                             videoHost.hideTile();
+                                         }
+                                         else
+                                         {
+                                             spec.id = tileCue;
+                                             const auto opacity = wfg::osc::parseDouble (document.getAttribute ("/godot/cue/" + tileCue + "/opacity")
+                                                                                             .value_or (std::string {})).value_or (100.0);
+                                             videoHost.showTile (spec, tileSeconds, opacity / 100.0);
+                                         }
+                                     }
                                  }
 
                                  const auto now = juce::Time::getCurrentTime();
@@ -5918,6 +5977,26 @@ namespace
 
                 //  The fifth door (Console.h): the canvases, small, for the video monitor.
                 clientHost.monitorCanvases = [&videoHost] (bool wanted) { videoHost.setMonitoring (wanted); };
+
+                //  And the picked cue alone (§47, AAH): asked of the tick, read back from the renderer.
+                clientHost.previewCue = [&tileWish] (const std::string& cueId, double seconds)
+                {
+                    const std::lock_guard<std::mutex> hold { tileWish.lock };
+
+                    if (cueId == tileWish.cue && std::abs (seconds - tileWish.seconds) < 1.0e-6)
+                        return;
+
+                    tileWish.cue = cueId;
+                    tileWish.seconds = seconds;
+                    ++tileWish.serial;
+                };
+
+                clientHost.cueTile = [&videoHost]
+                {
+                    auto tile = videoHost.cueTile();
+                    return wfg::ClientHost::CueTile { tile.serial, tile.width, tile.height,
+                                                      std::vector<unsigned char> (tile.rgb.begin(), tile.rgb.end()) };
+                };
                 clientHost.canvasPictures = [&videoHost]
                 {
                     std::vector<wfg::ClientHost::CanvasPicture> out;

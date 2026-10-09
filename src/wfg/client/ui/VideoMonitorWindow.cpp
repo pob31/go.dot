@@ -62,9 +62,57 @@ namespace wfg::client::ui
             repaint();
         }
 
+        void showCue (const juce::String& captionNow, const juce::Image& pictureNow)
+        {
+            cueCaption = captionNow;
+            cuePicture = pictureNow;
+            repaint();
+        }
+
         void paint (juce::Graphics& g) override
         {
             g.fillAll (Look::colour (theme, "ground"));
+
+            auto everything = getLocalBounds();
+
+            /*  THE PICKED CUE FIRST (namespace draft §47, AAH), the larger part
+                of the window: what the hand is working on, as it will look on
+                its canvas, playing or not. */
+            if (cueCaption.isNotEmpty())
+            {
+                auto top = everything.removeFromTop (tiles.empty() ? everything.getHeight() : everything.getHeight() * 3 / 5)
+                                     .reduced (8);
+                auto caption = top.removeFromBottom (22);
+                auto picture = top;
+
+                if (cuePicture.isValid())
+                {
+                    const auto aspect = static_cast<double> (cuePicture.getWidth()) / std::max (1, cuePicture.getHeight());
+
+                    if (picture.getWidth() > picture.getHeight() * aspect)
+                        picture = picture.withSizeKeepingCentre (static_cast<int> (picture.getHeight() * aspect), picture.getHeight());
+                    else
+                        picture = picture.withSizeKeepingCentre (picture.getWidth(), static_cast<int> (picture.getWidth() / aspect));
+
+                    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                    g.drawImage (cuePicture, picture.toFloat());
+                }
+                else
+                {
+                    g.setColour (juce::Colours::black);
+                    g.fillRect (picture);
+                }
+
+                g.setColour (Look::colour (theme, "rule"));
+                g.drawRect (picture);
+                g.setColour (Look::colour (theme, cuePicture.isValid() ? "ink" : "ink-off"));
+                g.setFont (Look::font (theme, 13.0f));
+                g.drawText (cuePicture.isValid() ? cueCaption : cueCaption + "  - no picture yet",
+                            caption, juce::Justification::centredLeft, true);
+            }
+
+            if (tiles.empty() && cueCaption.isNotEmpty())
+                return;
 
             if (tiles.empty())
             {
@@ -78,7 +126,7 @@ namespace wfg::client::ui
             const auto count = static_cast<int> (tiles.size());
             const auto columns = std::max (1, static_cast<int> (std::ceil (std::sqrt (static_cast<double> (count)))));
             const auto rows = (count + columns - 1) / columns;
-            const auto area = getLocalBounds().reduced (8);
+            const auto area = everything.reduced (8);
             const auto cellWidth = area.getWidth() / columns;
             const auto cellHeight = area.getHeight() / std::max (1, rows);
             const auto now = juce::Time::getMillisecondCounter();
@@ -144,6 +192,8 @@ namespace wfg::client::ui
         model::Theme theme;
         std::vector<Tile> tiles;
         std::map<std::string, Held> images;
+        juce::String cueCaption;
+        juce::Image cuePicture;
     };
 
     //==============================================================================
@@ -178,6 +228,20 @@ namespace wfg::client::ui
 
         if (actions.monitor)
             actions.monitor (true);
+    }
+
+    void VideoMonitorWindow::openQuietly()
+    {
+        setVisible (true);
+        toFront (false);
+
+        if (actions.monitor)
+            actions.monitor (true);
+    }
+
+    void VideoMonitorWindow::showCue (const juce::String& caption, const juce::Image& picture)
+    {
+        content->showCue (caption, picture);
     }
 
     bool VideoMonitorWindow::watching() const noexcept

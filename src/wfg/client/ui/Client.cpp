@@ -1743,6 +1743,179 @@ namespace wfg::client
 
             int videoMonitorPasses = 0;
 
+            /*  THE MONITOR OPENED BY A PANEL (namespace draft §47, AAH): shown,
+                but behind the show's window's keyboard. */
+            void openVideoMonitorQuietly()
+            {
+                if (! host.canvasPictures)
+                    return;
+
+                if (videoMonitor == nullptr)
+                {
+                    ui::VideoMonitorWindow::Actions monitorActions;
+                    monitorActions.monitor = host.monitorCanvases;
+                    monitorActions.panic = [this] { panic(); };
+                    videoMonitor = std::make_unique<ui::VideoMonitorWindow> (theme, std::move (monitorActions));
+                }
+
+                videoMonitor->openQuietly();
+            }
+
+            /*  THE PICKED CUE ON THE VIDEO MONITOR (namespace draft §47, AAH).
+                The author, 2026-10-09: "We need to open the monitor window for
+                the media when adjusting", and "When this panel is open the video
+                monitor window could also be open"; asked, he chose the cue
+                alone, large, as it will look on its canvas, playing or not.
+
+                WHICH CUE: the one the picture panel is open on, or a movie
+                whose strip is. WHICH SECOND of a movie: under an in or out
+                point being dragged; else where it plays; else the strip's
+                playhead; else where it starts. The monitor opens with the
+                panel - without the keyboard, which stays where GO is - and
+                shuts with it when the panel opened it; shut by a hand while the
+                panel is open, it stays shut until the panel moves on. */
+            void followCueTile (const tree::TreeSnapshot& snapshot)
+            {
+                if (! host.previewCue)
+                    return;
+
+                const auto subject = shell->footSubject();
+                const auto base = "/godot/cue/" + subject.objectId + "/";
+                const auto isVideo = subject.isOpen() && model::text (snapshot, base + "kind") == "video";
+                const auto isMovie = isVideo && model::text (snapshot, base + "source") == "movie";
+                const auto wanted = (subject.kind == model::Subject::Kind::picture && isVideo)
+                                      || (subject.kind == model::Subject::Kind::waveform && isMovie);
+
+                std::string cue;
+                double seconds = 0.0;
+                juce::String caption;
+
+                if (wanted)
+                {
+                    cue = subject.objectId;
+                    const auto number = model::text (snapshot, base + "number");
+                    caption = juce::String (number.empty() ? std::string {} : "Cue " + number + " ")
+                              + juce::String (model::text (snapshot, base + "name"));
+
+                    if (isMovie)
+                    {
+                        const char* how = "where it starts";
+
+                        if (const auto edge = shell->foot.heldEdge(); edge.has_value())
+                        {
+                            seconds = *edge;
+                            how = nullptr;
+                        }
+                        else if (footReading.running && footReading.subject.objectId == cue)
+                        {
+                            seconds = footReading.position;
+                            how = "playing";
+                        }
+                        else if (const auto head = shell->foot.stripPlayhead(); head.has_value() && *head > 0.0)
+                        {
+                            seconds = *head;
+                            how = "at the playhead";
+                        }
+                        else
+                        {
+                            const auto ranges = model::readRanges (snapshot, cue);
+                            seconds = ! ranges.empty() ? ranges.front().in
+                                                       : osc::parseDouble (model::text (snapshot, base + "startOffset")).value_or (0.0);
+                        }
+
+                        const auto whole = static_cast<int> (std::floor (seconds / 60.0));
+                        const auto rest = seconds - 60.0 * whole;
+                        caption << " - " << juce::String (whole) << ":" << (rest < 10.0 ? "0" : "")
+                                << juce::String (rest, 2) << ", "
+                                << (how != nullptr ? juce::String (how)
+                                                   : juce::String (shell->foot.heldEdgeWord()) + " being dragged");
+                    }
+                }
+
+                if (cue != tileCueAsked || std::abs (seconds - tileSecondsAsked) > 0.0005)
+                {
+                    host.previewCue (cue, seconds);
+                    tileCueAsked = cue;
+                    tileSecondsAsked = seconds;
+                }
+
+                //  The monitor with the panel.
+                if (! cue.empty())
+                {
+                    const auto key = model::wordFor (subject.kind) + "/" + cue;
+
+                    if (videoMonitor != nullptr && monitorOpenedByPanel && ! videoMonitor->watching())
+                    {
+                        monitorShutFor = key;
+                        monitorOpenedByPanel = false;
+                    }
+
+                    if ((videoMonitor == nullptr || ! videoMonitor->watching()) && monitorShutFor != key)
+                    {
+                        openVideoMonitorQuietly();
+                        monitorOpenedByPanel = videoMonitor != nullptr && videoMonitor->watching();
+                    }
+                }
+                else
+                {
+                    if (monitorOpenedByPanel && videoMonitor != nullptr && videoMonitor->watching())
+                        videoMonitor->closeButtonPressed();
+
+                    monitorOpenedByPanel = false;
+                    monitorShutFor.clear();
+                }
+
+                if (videoMonitor == nullptr || ! videoMonitor->watching())
+                    return;
+
+                if (cue.empty())
+                {
+                    if (cueTileShown)
+                    {
+                        videoMonitor->showCue ({}, {});
+                        cueTileShown = false;
+                        cueTileBytes.clear();
+                    }
+
+                    return;
+                }
+
+                //  Ten times a second, as the canvases are read.
+                if (! host.cueTile || ++cueTilePasses % std::max (1, juce::roundToInt (theme.refreshHz / 10.0)) != 0)
+                    return;
+
+                const auto tile = host.cueTile();
+
+                if (tile.width > 0 && tile.height > 0 && tile.rgb != cueTileBytes)
+                {
+                    cueTileBytes = tile.rgb;
+                    cueTileImage = juce::Image (juce::Image::RGB, tile.width, tile.height, false, juce::SoftwareImageType());
+                    juce::Image::BitmapData pixels (cueTileImage, juce::Image::BitmapData::writeOnly);
+
+                    for (int row = 0; row < tile.height; ++row)
+                        for (int column = 0; column < tile.width; ++column)
+                        {
+                            const auto* rgb = tile.rgb.data() + 3 * (row * tile.width + column);
+                            pixels.setPixelColour (column, row, juce::Colour (rgb[0], rgb[1], rgb[2]));
+                        }
+
+                    shell->foot.setCuePicture (cueTileImage);
+                }
+
+                videoMonitor->showCue (caption, tile.width > 0 ? cueTileImage : juce::Image());
+                cueTileShown = true;
+            }
+
+            model::FootReading footReading;
+            std::string tileCueAsked;
+            double tileSecondsAsked = 0.0;
+            bool monitorOpenedByPanel = false;
+            std::string monitorShutFor;
+            int cueTilePasses = 0;
+            bool cueTileShown = false;
+            std::vector<unsigned char> cueTileBytes;
+            juce::Image cueTileImage;
+
             /*  RULE 2's ONE CALL SITE. A pointer copy, never null, and the
                 snapshot is only ever swapped whole. */
             void pass()
@@ -2125,12 +2298,15 @@ namespace wfg::client
                         picked, the anchor's values drawn. Not while a
                         surface's page holds the foot - a page edits the one
                         cue it is aimed at, and the panel shows that one. */
-                    shell->foot.show (model::readFoot (*snapshot, subject,
-                                                       surfaceHoldsFoot ? std::vector<std::string> {} : selection.ids()),
-                                      mediaTable, takePictures);
+                    footReading = model::readFoot (*snapshot, subject,
+                                                   surfaceHoldsFoot ? std::vector<std::string> {} : selection.ids());
+                    shell->foot.show (footReading, mediaTable, takePictures);
 
                     sayWhatPasteWouldDo (*snapshot, subject);
                 }
+
+                //  The picked cue on the video monitor, while its strip or its picture is open (§47, AAH).
+                followCueTile (*snapshot);
 
                 /*  AND EVERY OPEN PLUGIN WINDOW FOLLOWS THE PICK, from this
                     same snapshot; the lock closes them. */

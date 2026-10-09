@@ -1754,3 +1754,148 @@ TEST_CASE ("video host: the analyser reads a picture's size and a movie's, for t
     analyser.stop();
     folder.deleteRecursively();
 }
+
+TEST_CASE ("video host: while the monitor watches, the picked cue is drawn alone in its canvas's shape, with no output switched on (§47)")
+{
+    /*  THE PICKED CUE'S TILE (namespace draft §47, AAH): the cue as it would
+        look on its canvas, playing or not - here a red fill at half its size,
+        so the middle is red and the corners black. A show with no output
+        switched on has no renderer, until a monitor watches. */
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-tile-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/enabled", "false").ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        REQUIRE (host.isOpen());
+        host.configure (document);
+
+        //  No output on and nobody watching: no renderer.
+        tickUntil (host, clock, [] { return false; }, 300);
+        CHECK (host.readouts().renderer != "running");
+
+        host.setMonitoring (true);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto look = fill ("VD000002", "VD000011", 0, 1, 0xC03010);
+        look.scale = 50.0;
+        host.showTile (look, 0.0, 1.0);
+
+        const auto pixel = [] (const video::VideoHost::CueTile& tile, int x, int y)
+        {
+            const auto* at = tile.rgb.data() + 3 * (y * tile.width + x);
+            return (static_cast<std::uint32_t> (at[0]) << 16) | (static_cast<std::uint32_t> (at[1]) << 8) | at[2];
+        };
+
+        video::VideoHost::CueTile tile;
+        CHECK (tickUntil (host, clock, [&]
+                          {
+                              tile = host.cueTile();
+                              return tile.width > 0 && tile.height > 0
+                                       && pixel (tile, tile.width / 2, tile.height / 2) == 0xC03010u;
+                          }));
+
+        REQUIRE (tile.width > 0);
+        CHECK (tile.width == video::region::tileWidth);       // the canvas's shape, 16 by 9
+        CHECK (tile.height == video::region::tileHeight);
+        CHECK (pixel (tile, 2, 2) == 0u);
+        CHECK (pixel (tile, tile.width - 3, tile.height - 3) == 0u);
+
+        //  Let go: nothing to read.
+        host.hideTile();
+        CHECK (host.cueTile().width == 0);
+
+        host.setMonitoring (false);
+    }
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("video host: the picked movie's tile shows the frame at the second asked, while the same movie plays another (§47)")
+{
+    /*  A MOVIE'S TILE (namespace draft §47, AAH): the frame under an in point
+        being dragged, say, while the movie plays somewhere else on the canvas -
+        the tile reads the file through a store of its own, so neither pulls the
+        other's frame away. Red, blue, green, a second each. */
+    using namespace wfg::testing::hapmovie;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-tile-movie-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    std::vector<Bytes> frames;
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0xFF0000)));
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0x0000FF)));
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0x00FF00)));
+    const auto movie = writeMovie (folder, "three.mov", hapMovie (16, 8, frames, 1));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+        host.setMonitoring (true);
+
+        auto& r = *host.regionForTests();
+
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "movie";
+        layer.file = movie.getFullPathName().toStdString();
+
+        //  Playing at its first frame.
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { clock.now(), 1.0 });
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 0.2 });
+
+        std::int64_t seen = -1;
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
+
+        //  Its tile asked at a second and a half: the second frame, and the canvas still on the first.
+        auto look = layer;
+        look.id = "VD000060";
+        host.showTile (look, 1.5, 1.0);
+
+        video::VideoHost::CueTile tile;
+        CHECK (tickUntil (host, clock, [&]
+                          {
+                              tile = host.cueTile();
+
+                              if (tile.width <= 0 || tile.height <= 0)
+                                  return false;
+
+                              const auto* at = tile.rgb.data() + 3 * ((tile.height / 2) * tile.width + tile.width / 2);
+                              return at[0] == 0x00 && at[1] == 0x00 && at[2] == 0xFF;
+                          }));
+
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
+
+        host.hideTile();
+        host.setMonitoring (false);
+    }
+
+    folder.deleteRecursively();
+}
