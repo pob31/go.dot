@@ -1,0 +1,16 @@
+#N canvas 0 50 720 310 12;
+#X text 20 14 go.ratelimit - at most one message every so many ms. The newest of those that wait goes when the time is up.;
+#X floatatom 20 70 6 0 0 0 - - - 0;
+#X msg 110 70 1 2 3;
+#X msg 170 70 reset;
+#X floatatom 230 70 6 0 0 0 - - - 0;
+#X obj 20 110 go.ratelimit 200;
+#X floatatom 20 145 8 0 0 0 - - - 0;
+#X text 20 180 Thins a sensor that sends hundreds a second to what a device can take. A number \, a word or a list.;
+#X text 20 210 reset forgets what waits. Right inlet: the time (100 ms by default).;
+#X text 10 284 Part of Go.dot - https://github.com/pob31/go.dot - GPL-3.0-or-later \, Copyright (C) 2026 Pierre-Olivier Boulant;
+#X connect 1 0 5 0;
+#X connect 2 0 5 0;
+#X connect 3 0 5 0;
+#X connect 4 0 5 1;
+#X connect 5 0 6 0;

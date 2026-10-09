@@ -77,9 +77,18 @@ install(TARGETS wfg RUNTIME DESTINATION "${_wfg_bin}" COMPONENT wfg)
 # on the same network can reach http://<this machine>:<port>/ui beside the window.
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/clients/console/" DESTINATION "${_wfg_res_prefix}console" COMPONENT wfg)
 
+# Go.dot's ready-made Pd patches - go.avg, go.scale and the rest, each with its
+# help patch - where serve looks for them: beside the binary, or in the
+# bundle's Resources on macOS (namespace draft §51, ACU).
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/pd/" DESTINATION "${_wfg_res_prefix}pd" COMPONENT wfg)
+
 # An empty show to open, because a launcher opens a bundle rather than asking.
 # The window's New show and Save as are how a tester makes their own.
 install(DIRECTORY "${_wfg_packaging}/Untitled/" DESTINATION "${_wfg_res_prefix}Untitled" COMPONENT wfg)
+
+# Shows to open and learn from: so far, two process cues playing Go.dot's
+# ready-made Pd patches (namespace draft §51, PC.9).
+install(DIRECTORY "${_wfg_packaging}/Examples/" DESTINATION "${_wfg_res_prefix}Examples" COMPONENT wfg)
 
 # Beside the app on macOS (the DMG's window), beside the binary elsewhere.
 install(FILES

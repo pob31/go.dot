@@ -23549,7 +23549,27 @@ Mine, proposed:
   slim locks (`ThirdParty/pthread-shim`), Go.dot's own, measured with two patches at once (§51.6).
 - **ACU** **The ready-made patches** - `go.avg`, `go.minmax`, `go.smooth`, `go.scale`, `go.deadband`,
   `go.edge`, `go.change`, `go.hold`, `go.ratelimit` - vanilla objects only, each with a help patch, in
-  Go.dot's `pd` folder. A window is counted in values, or in milliseconds with a `ms` argument.
+  Go.dot's `pd` folder. A window is counted in values, or in milliseconds with a `ms` argument. What each
+  does, as built in PC.9 (each takes `reset`, and its right inlet changes its argument):
+  - `[go.avg 8]`, `[go.avg 500 ms]` - the average of the last 8 values, or of the values that came in
+    the last 500 ms; one out for each value in. At most 1024 values in a window.
+  - `[go.minmax 8]`, `[go.minmax 500 ms]` - the smallest on the left and the largest on the right, the
+    same windows.
+  - `[go.smooth 0.75]` - each value moves the output part of the way, keeping that much of the last
+    output; the first is taken whole. A glide over a time is Pd's `[line]`.
+  - `[go.scale 0 1023 0 1]` - one range onto another, upside down if the out range is; `clip` as a
+    fifth argument or `clip 1` keeps it inside the out range; `in a b` and `out c d` change them.
+  - `[go.deadband 4]` - a value passes only when it is further than the band from the last one passed.
+  - `[go.change]` - a number or a word passes only when it is not the last one passed.
+  - `[go.edge 512 20]` - a bang on the left going up past 522, on the right going down past 502; the
+    first value says which side it is on and bangs nothing.
+  - `[go.hold 2000]` - each number passes at once and is held; 2000 ms with nothing new and the
+    resting value goes out (0, or the second argument); the resting value itself ends the hold.
+  - `[go.ratelimit 100]` - at most one message every 100 ms, a number, a word or a list: the first at
+    once, the newest of those that waited when the time is up.
+  `scripts/make-pd-patches.py` writes them, and an example show, `Examples/Process examples`, plays
+  four of them. *(The patches carry Go.dot's licence, GPL-3.0-or-later, like the rest of the source;
+  whether a show that uses one is bound by it is the author's question, not settled here.)*
 
 ### 51.3 What a patch talks to
 
@@ -23642,6 +23662,11 @@ canvas; a patch drawn in the browser console; a MIDI message a patch heard, in t
 stops a patch stuck inside Pd short of starting Go.dot again; a helper process for the patches, which
 would give that (the option ACE did not take).
 
+A CUE NAMED BY A NUMBER. Pd reads a word that is all digits, or digits either side of an E, as a
+number, so `; /godot/cmd/cue/fire 12E45678` would send a float and fire nothing. Since PC.9 Go.dot never
+draws such an identifier (`IdRegistry::generate`, one draw in about ten thousand drawn again); a show
+made before it may hold one, and a patch cannot fire that cue by its id.
+
 ### 51.9 Built so far
 
 - **PC.0**: this section; PRD §3.6, §3.8, §3.20, §3.21, §3.29, §6.5, §6.9, §6.11; the devplan.
@@ -23706,3 +23731,10 @@ would give that (the option ACE did not take).
   receive name, so the patch answers as if the box were clicked in Pd. A box with no receive name, or
   a cue that is not running, sends nothing; playing writes nothing to the show. Pd's atom moved into
   `PatchText`, which both sides read.
+- **PC.9**: the ready-made patches (ACU) in `pd/`, written by `scripts/make-pd-patches.py`, copied
+  beside the binary by the build and installed beside it (in Resources on macOS); each has a help patch.
+  An example show, `packaging/Examples/Process examples`, installed as `Examples`: a light sensor
+  steadied and firing a cue each way, and a slider played on the canvas going to a desk scaled and
+  thinned. Pd 0.56-5's `[expr]` printed a debugging line to stdout on every long expression: the build's
+  copy of `x_vexp.c` does not. Go.dot no longer draws an identifier Pd reads as a number (§51.8). The
+  .deb recommends `puredata-gui`; the release jobs check `pd/` and validate the example.

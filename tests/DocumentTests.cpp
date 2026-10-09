@@ -433,6 +433,27 @@ TEST_CASE ("identifiers: the registry hands out unique ones and takes them back"
     CHECK_FALSE (registry.reserve ("not an id"));
 }
 
+TEST_CASE ("identifiers: none is drawn that Pure Data would read as a number")
+{
+    /*  A process cue's patch names a cue by its id (namespace draft §51); Pd
+        reads eight digits, or digits either side of an E, as a float. */
+    CHECK (IdRegistry::readAsNumberByPd ("12345678"));
+    CHECK (IdRegistry::readAsNumberByPd ("12E45678"));
+    CHECK (IdRegistry::readAsNumberByPd ("1234567E8"));
+    CHECK_FALSE (IdRegistry::readAsNumberByPd ("1234567E"));
+    CHECK_FALSE (IdRegistry::readAsNumberByPd ("E1234567"));
+    CHECK_FALSE (IdRegistry::readAsNumberByPd ("12E4E678"));
+    CHECK_FALSE (IdRegistry::readAsNumberByPd ("K7Q2M9X4"));
+    CHECK_FALSE (IdRegistry::readAsNumberByPd ("1234567A"));
+
+    auto registry = IdRegistry::withSeed (51u);
+    int numbers = 0;
+    for (int i = 0; i < 100000; ++i)       // about ten would be drawn otherwise
+        if (IdRegistry::readAsNumberByPd (registry.generate()))
+            ++numbers;
+    CHECK (numbers == 0);
+}
+
 TEST_CASE ("identifiers: two registries do not agree, which is the point")
 {
     /*  Identifiers are drawn from entropy rather than counted, so two shows

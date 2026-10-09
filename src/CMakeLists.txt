@@ -755,6 +755,14 @@ endif()
 # oversight.
 target_link_libraries(wfg PRIVATE wfg::engine wfg::client_ui wfg::warnings)
 
+# GO.DOT'S READY-MADE PD PATCHES (namespace draft §51, ACU) beside the binary in
+# the build tree as the installer puts them beside it (cmake/WfgInstall.cmake):
+# serve looks for them in a `pd` folder next to itself, so a process cue run
+# from a build finds [go.avg] and the rest as a tester's copy does.
+add_custom_command(TARGET wfg POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/pd" "$<TARGET_FILE_DIR:wfg>/pd"
+    VERBATIM)
+
 # NOTE: there is no add_test() in this file. Every add_test() in the project
 # lives in tests/CMakeLists.txt, including the ones that run THIS binary, so
 # that the full list of what CI actually executes can be read in one place.

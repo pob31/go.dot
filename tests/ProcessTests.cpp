@@ -29,6 +29,7 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -1118,4 +1119,403 @@ TEST_CASE ("process editor: process.edit is refused on what is not a process cue
     //  pd.install with nothing to download: taken and ignored.
     REQUIRE (rig.engine.submit ("cli", "pd.install", {}));
     rig.tickOnce();
+}
+
+//==============================================================================
+/*  PC.9: GO.DOT'S READY-MADE PATCHES (namespace draft §51, ACU), each played
+    through a patch that uses it - [r /in] and [r /right] into its inlets, a
+    `reset` from [r /reset], its outlets to /out and /out2 - a value a tick,
+    and every help patch opened with nothing printed against it. A tick is
+    20 ms of Pd's time. */
+namespace
+{
+    std::filesystem::path readyMadeFolder()
+    {
+        return std::filesystem::path (std::string (WFG_REPO_ROOT)) / "pd";
+    }
+
+    PdInstance::Settings withReadyMade (const std::string& name)
+    {
+        auto settings = settingsFor (name);
+        settings.searchPaths.push_back (readyMadeFolder().string());
+        return settings;
+    }
+
+    std::string around (const std::string& box, int inlets, int outlets)
+    {
+        std::string text = "#N canvas 0 0 450 300 12;\n"
+                           "#X obj 10 10 r /in;\n"
+                           "#X obj 200 10 r /right;\n"
+                           "#X obj 300 10 r /reset;\n"
+                           "#X msg 300 40 reset;\n"
+                           "#X obj 10 80 " + box + ";\n"
+                           "#X obj 10 140 s /out;\n"
+                           "#X obj 200 140 s /out2;\n"
+                           "#X connect 0 0 4 0;\n"
+                           "#X connect 2 0 3 0;\n"
+                           "#X connect 3 0 4 0;\n"
+                           "#X connect 4 0 5 0;\n";
+        if (inlets > 1)
+            text += "#X connect 1 0 4 1;\n";
+        if (outlets > 1)
+            text += "#X connect 4 1 6 0;\n";
+        return text;
+    }
+
+    /*  What Pd printed that says something did not work. */
+    std::vector<std::string> troubleIn (const Outbox& outbox)
+    {
+        std::vector<std::string> out;
+        for (const auto& line : outbox.printed)
+            for (const char* word : { "error", "couldn't", "no method", "failed", "bad ", "unknown", "can't" })
+                if (line.find (word) != std::string::npos)
+                {
+                    out.push_back (line);
+                    break;
+                }
+        return out;
+    }
+
+    std::string joined (const std::vector<std::string>& lines)
+    {
+        std::string out;
+        for (const auto& line : lines)
+            out += line + "\n";
+        return out;
+    }
+
+    int bangsTo (const Outbox& outbox, const std::string& to)
+    {
+        return static_cast<int> (std::count_if (outbox.sent.begin(), outbox.sent.end(),
+                                                [&to] (const Sent& s) { return s.to == to && s.selector == "bang"; }));
+    }
+
+    std::vector<std::string> wordsSentTo (const Outbox& outbox, const std::string& to)
+    {
+        std::vector<std::string> out;
+        for (const auto& sent : outbox.sent)
+            if (sent.to == to)
+                for (const auto& atom : sent.atoms)
+                    if (! atom.isNumber)
+                        out.push_back (atom.word);
+        return out;
+    }
+
+    struct Played
+    {
+        PdInstance pd;
+
+        Played (const std::string& name, const std::string& box, int inlets, int outlets)
+            : pd (withReadyMade (name))
+        {
+            makeAndOpen (pd, around (box, inlets, outlets));
+            const auto opened = pd.takeOutbox();
+            INFO (joined (opened.printed));
+            CHECK (troubleIn (opened).empty());
+        }
+
+        Outbox tick (std::vector<Input> inputs = {}) { return tickOnce (pd, std::move (inputs)); }
+        Outbox in (double value) { return tick ({ { "/in", { Atom::of (value) } } }); }
+        Outbox in (Atoms atoms) { return tick ({ { "/in", std::move (atoms) } }); }
+        Outbox right (double value) { return tick ({ { "/right", { Atom::of (value) } } }); }
+        Outbox reset() { return tick ({ { "/reset", {} } }); }
+
+        /*  The one number a value in sends to /out, or nothing. */
+        std::optional<double> out (double value)
+        {
+            const auto sent = numbersSentTo (in (value), "/out");
+            if (sent.empty())
+                return std::nullopt;
+            CHECK (sent.size() == 1u);
+            return sent.front();
+        }
+    };
+
+    bool is (std::optional<double> got, double expected)
+    {
+        return got.has_value() && sameNumber (*got, expected);
+    }
+}
+
+TEST_CASE ("ready-made: go.avg - the average of the last values, forgotten on reset, a new window from the right")
+{
+    Played avg ("go-avg", "go.avg 4", 2, 1);
+    CHECK (is (avg.out (1.0), 1.0));
+    CHECK (is (avg.out (2.0), 1.5));
+    CHECK (is (avg.out (3.0), 2.0));
+    CHECK (is (avg.out (4.0), 2.5));
+    CHECK (is (avg.out (5.0), 3.5));      // 1 has left the window of four
+    CHECK (is (avg.out (6.0), 4.5));
+
+    avg.reset();
+    CHECK (is (avg.out (10.0), 10.0));
+
+    CHECK (numbersSentTo (avg.right (2.0), "/out").empty());
+    CHECK (is (avg.out (4.0), 4.0));
+    CHECK (is (avg.out (6.0), 5.0));
+    CHECK (is (avg.out (8.0), 7.0));
+}
+
+TEST_CASE ("ready-made: go.avg in ms - the values that came in the window's time")
+{
+    Played avg ("go-avg-ms", "go.avg 100 ms", 2, 1);
+    CHECK (is (avg.out (10.0), 10.0));    // at 0 ms
+    CHECK (is (avg.out (20.0), 15.0));    // at 20
+    CHECK (is (avg.out (30.0), 20.0));    // at 40
+    for (int tick = 3; tick < 7; ++tick)
+        CHECK (numbersSentTo (avg.tick(), "/out").empty());
+    CHECK (is (avg.out (40.0), 35.0));    // at 140: what came at 0 and 20 is older than 100 ms
+    for (int tick = 8; tick < 20; ++tick)
+        avg.tick();
+    CHECK (is (avg.out (50.0), 50.0));    // at 400: alone
+}
+
+TEST_CASE ("ready-made: go.minmax - the smallest and the largest of the last values")
+{
+    Played minmax ("go-minmax", "go.minmax 3", 2, 2);
+    const auto both = [&minmax] (double value)
+    {
+        const auto outbox = minmax.in (value);
+        const auto low = numbersSentTo (outbox, "/out");
+        const auto high = numbersSentTo (outbox, "/out2");
+        REQUIRE (low.size() == 1u);
+        REQUIRE (high.size() == 1u);
+        return std::pair { low[0], high[0] };
+    };
+    CHECK (both (5.0) == std::pair { 5.0, 5.0 });
+    CHECK (both (1.0) == std::pair { 1.0, 5.0 });
+    CHECK (both (9.0) == std::pair { 1.0, 9.0 });
+    CHECK (both (7.0) == std::pair { 1.0, 9.0 });
+    CHECK (both (8.0) == std::pair { 7.0, 9.0 });    // 5 and 1 have left
+    minmax.reset();
+    CHECK (both (-3.0) == std::pair { -3.0, -3.0 });
+}
+
+TEST_CASE ("ready-made: go.minmax in ms - over the window's time")
+{
+    Played minmax ("go-minmax-ms", "go.minmax 60 ms", 2, 2);
+    CHECK (numbersSentTo (minmax.in (9.0), "/out2") == std::vector<double> { 9.0 });   // at 0
+    minmax.in (2.0);                                                                      // at 20
+    for (int tick = 2; tick < 4; ++tick)
+        minmax.tick();
+    const auto outbox = minmax.in (5.0);                                                  // at 80: 9 is gone
+    CHECK (numbersSentTo (outbox, "/out") == std::vector<double> { 2.0 });
+    CHECK (numbersSentTo (outbox, "/out2") == std::vector<double> { 5.0 });
+}
+
+TEST_CASE ("ready-made: go.smooth - each value part of the way, the first whole")
+{
+    Played smooth ("go-smooth", "go.smooth 0.5", 2, 1);
+    CHECK (is (smooth.out (10.0), 10.0));
+    CHECK (is (smooth.out (20.0), 15.0));
+    CHECK (is (smooth.out (20.0), 17.5));
+    smooth.reset();
+    CHECK (is (smooth.out (4.0), 4.0));
+    smooth.right (0.0);
+    CHECK (is (smooth.out (8.0), 8.0));
+
+    Played byDefault ("go-smooth-default", "go.smooth", 2, 1);
+    CHECK (is (byDefault.out (0.0), 0.0));
+    CHECK (is (byDefault.out (100.0), 25.0));       // three quarters kept
+}
+
+TEST_CASE ("ready-made: go.scale - one range onto another, clipped when asked, changed by message")
+{
+    Played scale ("go-scale", "go.scale 0 10 100 200", 1, 1);
+    CHECK (is (scale.out (5.0), 150.0));
+    CHECK (is (scale.out (20.0), 300.0));
+    CHECK (numbersSentTo (scale.in ({ Atom::of (std::string ("clip")), Atom::of (1.0) }), "/out").empty());
+    CHECK (is (scale.out (20.0), 200.0));
+    scale.in ({ Atom::of (std::string ("out")), Atom::of (1.0), Atom::of (0.0) });
+    CHECK (is (scale.out (5.0), 0.5));               // upside down
+    scale.in ({ Atom::of (std::string ("in")), Atom::of (0.0), Atom::of (100.0) });
+    CHECK (is (scale.out (25.0), 0.75));
+
+    Played plain ("go-scale-plain", "go.scale", 1, 1);
+    CHECK (is (plain.out (0.25), 0.25));
+
+    Played clipped ("go-scale-clip", "go.scale 0 1 -90 90 clip", 1, 1);
+    CHECK (is (clipped.out (2.0), 90.0));
+    CHECK (is (clipped.out (0.5), 0.0));
+}
+
+TEST_CASE ("ready-made: go.deadband - a value passes only once it has moved past the band")
+{
+    Played band ("go-deadband", "go.deadband 4", 2, 1);
+    CHECK (is (band.out (100.0), 100.0));
+    CHECK_FALSE (band.out (102.0).has_value());
+    CHECK (is (band.out (105.0), 105.0));
+    CHECK_FALSE (band.out (101.0).has_value());     // four is not past a band of four
+    CHECK (is (band.out (100.0), 100.0));
+    band.reset();
+    CHECK (is (band.out (100.0), 100.0));            // the first after reset
+    band.right (0.0);
+    CHECK_FALSE (band.out (100.0).has_value());
+    CHECK (is (band.out (101.0), 101.0));
+}
+
+TEST_CASE ("ready-made: go.change - a number or a word that is not the last one")
+{
+    Played change ("go-change", "go.change", 2, 1);
+    CHECK (is (change.out (3.0), 3.0));
+    CHECK_FALSE (change.out (3.0).has_value());
+    CHECK (is (change.out (4.0), 4.0));
+
+    const auto word = [&change] (const char* w) { return wordsSentTo (change.in ({ Atom::of (std::string (w)) }), "/out"); };
+    CHECK (word ("open") == std::vector<std::string> { "open" });
+    CHECK (word ("open").empty());
+    CHECK (word ("shut") == std::vector<std::string> { "shut" });
+
+    change.reset();
+    CHECK (is (change.out (4.0), 4.0));
+    CHECK (word ("shut") == std::vector<std::string> { "shut" });
+
+    change.tick ({ { "/right", {} } });               // a bang on the right forgets too
+    CHECK (is (change.out (4.0), 4.0));
+}
+
+TEST_CASE ("ready-made: go.edge - a bang going up past the band, another going down")
+{
+    Played edge ("go-edge", "go.edge 50 10", 2, 2);
+    const auto crossed = [&edge] (double value)
+    {
+        const auto outbox = edge.in (value);
+        return std::pair { bangsTo (outbox, "/out"), bangsTo (outbox, "/out2") };
+    };
+    CHECK (crossed (40.0) == std::pair { 0, 0 });    // the first says where it is
+    CHECK (crossed (52.0) == std::pair { 0, 0 });    // inside the band
+    CHECK (crossed (60.0) == std::pair { 1, 0 });
+    CHECK (crossed (70.0) == std::pair { 0, 0 });
+    CHECK (crossed (50.0) == std::pair { 0, 0 });
+    CHECK (crossed (44.0) == std::pair { 0, 1 });
+    CHECK (crossed (30.0) == std::pair { 0, 0 });
+    edge.reset();
+    CHECK (crossed (60.0) == std::pair { 0, 0 });
+    CHECK (crossed (40.0) == std::pair { 0, 1 });
+    edge.right (20.0);                                // a new threshold
+    CHECK (crossed (30.0) == std::pair { 1, 0 });
+}
+
+TEST_CASE ("ready-made: go.hold - a value held for its time, then the resting value")
+{
+    Played hold ("go-hold", "go.hold 100", 2, 1);
+    std::vector<std::pair<int, double>> seen;
+    const auto at = [&] (int tick, Outbox outbox)
+    {
+        for (const auto value : numbersSentTo (outbox, "/out"))
+            seen.emplace_back (tick, value);
+    };
+    for (int tick = 0; tick < 30; ++tick)
+    {
+        if (tick == 0 || tick == 8 || tick == 10 || tick == 20)
+            at (tick, hold.in (1.0));
+        else if (tick == 22)
+            at (tick, hold.in (0.0));                 // the resting value: it passes, and the hold ends
+        else
+            at (tick, hold.tick());
+    }
+    const std::vector<std::pair<int, double>> expected {
+        { 0, 1.0 }, { 5, 0.0 },                       // 100 ms after 0
+        { 8, 1.0 }, { 10, 1.0 }, { 15, 0.0 },         // held again from 200 ms
+        { 20, 1.0 }, { 22, 0.0 } };
+    CHECK (seen == expected);
+}
+
+TEST_CASE ("ready-made: go.ratelimit - one message every so often, the newest of those that waited")
+{
+    Played limit ("go-ratelimit", "go.ratelimit 100", 2, 1);
+    std::vector<std::pair<int, std::vector<double>>> seen;
+    for (int tick = 0; tick < 25; ++tick)
+    {
+        Outbox outbox;
+        if (tick <= 2)
+            outbox = limit.in (static_cast<double> (tick + 1));
+        else if (tick == 12)
+            outbox = limit.in (4.0);
+        else if (tick == 13)
+            outbox = limit.in ({ Atom::of (5.0), Atom::of (6.0) });
+        else
+            outbox = limit.tick();
+        if (const auto sent = numbersSentTo (outbox, "/out"); ! sent.empty())
+            seen.emplace_back (tick, sent);
+    }
+    const std::vector<std::pair<int, std::vector<double>>> expected {
+        { 0, { 1.0 } },                                // the first at once
+        { 5, { 3.0 } },                                // 2 was overtaken by 3
+        { 12, { 4.0 } },                               // idle again since 200 ms
+        { 17, { 5.0, 6.0 } } };                        // a list, 100 ms after 4
+    CHECK (seen == expected);
+}
+
+TEST_CASE ("ready-made: every help patch opens with nothing printed against it")
+{
+    int opened = 0;
+    for (const auto& entry : std::filesystem::directory_iterator (readyMadeFolder()))
+    {
+        const auto file = entry.path().filename().string();
+        if (file.size() < 8 || file.substr (file.size() - 8) != "-help.pd")
+            continue;
+
+        INFO (file);
+        std::ifstream in (entry.path(), std::ios::binary);
+        const std::string text ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        CHECK (parsePatch (text).problem.empty());
+
+        PdInstance pd (withReadyMade ("help-" + file.substr (0, file.size() - 3)));
+        makeAndOpen (pd, text);
+        const auto outbox = pd.takeOutbox();
+        INFO (joined (outbox.printed));
+        CHECK (troubleIn (outbox).empty());
+        ++opened;
+    }
+    CHECK (opened == 9);
+}
+
+TEST_CASE ("ready-made: the example show opens, and its two patches play with the ready-made ones found")
+{
+    const auto bundle = juce::File (juce::String (std::string (WFG_REPO_ROOT))).getChildFile ("packaging/Examples/Process examples");
+    wfg::doc::ShowDocument document;
+    REQUIRE (wfg::doc::Bundle::open (bundle, document).ok);
+
+    const auto patchOf = [&document] (const char* id)
+    {
+        const auto patch = document.getAttribute (std::string ("/godot/cue/") + id + "/patch");
+        REQUIRE (patch.has_value());
+        return *patch;
+    };
+
+    //  SENSOR TO CUES: a light coming up fires Lights up once, going down Lights down once.
+    PdInstance sensor (withReadyMade ("example-sensor"));
+    makeAndOpen (sensor, patchOf ("PXSENS0R"));
+    {
+        const auto opened = sensor.takeOutbox();
+        INFO (joined (opened.printed));
+        CHECK (troubleIn (opened).empty());
+    }
+    std::vector<std::string> fired;
+    const auto light = [&] (double value)
+    {
+        for (const auto& sent : tickOnce (sensor, { { "/sensor/light", { Atom::of (value) } } }).sent)
+            if (sent.to == "/godot/cmd/cue/fire")
+                fired.push_back (sent.selector);
+    };
+    light (0.0);
+    for (int tick = 0; tick < 10; ++tick)
+        light (1000.0);
+    CHECK (fired == std::vector<std::string> { "PXSHN001" });
+    for (int tick = 0; tick < 10; ++tick)
+        light (0.0);
+    CHECK (fired == std::vector<std::string> { "PXSHN001", "PXDARK01" });
+
+    //  SLIDER TO DESK: the slider's 64 goes to the desk as 64/127.
+    PdInstance slider (withReadyMade ("example-slider"));
+    makeAndOpen (slider, patchOf ("PXFADER1"));
+    {
+        const auto opened = slider.takeOutbox();
+        INFO (joined (opened.printed));
+        CHECK (troubleIn (opened).empty());
+    }
+    const auto desk = numbersSentTo (tickOnce (slider, { { "/slider", { Atom::of (64.0) } } }), "/desk/fader/1");
+    REQUIRE (desk.size() == 1u);
+    CHECK (std::abs (desk[0] - 64.0 / 127.0) < 1e-5);
 }

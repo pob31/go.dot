@@ -664,7 +664,10 @@ unset(_hidapi)
 #   * a patch cannot end Go.dot (ACP): "pd quit" calls exit() and "pd exit" sets
 #     a quit flag every instance's scheduler stops on, so one message box would
 #     end the show or freeze every patch's clocks; the copy of s_inter.c refuses
-#     both, in Pd's console's words.
+#     both, in Pd's console's words;
+#   * nothing printed behind the show's back: Pd 0.56-5's [expr] still prints a
+#     debugging line to stdout whenever it makes a long expression, which the
+#     copy of x_vexp.c does not.
 # Each copy is made at configure time - line endings made LF first, so a checkout
 # with CRLF matches too - and the submodule is left as pinned. If a text the build
 # replaces ever moves, configure stops here rather than building a Pd without
@@ -682,7 +685,7 @@ foreach(_file d_arithmetic d_array d_ctl d_dac d_delay d_fft d_fft_fftsg d_filte
               g_traversal g_undo g_vumeter m_atom m_binbuf m_class m_conf m_glob m_memory
               m_obj m_pd m_sched s_audio s_audio_dummy s_inter_gui s_main s_net
               s_path s_print s_utf8 x_acoustics x_arithmetic x_array x_connective x_file
-              x_gui x_interface x_list x_midi x_misc x_net x_scalar x_text x_time x_vexp
+              x_gui x_interface x_list x_midi x_misc x_net x_scalar x_text x_time
               x_vexp_fun x_vexp_if)
     target_sources(wfg_pd PRIVATE "${_pd}/${_file}.c")
 endforeach()
@@ -716,7 +719,10 @@ _wfg_pd_amend(s_inter.c
 _wfg_pd_amend(s_inter.c
     "void glob_quit(void *dummy, t_floatarg status)\n{\n    exit(status);\n}"
     "void glob_quit(void *dummy, t_floatarg status)\n{\n    (void)dummy; (void)status;\n    pd_error(0, \"Go.dot: a patch cannot end Go.dot - [pd quit( is refused\");\n}")
-foreach(_file s_loader.c s_inter.c)
+_wfg_pd_amend(x_vexp.c
+    "    printf (\"realloc called with %zu bytes\\n\", size);\n"
+    "")
+foreach(_file s_loader.c s_inter.c x_vexp.c)
     file(WRITE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${_wfg_pd_${_file}}")
     configure_file("${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${CMAKE_BINARY_DIR}/wfg_pd/${_file}" COPYONLY)
     target_sources(wfg_pd PRIVATE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}")

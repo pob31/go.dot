@@ -1,0 +1,22 @@
+<Show>
+  <Lists>
+    <List id="PX7K2QM9" name="Examples">
+      <Cue id="PXN0TE5A" name="Read me" notes="Two process cues: each runs a Pure Data patch from its GO until Esc. Pick one to see its patch at the foot; GO, and the values show on it as they go by. Sensor to cues hears a light sensor at /sensor on this machine and fires the two cues in Fired by patches; Slider to desk is played on the canvas with Ctrl+E and writes to a desk listening on port 9000. The go. boxes are Go.dot's ready-made patches: open one in Pd or plugdata for its help." number="1"/>
+      <Process id="PXSENS0R" name="Sensor to cues" number="2" patch="#N canvas 0 50 760 420 12;&#10;#X text 20 14 A light sensor - an Arduino \, or a phone app - sends /sensor/light \, 0 to 1023 \, to Go.dot's OSC port. Steadied by go.smooth \, crossing 600 on the way up fires Lights up and on the way down Lights down.;&#10;#X obj 20 100 r /sensor/light;&#10;#X obj 20 140 go.smooth 0.8;&#10;#X floatatom 200 140 6 0 0 0 - - - 0;&#10;#X obj 20 180 go.edge 600 40;&#10;#X msg 20 240 \; /godot/cmd/cue/fire PXSHN001;&#10;#X msg 320 240 \; /godot/cmd/cue/fire PXDARK01;&#10;#X connect 1 0 2 0;&#10;#X connect 2 0 3 0;&#10;#X connect 2 0 4 0;&#10;#X connect 4 0 5 0;&#10;#X connect 4 1 6 0;&#10;"/>
+      <Process id="PXFADER1" name="Slider to desk" number="3" patch="#N canvas 0 50 760 420 12;&#10;#X text 20 14 While the cue runs \, Ctrl+E on the canvas plays the patch: drag the slider. Its 0 to 127 goes to the desk as 0 to 1 \, at most twenty times a second.;&#10;#X obj 20 100 hsl 160 18 0 127 0 0 empty /slider empty -2 -10 0 12 #fcfcfc #000000 #000000 0 1;&#10;#X obj 20 150 r /slider;&#10;#X obj 20 190 go.scale 0 127 0 1;&#10;#X obj 20 230 go.ratelimit 50;&#10;#X obj 20 270 s /desk/fader/1;&#10;#X connect 2 0 3 0;&#10;#X connect 3 0 4 0;&#10;#X connect 4 0 5 0;&#10;"/>
+    </List>
+    <List id="PXF1RED5" name="Fired by patches">
+      <Osc id="PXSHN001" address="/desk/lights" name="Lights up" number="1" value="f:1"/>
+      <Osc id="PXDARK01" address="/desk/lights" name="Lights down" number="2" value="f:0"/>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="PXMNT001" name="Light sensor" port="9100" prefix="/sensor" rx="true"/>
+    <Mount id="PXMNT002" name="Desk" port="9000" prefix="/desk"/>
+  </Mounts>
+  <Audio tracks="0"/>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

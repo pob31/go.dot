@@ -1,0 +1,14 @@
+#N canvas 0 50 720 310 12;
+#X text 20 14 go.deadband - a value passes only when it has moved further than the band from the last one that passed.;
+#X floatatom 20 70 6 0 0 0 - - - 0;
+#X msg 110 70 reset;
+#X floatatom 170 70 6 0 0 0 - - - 0;
+#X obj 20 110 go.deadband 4;
+#X floatatom 20 145 8 0 0 0 - - - 0;
+#X text 20 180 Steadies a sensor that wanders by a few steps. The first value passes. Reset forgets.;
+#X text 20 210 Right inlet: the band.;
+#X text 10 284 Part of Go.dot - https://github.com/pob31/go.dot - GPL-3.0-or-later \, Copyright (C) 2026 Pierre-Olivier Boulant;
+#X connect 1 0 4 0;
+#X connect 2 0 4 0;
+#X connect 3 0 4 1;
+#X connect 4 0 5 0;

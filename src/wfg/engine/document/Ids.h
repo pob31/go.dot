@@ -104,8 +104,17 @@ namespace wfg::doc
             Never used by the engine itself. */
         static IdRegistry withSeed (std::uint64_t seed);
 
-        /** A fresh identifier, not currently in use, and now reserved. */
+        /** A fresh identifier, not currently in use, and now reserved.
+
+            NEVER ONE PURE DATA READS AS A NUMBER (namespace draft §51, PC.9):
+            eight digits, or digits either side of an E, are a number to Pd, so
+            a process cue's patch naming such a cue - `; /godot/cmd/cue/fire
+            12E45678` - would send a float, rounded or infinite, and fire
+            nothing. One draw in about ten thousand; drawn again. */
         std::string generate();
+
+        /** Whether Pd would read `text` as a number rather than a word. */
+        static bool readAsNumberByPd (std::string_view text) noexcept;
 
         /*  A number from the same source, for the one other thing in the engine
             that needs randomness: the seed a shuffled group draws its rounds

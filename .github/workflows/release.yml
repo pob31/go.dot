@@ -142,8 +142,10 @@ jobs:
           ./wfg --version
           ./wfg selftest
           ./wfg validate Untitled
+          ./wfg validate "Examples/Process examples"
           test -x go.dot.sh
           test -f console/index.html
+          test -f pd/go.avg.pd
 
       - name: Archive
         # tar, not zip: it keeps the executable bits on wfg and go.dot.sh.
@@ -256,8 +258,10 @@ jobs:
           "$macos/wfg" --version
           "$macos/wfg" selftest
           "$macos/wfg" validate Go.dot.app/Contents/Resources/Untitled
+          "$macos/wfg" validate "Go.dot.app/Contents/Resources/Examples/Process examples"
           test -f Go.dot.app/Contents/Resources/launch.sh
           test -f Go.dot.app/Contents/Resources/console/index.html
+          test -f Go.dot.app/Contents/Resources/pd/go.avg.pd
 
       # WHAT macOS SAYS TO THE APP, tried the way a person does it, because
       # nothing else here can: the app registered with LaunchServices, a show's
@@ -370,7 +374,8 @@ jobs:
           }
           if (-not (Test-Path 'Go.dot.exe')) { throw 'Go.dot.exe is missing' }
           if (-not (Test-Path 'console/index.html')) { throw 'console/ is missing' }
-          foreach ($run in @(@('--version'), @('selftest'), @('validate', 'Untitled'))) {
+          if (-not (Test-Path 'pd/go.avg.pd')) { throw 'pd/ is missing' }
+          foreach ($run in @(@('--version'), @('selftest'), @('validate', 'Untitled'), @('validate', 'Examples/Process examples'))) {
             & ./wfg.exe @run
             if ($LASTEXITCODE -ne 0) { throw "wfg $run exited $LASTEXITCODE" }
           }

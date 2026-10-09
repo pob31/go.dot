@@ -1,0 +1,15 @@
+#N canvas 0 50 720 280 12;
+#X text 20 14 go.change - a number or a word passes only when it is not the last one that passed.;
+#X floatatom 20 70 6 0 0 0 - - - 0;
+#X msg 110 70 symbol open;
+#X msg 242 70 symbol shut;
+#X msg 374 70 reset;
+#X obj 20 110 go.change;
+#X floatatom 20 145 8 0 0 0 - - - 0;
+#X text 20 180 A word goes out as a word \, a number as a number. reset \, or a bang on the right inlet \, forgets.;
+#X text 10 254 Part of Go.dot - https://github.com/pob31/go.dot - GPL-3.0-or-later \, Copyright (C) 2026 Pierre-Olivier Boulant;
+#X connect 1 0 5 0;
+#X connect 2 0 5 0;
+#X connect 3 0 5 0;
+#X connect 4 0 5 0;
+#X connect 5 0 6 0;

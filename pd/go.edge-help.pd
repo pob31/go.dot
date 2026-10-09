@@ -1,0 +1,17 @@
+#N canvas 0 50 720 340 12;
+#X text 20 14 go.edge - a bang on the left when the value rises above the threshold \, on the right when it falls below.;
+#X floatatom 20 70 6 0 0 0 - - - 0;
+#X msg 110 70 reset;
+#X floatatom 170 70 6 0 0 0 - - - 0;
+#X obj 20 110 go.edge 512 20;
+#X obj 20 145 bng 25 250 50 0 empty empty empty 0 -8 0 10 #fcfcfc #000000 #000000;
+#X obj 220 145 bng 25 250 50 0 empty empty empty 0 -8 0 10 #fcfcfc #000000 #000000;
+#X text 20 180 Arguments: the threshold \, and a band around it: with 20 it crosses at 522 going up \, 502 going down.;
+#X text 20 210 The first value says which side it is on and bangs nothing. Reset forgets. Right inlet: the threshold.;
+#X text 20 240 Fire a cue with it: a message box [ \; /godot/cmd/cue/fire <cue id>( under the left outlet.;
+#X text 10 314 Part of Go.dot - https://github.com/pob31/go.dot - GPL-3.0-or-later \, Copyright (C) 2026 Pierre-Olivier Boulant;
+#X connect 1 0 4 0;
+#X connect 2 0 4 0;
+#X connect 3 0 4 1;
+#X connect 4 0 5 0;
+#X connect 4 1 6 0;

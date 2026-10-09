@@ -123,6 +123,31 @@ namespace wfg::doc
         return z ^ (z >> 31);
     }
 
+    bool IdRegistry::readAsNumberByPd (std::string_view text) noexcept
+    {
+        /*  Pd's own test, narrowed to what an identifier can hold - digits and
+            capitals, no point or sign: digits, then at most one E with digits
+            after it. */
+        const auto isDigit = [] (char c) { return c >= '0' && c <= '9'; };
+        std::size_t at = 0;
+
+        while (at < text.size() && isDigit (text[at]))
+            ++at;
+
+        if (at == 0)
+            return false;
+        if (at == text.size())
+            return true;
+        if (text[at] != 'E' && text[at] != 'e')
+            return false;
+
+        const auto exponent = ++at;
+        while (at < text.size() && isDigit (text[at]))
+            ++at;
+
+        return at == text.size() && at > exponent;
+    }
+
     std::string IdRegistry::generate()
     {
         /*  Draw until the value is free. With 2^40 values and a show holding
@@ -132,6 +157,9 @@ namespace wfg::doc
         for (int attempt = 0; attempt < 1000; ++attempt)
         {
             auto candidate = Id::encode (nextRandom());
+
+            if (readAsNumberByPd (candidate))
+                continue;
 
             if (taken.insert (candidate).second)
                 return candidate;
