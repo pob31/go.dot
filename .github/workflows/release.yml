@@ -146,6 +146,8 @@ jobs:
           test -x go.dot.sh
           test -f console/index.html
           test -f pd/go.avg.pd
+          # The two Try it out guides, by pattern: the French one's name has a c-cedilla.
+          test "$(ls Go.dot_TryItOut_*.md | wc -l)" -eq 2
 
       - name: Archive
         # tar, not zip: it keeps the executable bits on wfg and go.dot.sh.
@@ -262,6 +264,8 @@ jobs:
           test -f Go.dot.app/Contents/Resources/launch.sh
           test -f Go.dot.app/Contents/Resources/console/index.html
           test -f Go.dot.app/Contents/Resources/pd/go.avg.pd
+          # Beside the app, as LICENSE is: the two Try it out guides, by pattern.
+          test "$(ls Go.dot_TryItOut_*.md | wc -l)" -eq 2
 
       # WHAT macOS SAYS TO THE APP, tried the way a person does it, because
       # nothing else here can: the app registered with LaunchServices, a show's
@@ -375,6 +379,8 @@ jobs:
           if (-not (Test-Path 'Go.dot.exe')) { throw 'Go.dot.exe is missing' }
           if (-not (Test-Path 'console/index.html')) { throw 'console/ is missing' }
           if (-not (Test-Path 'pd/go.avg.pd')) { throw 'pd/ is missing' }
+          # The two Try it out guides, by pattern: the French one's name has a c-cedilla.
+          if (@(Get-ChildItem 'Go.dot_TryItOut_*.md').Count -ne 2) { throw 'a Try it out guide is missing' }
           foreach ($run in @(@('--version'), @('selftest'), @('validate', 'Untitled'), @('validate', 'Examples/Process examples'))) {
             & ./wfg.exe @run
             if ($LASTEXITCODE -ne 0) { throw "wfg $run exited $LASTEXITCODE" }

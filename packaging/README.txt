@@ -11,6 +11,10 @@ A report is most useful with the build's name (the archive's name, or the
 first line of `wfg --version`), your OS, your audio device, and the log -
 where each system keeps it is below.
 
+A longer guide - what Go.dot is, a first show in ten minutes, the keys that
+matter, and what there is to try - sits beside this file:
+Go.dot_TryItOut_English.md, and the same guide in French beside it.
+
 
 Starting it
 -----------

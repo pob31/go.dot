@@ -90,11 +90,15 @@ install(DIRECTORY "${_wfg_packaging}/Untitled/" DESTINATION "${_wfg_res_prefix}U
 # ready-made Pd patches (namespace draft §51, PC.9).
 install(DIRECTORY "${_wfg_packaging}/Examples/" DESTINATION "${_wfg_res_prefix}Examples" COMPONENT wfg)
 
-# Beside the app on macOS (the DMG's window), beside the binary elsewhere.
+# Beside the app on macOS (the DMG's window), beside the binary elsewhere. The
+# two Try it out guides are the author's for testers, in English and in French;
+# README.txt points to them.
 install(FILES
     "${PROJECT_SOURCE_DIR}/LICENSE"
     "${PROJECT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
     "${_wfg_packaging}/README.txt"
+    "${PROJECT_SOURCE_DIR}/docs/Go.dot_TryItOut_English.md"
+    "${PROJECT_SOURCE_DIR}/docs/Go.dot_TryItOut_Français.md"
     DESTINATION . COMPONENT wfg)
 
 # One launcher per platform, and only that platform's. macOS's launcher is the
