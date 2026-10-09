@@ -427,7 +427,7 @@ namespace wfg::client::model
             return out;
 
         std::string list;
-        bool allMedia = true;
+        bool allPlayable = true;
 
         for (const auto& id : picked)
         {
@@ -456,10 +456,20 @@ namespace wfg::client::model
                 continue;
 
             ++out.count;
-            allMedia = allMedia && kind == "media";
+
+            /*  WHAT A SAMPLER COULD HOLD (namespace draft §49): a sound, a
+                picture, and a sound locked to a movie only with its movie
+                picked too (ABE). */
+            const auto lockedTo = kind == "media" ? text (snapshot, "/godot/cue/" + id + "/lockedTo") : std::string {};
+            const auto playable = kind == "video"
+                                    || (kind == "media"
+                                          && (lockedTo.empty()
+                                                || std::find (picked.begin(), picked.end(), lockedTo) != picked.end()));
+
+            allPlayable = allPlayable && playable;
         }
 
-        out.allMedia = out.count > 0 && allMedia;
+        out.allPlayable = out.count > 0 && allPlayable;
         return out;
     }
 
@@ -476,7 +486,7 @@ namespace wfg::client::model
                                -1, false });
 
             for (std::size_t at = 0; at < choices.size(); ++at)
-                if (! choices[at].mediaOnly || wrap.allMedia)
+                if (! choices[at].playableOnly || wrap.allPlayable)
                     lines.push_back ({ MenuLine::Kind::item, lineText (choices[at]), static_cast<int> (at), true });
 
             lines.push_back ({ MenuLine::Kind::separator, {}, -1, false });

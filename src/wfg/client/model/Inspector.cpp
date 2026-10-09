@@ -151,6 +151,10 @@ namespace wfg::client::model
                 { "velocityFloor", "velocity floor" },
                 { "releaseFade", "release fade" },
                 { "initialLevel", "initial level" },
+                /*  NOT "strip": a movie's strip is the row of its pictures at the
+                    foot (§47, AAC), and a sampler member's is the fader or the
+                    pad it is played from (namespace draft §49, ABI). */
+                { "strip", "fader or pad" },
                 { "rate", "speed" },
                 { "rateMode", "speed mode" },
                 { "levelOn", "moves level" },
@@ -1359,6 +1363,10 @@ namespace wfg::client::model
             fitToTheRig (snapshot, cueId, decided);
             offerTheStrips (snapshot, cueId, decided);
         }
+
+        //  A picture's strip, a menu as a sound's is (namespace draft §49).
+        if (out.kind == "video")
+            offerTheStrips (snapshot, cueId, decided);
 
         /*  A VIDEO CUE'S CANVAS is a menu of the show's (Phase 8a). */
         if (out.kind == "video")

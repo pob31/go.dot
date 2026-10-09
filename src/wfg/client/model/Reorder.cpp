@@ -110,14 +110,22 @@ namespace wfg::client::model
                + (cue.name.empty() ? cue.id : cue.name) + " stays where it is";
     }
 
+    /*  WHAT A SAMPLER TAKES (§39; since 2026-10-09 §49): a sound, a picture of
+        any kind - and a sound locked to a movie never alone, which goes where
+        its movie goes (ABE): dragged with its movie, the engine carries it. */
     bool samplerTakes (const Row& cue)
     {
-        return cue.kind == "media" && cue.lockedTo.empty() && ! cue.isGroup;
+        return (cue.kind == "media" || cue.kind == "video") && cue.lockedTo.empty() && ! cue.isGroup;
     }
 
     std::string notForASampler (const Row& cue)
     {
-        return "a sampler plays sounds only, so " + (cue.name.empty() ? cue.id : cue.name) + " stays where it is";
+        const auto called = cue.name.empty() ? cue.id : cue.name;
+
+        if (cue.kind == "media" && ! cue.lockedTo.empty())
+            return "a sound locked to a movie goes where its movie goes, so " + called + " stays where it is";
+
+        return "a sampler plays sounds and pictures, so " + called + " stays where it is";
     }
 
     std::string containerOf (const Row& row)

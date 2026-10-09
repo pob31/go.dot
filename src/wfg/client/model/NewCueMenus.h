@@ -31,8 +31,9 @@
     selection is one keystroke, "if it is a dialog, people will resent it by
     the second tech". Its first part makes the group around the picked cues,
     its second an empty one where any new cue goes. The sampler joins the
-    first part only when every picked cue is media, because a sampler plays
-    its media members and nothing else.
+    first part only when a sampler could hold every picked cue - a sound or a
+    picture, a sound locked to a movie only with its movie (namespace draft
+    §49) - because a sampler plays those members and nothing else.
 
     A TRANSPORT OR START CUE IS BORN AIMED at the picked cue, when there is
     one: a stop with no target stops nothing, and the cue somebody has just
@@ -67,8 +68,10 @@ namespace wfg::client::model
         Settings settings;          ///< what the cue is born with
         std::string section;        ///< the heading it stands under, or empty
 
-        /** Offered around picked cues only when every one of them is media. */
-        bool mediaOnly = false;
+        /*  Offered around picked cues only when a sampler could hold every one
+            of them: a sound or a picture, a locked sound with its movie
+            (namespace draft §49). */
+        bool playableOnly = false;
 
         /** Born aimed at the picked cue: `target` is added when one is picked. */
         bool aimed = false;
@@ -132,7 +135,7 @@ namespace wfg::client::model
     {
         std::vector<std::string> cues;  ///< the picked ids, as picked
         int count = 0;
-        bool allMedia = false;
+        bool allPlayable = false;       ///< every one a sampler could hold (§49)
         std::string why;
 
         bool possible() const noexcept  { return count > 0 && why.empty(); }

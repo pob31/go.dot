@@ -2618,27 +2618,15 @@ namespace wfg::client
                     return;
                 }
 
-                std::vector<std::string> sources, pictures;
-
-                /*  A SAMPLER HOLDS SOUNDS (§39): pictures and movies dropped
-                    among its members go in a batch of their own, just after
-                    the sampler group, and the sounds where they were put. */
-                const auto [outside, outsideIndex] = outsideASampler (parent, index, "video");
-                const auto intoASampler = outside != parent;
+                /*  A SAMPLER HOLDS SOUNDS AND PICTURES (§39, §49): what is
+                    dropped among its members goes where it was put - a movie
+                    with its sound locked to it, beside it. */
+                std::vector<std::string> sources;
 
                 for (const auto& path : files)
-                    (intoASampler && model::isVisualFile (model::mediaNameFor (path.toStdString())) ? pictures : sources)
-                        .push_back (path.toStdString());
+                    sources.push_back (path.toStdString());
 
-                if (! sources.empty())
-                    imports.add (parent, index, orderOf (parent), sources, cueTemplate);
-
-                if (! pictures.empty())
-                {
-                    imports.add (outside, outsideIndex, orderOf (outside), pictures, cueTemplate);
-                    shell->transport.setNotice ("a sampler plays sounds only: the pictures go just after it");
-                }
-
+                imports.add (parent, index, orderOf (parent), sources, cueTemplate);
                 followImports();
             }
 
@@ -4311,14 +4299,15 @@ namespace wfg::client
                 return { last.listId, -1 };
             }
 
-            /*  A SAMPLER HOLDS SOUNDS (namespace draft §39): a cue of another
-                kind that would land among a sampler's members lands just after
-                the sampler group instead, where the engine takes it, rather
-                than being refused inside it. A sound goes where it was put. */
+            /*  A SAMPLER HOLDS SOUNDS AND PICTURES (namespace draft §39, §49): a
+                cue of another kind that would land among a sampler's members
+                lands just after the sampler group instead, where the engine
+                takes it, rather than being refused inside it. A sound or a
+                picture goes where it was put. */
             std::pair<std::string, int> outsideASampler (const std::string& parent, int index,
                                                          const std::string& kind) const
             {
-                if (latest == nullptr || kind == "media" || parent.empty()
+                if (latest == nullptr || kind == "media" || kind == "video" || parent.empty()
                     || model::text (*latest, "/godot/cue/" + parent + "/mode") != "sampler")
                     return { parent, index };
 

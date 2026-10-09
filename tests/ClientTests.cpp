@@ -4054,6 +4054,13 @@ TEST_CASE ("client: the group list offers the picked cues when the engine would 
     create (listId, "media", "C0000001");
     create (listId, "group", "G0000001");
     create ("G0000001", "memo", "D0000001");
+
+    //  A movie and its sound, locked to it (namespace draft §49).
+    create (listId, "video", "V0000001");
+    REQUIRE (rig.apply (tick++, "window", "cue.create",
+                        { osc::Value::string (listId), osc::Value::int32 (1), osc::Value::string ("media"),
+                          osc::Value::string (""), osc::Value::string ("S0000001"),
+                          osc::Value::string ("lockedTo"), osc::Value::string ("V0000001") }).applied == 1);
     REQUIRE (rig.apply (tick++, "window", "list.create",
                         { osc::Value::string ("Other"), osc::Value::string ("E0000002") }).applied == 1);
     create ("E0000002", "memo", "E0000001");
@@ -4067,11 +4074,17 @@ TEST_CASE ("client: the group list offers the picked cues when the engine would 
     const auto media = model::wrapOf (*snapshot, { "C0000001", "B0000001" });
     CHECK (media.possible());
     CHECK (media.count == 2);
-    CHECK (media.allMedia);
+    CHECK (media.allPlayable);
 
     const auto mixed = model::wrapOf (*snapshot, { "A0000001", "B0000001" });
     CHECK (mixed.count == 2);
-    CHECK_FALSE (mixed.allMedia);
+    CHECK_FALSE (mixed.allPlayable);
+
+    /*  A SAMPLER HOLDS PICTURES TOO (§49): a sound and a movie may be wrapped
+        in one; a sound locked to a movie only with its movie. */
+    CHECK (model::wrapOf (*snapshot, { "B0000001", "V0000001" }).allPlayable);
+    CHECK_FALSE (model::wrapOf (*snapshot, { "S0000001" }).allPlayable);
+    CHECK (model::wrapOf (*snapshot, { "V0000001", "S0000001" }).allPlayable);
 
     // A group and its own member: the member rides in with the group.
     CHECK (model::wrapOf (*snapshot, { "G0000001", "D0000001" }).count == 1);
@@ -8295,6 +8308,12 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
         CHECK (row->label == said.second);
     }
 
+    /*  And the strip said as what it is, apart from a movie's strip of
+        pictures at the foot (namespace draft §49, ABI). */
+    const auto* strip = rowIn (panel, "strip");
+    REQUIRE (strip != nullptr);
+    CHECK (strip->label == "fader or pad");
+
     /*  THE DCA IS A MENU: the identifier it writes, the name a person reads,
         and "(none)" first. What the cue is marked with is its value. */
     const auto* dca = rowIn (panel, "dca");
@@ -10252,12 +10271,12 @@ TEST_CASE ("client: a sampler group takes sounds and pictures as members, a soun
     CHECK (indexOf (after.id) == indexOf (thirdSound.id) + 1);
 }
 
-TEST_CASE ("client: a drag of anything but a sound into or among a sampler's members is refused in words (§39)")
+TEST_CASE ("client: a drag of anything but a sound or a picture into or among a sampler's members is refused in words (§39, §49)")
 {
     model::Row dragged;
     dragged.rowKind = model::RowKind::cue;
-    dragged.id = "VID00001";
-    dragged.kind = "video";
+    dragged.id = "MEM00001";
+    dragged.kind = "memo";
     dragged.name = "Moon";
     dragged.parent = "7K2QM9X4";
 
@@ -10269,10 +10288,10 @@ TEST_CASE ("client: a drag of anything but a sound into or among a sampler's mem
     sampler.mode = "sampler";
     sampler.parent = "7K2QM9X4";
 
-    //  Into the sampler, on its row.
+    //  A memo, into the sampler on its row: refused, in words.
     const auto into = model::dropFor (sampler, dragged, 0.5);
     CHECK (into.kind == model::DropKind::none);
-    CHECK (into.refused.find ("a sampler plays sounds only") != std::string::npos);
+    CHECK (into.refused.find ("a sampler plays sounds and pictures") != std::string::npos);
     CHECK (into.refused.find ("Moon") != std::string::npos);
 
     //  After one of its members.
@@ -10286,14 +10305,20 @@ TEST_CASE ("client: a drag of anything but a sound into or among a sampler's mem
 
     CHECK_FALSE (model::dropFor (member, dragged, 0.9).refused.empty());
 
-    //  A sound goes in.
-    dragged.kind = "media";
-    CHECK (model::dropFor (member, dragged, 0.9).refused.empty());
-    CHECK (model::dropFor (sampler, dragged, 0.5).kind == model::DropKind::into);
+    //  A sound goes in, and since §49 a picture.
+    for (const auto* kind : { "media", "video" })
+    {
+        INFO (kind);
+        dragged.kind = kind;
+        CHECK (model::dropFor (member, dragged, 0.9).refused.empty());
+        CHECK (model::dropFor (sampler, dragged, 0.5).kind == model::DropKind::into);
+    }
 
-    //  But not one locked to a movie.
+    //  But not a sound locked to a movie, alone: it goes where its movie goes.
+    dragged.kind = "media";
     dragged.lockedTo = "VID00002";
-    CHECK_FALSE (model::dropFor (sampler, dragged, 0.5).refused.empty());
+    const auto locked = model::dropFor (sampler, dragged, 0.5);
+    CHECK (locked.refused.find ("goes where its movie goes") != std::string::npos);
 }
 
 TEST_CASE ("client: a movie's row shows its speed as a sound's does, and its time at that speed (§39)")
