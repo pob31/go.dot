@@ -188,6 +188,18 @@ namespace wfg::client::ui
 
     namespace
     {
+        /*  THE CUE AN ADDRESS IS A ROW OF, `/godot/cue/<id>/<row>`, or empty. */
+        std::string cueOfAddress (const std::string& address)
+        {
+            const std::string prefix = "/godot/cue/";
+
+            if (address.rfind (prefix, 0) != 0)
+                return {};
+
+            const auto slash = address.find ('/', prefix.size());
+            return slash == std::string::npos ? std::string {} : address.substr (prefix.size(), slash - prefix.size());
+        }
+
         /*  ONE INTEGER, THREE QUESTIONS, and the mapping written out once so
             that reading it and writing it cannot drift:
 
@@ -419,12 +431,19 @@ namespace wfg::client::ui
         std::string labels;
 
         for (const auto& panel : panels)
-            labels += panel.label + "|";
+            labels += panel.label + "|" + panel.address + "|";
 
         if (words == panelWords && labels == panelLabels)
             return;
 
         panelLabels = labels;
+        panelCues.clear();
+
+        /*  WHICH CUE EACH OPENS ON: its own (namespace draft §47, AAD) - a
+            movie's strip on the movie, its sound's EQ on the sound - or, for a
+            panel that names none, the inspector's. */
+        for (const auto& panel : panels)
+            panelCues.push_back (panel.address);
 
         for (auto& button : panelButtons)
             removeChildComponent (button.get());
@@ -448,10 +467,10 @@ namespace wfg::client::ui
                                   + label + ". Pressed again, shuts it.");
 
             //  The subject is the button's; which cue it opens on is read when pressed.
-            button->onClick = [this, subject = panel.value]
+            button->onClick = [this, subject = panel.value, own = panel.address]
             {
                 if (actions.openPanel)
-                    actions.openPanel (panelCue, subject);
+                    actions.openPanel (own.empty() ? panelCue : own, subject);
             };
 
             addAndMakeVisible (*button);
@@ -464,9 +483,13 @@ namespace wfg::client::ui
     void InspectorComponent::lightPanels()
     {
         for (std::size_t at = 0; at < panelButtons.size() && at < panelWords.size(); ++at)
+        {
+            const auto& own = at < panelCues.size() && ! panelCues[at].empty() ? panelCues[at] : panelCue;
+
             panelButtons[at]->setToggleState (! footWord.empty() && panelWords[at] == footWord
-                                                && ! panelCue.empty() && footCue == panelCue,
+                                                && ! own.empty() && footCue == own,
                                               juce::dontSendNotification);
+        }
     }
 
     void InspectorComponent::showFoot (const std::string& subject, const std::string& cueId)
@@ -1176,19 +1199,24 @@ namespace wfg::client::ui
                     //  Read when pressed, for the reason the sends button is.
                     line->browse.setWantsKeyboardFocus (false);
                     line->browse.setTooltip ("Choose the media this cue plays");
-                    line->browse.onClick = [this]
+                    /*  THE FIELD'S OWN CUE, which over a movie and its sound
+                        (namespace draft §47, AAD) is not always the one the
+                        inspector is about. */
+                    const auto fileCue = cueOfAddress (field.address);
+
+                    line->browse.onClick = [this, fileCue]
                     {
                         if (actions.chooseFile)
-                            actions.chooseFile (drawnCue);
+                            actions.chooseFile (fileCue.empty() ? drawnCue : fileCue);
                     };
 
                     content.addAndMakeVisible (line->browse);
 
                     line->hap.setWantsKeyboardFocus (false);
-                    line->hap.onClick = [this, button = &line->hap]
+                    line->hap.onClick = [this, button = &line->hap, fileCue]
                     {
                         if (actions.convertToHap)
-                            actions.convertToHap (drawnCue, *button);
+                            actions.convertToHap (fileCue.empty() ? drawnCue : fileCue, *button);
                     };
 
                     content.addChildComponent (line->hap);

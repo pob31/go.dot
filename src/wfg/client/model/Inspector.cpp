@@ -17,6 +17,7 @@
 #include <wfg/client/model/Inspector.h>
 
 #include <wfg/client/model/Devices.h>
+#include <wfg/client/model/Dual.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/InputList.h>
@@ -1491,11 +1492,70 @@ namespace wfg::client::model
         return out;
     }
 
+    Inspection inspectDual (const tree::TreeSnapshot& snapshot, const std::string& movie,
+                            const std::string& sound, const std::string& picked)
+    {
+        auto out = inspect (snapshot, movie);
+        const auto locked = inspect (snapshot, sound);
+
+        if (out.empty() || locked.empty())
+            return inspect (snapshot, picked);
+
+        /*  THE SOUND'S DRAWER: its name, then what it does, as its own
+            inspector orders them. Its start offset, speed and mode are the
+            movie's, copied onto it in the same edit (37.5), and refused on
+            the sound - offered once, on the picture. */
+        Block drawer { "the sound", {} };
+
+        const auto dropped = [] (const std::string& name)
+        {
+            return name == "startOffset" || name == "rate" || name == "rateMode";
+        };
+
+        for (const auto& block : locked.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == "name")
+                    drawer.fields.push_back (field);
+
+        for (const auto& block : locked.blocks)
+            if (block.heading == "what it does")
+                for (const auto& field : block.fields)
+                    if (! dropped (field.name))
+                        drawer.fields.push_back (field);
+
+        if (! drawer.fields.empty())
+            out.blocks.push_back (std::move (drawer));
+
+        /*  AND THE PANELS OF BOTH, the picture's first - its strip - then the
+            sound's EQ, FX and sends, each opening on its own cue. The sound's
+            waveform is the movie's strip, which draws it. */
+        for (const auto& panel : locked.panels)
+            if (panel.value != "waveform")
+                out.panels.push_back (panel);
+
+        out.cueId = picked;
+        return out;
+    }
+
     Inspection inspectMany (const tree::TreeSnapshot& snapshot, const std::vector<std::string>& cueIds,
                             const std::string& anchor)
     {
         if (cueIds.empty())
             return {};
+
+        /*  EITHER LINE OF A MOVIE AND ITS SOUND, or both: the two as one
+            (namespace draft §47, AAD). */
+        if (cueIds.size() <= 2)
+        {
+            const auto dual = dualOf (snapshot, cueIds.front());
+            const auto both = cueIds.size() == 1
+                                || (dual.isPair() && (cueIds.back() == dual.movie || cueIds.back() == dual.sound));
+
+            if (dual.isPair() && both)
+                return inspectDual (snapshot, dual.movie, dual.sound,
+                                    std::find (cueIds.begin(), cueIds.end(), anchor) != cueIds.end() ? anchor
+                                                                                                      : cueIds.front());
+        }
 
         if (cueIds.size() == 1)
             return inspect (snapshot, cueIds.front());

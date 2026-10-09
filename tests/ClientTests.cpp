@@ -10688,3 +10688,72 @@ TEST_CASE ("client: a movie offers its strip at the top of the inspector, and th
     CHECK_FALSE (onStill.movie);
     CHECK (onStill.soundFile.empty());
 }
+
+TEST_CASE ("client: either line of a movie and its sound shows both halves, each panel opening on its own cue (§47, AAD)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto movie = rig.document.createCue (list, 0, "video", "Sunrise", {},
+                                               { { "source", "movie" }, { "file", "sunrise.mov" } });
+    REQUIRE (movie.ok);
+    const auto sound = rig.document.createCue (list, 1, "media", "Sunrise sound", {},
+                                               { { "lockedTo", movie.id }, { "file", "sunrise (sound).wav" } });
+    REQUIRE (sound.ok);
+    const auto rain = rig.document.createCue (list, 2, "media", "Rain");
+    REQUIRE (rain.ok);
+
+    const auto snapshot = rig.publish (1);
+
+    for (const auto& picked : { movie.id, sound.id })
+    {
+        CAPTURE (picked);
+        const auto both = model::inspectMany (*snapshot, { picked }, picked);
+
+        CHECK (both.cueId == picked);
+        CHECK (both.kind == "video");
+
+        //  The picture's rows, then a drawer of the sound's.
+        const model::Block* drawer = nullptr;
+
+        for (const auto& block : both.blocks)
+            if (block.heading == "the sound")
+                drawer = &block;
+
+        REQUIRE (drawer != nullptr);
+        CHECK (&both.blocks.back() == drawer);
+
+        std::vector<std::string> names;
+
+        for (const auto& field : drawer->fields)
+        {
+            names.push_back (field.name);
+            CHECK (field.address.rfind ("/godot/cue/" + sound.id + "/", 0) == 0);
+        }
+
+        CHECK (names.front() == "name");
+        CHECK (std::find (names.begin(), names.end(), "level") != names.end());
+        CHECK (std::find (names.begin(), names.end(), "lockedTo") != names.end());
+        CHECK (std::find (names.begin(), names.end(), "startOffset") == names.end());     // the movie's
+        CHECK (std::find (names.begin(), names.end(), "rate") == names.end());
+
+        //  The strip on the movie, the EQ, FX and sends on the sound.
+        std::vector<std::pair<std::string, std::string>> panels;
+
+        for (const auto& panel : both.panels)
+            panels.emplace_back (panel.value, panel.address);
+
+        CHECK (panels == std::vector<std::pair<std::string, std::string>> {
+                             { "waveform", movie.id }, { "eq", sound.id }, { "fx", sound.id }, { "sends", sound.id } });
+    }
+
+    //  A cue that is not half of a pair is inspected as it always was.
+    CHECK (model::inspectMany (*snapshot, { rain.id }, rain.id).kind == "media");
+
+    //  And the foot follows a pick to the half that has its panel.
+    CHECK (model::footCueForPick (*snapshot, model::Subject::Kind::eq, movie.id) == sound.id);
+    CHECK (model::footCueForPick (*snapshot, model::Subject::Kind::sends, sound.id) == sound.id);
+    CHECK (model::footCueForPick (*snapshot, model::Subject::Kind::waveform, sound.id) == movie.id);
+    CHECK (model::footCueForPick (*snapshot, model::Subject::Kind::waveform, rain.id) == rain.id);
+    CHECK (model::footCueForPick (*snapshot, model::Subject::Kind::eq, rain.id) == rain.id);
+}

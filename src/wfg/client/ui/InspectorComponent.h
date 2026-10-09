@@ -176,6 +176,7 @@ namespace wfg::client::ui
             panel is open on this cue. Rebuilt only when the set changes. */
         std::vector<std::unique_ptr<IconButton>> panelButtons;
         std::vector<std::string> panelWords;
+        std::vector<std::string> panelCues;     ///< the cue each opens on; empty for the inspector's (§47, AAD)
         std::string panelLabels;
         void rebuildPanels (const std::vector<model::Field>& panels, bool several);
         void lightPanels();

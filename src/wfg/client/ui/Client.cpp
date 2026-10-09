@@ -2057,7 +2057,10 @@ namespace wfg::client
 
                     if (! surfaceHoldsFoot && model::followsPick (subject.kind) && ! picked.empty())
                     {
-                        auto wanted = picked;
+                        /*  A MOVIE AND ITS SOUND ARE ONE CUE (namespace draft
+                            §47, AAD): an EQ follows a pick of either line to
+                            the sound, a strip to the movie. */
+                        auto wanted = model::footCueForPick (*snapshot, subject.kind, picked);
 
                         /*  A PANEL THAT OPENS BY ITSELF MAY CLOSE BY ITSELF
                             (author, 2026-09-22: "collapse the fade foot panel

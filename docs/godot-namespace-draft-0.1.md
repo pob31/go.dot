@@ -22751,3 +22751,18 @@ looked. Now:
   the pair - on the movie's own seconds, since that sound is the movie's own, taken out over the same
   span. A movie with no sound has an empty bar until its pictures are drawn (AAI). It has no level lane:
   its sound's is on the sound's own line.
+
+### 47.6 A movie and its sound, from either line (AAD)
+
+A pick of either line of a movie and the sound locked to it - or of both - shows the two as one: the
+movie's rows as its inspector always sorted them, then a drawer **the sound** with the sound's name
+and what it does (its file, its lock, its level, where it goes, its DCA), and at the head the panels of
+both - the movie's strip, the sound's EQ, FX and sends - each opening on its own cue and lit while
+that cue's panel is open. The sound's start offset, speed and mode are left out of its drawer: they are
+the movie's, copied onto the sound in the same edit (37.5) and refused on the sound. Its waveform is the
+movie's strip, which draws it.
+
+A panel open at the foot follows a pick of either line to the half that has it: an EQ, an FX chain or
+a send mixer to the sound, a strip to the movie (`footCueForPick`). The file row's "..." and "→ HAP"
+act on the cue whose file the row is, not on the inspector's. And, from §47.3, a pick of the movie aims
+the surfaces at its sound.

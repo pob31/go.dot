@@ -289,6 +289,12 @@ namespace wfg::client::model
 
     /*  `picked` is the list's selection, for the panels that serve several
         cues at once (`servesMany`); a panel on one cue ignores it. */
+    /*  THE CUE A PANEL FOLLOWS A PICK TO (namespace draft §47, AAD): the
+        cue picked, except over a movie and the sound locked to it, where the
+        EQ, the FX and the sends are the sound's and the strip the movie's,
+        whichever line was picked. */
+    std::string footCueForPick (const tree::TreeSnapshot& snapshot, Subject::Kind kind, const std::string& picked);
+
     FootReading readFoot (const tree::TreeSnapshot&, const Subject&,
                           const std::vector<std::string>& picked = {});
 

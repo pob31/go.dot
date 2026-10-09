@@ -299,6 +299,35 @@ namespace wfg::client::model
         return std::to_string (acting) + " of " + std::to_string (picked) + " cues";
     }
 
+    std::string footCueForPick (const tree::TreeSnapshot& snapshot, Subject::Kind kind, const std::string& picked)
+    {
+        const auto dual = dualOf (snapshot, picked);
+
+        if (! dual.isPair())
+            return picked;
+
+        switch (kind)
+        {
+            case Subject::Kind::eq:
+            case Subject::Kind::fx:
+            case Subject::Kind::sends:
+                return dual.sound;
+
+            case Subject::Kind::waveform:
+                return dual.movie;
+
+            case Subject::Kind::none:
+            case Subject::Kind::timeline:
+            case Subject::Kind::curve:
+            case Subject::Kind::take:
+            case Subject::Kind::fade:
+            case Subject::Kind::messages:
+                break;
+        }
+
+        return picked;
+    }
+
     FootReading readFoot (const tree::TreeSnapshot& snapshot, const Subject& subject,
                           const std::vector<std::string>& picked)
     {

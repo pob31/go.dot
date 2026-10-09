@@ -317,6 +317,17 @@ namespace wfg::client::model
         panel. */
     std::vector<Field> openersForMany (const std::vector<std::string>& kinds, const std::string& anchor);
 
+    /*  A MOVIE AND THE SOUND LOCKED TO IT, as one (namespace draft §47, AAD):
+        the author, 2026-10-09, "linked audio tracks should also enable to edit
+        the video track so it doesn't require the user to switch back and
+        forth". The movie's blocks as `inspect` sorts them, then a drawer "the
+        sound" with the sound's name and what it does - less its start offset,
+        speed and mode, which follow the movie's (37.5) - and the panels of
+        both, each opening on its own cue (`Field::address`). `picked` is the
+        line the hand picked, which the inspection is about. */
+    Inspection inspectDual (const tree::TreeSnapshot& snapshot, const std::string& movie,
+                            const std::string& sound, const std::string& picked);
+
     /** Everything published under one cue, sorted into blocks. Empty for no cue. */
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId);
 
