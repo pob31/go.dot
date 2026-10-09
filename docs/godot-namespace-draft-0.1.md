@@ -22928,3 +22928,123 @@ same output or a different one"*:
   than also making a new zone; the shape only, rather than with the blend and opacity. To copy onto a
   canvas an output does not show yet, a zone is added first and the shape copied to it.
 
+## 48. Read ahead: stills and movies at standby, and what is ready on the cue list's rows
+
+Written 2026-10-09. The author asked *"What would be the impact of allowing videos to be trigger in
+"Sampler Groups" too?"* The answer began with what a bank needs before a hand moves: every member's file
+ready, as §3.9a's fader-start assumes. A sound's is; a picture's is not. Then: *"So a first step would be
+to allow videos and stills preloading like for audio?"* - and *"Plan for video preload."* The bank itself
+is the second step and waits for the author's answers to four questions - what a fader does to a picture,
+where it waits, a still that never ends, which picture lies on top. None of it is here.
+
+### 48.1 What it is, before its names
+
+When the pointer moves, Go.dot gets ready what the next GO will start: a sound's file opened and a voice
+held for it (PRD §3.12). A still was read ahead only when it was the standby itself - never when a scene on
+standby began with it - and nothing went onto the graphics card until the frame it first appeared on. A
+movie was opened only once it was on screen, so a cut to it showed black first. And nothing said whether
+any of it had worked: a missing picture was a black layer and a silent log.
+
+Now pictures and movies are read where sounds are got ready - the standby, a scene's first cue, every cue
+of a timeline that starts at once - a movie from the second it will start at, and a still put on the
+graphics card ahead. The renderer says what it holds: ready, or failed and why. And each row of the cue
+list shows by a small mark whether its cue is being got ready, is ready, or cannot be because its file is
+missing - a sound's row as much as a picture's.
+
+GO is unchanged. Nothing is reserved for a picture and nothing waits for one: a picture not read yet when
+GO comes shows when it is, as it always did (VX).
+
+### 48.2 Decisions
+
+The author's (2026-10-09). **AAM** was chosen from three options I offered, the one I recommended, its
+words mine; **AAL**, **AAN** and **AAO** are in the plan the author approved, each my recommendation.
+
+- **AAL** Pictures and movies are **read ahead where sounds are armed**: the focused list's standby, a
+  sequence's first member, a timeline's members with no pre-wait, recursively - `armablesFor`'s walk. A
+  sampler group gives nothing, as for sounds. Nothing further ahead.
+- **AAM** **What is ready is a mark on the cue list's row**, for every cue that can be got ready - sounds
+  included, which PRD §3.12 asked for and the window never drew: getting ready, ready, or missing.
+- **AAN** **No run and no arm for a picture.** A sound's arm holds a voice; a picture holds nothing scarce,
+  so it is read without a run, GO's path is untouched, and GO never waits (VX stands).
+- **AAO** **Up to 32 files read ahead** (8 before), so a sampler bank fits when it comes.
+
+Mine, proposed:
+
+- **AAP** Every other list's standby picture is still read ahead, walked the same way and after the
+  focused list's, so the cap drops theirs first - a second list fired by OSC or a surface keeps what VX
+  gave it.
+- **AAQ** What **ready** means: §48.5.
+- **AAR** The words: §48.3.
+- **AAS** The mark is a shape in a cell of its own just left of the kind, its word in a tooltip, and
+  *missing* written out beside it. Colour never says it alone (PRD §4.8).
+- **AAT** At most one picture put on the graphics card a frame, within 512 MB of pictures held ahead;
+  one past that is ready once decoded.
+- **AAU** The engine looks for each file whenever what is read ahead changes, so *missing* is said with no
+  renderer running.
+
+### 48.3 The rows
+
+- `cue,prepare` (read-only) answers for a still or a movie read ahead as it does for a sound: `preparing`
+  while it is read, `armed` once it is ready, `partial` when it cannot be. A sound armed but not yet
+  confirmed by the audio side now reads `preparing`; it read `armed` at once. A finished run no longer
+  leaves its word behind - it did, so a sound whose arm had failed read `armed` until another run of it
+  came - except a failed arm of a cue still ahead, which reads `partial` (AAR).
+- `cue,prepareError` (new, read-only): why getting it ready failed, as a run's error - `media-missing`
+  for a file not found or not readable, `no-track` for a sound with no voice free. Empty otherwise.
+- `video,file`'s description no longer says a missing picture is told when the show opens: nothing did.
+
+### 48.4 The region (version 17)
+
+- **Engine to renderer:** up to 32 items to read ahead, in the order they matter - the focused list's
+  first - each a path, whether it is a movie, and for a movie the second it starts at and which way it
+  plays.
+- **Renderer to engine:** what it holds - each path's state, `reading`, `ready` or `failed`, with a short
+  problem - and which of the engine's lists it is the answer to, so an answer to an older list is never
+  read as ready. A renderer started again begins with an empty answer.
+- The renderer reads the list before the layers, and the engine writes it after them, so a picture GO has
+  just shown is never let go of on the way.
+
+### 48.5 What "ready" means (AAQ, AAT; mine)
+
+- **A still:** decoded, and on the graphics card when the renderer is drawing frames. Headless, decoded.
+- **A HAP movie:** open, with the frame at its starting second and the three after it, in the way it
+  plays, read.
+- **A movie played as a preview** (not HAP, §37.5): probed, and its decoder started at its first frame -
+  at most four decoders at once; a fifth stays getting ready.
+- **A sound:** its voice held and the audio side has said so (`audio.armed`). That is the graph made
+  ready, not the file read to its end - the word is a little early for a sound, and said so here.
+
+### 48.6 Measurements
+
+- **M54** From GO to the first picture of a still and of a HAP movie, read ahead against cold. **M54a**
+  headless, on every platform: the renderer's probe at the canvas's centre, in samples at 48 kHz from the
+  sample the layer was shown at; CI holds only the read-ahead cases. **M54b** on Windows with
+  `WFG_VIDEO_BENCH`: through a Spout output read back - a 4K still cold, decoded only, and on the card -
+  and the frames late while one upload happens under a playing movie. Owed to the bench: the light on a
+  projector.
+
+### 48.7 Stages
+
+| Stage | What the author sees |
+|---|---|
+| RA.0 | This section |
+| RA.1 | Nothing: what a GO starts first, and a movie's starting second, each written once |
+| RA.2 | Nothing yet: the engine names a scene's pictures and movies to read ahead, and finds a missing one |
+| RA.3 | Nothing yet: the renderer reads the list before GO and says what it holds |
+| RA.4 | A cut to a movie on standby shows its first frame, not black |
+| RA.5 | The words: `cue,prepare` for pictures, `cue,prepareError` |
+| RA.6 | The mark on every row that can be got ready, in the window and the browser console |
+| RA.7 | A large still shown at GO without a dropped frame |
+| RA.8 | M54, the PRD, the devplan, the close-out |
+
+### 48.8 Not built
+
+*(Proposed, PRD §6.9.)* Reading further ahead than the standby - §35.4 drew *"standby and the next few"*,
+the least recently used forgotten; this is the standby alone, as for sounds. A missing file said when the
+show opens, or by `wfg validate`. A movie's first frame on the graphics card ahead. The older renderer
+(`--renderer=gl`) putting stills on the card ahead. Video in a sampler group: the second step.
+
+### 48.9 Built so far
+
+- **RA.0, this section** (2026-10-09).
+
