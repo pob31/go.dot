@@ -3062,6 +3062,8 @@ namespace wfg::tree
             else if (name == "logPending")     text = std::to_string (state.logPending);
             else if (name == "spaceMouse")     text = state.spaceMouse;
             else if (name == "spaceMouseName") text = state.spaceMouseName;
+            else if (name == "patchEditor")    text = state.patchEditor;
+            else if (name == "patchEditorInstall") text = state.patchEditorInstall;
             else                               text = std::string (row->defaultText);
 
             engineValue (*row, "engine", text);

@@ -5216,3 +5216,41 @@ TEST_CASE ("patch canvas: Ctrl+1 places a box to type into, a drag from an outle
     //  Esc, typing or not, is the PANIC's.
     CHECK_FALSE (canvas.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
 }
+
+TEST_CASE ("patch canvas: its door opens the patch in plugdata or Pd, or offers Pd where neither is there")
+{
+    std::vector<std::string> opened;
+    int offered = 0;
+    wfg::client::ui::PatchCanvasComponent::Actions actions;
+    actions.set = [] (const std::string&, const std::string&) {};
+    actions.say = [] (const juce::String&) {};
+    actions.openInEditor = [&opened] (const std::string& cue) { opened.push_back (cue); };
+    actions.getEditor = [&offered] { ++offered; };
+
+    wfg::client::ui::PatchCanvasComponent canvas (wfg::client::model::Theme {}, std::move (actions));
+    canvas.setSize (600, 300);
+
+    wfg::client::model::PatchReading reading;
+    reading.cueId = "PRCS0001";
+    reading.text = "#N canvas 0 50 450 300 12;\n";
+    reading.editor = "plugdata";
+    canvas.show (reading);
+
+    CHECK (canvas.editorButton().getButtonText() == "Open in plugdata");
+    canvas.editorButton().onClick();
+    CHECK (opened == std::vector<std::string> { "PRCS0001" });
+
+    reading.editor.clear();
+    canvas.show (reading);
+    CHECK (canvas.editorButton().getButtonText() == "Get Pd...");
+    canvas.editorButton().onClick();
+    CHECK (offered == 1);
+
+    reading.editorInstall = "downloading\t40\t\tmsp.ucsd.edu";
+    canvas.show (reading);
+    CHECK (canvas.editorButton().getButtonText() == "Getting Pd...");
+
+    reading.locked = true;
+    canvas.show (reading);
+    CHECK_FALSE (canvas.editorButton().isEnabled());
+}

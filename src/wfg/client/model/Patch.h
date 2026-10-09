@@ -67,6 +67,11 @@ namespace wfg::client::model
         std::string state;
         std::string said;
         std::string ports;
+
+        /*  WHAT IT OPENS IN (PC.7): plugdata, Pd, or empty when this machine has
+            neither; and Pd's download as the engine says it. */
+        std::string editor;
+        std::string editorInstall;
     };
 
     PatchReading readPatchFoot (const tree::TreeSnapshot& snapshot, const std::string& cueId);

@@ -142,6 +142,8 @@ namespace wfg::client::ui
                     where Pd draws it, its boxes moved and deleted by hand. */
                 PatchCanvasComponent::Actions drawing;
                 drawing.set = actions.set;
+                drawing.openInEditor = actions.editPatch;
+                drawing.getEditor = actions.getPd;
                 drawing.say = [this] (const juce::String& sentence)
                 {
                     note = sentence;

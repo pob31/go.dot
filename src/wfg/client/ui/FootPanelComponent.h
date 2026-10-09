@@ -73,6 +73,11 @@ namespace wfg::client::ui
             /** `object.delete` on one of a cue's children. */
             std::function<void (const std::string& objectId)> removeObject;
 
+            /*  A process cue's patch opened in plugdata or Pd, and Pd offered
+                where neither is on the machine (namespace draft §51, PC.7). */
+            std::function<void (const std::string& cueId)> editPatch;
+            std::function<void()> getPd;
+
             /** `range.split` at the playhead. */
             std::function<void (const std::string& cueId, double at)> splitRange;
 

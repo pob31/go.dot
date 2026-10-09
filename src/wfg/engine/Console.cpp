@@ -41,6 +41,7 @@
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
@@ -380,6 +381,7 @@ namespace
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
+        wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -677,6 +679,7 @@ namespace
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
+        wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -1297,6 +1300,7 @@ namespace
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
+        wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -4229,6 +4233,15 @@ namespace
         wfg::video::ffmpeg::Installer ffmpegInstaller;
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), &ffmpegInstaller);
         parameters.setInstaller (&ffmpegInstaller);
+
+        /*  A PROCESS CUE'S PATCH OPENED IN PLUGDATA OR PD (namespace draft §51,
+            ACN, ACO): its file in the engine's cache, watched for saves, and Pd
+            downloaded on first use where neither is on the machine. */
+        wfg::process::editor::Watch patchEditing (engineCacheFolder().getChildFile ("process")
+                                                     .getChildFile ("edit").getFullPathName().toStdString());
+        wfg::process::editor::Installer pdInstaller;
+        wfg::process::editor::registerCommands (engine.commands(), document, &patchEditing, &pdInstaller);
+        std::string patchEditorFound;
         videoHost.configure (document);
 
         /*  The show's revision the video configuration was last read at: the
@@ -4810,6 +4823,15 @@ namespace
                                      devices, and lets them go when nothing is. */
                                  listener.want (runner.listenWanted());
 
+                                 /*  A SAVE IN PLUGDATA OR PD, every half second:
+                                     the cue's patch as it was saved, one `node.set`
+                                     from `pd` (namespace draft §51, ACN). */
+                                 if (tickIndex % 25 == 0)
+                                     for (auto& [cue, text] : patchEditing.saved())
+                                         engine.submit ("pd", "node.set",
+                                                        { wfg::osc::Value::string ("/godot/cue/" + cue + "/patch"),
+                                                          wfg::osc::Value::string (std::move (text)) });
+
                                  /*  THE PUCK, wanted while a curve with a
                                      movement is armed, and during a pass each
                                      push stepped into one logged `curve.ride` -
@@ -5321,6 +5343,20 @@ namespace
 
                                 state.refusedDatagrams =
                                     refusedDatagrams.load (std::memory_order_relaxed);
+
+                                /*  WHAT A PATCH IS EDITED IN, looked for every five
+                                    seconds - a Pd installed or downloaded meanwhile is
+                                    found - and Pd's download as it goes (§51, ACO). */
+                                if (outcome.tick % 250 == 0 || outcome.tick < 2)
+                                {
+                                    const auto found = wfg::process::editor::find();
+                                    patchEditorFound = found.has_value() ? found->name : std::string {};
+                                }
+                                state.patchEditor = patchEditorFound;
+                                if (const auto install = pdInstaller.status(); ! install.state.empty())
+                                    state.patchEditorInstall = install.state + "\t" + std::to_string (install.percent)
+                                                             + "\t" + install.problem + "\t"
+                                                             + wfg::process::editor::downloadSource();
 
                                 auto current = parameters.publish (outcome.tick, state);
 

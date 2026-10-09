@@ -36,6 +36,7 @@
 #include <wfg/engine/midi/MidiSink.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
+#include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/ProcessHost.h>
@@ -50,6 +51,7 @@
 #include <clocale>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -1048,4 +1050,72 @@ TEST_CASE ("process cue: a patch hearing /godot/puck asks for the SpaceMouse and
     rig.runner.notePuck (std::nullopt);
     rig.tickOnce();
     CHECK_FALSE (rig.listener.valueAt ("/dev/out", 100).has_value());
+}
+
+//==============================================================================
+/*  PC.7: A PATCH OPENED IN PLUGDATA OR PD, as a program of its own; each save
+    noticed and handed back. No program is started here: the watch is given
+    none, and the commands nothing to open. */
+
+TEST_CASE ("process editor: a patch written out for editing, and each save there noticed once")
+{
+    const auto folder = scratch ("pc7-watch");
+    std::filesystem::remove_all (folder);
+    wfg::process::editor::Watch watch (folder.string());
+
+    const std::string patch = "#N canvas 0 50 450 300 12;\n#X obj 10 10 r /a;\n";
+    CHECK (watch.open ({}, "PRCS0001", patch).empty());
+    CHECK (watch.watching() == 1u);
+
+    const auto file = std::filesystem::path (watch.fileFor ("PRCS0001"));
+    REQUIRE (std::filesystem::exists (file));
+    CHECK (watch.saved().empty());
+
+    //  A save: new words, and a later time on the file.
+    const std::string saved = "#N canvas 0 50 450 300 12;\n#X obj 10 10 r /b;\n";
+    {
+        std::ofstream out (file, std::ios::binary | std::ios::trunc);
+        out << saved;
+    }
+    std::filesystem::last_write_time (file, std::filesystem::last_write_time (file) + std::chrono::seconds (2));
+
+    const auto changes = watch.saved();
+    REQUIRE (changes.size() == 1u);
+    CHECK (changes[0].first == "PRCS0001");
+    CHECK (changes[0].second == saved);
+    CHECK (watch.saved().empty());
+
+    //  A save of the same words is not a change.
+    std::filesystem::last_write_time (file, std::filesystem::last_write_time (file) + std::chrono::seconds (2));
+    CHECK (watch.saved().empty());
+}
+
+TEST_CASE ("process editor: process.edit is refused on what is not a process cue and under the lock, taken in a replay")
+{
+    ProcessRig rig ("pc7-edit", false);
+    wfg::process::editor::registerCommands (rig.engine.commands(), rig.document, nullptr, nullptr);
+
+    const auto cue = rig.makeProcess (doubling());
+    const auto memo = rig.makeMemo ("Not a patch");
+
+    const auto refusedWith = [&] (const std::string& id) -> std::string
+    {
+        REQUIRE (rig.engine.submit ("cli", "process.edit", { wfg::osc::Value::string (id) }));
+        rig.tickOnce();
+        const auto records = rig.records();
+        for (auto at = records.rbegin(); at != records.rend(); ++at)
+            if (at->command == "process.edit")
+                return at->kind == wfg::LogRecord::Kind::rejected ? at->reason : std::string ("applied");
+        return "missing";
+    };
+
+    CHECK (refusedWith (memo) == "unknown-id");
+    CHECK (refusedWith (cue) == "applied");
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    CHECK (refusedWith (cue) == "locked");
+
+    //  pd.install with nothing to download: taken and ignored.
+    REQUIRE (rig.engine.submit ("cli", "pd.install", {}));
+    rig.tickOnce();
 }

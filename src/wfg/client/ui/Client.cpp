@@ -86,6 +86,7 @@
 #include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/video/Ffmpeg.h>
+#include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/Movie.h>
 
@@ -500,6 +501,8 @@ namespace wfg::client
                 footActions.createRange = [this] (const std::string& cueId, double in, double out)
                                           { send (gesture::createRange (cueId, in, out)); };
 
+                footActions.editPatch = [this] (const std::string& cueId) { send (gesture::editPatch (cueId)); };
+                footActions.getPd = [this] { askToDownloadPd(); };
                 footActions.removeObject = [this] (const std::string& objectId)
                                            { send (gesture::deleteObject (objectId)); };
 
@@ -3080,6 +3083,37 @@ namespace wfg::client
                             send (gesture::convertMovie (name, "whole", "none", true));
 
                         probeNextMovie();
+                    }), true);
+            }
+
+            /*  PURE DATA DOWNLOADED ON FIRST USE (namespace draft §51, ACO): what it
+                is for, where from, and that it is free software - and on a machine
+                with no build to download, which packages to install instead. */
+            void askToDownloadPd()
+            {
+                if (! process::editor::canDownload())
+                {
+                    shell->transport.setNotice ("Neither plugdata nor Pure Data is on this machine: install"
+                                                " plugdata, or Pure Data (puredata), from the system's packages.");
+                    return;
+                }
+
+                const auto message = juce::String ("Go.dot opens a process cue's patch in plugdata or Pure Data, and"
+                                                   " neither is on this machine. It can download Pure Data 0.56-5 now -"
+                                                   " the Pd it runs patches with - from ")
+                                   + juce::String (process::editor::downloadSource())
+                                   + " and keep it in its own folder. Pure Data is free software, under a BSD licence.";
+
+                auto* box = new juce::AlertWindow ("Download Pure Data?", message, juce::MessageBoxIconType::QuestionIcon,
+                                                   window.get());
+                box->addButton ("Download", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                box->addButton ("Not now", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                box->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                    {
+                        if (safe != nullptr && answer == 1)
+                            send (gesture::installPd());
                     }), true);
             }
 

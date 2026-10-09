@@ -227,6 +227,8 @@ namespace wfg::client::model
         out.cueId = cueId;
         out.text = text (snapshot, base + "patch");
         out.locked = isYes (flag (snapshot, "/godot/document/locked"));
+        out.editor = text (snapshot, "/godot/engine/patchEditor");
+        out.editorInstall = text (snapshot, "/godot/engine/patchEditorInstall");
 
         //  Its live run, the newest: a process cue has one at a time.
         for (const auto& run : words (text (snapshot, "/godot/runs/order")))

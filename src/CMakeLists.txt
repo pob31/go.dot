@@ -175,6 +175,8 @@ add_library(wfg_engine STATIC
     wfg/engine/process/PdInstance.cpp
     wfg/engine/process/ProcessHost.h
     wfg/engine/process/ProcessHost.cpp
+    wfg/engine/process/PatchEditor.h
+    wfg/engine/process/PatchEditor.cpp
     wfg/engine/surface/SurfaceProfile.cpp
     wfg/engine/surface/SurfacePages.h
     wfg/engine/surface/SurfacePages.cpp

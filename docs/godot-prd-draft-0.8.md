@@ -3863,8 +3863,9 @@ ACG-ACU in §51.2 are the author's to overrule:
 - **A process cue's life**: a second GO does nothing; it ends when its patch stops its own run, or Esc,
   a stop cue or its footer does.
 - **The canvas edits the text**, one `node.set` a gesture, the running patch opened again on each.
-- **Pd's window** on the same patch, a save there one step of undo; **downloaded on first use** as
-  FFmpeg is, never in the installer.
+- **plugdata or Pd as a program of its own** on the same patch, a save there one step of undo - not
+  Pd's window on the running instance, which Pd's code showed could end the show; Pd **downloaded on
+  first use** as FFmpeg is, never in the installer.
 - **No compiled externals**; vanilla objects whole; nothing runs at load.
 - **Numbers in C on each patch's own thread.**
 - **Serial lines first, then OSC over SLIP as a device.**

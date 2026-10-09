@@ -39,6 +39,22 @@ namespace wfg::client::ui
         setTitle ("Patch");
         setDescription ("The boxes and lines this process cue runs");
 
+        /*  THE DOOR TO PLUGDATA OR PD (PC.7), in the canvas's corner: what it
+            cannot do yet, done there, and each save coming back here. */
+        addAndMakeVisible (openButton);
+        openButton.onClick = [this]
+        {
+            if (reading.editor.empty())
+            {
+                if (actions.getEditor)
+                    actions.getEditor();
+            }
+            else if (actions.openInEditor && ! reading.cueId.empty())
+            {
+                actions.openInEditor (reading.cueId);
+            }
+        };
+
         addChildComponent (editor);
         editor.setMultiLine (false);
         editor.setReturnKeyStartsNewLine (false);
@@ -182,6 +198,21 @@ namespace wfg::client::ui
             rebuild (wanted);
             repaint();
         }
+
+        //  The door's words: where it opens, or Pd's download as it goes.
+        juce::String words;
+        if (! reading.editor.empty())
+            words = "Open in " + juce::String (reading.editor);
+        else if (reading.editorInstall.rfind ("downloading", 0) == 0 || reading.editorInstall.rfind ("unpacking", 0) == 0
+                  || reading.editorInstall.rfind ("checking", 0) == 0)
+            words = "Getting Pd...";
+        else
+            words = "Get Pd...";
+        if (openButton.getButtonText() != words)
+            openButton.setButtonText (words);
+        openButton.setEnabled (! reading.cueId.empty() && ! reading.locked);
+        openButton.setTooltip ("A subpatch, an array or a box's properties, in plugdata or Pure Data:"
+                               " each save there comes back here");
     }
 
     bool PatchCanvasComponent::editable() const
@@ -221,6 +252,7 @@ namespace wfg::client::ui
 
     void PatchCanvasComponent::resized()
     {
+        openButton.setBounds (getLocalBounds().removeFromTop (30).removeFromRight (150).reduced (4));
         repaint();
     }
 

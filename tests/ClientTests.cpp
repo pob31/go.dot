@@ -71,6 +71,7 @@
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Patch.h>
+#include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/FadeMix.h>
@@ -11522,4 +11523,32 @@ TEST_CASE ("client: a box placed by Pd's Ctrl+1 to Ctrl+5, a line drawn, a piece
     const auto twice = process::parsePatch (model::patchPasted (text, inner, 0, 100).text);
     CHECK (twice.canvases.size() == 3u);
     CHECK (twice.problem.empty());
+}
+
+TEST_CASE ("client: a patch opened in plugdata or Pd, and Pd downloaded - two gestures the engine takes")
+{
+    Rig rig;
+    wfg::process::editor::registerCommands (rig.engine.commands(), rig.document, nullptr, nullptr);
+
+    for (const auto& event : { gesture::editPatch ("PRCS0001"), gesture::installPd() })
+    {
+        INFO ("gesture sends " << event.command);
+        CHECK (event.origin == std::string (origin::window));
+        const auto* command = rig.engine.commands().find (event.command);
+        REQUIRE (command != nullptr);
+        CHECK (CommandRegistry::checkArgs (*command, event.args).ok);
+    }
+
+    //  The canvas reads what this machine opens a patch in.
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("process"), osc::Value::string ("Mapper"),
+                                            osc::Value::string ("PRCS0001") });
+    EngineState state;
+    state.patchEditor = "plugdata";
+    state.patchEditorInstall = "downloading\t40\t\tmsp.ucsd.edu";
+    rig.parameters.markStale();
+    const auto snapshot = rig.parameters.publish (2, state);
+    const auto reading = model::readPatchFoot (*snapshot, "PRCS0001");
+    CHECK (reading.editor == "plugdata");
+    CHECK (reading.editorInstall == "downloading\t40\t\tmsp.ucsd.edu");
 }

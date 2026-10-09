@@ -67,6 +67,11 @@ namespace wfg::client::ui
 
             /** A sentence for the panel's head. */
             std::function<void (const juce::String&)> say;
+
+            /*  THE PATCH OPENED IN PLUGDATA OR PD (PC.7), and Pd offered for
+                download where neither is on the machine. */
+            std::function<void (const std::string& cueId)> openInEditor;
+            std::function<void()> getEditor;
         };
 
         PatchCanvasComponent (const model::Theme&, Actions);
@@ -97,11 +102,13 @@ namespace wfg::client::ui
             clipboard would take. */
         std::optional<std::size_t> typingBox() const noexcept { return typing; }
         juce::TextEditor& typingEditor() noexcept { return editor; }
+        juce::TextButton& editorButton() noexcept { return openButton; }
         void commitTyping();
 
     private:
         model::Theme theme;
         Actions actions;
+        juce::TextButton openButton;
 
         model::PatchReading reading;
         std::string drawnText;              // the text the view was made from

@@ -116,6 +116,11 @@ namespace wfg::tree
         std::string spaceMouse = "off";
         std::string spaceMouseName;
 
+        /*  WHAT A PROCESS CUE'S PATCH IS EDITED IN (namespace draft §51, ACN):
+            plugdata, Pd, or empty; and Pd's download, as ffmpegInstall is said. */
+        std::string patchEditor;
+        std::string patchEditorInstall;
+
         /** `dummy` in Phase 1, `hosted` or `device` from Phase 2. */
         std::string clock = "dummy";
 

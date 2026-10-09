@@ -418,6 +418,11 @@ namespace wfg::client::gesture
     /*  FFmpeg downloaded into Go.dot's own folder (namespace draft 37.5, WN). */
     Event installFfmpeg();
 
+    /*  A process cue's patch opened in plugdata or Pd, and Pd downloaded into
+        Go.dot's own folder (namespace draft §51, ACN, ACO). */
+    Event editPatch (const std::string& cueId);
+    Event installPd();
+
     /*  A HAND ON A SAMPLER STRIP, AND THE HAND LIFTED (PRD §3.27): a pad of
         the virtual panel clicked, a number key held. `velocity` is 1 to 127,
         from where on the pad the click landed; below 1 the argument is left

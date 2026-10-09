@@ -23502,17 +23502,25 @@ Mine, proposed:
   a drag's run of them is one step of undo by the engine's own folding (§14.9, 25 ticks). A running
   patch is opened again on every change, so a counter inside it starts again: that is a rehearsal's
   fact, and the canvas says it once.
-- **ACN** **Pd's window** (`process.edit`) opens on the running patch, or on a patch opened for it if
-  the cue is not running, which is handed nothing. The patch is a file in the engine's cache; while the
-  window is up its time is read each tick and a save in Pd becomes one `node.set` of `process/patch`
-  with the origin `pd`. A change from anywhere else - undo, the canvas, the console - rewrites the file
-  and opens the patch again. `process.edit` is refused under the lock. A Tcl plug-in in Go.dot's `pd`
-  folder gives Pd's window Go.dot's grounds, inks and font as far as Tk will.
-- **ACO** **Where Pd's window comes from.** Found if installed - `WFG_PD`, a `pd` folder beside Go.dot,
-  Go.dot's application data, then where Pd installs itself on each system - otherwise **downloaded on
-  first use**, as FFmpeg is (`pd.install`): the release libpd is pinned to, so the window and the engine
-  are one version. Nothing of Tcl/Tk is in Go.dot's installer; the Linux package recommends
-  `puredata-gui`.
+- **ACN** **Pd's own editor, or plugdata's, as a program of its own** (`process.edit`; changed while
+  building PC.7, from Pd's window on the running instance). The patch is written to a file in the
+  engine's cache and plugdata - where it is installed, the prettier of the two - or Pure Data is started
+  on it, apart from Go.dot; each save there is noticed (the file's time, read every half second) and
+  becomes one `node.set` of `process/patch` from the origin `pd`, which opens the running patch again.
+  An edit there takes effect when it is saved, not as it is typed. WHY: libpd can open Pd's window on a
+  running instance, and reading Pd's code for it showed three ways that would end or break the show -
+  a window that crashed makes Pd's next write to it call `exit()`; closing the patch's window in Pd frees
+  the running patch under Go.dot; and the window's start blocks the patch's thread until it connects,
+  for ever if it never does. A program of its own can do none of that. `process.edit` is refused
+  under the lock, and `pd-missing` on a machine with neither.
+- **ACO** **Where it is found, and Pd downloaded on first use.** `WFG_PD` names one; else plugdata
+  where it installs itself; else the Pd Go.dot downloaded for itself; else a Pd installed on the machine
+  (`/godot/engine/patchEditor` says which, looked for every five seconds). Where there is none, the
+  canvas's door offers Pd 0.56-5 - the Pd Go.dot runs patches with - downloaded into Go.dot's own folder
+  as FFmpeg is (`pd.install`, `/godot/engine/patchEditorInstall`): a zip from msp.ucsd.edu, unpacked by
+  JUCE on Windows and by `ditto` on the Mac, which keeps an application runnable. On Linux the system's
+  package is the way, `puredata` or `plugdata`, which the .deb recommends. Nothing of it is in Go.dot's
+  installer.
 - **ACP** **What a patch can reach.** Loading a show never starts a patch: only a run does (PRD §3.20).
   **No compiled externals**: the build replaces Pd's loader of binary externals by one that refuses,
   so only `.pd` patches are found as abstractions, from Go.dot's own `pd` folder and the show's folder.
@@ -23571,7 +23579,7 @@ Mine, proposed:
 | `run/processLate`, `run/processDropped` | run | `i`, read | 0 | Counts |
 | `run/said` | run | `s`, read | | The last `[print]` line |
 | `run/ports` | run | `s`, read | | The last value on each named port, for the canvas |
-| `run/editing` | run | `T`, read | false | Pd's window is up |
+| `/godot/engine/patchEditor`, `patchEditorInstall` | engine | `s`, read | | What a patch opens in; Pd's download (ACO) |
 | `/godot/list/processBudget` | `lists` | `d`, ms | 2 | ACJ |
 | `/godot/list/processStuckAfter` | `lists` | `i`, ticks | 50 | ACJ |
 | `serial/<id>/name`, `path`, `baud`, `framing`, `rx`, `tx` | `serial` | | -, -, 115200, `lines`, true, true | ACR |
@@ -23582,16 +23590,16 @@ Mine, proposed:
 
 ### 51.5 Commands and records
 
-- `process.edit s cue` - Pd's window on the cue's patch (ACN). Refused `locked`, `pd-missing`,
-  `pd-held`.
+- `process.edit s cue` - the cue's patch opened in plugdata or Pd (ACN). Refused `locked`,
+  `pd-missing`.
 - `process.send s run s name [atoms...]` - hands atoms to a name a running patch receives: the
   canvas's live boxes, a surface, a test.
-- `pd.install` - Pd's window downloaded (ACO), as `ffmpeg.install`.
+- `pd.install` - Pure Data 0.56-5 downloaded into Go.dot's own folder (ACO), as `ffmpeg.install`.
 - `serial.create`, then `node.set` on its rows; `object.delete` removes one.
 - Records: a stuck patch is `run.failed <run> process-stuck`, and a run that cannot be opened because
   another patch is stuck `run.failed <run> pd-held` - the existing record, a new reason each; and
   `serial.heard serial line` (engine).
-- Refusals: `pd-missing`, and `pd-held` for `process.edit` while a patch is stuck.
+- Refusals: `pd-missing`.
 
 ### 51.6 Measurements
 
@@ -23618,7 +23626,7 @@ Mine, proposed:
 | PC.4 | The cue in the window: the + menu, its icon, the patch's text in the inspector, late and stuck on its row, the Playback tab's two rows |
 | PC.5 | The canvas: a patch drawn, panned, zoomed, its boxes moved and deleted |
 | PC.6 | The canvas: boxes typed and placed, lines joined, copy and paste |
-| PC.7 | Pd's window on a patch, a save in it on the canvas; Pd's window downloaded when missing |
+| PC.7 | A patch opened in plugdata or Pd, a save there back on the canvas; Pd downloaded when missing |
 | PC.8 | The canvas live: values on the lines, toggles and sliders that move the patch |
 | PC.9 | The ready-made patches and their help; an example show |
 | PC.10 | Serial ports: a line from an Arduino in a patch, and back |
@@ -23682,3 +23690,10 @@ would give that (the option ACE did not take).
   none to a port the box has not got; Ctrl or Cmd with A picks every box, C copies the picked boxes and
   the lines between them as Pd's own text, X cuts, V pastes them beside where they were, numbered after
   the boxes there, and D duplicates. Esc while typing is still the PANIC.
+- **PC.7**: plugdata or Pd as the canvas's fallback, a program of its own (ACN, changed - see there).
+  `process/PatchEditor`: `find` (WFG_PD, plugdata, Go.dot's own Pd, an installed Pd), a `Watch` that
+  writes the patch to `<engine cache>/process/edit/<cue>.pd`, starts the program on it without handing
+  it a socket (`plugin::ChildLaunch`) and reads each save once, and `pd.install`. Serve turns a save into
+  a `node.set` from `pd` every half second, and publishes `engine/patchEditor` and
+  `engine/patchEditorInstall`. The canvas's corner says "Open in plugdata", "Open in Pd", "Get Pd..."
+  or "Getting Pd..."; with neither on the machine the window asks "Download Pure Data?".

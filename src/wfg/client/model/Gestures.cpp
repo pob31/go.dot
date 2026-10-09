@@ -572,6 +572,16 @@ namespace wfg::client::gesture
         return { origin::window, "ffmpeg.install", {} };
     }
 
+    Event editPatch (const std::string& cueId)
+    {
+        return { origin::window, "process.edit", { osc::Value::string (cueId) } };
+    }
+
+    Event installPd()
+    {
+        return { origin::window, "pd.install", {} };
+    }
+
     Event pressStrip (const std::string& stripId, int velocity)
     {
         /*  A HAND WITH NO VELOCITY SAYS NONE. The argument is optional because
