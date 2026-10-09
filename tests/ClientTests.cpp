@@ -10136,7 +10136,7 @@ TEST_CASE ("client: a fade's mixer has a strip per slider, lit where the fade mo
 
 //==============================================================================
 /*  THE NIGGLES OF 2026-10-07 (namespace draft §39). */
-TEST_CASE ("client: a sampler group takes sounds as members and nothing else - not a picture, not a locked sound - and its header stays free (§39)")
+TEST_CASE ("client: a sampler group takes sounds and pictures as members, a sound locked to a movie only beside it, and its header stays free (§39, §49)")
 {
     Rig rig;
     const std::string list = "7K2QM9X4";
@@ -10145,9 +10145,27 @@ TEST_CASE ("client: a sampler group takes sounds as members and nothing else - n
     REQUIRE (pads.ok);
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + pads.id + "/mode", "sampler").ok);
 
-    //  A sound is a member; a picture, a memo, a group and a mic are not.
+    const auto parentOf = [&rig] (const std::string& id)
+    {
+        return rig.document.findById (id).getParent()[juce::Identifier ("id")].toString().toStdString();
+    };
+
+    const auto indexOf = [&rig] (const std::string& id)
+    {
+        const auto node = rig.document.findById (id);
+        return node.getParent().indexOf (node);
+    };
+
+    /*  A SOUND IS A MEMBER, AND SINCE §49 A PICTURE OF EVERY KIND (AAZ); a memo,
+        a group and a mic are not. */
     CHECK (rig.document.createCue (pads.id, 0, "media", "Thunder").ok);
-    CHECK_FALSE (rig.document.createCue (pads.id, 0, "video", "Moon").ok);
+
+    for (const auto* source : { "fill", "mask", "picture", "movie", "capture" })
+    {
+        INFO ("a " << source);
+        CHECK (rig.document.createCue (pads.id, 0, "video", source, {}, { { "source", source } }).ok);
+    }
+
     CHECK_FALSE (rig.document.createCue (pads.id, 0, "memo", "Note").ok);
     CHECK_FALSE (rig.document.createCue (pads.id, 0, "group", "Inner").ok);
     CHECK_FALSE (rig.document.createCue (pads.id, 0, "mic", "Voice").ok);
@@ -10157,15 +10175,53 @@ TEST_CASE ("client: a sampler group takes sounds as members and nothing else - n
     const auto sound = rig.document.createCue (list, 2, "media", "Rain");
     REQUIRE (picture.ok);
     REQUIRE (sound.ok);
-    CHECK_FALSE (rig.document.move (picture.id, pads.id, 0).ok);
+    CHECK (rig.document.move (picture.id, pads.id, 0).ok);
     CHECK (rig.document.move (sound.id, pads.id, 0).ok);
 
-    //  A sound locked to a movie is its movie's, never a strip's.
-    const auto locked = rig.document.createCue (list, 2, "media", "Movie sound", {},
-                                                { { "lockedTo", picture.id } });
+    /*  A MOVIE MOVED IN TAKES ITS SOUND WITH IT, straight after it - a dual cue
+        moves as one (37.5, WM). */
+    const auto movie = rig.document.createCue (list, 1, "video", "Clip", {}, { { "source", "movie" } });
+    REQUIRE (movie.ok);
+    const auto itsSound = rig.document.createCue (list, 2, "media", "Clip sound", {}, { { "lockedTo", movie.id } });
+    REQUIRE (itsSound.ok);
 
-    if (locked.ok)
-        CHECK_FALSE (rig.document.move (locked.id, pads.id, 0).ok);
+    CHECK (rig.document.move (movie.id, pads.id, 0).ok);
+    CHECK (parentOf (itsSound.id) == pads.id);
+    CHECK (indexOf (itsSound.id) == indexOf (movie.id) + 1);
+
+    /*  A SOUND LOCKED TO A MOVIE ALONE IS ITS MOVIE'S, never a strip's (ABE):
+        refused while its movie is elsewhere, let in once its movie is a member. */
+    const auto other = rig.document.createCue (list, 1, "video", "Other", {}, { { "source", "movie" } });
+    REQUIRE (other.ok);
+    const auto apart = rig.document.createCue (list, 3, "media", "Other sound", {}, { { "lockedTo", other.id } });
+    REQUIRE (apart.ok);
+
+    CHECK_FALSE (rig.document.move (apart.id, pads.id, 0).ok);
+    CHECK_FALSE (rig.document.createCue (pads.id, 0, "media", "Stray", {}, { { "lockedTo", other.id } }).ok);
+
+    CHECK (rig.document.move (other.id, pads.id, 0).ok);
+    CHECK (rig.document.move (apart.id, pads.id, 1).ok);
+    CHECK (rig.document.createCue (pads.id, 2, "media", "Second sound", {}, { { "lockedTo", other.id } }).ok);
+
+    /*  PASTED: a movie and its sound copied together come in together - the
+        sound locked to the copy, under its new name. */
+    const auto copied = rig.document.fragmentOf ({ movie.id, itsSound.id });
+    REQUIRE_FALSE (copied.empty());
+    CHECK (rig.document.paste (pads.id, 0, copied, {}).ok);
+
+    //  A sound alone comes in where its movie is a member, and not where it is not.
+    const auto loneCopy = rig.document.fragmentOf ({ apart.id });
+    REQUIRE_FALSE (loneCopy.empty());
+    CHECK (rig.document.paste (pads.id, 0, loneCopy, {}).ok);
+
+    const auto outside = rig.document.createCue (list, 1, "video", "Outside", {}, { { "source", "movie" } });
+    REQUIRE (outside.ok);
+    const auto outsideSound = rig.document.createCue (list, 2, "media", "Outside sound", {},
+                                                      { { "lockedTo", outside.id } });
+    REQUIRE (outsideSound.ok);
+    const auto strayCopy = rig.document.fragmentOf ({ outsideSound.id });
+    REQUIRE_FALSE (strayCopy.empty());
+    CHECK_FALSE (rig.document.paste (pads.id, 0, strayCopy, {}).ok);
 
     //  The header is the group's preparation, and takes anything.
     const auto header = rig.document.createRole (pads.id, "header");
@@ -10173,10 +10229,27 @@ TEST_CASE ("client: a sampler group takes sounds as members and nothing else - n
     CHECK (rig.document.createCue (header.id, 0, "video", "Blackout").ok);
     CHECK (rig.document.createCue (header.id, 0, "memo", "Load").ok);
 
-    //  And a new sampler made from picked cues takes only sounds.
-    const auto another = rig.document.createCue (list, 3, "video", "Stars");
-    REQUIRE (another.ok);
-    CHECK_FALSE (rig.document.groupSelection ({ another.id }, {}, { { "mode", "sampler" } }).ok);
+    /*  A NEW SAMPLER MADE FROM PICKED CUES: pictures are welcome; a sound locked
+        to a movie only with its movie picked too, and then it stays straight
+        after its movie rather than being moved again to the end. */
+    const auto stars = rig.document.createCue (list, 1, "video", "Stars");
+    REQUIRE (stars.ok);
+    CHECK (rig.document.groupSelection ({ stars.id }, {}, { { "mode", "sampler" } }).ok);
+
+    const auto third = rig.document.createCue (list, 1, "video", "Third", {}, { { "source", "movie" } });
+    REQUIRE (third.ok);
+    const auto thirdSound = rig.document.createCue (list, 2, "media", "Third sound", {}, { { "lockedTo", third.id } });
+    REQUIRE (thirdSound.ok);
+    const auto after = rig.document.createCue (list, 3, "media", "After");
+    REQUIRE (after.ok);
+
+    CHECK_FALSE (rig.document.groupSelection ({ thirdSound.id }, {}, { { "mode", "sampler" } }).ok);
+
+    const auto bank = rig.document.groupSelection ({ third.id, thirdSound.id, after.id }, {}, { { "mode", "sampler" } });
+    REQUIRE (bank.ok);
+    CHECK (parentOf (thirdSound.id) == bank.id);
+    CHECK (indexOf (thirdSound.id) == indexOf (third.id) + 1);
+    CHECK (indexOf (after.id) == indexOf (thirdSound.id) + 1);
 }
 
 TEST_CASE ("client: a drag of anything but a sound into or among a sampler's members is refused in words (§39)")

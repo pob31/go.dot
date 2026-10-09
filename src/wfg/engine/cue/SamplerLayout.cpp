@@ -45,6 +45,14 @@ namespace wfg::cue
                 && cueRow (document, idOf (node), "mode") == "sampler";
         }
 
+        /*  A SOUND LOCKED TO A MOVIE (namespace draft 37.5, WJ): its `lockedTo`
+            names a video cue that is there. */
+        bool followsAMovie (const doc::ShowDocument& document, const juce::ValueTree& node)
+        {
+            const auto movie = node[juce::Identifier ("lockedTo")].toString().toStdString();
+            return ! movie.empty() && document.findById (movie).hasType ("Video");
+        }
+
         /*  THE CUES THAT HOLD NO OTHER CUES, which a walk for groups need not
             enter: their children are sends and inserts. */
         bool isLeafCue (const juce::ValueTree& node)
@@ -92,10 +100,13 @@ namespace wfg::cue
 
         /*  THE MEMBERS A SAMPLER PLAYS: media cues, enabled, in member order
             - the Runner's `membersOf` narrowed to what a strip can play (a
-            memo among them would take a strip nothing could be played from). */
+            memo among them would take a strip nothing could be played from).
+            Not a sound locked to a movie (namespace draft §49, ABE): its movie
+            plays it, and on a strip of its own it would play without its
+            picture. */
         for (const auto& child : group)
         {
-            if (child.getType().toString() != "Media")
+            if (child.getType().toString() != "Media" || followsAMovie (document, child))
                 continue;
 
             const auto id = idOf (child);

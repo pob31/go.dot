@@ -1503,3 +1503,29 @@ TEST_CASE ("go.doh: a bank the GO closed, fired again, does not run its header a
     CHECK (rig.runsOf (lights) == 1u);
     CHECK (rig.liveRunOf (rig.bankA) != nullptr);
 }
+
+//==============================================================================
+/*  PICTURES IN A SAMPLER GROUP (namespace draft §49). */
+TEST_CASE ("sampler: a sound locked to a movie stands in a bank beside its movie and takes no strip (§49, ABE)")
+{
+    Rig rig;
+    const auto clips = rig.group ("Clips", 3, 0);
+
+    const auto movie = rig.document.createCue (clips, 0, "video", "Clip", {},
+                                               { { "source", "movie" }, { "file", "clip.mov" } });
+    REQUIRE (movie.ok);
+
+    /*  AS A CONVERSION MAKES IT (Conversion.cpp): a sound made straight after
+        the movie, then locked to it. */
+    const auto sound = rig.document.createCue (clips, 1, "media", "Clip sound");
+    REQUIRE (sound.ok);
+    rig.set ("/godot/cue/" + sound.id + "/lockedTo", movie.id);
+
+    const auto plain = rig.document.createCue (clips, 2, "media", "Plain");
+    REQUIRE (plain.ok);
+    rig.set ("/godot/cue/" + plain.id + "/file", "plain.wav");
+
+    //  Its movie plays it, never a strip: no strip, where a sound beside it has one.
+    CHECK (rig.published ("/godot/cue/" + sound.id + "/stripNow").empty());
+    CHECK_FALSE (rig.published ("/godot/cue/" + plain.id + "/stripNow").empty());
+}

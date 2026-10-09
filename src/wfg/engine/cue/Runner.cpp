@@ -12456,7 +12456,8 @@ namespace wfg::cue
     {
         const auto cue = document.findById (cueId);
 
-        if (! cue.isValid() || kindOfCue (cue) != "media")
+        //  Not a sound its movie plays (namespace draft §49, ABE): fired by name, it plays as anywhere else.
+        if (! cue.isValid() || kindOfCue (cue) != "media" || followsAMovie (cue))
             return false;
 
         const auto parent = cue.getParent();

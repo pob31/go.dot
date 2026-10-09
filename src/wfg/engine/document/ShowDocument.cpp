@@ -51,29 +51,43 @@ namespace wfg::doc
             doing nothing, and a sound locked to a movie would have been put on
             a strip and played without its picture. Its header and footer are
             lists of their own, whose parent is not the group, and stay free. A
-            mic or a picture as a member is PRD §6.9's, still proposed. */
+            mic or a picture as a member is PRD §6.9's, still proposed.
+
+            SINCE 2026-10-09 A PICTURE TOO (namespace draft §49, AAZ): a video
+            cue of every kind is played from a strip, its fader its opacity. And
+            a SOUND LOCKED TO A MOVIE stands in a sampler only beside its movie
+            (ABE): the movie plays it, never a strip - so it is let in when its
+            movie is a member already, or arrives with it in the same edit. */
         bool isSampler (const juce::ValueTree& parent)
         {
             return parent.hasType ("Group") && parent["mode"].toString() == "sampler";
         }
 
-        bool samplerRefuses (const juce::ValueTree& parent, std::string_view element, const juce::String& lockedTo)
+        bool samplerRefuses (const juce::ValueTree& parent, std::string_view element, const juce::String& lockedTo,
+                             const std::vector<juce::String>& moviesArriving = {})
         {
             if (! isSampler (parent))
                 return false;
 
+            if (element == "Video")
+                return false;
+
             if (element == "Media")
-                return lockedTo.isNotEmpty();
+                return lockedTo.isNotEmpty()
+                         && ! parent.getChildWithProperty (idProperty, lockedTo).hasType ("Video")
+                         && std::find (moviesArriving.begin(), moviesArriving.end(), lockedTo) == moviesArriving.end();
 
             //  Its sections and its triggers are the group's own, not members.
-            return element == "Cue" || element == "Group" || element == "Mic" || element == "Video"
+            return element == "Cue" || element == "Group" || element == "Mic"
                 || element == "Fade" || element == "Transport" || element == "Osc" || element == "Midi"
                 || element == "Start";
         }
 
-        bool samplerRefuses (const juce::ValueTree& parent, const juce::ValueTree& node)
+        bool samplerRefuses (const juce::ValueTree& parent, const juce::ValueTree& node,
+                             const std::vector<juce::String>& moviesArriving = {})
         {
-            return samplerRefuses (parent, node.getType().toString().toStdString(), node["lockedTo"].toString());
+            return samplerRefuses (parent, node.getType().toString().toStdString(), node["lockedTo"].toString(),
+                                   moviesArriving);
         }
 
         /*  Whether a value is a legal standby for this list: one of the places
@@ -1779,20 +1793,42 @@ namespace wfg::doc
             if (sibling == first) break;
             if (isSequenceChild (sibling)) ++position;
         }
-        /*  A new sampler takes only what a sampler may hold (§39), asked
-            before anything is made. */
+        /*  A new sampler takes only what a sampler may hold (§39, §49), asked
+            before anything is made: sounds, pictures, and a sound locked to a
+            movie only with its movie picked too. */
+        std::vector<juce::String> moviesPicked;
+
+        for (const auto& node : ordered)
+            if (node.hasType ("Video"))
+                moviesPicked.push_back (node[idProperty].toString());
+
         for (const auto& [name, value] : attributes)
             if (name == "mode" && value == "sampler")
                 for (const auto& node : ordered)
-                    if (! node.hasType ("Media") || node["lockedTo"].toString().isNotEmpty())
+                {
+                    const auto lockedTo = node["lockedTo"].toString();
+
+                    if (! node.hasType ("Video")
+                          && (! node.hasType ("Media")
+                                || (lockedTo.isNotEmpty()
+                                      && std::find (moviesPicked.begin(), moviesPicked.end(), lockedTo) == moviesPicked.end())))
                         return EditResult::failed (reason::typeMismatch);
+                }
 
         // All sources and the destination are validated before the first edit.
         const auto created = createCue (parent[idProperty].toString().toStdString(), position, "group", "", id,
                                         attributes);
         if (! created.ok) return created;
+        const auto group = findById (created.id);
         for (const auto& node : ordered)
+        {
+            /*  A SOUND ITS MOVIE CARRIED IN ALREADY (a dual cue moves as one,
+                37.5 WM) is not moved again: to the end of the group, it would
+                land apart from its movie. */
+            if (node.hasType ("Media") && node.getParent() == group && node["lockedTo"].toString().isNotEmpty())
+                continue;
             move (node[idProperty].toString().toStdString(), created.id, endOfSequence);
+        }
         return created;
     }
 
@@ -3700,10 +3736,17 @@ namespace wfg::doc
         if (! read.ok)
             return EditResult::failed (reason::badValue);
 
+        //  The movies this paste brings, under their new names: a sound locked to one comes in with it (§49).
+        std::vector<juce::String> moviesArriving;
+
+        for (const auto& node : read.nodes)
+            if (node.hasType ("Video"))
+                moviesArriving.push_back (node[idProperty].toString());
+
         for (const auto& node : read.nodes)
         {
             if (! parentElement->mayContain (node.getType().toString().toStdString())
-                || samplerRefuses (parent, node))
+                || samplerRefuses (parent, node, moviesArriving))
             {
                 for (const auto& id : read.ids)
                     registry.release (id);

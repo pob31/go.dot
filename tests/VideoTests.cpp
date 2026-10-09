@@ -916,12 +916,11 @@ TEST_CASE ("video read-ahead: a scene's first pictures and movies are read befor
     CHECK (rig.sink.preloads[1].seconds == doctest::Approx (0.0));
     CHECK (rig.sink.preloads[1].direction == 1);
 
-    /*  A SAMPLER GROUP: nothing - a hand starts its members, not a GO. The
-        show takes no picture into one (§3.27, video TBC), so this one is a
-        scene with a picture in it turned into a sampler afterwards. */
-    const auto sampler = groupIn (rig, 2, "timeline");
+    /*  A SAMPLER GROUP AT STANDBY: nothing - a hand starts its members, not a
+        GO; the GO that arms the bank is what reads its pictures ahead (§49,
+        ABF). */
+    const auto sampler = groupIn (rig, 2, "sampler");
     videoCueIn (rig, sampler, 0, "picture", "pad.png");
-    REQUIRE (rig.document.setAttribute ("/godot/cue/" + sampler + "/mode", "sampler").ok);
 
     standbyOn (rig, sampler);
     CHECK (rig.sink.preloads.empty());
