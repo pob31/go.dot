@@ -23510,8 +23510,10 @@ Mine, proposed:
 - **ACP** **What a patch can reach.** Loading a show never starts a patch: only a run does (PRD §3.20).
   **No compiled externals**: the build replaces Pd's loader of binary externals by one that refuses,
   so only `.pd` patches are found as abstractions, from Go.dot's own `pd` folder and the show's folder.
-  Pd's vanilla objects stay whole - `[netsend]`, `[netreceive]` and `[file]` included - so a patch can
-  open a socket or write a file as Pd can. That is the sandbox §3.20 asks for, in these terms: nothing
+  **A patch cannot end Go.dot**: Pd's `quit` - which calls the C library's exit - and `exit` - a flag
+  every patch's scheduler stops on - are refused, said in Pd's console's words. Pd's vanilla objects
+  otherwise stay whole - `[netsend]`, `[netreceive]` and `[file]` included - so a patch can open a
+  socket or write a file as Pd can. That is the sandbox §3.20 asks for, in these terms: nothing
   runs at load, nothing is loaded from outside Go.dot and the show, and the time budget. Tightening it
   (taking `[file]`'s writes or `[netsend]` away) is the author's to ask for, if a show from somebody
   else is a case to protect against.
@@ -23627,3 +23629,8 @@ would give that (the option ACE did not take).
 ### 51.9 Built so far
 
 - **PC.0**: this section; PRD §3.6, §3.8, §3.20, §3.21, §3.29, §6.5, §6.9, §6.11; the devplan.
+- **PC.1**: Pure Data 0.56-5 and libpd 0.16.1 pinned (`ThirdParty/pure-data`, `ThirdParty/libpd`,
+  `scripts/check-pins.py` (h)) and built as `wfg_pd` on the three systems, with the threads stand-in on
+  MSVC, compiled externals refused and `quit` and `exit` refused; `process/PdInstance`, a patch on a
+  thread of its own; `process/PatchText`, Pd's text read and written back byte for byte, with its
+  boxes, lines and names.

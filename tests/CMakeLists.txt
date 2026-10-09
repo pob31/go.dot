@@ -88,6 +88,7 @@ add_executable(wfg_tests
     LooperTests.cpp
     MountTests.cpp
     NetworkCueTests.cpp
+    ProcessTests.cpp
     TrafficTapTests.cpp
     VerifiedCueTests.cpp
     JsonTests.cpp

@@ -46,6 +46,10 @@ THE SEVEN CHECKS
  (g) Go.dot's Tracktion patches (patches/tracktion_engine/series) are on the
      tree, or fit it cleanly - so a pin moved without reworking them fails here,
      in seconds, rather than at every job's configure
+ (h) libpd's own pure-data gitlink == our ThirdParty/pure-data gitlink: the Pd
+     Go.dot compiles is the one this libpd was released with (namespace draft
+     §51). libpd's nested pure-data stays EMPTY, as TE's JUCE does - Go.dot
+     builds Pd from ThirdParty/pure-data and libpd's wrapper from ThirdParty/libpd
 
 (c) and (f) are the same question with opposite answers, and the pair is the
 whole submodule policy in two lines. There are two nested submodules in this
@@ -76,6 +80,8 @@ TE = "ThirdParty/tracktion_engine"
 SIMPLEWEB = "ThirdParty/juce_simpleweb"
 SPATCORE = "ThirdParty/spatcore"
 HIDAPI = "ThirdParty/hidapi"
+LIBPD = "ThirdParty/libpd"
+PUREDATA = "ThirdParty/pure-data"
 TE_VENDORED_JUCE = "ThirdParty/tracktion_engine/modules/juce"
 SIMPLEWEB_ASIO = "ThirdParty/juce_simpleweb/asio"
 TE_PATCHES = "patches/tracktion_engine"
@@ -89,6 +95,8 @@ FIX_HINT = {
     TE: "git submodule update --init " + TE,
     SPATCORE: "git submodule update --init " + SPATCORE,
     HIDAPI: "git submodule update --init " + HIDAPI,
+    LIBPD: "git submodule update --init " + LIBPD,
+    PUREDATA: "git submodule update --init " + PUREDATA,
     SIMPLEWEB: "git submodule update --init --recursive " + SIMPLEWEB
                + "   (the --recursive is SCOPED to this path, and required: asio)",
 }
@@ -140,7 +148,7 @@ def checked_out_head(path: str):
 
 def check_a(failures):
     """Every submodule is checked out at the SHA its gitlink names."""
-    for path in (JUCE, TE, SIMPLEWEB, SPATCORE, HIDAPI):
+    for path in (JUCE, TE, SIMPLEWEB, SPATCORE, HIDAPI, LIBPD, PUREDATA):
         recorded, err = recorded_gitlink(path)
         if err:
             failures.append(err)
@@ -251,6 +259,42 @@ def check_f(failures):
         )
     else:
         print(f"  ok  (f) {SIMPLEWEB_ASIO}/ is populated ({len(entries)} entries)")
+
+
+def check_h(failures):
+    """libpd's own pure-data gitlink == our ThirdParty/pure-data gitlink.
+
+    The (b) of Pure Data: libpd is released against one Pd, and Go.dot pins
+    that Pd itself rather than recursing into libpd, whose nested submodules
+    also hold an Android audio library nothing here builds.
+    """
+    ours, err = recorded_gitlink(PUREDATA)
+    if err:
+        failures.append(err)
+        return
+
+    r = git("ls-tree", "HEAD", "pure-data", cwd=REPO_ROOT / LIBPD)
+    if r.returncode != 0 or not r.stdout.strip():
+        failures.append(
+            f"could not read libpd's own pure-data gitlink ({LIBPD} not checked out?)"
+        )
+        return
+    theirs = r.stdout.split()[2]     # "160000 commit <sha>\tpure-data"
+
+    if ours == theirs:
+        print(f"  ok  (h) libpd's pure-data gitlink matches our Pure Data pin @ {ours[:12]}")
+        return
+
+    failures.append(
+        "Pure Data pin skew: our ThirdParty/pure-data is NOT the Pd this libpd\n"
+        "    was released with.\n"
+        f"    ThirdParty/pure-data (ours)        : {ours}\n"
+        f"    libpd's own pure-data gitlink      : {theirs}\n"
+        "    Fix: move ThirdParty/pure-data to libpd's SHA and commit BOTH gitlinks\n"
+        "    in one commit:\n"
+        f"        git -C {PUREDATA} fetch origin && git -C {PUREDATA} checkout {theirs}\n"
+        f"        git add {PUREDATA} {LIBPD}"
+    )
 
 
 def our_files(suffixes=None, names=None, under=None):
@@ -387,6 +431,7 @@ def main() -> int:
     check_e(failures)
     check_f(failures)
     check_g(failures)
+    check_h(failures)
 
     if failures:
         print("\ncheck-pins: FAILED\n")

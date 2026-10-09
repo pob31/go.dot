@@ -7,7 +7,7 @@ This file records notice obligations, per dependency. Go.dot's own licence, and
 how it relates to its dependencies', is discussed once in
 [`README.md`](README.md#a-note-on-juce) and nowhere else in this tree.
 
-Four submodules supply everything below, plus one nested inside another
+Nine submodules supply everything below, plus one nested inside another
 (`asio`, under `juce_simpleweb`). Nothing else is vendored by Go.dot itself, and
 no dependency here is fetched at configure time — the pins are in `.gitmodules`
 and enforced by `scripts/check-pins.py`.
@@ -384,6 +384,41 @@ compiled - `windows/hid.c` with its descriptor reconstruction, `mac/hid.c`, or
 `linux/hid.c` (hidraw, over libudev) - into a static library of its own,
 `wfg_hidapi` (`cmake/WfgThirdParty.cmake`). Full text:
 `ThirdParty/hidapi/LICENSE-bsd.txt`.
+
+---
+
+## Pure Data
+
+- **Website**: https://puredata.info, https://github.com/pure-data/pure-data
+- **Version**: tag `0.56-5`, commit `f009fd8d7b537e209e09898d487fdf1bf547da2b`
+- **Licence**: BSD 3-Clause ("Standard Improved BSD License"); the expression objects
+  (`expr`, `expr~`, `fexpr~`, copyright IRCAM) under the same, by their own headers
+- **Copyright**: Miller Puckette and others
+
+What runs a process cue's patch (namespace draft §51). A pinned submodule at
+`ThirdParty/pure-data`, of which the sources libpd builds are compiled - no
+`extra` externals, no audio or MIDI back end but libpd's dummy - into a static
+library, `wfg_pd` (`cmake/WfgThirdParty.cmake`). **Modified at build time**: two
+files are compiled from copies made at configure time - `s_loader.c`, whose loader
+of compiled externals refuses, and `s_inter.c`, whose `quit` and `exit` messages
+are refused - and the submodule itself is left as pinned. On MSVC its POSIX
+threads come from Go.dot's own `src/wfg/engine/process/pthread-win32`. Full text:
+`ThirdParty/pure-data/LICENSE.txt`.
+
+---
+
+## libpd
+
+- **Website**: https://github.com/libpd/libpd
+- **Version**: tag `0.16.1`, commit `ba0dc63262901d658af8bbda5e619a60fa975e78`
+- **Licence**: BSD 3-Clause ("Standard Improved BSD License")
+- **Copyright**: Peter Brinkmann and the libpd team; its `LICENSE.txt` is Pure Data's text
+
+Pure Data as a library: the wrapper (`libpd_wrapper/`) is compiled into `wfg_pd`
+beside Pd, one instance per patch (`PDINSTANCE`, `PDTHREADS`). A pinned submodule
+at `ThirdParty/libpd`; its own nested `pure-data` is left empty, and
+`scripts/check-pins.py` (h) holds its gitlink equal to Go.dot's Pure Data pin.
+Full text: `ThirdParty/libpd/LICENSE.txt`.
 
 ---
 

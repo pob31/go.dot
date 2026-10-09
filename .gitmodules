@@ -19,3 +19,9 @@
 [submodule "ThirdParty/hidapi"]
 	path = ThirdParty/hidapi
 	url = https://github.com/libusb/hidapi.git
+[submodule "ThirdParty/libpd"]
+	path = ThirdParty/libpd
+	url = https://github.com/libpd/libpd.git
+[submodule "ThirdParty/pure-data"]
+	path = ThirdParty/pure-data
+	url = https://github.com/pure-data/pure-data.git

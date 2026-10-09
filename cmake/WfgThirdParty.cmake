@@ -648,6 +648,129 @@ set_target_properties(wfg_hidapi PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(wfg_deps INTERFACE wfg_hidapi)
 unset(_hidapi)
 
+# Pure Data (BSD-3, pure-data/pure-data at 0.56-5) and libpd's wrapper (BSD-3,
+# libpd/libpd at 0.16.1), which runs a process cue's patch (namespace draft §51).
+# Pd's sources come from ThirdParty/pure-data, never from libpd's own nested
+# pure-data, which stays empty as TE's JUCE does: scripts/check-pins.py (h) holds
+# the two gitlinks equal. Nothing of libpd's own CMake: its source list transcribed,
+# its settings with three changes -
+#   * one Pd instance per patch, each bound to its own thread (PDINSTANCE,
+#     PDTHREADS; namespace draft §51, ACT), and libpd's extras left out;
+#   * LIBPD_NO_NUMERIC: libpd_init would otherwise set the WHOLE process's number
+#     format to C - each patch's thread sets its own instead (ACQ);
+#   * no compiled externals (ACP): Pd's loader tries a binary first, with
+#     LoadLibrary or dlopen; the build compiles a copy of s_loader.c whose first
+#     loader refuses, so only .pd patches are ever found;
+#   * a patch cannot end Go.dot (ACP): "pd quit" calls exit() and "pd exit" sets
+#     a quit flag every instance's scheduler stops on, so one message box would
+#     end the show or freeze every patch's clocks; the copy of s_inter.c refuses
+#     both, in Pd's console's words.
+# Each copy is made at configure time - line endings made LF first, so a checkout
+# with CRLF matches too - and the submodule is left as pinned. If a text the build
+# replaces ever moves, configure stops here rather than building a Pd without
+# the change.
+# On MSVC Pd's <pthread.h> is Go.dot's own (src/wfg/engine/process/pthread-win32),
+# seen by Pd's sources alone.
+set(_pd "${CMAKE_SOURCE_DIR}/ThirdParty/pure-data/src")
+set(_libpd "${CMAKE_SOURCE_DIR}/ThirdParty/libpd/libpd_wrapper")
+add_library(wfg_pd STATIC)
+foreach(_file d_arithmetic d_array d_ctl d_dac d_delay d_fft d_fft_fftsg d_filter d_global
+              d_math d_misc d_osc d_resample d_soundfile d_soundfile_aiff d_soundfile_caf
+              d_soundfile_next d_soundfile_wave d_ugen g_all_guis g_array g_bang g_canvas
+              g_clone g_editor g_editor_extras g_graph g_guiconnect g_io g_mycanvas g_numbox
+              g_radio g_readwrite g_rtext g_scalar g_slider g_template g_text g_toggle
+              g_traversal g_undo g_vumeter m_atom m_binbuf m_class m_conf m_glob m_memory
+              m_obj m_pd m_sched s_audio s_audio_dummy s_inter_gui s_main s_net
+              s_path s_print s_utf8 x_acoustics x_arithmetic x_array x_connective x_file
+              x_gui x_interface x_list x_midi x_misc x_net x_scalar x_text x_time x_vexp
+              x_vexp_fun x_vexp_if)
+    target_sources(wfg_pd PRIVATE "${_pd}/${_file}.c")
+endforeach()
+
+# One of Pd's files, read and changed in memory: `_wfg_pd_amend(<file> <from> <to>)`
+# replaces <from> by <to> in the copy being built for <file>, or stops configure.
+function(_wfg_pd_amend file from to)
+    if(NOT DEFINED _wfg_pd_${file})
+        file(READ "${CMAKE_SOURCE_DIR}/ThirdParty/pure-data/src/${file}" _text)
+        string(REPLACE "\r\n" "\n" _text "${_text}")
+    else()
+        set(_text "${_wfg_pd_${file}}")
+    endif()
+    string(FIND "${_text}" "${from}" _at)
+    if(_at EQUAL -1)
+        message(FATAL_ERROR
+            "ThirdParty/pure-data/src/${file} no longer holds\n    ${from}\n"
+            "which Go.dot's build changes (namespace draft §51, ACP). Rework "
+            "cmake/WfgThirdParty.cmake for the new Pd before moving the pin.")
+    endif()
+    string(REPLACE "${from}" "${to}" _text "${_text}")
+    set(_wfg_pd_${file} "${_text}" PARENT_SCOPE)
+endfunction()
+
+_wfg_pd_amend(s_loader.c
+    "static loader_queue_t loaders = {sys_do_load_lib, NULL};"
+    "static int wfg_refuse_compiled_externals(t_canvas *canvas, const char *objectname, const char *path)\n{ (void)canvas; (void)objectname; (void)path; return 0; }\nstatic loader_queue_t loaders = {wfg_refuse_compiled_externals, NULL};")
+_wfg_pd_amend(s_inter.c
+    "void glob_exit(void *dummy, t_floatarg status)\n{\n    sys_exit(status);\n}"
+    "void glob_exit(void *dummy, t_floatarg status)\n{\n    (void)dummy; (void)status;\n    pd_error(0, \"Go.dot: a patch cannot end Go.dot - [pd exit( is refused\");\n}")
+_wfg_pd_amend(s_inter.c
+    "void glob_quit(void *dummy, t_floatarg status)\n{\n    exit(status);\n}"
+    "void glob_quit(void *dummy, t_floatarg status)\n{\n    (void)dummy; (void)status;\n    pd_error(0, \"Go.dot: a patch cannot end Go.dot - [pd quit( is refused\");\n}")
+foreach(_file s_loader.c s_inter.c)
+    file(WRITE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${_wfg_pd_${_file}}")
+    configure_file("${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${CMAKE_BINARY_DIR}/wfg_pd/${_file}" COPYONLY)
+    target_sources(wfg_pd PRIVATE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}")
+    unset(_wfg_pd_${_file})
+endforeach()
+target_sources(wfg_pd PRIVATE
+    "${_libpd}/s_libpdmidi.c"
+    "${_libpd}/x_libpdreceive.c"
+    "${_libpd}/z_hooks.c"
+    "${_libpd}/z_libpd.c")
+target_include_directories(wfg_pd SYSTEM PUBLIC "${_libpd}" "${_pd}")
+target_compile_definitions(wfg_pd
+    PUBLIC PD=1 USEAPI_DUMMY=1 PDINSTANCE=1 PDTHREADS=1 LIBPD_NO_NUMERIC=1
+    PRIVATE PD_INTERNAL=1)
+set_property(TARGET wfg_pd PROPERTY C_STANDARD 11)
+include(CheckIncludeFile)
+foreach(_h alloca.h endian.h machine/endian.h unistd.h)
+    string(MAKE_C_IDENTIFIER "WFG_PD_HAVE_${_h}" _var)
+    check_include_file("${_h}" ${_var})
+    if(${_var})
+        string(TOUPPER "${_h}" _def)
+        string(MAKE_C_IDENTIFIER "HAVE_${_def}" _def)
+        target_compile_definitions(wfg_pd PUBLIC ${_def}=1)
+    endif()
+endforeach()
+if(MSVC)
+    # Pd's own MSVC settings from libpd's CMake: a 64-bit t_int, the C11 atomics
+    # its scheduler uses, and Windows' names for what POSIX calls otherwise.
+    target_compile_definitions(wfg_pd
+        PUBLIC "PD_LONGINTTYPE=long long" EXTERN=extern HAVE_STRUCT_TIMESPEC=1
+        PRIVATE _CRT_SECURE_NO_WARNINGS WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+    target_sources(wfg_pd PRIVATE "${CMAKE_SOURCE_DIR}/src/wfg/engine/process/pthread-win32/pthread_win32.c")
+    target_include_directories(wfg_pd PRIVATE "${CMAKE_SOURCE_DIR}/src/wfg/engine/process/pthread-win32")
+    target_compile_options(wfg_pd PRIVATE /experimental:c11atomics /w)
+    target_link_libraries(wfg_pd PUBLIC Ws2_32)
+else()
+    target_compile_options(wfg_pd PRIVATE -w)
+    find_package(Threads REQUIRED)
+    target_link_libraries(wfg_pd PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+    if(APPLE)
+        target_compile_definitions(wfg_pd PUBLIC _DARWIN_C_SOURCE)
+    else()
+        target_link_libraries(wfg_pd PUBLIC m)
+    endif()
+endif()
+set_target_properties(wfg_pd PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(wfg_deps INTERFACE wfg_pd)
+unset(_file)
+unset(_h)
+unset(_var)
+unset(_def)
+unset(_libpd)
+unset(_pd)
+
 add_library(wfg::thirdparty ALIAS wfg_thirdparty)
 
 # The engine will eventually be linked into things that are themselves shared objects
