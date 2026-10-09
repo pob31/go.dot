@@ -428,8 +428,9 @@ namespace wfg::client::ui
 
         switch (showing.kind)
         {
+            //  A movie's is its strip (§47), the word its inspector's button wears.
             case model::Subject::Kind::waveform:
-                wanted = "Waveform";
+                wanted = reading.movie ? "Strip" : "Waveform";
                 break;
 
             case model::Subject::Kind::sends:

@@ -940,9 +940,23 @@ namespace wfg::client::ui
         const auto aspect = first.height > 0 ? static_cast<double> (first.width) / first.height : 16.0 / 9.0;
         const auto wide = std::max (8, static_cast<int> (std::lround (pictures.getHeight() * aspect)));
 
+        /*  KEPT INSIDE THE STRIP AND THE MOVIE (the author, 2026-10-09: "The
+            thumbnails on a resized time line tend to over flow on the loop/section
+            list to the right"): a picture is scaled to cover its slot in the
+            movie's shape, so the last one, and any slot narrower than a picture,
+            ran on past its edge - over the next, and past the bar onto the range
+            table. Each is clipped to its slot, and the strip ends where the
+            movie does. */
+        const auto movieEnd = strip->duration > 0.0 && view.span() > 0.0
+                                ? pictures.getX() + static_cast<int> (std::ceil (view.xForSeconds (strip->duration, pictures.getWidth())))
+                                : pictures.getRight();
+        const auto stripEnd = std::clamp (movieEnd, pictures.getX(), pictures.getRight());
+
+        juce::Graphics::ScopedSaveState keepInside (g);
+        g.reduceClipRegion (pictures.withRight (stripEnd));
         g.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);
 
-        for (auto x = pictures.getX(); x < pictures.getRight(); x += wide)
+        for (auto x = pictures.getX(); x < stripEnd; x += wide)
         {
             const auto* thumbnail = strip->thumbnailAt (secondsAt (x));
 
@@ -965,8 +979,11 @@ namespace wfg::client::ui
                     }
             }
 
-            const auto slot = juce::Rectangle<int> (x, pictures.getY(), std::min (wide, pictures.getRight() - x), pictures.getHeight());
-            g.drawImage (image, slot.toFloat(), juce::RectanglePlacement::fillDestination | juce::RectanglePlacement::xLeft);
+            const auto slot = juce::Rectangle<int> (x, pictures.getY(), std::min (wide, stripEnd - x), pictures.getHeight());
+
+            juce::Graphics::ScopedSaveState keepToSlot (g);
+            g.reduceClipRegion (slot);
+            g.drawImage (image, slot.withWidth (wide).toFloat(), juce::RectanglePlacement::fillDestination);
         }
     }
 

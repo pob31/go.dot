@@ -30,6 +30,7 @@
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
+#include <wfg/engine/video/Strip.h>
 #include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/command/Event.h>
 #include <wfg/engine/osc/OscCodec.h>
@@ -4663,4 +4664,92 @@ TEST_CASE ("curve lane: the picked curve's puck - its axis, speed and turn - eac
     CHECK (lane.puckAxisMenu().getY() > lane.pointValueBox().getBottom());
     CHECK_FALSE (lane.puckInvertButton().getBounds().intersects (lane.pointValueBox().getBounds()));
     CHECK (lane.puckInvertButton().getRight() <= lane.getWidth());
+}
+
+TEST_CASE ("waveform: a movie's pictures stay inside their strip and end where the movie does (§47)")
+{
+    /*  The author, 2026-10-09: "The thumbnails on a resized time line tend to
+        over flow on the loop/section list to the right." A picture is scaled to
+        cover its slot in the movie's shape; drawn unclipped, the last ran on
+        past the bar onto the range table. A movie of thirty seconds drawn over a
+        file of sixty, its pictures pure red: nothing red right of the middle.
+        With WFG_SNAPSHOT_DIR set, waveform-movie-strip.png as well. */
+    ui::WaveformEditorComponent editor (model::Theme {}, {});
+    editor.setRightColumn (360, 12);
+    editor.setSize (1000, 220);
+
+    auto strip = std::make_shared<wfg::video::strip::MovieStrip>();
+    strip->duration = 30.0;
+    strip->width = 1920;
+    strip->height = 1080;
+
+    for (int n = 0; n < 4; ++n)
+    {
+        wfg::video::strip::Thumbnail picture;
+        picture.seconds = 7.5 * n;
+        picture.width = wfg::video::strip::thumbnailWidth;
+        picture.height = 45;
+
+        for (int pixel = 0; pixel < picture.width * picture.height; ++pixel)
+            picture.rgb.insert (picture.rgb.end(), { 255, 0, 0 });
+
+        strip->thumbnails.push_back (std::move (picture));
+    }
+
+    strip->cuts = { { 7.5, 0.5, false }, { 15.0, 0.4, true } };
+
+    auto records = std::make_shared<wfg::audio::MediaRecords>();
+    wfg::audio::MediaRecord record;
+    record.seconds = 60.0;
+    record.strip = strip;
+    (*records)["movie.mov"] = record;
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "Movie";
+    reading.cueKind = "video";
+    reading.movie = true;
+    reading.file = "movie.mov";
+    reading.fileLength = 60.0;
+
+    editor.show (reading, records);
+
+    juce::Image canvas (juce::Image::RGB, 1000, 220, true, juce::SoftwareImageType());
+    {
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, false);
+    }
+
+    auto rightmostRed = -1;
+    auto red = 0;
+
+    for (int y = 0; y < canvas.getHeight(); ++y)
+        for (int x = 0; x < canvas.getWidth(); ++x)
+        {
+            const auto colour = canvas.getPixelAt (x, y);
+
+            if (colour.getRed() > 240 && colour.getGreen() < 20 && colour.getBlue() < 20)
+            {
+                ++red;
+                rightmostRed = std::max (rightmostRed, x);
+            }
+        }
+
+    INFO ("rightmost red pixel at " << rightmostRed);
+    CHECK (red > 1000);                                  // the pictures were drawn
+    CHECK (rightmostRed < (1000 - 360 - 12) / 2 + 2);    // and stop at the movie's end, mid-bar
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const juce::File file { juce::File (dir).getChildFile ("waveform-movie-strip.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (canvas, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
 }
