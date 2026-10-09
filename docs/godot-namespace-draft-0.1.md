@@ -23175,6 +23175,22 @@ on a Video as on a Media:
   from the press (`videoLeadTicks` ticks), a fader's touch one tick more. **M55b** headless, as M54a: a
   member read ahead against cold. **M55c** on the bench: a D700 fader to the light on a projector.
 
+*Measured 2026-10-09* (VS.9):
+
+- **M55a** (SamplerTests, exact, at 48 kHz with a 128-sample block): a tick's pass runs before the
+  commands it applies, so a press is acted on the tick after the one it is applied in - for a sound as
+  for a picture. From the audio's clock at the tick a pad's press is applied to its picture's first
+  opacity point: **a tick and a horizon, 60 ms** - the very sample a sound pressed in the same tick
+  starts on. A hand landing on a fader, whose press is the engine's record of the touch, and a movie
+  whose sound is ready, which the bank's tick lets go: **a tick more, 80 ms**; the movie's sound starts
+  on its picture's sample. The expectation above was a tick short: it had the pass after the drain.
+- **M55b** (VideoHostTests, a Debug build, a renderer with no window): a 1920x1080 still on an armed
+  bank's strip, read ahead with its bank (ABF), is seen **9.6 ms** after the sample its press put it
+  up on - the renderer's first pass; one fired by name and never read, **911 ms**, its decode. Driven
+  through the Runner, a press of a virtual panel's strip and the bank armed by GO, on the machine's
+  clock.
+- **M55c** owed to the bench.
+
 ### 49.5 Stages
 
 | Stage | What the author sees |
@@ -23197,7 +23213,35 @@ video monitor following a strip.
 
 ### 49.7 Built so far
 
-- **VS.0, this section** (2026-10-09).
+All of it, 2026-10-09, each stage its own commit on main:
+
+- **VS.-1** (d40bc62): M54's lag bound on CI loosened to 250 ms, the hosted Mac's noise being larger
+  than the effect it measured.
+- **VS.0** (179b05f): this section; PRD §3.27, §3.28 and §6.9.
+- **VS.1** (6fcdfba): the member rows under the owner `member`, on a Media and a Video (ABB); the
+  "play" foot part on a video cue; the inspector's and the console's orders.
+- **VS.2** (a6c92e5): a sampler group takes a picture of every kind on create, move and paste, and a
+  sound locked to a movie only beside its movie, or arriving with it (ABE).
+- **VS.3** (6a0ccb4): a picture placed on a strip with no voice, brought up by a press a horizon ahead,
+  its fader along the fader's travel (AAV, AAW); a restart takes a movie to its start (ABD); the later
+  on top on one layer (AAY). `tests/FakeVideoSink.h` shared.
+- **VS.4** (94ade6e): let go, or the fader at the bottom, a picture goes down over `releaseFade`
+  (`releaseVideo`); a still playing out stays until MUTE (AAX), and through a takeover (ABJ). And a
+  fault older than this: a picture stopped in the tick it was fired never ended (`run.started`).
+- **VS.5** (cb2d432): an armed bank's stills and movies read ahead, after the focused standby (ABF).
+- **VS.6** (3a9447b): a picture strip in its picture's tint; SELECT on a movie aims its sound, one rule
+  for the window and the surfaces (`tree::dualCueOf`) (ABG).
+- **VS.7** (bfeb6e3): the window lets a picture into a bank by drag, drop and the add lists; the
+  inspector's strip menu on a picture, "fader or pad" (ABI).
+- **VS.8** (ff5ede7): a movie's sound armed with its bank on a voice of its own, the movie pending while
+  it waits, a press let go once the sound is ready, both on one sample; its meter the movie's (ABA, ABG,
+  ABH).
+- **VS.9**: M55 (§49.4); `tests/blackbox/phase6_sampler.py` plays a picture member over the network -
+  armed, pressed, ridden, killed by MUTE, armed again - under C and fr-FR, and `wfg replay` reproduces
+  it.
+
+Owed to the bench: M55c; the D700 with a bank of pictures under the hands - the tint on a strip, the
+fader's travel on a projector, a movie and its sound from one fader.
 
 ### 49.8 Afterwards: the knob above a DCA strip (the author's, 2026-10-09)
 

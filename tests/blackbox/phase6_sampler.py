@@ -38,6 +38,12 @@ the bottom first by a write with no hand on it - a level set in advance, which
 starts nothing - so the touch starts it silent and the render keeps its
 arithmetic.
 
+AND A PICTURE ON A STRIP (namespace draft §49): Bank A's copy is given a fifth
+member, a colour on a canvas no output shows - so no renderer starts and no
+window opens - which lands on the fifth strip, comes up from a press over the
+network, takes its fader as its opacity, is killed by MUTE and is armed again,
+all of it in the log for `wfg replay`. Silent, so the render's arithmetic holds.
+
 THE FIXTURE IS tests/fixtures/bundles/sampler, which has no audio routing of
 its own (its log is recorded with no device). This copies it and gives it a
 bus and a route per member - a copy of a bundle is exactly the thing to change,
@@ -78,6 +84,10 @@ THUNDER_STRIP = "STRP0001"      # Thunder: release = hold
 RAIN_STRIP = "STRP0002"         # Rain: velocity on, floor -40 dB
 DOOR_STRIP = "STRP0004"         # Door: play-out, touched to start
 BANK_A_STRIPS = ["STRP0001", "STRP0002", "STRP0003", "STRP0004"]
+
+PICTURE = "SMPV0001"            # Glow: a colour, Bank A's fifth member
+PICTURE_STRIP = "STRP0005"
+CANVAS = "SMPC0001"
 
 # The constant every file holds, and the two levels the render must show.
 UNITY = first_sound.AMPLITUDE
@@ -128,6 +138,25 @@ def give_it_a_bus(bundle: Path) -> None:
 
     for name in ("thunder", "rain", "bell", "door", "wind", "owl"):
         first_sound.write_tone(bundle / "media" / f"{name}.wav")
+
+
+def give_it_a_picture(bundle: Path) -> None:
+    """Bank A's fifth member, a colour on a canvas of its own (namespace draft
+    §49) - and no video output, so the show starts no renderer and opens no
+    window on whatever screen the machine has."""
+    show = bundle / "show.xml"
+    text = show.read_text(encoding="utf-8")
+
+    # The first close of a group is Bank A's.
+    glow = (f'        <Video id="{PICTURE}" canvas="{CANVAS}" name="Glow" number="1.5" '
+            f'paint="#2040A0"/>\n      </Group>')
+    text = text.replace("      </Group>", glow, 1)
+    text = text.replace("</Show>", f'  <Canvases>\n    <Canvas id="{CANVAS}" name="Stage"/>\n  </Canvases>\n</Show>')
+
+    if text.count(PICTURE) != 1 or "<VideoOutputs" in text:
+        raise HarnessError("the sampler fixture is not the shape this expects (the picture)")
+
+    show.write_text(text, encoding="utf-8", newline="\n")
 
 
 # =============================================================================
@@ -272,6 +301,7 @@ def run(locale: "str | None") -> int:
         replayed = room / "replayed"
 
         give_it_a_bus(bundle)
+        give_it_a_picture(bundle)
 
         with Server(bundle, log=log, locale=locale, sample_rate=RATE,
                     buffer_size=BLOCK, hosted=True, render=render) as server:
@@ -301,6 +331,11 @@ def run(locale: "str | None") -> int:
 
                 report.check(armed, "GO armed all four members onto the panel's strips",
                              str([value_of(server, f"/godot/slot/{s}/word") for s in BANK_A_STRIPS]))
+
+                report.equal(wait_for(server, f"/godot/slot/{PICTURE_STRIP}/word", "armed"), "armed",
+                             "and the picture member onto the fifth (§49)")
+                report.equal(value_of(server, f"/godot/slot/{PICTURE_STRIP}/cue"), PICTURE,
+                             "which names it")
 
                 bank = run_for_cue(server, BANK_A)
                 report.check(bool(bank), "and the bank is a run of its own")
@@ -404,6 +439,34 @@ def run(locale: "str | None") -> int:
                 hand.send("/godot/cmd/node/release", [door_trim])
                 wait_ticks(server, 10)
 
+                # --- Glow, a picture on a strip (§49) -----------------------
+                # Up from a press, its fader its opacity; MUTE kills it, and
+                # it is armed again on its strip as a new run. Silent.
+                glow = value_of(server, f"/godot/slot/{PICTURE_STRIP}/holder") or ""
+                hand.send("/godot/cmd/strip/press", [PICTURE_STRIP])
+
+                report.equal(wait_for(server, f"/godot/run/{glow}/state", "playing"), "playing",
+                             "a pad press over the network brings a picture up")
+                report.equal(value_of(server, f"/godot/slot/{PICTURE_STRIP}/word"), "playing",
+                             "and its strip says so")
+
+                hand.send(f"/godot/run/{glow}/trim", [-20.0])
+                report.equal(wait_for(server, f"/godot/run/{glow}/trim", -20.0), -20.0,
+                             "a hand on its fader rides it")
+
+                hand.send("/godot/cmd/run/kill", [glow])
+                report.equal(wait_for(server, f"/godot/run/{glow}/state", "done"), "done",
+                             "MUTE takes the picture away")
+
+                glow_again = wait_until(server, lambda: (
+                    value_of(server, f"/godot/slot/{PICTURE_STRIP}/holder") not in (None, "", glow)
+                    and value_of(server, f"/godot/slot/{PICTURE_STRIP}/word") == "armed"))
+
+                report.check(glow_again, "and it is armed again on its strip, as a new run",
+                             str(value_of(server, f"/godot/slot/{PICTURE_STRIP}/holder")))
+
+                wait_ticks(server, 10)
+
                 # --- the bank disarmed --------------------------------------
                 # The transport cue aimed at the bank: every member ends - the
                 # muted Rain with them - the footer runs, the strips are free.
@@ -415,10 +478,11 @@ def run(locale: "str | None") -> int:
 
                 freed = wait_until(server, lambda: all(
                     value_of(server, f"/godot/slot/{strip}/word") == "free"
-                    for strip in BANK_A_STRIPS))
+                    for strip in BANK_A_STRIPS + [PICTURE_STRIP]))
 
-                report.check(freed, "and every strip it held is free",
-                             str([value_of(server, f"/godot/slot/{s}/word") for s in BANK_A_STRIPS]))
+                report.check(freed, "and every strip it held is free, the picture's too",
+                             str([value_of(server, f"/godot/slot/{s}/word")
+                                  for s in BANK_A_STRIPS + [PICTURE_STRIP]]))
 
                 wait_ticks(server, 25)
                 first_sound.wait_for_render_tail(render)
@@ -471,7 +535,12 @@ def run(locale: "str | None") -> int:
         by_hand = [parts for parts in presses if parts[3].startswith("udp:")]
         by_touch = [parts for parts in presses if parts[3] == "engine"]
 
-        report.equal(len(by_hand), 2, "two presses in the log, with the origin of the hand")
+        kills = [parts for parts in applied if len(parts) > 4 and parts[4] == "run.kill"
+                 and parts[3].startswith("udp:")]
+
+        report.equal(len(by_hand), 3, "three presses in the log, with the origin of the hand - "
+                     "two sounds and a picture")
+        report.equal(len(kills), 1, "and the picture's MUTE, by hand", str(kills))
         report.check(any(parts[-1] == "i:64" for parts in by_hand),
                      "and the velocity travels with the press", str(by_hand))
         report.equal(len(by_touch), 1,

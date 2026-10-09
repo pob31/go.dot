@@ -2278,3 +2278,92 @@ TEST_CASE ("sampler: a movie's sound lets its voice go when its idle movie is ki
     REQUIRE (rig.tickUntil ([&rig, &secondSound] { return rig.runs.find (secondSound)->isFinished(); }));
     CHECK (rig.liveRunOf (sound) == nullptr);
 }
+
+TEST_CASE ("sampler: M55a, a pad puts a picture up on the sample it would start a sound, a fader's touch and a movie with its sound one tick later (§49)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const auto padded = pictures.member (bank, "picture", "still.png");
+    const auto touched = pictures.member (bank, "fill");
+
+    const auto thunder = rig.document.createCue (bank, 2, "media", "Thunder").id;
+    rig.set ("/godot/cue/" + thunder + "/file", "thunder.wav");
+    rig.membersOf[bank].push_back (thunder);
+
+    const auto movie = pictures.member (bank, "movie", "clip.mov");
+    const auto sound = pictures.soundOf (bank, movie, "clip.wav");
+
+    rig.arm (bank);
+    REQUIRE (rig.tickUntil ([&rig, &sound] { return rig.liveRunOf (sound) != nullptr; }));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    /*  THE AUDIO'S CLOCK MOVING A TICK A TICK, as the device's does, and the
+        horizon a picture is put up on: a launch's, two ticks at the least. A
+        tick's pass runs before its commands are applied (Console's
+        `setBeforeTick`, and the rig's `tickOnce`), so a press applied in one
+        tick is acted on in the next - for a sound as for a picture. */
+    const auto tickOn = [&rig]
+    {
+        rig.audio.elapsed += 960;
+        rig.tickOnce();
+    };
+
+    const auto horizon = static_cast<std::int64_t> (std::max (rig.runner.latencyTicks(), 2)) * 960;
+    constexpr std::int64_t aTick = 960;
+
+    const auto firstPoint = [&pictures] (const std::string& runId)
+    {
+        const auto& points = pictures.sink.points[runId];
+        return points.empty() ? std::int64_t { -1 } : points.front().sample;
+    };
+
+    /*  A PAD, AND A SOUND'S PAD IN THE SAME TICK: the picture up on the very
+        sample the sound starts on, a tick and a horizon from the clock the
+        presses were applied at. */
+    const auto padRun = rig.liveRunOf (padded)->id;
+    const auto thunderRun = rig.liveRunOf (thunder)->id;
+    rig.audio.elapsed += aTick;
+    const auto padAt = rig.audio.elapsed;
+    REQUIRE (rig.engine.submit ("window", "strip.press", { osc::Value::string (rig.strips[0]) }));
+    rig.send ("strip.press", { osc::Value::string (rig.strips[2]) }, "window");
+
+    for (int n = 0; n < 4; ++n)
+        tickOn();
+
+    CHECK (firstPoint (padRun) - padAt == aTick + horizon);
+    CHECK (rig.runs.find (thunderRun)->launchedAtSample == firstPoint (padRun));
+
+    //  A HAND LANDING ON A FADER: its press is the engine's record of the touch, a tick later.
+    const auto touchRun = rig.liveRunOf (touched)->id;
+    rig.audio.elapsed += aTick;
+    const auto touchAt = rig.audio.elapsed;
+    rig.send ("node.touch", { osc::Value::string ("/godot/run/" + touchRun + "/trim") }, "surface:DESK");
+
+    for (int n = 0; n < 4; ++n)
+        tickOn();
+
+    CHECK (firstPoint (touchRun) - touchAt == 2 * aTick + horizon);
+
+    /*  A MOVIE WITH ITS SOUND READY: let go by the bank's tick, a tick later,
+        and its sound on the same sample. */
+    const auto movieRun = rig.liveRunOf (movie)->id;
+    rig.audio.elapsed += aTick;
+    const auto movieAt = rig.audio.elapsed;
+    rig.send ("strip.press", { osc::Value::string (rig.strips[3]) }, "window");
+
+    for (int n = 0; n < 4; ++n)
+        tickOn();
+
+    CHECK (firstPoint (movieRun) - movieAt == 2 * aTick + horizon);
+
+    const auto* voice = rig.liveRunOf (sound);
+    REQUIRE (voice != nullptr);
+    CHECK (voice->launchedAtSample == firstPoint (movieRun));
+
+    MESSAGE ("M55a, from the clock a press is applied at to its picture's first sample: a pad ",
+             static_cast<double> (aTick + horizon) / 48.0, " ms, as a sound's; a touch and a movie with its sound ",
+             static_cast<double> (2 * aTick + horizon) / 48.0, " ms");
+}

@@ -2496,7 +2496,9 @@ it**, on a voice of its own from the moment the bank arms, so the press starts b
 the fader moves both (ABA). Proposed (§6.9): the bank's set level reaches its sounds but not its pictures
 (ABC); a restart on a still does nothing (ABD); an armed bank's pictures read ahead (ABF); a picture
 strip's colour is its picture's tint, and SELECT on a movie aims its sound (ABG); a still playing out
-keeps its strip through a takeover, until MUTE (ABJ).
+keeps its strip through a takeover, until MUTE (ABJ). *Built 2026-10-09* (namespace draft §49.7):
+a pad brings a picture up on the sample it would start a sound; a movie waits for its sound's voice
+and both leave together, a tick later (§6.11, M55).
 
 **Strips.** §3.16's word for a fader or a pad. Each strip's role is the
 layout's (§3.9a): a **DCA strip** is pinned; a **sampler strip** is filled by
@@ -3783,8 +3785,8 @@ AAP-AAU in §48.2 are the author's to overrule; these are what the work left out
   that never ends, and which picture lies on top.~~ *Answered 2026-10-09* - the opacity, the set level,
   MUTE or a stop cue, the layer's number (§3.27; namespace draft §49).
 
-Added 2026-10-09 *(proposed)*, with video in a sampler group (namespace draft §49). The implementer's
-calls ABB-ABJ in §49.2 are the author's to overrule; what the work leaves out:
+Added 2026-10-09 *(proposed)*, with video in a sampler group (namespace draft §49, built the same day).
+The implementer's calls ABB-ABJ in §49.2 are the author's to overrule; what the work leaves out:
 
 - **The bank's set level on a picture** (ABC): today it reaches the sounds only.
 - **A curve of its own on a member** - a picture on a strip follows the fader's travel straight. The
@@ -3922,6 +3924,12 @@ Mackie vs HUI first — first week with the D700.
   so its gain is for long movies and files not in the system's cache - owed to the bench. On the
   graphics card, GO on a 3840x2160 still only decoded took 58 ms against 35 ms for one put on the card a
   frame before: its upload, a frame or two at sixty, is now spent before GO.
+- **Pictures in a sampler group** (§3.27, 2026-10-09, namespace draft §49): **M55** - from a press to
+  the first picture. *Measured 2026-10-09* (§49.4): from the tick a pad's press is applied, a tick and
+  a launch horizon - 60 ms at 48 kHz on a 128-sample block - the sample a sound pressed with it starts
+  on; a fader's touch, and a movie waiting for its sound, a tick more. A still read ahead with its bank
+  is seen on the renderer's first pass after that sample (10 ms on a Debug build), one never read about
+  a second later. The light on a projector from a D700 fader is owed to the bench.
 
 ---
 

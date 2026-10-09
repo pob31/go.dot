@@ -39,11 +39,21 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/MediaAnalyser.h>
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/ListState.h>
+#include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/tree/TreeCommands.h>
+#include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/document/Bundle.h>
+#include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/Compositor.h>
 #include <wfg/engine/video/Displays.h>
@@ -65,6 +75,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <new>
 #include <string>
@@ -1123,6 +1134,207 @@ TEST_CASE ("video host: a renderer with no window reads ahead what it is named, 
         REQUIRE (aheadLag >= 0);
         CHECK (aheadLag < seenSoonEnough);
         CHECK (coldLag >= 0);
+    }
+
+    folder.deleteRecursively();
+}
+
+//==============================================================================
+namespace
+{
+    /*  A PLAYER WHOSE CLOCK IS THE TEST'S (M55b): the Runner places a picture
+        on the samples the renderer is told - the machine's own time, as
+        `TestClock` keeps it - and nothing sounds. */
+    struct ClockPlayer final : cue::Player
+    {
+        explicit ClockPlayer (const TestClock& clockToRead) : clock (clockToRead) {}
+
+        int trackCount() const override                      { return 2; }
+        std::int64_t samplesElapsed() const override         { return clock.now(); }
+        int blockSize() const override                       { return 128; }
+        int channelsPerTrack() const override                { return 2; }
+        int slotCount() const override                       { return 1; }
+        int sampleRate() const override                      { return 48000; }
+        void requestArm (const cue::ArmRequest&) override    {}
+        bool launchAtSample (int, int, std::int64_t) override { return true; }
+        bool stop (int) override                             { return true; }
+        bool stopAtSample (int, int, std::int64_t) override  { return true; }
+        void setLevelDb (int, double) override               {}
+        void setRouting (int, const std::vector<cue::Coefficient>&) override {}
+        bool isPlaying (int) const override                  { return false; }
+        bool isArmReady (int) const override                 { return false; }
+
+        const TestClock& clock;
+    };
+
+    /*  THE RENDERER'S SINK, and the sample each layer was first put up on:
+        what a press asked for, which the lag is measured from. */
+    struct FirstSample final : video::Sink
+    {
+        explicit FirstSample (video::Sink& inner) : to (inner) {}
+
+        void show (const video::LayerSpec& spec) override                  { to.show (spec); }
+        void restate (const video::LayerSpec& spec) override               { to.restate (spec); }
+        void remove (const std::string& id, std::int64_t sample) override  { to.remove (id, sample); }
+        void clear() override                                              { to.clear(); }
+        void prepare (const std::vector<video::Preload>& items) override   { to.prepare (items); }
+
+        void canvasLevels (const std::vector<std::pair<std::string, double>>& levels) override
+        {
+            to.canvasLevels (levels);
+        }
+
+        void move (const std::string& id, video::Property property, const video::Point& point) override
+        {
+            if (property == video::Property::opacity && first.count (id) == 0)
+                first[id] = point.sample;
+
+            to.move (id, property, point);
+        }
+
+        video::Sink& to;
+        std::map<std::string, std::int64_t> first;
+    };
+}
+
+TEST_CASE ("video host: M55b, a still on an armed bank's strip is seen at once when pressed, one never read only once it is read (§49)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-bank-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    const auto bench = juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_BENCH", {}).isNotEmpty();
+    const auto width = bench ? 3840 : 1920;
+    const auto height = bench ? 2160 : 1080;
+    const auto ahead = noiseStill (folder, "member.png", 0x00FF00, width, height);
+    const auto cold = noiseStill (folder, "cold.png", 0xFF00FF, width, height);
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    /*  THE VIDEO FIXTURE, and a bank last in its list: one still on the first
+        strip of a virtual panel. And a still before the bank, fired by name and
+        read only then - GO leaves the standby past the bank, on nothing. */
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    std::vector<std::string> strips;
+    REQUIRE (document.createSurface ("virtual", "Panel", {}, {}, strips).ok);
+
+    const auto elsewhere = document.createCue ("VD000001", 2, "video", "Cold", {},
+                                               { { "source", "picture" }, { "file", cold.getFullPathName().toStdString() },
+                                                 { "canvas", "VD000011" } });
+    REQUIRE (elsewhere.ok);
+
+    const auto bank = document.createCue ("VD000001", 3, "group", "Bank");
+    REQUIRE (bank.ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + bank.id + "/mode", "sampler").ok);
+
+    const auto member = document.createCue (bank.id, 0, "video", "Member", {},
+                                            { { "source", "picture" }, { "file", ahead.getFullPathName().toStdString() },
+                                              { "canvas", "VD000011" } });
+    REQUIRE (member.ok);
+    REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    Engine engine;
+    engine.log().openInMemory ({});
+    cue::RunTable runs;
+    cue::DcaTable dcas;
+    tree::TouchTable touches;
+    doc::IdRegistry runIds { doc::IdRegistry::withSeed (55) };
+    cue::Focus focus;
+    cue::Runner runner { document, runs, runIds, focus };
+
+    doc::registerDocumentCommands (engine.commands(), document, {}, cue::liveWriteFor (runs, dcas, document));
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+    tree::registerTreeCommands (engine.commands(), touches);
+
+    TestClock clock;
+    ClockPlayer audio { clock };
+    runner.setPlayer (&audio);
+    runner.setSamplesPerTick (960);
+    runner.setDcas (&dcas);
+    runner.setTouches (&touches);
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+
+        FirstSample sink { host.sink() };
+        runner.setVideo (&sink);
+
+        std::int64_t tick = 1;
+
+        /*  THE ENGINE AND THE RENDERER, ticked together on the machine's clock
+            until `done`. */
+        const auto run = [&] (auto done)
+        {
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (20);
+
+            while (std::chrono::steady_clock::now() < until)
+            {
+                runner.beforeTick (engine, tick);
+                engine.processTick (tick++);
+                host.tick (clock.now(), 48000);
+
+                if (done())
+                    return true;
+
+                std::this_thread::sleep_for (std::chrono::milliseconds (20));
+            }
+
+            return done();
+        };
+
+        REQUIRE (run ([&host] { return host.readouts().renderer == "running"; }));
+        auto& r = *host.regionForTests();
+
+        //  GO ARMS THE BANK, and its still is read ahead before any hand moves (ABF).
+        REQUIRE (document.setAttribute (cue::standbyAddressOf ("VD000001"), bank.id).ok);
+        REQUIRE (engine.submit ("cli", "go", {}));
+
+        const auto memberPath = ahead.getFullPathName().toStdString();
+
+        REQUIRE (run ([&host, &memberPath]
+                      {
+                          const auto readouts = host.readouts();
+                          const auto* held = readouts.heldOf (memberPath);
+                          return held != nullptr && held->state == video::region::HeldState::ready;
+                      }));
+
+        //  PRESSED: up a horizon on, and seen on the renderer's first pass from there.
+        const auto* armed = runs.liveRunOf (member.id);
+        REQUIRE (armed != nullptr);
+        const auto memberRun = armed->id;
+
+        REQUIRE (engine.submit ("window", "strip.press", { osc::Value::string (strips[0]) }));
+        REQUIRE (run ([&sink, &memberRun] { return sink.first.count (memberRun) > 0; }));
+
+        const auto aheadLag = lagToFirstSight (host, clock, r, sink.first[memberRun], 0x00FF00);
+
+        //  FIRED BY NAME, never read: seen once it is.
+        REQUIRE (engine.submit ("window", "cue.fire", { osc::Value::string (elsewhere.id) }));
+        REQUIRE (run ([&runs, &sink, &elsewhere]
+                      {
+                          const auto* fired = runs.liveRunOf (elsewhere.id);
+                          return fired != nullptr && sink.first.count (fired->id) > 0;
+                      }));
+
+        const auto coldLag = lagToFirstSight (host, clock, r, sink.first[runs.liveRunOf (elsewhere.id)->id], 0xFF00FF);
+
+        MESSAGE ("M55b, a ", width, "x", height, " still on a strip: read ahead with its bank ", static_cast<double> (aheadLag) / 48.0,
+                 " ms after its sample; cold ", static_cast<double> (coldLag) / 48.0, " ms");
+
+        REQUIRE (aheadLag >= 0);
+        CHECK (aheadLag < seenSoonEnough);
+        CHECK (coldLag >= 0);
+
+        runner.setVideo (nullptr);
     }
 
     folder.deleteRecursively();

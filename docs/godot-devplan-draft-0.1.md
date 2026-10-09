@@ -600,8 +600,9 @@ which picture lies on top - wait for the author.
 
 *Added 2026-10-09, at the author's direction* (namespace draft §49; PRD §3.27,
 §3.28 and §6.9 amended): **pictures in a sampler group** - the author's answers to
-those four questions, every kind of video cue, and a movie's sound with it. Each
-stage its own commit on main:
+those four questions, every kind of video cue, and a movie's sound with it. All
+built and pushed the same day, VS.-1-VS.9, each stage its own commit on main
+(namespace draft §49.7):
 
 | Stage | What the author sees |
 |---|---|
@@ -615,6 +616,10 @@ stage its own commit on main:
 | VS.7 | The list takes pictures into a bank by drag, drop and the add menus |
 | VS.8 | A movie's sound comes with it, on a voice of its own |
 | VS.9 | M55, the docs, the close-out |
+
+Owed to the bench: M55c, a D700 fader to the light on a projector; a bank of
+pictures under the hands - the tint on a strip, the fader's travel on a
+projector, a movie and its sound from one fader.
 
 Then its own round: the knob above a DCA strip (PRD §3.28, decided the same day).
 
