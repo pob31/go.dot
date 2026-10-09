@@ -2260,6 +2260,13 @@ namespace wfg::cue
         std::vector<std::string> soundsLockedTo (const std::string& movieCue) const;
         bool followsAMovie (const juce::ValueTree& cue) const;
 
+        /*  ONE WALK OF THE SHOW PER EDIT, not one per movie per tick: every
+            movie's locked sounds, made again when the document's revision moves
+            - an override switching a sound on or off moves it too - since a
+            bank asks for its movies' every tick (namespace draft §49). */
+        mutable std::map<std::string, std::vector<std::string>> lockedSounds;
+        mutable std::uint64_t lockedSoundsAt = 0;
+
         /*  The sounds of a movie run fired with it: adopted when the standby
             armed them, else made under an identifier drawn from the movie
             run's and the cue's - so a replay, which re-supplies the movie's,
@@ -2269,6 +2276,23 @@ namespace wfg::cue
 
         /*  And ended with it: stopped when it was stopped, killed when it was. */
         void endLockedSounds (Engine& engine, const std::string& movieRun);
+
+        /*  A MOVIE MEMBER'S SOUNDS, in the bank's tick (namespace draft §49, ABA,
+            ABH): made under it as it is armed on its strip, its row reading
+            pending while one waits for a voice, and its press let go - a
+            `run.fire` - once each is ready to start on the picture's sample.
+            Records, so a replay has the same spawns and the same fire. */
+        void movieMemberTick (Engine& engine, const Run& movie, bool stripHeld);
+
+        /*  Whether a press on this movie member waits for its sounds rather than
+            bringing it up at once: it has sounds locked to it. The document's
+            answer, so the press's handler decides the same on replay. */
+        bool pressWaitsForSounds (const Run& movie, const juce::ValueTree& cue) const;
+
+        /*  A movie member's sounds whose movie never came up and is gone -
+            killed idle, closed, taken back - are ended: armed under a run that
+            will never fire them, they would hold their voices for good. */
+        void endOrphanedSounds (Engine& engine);
 
         /*  Draws this group run's next round and REPORTS IT, returning what it
             drew so the caller can schedule against it at once.

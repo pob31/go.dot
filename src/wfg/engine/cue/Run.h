@@ -600,6 +600,12 @@ namespace wfg::cue
             of failing `no-track` at entry as a cue fired by GO does. */
         bool sampler = false;
 
+        /*  A MOVIE'S SOUND ARMED WITH ITS BANK (namespace draft §49, ABA): under
+            a movie that is a sampler member, it waits for a voice as a member
+            does - `voice` in `pending`, its movie reading pending too (ABH) -
+            rather than failing `no-track`. It holds no strip: its movie does. */
+        bool waitsForVoice = false;
+
         /*  A PAD IS DOWN ON IT: pressed and not yet released, for a clip whose
             `release` is hold. While it is held a press from any other origin
             is a no-op, and so is that origin's release (PRD §3.27): the hand

@@ -1571,6 +1571,19 @@ namespace
             return placed.empty() ? 1.0 : placed.back().value;
         }
 
+        /*  A MOVIE'S SOUND, as a conversion makes it (Conversion.cpp): straight
+            after the movie, then locked to it. Made after every member, so the
+            movie is the last of them. */
+        std::string soundOf (const std::string& bank, const std::string& movie, const std::string& file)
+        {
+            const auto made = rig.document.createCue (bank, static_cast<int> (rig.membersOf[bank].size()), "media",
+                                                      "Its sound");
+            REQUIRE (made.ok);
+            rig.set ("/godot/cue/" + made.id + "/file", file);
+            rig.set ("/godot/cue/" + made.id + "/lockedTo", movie);
+            return made.id;
+        }
+
         Rig& rig;
         testing::FakeVideoSink sink;
         std::string canvas;
@@ -2031,4 +2044,237 @@ TEST_CASE ("sampler: a held picture pressed and let go in one tick comes up and 
     const auto taken = std::find_if (pictures.sink.removed.begin(), pictures.sink.removed.end(),
                                      [&runId] (const auto& removal) { return removal.first == runId; });
     CHECK (taken != pictures.sink.removed.end());
+}
+
+//==============================================================================
+/*  A MOVIE'S SOUND IN A BANK (namespace draft §49, ABA, ABH). */
+namespace
+{
+    bool says (const std::vector<std::string>& pending, const char* word)
+    {
+        return std::find (pending.begin(), pending.end(), word) != pending.end();
+    }
+}
+
+TEST_CASE ("sampler: a movie's sound is armed with its bank, under its movie, on a voice of its own (§49, ABA)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Movies", 3, 0);
+    const auto movie = pictures.member (bank, "movie", "clip.mov");
+    const auto sound = pictures.soundOf (bank, movie, "clip.wav");
+
+    rig.arm (bank);
+    const auto movieId = rig.liveRunOf (movie)->id;
+
+    REQUIRE (rig.tickUntil ([&rig, &sound] { return rig.liveRunOf (sound) != nullptr; }));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    /*  UNDER ITS MOVIE, ON A VOICE, ARMED AND NOT ASKED FOR - and on no strip:
+        the movie holds the strip, the sound only comes with it. */
+    const auto* voice = rig.liveRunOf (sound);
+    REQUIRE (voice != nullptr);
+    CHECK (voice->parent == movieId);
+    CHECK (voice->waitsForVoice);
+    CHECK (voice->track >= 0);
+    CHECK (voice->armConfirmed);
+    CHECK (voice->state == cue::runState::armed);
+    CHECK_FALSE (voice->launchRequested);
+    CHECK (voice->strip.empty());
+    CHECK (rig.holds (rig.runs.find (movieId), rig.strips[0]));
+
+    //  Made once: one run of each over a hundred ticks.
+    for (int n = 0; n < 100; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runsOf (movie) == 1u);
+    CHECK (rig.runsOf (sound) == 1u);
+}
+
+TEST_CASE ("sampler: a press on a movie waits until its sound is ready, and the two start on one sample (§49, ABH)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Movies", 3, 0);
+    const auto movie = pictures.member (bank, "movie", "clip.mov");
+    const auto sound = pictures.soundOf (bank, movie, "clip.wav");
+
+    rig.arm (bank);
+    REQUIRE (rig.tickUntil ([&rig, &sound] { return rig.liveRunOf (sound) != nullptr; }));
+
+    /*  THE DISK HAS NOT ANSWERED for the sound: the press is taken, and nothing
+        comes up - a picture ahead of its sound would be out of step with it for
+        as long as it played. */
+    const auto movieId = rig.liveRunOf (movie)->id;
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    CHECK (pictures.sink.shownFor (movieId) == nullptr);
+    CHECK (rig.runs.find (movieId)->state == cue::runState::armed);
+    CHECK (rig.runs.find (movieId)->launchRequested);
+    CHECK (rig.audio.launched.empty());
+    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/word") == "playing");
+
+    //  IT ANSWERS: the movie comes up, and its sound - the one armed for it - with it.
+    rig.audio.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&pictures, &movieId] { return pictures.sink.shownFor (movieId) != nullptr; }));
+    rig.tickOnce();
+
+    const auto* voice = rig.liveRunOf (sound);
+    REQUIRE (voice != nullptr);
+    CHECK (voice->parent == movieId);
+    CHECK (rig.runsOf (sound) == 1u);
+    REQUIRE (voice->launchedAtSample > 0);
+    CHECK (rig.audio.launched == std::vector<int> { voice->track });
+
+    //  ON ONE SAMPLE: the picture's first point, and the movie's clock, are the sound's launch.
+    const auto& opacity = pictures.sink.points[movieId];
+    const auto& times = pictures.sink.geometry[movieId][video::Property::time];
+    REQUIRE_FALSE (opacity.empty());
+    REQUIRE_FALSE (times.empty());
+    CHECK (opacity.front().sample == voice->launchedAtSample);
+    CHECK (times.front().sample == voice->launchedAtSample);
+}
+
+TEST_CASE ("sampler: a movie whose sound finds no voice reads pending, and its sound takes the next track that frees (§49, ABH)")
+{
+    Rig rig { 1 };
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Mixed", 3, 0);
+    const auto thunder = rig.document.createCue (bank, 0, "media", "Thunder").id;
+    rig.set ("/godot/cue/" + thunder + "/file", "thunder.wav");
+    rig.membersOf[bank].push_back (thunder);
+
+    const auto movie = pictures.member (bank, "movie", "clip.mov");
+    const auto sound = pictures.soundOf (bank, movie, "clip.wav");
+
+    rig.arm (bank);
+    REQUIRE (rig.tickUntil ([&rig, &sound] { return rig.liveRunOf (sound) != nullptr; }));
+    rig.tickOnce();
+
+    /*  THE ONE TRACK IS THE SOUND MEMBER'S: the movie's sound waits for a
+        voice, and the movie says so, on its row and on its strip. */
+    const auto thunderId = rig.liveRunOf (thunder)->id;
+    const auto movieId = rig.liveRunOf (movie)->id;
+    CHECK (rig.runs.find (thunderId)->track == 0);
+    CHECK (rig.liveRunOf (sound)->track < 0);
+    CHECK (says (rig.liveRunOf (sound)->pending, "voice"));
+    CHECK (says (rig.runs.find (movieId)->pending, "voice"));
+    CHECK (rig.published ("/godot/slot/" + rig.strips[1] + "/word") == "pending");
+    CHECK (rig.published ("/godot/run/" + movieId + "/pending") == "voice");
+
+    //  PRESSED, it waits for the voice: nothing comes up.
+    rig.send ("strip.press", { osc::Value::string (rig.strips[1]) }, "window");
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    CHECK (pictures.sink.shownFor (movieId) == nullptr);
+
+    /*  MUTE ON THE SOUND MEMBER frees the track, and the movie's sound - waiting
+        longest - takes it ahead of the member armed again. Then the movie comes
+        up, its sound with it. */
+    rig.send ("run.kill", { osc::Value::string (thunderId) }, "surface:DESK");
+
+    REQUIRE (rig.tickUntil ([&rig, &sound]
+                            {
+                                const auto* voice = rig.liveRunOf (sound);
+                                return voice != nullptr && voice->track == 0;
+                            }));
+
+    rig.audio.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&pictures, &movieId] { return pictures.sink.shownFor (movieId) != nullptr; }));
+
+    CHECK_FALSE (says (rig.runs.find (movieId)->pending, "voice"));
+    CHECK (rig.liveRunOf (thunder)->track < 0);
+}
+
+TEST_CASE ("sampler: a movie's fader moves its sound too, its meter is its sound's, and letting go fades both (§49, ABA, ABG)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Movies", 3, 0);
+    const auto movie = pictures.member (bank, "movie", "clip.mov");
+    rig.set ("/godot/cue/" + movie + "/release", "hold");
+    const auto sound = pictures.soundOf (bank, movie, "clip.wav");
+
+    rig.arm (bank);
+    REQUIRE (rig.tickUntil ([&rig, &sound] { return rig.liveRunOf (sound) != nullptr; }));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    const auto movieId = rig.liveRunOf (movie)->id;
+    const auto soundId = rig.liveRunOf (sound)->id;
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+    REQUIRE (rig.tickUntil ([&rig, &soundId] { return rig.runs.find (soundId)->launchedAtSample > 0; }));
+    rig.tickOnce();
+
+    const auto before = rig.runs.find (soundId)->level;
+
+    //  TWENTY DB DOWN THE MOVIE'S FADER: the picture and its sound together.
+    rig.send ("node.set", { osc::Value::string ("/godot/run/" + movieId + "/trim"), osc::Value::float64 (-20.0) },
+              "window");
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (soundId)->level == doctest::Approx (before - 20.0));
+    CHECK (pictures.factorOf (movieId) == doctest::Approx (video::opacityForTrim (-20.0)));
+
+    //  WHAT LEFT THE SOUND'S TRACK LIGHTS THE MOVIE'S METER.
+    rig.audio.peaks[rig.runs.find (soundId)->track] = 0.5f;
+    rig.tickOnce();
+    CHECK (rig.runs.find (movieId)->meter == doctest::Approx (-6.0206).epsilon (1e-3));
+
+    //  LET GO: the picture to black and its sound down with it, over the release fade.
+    rig.send ("strip.release", { osc::Value::string (rig.strips[0]) }, "window");
+    CHECK (rig.runs.find (movieId)->state == cue::runState::stopping);
+    CHECK (rig.runs.find (soundId)->state == cue::runState::stopping);
+
+    REQUIRE (rig.tickUntil ([&rig, &movieId, &soundId]
+                            {
+                                return rig.runs.find (movieId)->isFinished() && rig.runs.find (soundId)->isFinished();
+                            }));
+}
+
+TEST_CASE ("sampler: a movie's sound lets its voice go when its idle movie is killed, and when its bank is taken over (§49)")
+{
+    Rig rig { 2 };
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Movies", 3, 0);
+    const auto movie = pictures.member (bank, "movie", "clip.mov");
+    const auto sound = pictures.soundOf (bank, movie, "clip.wav");
+
+    rig.arm (bank);
+    REQUIRE (rig.tickUntil ([&rig, &sound] { return rig.liveRunOf (sound) != nullptr; }));
+
+    const auto firstMovie = rig.liveRunOf (movie)->id;
+    const auto firstSound = rig.liveRunOf (sound)->id;
+    CHECK (rig.runs.find (firstSound)->track >= 0);
+
+    //  MUTE ON THE IDLE MOVIE: its sound goes with it, and both are armed again.
+    rig.send ("run.kill", { osc::Value::string (firstMovie) }, "surface:DESK");
+    REQUIRE (rig.tickUntil ([&rig, &firstSound] { return rig.runs.find (firstSound)->isFinished(); }));
+
+    REQUIRE (rig.tickUntil ([&rig, &sound, &firstSound]
+                            {
+                                const auto* again = rig.liveRunOf (sound);
+                                return again != nullptr && again->id != firstSound && again->track >= 0;
+                            }));
+
+    const auto secondSound = rig.liveRunOf (sound)->id;
+    CHECK (rig.runs.find (secondSound)->parent == rig.liveRunOf (movie)->id);
+    CHECK (rig.runs.find (secondSound)->parent != firstMovie);
+
+    //  ANOTHER BANK TAKES OVER: this one closes, and the sound's voice is let go.
+    rig.arm (rig.bankA);
+    REQUIRE (rig.tickUntil ([&rig, &secondSound] { return rig.runs.find (secondSound)->isFinished(); }));
+    CHECK (rig.liveRunOf (sound) == nullptr);
 }

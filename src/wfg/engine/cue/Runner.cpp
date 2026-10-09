@@ -4567,6 +4567,17 @@ namespace wfg::cue
         if (run == nullptr || run->isFinished() || run->takenBack || beingKilled (*run))
             return;
 
+        /*  A PICTURE ON A STRIP COMES UP FROM A PRESS (namespace draft §49): one
+            whose ask was taken back - a hold let go while its movie waited for
+            its sounds, before the bank's `run.fire` drained - fires nothing. */
+        if (run->sampler && run->kind == "video" && run->state == runState::armed)
+        {
+            if (! run->launchRequested)
+                return;
+
+            run->launchRequested = false;
+        }
+
         const auto cue = document.findById (run->cue);
 
         if (! cue.isValid())
@@ -4834,6 +4845,20 @@ namespace wfg::cue
             if (! movieCue.empty())
                 fireLockedSounds (engine, tick, movieCue, runId);
 
+            /*  AND ON A STRIP, ITS CLOCK IS ITS SOUND'S (namespace draft §49,
+                ABH): the press waited for them to be ready, so they launch in
+                this tick too - and the movie runs on from the sample the last of
+                them starts on, as after a seek, should the audio's clock have
+                moved between the picture's placing and theirs. With no player
+                nothing launches, and nothing is waited for. */
+            if (const auto* movieRun = runs.find (runId);
+                audio != nullptr && ! movieCue.empty() && movieRun != nullptr && movieRun->sampler)
+                for (auto& held : showing)
+                    if (held.self == runId)
+                        for (const auto* sound : runs.childrenOf (runId))
+                            if (sound->kind == "media" && ! sound->isFinished())
+                                held.soundsSought.push_back (sound->id);
+
             return;
         }
 
@@ -5064,8 +5089,9 @@ namespace wfg::cue
             larger than the tracks left is not a failure: the member says
             `voice` in its pending list - in words, never colour alone - and the
             scheduler hands it the next track that frees. A cue fired by GO
-            still fails at entry, visibly, as it always has. */
-        if (track < 0 && run->sampler)
+            still fails at entry, visibly, as it always has. A movie member's
+            sound the same (namespace draft §49, ABH). */
+        if (track < 0 && (run->sampler || run->waitsForVoice))
         {
             if (std::find (run->pending.begin(), run->pending.end(), "voice") == run->pending.end())
                 run->pending.push_back ("voice");
@@ -7176,6 +7202,23 @@ namespace wfg::cue
             once; a clip that is sounding plays out, and its strip changes
             hands when its run ends. The group completes - its footer, then
             its end - when its last member has. */
+        /*  A STRIP HELD, and not one waited for while another group's clip
+            plays out on it. */
+        const auto holdsItsStrip = [] (const Run& child)
+        {
+            return std::find (child.claims.begin(), child.claims.end(), child.strip) != child.claims.end();
+        };
+
+        /*  A MOVIE MEMBER'S SOUNDS (namespace draft §49, ABA, ABH): made under
+            it while it holds its strip, and a press on it let go once they are
+            ready - a pressed movie in a closing bank or on a lost strip is
+            still let go, as a pressed sound there still launches. */
+        for (const auto* child : runs.childrenOf (job.run))
+            if (! child->isFinished() && child->sampler && child->kind == "video")
+                movieMemberTick (engine, *child,
+                                 child->launchRequested
+                                   || (! groupRun.closing && holdsItsStrip (*child) && ! lost (child->strip)));
+
         if (groupRun.closing)
         {
             for (const auto& entry : live)
@@ -7214,14 +7257,29 @@ namespace wfg::cue
                 if (freeTracks <= 0)
                     break;
 
+                /*  A MOVIE'S SOUNDS TAKE VOICES OF THEIR OWN, under it and in its
+                    place in the order, while it holds its strip (namespace draft
+                    §49, ABA). */
+                if (! child->isFinished() && child->sampler && child->kind == "video" && holdsItsStrip (*child))
+                {
+                    for (const auto* sound : runs.childrenOf (child->id))
+                        if (freeTracks > 0 && sound->waitsForVoice && ! sound->isFinished() && sound->track < 0
+                              && sound->state == runState::armed)
+                        {
+                            engine.submit (origin::engine, "run.arm", one (sound->id));
+                            --freeTracks;
+                        }
+
+                    continue;
+                }
+
                 /*  A PICTURE HAS NO VOICE (namespace draft §49): it would take a
                     track for its file and spend one a sound is waiting for. */
                 if (child->isFinished() || ! child->sampler || child->track >= 0
                      || child->state != runState::armed || child->kind != "media")
                     continue;
 
-                if (std::find (child->claims.begin(), child->claims.end(), child->strip)
-                      == child->claims.end())
+                if (! holdsItsStrip (*child))
                     continue;
 
                 engine.submit (origin::engine, "run.arm", one (child->id));
@@ -12333,14 +12391,15 @@ namespace wfg::cue
                 sound's launch is placed on. Not through `launchRun`: a pre-wait
                 is a GO's, and a hand's press ignores it, as a sound's does
                 (ABD). A sound's press asks the audio side to launch. */
+            /*  A MOVIE WITH ITS SOUND WAITS FOR IT (ABH): asked for, and let go
+                by the bank's tick - a `run.fire` - once its sounds are ready to
+                start on the picture's sample. A release in between takes the
+                ask back, as a sound's is. */
             const auto picture = run->kind == "video";
+            const auto waitsForSounds = picture && pressWaitsForSounds (*run, cue);
 
-            if (! picture)
-            {
-                run->launchRequested = true;
-                run->launchRequestedAtTick = tick;
-            }
-
+            run->launchRequested = true;
+            run->launchRequestedAtTick = tick;
             run->prepare.clear();
 
             if (hold)
@@ -12352,7 +12411,7 @@ namespace wfg::cue
             notePlayed (*run);
             step();
 
-            if (picture)
+            if (picture && ! waitsForSounds)
                 fireNow (engine, tick, run->id);
 
             return {};
@@ -14144,27 +14203,32 @@ namespace wfg::cue
 
     std::vector<std::string> Runner::soundsLockedTo (const std::string& movieCue) const
     {
-        std::vector<std::string> out;
-
         if (movieCue.empty())
-            return out;
+            return {};
 
-        const juce::Identifier lockedTo { "lockedTo" };
-        const juce::String wanted (movieCue);
-
-        std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& node)
+        if (lockedSoundsAt != document.revision())
         {
-            if (node.hasType ("Media") && node[lockedTo].toString() == wanted && runsNow (node))
-                out.push_back (node[idProperty].toString().toStdString());
+            lockedSoundsAt = document.revision();
+            lockedSounds.clear();
 
-            for (const auto& child : node)
-                visit (child);
-        };
+            const juce::Identifier lockedTo { "lockedTo" };
 
-        if (const auto showLists = document.root().getChildWithName ("Lists"); showLists.isValid())
-            visit (showLists);
+            std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& node)
+            {
+                if (node.hasType ("Media") && runsNow (node))
+                    if (const auto movie = node[lockedTo].toString(); movie.isNotEmpty())
+                        lockedSounds[movie.toStdString()].push_back (node[idProperty].toString().toStdString());
 
-        return out;
+                for (const auto& child : node)
+                    visit (child);
+            };
+
+            if (const auto showLists = document.root().getChildWithName ("Lists"); showLists.isValid())
+                visit (showLists);
+        }
+
+        const auto found = lockedSounds.find (movieCue);
+        return found != lockedSounds.end() ? found->second : std::vector<std::string> {};
     }
 
     bool Runner::followsAMovie (const juce::ValueTree& cue) const
@@ -14183,8 +14247,25 @@ namespace wfg::cue
         {
             std::string id;
 
+            /*  ARMED WITH ITS BANK, under the movie run itself (namespace draft
+                §49, ABA): taken first and by name - the sound's newest run may be
+                the last press's, still fading under the movie run before. */
+            const Run* own = nullptr;
+
+            for (const auto* child : runs.childrenOf (movieRun))
+                if (child->cue == soundCue && ! child->isFinished())
+                    own = child;
+
+            if (own != nullptr)
+            {
+                if (own->state != runState::armed || own->launchRequested)
+                    continue;
+
+                id = own->id;
+            }
+
             /*  ARMED BY THE STANDBY, or under a block the movie is in: taken. */
-            if (const auto* live = runs.liveRunOf (soundCue))
+            else if (const auto* live = runs.liveRunOf (soundCue))
             {
                 const auto adoptable = live->state == runState::armed && ! live->launchRequested
                                     && ! claimedByAJob (live->id)
@@ -14237,6 +14318,99 @@ namespace wfg::cue
             if (child != nullptr && ! child->isFinished() && child->state != runState::stopping
                   && followsAMovie (document.findById (child->cue)))
                 endMember (engine, *child, graceful);
+    }
+
+    bool Runner::pressWaitsForSounds (const Run& movie, const juce::ValueTree& cue) const
+    {
+        return textOf (cue, "source") == "movie" && ! soundsLockedTo (movie.cue).empty();
+    }
+
+    void Runner::movieMemberTick (Engine& engine, const Run& movie, bool mayArm)
+    {
+        if (movie.isFinished())
+            return;
+
+        const auto cue = document.findById (movie.cue);
+
+        if (! cue.isValid() || textOf (cue, "source") != "movie")
+            return;
+
+        const auto sounds = soundsLockedTo (movie.cue);
+        const auto under = runs.childrenOf (movie.id);
+        const auto armed = movie.state == runState::armed;
+
+        auto ready = true;
+        auto waitingForAVoice = false;
+
+        for (const auto& sound : sounds)
+        {
+            const Run* made = nullptr;
+
+            for (const auto* child : under)
+                if (child->cue == sound)
+                    made = child;
+
+            /*  NOT MADE YET: asked for, once the movie is on its strip. Made
+                once per movie run, finished or not - a sound whose file is
+                missing fails, and is not made again every tick. */
+            if (made == nullptr)
+            {
+                ready = false;
+
+                if (armed && mayArm)
+                    engine.submit (origin::engine, "run.spawn",
+                                   { osc::Value::string (movie.id), osc::Value::string (sound) });
+
+                continue;
+            }
+
+            //  One that failed holds nothing back: the picture comes up without it.
+            if (made->isFinished())
+                continue;
+
+            if (std::find (made->pending.begin(), made->pending.end(), "voice") != made->pending.end())
+                waitingForAVoice = true;
+
+            /*  READY TO START ON THE PICTURE'S SAMPLE: its voice, the voice
+                confirmed, the disk answered and no claim outstanding - what
+                `launchIfDue` asks before it places a launch. With no player
+                there is nothing to wait for. */
+            if (audio != nullptr
+                  && (made->track < 0 || ! made->armConfirmed || ! made->pending.empty()
+                        || ! audio->isArmReady (made->track)))
+                ready = false;
+        }
+
+        /*  ITS ROW AND ITS STRIP SAY PENDING while a sound of it waits for a
+            voice (ABH), in words, as a sound member's do. A readout: a replay
+            has no player, so no sound of it ever waits. */
+        if (auto* shown = runs.find (movie.id))
+        {
+            const auto said = std::find (shown->pending.begin(), shown->pending.end(), "voice");
+
+            if (waitingForAVoice && said == shown->pending.end())
+                shown->pending.push_back ("voice");
+            else if (! waitingForAVoice && said != shown->pending.end())
+                shown->pending.erase (said);
+        }
+
+        /*  PRESSED, AND NOW READY: let go, as a record - the `run.fire` a
+            replay reads. A hold let go in between took the ask back, and the
+            fire then brings nothing up (`fireNow`). */
+        if (armed && movie.launchRequested && ready)
+            engine.submit (origin::engine, "run.fire", one (movie.id));
+    }
+
+    void Runner::endOrphanedSounds (Engine& engine)
+    {
+        for (const auto& sound : runs.all())
+        {
+            if (! sound.waitsForVoice || sound.isFinished() || sound.state != runState::armed || sound.launchRequested)
+                continue;
+
+            if (const auto* movie = runs.find (sound.parent); movie == nullptr || movie->isFinished())
+                engine.submit (origin::engine, "run.kill", one (sound.id));
+        }
     }
 
     std::string Runner::spawnChild (Engine& engine, const std::string& parentRun,
@@ -14441,6 +14615,15 @@ namespace wfg::cue
         if (makingForHorizon)
             if (const auto* root = soundRootOf (cueId); root != nullptr && root->underRun == parentRun)
                 armAtRoot (*run, *root, cue);
+
+        /*  A MOVIE MEMBER'S SOUND, armed as its bank arms (namespace draft §49,
+            ABA): it waits for a voice as a member does, rather than failing -
+            the bank hands it the next track that frees (ABH). */
+        if (kind == "media")
+            if (const auto* parent = runs.find (parentRun);
+                parent != nullptr && parent->sampler && parent->kind == "video" && followsAMovie (cue))
+                if (auto* sound = runs.find (id))
+                    sound->waitsForVoice = true;
 
         if (kind == "media")
             armMedia (engine, cue, id);
@@ -16865,6 +17048,9 @@ namespace wfg::cue
 
         followCanvasLevels();
 
+        //  A movie member's sounds whose movie is gone before it came up (namespace draft §49).
+        endOrphanedSounds (engine);
+
         //  The show moved since the last tick: a playing picture may have been edited (§47, AAE).
         const auto revision = document.showRevision();
         const auto reread = revision != pictureRevision;
@@ -18431,6 +18617,25 @@ namespace wfg::cue
             }
 
             run->position = run->positionOrigin + static_cast<double> (elapsed) / rate;
+        }
+
+        /*  A MOVIE'S METER IS ITS SOUND'S (namespace draft §49, ABG): the
+            loudest of its locked sounds this tick, read after theirs - so a
+            movie on a strip lights that strip's meter, and a picture with no
+            sound leaves it dark. */
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.kind != "video" || snapshot.isFinished())
+                continue;
+
+            auto loudest = Run::silentDb;
+
+            for (const auto* sound : runs.childrenOf (snapshot.id))
+                if (sound->kind == "media" && ! sound->isFinished())
+                    loudest = std::max (loudest, sound->meter);
+
+            if (auto* movie = runs.find (snapshot.id))
+                movie->meter = loudest;
         }
     }
 
