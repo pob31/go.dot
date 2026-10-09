@@ -21,6 +21,7 @@
 #include <wfg/engine/plugin/ChildLaunch.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/video/RegionSink.h>
+#include <wfg/engine/video/SendNames.h>
 
 #include <juce_core/juce_core.h>
 
@@ -573,8 +574,7 @@ namespace wfg::video
             entry.kind = region::outputKindFrom (text (base + "kind"));
             entry.sendName = text (base + "sendName");
 
-            if (entry.sendName.empty())
-                entry.sendName = "Go.dot - " + (entry.name.empty() ? id : entry.name);
+            entry.sendName = outputSendName (entry.sendName, entry.name, id);
 
             if (const auto rate = osc::parseDouble (text (base + "frameRate")); rate.has_value() && *rate > 0.0)
                 entry.frameRate = std::clamp (*rate, 1.0, 240.0);
@@ -690,16 +690,14 @@ namespace wfg::video
             if (entry.kind == region::OutputKind::display)
                 entry.kind = region::OutputKind::spout;
 
-            entry.sendName = text (base + "sendName");
-
-            if (entry.sendName.empty())
-            {
-                const auto name = text (base + "name");
-                entry.sendName = "Go.dot - insert " + (name.empty() ? id : name);
-            }
-
+            entry.sendName = insertSendName (text (base + "sendName"), text (base + "name"), id);
             entry.returnSender = text (base + "returnSender");
             inserts.push_back (std::move (entry));
+
+            /*  AND IT KEEPS THE RENDERER RUNNING (§47, AAK), as an input does:
+                its send is up from the moment it is declared, so the other
+                program can be patched to it before any cue goes through. */
+            anyEnabled = true;
         }
 
         if (! impl->configured || ! sameCanvases (canvases, impl->canvases) || ! sameOutputs (outputs, impl->outputs)

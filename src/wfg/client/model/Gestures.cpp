@@ -480,9 +480,19 @@ namespace wfg::client::gesture
         return { origin::window, "videoInput.create", { osc::Value::string (name), osc::Value::string (kind) } };
     }
 
-    Event createVideoInsert (const std::string& name, const std::string& kind)
+    Event createVideoInsert (const std::string& name, const std::string& kind,
+                             const std::string& sendName, const std::string& returnSender)
     {
-        return { origin::window, "videoInsert.create", { osc::Value::string (name), osc::Value::string (kind) } };
+        std::vector<osc::Value> args { osc::Value::string (name), osc::Value::string (kind) };
+
+        //  Both names written when it is made (§47, AAK), never moved after.
+        if (! sendName.empty() || ! returnSender.empty())
+        {
+            args.push_back (osc::Value::string (sendName));
+            args.push_back (osc::Value::string (returnSender));
+        }
+
+        return { origin::window, "videoInsert.create", std::move (args) };
     }
 
     Event createZone (const std::string& outputId, const std::string& canvasId)

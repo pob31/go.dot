@@ -1291,6 +1291,23 @@ namespace wfg::video::render
         return impl->drawAlone (*holder->second, sample, into);
     }
 
+    bool Painter::drawInsertBlack (const std::string& insertId, sg_pixel_format format)
+    {
+        //  The size it last sent, else 1920 by 1080.
+        auto width = 1920, height = 1080;
+
+        if (const auto found = impl->targets.find ("own:insert:" + insertId); found != impl->targets.end())
+        {
+            width = found->second.width;
+            height = found->second.height;
+        }
+
+        auto& into = impl->offscreen ("own:insert:" + insertId, std::max (16, width), std::max (16, height), format);
+        sg_begin_pass (Impl::passInto (into.colour));
+        sg_end_pass();
+        return true;
+    }
+
     sg_image Painter::insertImage (const std::string& insertId) const
     {
         const auto found = impl->targets.find ("own:insert:" + insertId);

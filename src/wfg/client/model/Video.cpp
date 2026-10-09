@@ -17,6 +17,7 @@
 #include <wfg/client/model/Video.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/video/SendNames.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/video/Mapping.h>
 #include <wfg/engine/tree/Node.h>
@@ -695,6 +696,54 @@ namespace wfg::client::model
             choices.push_back ({ insert.id, insert.label() + " \xc2\xb7 " + pictureKindWord (insert.kind) });
 
         return choices;
+    }
+
+    NewInsert newInsertOf (const std::vector<VideoInsertRow>& inserts, const std::string& kind)
+    {
+        NewInsert made;
+        made.kind = kind;
+
+        for (auto number = 1; ; ++number)
+        {
+            const auto name = pictureKindWord (kind) + " insert " + std::to_string (number);
+            const auto taken = std::any_of (inserts.begin(), inserts.end(),
+                                            [&name] (const VideoInsertRow& row) { return row.name == name; });
+
+            if (! taken)
+            {
+                made.name = name;
+                break;
+            }
+        }
+
+        made.sendName = video::newInsertSendName (made.name);
+        made.returnSender = video::newInsertReturnName (made.name);
+        return made;
+    }
+
+    std::string sentAs (const VideoInsertRow& insert)
+    {
+        return video::insertSendName (insert.sendName, insert.name, insert.id);
+    }
+
+    std::string sentAs (const VideoOutputRow& output)
+    {
+        return video::outputSendName (output.sendName, output.name, output.id);
+    }
+
+    std::vector<std::string> ownSendNames (const std::vector<VideoOutputRow>& outputs,
+                                           const std::vector<VideoInsertRow>& inserts)
+    {
+        std::vector<std::string> names;
+
+        for (const auto& output : outputs)
+            if (output.sends())
+                names.push_back (sentAs (output));
+
+        for (const auto& insert : inserts)
+            names.push_back (sentAs (insert));
+
+        return names;
     }
 
     std::vector<std::pair<std::string, std::string>> canvasChoices (const std::vector<CanvasRow>& canvases)

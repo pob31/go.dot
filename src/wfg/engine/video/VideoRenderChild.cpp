@@ -2043,8 +2043,19 @@ namespace wfg::video
                 std::unique_ptr<render::Sender> sender;
                 std::unique_ptr<render::Receiver> receiver;
                 std::string why;
-                std::int64_t retryAt = 0;
+                std::string sendWhy;
+                std::string backWhy;
+
+                /*  EACH SIDE TRIED AGAIN ON ITS OWN (§47, AAK): a return not
+                    there yet never takes the send down with it, which had the
+                    other program lose Go.dot's picture every two seconds. */
+                std::int64_t sendRetryAt = 0;
+                std::int64_t backRetryAt = 0;
                 bool sendNow = false;
+
+                //  Black, a few times a second, while no cue goes through it.
+                std::int64_t idleDue = 0;
+                bool idleNow = false;
             };
 
             /*  A SENDER AS THE RENDER THREAD HOLDS IT: what sends, when it is
@@ -2067,6 +2078,10 @@ namespace wfg::video
                 std::vector<Sending> sending;
                 std::map<std::string, Taking> taking;
                 std::map<std::string, Inserting> inserting;
+                bool insertsDeclared = false;
+                bool insertDeviceTried = false;
+                std::int64_t nextInsertLook = 0;
+                std::int64_t nextInsertBeat = 0;
                 std::unique_ptr<render::Painter> painter;
                 std::uint64_t have = 0;
                 std::string deviceProblem;
@@ -2213,30 +2228,39 @@ namespace wfg::video
                         const auto key = std::to_string (static_cast<int> (insert.kind)) + "|" + insert.sendName + "|"
                                        + insert.returnSender;
 
-                        if (held.key != key || ((held.sender == nullptr || held.receiver == nullptr) && now >= held.retryAt))
+                        if (held.key != key)
                         {
                             if (painter != nullptr)
                                 painter->releaseOffscreen ("insert:" + insert.id);
 
-                            held.sender.reset();
-                            held.receiver.reset();
+                            held = Inserting {};
                             held.key = key;
-                            held.why.clear();
-                            held.retryAt = now + 2'000'000'000;
+                        }
 
-                            if (painter == nullptr)
+                        if (painter == nullptr)
+                        {
+                            held.why = deviceProblem;
+                        }
+                        else
+                        {
+                            if (held.sender == nullptr && now >= held.sendRetryAt)
                             {
-                                held.why = deviceProblem;
+                                held.sendRetryAt = now + 2'000'000'000;
+                                held.sendWhy.clear();
+                                held.sender = render::makeSender (insert.kind, insert.sendName, 60.0, held.sendWhy);
                             }
-                            else
-                            {
-                                held.sender = render::makeSender (insert.kind, insert.sendName, 60.0, held.why);
-                                std::string back;
-                                held.receiver = render::makeReceiver (insert.kind, insert.returnSender, back);
 
-                                if (held.why.empty())
-                                    held.why = back;
+                            //  Nothing named to come back from: nothing to try.
+                            if (held.receiver == nullptr && ! insert.returnSender.empty() && now >= held.backRetryAt)
+                            {
+                                held.backRetryAt = now + 2'000'000'000;
+                                held.backWhy.clear();
+                                held.receiver = render::makeReceiver (insert.kind, insert.returnSender, held.backWhy);
                             }
+
+                            held.why = ! held.sendWhy.empty() ? held.sendWhy
+                                     : insert.returnSender.empty() ? std::string ("nothing named to come back from")
+                                                                   : held.backWhy;
                         }
 
                         if (held.receiver != nullptr)
@@ -2304,6 +2328,17 @@ namespace wfg::video
                 {
                     render::FramePool pool;
 
+                    /*  WHETHER ANY INSERT IS DECLARED (§47, AAK), looked at twice a
+                        second: one keeps this thread drawing with nothing else to. */
+                    if (const auto looked = steadyNanos(); looked >= nextInsertLook)
+                    {
+                        nextInsertLook = looked + 500'000'000;
+                        region::ConfigReading peek;
+
+                        if (region::readConfig (r, peek))
+                            insertsDeclared = ! peek.inserts.empty();
+                    }
+
                     //  THE PROJECTORS CHANGED: the old surfaces let go first, and said so.
                     auto rebuilt = false;
                     auto idle = false;
@@ -2330,7 +2365,7 @@ namespace wfg::video
                             rebuilt = true;
                             changed.notify_all();
                         }
-                        else if (surfaces.empty() && sending.empty())
+                        else if (surfaces.empty() && sending.empty() && ! insertsDeclared)
                         {
                             changed.wait_for (hold, std::chrono::milliseconds (100),
                                               [this, have] { return generation != have || threadShouldExit(); });
@@ -2399,6 +2434,16 @@ namespace wfg::video
                         continue;
                     }
 
+                    /*  AN INSERT WITH NOTHING ELSE TO DRAW opens the device, once,
+                        as an input does (§47, AAK). */
+                    if (! insertsDeclared)
+                        insertDeviceTried = false;
+                    else if (painter == nullptr && ! insertDeviceTried)
+                    {
+                        insertDeviceTried = true;
+                        openDevice (false, 0, 0);
+                    }
+
                     if (painter == nullptr)
                     {
                         std::unique_lock<std::mutex> hold (lock);
@@ -2428,6 +2473,13 @@ namespace wfg::video
                         if (one.sender != nullptr && one.rides < 0)
                             waitMs = std::min (waitMs, std::max (0, static_cast<int> ((one.due - now) / 1000000)));
 
+                    /*  AND THE INSERTS KEEP A BEAT OF THEIR OWN (namespace draft
+                        §47, AAK): sixty frames a second while any is declared,
+                        with no projector to ride - their send up before any cue
+                        goes through, a cue's picture sent while one does. */
+                    if (insertsDeclared)
+                        waitMs = std::min (waitMs, std::max (0, static_cast<int> ((nextInsertBeat - now) / 1000000)));
+
                     const auto refreshed = ! live.empty() && render::waitForRefresh (live, fastest, std::max (1, waitMs));
 
                     if (live.empty() && waitMs > 0)
@@ -2448,7 +2500,12 @@ namespace wfg::video
                             sendNow.push_back (&one);
                     }
 
-                    if (! refreshed && sendNow.empty())
+                    const auto insertBeat = insertsDeclared && began >= nextInsertBeat;
+
+                    if (insertBeat)
+                        nextInsertBeat = began + 16'666'667;
+
+                    if (! refreshed && sendNow.empty() && ! insertBeat)
                         continue;
 
                     region::ConfigReading config;
@@ -2463,8 +2520,20 @@ namespace wfg::video
                         const auto sample = clock.sampleAt (r, began + static_cast<std::int64_t> (1.0e9 / std::max (24.0, fastest)));
 
                         for (auto& [insertId, held] : inserting)
+                        {
                             held.sendNow = held.sender != nullptr
                                          && painter->drawInsertPicture (insertId, sample, render::senderFormat());
+
+                            /*  NO CUE THROUGH IT: black, five times a second, so the
+                                send is there for the other program to find and
+                                stay patched to (§47, AAK) - Spout lists a sender
+                                only once it has sent a frame. */
+                            held.idleNow = held.sender != nullptr && ! held.sendNow && began >= held.idleDue
+                                         && painter->drawInsertBlack (insertId, render::senderFormat());
+
+                            if (held.idleNow)
+                                held.idleDue = began + 200'000'000;
+                        }
                     }
 
                     if (sayInsertsLater)
@@ -2557,12 +2626,13 @@ namespace wfg::video
                     }
 
                     for (auto& [insertId, held] : inserting)
-                        if (held.sendNow)
+                        if (held.sendNow || held.idleNow)
                         {
                             const auto image = painter->insertImage (insertId);
                             const auto desc = sg_query_image_desc (image);
                             held.sender->send (image, desc.width, desc.height);
                             held.sendNow = false;
+                            held.idleNow = false;
                         }
 
                     for (auto* one : sent)

@@ -1658,6 +1658,85 @@ TEST_CASE ("video host: an output set to spout is sent by a renderer with no win
     CHECK (output->bound);
     CHECK (output->problem.empty());
 }
+/*  AN INSERT'S SEND, BEFORE ANY CUE (namespace draft §47, AAK): declared with
+    nothing named to come back from and no output switched on, its send is up -
+    black - for another program to find and patch to, and stays up: it used to
+    be made again every two seconds while no return was named, and Spout listed
+    it only once a cue had gone through. */
+TEST_CASE ("video host: an insert's send is there before any cue goes through it, black, and stays with nothing named to come back (§47)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-insert-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/enabled", "false").ok);
+
+    const auto name = "Go.dot insert test " + std::to_string (GetCurrentProcessId()) + " (send)";
+    REQUIRE (document.createVideoInsert ("Spout insert 1", "spout", name, {}).ok);
+
+    SetEnvironmentVariableA ("WFG_VIDEO_SOFTWARE", "1");
+
+    TestClock clock;
+    video::VideoHost host { spec };
+    host.configure (document);
+
+    //  No output on: the insert alone keeps the renderer running.
+    REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+    SetEnvironmentVariableA ("WFG_VIDEO_SOFTWARE", nullptr);
+
+    ID3D11Device* device = nullptr;
+    ID3D11DeviceContext* context = nullptr;
+    REQUIRE (SUCCEEDED (D3D11CreateDevice (nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+                                           D3D11_SDK_VERSION, &device, nullptr, &context)));
+
+    {
+        spoutDX receiver;
+        REQUIRE (receiver.OpenDirectX11 (device));
+        receiver.SetReceiverName (name.c_str());
+
+        //  Found, with no cue through it.
+        CHECK (tickUntil (host, clock, [&] { return receiver.ReceiveTexture() && receiver.GetSenderTexture() != nullptr; }, 10000));
+
+        //  And still there five seconds on, whatever the missing return does.
+        auto lost = 0;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (5);
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            host.tick (clock.now(), 48000);
+
+            if (! receiver.ReceiveTexture())
+                ++lost;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (100));
+        }
+
+        CHECK (lost == 0);
+
+        receiver.ReleaseReceiver();
+        receiver.CloseDirectX11();
+    }
+
+    context->Release();
+    device->Release();
+
+    //  The state says which side is missing, in words.
+    CHECK (tickUntil (host, clock, [&host]
+                      {
+                          const auto said = host.readouts();
+                          const auto* insert = said.insert (said.inserts.empty() ? std::string {} : said.inserts.front().id);
+                          return insert != nullptr && insert->problem == "nothing named to come back from";
+                      }, 5000));
+
+    folder.deleteRecursively();
+}
 #endif
 
 TEST_CASE ("video host: a layer restated takes its new look and keeps its points, its place and its removal (§47)")

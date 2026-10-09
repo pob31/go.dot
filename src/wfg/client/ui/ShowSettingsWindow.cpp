@@ -5180,10 +5180,32 @@ namespace wfg::client::ui
                         send (gesture::createVideoInput (freeName (inputs, "Input"), model::pictureKindsHere().front()));
                 };
 
+                /*  AN INSERT BY KIND (namespace draft §47, AAK): the author, "make
+                    incremental insert with the type (Syphon/Spout; NDI) and
+                    leave it as is". Numbered by kind, both its names written
+                    when it is made: what Go.dot sends as and what it expects
+                    back - the names the other program is patched to once. */
                 addInsert.onClick = [this]
                 {
-                    if (send)
-                        send (gesture::createVideoInsert (freeName (inserts, "Insert"), model::pictureKindsHere().front()));
+                    juce::PopupMenu menu;
+                    const auto kinds = model::pictureKindsHere();
+
+                    for (std::size_t at = 0; at < kinds.size(); ++at)
+                        menu.addItem (static_cast<int> (at) + 1,
+                                      juce::String (model::pictureKindWord (kinds[at])) + " insert");
+
+                    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addInsert),
+                                        [safe = juce::Component::SafePointer<VideoPage> (this), kinds] (int chosen)
+                                        {
+                                            if (safe == nullptr || chosen <= 0 || safe->send == nullptr
+                                                  || static_cast<std::size_t> (chosen) > kinds.size())
+                                                return;
+
+                                            const auto made = model::newInsertOf (safe->inserts,
+                                                                                  kinds[static_cast<std::size_t> (chosen - 1)]);
+                                            safe->send (gesture::createVideoInsert (made.name, made.kind,
+                                                                                    made.sendName, made.returnSender));
+                                        });
                 };
                 addCanvas.setTooltip ("A canvas: the flat picture video cues are laid onto, 1920 by 1080 until"
                                       " you say otherwise. Name it for where it is seen - Stage, Cyclo.");
@@ -5342,13 +5364,13 @@ namespace wfg::client::ui
                 g.drawText ("Warp, zones", outputCells[7], juce::Justification::centredLeft);
 
                 const auto inputCells = inputCellsFor (inputHeading.withWidth (inputList.getWidth()));
-                const char* inputNames[] { "Input", "Kind", "Sender", "On", "State" };
+                const char* inputNames[] { "Input", "Kind", "Takes in from", "On", "State" };
 
                 for (auto at = 0; at < 5; ++at)
                     g.drawText (inputNames[at], inputCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
 
                 const auto insertCells = insertCellsFor (insertHeading.withWidth (insertList.getWidth()));
-                const char* insertNames[] { "Insert", "Kind", "Sent as", "Comes back from", "State" };
+                const char* insertNames[] { "Insert", "Kind", "Go.dot sends as", "Takes back from", "State" };
 
                 for (auto at = 0; at < 5; ++at)
                     g.drawText (insertNames[at], insertCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
@@ -5516,7 +5538,7 @@ namespace wfg::client::ui
                     {
                         g.setColour (Look::colour (page.theme, "ink-dim"));
                         g.drawText (juce::String (model::pictureKindWord (entry.kind)) + juce::String::fromUTF8 ("  \xc2\xb7  ")
-                                      + juce::String (entry.sendName.empty() ? "Go.dot - " + entry.label() : entry.sendName)
+                                      + juce::String (model::sentAs (entry))
                                       + juce::String::fromUTF8 ("  \xc2\xb7  ") + juce::String (entry.frameRate, 0) + " fps",
                                     cells[2], juce::Justification::centredLeft, true);
                     }
@@ -5704,8 +5726,7 @@ namespace wfg::client::ui
                     g.setFont (Look::font (page.theme, 12.0f));
                     g.setColour (Look::colour (page.theme, "ink-dim"));
                     g.drawText (juce::String (model::pictureKindWord (entry.kind)), cells[1], juce::Justification::centredLeft);
-                    g.drawText (juce::String (entry.sendName.empty() ? "Go.dot - insert " + entry.label() : entry.sendName),
-                                cells[2], juce::Justification::centredLeft, true);
+                    g.drawText (juce::String (model::sentAs (entry)), cells[2], juce::Justification::centredLeft, true);
 
                     g.setColour (Look::colour (page.theme, entry.returnSender.empty() ? "ink-off" : "ink-dim"));
                     g.drawText (entry.returnSender.empty() ? dash : juce::String (entry.returnSender),
@@ -5776,8 +5797,12 @@ namespace wfg::client::ui
             {
                 std::vector<std::string> names;
 
+                /*  NEVER GO.DOT'S OWN (§47, AAK): an insert taking back what an
+                    output or an insert of this show sends is a loop. */
+                const auto own = model::ownSendNames (outputs, inserts);
+
                 for (const auto& one : offered)
-                    if (one.kind == kind)
+                    if (one.kind == kind && std::find (own.begin(), own.end(), one.name) == own.end())
                         names.push_back (one.name);
 
                 juce::PopupMenu menu;

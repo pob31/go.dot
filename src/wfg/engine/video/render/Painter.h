@@ -128,6 +128,10 @@ namespace wfg::video::render
         bool drawInsertPicture (const std::string& insertId, std::int64_t sample, sg_pixel_format format);
         sg_image insertImage (const std::string& insertId) const;
 
+        /*  AN INSERT NO CUE GOES THROUGH, sent black at the size it last sent
+            (or a canvas's) so the other program finds it (§47, AAK). */
+        bool drawInsertBlack (const std::string& insertId, sg_pixel_format format);
+
         /** How many cues go through `insertId` this frame: more than one is the YG warning. */
         int insertUsers (const std::string& insertId) const;
 

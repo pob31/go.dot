@@ -389,6 +389,7 @@ add_library(wfg_engine STATIC
     wfg/engine/video/Strip.cpp
     wfg/engine/video/StripAnalysis.h
     wfg/engine/video/StripAnalysis.cpp
+    wfg/engine/video/SendNames.h
     wfg/engine/video/Movie.h
     wfg/engine/video/MovieWriter.cpp
     wfg/engine/video/MovieWriter.h

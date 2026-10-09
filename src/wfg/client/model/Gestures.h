@@ -376,7 +376,8 @@ namespace wfg::client::gesture
         picture another program sends, and a cue's picture to another program
         and back. Their names and senders are `setNode`s after. */
     Event createVideoInput (const std::string& name, const std::string& kind);
-    Event createVideoInsert (const std::string& name, const std::string& kind);
+    Event createVideoInsert (const std::string& name, const std::string& kind,
+                             const std::string& sendName = {}, const std::string& returnSender = {});
 
     /** A further canvas on an output, through a warp of its own (namespace draft 40, WY). */
     Event createZone (const std::string& outputId, const std::string& canvasId);

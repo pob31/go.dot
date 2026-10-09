@@ -22877,3 +22877,32 @@ last megabyte, a format of its own with a checksum (`formatVersion` 1) - and rea
 the analyser publishes it on the movie's record (`MediaRecord::strip`). **A movie that is not HAP has no
 strip until it is** - adding one to a show converts it (37.5, WF); reading a preview's pictures through
 FFmpeg is owed, if a show needs it before its conversion ends.
+
+### 47.11 Inserts made by kind, their names written once, and their send steady (AAJ, the author's; AAK, mine)
+
+Inserts stay the show's (YE), declared in Show settings > Video and picked by a cue: the author did not
+want them made from the cue, since After Effects or TouchDesigner, patched to an insert's names, would lose
+the connection whenever a cue made a new one. What changed:
+
+- **"+ insert" asks for the kind** - Spout insert, Syphon insert, NDI insert, the kinds this system has -
+  where it took the first silently. The insert is **numbered by kind** ("Spout insert 1", "Spout insert 2",
+  "NDI insert 1"), and **both its names are written when it is made**: Go.dot sends as "Go.dot - Spout insert
+  1 (send)" and expects the other program to send back as "Go.dot - Spout insert 1 (return)". A rename never
+  moves them, so the other program is patched once. These words are mine. An insert from before, whose send
+  name the show left empty, still sends as "Go.dot - insert" and its name, which follows a rename; one rule
+  for both the engine and the window (`video/SendNames.h`), where each had its own copy of the default.
+- **Its send is up from the moment it is declared**, black five times a second while no cue goes through it,
+  so the other program finds it and patches to it before any cue plays - Spout lists a sender only once it
+  has sent a frame, and Go.dot sent one only while a cue went through. A declared insert keeps the renderer
+  running, as an input does, and keeps its drawing going at sixty frames a second with no projector to ride.
+- **Its send no longer drops out while nothing comes back.** With no return named the renderer made both
+  sides again every two seconds, so the other program lost Go.dot's picture every two seconds; each side is
+  now tried again on its own, and an empty return is never tried. Its state says which side is missing:
+  *nothing named to come back from*, where it said *no sender is named* beside a filled-in name.
+- **The pick list of what comes back leaves out what Go.dot itself sends** - its sending outputs' names and
+  its inserts' - since an insert taking back its own send is a loop. And the columns say which way each name
+  goes: *Go.dot sends as* and *Takes back from* for an insert, *Takes in from* for an input (mine).
+
+Owed to the bench: the round trip with TouchDesigner, and Syphon's list, which names a server by its
+application and name, so Go.dot's own Syphon sends are not yet left out of it by name alone.
+

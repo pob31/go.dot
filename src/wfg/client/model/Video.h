@@ -136,6 +136,32 @@ namespace wfg::client::model
     std::vector<std::pair<std::string, std::string>> videoInputChoices (const std::vector<VideoInputRow>&);
     std::vector<std::pair<std::string, std::string>> videoInsertChoices (const std::vector<VideoInsertRow>&);
 
+    /*  A NEW INSERT OF A KIND (namespace draft §47, AAK): "Spout insert 1",
+        numbered by kind, the first number free; and the two names it is given
+        when it is made - sent as "Go.dot - Spout insert 1 (send)", expected
+        back as "... (return)" - written once, never moved by a rename. */
+    struct NewInsert
+    {
+        std::string name;
+        std::string kind;
+        std::string sendName;
+        std::string returnSender;
+    };
+
+    NewInsert newInsertOf (const std::vector<VideoInsertRow>& inserts, const std::string& kind);
+
+    /*  WHAT GO.DOT ITSELF SENDS UNDER (§47, AAK): every sending output's name
+        and every insert's - what "comes back from" never offers, since an
+        insert taking back its own send is a loop. */
+    std::vector<std::string> ownSendNames (const std::vector<VideoOutputRow>& outputs,
+                                           const std::vector<VideoInsertRow>& inserts);
+
+    /** The name an insert's picture is sent under, the show's or the default. */
+    std::string sentAs (const VideoInsertRow& insert);
+
+    /** And an output's, while it sends. */
+    std::string sentAs (const VideoOutputRow& output);
+
     /** Every canvas, in /godot/canvas/order. */
     std::vector<CanvasRow> readCanvases (const tree::TreeSnapshot&);
 

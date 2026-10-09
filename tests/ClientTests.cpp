@@ -10921,3 +10921,51 @@ TEST_CASE ("client: a video cue's place, colour and mask are its picture panel's
 
     CHECK (points == "0 0 1 -120");
 }
+
+TEST_CASE ("client: a new insert is numbered by kind and given both its names once; what Go.dot sends is never offered back (§47, AAK)")
+{
+    std::vector<model::VideoInsertRow> inserts;
+
+    auto made = model::newInsertOf (inserts, "spout");
+    CHECK (made.name == "Spout insert 1");
+    CHECK (made.kind == "spout");
+    CHECK (made.sendName == "Go.dot - Spout insert 1 (send)");
+    CHECK (made.returnSender == "Go.dot - Spout insert 1 (return)");
+
+    //  Numbered by kind, the first number free.
+    model::VideoInsertRow first;
+    first.id = "INS00001";
+    first.name = "Spout insert 1";
+    first.kind = "spout";
+    first.sendName = made.sendName;
+    inserts.push_back (first);
+
+    CHECK (model::newInsertOf (inserts, "spout").name == "Spout insert 2");
+    CHECK (model::newInsertOf (inserts, "ndi").name == "NDI insert 1");
+
+    //  The gesture carries the two names to `videoInsert.create`.
+    const auto event = gesture::createVideoInsert (made.name, made.kind, made.sendName, made.returnSender);
+    CHECK (event.command == "videoInsert.create");
+    REQUIRE (event.args.size() == 4);
+    CHECK (event.args[2].getString() == made.sendName);
+    CHECK (event.args[3].getString() == made.returnSender);
+
+    //  An older insert, named nothing to send as, sends as the default - which follows its name.
+    model::VideoInsertRow older;
+    older.id = "INS00002";
+    older.name = "Blur";
+    inserts.push_back (older);
+    CHECK (model::sentAs (older) == "Go.dot - insert Blur");
+
+    //  What Go.dot sends: each sending output's name and each insert's.
+    model::VideoOutputRow sending;
+    sending.id = "OUT00001";
+    sending.name = "Face";
+    sending.kind = "spout";
+    model::VideoOutputRow display;
+    display.id = "OUT00002";
+    display.name = "Wall";
+
+    const auto own = model::ownSendNames ({ sending, display }, inserts);
+    CHECK (own == std::vector<std::string> { "Go.dot - Face", "Go.dot - Spout insert 1 (send)", "Go.dot - insert Blur" });
+}
