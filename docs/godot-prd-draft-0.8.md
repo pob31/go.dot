@@ -2748,6 +2748,15 @@ DCA now, one undo step, live and unsaved under the lock as the EQ page is; a new
 cue starts straight, with no offset. A picture under two DCAs then takes each
 one's curve in turn, multiplying, as nested trims on an opacity compose.
 
+*Planned 2026-10-09* (namespace draft §50). The author's further picks: **one
+curve and one offset per mark**, written by the knob above any DCA the mark
+reaches - the cue's own, or one that DCA sits inside - the last turned winning;
+**marks multiply** on a picture; and **the window's panel has the knob too**.
+Proposed (§6.9): the rows' ranges and names, a curve law, an offset that never
+lifts silence, within one mark its DCAs' trims adding in dB as before and across
+marks the factors multiplying - a sampler member's hand a factor of its own - and
+the press no longer resetting the DCA to nought on a desk.
+
 ### 3.29 Persistent cues — a section that is checked, not fired
 
 *Added in 0.8, at the author's direction (2026-09-07). How the user sets them up
@@ -3793,6 +3802,23 @@ The implementer's calls ABB-ABJ in §49.2 are the author's to overrule; what the
   knob above a DCA strip bends a DCA's (decided the same day, its own round after this one).
 - **The video monitor following a strip's hand**, or a picture strip's meter showing anything but its
   movie's sound.
+
+Added 2026-10-09 *(proposed)*, with the knob above a DCA strip (namespace draft §50). The implementer's
+calls ABT-ACB in §50.2 are the author's to overrule:
+
+- **The rows** `dcaCurve` (%, -100 to 100) and `dcaOffset` (dB, -24 to +12) on one owner, `mark`.
+- **The curve law** - the fader's factor raised to 4 to the power minus the curve over 100.
+- **An offset that never lifts silence**, added once per mark.
+- **Within one mark, its DCAs' trims add in dB**; across marks, and with a sampler member's hand, the
+  factors multiply - replacing §37.5's one sum.
+- **A detent** of 2 % or 0.5 dB; a strip starting on the curve when its DCA has pictures.
+- **The screen's words** (`pic +20`, `snd -3.5`) and a ring filling from its centre.
+- **The press no longer resetting the DCA to nought on a desk** - the window's pad still does; REC is free
+  if the reset is wanted there.
+- **Templates and the `mix` part carrying the mapping.**
+
+What the work leaves out: a curve on an output's or a canvas's DCA, which keep the straight travel; a
+curve of its own on a sampler member's hand; one setting per DCA a mark reaches.
 
 ### 6.10 Protocol implementation order (§3.16)
 

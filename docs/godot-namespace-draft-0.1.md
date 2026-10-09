@@ -8702,7 +8702,9 @@ front of the place the lock is asked (§16.4).
 `run.stopAll`, `run.killAll`, `standby.previous` and `standby.next` from the transport buttons, and
 `node.touch`, `node.release` and `node.releaseAll` from the faders (§16.6). A dca strip is never
 pressed; on a Mackie surface its gate resets its DCA's trim to nought (plan decision 12), which is a
-`node.set`.
+`node.set`. *Amended 2026-10-09 (§50, ACA, proposed): on a desk the gate of a dca strip switches its
+knob between the picture's curve and the sound's offset, and a turn writes the marks under it as one
+`node.setMany`; the window's pad still resets.*
 
 ### 16.4 One sum, one write verb
 
@@ -9082,7 +9084,8 @@ safe list and not on the codec's: the colour it carries is MCU's eight, too coar
 **The gate is the V-Pot press, and SELECT is left alone** (plan decision 12). On the D700 an
 element's identity is its button note — encoder three's V-Pot press, ring and colour all key off one
 number — so the button that presses a strip is the one wearing its colour. On a dca strip the gate
-resets the DCA's trim to nought.
+resets the DCA's trim to nought. *Amended 2026-10-09 (§50, ABK; ACA proposed): on a dca strip the gate
+switches the knob above it between the picture's curve and the sound's offset.*
 
 **The transport.** PLAY is `go`. STOP is `run.stopAll` — Esc — and STOP again within 750 ms is
 `run.killAll`, double Esc, so §4.4's first two levels are under the hand that is already on the
@@ -20992,7 +20995,9 @@ decision in the implementer's words; the rest is marked (proposed).
   opacity a run is at, fades included, and is placed a horizon ahead like every moving value: a
   seventh, `dca`, in the region. The show's fader law and not the D700's, because a DCA's trim is the
   show's and a surface's law is how one surface draws it. A movie's sound is a cue of its own (WJ),
-  so a DCA reaches it as it reaches any sound, in dB.
+  so a DCA reaches it as it reaches any sound, in dB. *Amended 2026-10-09 (§50, ABO; ABW proposed): the
+  one sum is now one per mark - within a mark its DCAs' trims add in dB and the mark's curve shapes the
+  factor; across marks, and with a sampler member's hand, the factors multiply.*
 - **WF - Fallback codecs are for preview** (author): *"Fallback Codec are essentially for preview
   before we add the media in HAP by converting it. This operation means we commit the media to the
   project and in the background make the transcoding."* A movie in another codec - H.264, ProRes and
@@ -23249,5 +23254,129 @@ Asked the same day *"if the rotary dial above a DCA with sound and video could b
 the audio level offset or the opacity curve from linear at 50% to something that either fades in slower
 at first or fast at first"*, and *"how to store this through out the cueing"*, the author chose, from the
 options I offered: **both, a press switches**; **on each cue's DCA mark**; **after this section**. PRD
-§3.28 says it as decided. Its own round, with its own section.
+§3.28 says it as decided. Its own round, with its own section: §50.
 
+## 50. The knob above a DCA strip
+
+Written 2026-10-09, the round §49.8 promised. The author asked *"if the rotary dial above a DCA with sound
+and video could be used to adjust either the audio level offset or the opacity curve from linear at 50% to
+something that either fades in slower at first or fast at first"*, then *"how to store this through out
+the cueing"*. PRD §3.28 says what was decided; this section is how it is built.
+
+### 50.1 What it is, before its names
+
+The knob above a DCA fader on the D700 or a Mackie desk - and on the window's virtual panel - changes how
+that DCA's fader acts on what plays under it. It has two settings, and a press of the knob swaps between
+them. **The picture's curve**: in its middle the fader works as today, half way up about half faded; one
+way the picture comes in slowly at first and catches up at the top, the other way it comes in fast and
+settles. **The sound's offset**: a number of dB the DCA's sounds sit above or below where the fader puts
+them, so a sound can sit under its picture on one fader. Both settings are kept **on the cue**, beside the
+DCA the cue is marked with, so they travel with the cues through the show: turning the knob changes the
+cues playing under that DCA now, and the next cue plays as its own mark says. A new cue starts straight,
+with no offset. While the show is locked a turn is heard and seen at once and saved only if the operator
+keeps it when unlocking, as the EQ page's turns are.
+
+### 50.2 Decisions
+
+The author's (2026-10-09): **ABK**, **ABL** and **ABP**-**ABR** in PRD §3.28's words; **ABM**-**ABO** and
+**ABS** each the option I recommended, the words of each option mine.
+
+- **ABK** The knob sets **both** numbers, and **a press switches** between them; the strip's screen says
+  which and its value, and the ring shows it.
+- **ABL** Both are kept **on each cue's DCA mark** - PRD §3.28's "what the DCA controls on that member
+  and with what mapping".
+- **ABM** **One curve and one offset per mark**, not one per DCA the mark reaches.
+- **ABN** **The knob above any DCA the mark reaches writes it**: the cue's own DCA, or a DCA that one sits
+  inside. The last knob turned wins.
+- **ABO** **Marks multiply on a picture**: a picture under its own mark and a group's takes one factor
+  from each.
+- **ABP** **A turn writes the cues playing under that DCA now**, one undo step.
+- **ABQ** **Live and unsaved under the lock**, asked on unlock, as the EQ page is (§17.14, AM, AN).
+- **ABR** **A new cue starts straight**, with no offset.
+- **ABS** **The window's virtual panel has the knob too**, on its DCA strips.
+
+Mine, proposed:
+
+- **ABT** The rows are one **owner, `mark`**, carried by Media, Mic, Video and Group - one definition of
+  each row, as `member` (ABB). `dcaCurve` in %, -100 to 100, nought straight, below nought slow at first,
+  above fast at first; `dcaOffset` in dB, -24 to +12 - the top every other trim has, since nothing clamps
+  a level further on. The inspector says **picture curve** and **sound offset**, straight after the DCA,
+  both greyed when the cue has none; the curve greyed on a sound or a mic, the offset on a picture that is
+  not a movie.
+- **ABU** **The curve**: the factor the fader's travel gives, f, becomes f to the power 4 to the power
+  minus c over 100 - at +100 its fourth root, fast at first; at -100 its fourth power, slow at first;
+  nought and all of it are left where they are.
+- **ABV** **The offset** is added once for each mark a run, or a run above it, carries - so it reaches
+  what the mark's DCA reaches today, a movie's sound under its movie included - and **never lifts
+  silence**: a mark whose DCAs sum to -120 dB or below adds nothing.
+- **ABW** **On a picture, within one mark the trims of its DCAs add in dB**, as today, and the curve
+  shapes their factor; **across marks the factors multiply** - the cue's own, each run's above it, and a
+  sampler member's hand as a factor of its own. It replaces §37.5 WE's proposed one sum: -10 dB on the
+  cue's DCA and -10 dB on its group's was the factor of -20, 0.745, and is the square of the factor of
+  -10, 0.761.
+- **ABX** **A detent** is 2 % of curve or 0.5 dB of offset. A strip **starts on the curve when its DCA
+  has pictures** (the "V" of §39's letters), on the offset otherwise; a press switches and it stays
+  there; a new DCA on the strip starts again. The desk and the window each keep their own. The knob does
+  nothing while the faders are flipped to lanes (§34) or a page owns the rotaries.
+- **ABY** **What a turn writes**: the marks of the runs playing or stopping under the DCA, found through
+  the runs' own parents - so only marks that change something heard or seen; on the curve those with a
+  picture under them, on the offset those with a sound. The value shown is the nearest mark of the run
+  that started last; a turn sets every one of them to that value moved by the detents, clamped, a mark
+  reached twice written once, as **one `node.setMany`** (§30.11). With nothing playing, nothing is
+  written.
+- **ABZ** **The screen and the ring.** With nothing playing the strip is as today - "dca", "dca AV", an
+  empty ring - and a press or a turn says `pic --` or `snd --` for a second. With something playing,
+  the D700's third row says `pic +20` or `snd -3.5`, the MCU's second `p +20` or `s -3.5`, a `*` after
+  the word when the marks disagree; the ring fills from its centre, the offset's in two halves so that
+  nought dB is the centre.
+- **ACA** **The press no longer resets the DCA's trim to nought on a desk** (§16.6's gate rule, plan
+  decision 12, amended): it switches. The panel's pad still resets. REC on a DCA strip is free, if the
+  reset is wanted there.
+- **ACB** **Templates and the `mix` part carry the mapping**, as they carry `dca` itself: "starts
+  straight" is a fresh cue's.
+
+What this changes for what was there, said plainly: a picture with its own DCA and a group's is a little
+more solid where both are down (ABW); a picture in a bank with a DCA takes its hand and its DCA as two
+factors; a press on a DCA strip's knob stops resetting the fader; and where a cue's own mark and its
+group's both reach the DCA turned, a turn moves both - a sound under both takes the offset twice, a
+picture the curve twice.
+
+### 50.3 The rows
+
+| Row | Owner | Type | Range | Default | Read where |
+|---|---|---|---|---|---|
+| `dcaCurve` | `mark` (Media, Mic, Video, Group) | `d`, % | -100..100 | 0 | the picture's DCA factor (ABU, ABW) |
+| `dcaOffset` | `mark` | `d`, dB | -24..12 | 0 | the sound's level, beside the DCA's trims (ABV) |
+
+### 50.4 The screen and the ring
+
+| Surface | Nothing playing | Playing |
+|---|---|---|
+| D700, third row (8) | `dca`, `dca AV`; `pic --` / `snd --` a second after a press or a turn | `pic +20`, `pic*+100`, `snd -3.5`, `snd*-24` |
+| MCU, second row (7) | the strip's word | `p +20`, `s*-3.5` |
+| Ring | empty | from the centre: the curve over -100..100, the offset over -24..0 and 0..+12 |
+| Window panel | the knob drawn dim, its mode's word | the knob at its value, its words |
+
+### 50.5 Stages
+
+| Stage | What the author sees |
+|---|---|
+| DK.0 | This section; PRD §3.28 and §6.9 |
+| DK.1 | Two rows after the DCA in the inspector, greyed until a DCA is set; nothing moves yet |
+| DK.2 | A sound offset is heard |
+| DK.3 | A picture curve is seen; two marks multiply |
+| DK.4 | Under the lock, live and unsaved, kept or discarded on unlock |
+| DK.5 | Nothing yet: which marks a knob reaches, one rule for the desk and the window |
+| DK.6 | The knob on the D700 and a Mackie desk |
+| DK.7 | The knob on the window's panel |
+| DK.8 | The close-out |
+
+### 50.6 Not built
+
+*(Proposed, PRD §6.9.)* A curve on an output's or a canvas's DCA, which keep the straight travel (§38); a
+curve of its own on a sampler member's hand; one setting per DCA the mark reaches (the option ABM did not
+take).
+
+### 50.7 Built so far
+
+- **DK.0, this section** (2026-10-09).

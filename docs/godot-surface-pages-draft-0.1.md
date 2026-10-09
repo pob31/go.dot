@@ -202,7 +202,7 @@ a ride, because the fader is not over a sample.
 
 | Page | Button | Faders | Encoders | Clicks |
 |---|---|---|---|---|
-| **Show** (built) | none lit | sampler strips and DCA strips | ±0.5 dB on the strip's target | the strip's pad; a DCA back to 0 dB |
+| **Show** (built) | none lit | sampler strips and DCA strips | on a DCA strip, the picture's curve or the sound's offset of the cues playing under it (namespace draft §50); on a sampler strip nothing | the strip's pad; on a DCA strip, switches between the two (§50, ACA) |
 | **Send** | Send | the focused cue's send levels, one per mix channel in output-list order — the desktop send mixer's model (`model/Sends.h`); raising a silent one creates the `Send` | fine trim of the same | that send back to 0 dB |
 | **Pan** | Pan | — | the focused cue's placement: its route gains today, a WFS source position later (question 2) | centre |
 | **EQ** | EQ | the band gains *(or none — §7.1)* | the focused cue's EQ (§7.1) | band on/off, or reset |

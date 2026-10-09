@@ -623,6 +623,23 @@ projector, a movie and its sound from one fader.
 
 Then its own round: the knob above a DCA strip (PRD §3.28, decided the same day).
 
+*Added 2026-10-09, at the author's direction* (namespace draft §50; PRD §3.28 and
+§6.9 amended): **the knob above a DCA strip** - the picture's curve and the
+sound's offset, kept on each cue's DCA mark, one of each per mark, on the desk
+and on the window's panel. Each stage its own commit on main:
+
+| Stage | What the author sees |
+|---|---|
+| DK.0 | Namespace draft §50 |
+| DK.1 | Two rows after the DCA in the inspector, greyed until a DCA is set; nothing moves yet |
+| DK.2 | A sound offset is heard |
+| DK.3 | A picture curve is seen; two marks multiply |
+| DK.4 | Under the lock, live and unsaved, kept or discarded on unlock |
+| DK.5 | Nothing yet: which marks a knob reaches, one rule for the desk and the window |
+| DK.6 | The knob on the D700 and a Mackie desk |
+| DK.7 | The knob on the window's panel |
+| DK.8 | The close-out |
+
 ---
 
 ## Phase 9 — Plugins and the rack · L
