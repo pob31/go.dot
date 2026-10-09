@@ -16654,6 +16654,36 @@ namespace wfg::cue
             }
     }
 
+    std::uint64_t Runner::banksKey()
+    {
+        /*  FNV over each live group run's identifier, whether it is closing and
+            how many strips it has lost: what changes when a bank arms, closes or
+            has a strip taken - and nothing allocated, since it is asked every
+            tick. A sequence's group runs count as well, and only cost a list
+            made again when one starts or ends. */
+        std::uint64_t hash = 1469598103934665603ull;
+
+        const auto mix = [&hash] (std::uint64_t value)
+        {
+            hash ^= value;
+            hash *= 1099511628211ull;
+        };
+
+        for (const auto& run : runs.all())
+        {
+            if (run.kind != "group" || run.isFinished() || run.state == runState::preparing)
+                continue;
+
+            for (const auto character : run.id)
+                mix (static_cast<unsigned char> (character));
+
+            mix (run.closing ? 1u : 2u);
+            mix (run.lostStrips.size());
+        }
+
+        return hash;
+    }
+
     void Runner::prepareStandbyVideo()
     {
         /*  ONLY WHEN SOMETHING MOVED: the show - a standby, the focus and every
@@ -16663,12 +16693,15 @@ namespace wfg::cue
             again once a second, which is when the rest is made again too. */
         const auto* known = handlerDurations();
         const auto lookAgain = aheadMissing && currentTick - aheadLookedTick >= TickClock::rateHz;
+        const auto banks = banksKey();
 
-        if (revisionPrepared == document.revision() && durationsPrepared == known && ! lookAgain)
+        if (revisionPrepared == document.revision() && durationsPrepared == known && banksPrepared == banks
+              && ! lookAgain)
             return;
 
         revisionPrepared = document.revision();
         durationsPrepared = known;
+        banksPrepared = banks;
         aheadLookedTick = currentTick;
         aheadMissing = false;
 
@@ -16734,6 +16767,29 @@ namespace wfg::cue
                 for (const auto& leaf : launchedFirst (standby))
                     readAhead (leaf);
             }
+
+        /*  AN ARMED BANK'S PICTURES (namespace draft §49, ABF): every member a
+            hand may press now, ready before the hand moves - after the focused
+            list's standby, which GO acts on, and before the other lists'. By
+            the bank's placement and not by its members' runs, which end and are
+            armed again a tick apart: a list made from runs would let a still go
+            in between and read it again for the next press. A bank closing, or
+            a strip another bank took, offers nothing more. */
+        for (const auto& bank : runs.all())
+        {
+            if (bank.kind != "group" || bank.isFinished() || bank.state == runState::preparing || bank.closing)
+                continue;
+
+            const auto group = document.findById (bank.cue);
+
+            if (! group.isValid() || textOf (group, "mode") != "sampler")
+                continue;
+
+            for (const auto& member : placeMembers (document, group, samplerStrips()))
+                if (! member.strip.empty()
+                      && std::find (bank.lostStrips.begin(), bank.lostStrips.end(), member.strip) == bank.lostStrips.end())
+                    readAhead (document.findById (member.cue));
+        }
 
         for (const auto& list : document.root().getChildWithName ("Lists"))
         {

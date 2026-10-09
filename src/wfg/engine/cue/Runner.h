@@ -558,6 +558,7 @@ namespace wfg::cue
             //  A new picture side has been told nothing to read ahead yet.
             preloadsSent.clear();
             revisionPrepared = 0;
+            banksPrepared = 0;
         }
 
         /*  THE CLOCK A VIDEO POINT IS PLACED ON, now: the audio's samples when
@@ -1602,6 +1603,14 @@ namespace wfg::cue
         std::uint64_t revisionPrepared = 0;
         const std::map<std::string, double>* durationsPrepared = nullptr;
         bool aheadMissing = false;
+
+        /*  WHICH GROUPS ARE LIVE, as a number (namespace draft §49, ABF): an
+            armed bank's pictures are read ahead, and the list is made again
+            when a bank arms, closes or loses a strip - keyed on the banks and
+            not on their members' runs, which end and are armed again a tick
+            apart. */
+        std::uint64_t banksPrepared = 0;
+        std::uint64_t banksKey();
         std::int64_t aheadLookedTick = -1;
 
         /*  Where a video point lands: Go.dot's sample now, plus a launch

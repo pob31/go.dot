@@ -1936,6 +1936,77 @@ TEST_CASE ("sampler: a still playing out keeps its strip when another bank takes
                             }));
 }
 
+TEST_CASE ("sampler: an armed bank's pictures are read ahead after the focused standby and before another list's, until it closes (§49, ABF)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const auto still = pictures.member (bank, "picture", "still.png");
+    pictures.member (bank, "movie", "clip.mov");
+    pictures.member (bank, "fill");
+
+    //  The cue after the bank, where GO leaves the standby: a still of its own.
+    REQUIRE (rig.document.createCue (rig.listId, 4, "video", "Next", {},
+                                     { { "source", "picture" }, { "file", "next.png" }, { "canvas", pictures.canvas } }).ok);
+
+    //  And another list, its standby a still too.
+    const auto other = rig.document.createList ("Other");
+    REQUIRE (other.ok);
+    const auto elsewhere = rig.document.createCue (other.id, 0, "video", "Elsewhere", {},
+                                                   { { "source", "picture" }, { "file", "elsewhere.png" },
+                                                     { "canvas", pictures.canvas } });
+    REQUIRE (elsewhere.ok);
+    rig.set ("/godot/list/" + other.id + "/standby", elsewhere.id);
+
+    const auto paths = [&pictures]
+    {
+        std::vector<std::string> out;
+
+        for (const auto& item : pictures.sink.preloads)
+            out.push_back (item.path);
+
+        return out;
+    };
+
+    rig.arm (bank);
+    rig.tickOnce();
+
+    /*  THE FOCUSED LIST'S STANDBY FIRST, which GO acts on; then the bank's still
+        and movie - a fill has no file - then the other list's. */
+    CHECK (paths() == std::vector<std::string> { "next.png", "still.png", "clip.mov", "elsewhere.png" });
+
+    /*  BETWEEN PRESSES: a member's run ends and the next is armed a tick later,
+        and the still is never let go in between. */
+    const auto sentBefore = pictures.sink.preloadsSent.size();
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.tickOnce();
+    const auto stillId = rig.liveRunOf (still)->id;
+    rig.send ("run.kill", { osc::Value::string (stillId) }, "surface:DESK");
+
+    REQUIRE (rig.tickUntil ([&rig, &still, &stillId]
+                            {
+                                const auto* again = rig.liveRunOf (still);
+                                return again != nullptr && again->id != stillId;
+                            }));
+
+    for (auto at = sentBefore; at < pictures.sink.preloadsSent.size(); ++at)
+    {
+        const auto& sent = pictures.sink.preloadsSent[at];
+        CHECK (std::any_of (sent.begin(), sent.end(), [] (const video::Preload& item) { return item.path == "still.png"; }));
+    }
+
+    /*  ANOTHER BANK TAKES OVER: this one closes, and offers nothing more. */
+    rig.arm (rig.bankA);
+
+    REQUIRE (rig.tickUntil ([&paths]
+                            {
+                                const auto now = paths();
+                                return std::find (now.begin(), now.end(), "still.png") == now.end();
+                            }));
+}
+
 TEST_CASE ("sampler: a held picture pressed and let go in one tick comes up and goes down (§49)")
 {
     Rig rig;
