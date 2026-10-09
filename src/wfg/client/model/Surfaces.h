@@ -94,6 +94,7 @@ namespace wfg::client::model
         std::string cueNumber;
         std::string cueColour;   // #RRGGBB or empty
         std::string timbre;      // the holder run's timbre ("h s l"), or empty
+        std::string tint {};     // a picture holder's tint (#RRGGBB, namespace draft §49), or empty
         std::string dcaName;     // for a dca strip: the DCA's shortName, else its name
 
         /*  FOR A DCA STRIP, WHAT IT RIDES AS ONE COLOUR (namespace draft §38,

@@ -531,6 +531,7 @@ namespace wfg::client::model
                 const auto runBase = "/godot/run/" + row.holder + "/";
 
                 row.timbre = text (snapshot, runBase + "timbre");
+                row.tint = text (snapshot, runBase + "tint");
                 row.held = isTrue (snapshot.find (runBase + "held"), false);
             }
 

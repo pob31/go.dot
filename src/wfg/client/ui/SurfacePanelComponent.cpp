@@ -424,11 +424,24 @@ namespace wfg::client::ui
         /*  "#rrggbb" AND NOTHING ELSE, asked rather than handed to
             `Colour::fromString`, which answers black for what it cannot read
             (the timeline's rule, for the timeline's reason). */
-        const juce::String authored (strip.cueColour);
+        const auto hexColour = [] (const std::string& text) -> std::optional<juce::Colour>
+        {
+            const juce::String hex (text);
 
-        if (authored.length() == 7 && authored.startsWithChar ('#')
-              && authored.substring (1).containsOnly ("0123456789abcdefABCDEF"))
-            return juce::Colour::fromString ("ff" + authored.substring (1));
+            if (hex.length() == 7 && hex.startsWithChar ('#') && hex.substring (1).containsOnly ("0123456789abcdefABCDEF"))
+                return juce::Colour::fromString ("ff" + hex.substring (1));
+
+            return std::nullopt;
+        };
+
+        /*  A PICTURE ON THE STRIP SHOWS ITS PICTURE'S COLOUR while it is up
+            (namespace draft §49, ABG): the tint the renderer reads off it. */
+        if (strip.word == "playing" || strip.word == "held")
+            if (const auto tinted = hexColour (strip.tint))
+                return *tinted;
+
+        if (const auto authored = hexColour (strip.cueColour))
+            return *authored;
 
         return Look::colour (theme, "ink-off");
     }

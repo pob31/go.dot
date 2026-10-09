@@ -24,6 +24,7 @@
 #include <wfg/engine/surface/McuCodec.h>
 #include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
+#include <wfg/engine/tree/DualCue.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -525,7 +526,12 @@ namespace wfg::surface
             std::string cueId, cueNameAt, cueShortAt, cueNumberAt, cueColourAt, cuePressureAt,
                         cueFloorAt, cueDurationAt, cueStartAt;
             std::string dcaId, dcaNameAt, dcaShortAt;
-            std::string holderId, timbreAt, envelopeAt, meterAt, soloAt, positionAt;
+            std::string holderId, timbreAt, envelopeAt, meterAt, soloAt, positionAt, tintAt;
+
+            /*  WHAT SELECT AIMS THE ROTARIES AT (namespace draft §49, ABG): the
+                cue for a sound, a movie's locked sound - the half with an EQ,
+                sends and inserts - and nothing for any other picture. */
+            std::string aimId;
 
             /*  THE PULSE'S OWN MEMORY (2026-09-25): the slow average of the
                 holder's envelope and the brightness being let go, for the run
@@ -1245,16 +1251,36 @@ namespace wfg::surface
         /*  SELECT AIMS THE ROTARIES at the cue on the strip, and a lit one
             lets go (author, 2026-09-25). A strip with no cue - free, or a
             dca strip - has nothing to aim at. */
+        /*  WHAT SELECT AIMS AT FOR THE CUE ON A STRIP (namespace draft §49,
+            ABG): a picture its locked sound, if it has one - the half with an
+            EQ, sends and inserts, by the rule the window's pick uses
+            (tree/DualCue); every other cue itself, as before, `surface.aim`
+            saying no to a kind with nothing a page could turn. */
+        std::string aimOf (const std::string& cueId) const
+        {
+            const auto* at = published.get();
+
+            if (cueId.empty() || at == nullptr)
+                return cueId;
+
+            return textAt (at, "/godot/cue/" + cueId + "/kind") == "video" ? tree::dualCueOf (*at, cueId).sound
+                                                                             : cueId;
+        }
+
         void aim (const Surface& box, Strip& strip, const Submit& submit)
         {
             follow (strip);
 
-            if (strip.cueId.empty())
+            //  Asked again at the press, which is rare: a sound locked since the strip took its cue counts.
+            strip.aimId = aimOf (strip.cueId);
+
+            //  A picture with no sound has nothing a page could turn (§49, ABG).
+            if (strip.aimId.empty())
                 return;
 
-            const auto again = strip.cueId == aimNow();
+            const auto again = strip.aimId == aimNow();
             submit (commandFrom (box.origin, "surface.aim",
-                                 { osc::Value::string (again ? std::string {} : strip.cueId) }));
+                                 { osc::Value::string (again ? std::string {} : strip.aimId) }));
         }
 
         //======================================================================
@@ -1281,6 +1307,8 @@ namespace wfg::surface
                 strip.cueFloorAt = under (base, "velocityFloor");
                 strip.cueDurationAt = under (base, "duration");
                 strip.cueStartAt = under (base, "startOffset");
+
+                strip.aimId = aimOf (onStrip);
             }
 
             if (const auto& marked = textAt (at, strip.dcaAt); marked != strip.dcaId)
@@ -1299,6 +1327,7 @@ namespace wfg::surface
                 strip.meterAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/meter";
                 strip.soloAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/solo";
                 strip.positionAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/position";
+                strip.tintAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/tint";
             }
         }
 
@@ -2803,7 +2832,7 @@ namespace wfg::surface
             /*  PICKED: the rotaries are aimed at this strip's cue (author,
                 2026-09-25: "while a sample is selected (select button)"). */
             const auto& aimed = aimNow();
-            const auto picked = ! strip.cueId.empty() && strip.cueId == aimed;
+            const auto picked = ! strip.aimId.empty() && strip.aimId == aimed;
 
             if (box.paging.page != Page::show)
                 paintControl (box, strip, port, element, tick);
@@ -3059,6 +3088,12 @@ namespace wfg::surface
                 {
                     strip.pulseFor.clear();
                 }
+
+                /*  A PICTURE'S STRIP IS ITS PICTURE'S COLOUR (namespace draft §49,
+                    ABG): the tint the renderer reads off what it shows, steady -
+                    a picture has no envelope to pulse with. */
+                if (! wanted.has_value() && sounding)
+                    wanted = colourFromHex (textAt (at, strip.tintAt));
 
                 if (! wanted.has_value() && ! strip.cueId.empty())
                     wanted = colourFromHex (textAt (at, strip.cueColourAt));

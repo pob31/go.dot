@@ -370,6 +370,8 @@ add_library(wfg_engine STATIC
     wfg/engine/tree/TreeCommands.h
     wfg/engine/tree/TreeSnapshot.cpp
     wfg/engine/tree/TreeSnapshot.h
+    wfg/engine/tree/DualCue.cpp
+    wfg/engine/tree/DualCue.h
     wfg/engine/video/Compositor.h
     wfg/engine/video/Conversion.cpp
     wfg/engine/video/Conversion.h

@@ -3303,6 +3303,85 @@ TEST_CASE ("surface bridge: SELECT aims the rotaries at its strip's cue, lights 
     CHECK (desk.writes() == std::vector<std::string> { "surface.aim CUE00009" });
 }
 
+TEST_CASE ("surface bridge: SELECT on a movie's strip aims its locked sound, and on another picture aims nothing (§49, ABG)")
+{
+    PageDesk desk;
+
+    /*  A BANK OF PICTURES: a movie on the third strip with its sound straight
+        after it, a still on the fourth. */
+    desk.fake.text ("/godot/slot/STRIP003/cue", "MOV00001");
+    desk.fake.text ("/godot/slot/STRIP004/cue", "PIC00001");
+    desk.fake.text ("/godot/cue/BANK0001/order", "MOV00001 SND00001 PIC00001");
+
+    for (const auto* cue : { "MOV00001", "SND00001", "PIC00001" })
+        desk.fake.text ("/godot/cue/" + std::string (cue) + "/parent", "BANK0001");
+
+    desk.fake.text ("/godot/cue/MOV00001/kind", "video");
+    desk.fake.text ("/godot/cue/PIC00001/kind", "video");
+    desk.fake.text ("/godot/cue/SND00001/kind", "media");
+    desk.fake.text ("/godot/cue/SND00001/lockedTo", "MOV00001");
+    desk.publish();
+
+    //  THE MOVIE'S SELECT aims its sound - the half with an EQ, sends and inserts.
+    desk.press ("PORTBNK1", 0x18 + 2);
+    REQUIRE (desk.writes() == std::vector<std::string> { "surface.aim SND00001" });
+
+    //  And lights for it: the strip whose sound is aimed is the picked one.
+    desk.sink.sent.clear();
+    desk.aimAt ("SND00001");
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x18 + 2, surface::Led::on)));
+
+    //  A STILL has nothing a page could turn: its SELECT sends nothing.
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x18 + 3);
+    CHECK (desk.writes().empty());
+}
+
+TEST_CASE ("surface bridge: a picture's strip wears its picture's tint while it is up (§49, ABG)")
+{
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "PIC00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+    fake.text ("/godot/run/RUN00001/tint", "#00FF00");             // what the renderer reads off it
+    fake.text ("/godot/cue/PIC00001/kind", "video");
+    fake.text ("/godot/cue/PIC00001/colour", "#0000FF");
+    fake.text ("/godot/cue/PIC00001/name", "Logo");
+    fake.text ("/godot/surface/aim", "PIC00001");
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    //  Up, it is its tint - green - and not the colour its cue was given.
+    CHECK (colourOf (sink, "PORTBNK1", 0x20)
+             == std::vector<midi::Bytes> { { 0x91, 0x20, 0 }, { 0x92, 0x20, 127 }, { 0x93, 0x20, 0 } });
+
+    //  Down, its cue's own colour again.
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    sink.sent.clear();
+
+    for (tick = 2; tick <= 10; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    CHECK (colourOf (sink, "PORTBNK1", 0x20)
+             == std::vector<midi::Bytes> { { 0x91, 0x20, 0 }, { 0x92, 0x20, 0 }, { 0x93, 0x20, 127 } });
+}
+
 TEST_CASE ("surface bridge: the transport's REC presses the take on the aimed mic cue's channel, and nothing else")
 {
     /*  Phase 9c, decision CS: REC is `take.record` on the rack channel the
