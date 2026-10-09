@@ -70,6 +70,7 @@
 #include <wfg/client/model/View.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
+#include <wfg/engine/process/PatchText.h>
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/FadeMix.h>
 #include <wfg/client/model/Fx.h>
@@ -11225,4 +11226,89 @@ TEST_CASE ("client: every warp of the show is offered to copy onto, and a copy w
     const auto after = rig.publish (3);
     CHECK (model::text (*after, targets[2].base + "meshColumns") == "3");
     CHECK (model::text (*after, targets[2].base + "canvas") == other.id);
+}
+
+//==============================================================================
+/*  PROCESS CUES IN THE WINDOW (namespace draft §51, PC.4). */
+TEST_CASE ("client: a process cue has its own icon and accent, and its button makes one with the starter patch")
+{
+    CHECK (model::iconFor ("process") == model::Icon::process);
+    CHECK (model::accentFor ("process") == "kind-process");
+
+    const auto& kinds = model::cueKinds();
+    CHECK (std::find (kinds.begin(), kinds.end(), "process") != kinds.end());
+
+    const auto born = model::bornWith ("process");
+    REQUIRE (born.size() == 1u);
+    CHECK (born[0].first == "patch");
+    CHECK (born[0].second == wfg::process::starterPatch());
+    CHECK (model::bornWith ("memo").empty());
+}
+
+TEST_CASE ("client: a process cue is inspected by its patch, as long text, then its two MIDI ports")
+{
+    Rig rig;
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("process"), osc::Value::string ("Mapper"),
+                                            osc::Value::string ("PRCS0001"),
+                                            osc::Value::string ("patch"),
+                                            osc::Value::string (wfg::process::starterPatch()) });
+    const auto snapshot = rig.publish (2);
+
+    const auto panel = model::inspect (*snapshot, "PRCS0001");
+    REQUIRE_FALSE (panel.empty());
+    CHECK (panel.kind == "process");
+
+    std::vector<std::string> order;
+    const model::Field* patch = nullptr;
+    for (const auto& block : panel.blocks)
+        for (const auto& field : block.fields)
+        {
+            if (field.name == "patch" || field.name == "midiIn" || field.name == "midiOut")
+                order.push_back (field.name);
+            if (field.name == "patch")
+                patch = &field;
+        }
+
+    CHECK (order == std::vector<std::string> { "patch", "midiIn", "midiOut" });
+    REQUIRE (patch != nullptr);
+    CHECK (patch->control == model::Control::longText);
+    CHECK (patch->value == wfg::process::starterPatch());
+}
+
+TEST_CASE ("client: a process run says what its patch is doing, beside its name")
+{
+    Rig rig;
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("process"), osc::Value::string ("Mapper"),
+                                            osc::Value::string ("PRCS0001") });
+    rig.runs.create ("PRCRUN01", "PRCS0001", "process");
+    auto* run = rig.runs.find ("PRCRUN01");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::playing;
+
+    std::int64_t tick = 2;
+    const auto words = [&]
+    {
+        rig.parameters.markStale();
+        for (const auto& row : model::readRuns (*rig.publish (tick++)))
+            if (row.id == "PRCRUN01")
+                return row.liveWords;
+        return std::string ("(no row)");
+    };
+
+    run->processState = "starting";
+    CHECK (words() == "opening its patch");
+    run->processState = "late";
+    CHECK (words() == "late - its last tick ran past the budget");
+    run->processState = "running";
+    CHECK (words().empty());
+    run->processSaid = "level: 0.25";
+    CHECK (words() == "level: 0.25");
+
+    run->state = cue::runState::failed;
+    run->error = "process-stuck";
+    CHECK (words() == "stuck - Pure Data is held until Go.dot starts again");
+    run->error = "pd-held";
+    CHECK (words() == "not opened - another patch is stuck");
 }

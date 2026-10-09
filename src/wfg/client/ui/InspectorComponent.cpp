@@ -1167,6 +1167,12 @@ namespace wfg::client::ui
 
                     line->editor.setMultiLine (true, true);
                     line->editor.setReturnKeyStartsNewLine (true);
+
+                    /*  A PATCH IS PD'S TEXT (namespace draft §51), read in columns
+                        the way a .pd file is: a fixed-width face. */
+                    if (field.name == "patch")
+                        line->editor.setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(),
+                                                                             13.0f, juce::Font::plain)));
                     line->editor.setScrollbarsShown (true);
                     line->editor.setText (shown (field), juce::dontSendNotification);
                     line->editor.setTooltip (juce::String (field.description));

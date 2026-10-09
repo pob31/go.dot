@@ -79,7 +79,7 @@ namespace wfg::cue
         return element == "Cue"  || element == "Group" || element == "Media"
             || element == "Mic"  || element == "Video" || element == "Fade"
             || element == "Transport" || element == "Osc" || element == "Midi"
-            || element == "Start";
+            || element == "Start" || element == "Process";
     }
 
     //======================================================================
@@ -117,7 +117,9 @@ namespace wfg::cue
                                            value carries no `arg` once saved. */
                                        "message", "curve",
                                        //  What a cue's DCA mark carries (namespace draft §50).
-                                       "mark" })
+                                       "mark",
+                                       //  A process cue's patch (namespace draft §51).
+                                       "process" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
                     defaults[std::string (owner) + "/" + std::string (row->name)]
                         = std::string (row->defaultText);

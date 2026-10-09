@@ -959,6 +959,7 @@ namespace wfg::tree
             const auto isOsc = element == "Osc";
             const auto isMidi = element == "Midi";
             const auto isStart = element == "Start";
+            const auto isProcess = element == "Process";
             const auto id = node[idProperty].toString().toStdString();
 
             if (id.empty())
@@ -1051,6 +1052,11 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("start"))
                     rows.push_back (row);
 
+            //  A process cue's patch (namespace draft §51).
+            if (isProcess)
+                for (auto* row : doc::Schema::rowsForOwner ("process"))
+                    rows.push_back (row);
+
             for (const auto* row : rows)
             {
                 const doc::Attribute attribute { element, row };
@@ -1090,6 +1096,7 @@ namespace wfg::tree
                                                   : isOsc   ? "osc"
                                                   : isMidi  ? "midi"
                                                   : isStart ? "start"
+                                                  : isProcess ? "process"
                                                             : "memo";
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
@@ -4057,6 +4064,13 @@ namespace wfg::tree
                 else if (name == "held")      text = run.held ? "true" : "false";
                 else if (name == "solo")      text = run.solo ? "true" : "false";
                 else if (name == "error")     text = run.error;
+
+                //  A process cue's patch, as its host last saw it (namespace draft §51).
+                else if (name == "processState")   text = run.processState;
+                else if (name == "processLate")    text = std::to_string (run.processLate);
+                else if (name == "processDropped") text = std::to_string (run.processDropped);
+                else if (name == "said")           text = run.processSaid;
+                else if (name == "ports")          text = run.processPorts;
                 else if (name == "iteration")  text = std::to_string (run.iteration);
                 else if (name == "iterations") text = std::to_string (run.iterations);
                 else if (name == "round")      text = joinIds (run.round);

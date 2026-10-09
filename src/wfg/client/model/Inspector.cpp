@@ -112,6 +112,8 @@ namespace wfg::client::model
                                "stopWhenDone" } },
                 { "transport", { "target", "verb", "andGo", "range", "curve" } },
                 { "start",   { "target" } },
+                //  A process cue (namespace draft §51): its patch, then its MIDI.
+                { "process", { "patch", "midiIn", "midiOut" } },
                 /*  WHAT DOH! DOES WITH WHAT IT SENT last on both (PRD §3.32,
                     2026-10-01): a question about after the send, so it comes
                     after everything the send itself is. */
@@ -146,6 +148,9 @@ namespace wfg::client::model
             static const std::map<std::string, std::string> table
             {
                 { "play", "items to play" },
+                //  A process cue's two ports (namespace draft §51).
+                { "midiIn", "MIDI in" },
+                { "midiOut", "MIDI out" },
                 { "stopWhenDone", "stop when done" },
                 { "andGo", "and Go" },
                 { "shortName", "short name" },
@@ -258,7 +263,7 @@ namespace wfg::client::model
             else if (name == "loops")      field.control = Control::loopCount;
             else if (name == "file")       field.control = Control::file;
             else if (name == "target")     field.control = Control::cueRef;
-            else if (name == "notes")      field.control = Control::longText;
+            else if (name == "notes" || name == "patch") field.control = Control::longText;
             else                           field.control = Control::text;
 
             return field;
@@ -502,14 +507,15 @@ namespace wfg::client::model
             if (ports.empty())
                 return;
 
+            /*  AND A PROCESS CUE'S TWO (namespace draft §51, PC.3): where its
+                patch hears MIDI and where it sends it. */
             for (auto& field : decided)
             {
-                if (field.name != "port" || ! field.writable)
+                if ((field.name != "port" && field.name != "midiIn" && field.name != "midiOut") || ! field.writable)
                     continue;
 
                 field.control = Control::portRef;
                 field.choices = portChoices (ports);
-                return;
             }
         }
 

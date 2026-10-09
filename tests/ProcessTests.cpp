@@ -23,15 +23,37 @@
 
 #include "TestSupport.h"
 
+#include <wfg/engine/Engine.h>
+#include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/Ids.h>
+#include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/midi/MidiSink.h>
+#include <wfg/engine/osc/OscCodec.h>
+#include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/engine/process/PdInstance.h>
+#include <wfg/engine/process/ProcessHost.h>
+#include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/MountSender.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <clocale>
 #include <cmath>
 #include <filesystem>
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -61,9 +83,13 @@ namespace
         "#X connect 1 0 2 0;\n"
         "#X connect 5 0 2 0;\n";
 
+    /*  ONE FOLDER PER LOCALE RUN: ctest runs this binary under C and fr-FR at
+        once, and two processes writing one patch file would open each other's. */
     std::filesystem::path scratch (const std::string& name)
     {
-        return std::filesystem::temp_directory_path() / "wfg-process-tests" / name;
+        std::string run = wfgtest::appliedLocaleName();
+        std::replace_if (run.begin(), run.end(), [] (char c) { return ! std::isalnum (static_cast<unsigned char> (c)); }, '-');
+        return std::filesystem::temp_directory_path() / ("wfg-process-tests-" + run) / name;
     }
 
     PdInstance::Settings settingsFor (const std::string& name)
@@ -374,4 +400,652 @@ TEST_CASE ("process: a job asked for while the last is running is refused, and n
     CHECK (pd.close());
     REQUIRE (pd.finished (5s));
     CHECK_FALSE (pd.made());
+}
+
+TEST_CASE ("process: a number Pd works out leaves as the shortest decimal it is, not a float's tail")
+{
+    PdInstance pd (settingsFor ("shortest"));
+    makeAndOpen (pd, "#N canvas 0 0 450 300 12;\n"
+                     "#X obj 10 10 r /a;\n"
+                     "#X obj 10 40 * 2;\n"
+                     "#X obj 10 70 s /b;\n"
+                     "#X connect 0 0 1 0;\n"
+                     "#X connect 1 0 2 0;\n");
+    const auto out = numbersSentTo (tickOnce (pd, { { "/a", { Atom::of (0.05) } } }), "/b");
+    REQUIRE (out.size() == 1);
+
+    // Pd holds 0.1 as the float 0.100000001490116; Go.dot is handed 0.1.
+    const bool exactlyATenth = ! (out[0] < 0.1) && ! (0.1 < out[0]);
+    CHECK (exactlyATenth);
+}
+
+//==============================================================================
+/*  PC.2: THE PROCESS CUE. A show with one device and the cues a patch plays
+    with; everything below the command is real - a mount table with a parsed
+    namespace, a sender on a loopback socket, the Runner's hook and a host
+    running Pd instances on threads of their own. */
+namespace
+{
+    constexpr const char* deviceJson = R"JSON({
+      "FULL_PATH": "/",
+      "CONTENTS": {
+        "in":  { "FULL_PATH": "/in",  "TYPE": "f", "ACCESS": 3 },
+        "out": { "FULL_PATH": "/out", "TYPE": "f", "ACCESS": 3 }
+      }
+    })JSON";
+
+    constexpr const char* deviceId = "K3PV7WRB";
+
+    wfg::tree::MountDeclaration deviceMount (int port)
+    {
+        wfg::tree::MountDeclaration mount;
+        mount.id = deviceId;
+        mount.prefix = "/dev";
+        mount.namespaceFile = "namespaces/dev.json";
+        mount.host = "127.0.0.1";
+        mount.port = port;
+        return mount;
+    }
+
+    /*  A socket that keeps what it was sent. */
+    struct Listener
+    {
+        Listener()
+        {
+            const auto started = endpoint.start (0, [this] (wfg::osc::Datagram datagram)
+                                                    {
+                                                        const std::lock_guard<std::mutex> lock { guard };
+                                                        received.push_back (std::move (datagram));
+                                                    });
+            REQUIRE (started);
+        }
+
+        ~Listener() { endpoint.stop(); }
+
+        int port() const { return endpoint.boundPort(); }
+
+        std::vector<wfg::osc::Packet> packets() const
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+            std::vector<wfg::osc::Packet> out;
+            for (const auto& datagram : received)
+            {
+                const auto decoded = wfg::osc::decode (datagram.bytes.data(), datagram.bytes.size());
+                if (decoded.ok)
+                    out.push_back (decoded.packet);
+            }
+            return out;
+        }
+
+        /*  The first value sent to `address`, waited for. */
+        std::optional<double> valueAt (const std::string& address, int millisecondsAtMost = 3000) const
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds (millisecondsAtMost);
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                for (const auto& packet : packets())
+                    if (packet.address == address && ! packet.args.empty())
+                        return packet.args.front().asDouble();
+                std::this_thread::sleep_for (std::chrono::milliseconds (2));
+            }
+            return std::nullopt;
+        }
+
+        void clear()
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+            received.clear();
+        }
+
+        mutable std::mutex guard;
+        std::vector<wfg::osc::Datagram> received;
+        wfg::osc::UdpEndpoint endpoint;
+    };
+
+    /*  What a patch sent on its MIDI port, kept. */
+    struct RecordingSink : wfg::midi::MidiSink
+    {
+        std::string send (const std::string& port, const wfg::midi::Bytes& bytes) override
+        {
+            sent.emplace_back (port, bytes);
+            return {};
+        }
+
+        std::vector<std::pair<std::string, wfg::midi::Bytes>> sent;
+    };
+
+    wfg::process::ProcessHost::Settings hostSettings (const std::string& name)
+    {
+        wfg::process::ProcessHost::Settings settings;
+        settings.cacheFolder = scratch (name).string();
+        return settings;
+    }
+
+    struct ProcessRig
+    {
+        explicit ProcessRig (const std::string& name, bool withHost = true)
+            : sender (listener.endpoint),
+              host (hostSettings (name))
+        {
+            REQUIRE (mounts.load (deviceMount (listener.port()), deviceJson).ok);
+
+            engine.log().openInMemory ({});
+            wfg::doc::registerDocumentCommands (engine.commands(), document, foreignWrite());
+            wfg::cue::registerCueCommands (engine.commands(), document, focus);
+            wfg::cue::registerRunCommands (engine.commands(), runs);
+            wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+            runner.setMounts (&mounts, &sender);
+            runner.setMidiSink (&midiSink);
+            runner.setProcessMidi (&midiInbox);
+            if (withHost)
+                runner.setProcesses (&host);
+
+            listId = document.createList ("Sound").id;
+
+            //  A Debug build makes a Pd instance slower than a show's budget.
+            document.setAttribute ("/godot/list/processBudget", "20");
+            document.setAttribute ("/godot/list/goDebounce", "0");
+        }
+
+        wfg::doc::ForeignWrite foreignWrite()
+        {
+            return [this] (const std::string& address, const wfg::osc::Values& values)
+            {
+                const auto written = wfg::tree::writeToDevice (mounts, sender, address, values);
+                if (! written.ok)
+                    return wfg::Outcome::rejected (written.reason);
+                std::vector<wfg::osc::Value> applied { wfg::osc::Value::string (address) };
+                applied.insert (applied.end(), written.values.begin(), written.values.end());
+                return wfg::Outcome::ok (std::move (applied));
+            };
+        }
+
+        std::string makeProcess (const std::string& patch, const std::string& parent = {})
+        {
+            const auto id = document.createCue (parent.empty() ? listId : parent,
+                                                parent.empty() ? index++ : 0, "process", "Patch").id;
+            REQUIRE (! id.empty());
+            document.setAttribute ("/godot/cue/" + id + "/patch", patch);
+            return id;
+        }
+
+        std::string makeMemo (const std::string& name)
+        {
+            const auto id = document.createCue (listId, index++, "memo", name).id;
+            REQUIRE (! id.empty());
+            return id;
+        }
+
+        void tickOnce()
+        {
+            runner.beforeTick (engine, tick);
+            engine.processTick (tick++);
+            sender.flush();
+        }
+
+        void submit (const std::string& name, std::vector<wfg::osc::Value> args = {})
+        {
+            REQUIRE (engine.submit ("cli", name, std::move (args)));
+            tickOnce();
+        }
+
+        void fire (const std::string& cueId)
+        {
+            submit ("cue.fire", { wfg::osc::Value::string (cueId) });
+        }
+
+        /*  What a device with rx on reports, as `mount.heard`'s handler keeps
+            it: on the tick just run, so the next tick's hook hands it on. */
+        void hear (const std::string& address, float value)
+        {
+            mounts.noteObservation (address, { wfg::osc::Value::float32 (value) }, tick - 1, -1);
+            mounts.noteHeard (deviceId, address, tick - 1);
+        }
+
+        const wfg::cue::Run* runOf (const std::string& cueId) const
+        {
+            const wfg::cue::Run* last = nullptr;
+            for (const auto& run : runs.all())
+                if (run.cue == cueId)
+                    last = &run;
+            return last;
+        }
+
+        std::size_t runsOf (const std::string& cueId) const
+        {
+            return static_cast<std::size_t> (std::count_if (runs.all().begin(), runs.all().end(),
+                                                            [&] (const auto& run) { return run.cue == cueId; }));
+        }
+
+        bool tickUntil (const std::function<bool()>& done, int ticks = 300)
+        {
+            for (int n = 0; n < ticks; ++n)
+            {
+                if (done())
+                    return true;
+                tickOnce();
+            }
+            return done();
+        }
+
+        bool running (const std::string& cueId)
+        {
+            return tickUntil ([&] { const auto* run = runOf (cueId); return run != nullptr && run->processState == "running"; });
+        }
+
+        std::vector<wfg::LogRecord> records()
+        {
+            return wfg::LogFile::parse (engine.log().contents()).records;
+        }
+
+        Listener listener;
+        wfg::tree::MountTable mounts;
+        wfg::tree::MountSender sender;
+        wfg::process::ProcessHost host;
+        wfg::process::MidiInbox midiInbox;
+        RecordingSink midiSink;
+
+        wfg::Engine engine;
+        wfg::doc::ShowDocument document;
+        wfg::cue::RunTable runs;
+        wfg::cue::Focus focus;
+        wfg::doc::IdRegistry runIds = wfg::doc::IdRegistry::withSeed (17);
+        wfg::cue::Runner runner { document, runs, runIds, focus };
+
+        std::string listId;
+        int index = 0;
+        std::int64_t tick = 1;
+    };
+
+    std::string doubling (const char* times = "2")
+    {
+        return std::string ("#N canvas 0 0 450 300 12;\n"
+                            "#X obj 10 10 r /dev/in;\n"
+                            "#X obj 10 40 * ") + times + ";\n"
+               "#X obj 10 70 s /dev/out;\n"
+               "#X connect 0 0 1 0;\n"
+               "#X connect 1 0 2 0;\n";
+    }
+}
+
+TEST_CASE ("process cue: a patch doubles what a device reports, on the wire the tick it is heard")
+{
+    ProcessRig rig ("pc2-double");
+    const auto cue = rig.makeProcess (doubling());
+
+    rig.fire (cue);
+    REQUIRE (rig.runOf (cue) != nullptr);
+    CHECK (rig.runOf (cue)->kind == "process");
+    CHECK (rig.runOf (cue)->state == wfg::cue::runState::playing);
+    REQUIRE (rig.running (cue));
+
+    rig.listener.clear();
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+
+    const auto sent = rig.listener.valueAt ("/dev/out");
+    REQUIRE (sent.has_value());
+    CHECK (sameNumber (*sent, 0.5));
+
+    // In the tree as a cue's write would be.
+    const auto* value = rig.mounts.valueOf ("/dev/out");
+    REQUIRE (value != nullptr);
+    CHECK (sameNumber (value->front().asDouble(), 0.5));
+
+}
+
+TEST_CASE ("process cue: a patch fires a cue by name, under its own origin, and self is its own")
+{
+    ProcessRig rig ("pc2-fire");
+    const auto bell = rig.makeMemo ("Bell");
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 r /dev/in;\n"
+                                      "#X msg 10 40 \\; /godot/cmd/cue/fire " + bell + ";\n"
+                                      "#X connect 0 0 1 0;\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    const auto processRun = rig.runOf (cue)->id;
+
+    CHECK (rig.runsOf (bell) == 0u);
+    rig.hear ("/dev/in", 1.0f);
+    rig.tickOnce();
+    rig.tickOnce();
+    CHECK (rig.runsOf (bell) == 1u);
+
+    const auto records = rig.records();
+    const auto fired = std::find_if (records.begin(), records.end(), [&] (const auto& r)
+    {
+        return r.command == "cue.fire" && ! r.args.empty() && r.args.front().getString() == bell;
+    });
+    REQUIRE (fired != records.end());
+    CHECK (fired->origin == "process:" + processRun);
+}
+
+TEST_CASE ("process cue: a patch ends its own run with self, and that is its completion")
+{
+    ProcessRig rig ("pc2-self");
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 r /dev/in;\n"
+                                      "#X msg 10 40 \\; /godot/cmd/run/stop self;\n"
+                                      "#X connect 0 0 1 0;\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    rig.hear ("/dev/in", 1.0f);
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->isFinished(); }, 10));
+    CHECK (rig.runOf (cue)->state == wfg::cue::runState::done);
+}
+
+TEST_CASE ("process cue: a disable cue a patch fires switches its target off for this run")
+{
+    ProcessRig rig ("pc2-disable");
+    const auto bell = rig.makeMemo ("Bell");
+    const auto off = rig.document.createCue (rig.listId, rig.index++, "transport", "Off").id;
+    rig.document.setAttribute ("/godot/cue/" + off + "/verb", "disable");
+    rig.document.setAttribute ("/godot/cue/" + off + "/target", bell);
+
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 r /dev/in;\n"
+                                      "#X msg 10 40 \\; /godot/cmd/cue/fire " + off + ";\n"
+                                      "#X connect 0 0 1 0;\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    rig.hear ("/dev/in", 1.0f);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    // The bell is off: a fire by name is refused, and said so.
+    REQUIRE (rig.engine.submit ("cli", "cue.fire", { wfg::osc::Value::string (bell) }));
+    rig.tickOnce();
+    const auto records = rig.records();
+    CHECK (std::any_of (records.begin(), records.end(), [&] (const auto& r)
+    {
+        return r.kind == wfg::LogRecord::Kind::rejected && r.command == "cue.fire" && r.reason == "disabled";
+    }));
+    CHECK (rig.runsOf (bell) == 0u);
+}
+
+TEST_CASE ("process cue: Esc ends the run at once and its patch is closed; a second GO does nothing")
+{
+    ProcessRig rig ("pc2-esc");
+    const auto cue = rig.makeProcess (doubling());
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    rig.fire (cue);
+    CHECK (rig.runsOf (cue) == 1u);
+    CHECK (rig.host.instances() == 1u);
+
+    rig.submit ("run.stopAll");
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->isFinished(); }, 5));
+    REQUIRE (rig.tickUntil ([&] { return rig.host.instances() == 0u; }, 20));
+
+    // Nothing it would have sent leaves now.
+    rig.listener.clear();
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+    CHECK_FALSE (rig.listener.valueAt ("/dev/out", 100).has_value());
+}
+
+TEST_CASE ("process cue: an edit opens the running patch again")
+{
+    ProcessRig rig ("pc2-edit");
+    const auto cue = rig.makeProcess (doubling());
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    rig.document.setAttribute ("/godot/cue/" + cue + "/patch", doubling ("3"));
+
+    std::optional<double> seen;
+    for (int n = 0; n < 50 && ! (seen.has_value() && sameNumber (*seen, 0.75)); ++n)
+    {
+        rig.listener.clear();
+        rig.hear ("/dev/in", 0.25f);
+        rig.tickOnce();
+        seen = rig.listener.valueAt ("/dev/out", 200);
+    }
+    REQUIRE (seen.has_value());
+    CHECK (sameNumber (*seen, 0.75));
+    CHECK (rig.runsOf (cue) == 1u);
+}
+
+TEST_CASE ("process cue: in the persistent section it is started again at the next step")
+{
+    ProcessRig rig ("pc2-persistent");
+    const auto memo = rig.makeMemo ("Scene");
+    const auto section = rig.document.createPersistent (rig.listId);
+    REQUIRE (section.ok);
+    const auto cue = rig.makeProcess (doubling(), section.id);
+
+    const auto step = [&]
+    {
+        rig.submit ("standby.set", { wfg::osc::Value::string (memo) });
+        rig.submit ("go");
+        rig.tickOnce();
+    };
+
+    step();
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue) != nullptr; }, 40));
+    const auto first = rig.runOf (cue)->id;
+    REQUIRE (rig.running (cue));
+
+    // Esc stops it; the next step puts it back - a new run, from its beginning.
+    rig.submit ("run.stopAll");
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->isFinished(); }, 5));
+    step();
+    REQUIRE (rig.tickUntil ([&] { const auto* run = rig.runOf (cue); return run != nullptr && run->id != first; }, 40));
+    REQUIRE (rig.running (cue));
+
+    rig.listener.clear();
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+    const auto sent = rig.listener.valueAt ("/dev/out");
+    REQUIRE (sent.has_value());
+    CHECK (sameNumber (*sent, 0.5));
+}
+
+TEST_CASE ("process cue: with no host - a replay - the run plays and ends as the log says")
+{
+    ProcessRig rig ("pc2-replay", false);
+    const auto cue = rig.makeProcess (doubling());
+    rig.fire (cue);
+    REQUIRE (rig.runOf (cue) != nullptr);
+    CHECK (rig.runOf (cue)->state == wfg::cue::runState::playing);
+    CHECK (rig.runOf (cue)->processState == "starting");
+
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+    CHECK_FALSE (rig.listener.valueAt ("/dev/out", 100).has_value());
+
+    rig.submit ("run.stopAll");
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->isFinished(); }, 5));
+}
+
+TEST_CASE ("process cue: a stuck patch fails its run and holds Pd, and the show never waits on it")
+{
+    using clock = std::chrono::steady_clock;
+    {
+        ProcessRig rig ("pc2-stuck");
+        rig.document.setAttribute ("/godot/list/processStuckAfter", "5");
+
+        const auto steady = rig.makeProcess (doubling());
+        rig.fire (steady);
+        REQUIRE (rig.running (steady));
+
+        // Fifty million passes of [until]: seconds of Pd, far past five ticks and
+        // their hundred milliseconds.
+        const auto loop = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                           "#X obj 10 10 r /dev/in;\n"
+                                           "#X msg 10 40 50000000;\n"
+                                           "#X obj 10 70 until;\n"
+                                           "#X connect 0 0 1 0;\n"
+                                           "#X connect 1 0 2 0;\n");
+        rig.fire (loop);
+        REQUIRE (rig.running (loop));
+        rig.document.setAttribute ("/godot/list/processBudget", "2");
+
+        rig.hear ("/dev/in", 1.0f);
+        auto longest = clock::duration::zero();
+        // Ticks a couple of milliseconds apart, as a show's are twenty: stuck is
+        // late for five ticks and as long in time.
+        for (int n = 0; n < 500 && ! rig.runOf (loop)->isFinished(); ++n)
+        {
+            const auto started = clock::now();
+            rig.tickOnce();
+            longest = std::max (longest, clock::now() - started);
+            std::this_thread::sleep_for (2ms);
+        }
+
+        const auto* stuck = rig.runOf (loop);
+        CHECK (stuck->state == wfg::cue::runState::failed);
+        CHECK (stuck->error == "process-stuck");
+
+        // The tick waited for the patches at most the budget, never the loop.
+        CHECK (longest < std::chrono::milliseconds (200));
+
+        // A patch already running carries on.
+        rig.listener.clear();
+        rig.hear ("/dev/in", 0.25f);
+        rig.tickOnce();
+        const auto sent = rig.listener.valueAt ("/dev/out");
+        REQUIRE (sent.has_value());
+        CHECK (sameNumber (*sent, 0.5));
+
+        // And nothing new is opened: it would wait for ever, and stop every patch.
+        const auto late = rig.makeProcess (doubling());
+        rig.fire (late);
+        REQUIRE (rig.tickUntil ([&] { return rig.runOf (late)->isFinished(); }, 10));
+        CHECK (rig.runOf (late)->error == "pd-held");
+    }
+
+    // The loop does end, and Pd is free again: a new instance can be made.
+    PdInstance after (settingsFor ("after-stuck"));
+    REQUIRE (after.make());
+    CHECK (after.finished (60s));
+}
+
+//==============================================================================
+/*  PC.3: MIDI, what a patch says, the ports readout, process.send, the puck. */
+
+TEST_CASE ("process cue: a note on the port its cue listens on reaches [notein]")
+{
+    ProcessRig rig ("pc3-notein");
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 notein;\n"
+                                      "#X obj 10 40 s /dev/out;\n"
+                                      "#X connect 0 0 1 0;\n");
+    rig.document.setAttribute ("/godot/cue/" + cue + "/midiIn", "PORTA001");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    rig.listener.clear();
+    rig.midiInbox.push ("PORTB002", { 0x90, 61, 100 });   // another port: not heard
+    rig.midiInbox.push ("PORTA001", { 0x90, 60, 100 });
+    rig.tickOnce();
+
+    const auto pitch = rig.listener.valueAt ("/dev/out");
+    REQUIRE (pitch.has_value());
+    CHECK (sameNumber (*pitch, 60.0));
+    CHECK (rig.listener.packets().size() == 1u);
+}
+
+TEST_CASE ("process cue: [noteout] sends on the port its cue names, as a cue's message")
+{
+    ProcessRig rig ("pc3-noteout");
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 r /dev/in;\n"
+                                      "#X msg 10 40 60 100;\n"
+                                      "#X obj 10 70 noteout 2;\n"
+                                      "#X connect 0 0 1 0;\n"
+                                      "#X connect 1 0 2 0;\n");
+    rig.document.setAttribute ("/godot/cue/" + cue + "/midiOut", "PORTA001");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    rig.hear ("/dev/in", 1.0f);
+    rig.tickOnce();
+
+    REQUIRE (rig.midiSink.sent.size() == 1u);
+    CHECK (rig.midiSink.sent[0].first == "PORTA001");
+    CHECK (rig.midiSink.sent[0].second == wfg::midi::Bytes { 0x91, 60, 100 });
+}
+
+TEST_CASE ("process cue: what a patch prints is the run's said line, and its ports their last values")
+{
+    ProcessRig rig ("pc3-said");
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 r /dev/in;\n"
+                                      "#X obj 10 40 * 2;\n"
+                                      "#X obj 10 70 s /dev/out;\n"
+                                      "#X obj 100 40 print level;\n"
+                                      "#X connect 0 0 1 0;\n"
+                                      "#X connect 1 0 2 0;\n"
+                                      "#X connect 0 0 3 0;\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+
+    const auto* run = rig.runOf (cue);
+    CHECK (run->processSaid == "level: 0.25");
+    CHECK (run->processPorts.find ("/dev/out 0.5\n") != std::string::npos);
+    CHECK (run->processPorts.find ("/dev/in 0.25\n") != std::string::npos);
+}
+
+TEST_CASE ("process cue: process.send hands atoms to a name the patch hears")
+{
+    ProcessRig rig ("pc3-send");
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 r /knob;\n"
+                                      "#X obj 10 40 s /dev/out;\n"
+                                      "#X connect 0 0 1 0;\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    const auto runId = rig.runOf (cue)->id;
+
+    rig.listener.clear();
+    rig.submit ("process.send", { wfg::osc::Value::string (runId), wfg::osc::Value::string ("/knob"),
+                                  wfg::osc::Value::float64 (0.75) });
+    rig.tickOnce();
+    const auto sent = rig.listener.valueAt ("/dev/out");
+    REQUIRE (sent.has_value());
+    CHECK (sameNumber (*sent, 0.75));
+
+    // Refused for a run that is not a running process.
+    REQUIRE (rig.engine.submit ("cli", "process.send", { wfg::osc::Value::string ("NONEXIST"),
+                                                         wfg::osc::Value::string ("/knob") }));
+    rig.tickOnce();
+    const auto records = rig.records();
+    CHECK (std::any_of (records.begin(), records.end(), [] (const auto& r)
+    {
+        return r.kind == wfg::LogRecord::Kind::rejected && r.command == "process.send";
+    }));
+}
+
+TEST_CASE ("process cue: a patch hearing /godot/puck asks for the SpaceMouse and hears its axes")
+{
+    ProcessRig rig ("pc3-puck");
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 r /godot/puck;\n"
+                                      "#X obj 10 40 unpack f f f f f f;\n"
+                                      "#X obj 10 70 s /dev/out;\n"
+                                      "#X connect 0 0 1 0;\n"
+                                      "#X connect 1 2 2 0;\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    rig.tickOnce();
+    CHECK (rig.runner.processesWantPuck());
+
+    rig.listener.clear();
+    rig.runner.notePuck (std::array<double, 6> { 0.1, 0.2, -0.5, 0.0, 0.0, 0.0 });
+    rig.tickOnce();
+    const auto z = rig.listener.valueAt ("/dev/out");
+    REQUIRE (z.has_value());
+    CHECK (sameNumber (*z, -0.5));
+
+    // Not live: nothing heard.
+    rig.listener.clear();
+    rig.runner.notePuck (std::nullopt);
+    rig.tickOnce();
+    CHECK_FALSE (rig.listener.valueAt ("/dev/out", 100).has_value());
 }

@@ -1733,7 +1733,10 @@ namespace wfg::cue
             if (std::find (stopped.begin(), stopped.end(), id) != stopped.end())
                 continue;
 
-            if (element == "Media" || element == "Midi" || element == "Mic")
+            /*  A PROCESS CUE IS ASSERTED AS A SOUND IS (namespace draft §51,
+                ACL; PRD §3.29): relaunched when it is not running, from its
+                patch's beginning. */
+            if (element == "Media" || element == "Midi" || element == "Mic" || element == "Process")
             {
                 PlannedRun run;
                 run.cue = id;

@@ -566,6 +566,22 @@ namespace wfg::cue
         static constexpr double silentDb = -120.0;
         double meter = silentDb;
 
+        /*  A PROCESS CUE'S PATCH, AS ITS HOST LAST SAW IT (namespace draft §51):
+            starting, running, late or stuck; how many ticks it has been late;
+            how many of its sends were dropped past the cap. READOUTS like the
+            meter: written by the tick hook from the host, never logged, empty
+            and nought in a replay - which runs no patch. A stuck patch is also
+            a record, `process.stuck`, because it ends the run. */
+        std::string processState;
+        int processLate = 0;
+        std::uint64_t processDropped = 0;
+
+        /*  AND WHAT IT SAYS (PC.3): the last line its [print] - or Pd's own
+            complaint - printed, and the last value on each name it sends to or
+            hears, a line each, for the canvas. Readouts, as above. */
+        std::string processSaid;
+        std::string processPorts;
+
         /*  THE EQ THE VOICE WAS LAST GIVEN (Phase 9a): the cue's twenty-three rows
             as they were carried by the arm, and as `Runner::applyEq` last
             pushed them. Kept on the run so a tick after an edit can say

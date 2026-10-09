@@ -23470,27 +23470,33 @@ Mine, proposed:
   devices through the device's own door (`tree::writeToDevice` - coerced, rate-capped, bundled, tx
   honoured), commands through `Engine::submit` with the origin `process:<run>`. At most 256 commands
   and sets a tick leave one process; the rest are dropped and counted (`run/process/dropped`).
-- **ACJ** **The bounded wait.** The tick waits for the patches at most `process/budget` (2 ms by
+- **ACJ** **The bounded wait.** The tick waits for the patches at most `list/processBudget` (2 ms by
   default, on the Playback tab). One that has not finished is **late**: what it sends lands on the next
   tick, and it is not handed the next tick's inputs until it is done - they wait, the newest per
-  address. Late for `process/stuckAfter` ticks in a row (50 by default, one second) it is **stuck**: its
-  run fails with `process.stuck`, the run's row says so in words, and the patch is left where it is -
-  nothing in Go.dot can stop a loop inside Pd. The show never waits more than the budget for any of it.
+  address. Late for `list/processStuckAfter` ticks in a row (50 by default) and as long in time (a
+  second, then) it is **stuck** - the two are one thing in a show, and a test's ticks, which take no
+  time, are judged by the clock: its run fails with `run.failed <run> process-stuck`, the run's row says
+  so in words, and the patch is left where it is - nothing in Go.dot can stop a loop inside Pd. A step
+  that never comes back - a patch whose `[loadbang]` never ends - is stuck the same way. The show never
+  waits more than the budget for any of it.
 - **ACK** **Pd is changed only at a quiet point** (measured, §51.6). Making a patch, opening it,
   reloading it after an edit and closing it all take a lock every running patch shares, and a patch
   that is stuck holds that lock for good: a patch already running carries on, but anything waiting to
   open a patch would wait for ever, and **while it waits every patch stops**. So Go.dot opens and closes
   patches only at the start of a tick, when every patch's last tick has finished; and **once a patch is
   stuck nothing is opened, reloaded or closed until Go.dot is started again** - a new process run fails
-  with `process-stuck` and says so; the patches already running carry on. A patch that never finishes
-  *as it opens* (a `[loadbang]` into an endless loop) holds the lock while it opens, and stops every
-  patch - the one case the bounded wait does not cover, written here so that it is known.
+  with `pd-held` and says so, a run that ends has its patch let go unfreed; the patches already running
+  carry on. A patch that never finishes *as it opens* (a `[loadbang]` into an endless loop) holds the
+  lock while it opens, and stops every patch: it is found stuck as any is, and nothing else runs in Pd
+  until Go.dot is started again - the one case the bounded wait does not cover, written here so that
+  it is known.
 - **ACL** **A process cue's life.** A second GO on a running one does nothing, as on a sound. It never
   finishes by itself: its patch ends it with `[s /godot/cmd/run/stop]` given `self`, or a stop cue, Esc,
   a double Esc or its container's footer does - and that is its completion for a sequence. Esc and
   double Esc stop it at once (it has nothing to fade or release). Doh! stops one that a GO fired early.
   In the persistent section it is started again, from the beginning, as §3.29 already says of a data
-  process. A `[loadbang]` fires when the run starts.
+  process. A `[loadbang]` fires when the run starts. A cue a patch fires is a fire by name after the
+  GO, as a trigger's is (§24, `trigger-after-go`): Doh! then refuses to take that GO back.
 - **ACM** **The canvas edits the text, and the text is the show.** Every gesture on the canvas - a
   move, a deletion, a box typed, a line joined - rewrites the cue's `process/patch` as one `node.set`;
   a drag's run of them is one step of undo by the engine's own folding (§14.9, 25 ticks). A running
@@ -23561,13 +23567,13 @@ Mine, proposed:
 |---|---|---|---|---|
 | `patch` | `process` | `s` | a patch with one comment | The patch, as Pd's text |
 | `midiIn`, `midiOut` | `process` | `s` | empty | A MIDI port's id, or none |
-| `run/process/state` | run | `s`, read | | `starting`, `running`, `late`, `stuck` |
-| `run/process/late`, `run/process/dropped` | run | `i`, read | 0 | Counts |
-| `run/process/said` | run | `s`, read | | The last `[print]` line |
-| `run/process/ports` | run | `s`, read | | The last value on each named port, for the canvas |
-| `run/process/editing` | run | `T`, read | false | Pd's window is up |
-| `/godot/process/budget` | show | `d`, ms | 2 | ACJ |
-| `/godot/process/stuckAfter` | show | `i`, ticks | 50 | ACJ |
+| `run/processState` | run | `s`, read | | `starting`, `running`, `late`, `stuck` |
+| `run/processLate`, `run/processDropped` | run | `i`, read | 0 | Counts |
+| `run/said` | run | `s`, read | | The last `[print]` line |
+| `run/ports` | run | `s`, read | | The last value on each named port, for the canvas |
+| `run/editing` | run | `T`, read | false | Pd's window is up |
+| `/godot/list/processBudget` | `lists` | `d`, ms | 2 | ACJ |
+| `/godot/list/processStuckAfter` | `lists` | `i`, ticks | 50 | ACJ |
 | `serial/<id>/name`, `path`, `baud`, `framing`, `rx`, `tx` | `serial` | | -, -, 115200, `lines`, true, true | ACR |
 | `serial/<id>/state`, `problem` | `serial` | read | | Open, closed, retrying; why, in words |
 | `mount/<id>/transport` gains `serial`; `mount/<id>/serial` | `mount` | | | ACR, OSC over SLIP |
@@ -23577,13 +23583,15 @@ Mine, proposed:
 ### 51.5 Commands and records
 
 - `process.edit s cue` - Pd's window on the cue's patch (ACN). Refused `locked`, `pd-missing`,
-  `process-stuck`.
+  `pd-held`.
 - `process.send s run s name [atoms...]` - hands atoms to a name a running patch receives: the
   canvas's live boxes, a surface, a test.
 - `pd.install` - Pd's window downloaded (ACO), as `ffmpeg.install`.
 - `serial.create`, then `node.set` on its rows; `object.delete` removes one.
-- Records: `process.stuck run sentence` (engine), `serial.heard serial line` (engine).
-- Refusals: `process-stuck` (a run or a reload while a patch is stuck), `pd-missing`.
+- Records: a stuck patch is `run.failed <run> process-stuck`, and a run that cannot be opened because
+  another patch is stuck `run.failed <run> pd-held` - the existing record, a new reason each; and
+  `serial.heard serial line` (engine).
+- Refusals: `pd-missing`, and `pd-held` for `process.edit` while a patch is stuck.
 
 ### 51.6 Measurements
 
@@ -23634,3 +23642,25 @@ would give that (the option ACE did not take).
   MSVC, compiled externals refused and `quit` and `exit` refused; `process/PdInstance`, a patch on a
   thread of its own; `process/PatchText`, Pd's text read and written back byte for byte, with its
   boxes, lines and names.
+- **PC.2**: the kind - `<Process>` with its `patch` row, `cue/kind` and `run/kind` gaining `process`;
+  the run's readouts `processState`, `processLate`, `processDropped`; `list/processBudget` and
+  `list/processStuckAfter`. `process/ProcessHost` runs every running patch once a tick: made, opened,
+  opened again on an edit and closed only at a quiet point, ticked with what devices reported since the
+  last tick and the rows it hears, waited for at most the budget, late and stuck as ACJ says, `pd-held`
+  once a patch is stuck. The Runner's hook `advanceProcesses` hands it the runs and does what a patch
+  sent: a device written through its own door, a command or a `node.set` submitted as `process:<run>`,
+  `self` its own run or cue. A second GO does nothing; Esc, a stop, a kill and Doh! end the run;
+  the persistent section starts it again. Pd's 32-bit numbers leave as their shortest decimal.
+- **PC.3**: MIDI in and out - `process/midiIn` and `process/midiOut` name a declared port; what the
+  surfaces decline on the input port reaches the patch's MIDI objects (the port's rx honoured, its
+  triggers still firing), and what its MIDI objects send leaves on the output port as a cue's message
+  (tx honoured, a double Esc able to drop it), `[midiout]`'s bytes gathered into whole messages. The
+  run's `said` is the last line it printed; its `ports` the last value on each name it sends to or hears.
+  `process.send run name atoms...` hands a running patch atoms at the next tick. A patch hearing
+  `/godot/puck` opens the SpaceMouse and hears its six axes while it is live.
+- **PC.4**: the window. "+ process" on the new-cue bar makes one born with the starter patch; its icon
+  (two boxes and the line between them) and its accent, `kind-process`; the inspector shows its patch
+  as long text in a fixed-width face, then "MIDI in" and "MIDI out" as menus of the declared ports;
+  the running pane says what its patch is doing - opening, late, stuck, or the last line it printed -
+  and what a failure means for Pd; the Playback tab has "Time a tick waits for patches" (ms) and "A
+  patch is stuck after" (ticks). The browser console lists the kind and its rows.

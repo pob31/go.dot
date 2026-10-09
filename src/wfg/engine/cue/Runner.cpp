@@ -36,6 +36,7 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
+#include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/clock/TickClock.h>
@@ -55,6 +56,8 @@
 #include <wfg/engine/document/LevelLane.h>
 
 #include <algorithm>
+#include <chrono>
+#include <string_view>
 #include <bit>
 #include <cctype>
 #include <cmath>
@@ -106,6 +109,7 @@ namespace wfg::cue
             if (element == "Osc")   return "osc";
             if (element == "Midi")  return "midi";
             if (element == "Start") return "start";
+            if (element == "Process") return "process";
 
             return {};
         }
@@ -602,6 +606,14 @@ namespace wfg::cue
 
                 return live->id;
             }
+
+        /*  A SECOND GO ON A RUNNING PROCESS CUE DOES NOTHING (namespace draft
+            §51, ACL; PRD §3.8's table), as on a sound: its patch is running,
+            and a second patch beside it would be a second process nobody asked
+            for. */
+        if (fireAtOnce && kind == "process")
+            if (const auto* live = liveUntakenRunOf (cueId))
+                return live->id;
 
         /*  GO ON AN ARMED SAMPLER GROUP IS A REFRESH (PRD §3.27, §3.8's
             table), and not a second bank. Every member that has lost its strip
@@ -1919,7 +1931,10 @@ namespace wfg::cue
                 const auto cue = document.findById (planned.cue);
                 const auto kind = kindOfCue (cue);
 
-                if (kind == "media" || kind == "mic")
+                /*  A PROCESS CUE IS ASSERTED AS A SOUND IS (namespace draft §51,
+                    ACL): left alone while it runs, started again from its patch's
+                    beginning when it does not, suspended by the pane's kill. */
+                if (kind == "media" || kind == "mic" || kind == "process")
                 {
                     /*  STILL SOUNDING, and left alone - unless it is the run
                         Esc paused, still on its way out over the panic fade:
@@ -4761,6 +4776,27 @@ namespace wfg::cue
                 startsToFire.push_back ({ target, goOfRun (runId) });
 
             finishing.push_back (runId);
+            return;
+        }
+
+        /*  A PROCESS CUE (namespace draft §51): playing from its GO, its patch
+            run by the host from the next tick's hook - made and opened at the
+            first quiet point - and running until something stops it (ACL). The
+            job is handler state, so a replay makes it too and runs no patch. */
+        if (kind == "process")
+        {
+            if (auto* run = runs.find (runId))
+            {
+                run->state = runState::playing;
+                run->processState = "starting";
+            }
+
+            ProcessJob job;
+            job.self = runId;
+            job.cue = cue[idProperty].toString().toStdString();
+            job.patch = textOf (cue, "patch");
+            job.revision = document.revision();
+            processing.push_back (std::move (job));
             return;
         }
 
@@ -10600,7 +10636,7 @@ namespace wfg::cue
 
                 const auto silentSound = (run->kind == "media" || run->kind == "mic") && run->startedAtTick < 0;
                 const auto sender = run->kind == "osc" || run->kind == "midi" || run->kind == "memo"
-                                      || run->kind == "start";
+                                      || run->kind == "start" || run->kind == "process";
 
                 if (silentSound || sender || run->isWaiting())
                     endHere (id, tick);
@@ -13239,6 +13275,331 @@ namespace wfg::cue
             job.failure = problem;
 
         sending.push_back (job);
+    }
+
+    namespace
+    {
+        /*  A value of Go.dot's as a patch's atoms: numbers as numbers, words as
+            words, a true or false as one or nought (Pd has neither). */
+        process::Atoms patchAtomsOf (const osc::Values& values)
+        {
+            process::Atoms atoms;
+            atoms.reserve (values.size());
+            for (const auto& value : values)
+            {
+                if (value.isString())
+                    atoms.push_back (process::Atom::of (value.getString()));
+                else if (value.isBool())
+                    atoms.push_back (process::Atom::of (value.getBool() ? 1.0 : 0.0));
+                else if (value.isNumber())
+                    atoms.push_back (process::Atom::of (value.asDouble()));
+            }
+            return atoms;
+        }
+
+        /*  And back: a patch's atoms as Go.dot's values. */
+        osc::Values patchValuesOf (const process::Atoms& atoms)
+        {
+            osc::Values values;
+            values.reserve (atoms.size());
+            for (const auto& atom : atoms)
+                values.push_back (atom.isNumber ? osc::Value::float64 (atom.number)
+                                                : osc::Value::string (atom.word));
+            return values;
+        }
+    }
+
+    void Runner::advanceProcesses (Engine& engine, std::int64_t tick)
+    {
+        std::vector<process::WantedProcess> wanted;
+
+        for (auto& job : processing)
+        {
+            if (job.finished)
+                continue;
+
+            auto* run = runs.find (job.self);
+
+            /*  OVER BY ANOTHER ROAD - failed, revoked, taken back by Doh!. */
+            if (run == nullptr || run->isFinished())
+            {
+                job.finished = true;
+                continue;
+            }
+
+            /*  ESC, A DOUBLE ESC, A STOP CUE, A KILL, THE FOOTER (ACL): a patch
+                has nothing to fade or let go of, so its run ends this tick - by
+                `advanceSends`' sweep of the stopping runs no job claims, which
+                runs after this - and the host closes the patch at its next quiet
+                point. */
+            if (run->state == runState::stopping || beingKilled (*run))
+            {
+                job.finished = true;
+                continue;
+            }
+
+            /*  AN EDIT REACHES A RUNNING PATCH (ACM): read again, and opened again
+                by the host - from its beginning. */
+            if (job.revision != document.revision())
+            {
+                const auto cue = document.findById (job.cue);
+
+                if (! cue.isValid())
+                {
+                    engine.submit (origin::engine, "run.ended", one (job.self));
+                    job.finished = true;
+                    continue;
+                }
+
+                job.patch = textOf (cue, "patch");
+                job.revision = document.revision();
+            }
+
+            if (! job.failed)
+                wanted.push_back ({ job.self, job.cue, job.patch });
+        }
+
+        processing.erase (std::remove_if (processing.begin(), processing.end(),
+                                          [] (const ProcessJob& job) { return job.finished; }),
+                          processing.end());
+
+        //  WHAT ARRIVED ON THE MIDI PORTS, taken whatever happens to it.
+        auto midiArrived = processMidi != nullptr ? processMidi->take()
+                                                  : std::vector<std::pair<std::string, midi::Bytes>> {};
+        auto handed = std::exchange (patchInputs, {});
+
+        if (processHost == nullptr)
+            return;
+
+        /*  WHAT DEVICES REPORTED SINCE THE LAST LOOK, the same for every patch:
+            the `mount.heard` records of the ticks since, applied by now. */
+        std::vector<process::Input> heard;
+
+        if (mounts != nullptr)
+            for (const auto& address : mounts->heardAfter (processHeardTick))
+                if (const auto* values = mounts->observedOf (address))
+                    heard.push_back ({ address, patchAtomsOf (*values) });
+
+        processHeardTick = tick - 1;
+
+        /*  AND THE ROWS OF THE SHOW EACH PATCH HEARS, off the tree as last
+            published; the host hands one on only when it has changed. */
+        bool anyPuck = false;
+
+        const auto inputsFor = [this, &heard, &midiArrived, &handed, &anyPuck]
+                               (const std::string& runId, const std::vector<std::string>& receives)
+        {
+            process::TickInputs inputs;
+            inputs.heard = heard;
+
+            if (lastSnapshot != nullptr)
+                for (const auto& name : receives)
+                    if (name.rfind ("/godot/", 0) == 0 && name != "/godot/puck")
+                        if (const auto* node = lastSnapshot->find (name))
+                            inputs.rows.push_back ({ name, patchAtomsOf (node->values) });
+
+            const auto job = std::find_if (processing.begin(), processing.end(),
+                                           [&] (const ProcessJob& j) { return j.self == runId; });
+
+            /*  MIDI ON THE PORT ITS CUE LISTENS ON (PC.3), when that port's
+                rx is not off - anything but `false` is on, as a cue reads tx. */
+            if (job != processing.end() && ! midiArrived.empty())
+            {
+                const auto port = textOf (document.findById (job->cue), "midiIn");
+
+                if (! port.empty()
+                     && document.getAttribute ("/godot/port/" + port + "/rx").value_or (std::string {}) != "false")
+                    for (const auto& [from, bytes] : midiArrived)
+                        if (from == port)
+                        {
+                            process::Atoms atoms;
+                            for (const auto byte : bytes)
+                                atoms.push_back (process::Atom::of (static_cast<double> (byte)));
+                            inputs.heard.push_back ({ process::midiName, std::move (atoms) });
+                        }
+            }
+
+            //  THE SPACEMOUSE, its six axes each tick it is live (PC.3).
+            if (std::find (receives.begin(), receives.end(), "/godot/puck") != receives.end())
+            {
+                anyPuck = true;
+                if (puckAxes.has_value())
+                {
+                    process::Atoms axes;
+                    for (const auto axis : *puckAxes)
+                        axes.push_back (process::Atom::of (axis));
+                    inputs.heard.push_back ({ "/godot/puck", std::move (axes) });
+                }
+            }
+
+            //  WHAT `process.send` HANDED IT.
+            if (const auto found = handed.find (runId); found != handed.end())
+                for (auto& input : found->second)
+                    inputs.heard.push_back (std::move (input));
+
+            return inputs;
+        };
+
+        const auto setting = [this] (const char* address, double otherwise)
+        {
+            return osc::parseDouble (document.getAttribute (address).value_or (std::string {})).value_or (otherwise);
+        };
+        const auto budgetMs = std::clamp (setting ("/godot/list/processBudget", 2.0), 0.1, 20.0);
+        const auto stuckAfter = std::max (1, static_cast<int> (setting ("/godot/list/processStuckAfter", 50.0)));
+
+        const auto results = processHost->tick (wanted, inputsFor,
+                                                std::chrono::microseconds (static_cast<std::int64_t> (budgetMs * 1000.0)),
+                                                stuckAfter);
+
+        puckWanted = anyPuck;
+
+        for (const auto& result : results)
+        {
+            auto* run = runs.find (result.run);
+
+            if (run == nullptr)
+                continue;
+
+            run->processState = result.state;
+            run->processLate = result.lateTicks;
+            run->processDropped = result.droppedTotal;
+            run->processPorts = result.ports;
+
+            if (! result.printed.empty())
+                run->processSaid = result.printed.back();
+
+            const auto job = std::find_if (processing.begin(), processing.end(),
+                                           [&] (const ProcessJob& j) { return j.self == result.run; });
+
+            if (job == processing.end())
+                continue;
+
+            applyProcessSends (engine, result.run, job->cue, result.sent);
+
+            /*  STUCK, OR HELD BY ANOTHER THAT IS (ACJ, ACK): a record, so a
+                replay fails the run on the same tick. */
+            if (! result.failure.empty() && ! job->failed)
+            {
+                job->failed = true;
+                engine.submit (origin::engine, "run.failed",
+                               { osc::Value::string (result.run), osc::Value::string (result.failure) });
+            }
+        }
+    }
+
+    bool Runner::queuePatchInput (const std::string& runId, process::Input input)
+    {
+        const auto* run = runs.find (runId);
+
+        if (run == nullptr || run->kind != "process" || run->isFinished())
+            return false;
+
+        auto& waiting = patchInputs[runId];
+
+        if (waiting.size() >= 64)
+            waiting.erase (waiting.begin());
+
+        waiting.push_back (std::move (input));
+        return true;
+    }
+
+    void Runner::applyProcessSends (Engine& engine, const std::string& runId, const std::string& cueId,
+                                    const std::vector<process::Sent>& sent)
+    {
+        const auto from = "process:" + runId;
+
+        for (const auto& message : sent)
+        {
+            /*  WHERE IT GOES AND WHAT IT CARRIES. A send to `out` names its
+                address as its first word (ACG); a message's own first word is
+                kept as its first atom; a float, a word, a list or a bang is its
+                atoms. */
+            std::string address = message.to;
+            process::Atoms atoms;
+
+            /*  MIDI OUT (PC.3), on the port the cue names, as a cue's message:
+                its tx honoured, a double Esc able to drop it. */
+            if (address == process::midiName)
+            {
+                const auto port = textOf (document.findById (cueId), "midiOut");
+
+                if (port.empty() || midiOut == nullptr
+                     || document.getAttribute ("/godot/port/" + port + "/tx").value_or (std::string {}) == "false")
+                    continue;
+
+                midi::Bytes bytes;
+                for (const auto& atom : message.atoms)
+                    if (atom.isNumber)
+                        bytes.push_back (static_cast<std::uint8_t> (std::clamp (static_cast<int> (atom.number), 0, 255)));
+
+                if (! bytes.empty())
+                    midiOut->sendForRun (runId, port, bytes);
+                continue;
+            }
+
+            if (address == "out")
+            {
+                address = message.selector;
+                atoms = message.atoms;
+            }
+            else
+            {
+                if (message.selector != "float" && message.selector != "symbol"
+                     && message.selector != "list" && message.selector != "bang")
+                    atoms.push_back (process::Atom::of (message.selector));
+                atoms.insert (atoms.end(), message.atoms.begin(), message.atoms.end());
+            }
+
+            if (address.empty() || address.front() != '/')
+                continue;
+
+            static constexpr std::string_view commandRoot = "/godot/cmd/";
+
+            /*  A NAMED COMMAND (§2.6): `self` as a run or cue argument is this
+                process's own. */
+            if (address.rfind (commandRoot, 0) == 0)
+            {
+                auto name = address.substr (commandRoot.size());
+                std::replace (name.begin(), name.end(), '/', '.');
+
+                const auto* command = engine.commands().find (name);
+
+                if (command == nullptr)
+                    continue;
+
+                auto args = patchValuesOf (atoms);
+
+                for (std::size_t i = 0; i < args.size() && i < command->params.size(); ++i)
+                    if (args[i].isString() && args[i].getString() == "self")
+                    {
+                        if (command->params[i].name == "run")
+                            args[i] = osc::Value::string (runId);
+                        else if (command->params[i].name == "cue")
+                            args[i] = osc::Value::string (cueId);
+                    }
+
+                engine.submit (from, name, std::move (args));
+                continue;
+            }
+
+            /*  A ROW OF THE SHOW: a `node.set`, refused under the lock as any is. */
+            if (address.rfind ("/godot/", 0) == 0)
+            {
+                if (atoms.empty())
+                    continue;
+
+                auto args = patchValuesOf (atoms);
+                args.insert (args.begin(), osc::Value::string (address));
+                engine.submit (from, "node.set", std::move (args));
+                continue;
+            }
+
+            /*  A DEVICE'S ADDRESS: written as a cue's write is, through the
+                device's own door - coerced, rate-capped, bundled, its tx
+                honoured - and, like a curve's, not logged. */
+            if (mounts != nullptr && sender_ != nullptr && ! atoms.empty())
+                tree::writeToDevice (*mounts, *sender_, address, patchValuesOf (atoms));
+        }
     }
 
     void Runner::advanceCurves (Engine& engine, std::int64_t tick)
@@ -16764,6 +17125,7 @@ namespace wfg::cue
         applyFx();
         recordCurves (engine, tick);
         advanceCurves (engine, tick);
+        advanceProcesses (engine, tick);
         advanceSends (engine);
         observeAfterStep (engine, tick);
 
@@ -21500,6 +21862,41 @@ namespace wfg::cue
                                 applied.push_back (osc::Value::string (id));
 
                             return Outcome::ok (applied);
+                        } });
+
+        /*  ATOMS FOR A RUNNING PATCH (namespace draft §51, PC.3): what a
+            surface, the canvas's live boxes (PC.8) or a test hands a name a
+            process cue's patch hears - `[r <name>]` - at the next tick. A record,
+            so a replay holds what was sent; the patch it would reach runs only
+            in serve. */
+        registry.add ({ "process.send",
+                        "Hands atoms to a name a running process cue's patch hears ([r <name>]), at the next tick.",
+                        { { "run", 's', false }, { "name", 's', false }, { "atoms", '*', true, true } },
+                        true,
+                        [&runner] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto name = args[1].getString();
+
+                            if (name.empty())
+                                return Outcome::rejected (reason::badValue);
+
+                            process::Input input;
+                            input.to = name;
+
+                            for (std::size_t i = 2; i < args.size(); ++i)
+                            {
+                                if (args[i].isString())
+                                    input.atoms.push_back (process::Atom::of (args[i].getString()));
+                                else if (args[i].isNumber())
+                                    input.atoms.push_back (process::Atom::of (args[i].asDouble()));
+                                else if (args[i].isBool())
+                                    input.atoms.push_back (process::Atom::of (args[i].getBool() ? 1.0 : 0.0));
+                            }
+
+                            if (! runner.queuePatchInput (args[0].getString(), std::move (input)))
+                                return Outcome::rejected (reason::unknownId);
+
+                            return Outcome::ok (args);
                         } });
 
         registry.add ({ "trigger.fire",

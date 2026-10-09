@@ -41,6 +41,7 @@
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -3658,6 +3659,30 @@ namespace
 
         runner.setMounts (&mounts, &sender, &probe);
 
+        /*  THE PROCESS CUES' PATCHES (namespace draft §51): a Pure Data instance
+            per running process cue, each on a thread of its own, its patch
+            written to the engine's cache to be opened, finding abstractions in
+            Go.dot's own `pd` folder - beside the binary, or in the bundle's
+            Resources on macOS - and in the show's folder. Serve only: a replay
+            runs no patch, and what a patch made Go.dot do is in the log. */
+        wfg::process::ProcessHost processes ([&path]
+        {
+            wfg::process::ProcessHost::Settings settings;
+            settings.cacheFolder = engineCacheFolder().getChildFile ("process").getFullPathName().toStdString();
+
+            const auto program = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+            for (const auto& folder : { program.getChildFile ("pd"),
+                                        program.getSiblingFile ("Resources").getChildFile ("pd") })
+                if (folder.isDirectory())
+                    settings.searchPaths.push_back (folder.getFullPathName().toStdString());
+
+            settings.searchPaths.push_back (juce::File (path).getFullPathName().toStdString());
+            return settings;
+        }());
+        runner.setProcesses (&processes);
+        wfg::process::MidiInbox processMidi;
+        runner.setProcessMidi (&processMidi);
+
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
             std::cerr << "    " << problem << std::endl;
 
@@ -4291,11 +4316,17 @@ namespace
 
         declareSurfaces();
 
-        /*  A SURFACE'S PORT IS THE SURFACE'S: nothing arriving on it is a trigger. */
-        midiIn.setConsumer ([bridge = surfaceBridge] (const std::string& portId,
-                                                      const wfg::midi::Bytes& message)
+        /*  A SURFACE'S PORT IS THE SURFACE'S: nothing arriving on it is a trigger.
+            And what the surfaces decline is kept for the process cues whose patch
+            listens on that port (namespace draft §51, PC.3) - a copy, so the
+            triggers still hear it. */
+        midiIn.setConsumer ([bridge = surfaceBridge, &processMidi] (const std::string& portId,
+                                                                    const wfg::midi::Bytes& message)
                             {
-                                return bridge->arrived (portId, message);
+                                if (bridge->arrived (portId, message))
+                                    return true;
+                                processMidi.push (portId, message);
+                                return false;
                             });
 
         if (! midiOutputBindings.empty())
@@ -4783,7 +4814,16 @@ namespace
                                      movement is armed, and during a pass each
                                      push stepped into one logged `curve.ride` -
                                      the hardware read there, decided here. */
-                                 spaceMouse.want (wfg::cue::puckWanted (document, curveTable));
+                                 spaceMouse.want (wfg::cue::puckWanted (document, curveTable)
+                                                    || runner.processesWantPuck());
+
+                                 /*  AND ITS AXES FOR A PROCESS CUE'S PATCH that
+                                     hears `/godot/puck` (namespace draft §51, PC.3). */
+                                 {
+                                     const auto puck = spaceMouse.read();
+                                     runner.notePuck (puck.live ? std::optional<std::array<double, 6>> (puck.state.axes)
+                                                                : std::nullopt);
+                                 }
 
                                  if (curveTable.recording)
                                      if (const auto puck = spaceMouse.read(); puck.live)
@@ -5289,6 +5329,10 @@ namespace
                                     rings and colour, the differences only. */
                                 if (current != nullptr)
                                     surfaceBridge->afterTick (current, touches, outcome.tick);
+
+                                /*  And the rows of the show a process cue's patch
+                                    hears, read off it next tick (namespace draft §51). */
+                                runner.noteSnapshot (current);
 
                                 if (previous != nullptr && current != nullptr)
                                     server.publishChanges (wfg::tree::diff (*previous, *current),

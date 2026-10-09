@@ -131,6 +131,8 @@ const KIND_ORDER = {
   fade:    ["target", "dca", "levelOn", "level", "rateOn", "rate", "sends", "eq", "fx", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],
   start:   ["target"],
+  // A process cue (namespace draft 51): its patch, then its MIDI.
+  process: ["patch", "midiIn", "midiOut"],
   osc:     ["address", "value", "wait", "timeout"],
   midi:    ["port", "channel", "type", "data1", "data2", "sysex", "wait"],
   group:   ["mode", "takeover", "advance", "selection", "play", "loops", "seed", "dca", "dcaCurve", "dcaOffset"],
@@ -406,7 +408,7 @@ function controlFor(field) {
 /*  Every word `cue.create` takes. `midi` was missing until the desktop's
     new-cue row was built from the same list (2026-09-18) and the two clients
     were held to one answer: the engine has made MIDI cues since Phase 4. */
-const KINDS = ["memo", "media", "mic", "video", "fade", "transport", "osc", "midi", "group", "start"];
+const KINDS = ["memo", "media", "mic", "video", "fade", "transport", "osc", "midi", "process", "group", "start"];
 
 /*  ─────────────────────────────────────────────── several cues at once ──
 

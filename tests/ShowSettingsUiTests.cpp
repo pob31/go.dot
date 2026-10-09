@@ -557,17 +557,22 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     collect (*page);
 
     /*  DOH!'S WINDOW RIGHT AFTER THE GO DEBOUNCE (the author, 2026-09-30;
-        D1): three numbers, in that order. */
-    REQUIRE (boxes.size() == 3u);
+        D1), then the panic fade - and then the process cues' two (namespace
+        draft §51, ACJ): five numbers, in that order. */
+    REQUIRE (boxes.size() == 5u);
 
     auto* between = boxes[0];
     auto* doh = boxes[1];
     auto* fade = boxes[2];
+    auto* budget = boxes[3];
+    auto* stuck = boxes[4];
 
-    //  What a show that says nothing has: half a second, ten, and one.
+    //  What a show that says nothing has: half a second, ten, one, two and fifty.
     CHECK (between->getText().getDoubleValue() == doctest::Approx (0.5));
     CHECK (doh->getText().getDoubleValue() == doctest::Approx (10.0));
     CHECK (fade->getText().getDoubleValue() == doctest::Approx (1.0));
+    CHECK (budget->getText().getDoubleValue() == doctest::Approx (2.0));
+    CHECK (stuck->getText().getIntValue() == 50);
 
     doh->setText ("12,5", juce::dontSendNotification);
     doh->onReturnKey();
@@ -591,6 +596,19 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     CHECK (rig.sent.back().args[0].getString() == "/godot/audio/panicFade");
     CHECK (rig.sent.back().args[1].getString() == "2.5");
 
+    budget->setText ("5", juce::dontSendNotification);
+    budget->onReturnKey();
+    REQUIRE (rig.sent.size() == 3u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/list/processBudget");
+    CHECK (rig.sent.back().args[1].getString() == "5");
+
+    stuck->setText ("100", juce::dontSendNotification);
+    stuck->onReturnKey();
+    REQUIRE (rig.sent.size() == 4u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/list/processStuckAfter");
+    CHECK (rig.sent.back().args[1].getString() == "100");
+    rig.sent.resize (2);
+
     //  The value it already has is not an edit.
     REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "2.5").ok);
     panel.refresh (*rig.publish());
@@ -603,6 +621,8 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     CHECK_FALSE (between->isEnabled());
     CHECK_FALSE (doh->isEnabled());
     CHECK_FALSE (fade->isEnabled());
+    CHECK_FALSE (budget->isEnabled());
+    CHECK_FALSE (stuck->isEnabled());
 }
 
 //==============================================================================

@@ -60,6 +60,14 @@ namespace wfg::process
     inline constexpr int pdSampleRate = 12800;
     inline constexpr int pdBlocksPerTick = 4;
 
+    /*  THE NAME MIDI TRAVELS UNDER, in and out (namespace draft §51, PC.3): an
+        Input or a Sent `to` this carries one MIDI message as its bytes, each a
+        number. In, it reaches Pd's [notein], [ctlin], [pgmin], [bendin],
+        [touchin], [polytouchin] and [midiin]; out, it is what [noteout],
+        [ctlout], [pgmout], [bendout], [touchout], [polytouchout] and
+        [midiout] sent. Starts with a character no address does. */
+    inline constexpr const char* midiName = "#midi";
+
     /*  One of Pd's atoms: a number or a word. */
     struct Atom
     {

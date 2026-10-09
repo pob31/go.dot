@@ -6353,7 +6353,24 @@ namespace wfg::client::ui
                                                " not. 0 cuts at once.",
                                                juce::dontSendNotification);
 
-                for (auto* field : { &debounce, &dohWindow, &panicFade })
+                /*  THE PROCESS CUES' TWO (namespace draft §51, ACJ). */
+                processBudget.address = "/godot/list/processBudget";
+                processBudget.label.setText ("Time a tick waits for patches", juce::dontSendNotification);
+                processBudget.explanation.setText ("Each process cue's patch runs on a thread of its own, and every"
+                                                   " tick waits at most this long for all of them. One that takes"
+                                                   " longer is late: what it sends goes out on the next tick. The show"
+                                                   " never waits on a patch longer than this.",
+                                                   juce::dontSendNotification);
+
+                processStuckAfter.address = "/godot/list/processStuckAfter";
+                processStuckAfter.label.setText ("A patch is stuck after", juce::dontSendNotification);
+                processStuckAfter.explanation.setText ("Late this many ticks in a row - fifty is a second - a patch is"
+                                                       " stuck: its run fails and says so. Nothing can stop a loop inside"
+                                                       " Pure Data; patches already running carry on, and no patch opens"
+                                                       " until Go.dot is started again.",
+                                                       juce::dontSendNotification);
+
+                for (auto* field : { &debounce, &dohWindow, &panicFade, &processBudget, &processStuckAfter })
                 {
                     for (auto* label : { &field->label, &field->unit, &field->explanation })
                         addAndMakeVisible (*label);
@@ -6369,14 +6386,21 @@ namespace wfg::client::ui
                     field->editor.onReturnKey = [this, field] { commit (*field); };
                     field->editor.onFocusLost = [this, field] { commit (*field); };
                 }
+
+                processBudget.unit.setText ("ms", juce::dontSendNotification);
+                processStuckAfter.unit.setText ("ticks", juce::dontSendNotification);
+                processStuckAfter.editor.setInputRestrictions (4, "0123456789");
             }
 
             void show (const std::string& debounceNow, const std::string& dohWindowNow,
-                       const std::string& panicFadeNow, bool editable)
+                       const std::string& panicFadeNow, const std::string& budgetNow,
+                       const std::string& stuckAfterNow, bool editable)
             {
                 for (auto [field, now] : { std::pair { &debounce, &debounceNow },
                                            std::pair { &dohWindow, &dohWindowNow },
-                                           std::pair { &panicFade, &panicFadeNow } })
+                                           std::pair { &panicFade, &panicFadeNow },
+                                           std::pair { &processBudget, &budgetNow },
+                                           std::pair { &processStuckAfter, &stuckAfterNow } })
                 {
                     field->shown = *now;
 
@@ -6393,7 +6417,7 @@ namespace wfg::client::ui
             {
                 auto area = getLocalBounds().reduced (22);
 
-                for (auto* field : { &debounce, &dohWindow, &panicFade })
+                for (auto* field : { &debounce, &dohWindow, &panicFade, &processBudget, &processStuckAfter })
                 {
                     auto line = area.removeFromTop (30);
                     field->label.setBounds (line.removeFromLeft (230));
@@ -6432,7 +6456,7 @@ namespace wfg::client::ui
             }
 
             std::function<void (Event)> send;
-            Field debounce, dohWindow, panicFade;
+            Field debounce, dohWindow, panicFade, processBudget, processStuckAfter;
         };
 
         /*  WHAT TO DO FIRST, AND WHAT EACH TAB IS FOR (author, 2026-09-30:
@@ -6903,6 +6927,8 @@ namespace wfg::client::ui
             playback->show (model::text (snapshot, "/godot/list/goDebounce"),
                             model::text (snapshot, "/godot/list/dohWindow"),
                             model::text (snapshot, "/godot/audio/panicFade"),
+                            model::text (snapshot, "/godot/list/processBudget"),
+                            model::text (snapshot, "/godot/list/processStuckAfter"),
                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 
             if (readCapabilities (snapshot)) capabilities();

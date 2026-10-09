@@ -4333,7 +4333,7 @@ namespace wfg::client
 
             void createCue (const std::string& kind)
             {
-                createCue (kind, {});
+                createCue (kind, model::bornWith (kind));
             }
 
             void createFromTemplate (const model::Choice& line)

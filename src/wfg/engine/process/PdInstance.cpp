@@ -16,17 +16,22 @@
 
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/PatchText.h>
+#include <wfg/engine/osc/OscValue.h>
 
 #include <z_libpd.h>
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <mutex>
 #include <thread>
+#include <string_view>
+#include <system_error>
 #include <utility>
 
 #if defined (_WIN32)
@@ -113,11 +118,26 @@ namespace wfg::process
         void* file = nullptr;
         std::vector<void*> bindings;
         std::string printing;
+        std::vector<int> midiBytes;
     };
 
     namespace
     {
         thread_local PdInstance::Shared* current = nullptr;
+
+        /*  PD'S NUMBERS ARE 32-BIT: 0.1 is 0.100000001490116 as a double, and a
+            device would be sent that. Each is taken as the shortest decimal that
+            reads back as the same float - 0.1 - through Go.dot's own number
+            reader, so no locale is asked. */
+        double numberOf (float value)
+        {
+            std::array<char, 48> text {};
+            const auto [end, error] = std::to_chars (text.data(), text.data() + text.size(), value);
+            if (error != std::errc())
+                return static_cast<double> (value);
+            const auto parsed = osc::parseDouble (std::string_view (text.data(), static_cast<std::size_t> (end - text.data())));
+            return parsed.has_value() ? *parsed : static_cast<double> (value);
+        }
 
         Atoms atomsOf (int argc, t_atom* argv)
         {
@@ -127,7 +147,7 @@ namespace wfg::process
             {
                 t_atom* a = argv + i;
                 if (libpd_is_float (a))
-                    atoms.push_back (Atom::of (static_cast<double> (libpd_get_float (a))));
+                    atoms.push_back (Atom::of (numberOf (libpd_get_float (a))));
                 else if (libpd_is_symbol (a))
                     atoms.push_back (Atom::of (std::string (libpd_get_symbol (a))));
             }
@@ -147,12 +167,108 @@ namespace wfg::process
         }
 
         void onBang (const char* to) { keep ({ to, "bang", {} }); }
-        void onFloat (const char* to, float x) { keep ({ to, "float", { Atom::of (static_cast<double> (x)) } }); }
+        void onFloat (const char* to, float x) { keep ({ to, "float", { Atom::of (numberOf (x)) } }); }
         void onSymbol (const char* to, const char* s) { keep ({ to, "symbol", { Atom::of (std::string (s)) } }); }
         void onList (const char* to, int argc, t_atom* argv) { keep ({ to, "list", atomsOf (argc, argv) }); }
         void onMessage (const char* to, const char* selector, int argc, t_atom* argv)
         {
             keep ({ to, selector, atomsOf (argc, argv) });
+        }
+
+        /*  MIDI OUT (PC.3): each message Pd's MIDI objects send, as its bytes.
+            libpd numbers a channel from nought, sixteen to a port; Go.dot sends
+            on the one port the cue names, so the port part is dropped. */
+        void midiOut (std::initializer_list<int> bytes)
+        {
+            Atoms atoms;
+            for (const int byte : bytes)
+                atoms.push_back (Atom::of (static_cast<double> (std::clamp (byte, 0, 255))));
+            keep ({ midiName, "list", std::move (atoms) });
+        }
+
+        void onNoteOn (int channel, int pitch, int velocity)       { midiOut ({ 0x90 | (channel & 15), pitch & 127, velocity & 127 }); }
+        void onControl (int channel, int controller, int value)    { midiOut ({ 0xB0 | (channel & 15), controller & 127, value & 127 }); }
+        void onProgram (int channel, int value)                    { midiOut ({ 0xC0 | (channel & 15), value & 127 }); }
+        void onBend (int channel, int value)
+        {
+            const int bend = std::clamp (value + 8192, 0, 16383);
+            midiOut ({ 0xE0 | (channel & 15), bend & 127, bend >> 7 });
+        }
+        void onTouch (int channel, int value)                      { midiOut ({ 0xD0 | (channel & 15), value & 127 }); }
+        void onPolyTouch (int channel, int pitch, int value)       { midiOut ({ 0xA0 | (channel & 15), pitch & 127, value & 127 }); }
+        /*  [midiout] sends a byte at a time; a message leaves once it is
+            whole - its status byte's length, or a system exclusive to its end. */
+        void onMidiByte (int, int byte)
+        {
+            if (current == nullptr)
+                return;
+            auto& pending = current->midiBytes;
+            byte &= 255;
+
+            if (byte >= 0xF8)
+            {
+                midiOut ({ byte });
+                return;
+            }
+            if (byte >= 0x80 && byte != 0xF7)
+                pending.clear();
+            pending.push_back (byte);
+
+            const int status = pending.front();
+            std::size_t whole = 0;
+            if (status == 0xF0)
+                whole = byte == 0xF7 ? pending.size() : 0;
+            else if (status == 0xC0 || status == 0xD0 || (status & 0xF0) == 0xC0 || (status & 0xF0) == 0xD0)
+                whole = 2;
+            else if (status >= 0x80 && status < 0xF0)
+                whole = 3;
+
+            if (whole > 0 && pending.size() >= whole)
+            {
+                Atoms atoms;
+                for (const int b : pending)
+                    atoms.push_back (Atom::of (static_cast<double> (b)));
+                keep ({ midiName, "list", std::move (atoms) });
+                pending.clear();
+            }
+        }
+
+        /*  MIDI IN (PC.3): one message's bytes to the matching call. */
+        void midiIn (const Atoms& atoms)
+        {
+            std::vector<int> b;
+            for (const auto& atom : atoms)
+                if (atom.isNumber)
+                    b.push_back (std::clamp (static_cast<int> (atom.number), 0, 255));
+            if (b.empty())
+                return;
+
+            const int status = b[0] & 0xF0;
+            const int channel = b[0] & 0x0F;
+            const auto at = [&b] (std::size_t i) { return i < b.size() ? b[i] : 0; };
+
+            switch (status)
+            {
+                case 0x90: libpd_noteon (channel, at (1), at (2)); break;
+                case 0x80: libpd_noteon (channel, at (1), 0); break;
+                case 0xB0: libpd_controlchange (channel, at (1), at (2)); break;
+                case 0xC0: libpd_programchange (channel, at (1)); break;
+                case 0xE0: libpd_pitchbend (channel, ((at (2) << 7) | at (1)) - 8192); break;
+                case 0xD0: libpd_aftertouch (channel, at (1)); break;
+                case 0xA0: libpd_polyaftertouch (channel, at (1), at (2)); break;
+                default:
+                    if (b[0] == 0xF0)
+                        for (const int byte : b)
+                            libpd_sysex (0, byte);
+                    else
+                        for (const int byte : b)
+                            libpd_sysrealtime (0, byte);
+                    break;
+            }
+
+            // And every byte to [midiin], as Pd's own MIDI input does.
+            for (const int byte : b)
+                libpd_midibyte (0, byte);
         }
 
         /*  Pd prints a line in pieces; a line is kept when its new line comes. */
@@ -216,6 +332,13 @@ namespace wfg::process
             libpd_set_symbolhook (onSymbol);
             libpd_set_listhook (onList);
             libpd_set_messagehook (onMessage);
+            libpd_set_noteonhook (onNoteOn);
+            libpd_set_controlchangehook (onControl);
+            libpd_set_programchangehook (onProgram);
+            libpd_set_pitchbendhook (onBend);
+            libpd_set_aftertouchhook (onTouch);
+            libpd_set_polyaftertouchhook (onPolyTouch);
+            libpd_set_midibytehook (onMidiByte);
             libpd_init_audio (0, 0, pdSampleRate);
             for (const auto& path : s.settings.searchPaths)
                 libpd_add_to_search_path (path.c_str());
@@ -238,6 +361,14 @@ namespace wfg::process
         {
             runClosePatch (s);
             s.work.problem.clear();
+
+            //  An empty patch is a patch with nothing in it: nothing to open.
+            if (std::all_of (text.begin(), text.end(), [] (char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }))
+            {
+                s.work.sends.clear();
+                s.work.receives.clear();
+                return;
+            }
 
             const auto patch = parsePatch (text);
             const auto names = namesIn (patch);
@@ -279,6 +410,12 @@ namespace wfg::process
             const bool hasIn = libpd_exists ("in") != 0;
             for (const auto& input : inputs)
             {
+                if (input.to == midiName)
+                {
+                    midiIn (input.atoms);
+                    continue;
+                }
+
                 if (libpd_exists (input.to.c_str()) != 0)
                     sendTo (input.to, input.atoms);
                 if (hasIn)

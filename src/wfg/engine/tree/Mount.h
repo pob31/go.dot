@@ -519,6 +519,19 @@ namespace wfg::tree
             const auto found = heardTicks.find (address);
             return found == heardTicks.end() ? -1 : found->second;
         }
+
+        /*  THE ADDRESSES HEARD AFTER `tick`, in address order (namespace draft
+            §51): what a process cue's patch is handed this tick. A walk of
+            everything ever heard rather than a queue, so a replay - which
+            applies `mount.heard` and runs no patch - keeps nothing growing. */
+        std::vector<std::string> heardAfter (std::int64_t tick) const
+        {
+            std::vector<std::string> out;
+            for (const auto& [address, at] : heardTicks)
+                if (at > tick)
+                    out.push_back (address);
+            return out;
+        }
         const osc::Values* observedOf (const std::string& address) const;
         void forgetObservation (const std::string& address);
 

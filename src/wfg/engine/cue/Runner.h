@@ -67,12 +67,14 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/video/VideoSink.h>
 
 #include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -95,6 +97,7 @@ namespace wfg::tree
     class MountProbe;
     class MountSender;
     class MountTable;
+    class TreeSnapshot;
 }
 
 namespace wfg::cue
@@ -657,6 +660,33 @@ namespace wfg::cue
             re-applies - `registerAudioSettingsCommands` hands it in, for `serve`
             and `replay` alike. Unset is never out. */
         void setOutage (std::function<bool()> isOut) { outage = std::move (isOut); }
+
+        /*  THE PROCESS CUES' PATCHES (namespace draft §51): what runs each running
+            process cue's Pure Data patch, one to a thread. Null - a replay, a rig,
+            a tree dump - and a process run plays and ends as the log says, with no
+            patch run: what a patch made Go.dot do is in the log as its own records. */
+        void setProcesses (process::ProcessHost* host) noexcept { processHost = host; }
+
+        /*  THE TREE AS LAST PUBLISHED, for the rows of the show a patch hears
+            ([r /godot/...]): handed in by serve after each publish, as the
+            surfaces are. Tick thread. */
+        void noteSnapshot (std::shared_ptr<const tree::TreeSnapshot> snapshot) { lastSnapshot = std::move (snapshot); }
+
+        /*  WHAT ARRIVED ON THE MIDI PORTS (PC.3), for the patches whose cue
+            listens on a port: filled by the input thread, taken once a tick. */
+        void setProcessMidi (process::MidiInbox* inbox) noexcept { processMidi = inbox; }
+
+        /*  THE SPACEMOUSE'S SIX AXES THIS TICK (PC.3), or none when the puck is
+            not live - handed in by serve before `beforeTick`, for a patch that
+            hears `/godot/puck`. And whether one does: serve opens the puck for
+            it as for an armed curve. */
+        void notePuck (std::optional<std::array<double, 6>> axes) noexcept { puckAxes = axes; }
+        bool processesWantPuck() const noexcept { return puckWanted; }
+
+        /*  `process.send`'s handler (PC.3): atoms for a name a running patch
+            hears, handed over at the next tick. False when the run is not a
+            running process cue. */
+        bool queuePatchInput (const std::string& runId, process::Input input);
 
         /*  WHAT EACH DCA IS TRIMMING BY (PRD §3.28), added to the level of
             every run whose cue - or whose group's cue - is marked with it, and
@@ -2081,6 +2111,15 @@ namespace wfg::cue
             be done by its wait. A hook, before `advanceSends`. */
         void advanceCurves (Engine& engine, std::int64_t tick);
 
+        /*  THE PROCESS CUES, ONE TICK (namespace draft §51): a run stopping is
+            ended, and every running one's patch is handed what arrived - what
+            devices reported since the last tick, the rows it hears - and what it
+            sent is done: written to a device as a cue's write is, or submitted
+            with the origin `process:<run>`. A hook, after the curves. */
+        void advanceProcesses (Engine& engine, std::int64_t tick);
+        void applyProcessSends (Engine& engine, const std::string& runId, const std::string& cueId,
+                                const std::vector<process::Sent>& sent);
+
         /*  THE PASS, ONE TICK (O.9): each armed curve takes the device's newest
             report or the hand's ride, latched from the first, sampled on the
             cue's clock; at the end the curves are spliced, judged and written
@@ -2444,6 +2483,32 @@ namespace wfg::cue
 
         /*  The OSC cues whose curves are playing (namespace draft 45). */
         std::vector<CurveJob> curving;
+
+        /*  THE PROCESS CUES RUNNING (namespace draft §51): which run, which cue,
+            and its patch as of which document revision. */
+        struct ProcessJob
+        {
+            std::string self;
+            std::string cue;
+            std::string patch;
+            std::uint64_t revision = 0;
+            bool finished = false;
+            bool failed = false;
+        };
+        std::vector<ProcessJob> processing;
+        process::ProcessHost* processHost = nullptr;
+        std::shared_ptr<const tree::TreeSnapshot> lastSnapshot;
+        process::MidiInbox* processMidi = nullptr;
+        std::optional<std::array<double, 6>> puckAxes;
+        bool puckWanted = false;
+
+        /*  What `process.send` handed each run, until the hook passes it on -
+            handler state, capped per run so a replay, which runs no hook,
+            holds a bounded amount. */
+        std::map<std::string, std::vector<process::Input>> patchInputs;
+
+        /*  The tick up to which heard values have been handed to the patches. */
+        std::int64_t processHeardTick = -1;
 
         /*  WHERE A MOVIE STARTS (§37, WL; §41): the second its playhead is put
             at by GO, how fast and which way it goes, the first range it plays,

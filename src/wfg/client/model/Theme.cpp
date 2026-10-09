@@ -205,6 +205,7 @@ namespace wfg::client::model
                 { "kind-transport", 0xFFE08A6E },
                 { "kind-osc",       0xFFD8C26A },
                 { "kind-midi",      0xFFB59CF0 },
+                { "kind-process",   0xFF7FD1AE },   // namespace draft §51: a seafoam no other kind wears
                 { "kind-group",     0xFFC6C1B9 },
             };
 

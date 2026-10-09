@@ -96,6 +96,24 @@
           </data>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="processBudget">
+          <a:documentation>How long a tick waits for the process cues- patches, in milliseconds (namespace draft 51, ACJ). Each patch runs on a thread of its own; the tick hands each what arrived and waits at most this long for all of them. A patch that has not finished by then is late: what it sends lands on the next tick, and it is handed nothing new until it is done. The show never waits on a patch longer than this, whatever the patch does. Two milliseconds unless the show says otherwise; set on Show settings &gt; Playback.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">20</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="processStuckAfter">
+          <a:documentation>How many ticks in a row a patch may be late before it is stuck, fifty by default - a second (namespace draft 51, ACJ, ACK). A stuck patch has never come back from a tick: a loop inside Pure Data that never ends. Its run fails, saying so, and nothing in Go.dot can stop the loop; patches already running carry on, and no patch is opened, reloaded or closed until Go.dot is started again, because waiting to would stop every one of them.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">3000</param>
+          </data>
+        </attribute>
+      </optional>
       <zeroOrMore>
         <ref name="List"/>
       </zeroOrMore>
@@ -125,6 +143,7 @@
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
+          <ref name="Process"/>
           <ref name="Persistent"/>
         </choice>
       </zeroOrMore>
@@ -366,6 +385,7 @@
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
+          <ref name="Process"/>
           <ref name="Header"/>
           <ref name="Footer"/>
           <ref name="Trigger"/>
@@ -391,6 +411,7 @@
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
+          <ref name="Process"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -413,6 +434,7 @@
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
+          <ref name="Process"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -435,6 +457,7 @@
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
+          <ref name="Process"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -2260,6 +2283,96 @@
       <optional>
         <attribute name="target">
           <a:documentation>The cue this starts when it fires - by name, as cue.fire does, so standby does not move and the target may sit anywhere in any list. A start cue is a memo that presses a button (2026-09-19): it fires, its run is done the next tick, and the target runs on its own. What the live recorder writes into a take: one start cue per cue the operator fired, at the second they fired it, so a night pressed by hand can be played back by a timeline. A target that is a manual group is refused when it fires, as cue.fire refuses it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <ref name="Trigger"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Process">
+    <element name="Process">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="midiIn">
+          <a:documentation>The identifier of the declared &lt;Port&gt; whose input this process cue-s patch hears (namespace draft 51, PC.3): what arrives there reaches its [notein], [ctlin], [pgmin], [bendin], [touchin], [polytouchin] and [midiin], as Pd-s own MIDI input would - after a control surface on that port has taken what is its own, and as long as the port-s rx is not off. Triggers on the port still fire. Empty for none.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="midiOut">
+          <a:documentation>The identifier of the declared &lt;Port&gt; this process cue-s patch sends MIDI on (namespace draft 51, PC.3): what its [noteout], [ctlout], [pgmout], [bendout], [touchout], [polytouchout] and [midiout] send goes out there as a cue-s message does - not at all when the port-s tx is off, and dropped by a double Esc while it is still queued. Empty for none.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="patch">
+          <a:documentation>The patch this process cue runs, as Pure Data-s own text - what Pd saves in a .pd file, so that one made in Pd opens here and one made here opens in Pd (namespace draft 51). While the cue runs its patch runs: once a tick it hears what devices reported at the addresses its receives name ([r /wfs/source/1/x]) and the rows of the show it names ([r /godot/...]), and what it sends to an address ([s /...]) is written to that device, or done by Go.dot - [s /godot/cmd/cue/fire] with a cue-s name fires it. Edited on the canvas at the foot of the window or in Pure Data-s own window; a change opens the running patch again, from its beginning. Empty is a patch with nothing in it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

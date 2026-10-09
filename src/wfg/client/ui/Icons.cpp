@@ -168,6 +168,16 @@ namespace wfg::client::ui
                     break;
                 }
 
+                case model::Icon::process:
+                    //  A patch (namespace draft §51): two boxes and the line between
+                    //  them, an outlet at the foot of one and an inlet on the other.
+                    l.addRectangle (3.0f, 3.5f, 11.0f, 6.5f);
+                    l.addRectangle (10.0f, 14.0f, 11.0f, 6.5f);
+                    f.addRectangle (3.0f, 8.5f, 3.5f, 1.5f);
+                    f.addRectangle (10.0f, 14.0f, 3.5f, 1.5f);
+                    line (l, 4.75f, 10.0f, 11.75f, 14.0f);
+                    break;
+
                 case model::Icon::group:
                     l.addRoundedRectangle (3.0f, 8.0f, 13.0f, 13.0f, 2.0f);
                     l.startNewSubPath (8.0f, 8.0f);

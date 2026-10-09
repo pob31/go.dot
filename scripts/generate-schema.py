@@ -89,6 +89,8 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # the picture's curve and the sound's offset. A media, a mic, a
                 # video cue and a group all carry it.
                 "mark",
+                # A process cue: its patch, as Pure Data-s text (namespace draft 51).
+                "process",
                 # `transport` was `stop` until 2026-09-22. A cue that ADVANCES
                 # is not a cue that stops, and the verb list had grown past the
                 # name: hard, fade, afterMember, afterIteration, advance - the

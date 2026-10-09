@@ -51,6 +51,11 @@ namespace wfg::client::model
         `cue.create` takes; the test holds the two lists together. */
     const std::vector<std::string>& cueKinds();
 
+    /*  WHAT A CUE OF THIS KIND IS BORN WITH from the bar's button, as
+        `attribute value` pairs: a process cue's starter patch, and nothing for
+        the others. */
+    std::vector<std::pair<std::string, std::string>> bornWith (const std::string& kind);
+
     /*  THE WORD A PERSON READS FOR A KIND (namespace draft §39, WZ, the
         author's pick on 2026-10-07): "audio" for `media`, which since the
         movies arrived makes only sounds - a movie is a `video` cue. The kind

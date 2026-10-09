@@ -17,6 +17,7 @@
 #include <wfg/client/model/NewCue.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/process/PatchText.h>
 
 namespace wfg::client::model
 {
@@ -26,10 +27,20 @@ namespace wfg::client::model
             "+ transport" list, among the other cues that act on a cue. The
             kind is unchanged; only its button went. */
         static const std::vector<std::string> kinds {
-            "memo", "media", "mic", "video", "fade", "transport", "osc", "midi", "group"
+            "memo", "media", "mic", "video", "fade", "transport", "osc", "midi", "process", "group"
         };
 
         return kinds;
+    }
+
+    std::vector<std::pair<std::string, std::string>> bornWith (const std::string& kind)
+    {
+        /*  A PROCESS CUE OPENS ON ONE COMMENT (namespace draft §51) that says how
+            a patch reaches the world, rather than on an empty canvas. */
+        if (kind == "process")
+            return { { "patch", process::starterPatch() } };
+
+        return {};
     }
 
     std::string kindWord (const std::string& kind)

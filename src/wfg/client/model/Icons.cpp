@@ -64,6 +64,7 @@ namespace wfg::client::model
         if (kind == "start")   return Icon::start;
         if (kind == "osc")     return Icon::osc;
         if (kind == "midi")    return Icon::midi;
+        if (kind == "process") return Icon::process;
         if (kind == "range")   return Icon::range;
         if (kind == "trigger") return Icon::trigger;
 
@@ -76,7 +77,8 @@ namespace wfg::client::model
             is found in the theme file under the kind's own word. A start cue
             is one of the cues that act on a cue, and shares the transport's. */
         if (kind == "memo" || kind == "media" || kind == "mic" || kind == "video" || kind == "fade"
-              || kind == "transport" || kind == "osc" || kind == "midi" || kind == "group")
+              || kind == "transport" || kind == "osc" || kind == "midi" || kind == "group"
+              || kind == "process")
             return "kind-" + kind;
 
         if (kind == "start")

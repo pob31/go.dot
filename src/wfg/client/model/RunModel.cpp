@@ -153,6 +153,33 @@ namespace wfg::client::model
             return "It cannot be scrubbed until its round has begun";
         }
 
+        /*  A PROCESS RUN'S WORDS (namespace draft §51): what its patch is doing -
+            being opened, running behind, stuck - and when it runs, the last line
+            it printed. A run that failed says what that means for Pd. */
+        std::string processWords (const tree::TreeSnapshot& snapshot, const RunRow& row)
+        {
+            const auto base = "/godot/run/" + row.id + "/";
+
+            if (row.error == "process-stuck")
+                return "stuck - Pure Data is held until Go.dot starts again";
+            if (row.error == "pd-held")
+                return "not opened - another patch is stuck";
+
+            const auto state = text (snapshot, base + "processState");
+
+            if (state == "starting")
+                return "opening its patch";
+            if (state == "stuck")
+                return "stuck";
+            if (state == "late")
+                return "late - its last tick ran past the budget";
+
+            if (const auto said = text (snapshot, base + "said"); ! said.empty())
+                return said;
+
+            return {};
+        }
+
         /*  A MIC RUN'S WORDS (Phase 9b), read off the tree: its cue's channel
             by the name somebody gave it, its queue, and its state. */
         std::string micWords (const tree::TreeSnapshot& snapshot, const RunRow& row)
@@ -458,6 +485,9 @@ namespace wfg::client::model
 
             if (row.kind == "mic")
                 row.liveWords = micWords (snapshot, row);
+
+            if (row.kind == "process")
+                row.liveWords = processWords (snapshot, row);
 
             if (! row.cueId.empty())
                 row.scrubRefusal = refusalOf (snapshot, row);

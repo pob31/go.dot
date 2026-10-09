@@ -80,7 +80,7 @@ namespace wfg::doc
             //  Its sections and its triggers are the group's own, not members.
             return element == "Cue" || element == "Group" || element == "Mic"
                 || element == "Fade" || element == "Transport" || element == "Osc" || element == "Midi"
-                || element == "Start";
+                || element == "Start" || element == "Process";
         }
 
         bool samplerRefuses (const juce::ValueTree& parent, const juce::ValueTree& node,
@@ -375,6 +375,7 @@ namespace wfg::doc
         if (kind == "osc")   return "Osc";
         if (kind == "midi")  return "Midi";
         if (kind == "start") return "Start";
+        if (kind == "process") return "Process";
         return {};
     }
 
@@ -441,7 +442,7 @@ namespace wfg::doc
         if (element == "Cue" || element == "Group" || element == "Media"
               || element == "Mic" || element == "Video" || element == "Fade"
               || element == "Transport" || element == "Osc" || element == "Midi"
-              || element == "Start")                                return "cue";
+              || element == "Start" || element == "Process")       return "cue";
         if (element == "Lists")                     return "lists";
         /*  A header and a footer are addressed by nothing: they carry no
             attribute but their identifier, and the cues inside them are
@@ -4509,7 +4510,7 @@ namespace wfg::doc
                         problems.push_back (
                             "/Show/.../Persistent/" + element + "["
                               + child[idProperty].toString().toStdString()
-                              + "]: a persistent section asserts media, mic, osc and midi cues and"
+                              + "]: a persistent section asserts media, mic, osc, midi and process cues and"
                                 " nothing else - a fade asserts nothing, a stop is what suspends"
                                 " an assertion, a group is a lifetime rather than a state - so"
                                 " this one is ignored");
