@@ -35,6 +35,7 @@
 #include <wfg/client/model/Waveform.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/video/Strip.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -42,6 +43,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -279,6 +281,14 @@ namespace wfg::client::ui
         model::Hit hover;
         model::Hit grabbed;
         std::optional<double> edgeHeld;
+
+        /*  A MOVIE'S STRIP (namespace draft §47, AAI): its cuts and small
+            pictures from the analyser's table, each picture made an image the
+            first time it is drawn and kept while the strip is the same. */
+        std::shared_ptr<const video::strip::MovieStrip> strip;
+        std::map<std::size_t, juce::Image> stripImages;
+        void paintStrip (juce::Graphics&, juce::Rectangle<int> pictures);
+        void paintCuts (juce::Graphics&, juce::Rectangle<int> bar);
 
         /*  THE LANE AS THE HAND HAS IT. A drag moves a copy and sends the
             whole list ONCE, on release (the fade editor's rule: a write per

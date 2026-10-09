@@ -66,6 +66,8 @@
 
 namespace wfg::doc { class ShowDocument; }
 
+namespace wfg::video::strip { struct MovieStrip; }
+
 namespace wfg::audio
 {
     /*  WHAT A FILE SOUNDS LIKE, at every zoom - defined in `Timbre.h` by PR 5.7,
@@ -117,6 +119,11 @@ namespace wfg::audio
             panel. Nought for a sound, and until the analyser has read it. */
         int width = 0;
         int height = 0;
+
+        /*  A MOVIE'S STRIP (namespace draft §47, AAI): its cuts and its small
+            pictures, once the analyser has found them; empty until then, and
+            for a movie that is not HAP. */
+        std::shared_ptr<const video::strip::MovieStrip> strip;
     };
 
     /*  One record per file the show named when it was opened, by that path. */

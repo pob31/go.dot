@@ -22849,3 +22849,31 @@ frame is read by a store of the tile's own, so the frame looked at never pulls a
 same file away. The window reads it back (`ClientHost::cueTile`). **While a monitor watches the renderer
 runs**, with no output switched on as with one; no window is made for no output.
 
+### 47.10 A movie's pictures and its cuts (AAI, mine)
+
+The strip of a movie draws **small pictures of it along its length**, where a sound's draws its waveform:
+each the picture nearest at or before the second its left edge stands on, at the bar's height in the
+movie's shape. The sound locked to the movie is drawn in a band beneath them, and every **cut** Go.dot
+found is marked over both - a line down the bar with a triangle at its head, dashed for a dissolve, so
+the mark is a shape and not a colour alone. **An in or out point dragged near a cut lands on it**, as on
+another range's edge; Alt lets go of the magnet.
+
+How the cuts are found (`video/Strip`, `video/StripAnalysis`): every few frames of the movie - seven or
+eight a second - are decoded on the CPU, at the 2,304 points a frame's signature samples rather than its
+millions. A signature is the frame as sixteen by nine squares of colour and how its brightness is
+spread; two frames' distance is half how far their squares differ and half how far their brightness
+moved. A **cut** stands out from the second around it: above an eighth, and above three times the middle
+of the distances there; a shot shorter than four tenths of a second is not believed unless the change is
+stark; one frame unlike both its neighbours - a flash, a strobe - is no cut, going or coming back. A
+**dissolve** is a run of raised distances within two and a half seconds whose ends differ by more than
+three tenths, marked at its middle. A cut found between two frames looked at is placed on its first frame
+by halving the frames between. The **pictures** are taken just inside every shot and every second, or a
+three-hundredth of the movie, between - at most 240, each 80 pixels across.
+
+Reading is held below 150 megabytes a second, so a show playing off the same disk keeps its frames: a
+ten-minute HAP movie at 1080p is three to five gigabytes read and a few seconds of one core. The strip is
+kept as `<key>.tms` in the media's `.timbre` folder - the key a hash of the file's size and its first and
+last megabyte, a format of its own with a checksum (`formatVersion` 1) - and read back when the show opens;
+the analyser publishes it on the movie's record (`MediaRecord::strip`). **A movie that is not HAP has no
+strip until it is** - adding one to a show converts it (37.5, WF); reading a preview's pictures through
+FFmpeg is owed, if a show needs it before its conversion ends.

@@ -47,6 +47,7 @@
 #include <wfg/engine/video/Movie.h>
 #include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/RegionSink.h>
+#include <wfg/engine/video/Strip.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoHost.h>
 #include <wfg/engine/video/VideoRamp.h>
@@ -1750,6 +1751,12 @@ TEST_CASE ("video host: the analyser reads a picture's size and a movie's, for t
     CHECK (records->at ("clip.mov").width == 16);
     CHECK (records->at ("clip.mov").height == 8);
     CHECK (records->at ("clip.mov").seconds > 0.0);
+
+    /*  AND ITS STRIP (§47, AAI): found, published on its record, and kept
+        beside the analysis of sounds to be read back. */
+    REQUIRE (records->at ("clip.mov").strip != nullptr);
+    CHECK (records->at ("clip.mov").strip->thumbnails.size() == 1u);
+    CHECK (folder.getChildFile (".timbre").findChildFiles (juce::File::findFiles, false, "*.tms").size() == 1);
 
     analyser.stop();
     folder.deleteRecursively();

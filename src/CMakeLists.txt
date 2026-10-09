@@ -385,6 +385,10 @@ add_library(wfg_engine STATIC
     wfg/engine/video/Mapping.h
     wfg/engine/video/Mask.h
     wfg/engine/video/Movie.cpp
+    wfg/engine/video/Strip.h
+    wfg/engine/video/Strip.cpp
+    wfg/engine/video/StripAnalysis.h
+    wfg/engine/video/StripAnalysis.cpp
     wfg/engine/video/Movie.h
     wfg/engine/video/MovieWriter.cpp
     wfg/engine/video/MovieWriter.h

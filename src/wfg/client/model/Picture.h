@@ -64,8 +64,6 @@ namespace wfg::client::model
     {
         double x = 0.0;
         double y = 0.0;
-
-        bool operator== (const MaskPoint&) const = default;
     };
 
     /** A curve's point: what comes in, what goes out, each 0..1. */

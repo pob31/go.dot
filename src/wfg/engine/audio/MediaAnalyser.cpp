@@ -16,6 +16,8 @@
 
 #include <wfg/engine/audio/MediaAnalyser.h>
 #include <wfg/engine/video/Movie.h>
+#include <wfg/engine/video/StripAnalysis.h>
+#include <wfg/engine/video/Strip.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Peaks.h>
@@ -45,6 +47,79 @@ namespace wfg::audio
     {
         /*  A STILL PICTURE'S NAME, by its extension - the kinds a video cue's
             picture is (client/model/Video's list). */
+        /*  A MOVIE'S STRIP, FROM ITS CACHE OR FOUND (namespace draft §47, AAI).
+            Kept as `<key>.tms` in the media's `.timbre` folder, the key a hash
+            of the file's size and its first and last megabyte: hashing the
+            whole of a movie of many gigabytes would cost more than finding its
+            strip. A strip found is written beside the others, through a part
+            file renamed when whole. Nothing for a movie that is not HAP. */
+        std::shared_ptr<const video::strip::MovieStrip> movieStripOf (const std::string& folder, const std::string& named,
+                                                                      const std::string& path,
+                                                                      const std::atomic<bool>& stopping)
+        {
+            const juce::File file { juce::String (path) };
+            const auto size = file.getSize();
+
+            if (size <= 0)
+                return nullptr;
+
+            juce::MemoryBlock keyed;
+            keyed.append (juce::String (size).toRawUTF8(), static_cast<std::size_t> (juce::String (size).getNumBytesAsUTF8()));
+
+            {
+                juce::FileInputStream in { file };
+
+                if (! in.openedOk())
+                    return nullptr;
+
+                constexpr juce::int64 mebibyte = 1 << 20;
+                in.readIntoMemoryBlock (keyed, std::min<juce::int64> (size, mebibyte));
+
+                if (size > 2 * mebibyte)
+                {
+                    in.setPosition (size - mebibyte);
+                    in.readIntoMemoryBlock (keyed, mebibyte);
+                }
+            }
+
+            keyed.append (&video::strip::formatVersion, sizeof (video::strip::formatVersion));
+
+            const auto key = juce::SHA256 (keyed).toHexString();
+            const auto cacheFolder = timbreCacheFolder (mediaRootOf (folder, named));
+            const auto cached = cacheFolder.empty() ? juce::File()
+                                                    : juce::File (juce::String (cacheFolder)).getChildFile (key + ".tms");
+
+            if (cached.existsAsFile())
+            {
+                juce::MemoryBlock bytes;
+
+                if (cached.loadFileAsData (bytes))
+                {
+                    auto strip = std::make_shared<video::strip::MovieStrip>();
+
+                    if (video::strip::decode (static_cast<const std::uint8_t*> (bytes.getData()), bytes.getSize(), *strip))
+                        return strip;
+                }
+            }
+
+            auto strip = std::make_shared<video::strip::MovieStrip>();
+            std::string why;
+
+            if (! video::strip::analyseHap (path, *strip, why, &stopping))
+                return nullptr;
+
+            if (cached != juce::File() && cached.getParentDirectory().createDirectory())
+            {
+                const auto bytes = video::strip::encode (*strip);
+                const auto part = cached.withFileExtension ("tms.part");
+
+                if (part.replaceWithData (bytes.data(), bytes.size()))
+                    part.moveFileTo (cached);
+            }
+
+            return strip;
+        }
+
         bool isStillPictureName (const std::string& name)
         {
             const auto dot = name.find_last_of ('.');
@@ -529,7 +604,16 @@ namespace wfg::audio
                         record.height = file.info().height;
                     }
 
-                    media->publish (named, std::move (record));
+                    media->publish (named, record);
+
+                    /*  AND ITS STRIP (namespace draft §47, AAI): kept beside the
+                        analysis of sounds, found once and read back after -
+                        published again, whole, when it is there. */
+                    if (auto strip = movieStripOf (folder, named, path, stopping); strip != nullptr)
+                    {
+                        record.strip = std::move (strip);
+                        media->publish (named, std::move (record));
+                    }
                 }
 
                 const std::lock_guard<std::mutex> lock { guard };

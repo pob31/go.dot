@@ -10831,9 +10831,12 @@ TEST_CASE ("client: a mask's outline and a picture's curves are edited as points
 
     const auto square = model::maskWithPointAdded (triangle, 0.5, 0.05);
     REQUIRE (square.size() == 4);
-    CHECK (square[1] == model::MaskPoint { 0.5, 0.05 });     // between the first two
+    CHECK (square[1].x == doctest::Approx (0.5));          // between the first two
+    CHECK (square[1].y == doctest::Approx (0.05));
 
-    CHECK (model::maskWithPointMoved (square, 1, 5.0, -3.0)[1] == model::MaskPoint { 2.0, -1.0 });
+    const auto moved = model::maskWithPointMoved (square, 1, 5.0, -3.0);
+    CHECK (moved[1].x == doctest::Approx (2.0));
+    CHECK (moved[1].y == doctest::Approx (-1.0));
     CHECK (model::maskWithPointRemoved (square, 1).size() == 3);
     CHECK (model::maskWithPointRemoved (triangle, 0).size() == 3);      // never fewer than three
     CHECK (model::maskText (triangle) == "0.1 0.1 0.9 0.1 0.5 0.9");

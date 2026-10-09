@@ -510,6 +510,21 @@ namespace wfg::client::ui
         reading = readingToUse;
         media = std::move (mediaToUse);
 
+        //  A movie's strip, when the analyser has found it (§47, AAI).
+        {
+            std::shared_ptr<const video::strip::MovieStrip> found;
+
+            if (reading.movie && media != nullptr)
+                if (const auto record = media->find (reading.file); record != media->end())
+                    found = record->second.strip;
+
+            if (found != strip)
+            {
+                strip = std::move (found);
+                stripImages.clear();
+            }
+        }
+
         /*  A NEW FILE IS A NEW VIEW. Keeping the old window would open the next
             cue zoomed into a second of it that means nothing there, which is
             the panel showing a reading about one file over the picture of
@@ -913,8 +928,124 @@ namespace wfg::client::ui
         paintHead (g, headArea());
     }
 
+    void WaveformEditorComponent::paintStrip (juce::Graphics& g, juce::Rectangle<int> pictures)
+    {
+        if (strip == nullptr || strip->thumbnails.empty() || pictures.getHeight() <= 0)
+            return;
+
+        /*  PICTURES SIDE BY SIDE, each at the bar's height in the movie's
+            shape, each the picture nearest at or before the second its left
+            edge stands on - a waveform's columns, a picture wide. */
+        const auto& first = strip->thumbnails.front();
+        const auto aspect = first.height > 0 ? static_cast<double> (first.width) / first.height : 16.0 / 9.0;
+        const auto wide = std::max (8, static_cast<int> (std::lround (pictures.getHeight() * aspect)));
+
+        g.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);
+
+        for (auto x = pictures.getX(); x < pictures.getRight(); x += wide)
+        {
+            const auto* thumbnail = strip->thumbnailAt (secondsAt (x));
+
+            if (thumbnail == nullptr || thumbnail->width <= 0 || thumbnail->height <= 0)
+                continue;
+
+            const auto index = static_cast<std::size_t> (thumbnail - strip->thumbnails.data());
+            auto& image = stripImages[index];
+
+            if (! image.isValid())
+            {
+                image = juce::Image (juce::Image::RGB, thumbnail->width, thumbnail->height, false, juce::SoftwareImageType());
+                juce::Image::BitmapData pixels (image, juce::Image::BitmapData::writeOnly);
+
+                for (int row = 0; row < thumbnail->height; ++row)
+                    for (int column = 0; column < thumbnail->width; ++column)
+                    {
+                        const auto* rgb = thumbnail->rgb.data() + 3 * (row * thumbnail->width + column);
+                        pixels.setPixelColour (column, row, juce::Colour (rgb[0], rgb[1], rgb[2]));
+                    }
+            }
+
+            const auto slot = juce::Rectangle<int> (x, pictures.getY(), std::min (wide, pictures.getRight() - x), pictures.getHeight());
+            g.drawImage (image, slot.toFloat(), juce::RectanglePlacement::fillDestination | juce::RectanglePlacement::xLeft);
+        }
+    }
+
+    void WaveformEditorComponent::paintCuts (juce::Graphics& g, juce::Rectangle<int> bar)
+    {
+        if (strip == nullptr || ! (view.span() > 0.0))
+            return;
+
+        /*  A CUT AS A SHAPE, not a colour alone (§4.8): a line down the bar
+            and a triangle at its head - solid for a cut, dashed for a dissolve. */
+        const auto ink = Look::colour (theme, "ink");
+
+        for (const auto& cut : strip->cuts)
+        {
+            if (cut.seconds < view.from || cut.seconds > view.to)
+                continue;
+
+            const auto x = static_cast<float> (bar.getX()) + static_cast<float> (view.xForSeconds (cut.seconds, bar.getWidth()));
+
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawLine (x + 1.0f, static_cast<float> (bar.getY()), x + 1.0f, static_cast<float> (bar.getBottom()), 1.0f);
+            g.setColour (ink);
+
+            if (cut.gradual)
+            {
+                const float dashes[] { 4.0f, 3.0f };
+                g.drawDashedLine (juce::Line<float> (x, static_cast<float> (bar.getY()), x, static_cast<float> (bar.getBottom())),
+                                  dashes, 2, 1.0f);
+            }
+            else
+            {
+                g.drawLine (x, static_cast<float> (bar.getY()), x, static_cast<float> (bar.getBottom()), 1.0f);
+            }
+
+            juce::Path head;
+            head.addTriangle (x - 4.0f, static_cast<float> (bar.getY()), x + 4.0f, static_cast<float> (bar.getY()),
+                              x, static_cast<float> (bar.getY()) + 6.0f);
+            g.fillPath (head);
+        }
+    }
+
     void WaveformEditorComponent::paintBar (juce::Graphics& g, juce::Rectangle<int> bar)
     {
+        /*  A MOVIE (namespace draft §47, AAI): its pictures along it, its sound
+            in a band below them, its cuts marked over both. */
+        if (reading.movie && strip != nullptr && ! strip->thumbnails.empty())
+        {
+            const auto& sound = columns();
+            auto pictures = bar;
+            const auto band = sound.empty() ? juce::Rectangle<int>() : pictures.removeFromBottom (bar.getHeight() / 4);
+
+            paintStrip (g, pictures);
+
+            if (! band.isEmpty())
+            {
+                const auto middle = band.getCentreY();
+                const auto half = band.getHeight() / 2.0;
+                const auto count = static_cast<int> (sound.size());
+
+                g.setColour (juce::Colours::black);
+                g.fillRect (band);
+
+                for (auto at = 0; at < count; ++at)
+                {
+                    const auto& column = sound[static_cast<std::size_t> (at)];
+                    g.setColour (juce::Colour::fromHSV (static_cast<float> (column.hue / 360.0),
+                                                        static_cast<float> (column.saturation),
+                                                        static_cast<float> (0.25 + column.lightness * 0.6), 1.0f));
+
+                    const auto top = middle - juce::roundToInt (column.high * half);
+                    const auto bottom = middle - juce::roundToInt (column.low * half);
+                    g.fillRect (band.getX() + at, juce::jmin (top, bottom), 1, juce::jmax (1, std::abs (bottom - top)));
+                }
+            }
+
+            paintCuts (g, bar);
+            return;
+        }
+
         const auto& drawn = columns();
 
         if (drawn.empty())
@@ -1531,10 +1662,16 @@ namespace wfg::client::ui
             of the magnet, which is the same key the cue list uses to mean
             "not the ordinary reading of this drag". */
         if (! event.mods.isAltDown())
-            seconds = model::snapTo (seconds,
-                                     model::snapTargets (reading.ranges, grabbed.rangeId,
-                                                         reading.fileLength),
-                                     toleranceSeconds());
+        {
+            auto targets = model::snapTargets (reading.ranges, grabbed.rangeId, reading.fileLength);
+
+            //  AND A MOVIE'S CUTS (§47, AAI): an in point on a shot's first frame.
+            if (reading.movie && strip != nullptr)
+                for (const auto& cut : strip->cuts)
+                    targets.push_back (cut.seconds);
+
+            seconds = model::snapTo (seconds, targets, toleranceSeconds());
+        }
 
         const auto writes = model::dragTo (grabbed, seconds, reading.ranges, reading.fileLength);
 
