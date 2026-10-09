@@ -556,8 +556,9 @@ TEST_CASE ("video: a DCA marked on a video cue, or on its group, is followed whi
     rig.ticks (5);
     CHECK (dca.size() == 3);
 
-    /*  A GROUP'S MARK reaches the picture under it, its trim summed with the
-        cue's own in dB as a sound's is. */
+    /*  A GROUP'S MARK reaches the picture under it - a factor of its own,
+        multiplied with the cue's (namespace draft §50, ABO; ABW): -10 dB and
+        -10 dB is the factor of -10 twice, where it was once the factor of -20. */
     const auto scene = rig.document.createCue ("VD000001", 0, "group", "Scene").id;
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
     const auto wash = rig.document.createCue (scene, 0, "video", "Wash").id;
@@ -577,7 +578,52 @@ TEST_CASE ("video: a DCA marked on a video cue, or on its group, is followed whi
 
     const auto& washDca = rig.sink.geometry[washRun->id][video::Property::dca];
     REQUIRE_FALSE (washDca.empty());
-    CHECK (washDca.back().value == doctest::Approx (video::opacityForTrim (-20.0)));
+    const auto tenDown = video::opacityForTrim (-10.0);
+    CHECK (washDca.back().value == doctest::Approx (tenDown * tenDown));
+
+    /*  AND EACH MARK BENDS ITS OWN (ABU): the cue's fast at first, the group's
+        slow at first, edited while the picture is up and followed a horizon
+        ahead, as a DCA ridden is. */
+    const auto placedBefore = washDca.size();
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + wash + "/dcaCurve", "50").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/dcaCurve", "-50").ok);
+    rig.ticks (1);
+
+    REQUIRE (washDca.size() > placedBefore);
+    CHECK (washDca.back().value == doctest::Approx (video::shapedOpacity (tenDown, 50.0)
+                                                      * video::shapedOpacity (tenDown, -50.0)));
+    CHECK (washDca.back().sample - washDca[washDca.size() - 2].sample == 960);
+}
+
+TEST_CASE ("video: a DCA mark's curve bends the fader's travel - fast at first above nought, slow below, the ends left where they are (§50, ABU)")
+{
+    //  Straight at nought: the travel as it was.
+    for (const auto factor : { 0.0, 0.25, 0.5, 0.75, 1.0 })
+        CHECK (video::shapedOpacity (factor, 0.0) == doctest::Approx (factor));
+
+    //  At 100 the fourth root, fast at first; at -100 the fourth power, slow at first.
+    CHECK (video::shapedOpacity (0.5, 100.0) == doctest::Approx (std::pow (0.5, 0.25)));
+    CHECK (video::shapedOpacity (0.5, -100.0) == doctest::Approx (std::pow (0.5, 4.0)));
+    CHECK (video::shapedOpacity (0.5, 50.0) == doctest::Approx (std::pow (0.5, 0.5)));
+    CHECK (video::shapedOpacity (0.5, -50.0) == doctest::Approx (std::pow (0.5, 2.0)));
+    CHECK (video::shapedOpacity (0.5, 50.0) > 0.5);
+    CHECK (video::shapedOpacity (0.5, -50.0) < 0.5);
+
+    //  The ends stay: the bottom hides, the top shows all of it.
+    for (const auto curve : { -100.0, -50.0, 50.0, 100.0 })
+    {
+        CHECK (video::shapedOpacity (0.0, curve) == doctest::Approx (0.0));
+        CHECK (video::shapedOpacity (1.0, curve) == doctest::Approx (1.0));
+    }
+
+    //  Past the range is the range; a factor past its ends is held to them.
+    CHECK (video::shapedOpacity (0.5, 400.0) == doctest::Approx (video::shapedOpacity (0.5, 100.0)));
+    CHECK (video::shapedOpacity (1.5, 50.0) == doctest::Approx (1.0));
+
+    //  On a DCA at -20 dB, the shape a fader's travel takes.
+    const auto twentyDown = video::opacityForTrim (-20.0);
+    CHECK (video::shapedOpacity (twentyDown, 60.0) > twentyDown);
+    CHECK (video::shapedOpacity (twentyDown, -60.0) < twentyDown);
 }
 
 TEST_CASE ("video: GO brings the layer up a horizon ahead over its fade-in, and it holds")

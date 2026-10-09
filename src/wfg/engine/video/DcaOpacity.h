@@ -54,6 +54,26 @@ namespace wfg::video
         return std::clamp (surface::fractionForDb (decibels) / unity, 0.0, 1.0);
     }
 
+    /*  THE CURVE ON A DCA MARK (namespace draft §50, ABU, proposed): the
+        factor the fader's travel gives, bent by the mark's `dcaCurve` in %.
+        Nought is the straight travel; above nought the picture comes in fast
+        at first - at 100 the factor's fourth root - and below nought slowly at
+        first, at -100 its fourth power. Nothing and all of it stay where they
+        are, so a fader at the bottom still hides the picture and one at the
+        top still shows all of it. */
+    inline double shapedOpacity (double factor, double curve) noexcept
+    {
+        if (std::isnan (factor))
+            return 1.0;
+
+        const auto clamped = std::clamp (factor, 0.0, 1.0);
+
+        if (std::isnan (curve) || clamped <= 0.0 || clamped >= 1.0)
+            return clamped;
+
+        return std::pow (clamped, std::pow (4.0, -std::clamp (curve, -100.0, 100.0) / 100.0));
+    }
+
     /*  A TINT AS THE TREE SAYS IT (namespace draft §38, WR): "#RRGGBB", in
         capitals, as a fill's `paint` is written. */
     inline std::string tintText (std::uint32_t rgb)

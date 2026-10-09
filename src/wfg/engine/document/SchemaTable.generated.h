@@ -3839,7 +3839,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "dca",
-          "The DCA this cue is assigned to, by identifier, or empty - a mark on the member as a sound's is (PRD 3.28). The DCA's trim, and the trim of every DCA it sits inside and of every group's above the cue, turn into how solid the picture is (namespace draft 37.5, WE, the author's): nought dB and above is the opacity as it stands, -120 dB is nothing, and between the two the picture follows the show's fader travel - half way up the fader is about half way faded. Never more solid than the cue's own opacity." },
+          "The DCA this cue is assigned to, by identifier, or empty - a mark on the member as a sound's is (PRD 3.28). The DCA's trim, and the trim of every DCA it sits inside, turn into how solid the picture is (namespace draft 37.5, WE, the author's): nought dB and above is the opacity as it stands, -120 dB is nothing, and between the two the picture follows the show's fader travel - half way up the fader is about half way faded - bent by the mark's dcaCurve. Each group's mark above the cue is a factor of its own, and the factors multiply (namespace draft 50, ABO; ABW proposed). Never more solid than the cue's own opacity." },
         { "video", "paint",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "#000000",

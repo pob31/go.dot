@@ -17273,23 +17273,35 @@ namespace wfg::cue
             fader's travel as a DCA's is - asked before the DCAs, so a show with
             none still has its hand. A group's level is still decibels of sound
             and stays with the sound: a bank's set level reaches its sounds and
-            not its pictures (ABC, proposed; it was 37.5's for the hand too). */
-        auto total = run.sampler ? run.trim : 0.0;
+            not its pictures (ABC, proposed; it was 37.5's for the hand too).
 
-        if (dcas == nullptr)
-            return video::opacityForTrim (total);
+            A FACTOR OF ITS OWN (namespace draft §50, ABW, proposed): it was
+            summed with the DCAs' trims in dB; it multiplies with them now, as
+            one mark multiplies with another. */
+        auto factor = run.sampler ? video::opacityForTrim (run.trim) : 1.0;
 
-        const auto termsOf = [this] (const std::string& cueId)
+        /*  EACH MARK ITS OWN FACTOR (§50, ABO, the author's; ABW): within a mark
+            its DCAs' trims add in dB, as a sound's do, and become a factor along
+            the fader's travel, bent by the mark's curve (ABU); across marks -
+            the run's own cue's and each run's above it - the factors multiply,
+            as nested trims on an opacity compose (PRD §3.28). */
+        const auto markFactorOf = [this] (const std::string& cueId)
         {
+            const auto* mark = dcaMarkOf (cueId);
+
+            if (mark == nullptr)
+                return 1.0;
+
             auto sum = 0.0;
 
-            for (const auto& dcaId : dcaChainOf (cueId))
-                sum += dcas->trimOf (dcaId);
+            if (dcas != nullptr)
+                for (const auto& dcaId : mark->chain)
+                    sum += dcas->trimOf (dcaId);
 
-            return sum;
+            return video::shapedOpacity (video::opacityForTrim (sum), mark->curve);
         };
 
-        total += termsOf (run.cue);
+        factor *= markFactorOf (run.cue);
         auto parent = run.parent;
 
         /*  BOUNDED BY THE TABLE, as the level's walk is. */
@@ -17300,11 +17312,11 @@ namespace wfg::cue
             if (above == nullptr)
                 break;
 
-            total += termsOf (above->cue);
+            factor *= markFactorOf (above->cue);
             parent = above->parent;
         }
 
-        return video::opacityForTrim (total);
+        return factor;
     }
 
     void Runner::followVideoDcas (VideoJob& job, const Run& run)

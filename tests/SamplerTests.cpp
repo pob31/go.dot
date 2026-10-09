@@ -1684,6 +1684,29 @@ TEST_CASE ("sampler: a press brings a picture of any kind up, and its fader is h
     CHECK (pictures.factorOf (first) == doctest::Approx (0.0));
 }
 
+TEST_CASE ("sampler: a picture's hand and its DCA are two factors, multiplied (§50, ABW)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const auto wash = pictures.member (bank, "fill");
+    rig.set ("/godot/cue/" + wash + "/initialLevel", "-6");
+
+    const auto screens = rig.document.createDca ("Screens").id;
+    rig.set ("/godot/cue/" + wash + "/dca", screens);
+    rig.dcas.set (screens, -6.0);
+
+    rig.arm (bank);
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.tickOnce();
+    rig.tickOnce();
+
+    //  Six down on the fader and six on the DCA: the factor of -6 twice, not the factor of -12.
+    const auto sixDown = video::opacityForTrim (-6.0);
+    CHECK (pictures.factorOf (rig.liveRunOf (wash)->id) == doctest::Approx (sixDown * sixDown));
+}
+
 TEST_CASE ("sampler: a hand landing on a picture's fader brings it up where the fader is, and velocity sets it (§49)")
 {
     Rig rig;

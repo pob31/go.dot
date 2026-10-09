@@ -2564,10 +2564,11 @@ namespace wfg::cue
         /*  A point placed for a video run, on the job and on the picture side. */
         void placeVideoPoint (VideoJob& job, video::Property property, const video::Point& point);
 
-        /*  THE DCAS ON A PICTURE (namespace draft 37.5, WE): the trims of every
-            DCA marked on the run's cue and on each group's above it, summed in
-            dB as a sound's are, and turned into a factor of its opacity along
-            the fader's travel. One with no DCA table, or none marked. */
+        /*  THE DCAS ON A PICTURE (namespace draft 37.5, WE; §50, ABO, ABW): for
+            each mark - on the run's cue and on each run's above it - its DCAs'
+            trims summed in dB and turned into a factor along the fader's
+            travel, bent by the mark's curve; the marks' factors multiplied, and
+            a sampler member's hand with them. One with none marked. */
         double videoDcaFactorOf (const Run& run);
 
         /*  And followed: a point a horizon ahead on the tick the factor moves,
