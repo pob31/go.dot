@@ -389,6 +389,7 @@ if not already passed.
 | fade | duration elapsed |
 | group | last member completes (footer included, §Header and footer) |
 | OSC/MIDI | per the three-valued wait (§3.11): `none` on send, `sent` on queue drain, `verified` on read-back match |
+| process | never by itself: its patch stops its own run, or a stop cue, Esc or the footer does (§3.21; namespace draft §51, ACL *(proposed)*) |
 
 **Post-wait** = how long after completion this cue reports done to its parent.
 Meaningful in `sequential`, inert in `parallel`.
@@ -553,6 +554,7 @@ running:
 | group, any trigger | **no-op** — except a sampler group, where it is a *refresh* (§3.27) |
 | fade, stop | **restart**, taking over from the level the target is at |
 | OSC, MIDI, memo | **second instance** |
+| process | **no-op** - it is running (§3.21; namespace draft §51, ACL *(proposed)*) |
 | sampler clip in *hold* mode | cannot happen from the origin holding it |
 | sampler clip in *play-out* mode | **restart** or **no-op**, per clip; *stop* as a third value *(proposed)* — it is what §3.16 already gives the Stream Deck, kill on press |
 
@@ -1884,6 +1886,13 @@ the projections nearly for free.
 appears as explicit **script nodes** in the dataflow graph: code in a marked
 field, sandboxed, limited API, hard time budget per tick.
 
+*Added in 0.8, at the author's direction (2026-10-09).* **A script node is a process cue's patch**
+(§3.21; namespace draft §51): Pure Data, run by libpd inside Go.dot, the patch kept as Pd's own text in
+one marked row of the cue (`process/patch`). Loading a show never starts one; only a run does.
+*(Proposed, ACP.)* The sandbox, in these terms: no compiled externals - only `.pd` patches from Go.dot's
+own folder and the show's; Pd's vanilla objects whole, `[file]` and `[netsend]` included; and the time
+budget of §3.21. Taking `[file]`'s writes or `[netsend]` away is the author's to ask for.
+
 Most QLab-AppleScript use is *document-time*, not show-time: batch renumber,
 retarget, generate sequences, conform to a venue's patch, import from a
 spreadsheet. With canonical XML, stable IDs and a published schema those are
@@ -1914,6 +1923,20 @@ background bridges, cue bindings and macros from one construct. A background
 list (§3.5) is the cue-shaped face of the same thing.
 
 Strictly control rate. Never in the audio callback.
+
+*Added in 0.8, at the author's direction (2026-10-09).* **Built as the process cue** (namespace draft
+§51): a cue whose Pure Data patch runs while the cue runs - in a list from its GO to its stop, in the
+persistent section (§3.29) all evening. The author asked for *"a data processor that takes in various
+types of data ... and can process them and send again"*, *"like having pure-data or Chataigne nested in
+Go.dot"*, for *"logic, averaging or finding min and max over a window"*, and for firing, enabling,
+disabling and jumping cues. Pd runs inside Go.dot through libpd, one patch to a thread, the tick waiting
+for them at most a budget (ACE); the patch is edited on Go.dot's own canvas at the foot of the window,
+with Pd's own window for what the canvas cannot do yet (ACD). *(Proposed, ACG.)* A patch names what it
+hears and what it sends to by address - a device's, Go.dot's own rows and commands, a serial port's -
+so there is no binding to declare beside it. Serial comes with it: an Arduino's lines first, then OSC
+over SLIP as a device (ACR). A patch that never finishes cannot be stopped from outside Pd: it is
+marked stuck after a second, the show never waits on it more than the budget, and nothing new is
+opened in Pd until Go.dot starts again (ACJ, ACK - measured, §6.11).
 
 ### 3.22 OSC device templates
 
@@ -2819,7 +2842,9 @@ A relaunch is a **machine action**: logged with its origin, shown on the run,
 and it never moves standby (§3.5). A stateful data process — a counter, a latch
 — loses its state on relaunch and restarts at its resting state (§4.6); the
 solver cannot rebuild it, because the stream that fed it is not in the list. A
-stateless transform relaunches for free, and §4.9 holds either way. Persistent
+stateless transform relaunches for free, and §4.9 holds either way *(2026-10-09:
+the data process is the process cue, §3.21 and namespace draft §51; a relaunch
+opens its patch again, from its beginning)*. Persistent
 rows are not GO targets; the cursor skips the section as it skips a footer.
 
 **Why sampler groups, rack channels and persistent cues share one design.** Not
@@ -3573,6 +3598,10 @@ CSICode itself has **no licence** — read for facts and concepts, never copy.
 EEL2 (WDL, permissive, no GC, compiles to machine code) for tick-path mapping
 math; Lua for orchestration outside it. Verify EEL2 licence terms.
 
+*Answered 2026-10-09, at the author's direction* (namespace draft §51, ACC): **Pure Data patches, run
+by libpd** (BSD-3) - neither EEL2 nor Lua is taken. A script object *inside* Pd - Lua through pd-lua
+(GPL-2 or later), or JavaScript - comes later *(proposed)*: the author's "both over time".
+
 ### 6.6 Restart-vs-second-instance (§3.8); banking policy (§3.9d)
 
 Restart-vs-second-instance is **settled** per kind — §3.8's table, decision N
@@ -3821,6 +3850,34 @@ calls ABT-ACB in §50.2 are the author's to overrule:
 What the work leaves out: a curve on an output's or a canvas's DCA, which keep the straight travel; a
 curve of its own on a sampler member's hand; one setting per DCA a mark reaches.
 
+Added 2026-10-09 *(proposed)*, with process cues (§3.21, namespace draft §51). The implementer's calls
+ACG-ACU in §51.2 are the author's to overrule:
+
+- **A patch's ports are addresses** - `[r /...]` hears, `[s /...]` writes or commands - and `self` names
+  the process's own run.
+- **Pd's clock is the tick**: 12 800 samples a second, four blocks a tick, 20 ms whatever the interface.
+- **Inputs, the blocks, then the outbox**, at most 256 commands and sets a tick from one patch.
+- **The bounded wait**: a budget of 2 ms, late, stuck after fifty late ticks.
+- **Pd changed only at a quiet point**, and nothing opened in Pd after a patch is stuck until Go.dot
+  starts again (measured).
+- **A process cue's life**: a second GO does nothing; it ends when its patch stops its own run, or Esc,
+  a stop cue or its footer does.
+- **The canvas edits the text**, one `node.set` a gesture, the running patch opened again on each.
+- **Pd's window** on the same patch, a save there one step of undo; **downloaded on first use** as
+  FFmpeg is, never in the installer.
+- **No compiled externals**; vanilla objects whole; nothing runs at load.
+- **Numbers in C on each patch's own thread.**
+- **Serial lines first, then OSC over SLIP as a device.**
+- **Nothing a patch does is run again in a replay**; what it made Go.dot do is in the log.
+- **A small POSIX-threads stand-in** of Go.dot's own for Windows.
+- **The ready-made patches** `go.avg`, `go.minmax`, `go.smooth`, `go.scale`, `go.deadband`, `go.edge`,
+  `go.change`, `go.hold`, `go.ratelimit`.
+
+What the work leaves out: a script object inside Pd; subpatches and arrays on the canvas; an edit taken
+without opening the patch again; a patch drawn in the browser console; a MIDI message a patch heard, in
+the log; a way to stop a stuck patch short of starting Go.dot again - a helper process for the patches,
+the option the author did not take, would give it.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -3957,6 +4014,13 @@ Mackie vs HUI first — first week with the D700.
   on; a fader's touch, and a movie waiting for its sound, a tick more. A still read ahead with its bank
   is seen on the renderer's first pass after that sample (10 ms on a Debug build), one never read about
   a second later. The light on a projector from a D700 fader is owed to the bench.
+- **Process cues** (§3.21, 2026-10-09, namespace draft §51): **M56** - what a tick of a patch costs;
+  **M57** - from a device's report to what a patch sent on the wire; **M58** - how many patches of
+  fifty objects fit in the budget; **M59** - the canvas's redraw for two hundred boxes. *Measured in
+  part 2026-10-09* (§51.6), on the spike that settled the design: two small patches at once, on two
+  threads, about 1.6 µs a tick each on a Debug build; and with one patch stuck, a patch already running
+  ran on while a patch asked to open waited for ever and, from then, stopped every patch - which is
+  why Pd is changed only at a quiet point.
 
 ---
 

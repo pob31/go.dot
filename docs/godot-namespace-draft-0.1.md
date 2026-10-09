@@ -23405,3 +23405,225 @@ All of it, 2026-10-09, each stage its own commit on main:
 
 Owed to the bench: the detents and the screen's words with the D700 in hand; a movie and its sound on
 one D700 DCA, both turned.
+
+## 51. Process cues: a Pure Data patch that runs while a cue runs
+
+Written 2026-10-09. The author asked for *"a data processor that takes in various types of data
+(protocols, types, rates...) and can process them and send again over various types of protocols and
+types. It's a bit like having pure-data or Chataigne nested in Go.dot"*, visual as Pd and Max are, *"as
+long as there is a way to type expressions"*, for *"logic, averaging or finding min and max over a
+window"*; then *"We may also trigger cues, enable or disable cues, jump to other section of the
+cuelist"*, and *"I was suggested to also be able to connect to an Arduino over UART (serial)"*. PRD §3.21
+drew this graph and §3.20 its script nodes; the devplan kept it for Phase 11 as processing cues in the
+persistent section (§13.11). This section is how it is built, now.
+
+### 51.1 What it is, before its names
+
+A **process cue** holds a small program drawn as boxes joined by lines - a **patch**, in Pure Data's
+sense and in Pure Data's own file format, so one made in Pd opens here and one made here opens in Pd.
+While the cue runs, its patch runs: once a tick it is handed what arrived - a value a device reported,
+a fader, a MIDI note, a line from an Arduino - works on it, and what it sends out goes where it says: to
+a device, to a MIDI port, to the Arduino, or to Go.dot itself, which is how a patch fires a cue, sets a
+level or moves the standby. Nothing about it is special to a list: in a sequence it runs from GO until
+something stops it; in the persistent section (§13.11) it runs all evening and is started again, from
+the beginning, if it stops. Esc stops it at once - a patch has nothing to fade.
+
+The patch is edited at the foot of the window, on a canvas drawn the way the rest of Go.dot is drawn:
+boxes with their inlets and outlets, the lines between them, typed text in each box, and - while it
+runs - the values passing through. What the canvas cannot do yet opens in Pure Data's own window, on
+the same patch. The maths is Pd's: its objects, and `[expr]` for anything typed as a formula. What a
+show keeps coming back to - an average over a window, its minimum and maximum, smoothing, scaling, a
+dead band, an edge - ships with Go.dot as ready-made patches (`[go.avg]`, `[go.minmax]`...).
+
+A patch names what it listens to and what it sends to by **address**. `[r /wfs/source/1/x]` hears
+whatever that device last reported for that address; `[s /wfs/source/1/x]` writes it, exactly as a cue
+aimed there would; `[s /godot/cmd/cue/fire]` given a cue's name fires it. So there are no bindings to
+set up beside the patch: the patch says it.
+
+### 51.2 Decisions
+
+The author's (2026-10-09, through AskUserQuestion; the words of every option were mine):
+
+- **ACC** **Pure Data runs the patches**, inside Go.dot, through **libpd** - Pd's own engine as a
+  library (BSD-3). The author chose "both over time": a Lua or JavaScript object *inside* Pd comes
+  later, and Pd now. It answers PRD §6.5: EEL2 and Lua as the script languages are not taken.
+- **ACD** **Go.dot's own canvas, in rounds, with Pd's window as the fallback.** The author first chose
+  Pd's own window (offered as "Ship Pd's own editor (Tcl/Tk)"), then asked *"Is there a prettier option
+  than the basic Tcl/Tk built in Pd?"* and took the canvas: drawing and moving first, then typing and
+  joining, then the values live, then subpatches. Pd's window stays, for what the canvas cannot do yet.
+- **ACE** **In Go.dot's own process, one thread per running patch, the tick waiting a bounded time**
+  (offered as "In-process, own thread, bounded wait"), not a helper process as plugins have.
+- **ACF** **The kind is called a process cue** (the author picked "Process cue" from four words I
+  offered; "patch" was set aside because Go.dot already has an output patch and a patch matrix).
+
+Mine, proposed:
+
+- **ACG** **A patch's ports are addresses** (§51.3). A send whose name starts with `/` leaves Go.dot's
+  way; a receive whose name starts with `/` hears Go.dot's. Names without a `/` stay inside the patch, as
+  in Pd. `self`, as the run or cue argument of a command, is the process's own run or cue.
+- **ACH** **Pd's clock is the tick.** A patch runs at 12 800 samples a second, four of Pd's 64-sample
+  blocks a tick: its time moves exactly 20 ms a tick whatever the interface's rate, and a `[metro 100]`
+  bangs every fifth tick. A process cue makes no sound; Pd's signal objects run at that rate for
+  arithmetic only.
+- **ACI** **Inputs, then the blocks, then the outbox.** What arrived this tick is handed to the patch
+  first, then its four blocks run, and what it sent is collected and applied by the tick: writes to
+  devices through the device's own door (`tree::writeToDevice` - coerced, rate-capped, bundled, tx
+  honoured), commands through `Engine::submit` with the origin `process:<run>`. At most 256 commands
+  and sets a tick leave one process; the rest are dropped and counted (`run/process/dropped`).
+- **ACJ** **The bounded wait.** The tick waits for the patches at most `process/budget` (2 ms by
+  default, on the Playback tab). One that has not finished is **late**: what it sends lands on the next
+  tick, and it is not handed the next tick's inputs until it is done - they wait, the newest per
+  address. Late for `process/stuckAfter` ticks in a row (50 by default, one second) it is **stuck**: its
+  run fails with `process.stuck`, the run's row says so in words, and the patch is left where it is -
+  nothing in Go.dot can stop a loop inside Pd. The show never waits more than the budget for any of it.
+- **ACK** **Pd is changed only at a quiet point** (measured, §51.6). Making a patch, opening it,
+  reloading it after an edit and closing it all take a lock every running patch shares, and a patch
+  that is stuck holds that lock for good: a patch already running carries on, but anything waiting to
+  open a patch would wait for ever, and **while it waits every patch stops**. So Go.dot opens and closes
+  patches only at the start of a tick, when every patch's last tick has finished; and **once a patch is
+  stuck nothing is opened, reloaded or closed until Go.dot is started again** - a new process run fails
+  with `process-stuck` and says so; the patches already running carry on. A patch that never finishes
+  *as it opens* (a `[loadbang]` into an endless loop) holds the lock while it opens, and stops every
+  patch - the one case the bounded wait does not cover, written here so that it is known.
+- **ACL** **A process cue's life.** A second GO on a running one does nothing, as on a sound. It never
+  finishes by itself: its patch ends it with `[s /godot/cmd/run/stop]` given `self`, or a stop cue, Esc,
+  a double Esc or its container's footer does - and that is its completion for a sequence. Esc and
+  double Esc stop it at once (it has nothing to fade or release). Doh! stops one that a GO fired early.
+  In the persistent section it is started again, from the beginning, as §3.29 already says of a data
+  process. A `[loadbang]` fires when the run starts.
+- **ACM** **The canvas edits the text, and the text is the show.** Every gesture on the canvas - a
+  move, a deletion, a box typed, a line joined - rewrites the cue's `process/patch` as one `node.set`;
+  a drag's run of them is one step of undo by the engine's own folding (§14.9, 25 ticks). A running
+  patch is opened again on every change, so a counter inside it starts again: that is a rehearsal's
+  fact, and the canvas says it once.
+- **ACN** **Pd's window** (`process.edit`) opens on the running patch, or on a patch opened for it if
+  the cue is not running, which is handed nothing. The patch is a file in the engine's cache; while the
+  window is up its time is read each tick and a save in Pd becomes one `node.set` of `process/patch`
+  with the origin `pd`. A change from anywhere else - undo, the canvas, the console - rewrites the file
+  and opens the patch again. `process.edit` is refused under the lock. A Tcl plug-in in Go.dot's `pd`
+  folder gives Pd's window Go.dot's grounds, inks and font as far as Tk will.
+- **ACO** **Where Pd's window comes from.** Found if installed - `WFG_PD`, a `pd` folder beside Go.dot,
+  Go.dot's application data, then where Pd installs itself on each system - otherwise **downloaded on
+  first use**, as FFmpeg is (`pd.install`): the release libpd is pinned to, so the window and the engine
+  are one version. Nothing of Tcl/Tk is in Go.dot's installer; the Linux package recommends
+  `puredata-gui`.
+- **ACP** **What a patch can reach.** Loading a show never starts a patch: only a run does (PRD §3.20).
+  **No compiled externals**: the build replaces Pd's loader of binary externals by one that refuses,
+  so only `.pd` patches are found as abstractions, from Go.dot's own `pd` folder and the show's folder.
+  Pd's vanilla objects stay whole - `[netsend]`, `[netreceive]` and `[file]` included - so a patch can
+  open a socket or write a file as Pd can. That is the sandbox §3.20 asks for, in these terms: nothing
+  runs at load, nothing is loaded from outside Go.dot and the show, and the time budget. Tightening it
+  (taking `[file]`'s writes or `[netsend]` away) is the author's to ask for, if a show from somebody
+  else is a case to protect against.
+- **ACQ** **Numbers.** Pd reads and writes numbers with the C library; under a French locale `2.5`
+  would read as 2. Each patch's thread sets its own number format to C, the rest of Go.dot untouched,
+  so the fr_FR run of every test keeps its power (measured, §51.6). libpd is built not to set the
+  process's locale.
+- **ACR** **Serial, lines first.** A serial port is an object of the show (`<Serial>`, §51.4) with a
+  name, the port's path on this machine, a speed and a framing. Its lines arrive split on spaces and
+  commas, numbers as numbers, at `[r /godot/serial/<id>/rx]`; `[s /godot/serial/<id>/tx]` writes one.
+  Opening a port resets an Arduino; a port that fails is tried again after a pause that grows, never
+  every tick. Then **OSC over SLIP** (an Arduino running CNMAT's OSC library): a device whose transport
+  is `serial`, and everything a device can do - heard, triggers, cues, curves - works on it unchanged.
+- **ACS** **Replay.** A patch never runs in a replay: what it made Go.dot do is in the log, with its
+  origin; what it wrote to devices is not, as a curve's is not. A serial line is logged as `serial.heard`
+  when a patch hears it; a MIDI message a patch heard is not logged (a limit, §51.8).
+- **ACT** **Threads.** libpd is built with an instance per patch, each bound to its own thread
+  (`PDINSTANCE`, `PDTHREADS`). Pd needs POSIX threads, which MSVC lacks: a small stand-in over Windows'
+  slim locks (`ThirdParty/pthread-shim`), Go.dot's own, measured with two patches at once (§51.6).
+- **ACU** **The ready-made patches** - `go.avg`, `go.minmax`, `go.smooth`, `go.scale`, `go.deadband`,
+  `go.edge`, `go.change`, `go.hold`, `go.ratelimit` - vanilla objects only, each with a help patch, in
+  Go.dot's `pd` folder. A window is counted in values, or in milliseconds with a `ms` argument.
+
+### 51.3 What a patch talks to
+
+| In the patch | What it is |
+|---|---|
+| `[r /<device address>]` | What a device whose prefix holds the address last reported, the tick it arrived (rx on, §45 YZ): a number, a word or a list |
+| `[r /godot/<row>]` | A row of the show or the engine - `/godot/run/<id>/level`, `/godot/dca/<id>/trim` - sent when it changes |
+| `[r /godot/serial/<id>/rx]` | A line from a serial port, split into atoms |
+| `[r /godot/puck]` | The SpaceMouse's six axes, while a patch listens to it (the puck is opened for it as for a curve) |
+| `[r in]` | Everything a patch could hear, as `/address atoms...`, for names a patch builds as it runs |
+| `[notein]`, `[ctlin]`, ... | MIDI from the port the cue's `process/midiIn` names |
+| `[s /<device address>]` | A write to that device, as a cue's |
+| `[s /godot/cmd/<command>]` | A named command (§2.6): `cue/fire` with a cue's name fires it, `go`, `standby/set`, `run/stopAll` - and Enable, Disable and Jump to are transport cues a patch fires by name (§27), as a GO would |
+| `[s /godot/<row>]` | A `node.set` of that row, refused under the lock as any is, ridden live where the live layer rides (§17.14) |
+| `[s /godot/serial/<id>/tx]` | A line to a serial port |
+| `[s out]` | Any of the above, as `/address atoms...` |
+| `[noteout]`, `[ctlout]`, ... | MIDI to the port `process/midiOut` names |
+| `[print]` | The run's `process/said` - the last line - and Pd's own complaints the same way |
+
+### 51.4 The rows
+
+| Row | Owner | Type | Default | What |
+|---|---|---|---|---|
+| `patch` | `process` | `s` | a patch with one comment | The patch, as Pd's text |
+| `midiIn`, `midiOut` | `process` | `s` | empty | A MIDI port's id, or none |
+| `run/process/state` | run | `s`, read | | `starting`, `running`, `late`, `stuck` |
+| `run/process/late`, `run/process/dropped` | run | `i`, read | 0 | Counts |
+| `run/process/said` | run | `s`, read | | The last `[print]` line |
+| `run/process/ports` | run | `s`, read | | The last value on each named port, for the canvas |
+| `run/process/editing` | run | `T`, read | false | Pd's window is up |
+| `/godot/process/budget` | show | `d`, ms | 2 | ACJ |
+| `/godot/process/stuckAfter` | show | `i`, ticks | 50 | ACJ |
+| `serial/<id>/name`, `path`, `baud`, `framing`, `rx`, `tx` | `serial` | | -, -, 115200, `lines`, true, true | ACR |
+| `serial/<id>/state`, `problem` | `serial` | read | | Open, closed, retrying; why, in words |
+| `mount/<id>/transport` gains `serial`; `mount/<id>/serial` | `mount` | | | ACR, OSC over SLIP |
+
+`cue/kind` and `run/kind` gain `process`.
+
+### 51.5 Commands and records
+
+- `process.edit s cue` - Pd's window on the cue's patch (ACN). Refused `locked`, `pd-missing`,
+  `process-stuck`.
+- `process.send s run s name [atoms...]` - hands atoms to a name a running patch receives: the
+  canvas's live boxes, a surface, a test.
+- `pd.install` - Pd's window downloaded (ACO), as `ffmpeg.install`.
+- `serial.create`, then `node.set` on its rows; `object.delete` removes one.
+- Records: `process.stuck run sentence` (engine), `serial.heard serial line` (engine).
+- Refusals: `process-stuck` (a run or a reload while a patch is stuck), `pd-missing`.
+
+### 51.6 Measurements
+
+- **M56** - what a tick of a patch costs. *Measured 2026-10-09 in the spike that settled ACK, ACQ and
+  ACT* (MSVC, Debug, Windows): two patches at once on two threads, each `[r in] -> [* 2.5] -> [s out]`
+  beside a `[metro 100]`, fifty ticks in 76 and 84 µs - about 1.6 µs a tick; the metronome banged ten
+  times in fifty ticks; `2.5` read as 2.5 under a French global locale. To take again with fifty
+  objects and ten patches (PC.12).
+- **M57** - from a device's report to what a patch sent on the wire (PC.12).
+- **M58** - how many patches of fifty objects fit in the budget (PC.12).
+- **M59** - the canvas's redraw for two hundred boxes (PC.12).
+- *Measured 2026-10-09, what ACK rests on:* with one patch stuck in an endless loop, a patch already
+  running ran on (260 ticks in half a second); a patch asked to open waited for ever; and from the
+  moment it waited, the running patch stopped (0 ticks in half a second).
+
+### 51.7 Stages
+
+| Stage | What the author sees |
+|---|---|
+| PC.0 | This section; PRD §3.6, §3.8, §3.20, §3.21, §3.29, §6.5, §6.9, §6.11; the devplan |
+| PC.1 | Nothing yet: libpd in the build on the three systems, a patch run headless, Pd's text read and written back |
+| PC.2 | A process cue: heard values in, devices and commands out, Esc, the persistent section, late and stuck |
+| PC.3 | MIDI in and out, `[print]`, the ports' values, the SpaceMouse, `process.send` |
+| PC.4 | The cue in the window: the + menu, its icon, the patch's text in the inspector, late and stuck on its row, the Playback tab's two rows |
+| PC.5 | The canvas: a patch drawn, panned, zoomed, its boxes moved and deleted |
+| PC.6 | The canvas: boxes typed and placed, lines joined, copy and paste |
+| PC.7 | Pd's window on a patch, a save in it on the canvas; Pd's window downloaded when missing |
+| PC.8 | The canvas live: values on the lines, toggles and sliders that move the patch |
+| PC.9 | The ready-made patches and their help; an example show |
+| PC.10 | Serial ports: a line from an Arduino in a patch, and back |
+| PC.11 | OSC over SLIP: an Arduino as a device |
+| PC.12 | M56-M59, the driver, the close-out |
+
+### 51.8 Not built
+
+*(Proposed, PRD §6.9.)* A script object inside Pd - Lua through pd-lua, or JavaScript (ACC's "over
+time"); subpatches entered and arrays edited on the canvas (C4, after PC.8); an edit taking effect
+without opening the patch again; Pd's GUI objects beyond the bang, toggle, number box and sliders on the
+canvas; a patch drawn in the browser console; a MIDI message a patch heard, in the log; anything that
+stops a patch stuck inside Pd short of starting Go.dot again; a helper process for the patches, which
+would give that (the option ACE did not take).
+
+### 51.9 Built so far
+
+- **PC.0**: this section; PRD §3.6, §3.8, §3.20, §3.21, §3.29, §6.5, §6.9, §6.11; the devplan.

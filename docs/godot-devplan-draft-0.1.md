@@ -1092,6 +1092,38 @@ mixed chain an automatic sequence, and MIDI, video and the triggers wait for the
 command line reads its arguments as UTF-8 on macOS and Linux, found on an accented show folder.
 Waiting: the probe set (QL.1), the shapes measured, and a run against the rig.
 
+### Process cues: a Pure Data patch in a cue · L
+
+*Added on 2026-10-09*, at the author's direction: a cue whose patch - Pure Data's, run by libpd inside
+Go.dot - takes in what devices, MIDI, a serial port and the show say, works on it, and sends it on or
+makes Go.dot fire, enable, disable or jump; edited on Go.dot's own canvas at the foot of the window,
+with Pd's own window as the fallback (namespace draft §51; PRD §3.20, §3.21). The author's decisions
+are ACC-ACF; ACG-ACU are the implementer's, the author's to overrule. Not a phase: it brings Phase 11's
+"OSC and MIDI processing cues" forward, and serial with it, and no later phase is renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| PC.0 | Docs: namespace §51, PRD §3.6, §3.8, §3.20, §3.21, §3.29, §6.5, §6.9, §6.11, this | - |
+| PC.1 | libpd and Pure Data pinned and built on the three systems; the Windows threads stand-in; the binary loader refused; a patch run headless; Pd's text read and written back | PC.0 |
+| PC.2 | The kind: rows, schema, the engine's host and threads, heard in, devices and commands out, Esc, Doh!, the persistent section, the budget, late and stuck, the quiet point | PC.1 |
+| PC.3 | MIDI in and out, `[print]`, the ports' values, the SpaceMouse, `process.send` | PC.2 |
+| PC.4 | The window: the + menu, the icon, the patch's text and MIDI ports in the inspector, late and stuck on the row, the Playback tab | PC.2 |
+| PC.5 | The canvas, round one: drawn, panned, zoomed, moved, deleted | PC.4 |
+| PC.6 | The canvas, round two: typed, placed, joined, copied | PC.5 |
+| PC.7 | Pd's window, a save in it on the canvas, `pd.install` | PC.2, PC.5 |
+| PC.8 | The canvas, round three: the values live, toggles and sliders | PC.3, PC.6 |
+| PC.9 | The ready-made patches, their help, an example show | PC.2 |
+| PC.10 | Serial ports: lines in and out | PC.2 |
+| PC.11 | OSC over SLIP: a device on a serial port | PC.10 |
+| PC.12 | The driver, the log, M56-M59, the close-out | all |
+
+**Done when:** a patch averaging what a device reports fires a cue when it crosses a line, made on the
+canvas from nothing; an Arduino's lines reach a patch; a stuck patch leaves the show running and says
+so; an old show saves unchanged; CI is green.
+
+**Needs from the author:** the canvas's words and look; a patch of their own made on it and in Pd's
+window; an Arduino on the bench, lines and SLIP.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M
@@ -1335,7 +1367,9 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
 - **OSC and MIDI processing cues as persistent processes** (PRD §3.29): the
   state-machine phase §3.5 deferred, arriving as rows in the persistent section;
   a stateful process restarts at its resting state, and no fixed pool is needed
-  because the control graph has no rebuild cost.
+  because the control graph has no rebuild cost. *(2026-10-09: brought forward as
+  process cues - Pure Data patches, serial with them - the item before Phase 10,
+  namespace draft §51.)*
 
 **Done when:** the sound operator's Choufleur column is populated from Go.dot
 and a Go.dot warning taps the wrist.
