@@ -1696,6 +1696,15 @@ namespace wfg::cue
             is gapless in one channel. */
         std::vector<std::string> armablesFor (const juce::ValueTree& cue) const;
 
+        /*  WHAT A GO ON THIS CUE STARTS FIRST, as the cues themselves: the cue
+            when it is not a group; for a group, the first enabled member of a
+            sequence or every member of a timeline with no pre-wait, recursively;
+            nothing for a sampler group, whose members a hand starts. Walked once
+            here so the two that ask cannot disagree about a scene: `armablesFor`
+            keeps its sounds, the read-ahead its pictures and movies (namespace
+            draft §48, AAL). */
+        std::vector<juce::ValueTree> launchedFirst (const juce::ValueTree& cue) const;
+
         /*  Every group a pointer at this cue stands in, outermost first, with
             the cue itself last when it is a group, or nothing when it is in
             none: the chain `prepareStandby` builds or descends through, by
@@ -2366,6 +2375,21 @@ namespace wfg::cue
 
         /*  The OSC cues whose curves are playing (namespace draft 45). */
         std::vector<CurveJob> curving;
+
+        /*  WHERE A MOVIE STARTS (§37, WL; §41): the second its playhead is put
+            at by GO, how fast and which way it goes, the first range it plays,
+            and where a movie with no ranges plays back to. Read by GO and by the
+            read-ahead alike (namespace draft §48), so the frame read before GO is
+            the frame GO shows. */
+        struct MovieStart
+        {
+            double seconds = 0.0;
+            double rate = 1.0;
+            std::string rangeId;
+            double pieceStart = 0.0;
+        };
+
+        MovieStart movieStartOf (const juce::ValueTree& cue) const;
 
         /*  ONE PER VIDEO RUN that is up or coming up (Phase 8a): its layer,
             the points placed for it, and - while Esc takes it down - the tick

@@ -4799,30 +4799,18 @@ namespace wfg::cue
             job.spec.order = ++videoOrder;
 
             /*  A MOVIE'S PLAYHEAD (§37): from its start offset at its speed,
-                or from its first Range's in point (WL). */
+                or from its first Range's in point (WL) - `movieStartOf`, which
+                the read-ahead asks too (namespace draft §48). */
             if (job.spec.source == "movie")
             {
+                const auto start = movieStartOf (cue);
+
                 job.movie = true;
                 job.movieFile = textOf (cue, "file");
-                job.moviePosition = std::max (0.0, numberOf (cue, "startOffset"));
-                job.rate = std::clamp (numberOf (cue, "rate"), -20.0, 20.0);   // below nought, backwards (§41)
-
-                job.pieceStart = job.moviePosition;
-
-                if (const auto ranges = rangesOf (cue); ! ranges.empty())
-                {
-                    job.rangeId = ranges.front().id;
-                    job.moviePosition = std::max (0.0, job.rate < 0.0 ? ranges.front().out : ranges.front().in);
-                }
-                else if (job.rate < 0.0)
-                {
-                    /*  BACKWARDS FROM THE END (namespace draft §41): its piece
-                        the other way, from the file's end - when the show knows
-                        it; not known, it waits at its start offset. */
-                    if (const auto* known = handlerDurations())
-                        if (const auto found = known->find (job.movieFile); found != known->end() && found->second > job.moviePosition)
-                            job.moviePosition = found->second;
-                }
+                job.moviePosition = start.seconds;
+                job.rate = start.rate;
+                job.pieceStart = start.pieceStart;
+                job.rangeId = start.rangeId;
             }
 
             /*  IN %, the author's unit (VR): the renderer's opacity is 0..1. */
@@ -16258,29 +16246,42 @@ namespace wfg::cue
 
     std::vector<std::string> Runner::armablesFor (const juce::ValueTree& cue) const
     {
-        const auto element = cue.getType().toString();
+        std::vector<std::string> out;
 
-        /*  ONLY A MEDIA CUE HAS ANYTHING TO MAKE READY. Asking to arm a memo
-            would be a rejection every time the pointer passed over one, which
-            would fill the log with a refusal about something nobody did wrong. */
-        if (element == "Media" || element == "Mic")
+        for (const auto& leaf : launchedFirst (cue))
         {
-            /*  A SOUND LOCKED TO ITS MOVIE is the movie's to arm. */
-            if (followsAMovie (cue))
-                return {};
+            const auto element = leaf.getType().toString();
 
-            const auto id = cue[idProperty].toString().toStdString();
-            return id.empty() ? std::vector<std::string> {} : std::vector<std::string> { id };
+            /*  ONLY A MEDIA CUE HAS ANYTHING TO MAKE READY. Asking to arm a memo
+                would be a rejection every time the pointer passed over one,
+                which would fill the log with a refusal about something nobody
+                did wrong. */
+            if (element == "Media" || element == "Mic")
+            {
+                /*  A SOUND LOCKED TO ITS MOVIE is the movie's to arm. */
+                if (followsAMovie (leaf))
+                    continue;
+
+                if (auto id = leaf[idProperty].toString().toStdString(); ! id.empty())
+                    out.push_back (std::move (id));
+            }
+
+            /*  A MOVIE MAKES ITS OWN SOUNDS READY (namespace draft 37.5, WJ),
+                so the GO that brings the picture up starts them on its sample. */
+            else if (element == "Video" && textOf (leaf, "source") == "movie")
+            {
+                for (auto& id : soundsLockedTo (leaf[idProperty].toString().toStdString()))
+                    out.push_back (std::move (id));
+            }
         }
 
-        /*  A MOVIE MAKES ITS OWN SOUNDS READY (namespace draft 37.5, WJ), so
-            the GO that brings the picture up starts them on its sample. */
-        if (element == "Video")
-            return textOf (cue, "source") == "movie" ? soundsLockedTo (cue[idProperty].toString().toStdString())
-                                                     : std::vector<std::string> {};
+        return out;
+    }
 
-        if (element != "Group")
-            return {};
+    std::vector<juce::ValueTree> Runner::launchedFirst (const juce::ValueTree& cue) const
+    {
+        if (cue.getType().toString() != "Group")
+            return { cue };
 
         /*  A SAMPLER GROUP LAUNCHES NOTHING FIRST: GO arms every member onto
             its strip at once, and a member armed ahead without a strip would be
@@ -16290,7 +16291,7 @@ namespace wfg::cue
 
         const auto timeline = textOf (cue, "mode") == "timeline";
 
-        std::vector<std::string> out;
+        std::vector<juce::ValueTree> out;
 
         for (const auto& child : cue)
         {
@@ -16319,7 +16320,7 @@ namespace wfg::cue
                 /*  A SEQUENCE LAUNCHES ONE THING, so the first enabled member
                     is the whole answer - and recursively, because that member
                     may be a group of its own. */
-                return armablesFor (child);
+                return launchedFirst (child);
             }
 
             /*  A TIMELINE LAUNCHES EVERYTHING AT ENTRY and the pre-waits are
@@ -16334,11 +16335,36 @@ namespace wfg::cue
             if (numberOf (child, "preWait") > 0.0)
                 continue;
 
-            for (auto& id : armablesFor (child))
-                out.push_back (std::move (id));
+            for (auto& leaf : launchedFirst (child))
+                out.push_back (std::move (leaf));
         }
 
         return out;
+    }
+
+    Runner::MovieStart Runner::movieStartOf (const juce::ValueTree& cue) const
+    {
+        MovieStart start;
+        start.seconds = std::max (0.0, numberOf (cue, "startOffset"));
+        start.rate = std::clamp (numberOf (cue, "rate"), -20.0, 20.0);   // below nought, backwards (§41)
+        start.pieceStart = start.seconds;
+
+        if (const auto ranges = rangesOf (cue); ! ranges.empty())
+        {
+            start.rangeId = ranges.front().id;
+            start.seconds = std::max (0.0, start.rate < 0.0 ? ranges.front().out : ranges.front().in);
+        }
+        else if (start.rate < 0.0)
+        {
+            /*  BACKWARDS FROM THE END (namespace draft §41): its piece the other
+                way, from the file's end - when the show knows it; not known, it
+                waits at its start offset. */
+            if (const auto* known = handlerDurations())
+                if (const auto found = known->find (textOf (cue, "file")); found != known->end() && found->second > start.seconds)
+                    start.seconds = found->second;
+        }
+
+        return start;
     }
 
     //==============================================================================
