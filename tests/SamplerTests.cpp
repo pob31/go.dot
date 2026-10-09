@@ -72,7 +72,7 @@ namespace
     struct FakePlayer final : cue::Player
     {
         int trackCount() const override                      { return tracks; }
-        std::int64_t samplesElapsed() const override         { return 0; }
+        std::int64_t samplesElapsed() const override         { return elapsed; }
         int blockSize() const override                       { return 128; }
         int channelsPerTrack() const override                { return 2; }
         int slotCount() const override                       { return 1; }
@@ -119,6 +119,10 @@ namespace
         }
 
         int tracks = 8;
+
+        //  The audio's clock: still unless a case moves it, as a movie's playhead needs (§49).
+        std::int64_t elapsed = 0;
+
         std::vector<cue::ArmRequest> arms;
         std::vector<int> launched;
         std::vector<int> stopped;
@@ -1732,4 +1736,228 @@ TEST_CASE ("sampler: two pictures on one layer lie the later pressed on top, and
     //  Fired by name, it was a press of its strip: the same run, armed on it.
     CHECK (rig.runsOf (a) == 1u);
     CHECK (rig.holds (rig.liveRunOf (a), rig.strips[0]));
+}
+
+TEST_CASE ("sampler: a held picture let go goes down to black over its release fade, and is armed again (§49)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const auto still = pictures.member (bank, "picture", "still.png");
+    rig.set ("/godot/cue/" + still + "/release", "hold");
+    rig.set ("/godot/cue/" + still + "/releaseFade", "0.5");
+
+    rig.arm (bank);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto runId = rig.liveRunOf (still)->id;
+    REQUIRE (pictures.sink.shownFor (runId) != nullptr);
+
+    rig.send ("strip.release", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.tickOnce();
+
+    /*  NOT CUT: the next tick it is still going down, from where it was to
+        black over half a second - 25 ticks of 960 samples - and taken off on
+        the sample it gets there. */
+    CHECK_FALSE (rig.runs.find (runId)->isFinished());
+
+    const auto& points = pictures.sink.points[runId];
+    REQUIRE (points.size() >= 2u);
+    CHECK (points.back().value == doctest::Approx (0.0));
+    CHECK (points.back().sample - points[points.size() - 2].sample == 25 * 960);
+
+    REQUIRE_FALSE (pictures.sink.removed.empty());
+    CHECK (pictures.sink.removed.back().first == runId);
+    CHECK (pictures.sink.removed.back().second == points.back().sample);
+
+    //  It ends when it is black, and the member is armed on its strip again.
+    REQUIRE (rig.tickUntil ([&rig, &runId] { return rig.runs.find (runId)->isFinished(); }));
+    REQUIRE (rig.tickUntil ([&rig, &still, &runId]
+                            {
+                                const auto* again = rig.liveRunOf (still);
+                                return again != nullptr && again->id != runId;
+                            }));
+    CHECK (rig.holds (rig.liveRunOf (still), rig.strips[0]));
+}
+
+TEST_CASE ("sampler: a held picture's fader let go at the bottom takes it down; one playing out stays until MUTE (§49, AAX)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const auto held = pictures.member (bank, "fill");
+    const auto still = pictures.member (bank, "picture", "still.png");
+    rig.set ("/godot/cue/" + held + "/release", "hold");
+
+    rig.arm (bank);
+
+    //  FADER-STOP: touched, ridden to the bottom, let go there.
+    const auto heldId = rig.liveRunOf (held)->id;
+    const auto heldTrim = "/godot/run/" + heldId + "/trim";
+    rig.send ("node.touch", { osc::Value::string (heldTrim) }, "surface:DESK");
+    REQUIRE (rig.tickUntil ([&rig, &heldId] { return rig.runs.find (heldId)->state == cue::runState::playing; }));
+
+    rig.send ("node.set", { osc::Value::string (heldTrim), osc::Value::float64 (-120.0) }, "surface:DESK");
+    rig.tickOnce();
+    CHECK (rig.runs.find (heldId)->state == cue::runState::playing);
+
+    rig.send ("node.release", { osc::Value::string (heldTrim) }, "surface:DESK");
+    REQUIRE (rig.tickUntil ([&rig, &heldId] { return rig.runs.find (heldId)->isFinished(); }));
+
+    /*  A STILL PLAYING OUT never ends by itself: at the bottom of its fader it
+        is unseen and still up, holding its strip, until its strip's MUTE - a
+        kill - takes it away at once. */
+    rig.send ("strip.press", { osc::Value::string (rig.strips[1]) }, "window");
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto stillId = rig.liveRunOf (still)->id;
+    rig.send ("node.set", { osc::Value::string ("/godot/run/" + stillId + "/trim"), osc::Value::float64 (-120.0) },
+              "window");
+
+    for (int n = 0; n < 50; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (stillId)->state == cue::runState::playing);
+    CHECK (pictures.factorOf (stillId) == doctest::Approx (0.0));
+    CHECK (rig.holds (rig.runs.find (stillId), rig.strips[1]));
+
+    rig.send ("run.kill", { osc::Value::string (stillId) }, "surface:DESK");
+    REQUIRE (rig.tickUntil ([&rig, &stillId] { return rig.runs.find (stillId)->isFinished(); }));
+    rig.tickOnce();
+
+    const auto taken = std::find_if (pictures.sink.removed.begin(), pictures.sink.removed.end(),
+                                     [&stillId] (const auto& removal) { return removal.first == stillId; });
+    CHECK (taken != pictures.sink.removed.end());
+}
+
+TEST_CASE ("sampler: a second press restarts a movie and not a still, and stops a picture over its release fade (§49, ABD)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const std::map<std::string, double> lengths { { "clip.mov", 10.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const auto movie = pictures.member (bank, "movie", "clip.mov");
+    const auto still = pictures.member (bank, "picture", "still.png");
+    const auto stopper = pictures.member (bank, "fill");
+    rig.set ("/godot/cue/" + movie + "/startOffset", "2");
+    rig.set ("/godot/cue/" + stopper + "/secondPress", "stop");
+
+    rig.arm (bank);
+
+    for (std::size_t n = 0; n < 3; ++n)
+        rig.send ("strip.press", { osc::Value::string (rig.strips[n]) }, "window");
+
+    //  The audio's clock moving, a tick a tick, so the movie's playhead does.
+    for (int n = 0; n < 30; ++n)
+    {
+        rig.audio.elapsed += 960;
+        rig.tickOnce();
+    }
+
+    //  THE MOVIE, from where GO starts it: its playhead put back to two seconds.
+    const auto movieId = rig.liveRunOf (movie)->id;
+    const auto& times = pictures.sink.geometry[movieId][video::Property::time];
+    REQUIRE_FALSE (times.empty());
+    CHECK (times.back().value > 2.0);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (rig.liveRunOf (movie)->id == movieId);
+    CHECK (std::any_of (times.end() - 3, times.end(), [] (const video::Point& point)
+                        { return std::abs (point.value - 2.0) < 0.05; }));
+
+    //  THE STILL has no top to go back to: nothing happens.
+    const auto stillId = rig.liveRunOf (still)->id;
+    const auto shownBefore = pictures.sink.shown.size();
+    rig.send ("strip.press", { osc::Value::string (rig.strips[1]) }, "window");
+    rig.tickOnce();
+    CHECK (rig.liveRunOf (still)->id == stillId);
+    CHECK (pictures.sink.shown.size() == shownBefore);
+
+    //  A SECOND PRESS THAT STOPS takes a picture down over its release fade.
+    const auto stopperId = rig.liveRunOf (stopper)->id;
+    rig.send ("strip.press", { osc::Value::string (rig.strips[2]) }, "window");
+    rig.tickOnce();
+    CHECK (rig.runs.find (stopperId)->state == cue::runState::stopping);
+    REQUIRE (rig.tickUntil ([&rig, &stopperId] { return rig.runs.find (stopperId)->isFinished(); }));
+}
+
+TEST_CASE ("sampler: a still playing out keeps its strip when another bank takes over, and hands it on at MUTE (§49, ABJ)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto first = rig.group ("First", 3, 0);
+    const auto still = pictures.member (first, "picture", "still.png");
+
+    const auto second = rig.group ("Second", 4, 0);
+    const auto next = pictures.member (second, "fill");
+
+    rig.arm (first);
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto stillId = rig.liveRunOf (still)->id;
+    REQUIRE (rig.runs.find (stillId)->state == cue::runState::playing);
+
+    //  THE SECOND BANK ARMS AND TAKES OVER: the still plays on, on its strip.
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), second).ok);
+    rig.tickOnce();
+    rig.send ("go");
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (stillId)->state == cue::runState::playing);
+    CHECK (rig.holds (rig.runs.find (stillId), rig.strips[0]));
+
+    const auto* waiting = rig.liveRunOf (next);
+    CHECK ((waiting == nullptr || ! rig.holds (waiting, rig.strips[0])));
+
+    //  MUTE: the still is gone, and the second bank's picture lands on the strip.
+    rig.send ("run.kill", { osc::Value::string (stillId) }, "surface:DESK");
+
+    REQUIRE (rig.tickUntil ([&rig, &next]
+                            {
+                                const auto* landed = rig.liveRunOf (next);
+                                return landed != nullptr && rig.holds (landed, rig.strips[0]);
+                            }));
+}
+
+TEST_CASE ("sampler: a held picture pressed and let go in one tick comes up and goes down (§49)")
+{
+    Rig rig;
+    Pictures pictures { rig };
+
+    const auto bank = rig.group ("Pictures", 3, 0);
+    const auto flash = pictures.member (bank, "fill");
+    rig.set ("/godot/cue/" + flash + "/release", "hold");
+
+    rig.arm (bank);
+    const auto runId = rig.liveRunOf (flash)->id;
+
+    REQUIRE (rig.engine.submit ("window", "strip.press", { osc::Value::string (rig.strips[0]) }));
+    rig.send ("strip.release", { osc::Value::string (rig.strips[0]) }, "window");
+
+    /*  IT ENDS, and its strip is free for the next press: the report that it
+        came up, which reaches the run after the stop, does not hand it back to
+        playing (RunCommands' `run.started`). */
+    REQUIRE (rig.tickUntil ([&rig, &runId] { return rig.runs.find (runId)->isFinished(); }));
+    CHECK (pictures.sink.shownFor (runId) != nullptr);
+
+    const auto taken = std::find_if (pictures.sink.removed.begin(), pictures.sink.removed.end(),
+                                     [&runId] (const auto& removal) { return removal.first == runId; });
+    CHECK (taken != pictures.sink.removed.end());
 }

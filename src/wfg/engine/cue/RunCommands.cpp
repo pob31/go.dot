@@ -96,8 +96,15 @@ namespace wfg::cue
                             /*  AND A RUN DOH! TOOK BACK STAYS ON ITS WAY OUT:
                                 a launch placed in the very tick of the Doh is
                                 reported after it, and must not hand the run back
-                                to `playing` under the fade taking it down. */
-                            if (! run->takenBack)
+                                to `playing` under the fade taking it down.
+
+                                NOR ONE ALREADY STOPPING (namespace draft §49): a
+                                picture let go, or Esc'd, in the tick it was fired
+                                is placed - and reported - after the stop, coming
+                                up and going down on one pass; handed back to
+                                `playing`, its run never ended, and on a sampler
+                                strip held the strip for good. */
+                            if (! run->takenBack && run->state != runState::stopping)
                                 run->state = runState::playing;
 
                             return Outcome::ok (args);

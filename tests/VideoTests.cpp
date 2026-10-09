@@ -1159,6 +1159,28 @@ TEST_CASE ("video read-ahead: the rows say what is got ready - a missing picture
     folder.deleteRecursively();
 }
 
+TEST_CASE ("video: a picture Esc'd in the tick it was fired comes up, goes down, and its run ends (§49)")
+{
+    VideoRig rig;
+
+    /*  FIRED AND ESC'D BEFORE IT CAME UP: the report that it came up reaches
+        the run after the stop, and must not hand it back to playing - it did,
+        and the run never ended. */
+    REQUIRE (rig.engine.submit ("cli", "cue.fire", { osc::Value::string ("VD000002") }));
+    rig.submitAndTick ("run.stopAll");
+
+    const auto* run = rig.runOf ("VD000002");
+    REQUIRE (run != nullptr);
+    const auto id = run->id;
+
+    for (int n = 0; n < 300 && ! rig.runs.find (id)->isFinished(); ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->isFinished());
+    REQUIRE_FALSE (rig.sink.removed.empty());
+    CHECK (rig.sink.removed.back().first == id);
+}
+
 TEST_CASE ("video: a fade cue moves a picture's opacity, scale, offset and turn, and stops it when told")
 {
     VideoRig rig;

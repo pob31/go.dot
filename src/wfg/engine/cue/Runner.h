@@ -2215,6 +2215,12 @@ namespace wfg::cue
             with no cue of its own behind it. */
         void beginReleaseFade (const std::string& runId, double seconds, std::int64_t tick);
 
+        /*  A PICTURE'S RELEASE (namespace draft §49): taken to black over the
+            same `releaseFade` and then ended, as Esc takes one - and a movie's
+            locked sounds faded with it over the same seconds. A dB fade would
+            leave its opacity alone and let the sweep cut it a tick later. */
+        void releaseVideo (const std::string& runId, double seconds, std::int64_t tick);
+
         /*  Starts a group's header, members or footer, and answers whether
             there was anything to start. False lets the caller fall through to
             the next phase, so a group with no header does not spend a tick in

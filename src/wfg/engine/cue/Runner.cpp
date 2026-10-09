@@ -7372,6 +7372,34 @@ namespace wfg::cue
         running.push_back (job);
     }
 
+    void Runner::releaseVideo (const std::string& runId, double seconds, std::int64_t tick)
+    {
+        const auto* target = runs.find (runId);
+
+        if (target == nullptr || target->isFinished() || target->stopIssued)
+            return;
+
+        /*  ITS SOUNDS FIRST, collected before anything is changed: a movie's
+            locked sounds are its children, and fade with it over the same
+            seconds. */
+        std::vector<std::string> sounds;
+
+        for (const auto* child : runs.childrenOf (runId))
+            if (! child->isFinished() && child->kind == "media")
+                sounds.push_back (child->id);
+
+        for (const auto& sound : sounds)
+            beginReleaseFade (sound, seconds, tick);
+
+        /*  THEN THE PICTURE, as Esc takes one down (`beginPanicFade`): the job
+            owns the run's ending until it is black. Not `stopEndsWait`: a
+            release is an ending somebody chose, not an emergency's. */
+        fadeOutVideo (runId, tick, static_cast<int> (std::lround (std::max (0.0, seconds) * TickClock::rateHz)));
+
+        if (auto* run = runs.find (runId))
+            run->askStop (0);
+    }
+
     void Runner::beginPanicFade (std::int64_t tick)
     {
         /*  THE SHOW'S NUMBER, read at the press: an edit to it lands at the next
@@ -12344,7 +12372,13 @@ namespace wfg::cue
         if (second == "stop")
         {
             notePlayed (*run);
-            beginReleaseFade (run->id, numberOf (cue, "releaseFade"), tick);
+
+            //  A picture down to black, its sounds with it (namespace draft §49).
+            if (run->kind == "video")
+                releaseVideo (run->id, numberOf (cue, "releaseFade"), tick);
+            else
+                beginReleaseFade (run->id, numberOf (cue, "releaseFade"), tick);
+
             return {};
         }
 
@@ -12460,7 +12494,12 @@ namespace wfg::cue
         if (run->state == runState::armed)
             return {};
 
-        beginReleaseFade (run->id, numberOf (cue, "releaseFade"), tick);
+        //  A picture let go goes down to black over its release fade (namespace draft §49).
+        if (run->kind == "video")
+            releaseVideo (run->id, numberOf (cue, "releaseFade"), tick);
+        else
+            beginReleaseFade (run->id, numberOf (cue, "releaseFade"), tick);
+
         return {};
     }
 
