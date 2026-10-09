@@ -1098,7 +1098,7 @@ TEST_CASE ("surface bridge: a hand on a flipped fader when a double Esc flips th
     CHECK (desk.dcas.trimOf (band) < 0.0);
 }
 
-TEST_CASE ("surface bridge: the V-Pot press is a sampler strip's gate, and puts a DCA back to nought")
+TEST_CASE ("surface bridge: the V-Pot press is a sampler strip's gate, and on a DCA strip switches its knob")
 {
     Desk desk;
     const auto mcu = desk.makeSurface ("mcu", "Desk");
@@ -1130,16 +1130,16 @@ TEST_CASE ("surface bridge: the V-Pot press is a sampler strip's gate, and puts 
     CHECK (desk.submitted[0].command == "strip.release");
     CHECK (desk.submitted[0].args[0].getString() == strips[0]);
 
-    //  ON A DCA STRIP the gate is its DCA back to nought, and letting go is nothing.
+    /*  ON A DCA STRIP the gate switches what the knob above it turns, and
+        writes nothing (namespace draft §50, ABK; ACA - it put the DCA back to
+        nought until 2026-10-09). The DCA keeps its trim. */
     desk.clear();
     desk.arrive ("PORTMCU1", { 0x90, 0x21, 0x7f });
     desk.arrive ("PORTMCU1", { 0x90, 0x21, 0x00 });
     desk.tickOnce();
 
-    REQUIRE (desk.submitted.size() == 1u);
-    CHECK (desk.submitted[0].command == "node.set");
-    CHECK (desk.submitted[0].args[0].getString() == "/godot/dca/" + band + "/trim");
-    CHECK (near (desk.submitted[0].args[1].getFloat64(), 0.0));
+    CHECK (desk.submitted.empty());
+    CHECK (desk.published ("/godot/dca/" + band + "/trim") == "-6");
 
     //  SELECT on a dca strip aims at nothing: there is no cue on it.
     desk.clear();
@@ -1199,12 +1199,14 @@ TEST_CASE ("surface bridge: STOP is Esc, STOP again inside the window is double 
     CHECK (pressing (0x5f).empty());
 }
 
-TEST_CASE ("surface bridge: a turn of a rotary moves nothing - the level is the fader's")
+TEST_CASE ("surface bridge: a turn of a rotary moves no level - the level is the fader's")
 {
     /*  The author, 2026-09-25: "The rotaries don't have to move with the
         faders. It's either or. We'll find other uses for the rotaries." Until
         this date a detent was half a decibel on the strip's target; now a
-        turn, either way and however many, writes nothing at all. */
+        turn moves no level: on a sampler strip it writes nothing, and above a
+        DCA strip with nothing playing under it - the use found 2026-10-09,
+        namespace draft §50 - nothing either. */
     Desk desk;
     const auto mcu = desk.makeSurface ("mcu", "Desk");
     const auto band = desk.makeDca ("Band");
@@ -1220,6 +1222,7 @@ TEST_CASE ("surface bridge: a turn of a rotary moves nothing - the level is the 
 
     desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x02 });     // strip two, two detents clockwise
     desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x41 });     // and one back
+    desk.arrive ("PORTMCU1", { 0xb0, 0x10, 0x03 });     // strip one, a sampler strip
     desk.tickOnce();
 
     CHECK (desk.submitted.empty());
@@ -1485,6 +1488,35 @@ TEST_CASE ("surface bridge: an MCU strip shows its name and its word in seven ch
     const auto again = sysexOf (desk.sink);
     REQUIRE (again.size() == 1u);
     CHECK (again[0] == surface::lcdCell (0x14, 0, 0, "Amb"));
+}
+
+TEST_CASE ("surface bridge: a D700 DCA strip's letters follow a cue marked with its DCA after the desk first drew it (§39)")
+{
+    /*  THE LETTERS WERE WORKED OUT ONCE AND NEVER AGAIN until 2026-10-09: the
+        document's revision, which says when to look again, is a number, and
+        was read as text. Found by the knob above a DCA strip (namespace draft
+        §50), whose starting mode is read off the same letters. */
+    Desk desk;
+    const auto d700 = desk.makeSurface ("d700", "The D700");
+    const auto band = desk.makeDca ("Band");
+    desk.pin (desk.strips[d700][0], band);
+
+    desk.declare ({ desk.spec (d700, "d700", { "PORTBNK1", "PORTBNK2" }) },
+                  { { "PORTBNK1", plugged ("D700 bank 1") }, { "PORTBNK2", plugged ("D700 bank 2") } });
+    desk.state.documentRevision = desk.document.showRevision();
+    desk.ticks (2);
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "dca")));
+
+    const auto list = desk.document.createList ("Main").id;
+    const auto rain = desk.document.createCue (list, 0, "media", "Rain").id;
+    desk.set ("/godot/cue/" + rain + "/dca", band);
+
+    //  What serve publishes every tick: the show's revision, which the mark moved.
+    desk.state.documentRevision = desk.document.showRevision();
+
+    desk.clear();
+    desk.ticks (2);
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "dca A")));
 }
 
 TEST_CASE ("surface bridge: a D700 strip shows three native rows and a number, and never MCU's display")
@@ -4823,4 +4855,156 @@ TEST_CASE ("dca knob: the value shown, a turn's writes, its words and its ring (
         CHECK (row->minimum == doctest::Approx (curveRow ? surface::knobCurveMin : surface::knobOffsetMinDb));
         CHECK (row->maximum == doctest::Approx (curveRow ? surface::knobCurveMax : surface::knobOffsetMaxDb));
     }
+}
+
+namespace
+{
+    /*  A D700 WHOSE FIRST STRIP RIDES A DCA, and a movie playing under it with
+        its locked sound (namespace draft §50): the movie's mark carries a
+        curve of 20 and an offset of -3. */
+    struct KnobDesk : PageDesk
+    {
+        explicit KnobDesk (const std::string& profile = "d700", int stripCount = 16)
+            : PageDesk (profile, stripCount)
+        {
+            fake.text ("/godot/dca/order", "DCA00001");
+            fake.text ("/godot/dca/DCA00001/name", "Screens");
+            fake.text ("/godot/slot/STRIP001/role", "dca");
+            fake.text ("/godot/slot/STRIP001/dca", "DCA00001");
+            fake.text ("/godot/slot/STRIP001/word", "dca");
+            fake.text ("/godot/slot/STRIP001/cue", "");
+            fake.text ("/godot/run/order", "");
+            publish();
+        }
+
+        void playMovie (double curve = 20.0, double offset = -3.0)
+        {
+            fake.text ("/godot/cue/MOV00001/kind", "video");
+            fake.text ("/godot/cue/MOV00001/dca", "DCA00001");
+            fake.number ("/godot/cue/MOV00001/dcaCurve", curve);
+            fake.number ("/godot/cue/MOV00001/dcaOffset", offset);
+            fake.text ("/godot/cue/SND00001/kind", "media");
+
+            fake.text ("/godot/run/order", "RUN00001 RUN00002");
+            fake.text ("/godot/run/RUN00001/kind", "video");
+            fake.text ("/godot/run/RUN00001/cue", "MOV00001");
+            fake.text ("/godot/run/RUN00001/state", "playing");
+            fake.number ("/godot/run/RUN00001/started", 10.0);
+            fake.text ("/godot/run/RUN00002/kind", "media");
+            fake.text ("/godot/run/RUN00002/cue", "SND00001");
+            fake.text ("/godot/run/RUN00002/state", "playing");
+            fake.number ("/godot/run/RUN00002/started", 10.0);
+            fake.text ("/godot/run/RUN00002/parent", "RUN00001");
+
+            //  A mark is an edit to the show: the revision the bridge reads its letters by moves.
+            fake.number ("/godot/document/revision", 2.0);
+            publish();
+        }
+
+        void turn (std::vector<std::uint8_t> detents, int element = 0)
+        {
+            std::vector<std::pair<std::string, midi::Bytes>> bytes;
+
+            for (const auto value : detents)
+                bytes.push_back ({ "PORTBNK1", { 0xb0, static_cast<std::uint8_t> (0x10 + element), value } });
+
+            hands (bytes);
+        }
+    };
+}
+
+TEST_CASE ("surface bridge: the knob above a DCA strip turns the curve of the pictures playing under it, a press switches it to their sound's offset (§50)")
+{
+    KnobDesk desk;
+    desk.playMovie();
+    desk.settle();
+
+    //  WHAT IT SAYS: the curve, since pictures are assigned to the DCA - in its third row, its ring from the centre.
+    const auto shown = sentOn (desk.sink, "PORTBNK1");
+    CHECK (contains (shown, surface::d700DisplayRow3 (0, "pic +20")));
+    CHECK (contains (shown, surface::d700Ring (0, static_cast<int> (std::lround (0.6 * 127.0)), 1)));
+
+    //  TWO DETENTS: one write over every mark the curve moves, from the surface, as one set.
+    desk.submitted.clear();
+    desk.turn ({ 0x02 });
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].origin == "surface:SURF0001");
+    CHECK (desk.writes() == std::vector<std::string> { "node.setMany /godot/cue/MOV00001/dcaCurve 24" });
+
+    //  Detents inside one tick are folded: two on, one back.
+    desk.submitted.clear();
+    desk.turn ({ 0x02, 0x41 });
+    CHECK (desk.writes() == std::vector<std::string> { "node.setMany /godot/cue/MOV00001/dcaCurve 22" });
+
+    //  A PRESS SWITCHES, and writes nothing; the screen says the offset now.
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x20);
+    CHECK (desk.submitted.empty());
+
+    desk.sink.sent.clear();
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "snd -3.0")));
+
+    //  And a turn moves the offset of the movie's mark - a sound plays under it.
+    desk.turn ({ 0x02 });
+    CHECK (desk.writes() == std::vector<std::string> { "node.setMany /godot/cue/MOV00001/dcaOffset -2" });
+}
+
+TEST_CASE ("surface bridge: the knob above a DCA strip with nothing playing under it writes nothing, and says so for a second (§50, ABZ)")
+{
+    KnobDesk desk;
+    desk.settle();
+
+    //  As it was: the strip says it is a DCA's.
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "dca")));
+
+    desk.sink.sent.clear();
+    desk.turn ({ 0x02 });
+    CHECK (desk.submitted.empty());
+
+    //  It found nothing to turn: "snd --" - nothing is assigned, so it starts on the offset.
+    desk.settle (2);
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "snd --")));
+
+    //  And a second later the strip is as it was.
+    desk.sink.sent.clear();
+    desk.settle (60);
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "dca")));
+}
+
+TEST_CASE ("surface bridge: the knob above a DCA strip does nothing while the faders are flipped to lanes or a page owns the rotaries (§50, ABX)")
+{
+    KnobDesk desk;
+    desk.playMovie();
+
+    //  FLIPPED TO A CUE'S LANES (§34): the knob is not the DCA's.
+    desk.fake.text ("/godot/surface/lane", "CUE00002");
+    desk.publish();
+    desk.turn ({ 0x02 });
+    CHECK (desk.submitted.empty());
+
+    desk.fake.text ("/godot/surface/lane", "");
+    desk.publish();
+
+    //  ON THE EQ PAGE every rotary is the page's: none of them writes a DCA mark.
+    desk.aimAt ("CUE00002");
+    desk.press ("PORTBNK1", 0x2c);
+    desk.submitted.clear();
+    desk.turn ({ 0x02 });
+
+    for (const auto& event : desk.submitted)
+        CHECK (event.command != "node.setMany");
+}
+
+TEST_CASE ("surface bridge: a Mackie desk's knob above a DCA strip says what it turns in its second row, in seven (§50, ABZ)")
+{
+    KnobDesk desk { "mcu", 8 };
+    desk.playMovie();
+    desk.settle();
+
+    const auto shown = sentOn (desk.sink, "PORTBNK1");
+    CHECK (contains (shown, surface::lcdCell (0x14, 1, 0, "p +20")));
+
+    desk.turn ({ 0x41 });
+    CHECK (desk.writes() == std::vector<std::string> { "node.setMany /godot/cue/MOV00001/dcaCurve 18" });
 }

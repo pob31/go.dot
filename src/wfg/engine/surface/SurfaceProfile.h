@@ -90,9 +90,11 @@ namespace wfg::surface
         THE STRIP'S GATE IS THE V-POT PRESS (plan decision 12): on the D700 an
         element's identity is its button note, so encoder three's press, ring
         and colour all key off one number, and the button that presses a strip
-        is the one wearing its colour. On a dca strip the gate resets the DCA's
-        trim to nought. On an EQ or Send page the same press switches the
-        control under it instead, and never starts a clip.
+        is the one wearing its colour. On a dca strip the gate switches what
+        the knob above it turns, the picture's curve or the sound's offset
+        (namespace draft §50, ABK; ACA - it reset the DCA's trim to nought). On
+        an EQ or Send page the same press switches the control under it
+        instead, and never starts a clip.
 
         SELECT AIMS THE ROTARIES (author, 2026-09-25: "pressing on the EQ
         button while a sample is selected (select button) assign rotaries to
@@ -161,6 +163,11 @@ namespace wfg::surface
         - a free strip, a dca strip, a locked show - lights nothing. */
     inline constexpr std::int64_t startLevelFlashTicks = TickClock::rateHz / 2;
 
+    /*  HOW LONG A DCA STRIP'S SCREEN SAYS ITS KNOB FOUND NOTHING TO TURN -
+        "pic --" after a press or a turn with nothing playing under the DCA
+        (namespace draft §50, ABZ): a second. */
+    inline constexpr std::int64_t knobFlashTicks = TickClock::rateHz;
+
     /*  A FLASHING LIGHT IS BLINKED BY THE BRIDGE, a quarter of a second on and
         a quarter off: the D700 takes a light as on or off and nothing else
         (control guide §4.2), so MCU's own flash - a velocity of one - lit it
@@ -176,9 +183,6 @@ namespace wfg::surface
 
     //==========================================================================
     //  The numbers the bench and the room revise, each in one place.
-
-    /** An encoder detent moves the strip's target this far. */
-    inline constexpr double encoderStepDb = 0.5;
 
     /*  WHAT ONE DETENT OF A ROTARY MOVES ON AN EQ OR SEND PAGE (2026-09-25),
         bench guesses to revise with the D700 in hand. A fast turn arrives as

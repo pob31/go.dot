@@ -16,6 +16,7 @@
 
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/DcaColour.h>
+#include <wfg/engine/surface/DcaKnob.h>
 
 #include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/cue/Runner.h>
@@ -493,16 +494,15 @@ namespace wfg::surface
     //==========================================================================
     struct SurfaceBridge::State
     {
-        /*  WHAT A STRIP'S HAND ASKED FOR THIS TICK, folded into one write: a
-            fader's position or a gate's reset replaces it, an encoder's detents
-            add to it. */
+        /*  WHAT A STRIP'S FADER ASKED FOR THIS TICK, folded into one write: the
+            later position replaces the earlier. A knob's detents are its own
+            (namespace draft §50, `knobSteps`). */
         struct Write
         {
-            enum class Kind { none, absolute, relative };
+            enum class Kind { none, absolute };
 
             Kind kind = Kind::none;
-            double db = 0.0;        // absolute
-            int steps = 0;          // relative: detents, `encoderStepDb` each
+            double db = 0.0;
         };
 
         /*  One display field, by the text it was last written FROM - not the
@@ -603,6 +603,16 @@ namespace wfg::surface
             std::string busNameAt;
             std::string paramAt;                    // an FX page: /godot/plugin/<id>/param/<n>/, its name, steps, default
             std::string fxTextAt;                   // an FX page: /godot/fx/<id>/t<n>, the plugin's own words for it
+
+            /*  THE KNOB ABOVE A DCA STRIP (namespace draft §50): what the hand
+                did this tick - detents folded, a press is a press - which of
+                the two it turns (-1 for where its DCA starts it, ABX; 0 the
+                picture's curve, 1 the sound's offset), and until when its
+                screen says it found nothing to turn. */
+            int knobSteps = 0;
+            bool knobPress = false;
+            int knobMode = -1;
+            std::int64_t knobFlashUntil = -1;
         };
 
         /*  One port of a surface: a bank of eight. */
@@ -805,6 +815,8 @@ namespace wfg::surface
                 strip.deaf = false;
                 strip.touched.clear();
                 strip.pending = Write {};
+                strip.knobSteps = 0;
+                strip.knobPress = false;
             }
 
             if (touchedAny)
@@ -1317,6 +1329,10 @@ namespace wfg::surface
                 const auto base = marked.empty() ? std::string {} : "/godot/dca/" + marked + "/";
                 strip.dcaNameAt = under (base, "name");
                 strip.dcaShortAt = under (base, "shortName");
+
+                //  A new DCA starts its knob again, where that DCA starts it (§50, ABX).
+                strip.knobMode = -1;
+                strip.knobFlashUntil = -1;
             }
 
             if (const auto& holder = textAt (at, strip.holderAt); holder != strip.holderId)
@@ -1504,7 +1520,6 @@ namespace wfg::surface
                         strip->motor = event.value;
                         strip->pending.kind = Write::Kind::absolute;
                         strip->pending.db = dbForFourteenBit (event.value, box.topology.faderLaw);
-                        strip->pending.steps = 0;
                     }
                     break;
 
@@ -1520,11 +1535,19 @@ namespace wfg::surface
 
                     ON AN EQ OR SEND PAGE it turns the control under it - the
                     use the author found the same day. The detents are folded
-                    and written once a tick (flushPageWrites). */
+                    and written once a tick (flushPageWrites).
+
+                    AND ABOVE A DCA STRIP it shapes what the DCA does (namespace
+                    draft §50, the author's, 2026-10-09): the picture's curve or
+                    the sound's offset of what plays under it (flushKnobWrites). */
                 case McuEvent::Kind::encoder:
-                    if (box.paging.page != Page::show)
-                        if (auto* strip = stripAt (box, bank, event.strip))
+                    if (auto* strip = stripAt (box, bank, event.strip))
+                    {
+                        if (box.paging.page != Page::show)
                             strip->pageSteps += event.value;
+                        else if (textAt (published.get(), strip->roleAt) == "dca")
+                            strip->knobSteps += event.value;
+                    }
                     break;
 
                 case McuEvent::Kind::button:
@@ -1852,7 +1875,8 @@ namespace wfg::surface
         }
 
         /*  THE STRIP'S GATE, the V-Pot press: a hand on a sampler strip, or on
-            a dca strip the DCA back to nought (plan decision 12). */
+            a dca strip a switch of what its knob turns (namespace draft §50,
+            ABK; ACA - it was the DCA back to nought, plan decision 12). */
         void gate (const Surface& box, Strip& strip, bool down, const Submit& submit) const
         {
             if (! down)
@@ -1868,15 +1892,7 @@ namespace wfg::surface
 
             if (textAt (published.get(), strip.roleAt) == "dca")
             {
-                /*  A WRITE, and folded with the fader's: a fader moved after
-                    the reset in the same tick is the later word. */
-                if (! targetOf (strip).empty())
-                {
-                    strip.pending.kind = Write::Kind::absolute;
-                    strip.pending.db = 0.0;
-                    strip.pending.steps = 0;
-                }
-
+                strip.knobPress = true;
                 return;
             }
 
@@ -1974,7 +1990,6 @@ namespace wfg::surface
 
             strip.pending.kind = Write::Kind::absolute;
             strip.pending.db = cue::Runner::levelForByte (amount, floorDb);
-            strip.pending.steps = 0;
         }
 
         /*  THE TICK'S WRITES, one per strip, after every touch of the tick. */
@@ -1995,25 +2010,8 @@ namespace wfg::surface
                     if (target.empty())
                         continue;
 
-                    auto value = asked.db;
-
-                    if (asked.kind == Write::Kind::relative)
-                    {
-                        const auto current = numberAt (at, target);
-
-                        if (! current.has_value())
-                            continue;
-
-                        value = std::clamp (*current + encoderStepDb * static_cast<double> (asked.steps),
-                                            faderSilenceDb, faderLoudestDb);
-
-                        //  Turned against an end, the value is where it was.
-                        if (std::abs (value - *current) < 1.0e-9)
-                            continue;
-                    }
-
                     submit (commandFrom (box.origin, "node.set",
-                                         { osc::Value::string (target), osc::Value::float64 (value) }));
+                                         { osc::Value::string (target), osc::Value::float64 (asked.db) }));
                 }
         }
 
@@ -2120,6 +2118,124 @@ namespace wfg::surface
                                        dial.integer ? osc::Value::int32 (static_cast<std::int32_t> (std::lround (next)))
                                                     : osc::Value::float64 (next) }));
             }
+        }
+
+        /*  WHAT THE KNOB ABOVE A DCA STRIP TURNS NOW (namespace draft §50,
+            ABX): where a press left it, else where its DCA starts it - the
+            picture's curve when pictures are assigned to it. */
+        KnobMode knobModeOf (const Strip& strip)
+        {
+            if (strip.knobMode >= 0)
+                return strip.knobMode == 0 ? KnobMode::curve : KnobMode::offset;
+
+            const auto& contents = dcaContentsNow();
+            const auto found = contents.find (strip.dcaId);
+            return found != contents.end() ? knobStartMode (found->second) : KnobMode::offset;
+        }
+
+        const std::vector<DcaMark>& marksUnder (const std::string& dcaId)
+        {
+            static const std::vector<DcaMark> none;
+            const auto& all = dcaMarksNow();
+            const auto found = all.find (dcaId);
+            return found != all.end() ? found->second : none;
+        }
+
+        /*  THE TICK'S KNOB WRITES (namespace draft §50, ABK, ABP): a press
+            switches what the knob turns; a turn moves the value shown - the
+            nearest mark of the run that started last - by its detents and
+            writes it to every mark under the DCA the mode moves, as ONE
+            `node.setMany` from the surface's own origin. So a second of
+            turning is one undo step (§30.11), and under the lock it rides live
+            (ABQ). Nothing on a page, nothing while the faders are flipped to
+            lanes, and nothing written with nothing playing - the screen says
+            so for a second. */
+        void flushKnobWrites (const Submit& submit, std::int64_t tick)
+        {
+            const auto flipped = laneState().flipped;
+
+            for (auto& box : surfaces)
+                for (auto& strip : box.strips)
+                {
+                    const auto steps = std::exchange (strip.knobSteps, 0);
+                    const auto pressed = std::exchange (strip.knobPress, false);
+
+                    if ((steps == 0 && ! pressed) || box.paging.page != Page::show || flipped
+                          || strip.dcaId.empty() || textAt (published.get(), strip.roleAt) != "dca")
+                        continue;
+
+                    auto mode = knobModeOf (strip);
+
+                    if (pressed)
+                    {
+                        mode = mode == KnobMode::curve ? KnobMode::offset : KnobMode::curve;
+                        strip.knobMode = mode == KnobMode::curve ? 0 : 1;
+                    }
+
+                    const auto& marks = marksUnder (strip.dcaId);
+                    const auto reading = knobReading (marks, mode);
+
+                    if (! reading.any)
+                    {
+                        strip.knobFlashUntil = tick + knobFlashTicks;
+                        continue;
+                    }
+
+                    if (steps == 0)
+                        continue;
+
+                    const auto writes = knobWrites (marks, mode, knobTurned (mode, reading.value, steps));
+
+                    if (writes.empty())
+                        continue;
+
+                    std::vector<osc::Value> args;
+                    args.reserve (writes.size() * 2);
+
+                    for (const auto& [address, text] : writes)
+                    {
+                        args.push_back (osc::Value::string (address));
+                        args.push_back (osc::Value::string (text));
+                    }
+
+                    submit (commandFrom (box.origin, "node.setMany", std::move (args)));
+                }
+        }
+
+        /*  WHAT THE KNOB SHOWS NOW (namespace draft §50, ABZ): its words and
+            its ring while something plays under the DCA; its words alone for a
+            second after a press or a turn that found nothing to move; and with
+            neither, nothing - the strip says what it said before. */
+        struct KnobShown
+        {
+            bool words = false;
+            bool ring = false;
+            KnobMode mode = KnobMode::offset;
+            KnobReading reading;
+        };
+
+        KnobShown knobShown (const Strip& strip, std::int64_t tick)
+        {
+            KnobShown out;
+
+            if (strip.dcaId.empty())
+                return out;
+
+            out.mode = knobModeOf (strip);
+            const auto& marks = marksUnder (strip.dcaId);
+
+            if (! marks.empty())
+            {
+                out.reading = knobReading (marks, out.mode);
+                out.words = true;
+                out.ring = out.reading.any;
+            }
+            else if (tick < strip.knobFlashUntil)
+            {
+                out.words = true;
+            }
+
+            return out;
         }
 
         void eqWrite (Surface& box, const Strip& strip, int steps, bool pressed, const Submit& submit) const
@@ -2975,7 +3091,18 @@ namespace wfg::surface
                 /*  A DCA'S STRIP SAYS WHAT IS ASSIGNED TO IT (§39): "dca A"
                     for sound only, "dca V" for pictures only, "dca AV" for
                     both, plain "dca" for nothing - letters, not a colour (§4.8). */
-                if (isDca && ! onLane)
+                /*  AND WHILE SOMETHING PLAYS UNDER IT, WHAT ITS KNOB TURNS
+                    (namespace draft §50, ABZ): "pic +20", "snd -3.5" - in the
+                    same row, since the letters say what is assigned and the
+                    knob what is playing. */
+                const auto knob = isDca && ! onLane ? knobShown (strip, tick) : KnobShown {};
+
+                if (isDca && ! onLane && knob.words)
+                {
+                    roleScratch = knobWords (knob.mode, knob.reading, 8);
+                    role = roleScratch;
+                }
+                else if (isDca && ! onLane)
                 {
                     const auto& contents = dcaContentsNow();
                     const auto found = contents.find (strip.dcaId);
@@ -2992,22 +3119,39 @@ namespace wfg::surface
                 if (changed (strip.rows[2], role))
                     send (port, d700DisplayRow3 (element, role));
 
+                //  THE KNOB'S RING, from its centre: straight, or nought dB, in the middle (§50, ABZ).
+                if (knob.ring)
+                {
+                    const auto ring = d700ParameterRing (knobRingFraction (knob.mode, knob.reading.value), true);
+
+                    if (ring.value != strip.ring || ring.mode != strip.ringMode)
+                    {
+                        send (port, d700Ring (element, ring.value, ring.mode));
+                        strip.ring = ring.value;
+                        strip.ringMode = ring.mode;
+                    }
+                }
+
                 /*  THE RING IS THE CLIP'S PROGRESS (author, 2026-09-25: "So
                     use the rotary LED ring then"). Asked for as the thin white
                     bar at the top of the screen - which is the D700's own mark
                     of a lit SELECT, on or off and nothing between, so it cannot
                     be one. Filled from the left as far as the clip has got, in
-                    the D700's 128 steps, and empty when nothing sounds; turning
-                    the knob still does nothing, and the ring no longer repeats
-                    the fader ("either or"). Sent when it moves, and again
-                    whenever the strip is painted whole. */
-                const auto ring = progressOf (strip, word, d700RingSteps);
-
-                if (ring != strip.ring || strip.ringMode != ringFillMode)
+                    the D700's 128 steps, and empty when nothing sounds; the
+                    ring no longer repeats the fader ("either or"). Sent when it
+                    moves, and again whenever the strip is painted whole. Above
+                    a DCA strip with something playing under it, the knob's own
+                    ring instead (namespace draft §50). */
+                if (! knob.ring)
                 {
-                    send (port, d700Ring (element, ring, ringFillMode));
-                    strip.ring = ring;
-                    strip.ringMode = ringFillMode;
+                    const auto ring = progressOf (strip, word, d700RingSteps);
+
+                    if (ring != strip.ring || strip.ringMode != ringFillMode)
+                    {
+                        send (port, d700Ring (element, ring, ringFillMode));
+                        strip.ring = ring;
+                        strip.ringMode = ringFillMode;
+                    }
                 }
 
                 /*  THE CUE'S NUMBER in the strip's number field when it is one
@@ -3024,17 +3168,45 @@ namespace wfg::surface
                 if (changed (strip.rows[0], name))
                     send (port, lcdCell (deviceId, 0, element, name));
 
-                if (changed (strip.rows[1], word))
-                    send (port, lcdCell (deviceId, 1, element, word));
+                /*  A DCA STRIP'S SECOND ROW IS ITS KNOB'S while something plays
+                    under it, in seven: "p +20", "s -3.5" (namespace draft §50). */
+                const auto onLane = isLaneRide (textAt (at, strip.targetAt));
+                const auto knob = isDca && ! onLane ? knobShown (strip, tick) : KnobShown {};
 
-                //  The clip's progress, as the D700's, in MCU's eleven steps: it does not repeat the fader.
-                const auto ring = progressOf (strip, word, mcuRingSteps);
-
-                if (ring != strip.ring || strip.ringMode != ringFillMode)
+                if (knob.words)
                 {
-                    send (port, ringMcu (element, ring, ringFillMode, false));
-                    strip.ring = ring;
-                    strip.ringMode = ringFillMode;
+                    levelScratch = knobWords (knob.mode, knob.reading, 7);
+
+                    if (changed (strip.rows[1], levelScratch))
+                        send (port, lcdCell (deviceId, 1, element, levelScratch));
+                }
+                else if (changed (strip.rows[1], word))
+                {
+                    send (port, lcdCell (deviceId, 1, element, word));
+                }
+
+                //  The knob's ring from its centre, else the clip's progress in MCU's eleven steps.
+                if (knob.ring)
+                {
+                    const auto ring = mcuParameterRing (knobRingFraction (knob.mode, knob.reading.value), true);
+
+                    if (ring.value != strip.ring || ring.mode != strip.ringMode)
+                    {
+                        send (port, ringMcu (element, ring.value, ring.mode, false));
+                        strip.ring = ring.value;
+                        strip.ringMode = ring.mode;
+                    }
+                }
+                else
+                {
+                    const auto ring = progressOf (strip, word, mcuRingSteps);
+
+                    if (ring != strip.ring || strip.ringMode != ringFillMode)
+                    {
+                        send (port, ringMcu (element, ring, ringFillMode, false));
+                        strip.ring = ring;
+                        strip.ringMode = ringFillMode;
+                    }
                 }
             }
 
@@ -3530,16 +3702,40 @@ namespace wfg::surface
             return dcaLightCache;
         }
 
+        /*  AND THE MARKS PLAYING UNDER EACH (namespace draft §50), what the
+            knob above a DCA strip reads and writes - once per snapshot, as the
+            lights are. */
+        std::shared_ptr<const tree::TreeSnapshot> dcaMarksFrom;
+        std::map<std::string, std::vector<DcaMark>> dcaMarkCache;
+
+        const std::map<std::string, std::vector<DcaMark>>& dcaMarksNow()
+        {
+            if (dcaMarksFrom != published)
+            {
+                dcaMarksFrom = published;
+                dcaMarkCache = published != nullptr ? dcaMarksPlaying (*published)
+                                                    : std::map<std::string, std::vector<DcaMark>> {};
+            }
+
+            return dcaMarkCache;
+        }
+
         /*  AND WHAT IS ASSIGNED TO EACH (§39), which reads the whole tree: so
             once per show change, by the document's revision, and not per
             snapshot. */
-        std::string dcaContentsAt { "-" };
+        /*  THE REVISION IS A NUMBER (`document/revision`, h): read as text it
+            was always empty, and the letters were worked out once and never
+            again - a cue marked after the desk first drew stayed unsaid. Found
+            by the knob's cases (namespace draft §50), which start from them. */
+        std::int64_t dcaContentsAt = -2;
         std::map<std::string, DcaContents> dcaContentCache;
 
         const std::map<std::string, DcaContents>& dcaContentsNow()
         {
-            const auto revision = published != nullptr ? textAt (published.get(), "/godot/document/revision")
-                                                       : std::string {};
+            const auto revision = published != nullptr
+                                    ? static_cast<std::int64_t> (numberAt (published.get(), "/godot/document/revision")
+                                                                   .value_or (-1.0))
+                                    : std::int64_t { -1 };
 
             if (revision != dcaContentsAt)
             {
@@ -3801,6 +3997,7 @@ namespace wfg::surface
         s.flushWrites (to);
         s.flushPageWrites (to);
         s.flushDialWrites (to);
+        s.flushKnobWrites (to, tick);
         return s.tableMoved;
     }
 
