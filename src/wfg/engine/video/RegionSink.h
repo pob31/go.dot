@@ -117,6 +117,42 @@ namespace wfg::video
             removing[static_cast<std::size_t> (at)] = region::notRemoved;
         }
 
+        void restate (const LayerSpec& spec) override
+        {
+            const auto at = slotOf (spec.id);
+
+            if (at < 0)
+                return;
+
+            auto& slot = r.layers[static_cast<std::size_t> (at)];
+
+            region::beginWrite (slot.seq);
+            slot.paint.store (spec.paint, std::memory_order_relaxed);
+            slot.blend.store (static_cast<std::uint32_t> (region::blendFrom (spec.blend)), std::memory_order_relaxed);
+            slot.fit.store (static_cast<std::uint32_t> (region::fitFrom (spec.fit)), std::memory_order_relaxed);
+            slot.scale.store (spec.scale, std::memory_order_relaxed);
+            slot.offsetX.store (spec.offsetX, std::memory_order_relaxed);
+            slot.offsetY.store (spec.offsetY, std::memory_order_relaxed);
+            slot.rotation.store (spec.rotation, std::memory_order_relaxed);
+            slot.flipH.store (spec.flipH ? 1u : 0u, std::memory_order_relaxed);
+            slot.flipV.store (spec.flipV ? 1u : 0u, std::memory_order_relaxed);
+            slot.contrast.store (spec.grade.contrast, std::memory_order_relaxed);
+            slot.saturation.store (spec.grade.saturation, std::memory_order_relaxed);
+            slot.gamma.store (spec.grade.gamma, std::memory_order_relaxed);
+            slot.hue.store (spec.grade.hue, std::memory_order_relaxed);
+            slot.hasCurves.store (spec.grade.hasCurves ? 1u : 0u, std::memory_order_relaxed);
+
+            for (std::size_t channel = 0; channel < 3; ++channel)
+                std::memcpy (slot.tables[channel], spec.grade.tables[channel].data(), 256);
+
+            slot.shapeCount.store (spec.shape.count, std::memory_order_relaxed);
+            slot.shapeFeather.store (spec.shape.feather, std::memory_order_relaxed);
+            slot.shapeInvert.store (spec.shape.invert ? 1u : 0u, std::memory_order_relaxed);
+            std::memcpy (slot.shapeX, spec.shape.x, sizeof (slot.shapeX));
+            std::memcpy (slot.shapeY, spec.shape.y, sizeof (slot.shapeY));
+            region::endWrite (slot.seq);
+        }
+
         void move (const std::string& id, Property property, const Point& point) override
         {
             const auto at = slotOf (id);

@@ -532,11 +532,14 @@ namespace wfg::video::render
             return &held;
         }
 
-        /*  A LAYER'S CURVES, baked once a layer (VV): its grade does not move. */
+        /*  A LAYER'S CURVES, baked on its side and uploaded here (VV): made
+            again when the bytes change - a playing cue's curves edited (§47,
+            AAE) - and never otherwise. */
         struct HeldTable
         {
             sg_image image {};
             sg_view view {};
+            std::array<std::uint8_t, 256 * 4> texels {};
             bool used = false;
         };
 
@@ -548,20 +551,23 @@ namespace wfg::video::render
             auto& held = tables[layer.id];
             held.used = true;
 
-            if (held.image.id == SG_INVALID_ID)
+            std::array<std::uint8_t, 256 * 4> texels {};
+
+            for (std::size_t step = 0; step < 256; ++step)
             {
-                std::uint8_t texels[256 * 4];
+                for (std::size_t channel = 0; channel < 3; ++channel)
+                    texels[step * 4 + channel] = layer.grade.tables[channel][step];
 
-                for (std::size_t step = 0; step < 256; ++step)
-                {
-                    for (std::size_t channel = 0; channel < 3; ++channel)
-                        texels[step * 4 + channel] = layer.grade.tables[channel][step];
+                texels[step * 4 + 3] = 255;
+            }
 
-                    texels[step * 4 + 3] = 255;
-                }
-
-                held.image = makeTable (texels);
+            if (held.image.id == SG_INVALID_ID || texels != held.texels)
+            {
+                release (held.view);
+                release (held.image);
+                held.image = makeTable (texels.data());
                 held.view = textureView (held.image);
+                held.texels = texels;
             }
 
             return held.view;

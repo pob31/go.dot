@@ -1656,3 +1656,49 @@ TEST_CASE ("video host: an output set to spout is sent by a renderer with no win
     CHECK (output->problem.empty());
 }
 #endif
+
+TEST_CASE ("video host: a layer restated takes its new look and keeps its points, its place and its removal (§47)")
+{
+    /*  A PLAYING CUE EDITED (namespace draft §47, AAE): `restate` writes the
+        look and nothing else - where the layer is in its fades and when it
+        goes are as they were, which `show` would have started again. */
+    Memory memory;
+    auto& r = *memory.region;
+    video::RegionSink sink { r };
+
+    auto spec = fill ("RUN00001", "CANVAS01", 2, 7, 0x2040A0);
+    sink.show (spec);
+    sink.opacity ("RUN00001", { 1000, 0.0 });
+    sink.opacity ("RUN00001", { 49000, 1.0 });
+    sink.move ("RUN00001", video::Property::scale, { 2000, 150.0 });
+    sink.remove ("RUN00001", 90000);
+
+    spec.paint = 0xFF0000;
+    spec.blend = "screen";
+    spec.offsetX = 25.0;
+    spec.grade.hue = 30.0;
+    spec.shape.count = 3;
+    spec.shape.x[1] = 0.5f;
+    sink.restate (spec);
+
+    const auto layers = layersOf (r);
+    REQUIRE (layers.size() == 1);
+    CHECK (layers[0].paint == 0xFF0000u);
+    CHECK (layers[0].blend == video::region::Blend::screen);
+    CHECK (layers[0].offsetX == doctest::Approx (25.0));
+    CHECK (layers[0].grade.hue == doctest::Approx (30.0));
+    CHECK (layers[0].shape.count == 3);
+    CHECK (layers[0].shape.x[1] == doctest::Approx (0.5f));
+
+    //  Its points, its place in the stack, its removal: untouched.
+    CHECK (layers[0].ring (video::Property::opacity).count == 2);
+    CHECK (layers[0].ring (video::Property::scale).count == 1);
+    CHECK (layers[0].layer == 2);
+    CHECK (layers[0].order == 7u);
+    CHECK (layers[0].removeAt == 90000);
+
+    //  And a layer nobody showed is restated nowhere.
+    auto other = fill ("NOBODY01", "CANVAS01", 1, 1, 0x000000);
+    sink.restate (other);
+    CHECK (layersOf (r).size() == 1);
+}

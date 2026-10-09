@@ -394,6 +394,7 @@ namespace
     struct FakeSink final : video::Sink
     {
         void show (const video::LayerSpec& spec) override  { shown.push_back (spec); }
+        void restate (const video::LayerSpec& spec) override  { restated.push_back (spec); }
 
         /*  THE OPACITY'S POINTS by layer, and every other value's by layer and
             property: what a fade of the geometry is checked against. */
@@ -421,6 +422,7 @@ namespace
 
         std::vector<std::vector<std::pair<std::string, double>>> canvasLevelsSent;
         std::vector<video::LayerSpec> shown;
+        std::vector<video::LayerSpec> restated;
         std::map<std::string, std::vector<video::Point>> points;
         std::map<std::string, std::map<video::Property, std::vector<video::Point>>> geometry;
         std::vector<std::string> prepared;
@@ -2049,4 +2051,108 @@ TEST_CASE ("video: a movie sought takes its locked sound to the same second, and
     const auto refused = rig.submitAndTick ("run.seek", { osc::Value::string (fill->id), osc::Value::float64 (1.0) });
     CHECK (refused.applied == 0);
     CHECK (refused.rejected == 1);
+}
+
+//==============================================================================
+/*  A PLAYING PICTURE FOLLOWS ITS EDITS (namespace draft §47, AAE). */
+TEST_CASE ("video: a playing picture's colour and curves edited are restated on its layer, which does not come up again (§47)")
+{
+    VideoRig rig;
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (60);
+
+    const auto id = rig.runOf ("VD000002")->id;
+    REQUIRE (rig.sink.shown.size() == 1);
+    const auto pointsBefore = rig.sink.points[id].size();
+
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/paint"),
+                                              osc::Value::string ("#FF0000") }).applied == 1);
+    rig.ticks (2);
+
+    REQUIRE (rig.sink.restated.size() == 1);
+    CHECK (rig.sink.restated.back().id == id);
+    CHECK (rig.sink.restated.back().paint == 0xFF0000u);
+    CHECK (rig.sink.shown.size() == 1);
+    CHECK (rig.sink.points[id].size() == pointsBefore);      // its fade-in left as it was
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000002/curveRed", "0 0 1 0.5").ok);
+    rig.ticks (2);
+
+    REQUIRE (rig.sink.restated.size() == 2);
+    CHECK (rig.sink.restated.back().grade.hasCurves);
+    CHECK (rig.sink.restated.back().grade.tables[0][255] == 128);
+
+    //  A tick with nothing edited restates nothing.
+    rig.ticks (5);
+    CHECK (rig.sink.restated.size() == 2);
+}
+
+TEST_CASE ("video: a playing picture moved by hand steps there, waits for a fade moving it, and steps from where the fade left it (§47)")
+{
+    VideoRig rig;
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (2),
+                                                osc::Value::string ("fade"), osc::Value::string ("Drift"),
+                                                osc::Value::string ("VD000050"),
+                                                osc::Value::string ("target"), osc::Value::string ("VD000002"),
+                                                osc::Value::string ("duration"), osc::Value::string ("1"),
+                                                osc::Value::string ("video"),
+                                                osc::Value::string ("offsetX:10") }).applied >= 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (60);
+    const auto id = rig.runOf ("VD000002")->id;
+
+    //  Never moved: the layer's own number.
+    rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/offsetX"), osc::Value::float64 (25.0) });
+    rig.ticks (2);
+    REQUIRE_FALSE (rig.sink.restated.empty());
+    CHECK (rig.sink.restated.back().offsetX == doctest::Approx (25.0));
+    CHECK (rig.sink.geometry[id][video::Property::offsetX].empty());
+
+    //  A fade on it: an edit meanwhile waits.
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000050") });
+    rig.ticks (10);
+    rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/offsetX"), osc::Value::float64 (40.0) });
+    rig.ticks (5);
+
+    const auto& offsets = rig.sink.geometry[id][video::Property::offsetX];
+    REQUIRE_FALSE (offsets.empty());
+
+    for (const auto& point : offsets)
+        CHECK (point.value <= 25.0 + 1.0e-9);       // from 25 toward 10, never 40
+
+    //  The fade lets go at ten, and the edit lands: a step from there.
+    rig.ticks (70);
+    REQUIRE (offsets.size() >= 2);
+    CHECK (offsets.back().value == doctest::Approx (40.0));
+    CHECK (offsets[offsets.size() - 2].value == doctest::Approx (10.0));
+    CHECK (offsets.back().sample == offsets[offsets.size() - 2].sample);
+
+    //  And the opacity, which always has points: a step a horizon ahead.
+    rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/opacity"), osc::Value::float64 (50.0) });
+    rig.ticks (2);
+    const auto& opacity = rig.sink.points[id];
+    REQUIRE (opacity.size() >= 2);
+    CHECK (opacity.back().value == doctest::Approx (0.5));
+    CHECK (opacity[opacity.size() - 2].value == doctest::Approx (1.0));
+    CHECK (opacity.back().sample == opacity[opacity.size() - 2].sample);
+}
+
+TEST_CASE ("video: under the lock a playing picture is not edited, so nothing moves (§47)")
+{
+    VideoRig rig;
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (60);
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    rig.ticks (2);
+
+    const auto refused = rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/paint"),
+                                                          osc::Value::string ("#00FF00") });
+    CHECK (refused.applied == 0);
+    rig.ticks (3);
+    CHECK (rig.sink.restated.empty());
 }

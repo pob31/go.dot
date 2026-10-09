@@ -482,6 +482,71 @@ TEST_CASE ("video gpu: the GPU composites a canvas as the reference compositor s
     }
 }
 
+TEST_CASE ("video gpu: a playing picture's curves edited are drawn at once, its table made again (§47)")
+{
+    /*  A PLAYING CUE'S CURVES EDITED (namespace draft §47, AAE): the same
+        layer, the same painter, two frames - its table uploaded for the first
+        curve, and made again for the second. Each frame is held to the
+        reference compositor, so a table kept from the first frame fails the
+        second. */
+    Device device;
+
+    if (! device.open)
+        return;
+
+    Pictures pictures;
+    pictures.images["picture.png"] = gradientPicture (40, 30);
+
+    auto ground = layerOf ("L1", region::Source::fill, 1.0, 1);
+    ground.paint = 0x204080u;
+
+    auto shown = layerOf ("L2", region::Source::picture, 1.0, 2);
+    shown.file = "picture.png";
+
+    constexpr int width = 160, height = 90;
+    constexpr std::int64_t sample = 1000;
+
+    region::ConfigReading config;
+    config.canvases.push_back ({ "C1", width, height });
+
+    video::render::Painter painter (pictures);
+    std::string why;
+    REQUIRE_MESSAGE (painter.make (why), why);
+
+    const auto frameWith = [&] (const std::vector<std::pair<double, double>>& red)
+    {
+        video::bakeCurves (shown.grade, {}, { red, {}, {} });
+
+        const std::vector<region::LayerReading> layers { ground, shown };
+        painter.beginFrame (config, layers, [] (const std::string&) { return 1.0; });
+        CHECK (painter.canvas ("C1", sample).id != SG_INVALID_ID);
+        sg_commit();
+
+        std::vector<float> rgba;
+        int readWidth = 0, readHeight = 0;
+        REQUIRE (video::gpu::readBack (painter.canvasImage ("C1"), rgba, readWidth, readHeight));
+        painter.endFrame();
+
+        std::vector<const region::LayerReading*> stack { &layers[0], &layers[1] };
+
+        return compare (rgba, width, height, 6.0, [&] (int column, int row)
+        {
+            const auto x = (column + 0.5) - width / 2.0;
+            const auto y = height / 2.0 - (row + 0.5);
+            return video::colourAt (stack, sample, width, height, x, y, &pictures);
+        });
+    };
+
+    const auto halved = frameWith ({ { 0.0, 0.0 }, { 1.0, 0.5 } });
+    INFO ("red halved: worst " << halved.worst << ", mean " << halved.mean);
+    CHECK (halved.mean < 1.5);
+
+    const auto inverted = frameWith ({ { 0.0, 1.0 }, { 1.0, 0.0 } });
+    INFO ("red inverted: worst " << inverted.worst << ", mean " << inverted.mean);
+    CHECK (inverted.mean < 1.5);
+    CHECK (inverted.far * 100 <= inverted.pixels);
+}
+
 TEST_CASE ("video gpu: an output warps and calibrates the canvas once composited, and lays its zones (R.1)")
 {
     Device device;

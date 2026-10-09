@@ -22766,3 +22766,29 @@ A panel open at the foot follows a pick of either line to the half that has it: 
 a send mixer to the sound, a strip to the movie (`footCueForPick`). The file row's "..." and "→ HAP"
 act on the cue whose file the row is, not on the inspector's. And, from §47.3, a pick of the movie aims
 the surfaces at its sound.
+
+### 47.7 A playing picture follows its edits (AAE, the author's; AAF, mine)
+
+Until now a video cue's picture was read once, at its GO, and an edit changed the next GO. Now, on any
+tick the show moved, every picture up is read again from its cue - one reading, `cue/PictureSpec`, the
+same GO uses and the monitor will (AAH) - and:
+
+- **its look is restated on its layer** - its blend, its colour, its fit and flips, its grade with the
+  curves baked, its mask - through a new `Sink::restate` that writes those and nothing else: where the
+  layer is in its fades, its playhead and when it goes are untouched, which showing it again would have
+  started over. The renderer reads every layer each frame, and a layer's curve table is made again when
+  its bytes change (it was made once a layer).
+- **its moving values step** to the row's new number a horizon ahead: the opacity, the scale, the
+  offsets and the turn. A value no fade has moved is the layer's own number, restated; one moved before
+  steps from where it is. **AAF** (mine): the opacity follows too - the author's question named position,
+  size, colour, curves and mask, and "the picture follows" read as taking its opacity with it.
+- **a fade moving a value holds it**: an edit to that value meanwhile waits, and lands when the fade
+  lets go, from where the fade left it - only if the row was edited; a fade's result stands until
+  somebody edits that row. The fade-in a GO placed holds the opacity the same way. This is the speed's
+  rule (§22, `applyRates`), for pictures.
+- **which canvas, layer, source, file and insert** stay the GO's: each is a different layer, not the same
+  one changed.
+
+Under the lock an edit is refused, so nothing moves. Esc's fade and a stop's are the run's own: a picture
+on its way out takes no edit.
+

@@ -16,6 +16,8 @@
 
 #include <wfg/engine/cue/Runner.h>
 
+#include <wfg/engine/cue/PictureSpec.h>
+
 #include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/FxRows.h>
@@ -4785,27 +4787,16 @@ namespace wfg::cue
         {
             VideoJob job;
             job.self = runId;
+            job.cue = cue[idProperty].toString().toStdString();
+
+            /*  WHAT IT PUTS UP, read in one place (cue/PictureSpec): what GO
+                brings up, what a playing cue is told when it is edited (§47,
+                AAE), and what the monitor shows of a cue not playing (AAH) -
+                its canvas, layer, source and file, its geometry as the cue is
+                written (§36.3), its grade with the curves baked, its mask. */
+            job.spec = pictureSpecOf (document, job.cue, mediaFolder);
             job.spec.id = runId;
-            job.spec.canvas = textOf (cue, "canvas");
-            job.spec.layer = static_cast<int> (std::lround (numberOf (cue, "layer")));
             job.spec.order = ++videoOrder;
-            job.spec.source = textOf (cue, "source");
-            job.spec.blend = textOf (cue, "blend");
-
-            const auto paint = textOf (cue, "paint");
-            job.spec.paint = video::paintFromText (paint.data(), paint.size());
-
-            /*  A PICTURE'S FILE AS A WHOLE PATH, resolved here as a sound's is
-                (VX), and the geometry as the cue is written (§36.3). */
-            if (job.spec.source == "picture" || job.spec.source == "movie")
-                job.spec.file = mediaPathOf (textOf (cue, "file"));
-
-            //  A CAPTURE'S VIDEO INPUT, by identifier (namespace draft §44, YC).
-            if (job.spec.source == "capture")
-                job.spec.input = textOf (cue, "videoInput");
-
-            //  AND THE INSERT ITS PICTURE GOES THROUGH, if any (§44, YE).
-            job.spec.insert = textOf (cue, "videoInsert");
 
             /*  A MOVIE'S PLAYHEAD (§37): from its start offset at its speed,
                 or from its first Range's in point (WL). */
@@ -4813,7 +4804,6 @@ namespace wfg::cue
             {
                 job.movie = true;
                 job.movieFile = textOf (cue, "file");
-                job.cue = cue[idProperty].toString().toStdString();
                 job.moviePosition = std::max (0.0, numberOf (cue, "startOffset"));
                 job.rate = std::clamp (numberOf (cue, "rate"), -20.0, 20.0);   // below nought, backwards (§41)
 
@@ -4835,59 +4825,16 @@ namespace wfg::cue
                 }
             }
 
-            job.spec.fit = textOf (cue, "fit");
-            job.spec.scale = numberOf (cue, "scale");
-            job.spec.offsetX = numberOf (cue, "offsetX");
-            job.spec.offsetY = numberOf (cue, "offsetY");
-            job.spec.rotation = numberOf (cue, "rotation");
-            job.spec.flipH = textOf (cue, "flipH") == "true";
-            job.spec.flipV = textOf (cue, "flipV") == "true";
-
-            /*  THE GRADE (§36, VP, VU), the curves baked here, once, so the
-                far side reads tables and never text (VM). */
-            job.spec.grade.contrast = numberOf (cue, "contrast");
-            job.spec.grade.saturation = numberOf (cue, "saturation");
-            job.spec.grade.gamma = numberOf (cue, "gamma");
-            job.spec.grade.hue = numberOf (cue, "hue");
-
-            const auto curveOf = [this, &cue] (const char* row)
-            {
-                std::vector<double> numbers;
-
-                for (const auto& word : juce::StringArray::fromTokens (juce::String (textOf (cue, row)), " ", ""))
-                    if (const auto value = osc::parseDouble (word.toStdString()); value.has_value())
-                        numbers.push_back (*value);
-
-                return video::curveFrom (numbers);
-            };
-
-            video::bakeCurves (job.spec.grade, curveOf ("curveLuma"),
-                               { curveOf ("curveRed"), curveOf ("curveGreen"), curveOf ("curveBlue") });
-
-            /*  A MASK'S OUTLINE (UY, VF): x, y pairs, at most `maxPoints`. */
-            {
-                std::vector<double> corners;
-
-                for (const auto& word : juce::StringArray::fromTokens (juce::String (textOf (cue, "shape")), " ", ""))
-                    if (const auto value = osc::parseDouble (word.toStdString()); value.has_value())
-                        corners.push_back (*value);
-
-                const auto count = std::min<std::size_t> (corners.size() / 2, video::mask::maxPoints);
-
-                for (std::size_t n = 0; n < count; ++n)
-                {
-                    job.spec.shape.x[n] = static_cast<float> (std::clamp (corners[2 * n], -1.0, 2.0));
-                    job.spec.shape.y[n] = static_cast<float> (std::clamp (corners[2 * n + 1], -1.0, 2.0));
-                }
-
-                job.spec.shape.count = static_cast<int> (count);
-                job.spec.shape.feather = static_cast<float> (std::max (0.0, numberOf (cue, "feather")));
-                job.spec.shape.invert = textOf (cue, "invert") == "true";
-            }
-
             /*  IN %, the author's unit (VR): the renderer's opacity is 0..1. */
             job.opacity = std::clamp (numberOf (cue, "opacity") / 100.0, 0.0, 1.0);
             job.fadeInSeconds = std::max (0.0, numberOf (cue, "fadeIn"));
+
+            //  The rows a later edit is measured against (§47, AAE).
+            job.rowSeen[static_cast<std::size_t> (video::Property::opacity)] = job.opacity;
+            job.rowSeen[static_cast<std::size_t> (video::Property::scale)] = job.spec.scale;
+            job.rowSeen[static_cast<std::size_t> (video::Property::offsetX)] = job.spec.offsetX;
+            job.rowSeen[static_cast<std::size_t> (video::Property::offsetY)] = job.spec.offsetY;
+            job.rowSeen[static_cast<std::size_t> (video::Property::rotation)] = job.spec.rotation;
 
             const auto movieCue = job.movie ? job.cue : std::string {};
 
@@ -16698,6 +16645,11 @@ namespace wfg::cue
         prepareStandbyPictures();
         followCanvasLevels();
 
+        //  The show moved since the last tick: a playing picture may have been edited (§47, AAE).
+        const auto revision = document.showRevision();
+        const auto reread = revision != pictureRevision;
+        pictureRevision = revision;
+
         for (auto& job : showing)
         {
             const auto* run = runs.find (job.self);
@@ -16791,6 +16743,11 @@ namespace wfg::cue
             /*  A DCA RIDDEN WHILE IT IS UP, through Esc's fade-out too. */
             if (job.placed && ! job.removed)
                 followVideoDcas (job, *run);
+
+            /*  AND ITS CUE'S EDITS, while it is up and not on its way out
+                (§47, AAE): Esc's fade and a stop's are the run's own. */
+            if (job.placed && ! job.removed && job.fadeOutTicks < 0 && run->state != runState::stopping)
+                applyPictureEdits (job, reread);
 
             /*  DOWN, AS ESC ASKED: from where it is at the horizon to black over
                 the panic fade, and gone on the frame it gets there. */
@@ -17154,6 +17111,100 @@ namespace wfg::cue
         placeVideoPoint (job, video::Property::time, { at, target });
         job.moviePosition = target;
         job.movieAt = at;
+    }
+
+    void Runner::applyPictureEdits (VideoJob& job, bool reread)
+    {
+        if (! reread && ! job.editWaiting)
+            return;
+
+        if (job.cue.empty() || ! document.findById (job.cue).isValid())
+            return;
+
+        const auto now = pictureSpecOf (document, job.cue, mediaFolder);
+        const auto at = videoSampleAhead();
+
+        /*  WHAT A FADE OR A RAMP IS MOVING NOW: a fade cue aimed at this run
+            that has begun and not ended, or points already placed past the
+            horizon - the fade-in a GO placed. An edit waits for it. */
+        const auto heldNow = [this, &job, at] (video::Property property)
+        {
+            for (const auto& fade : videoFades)
+                if (fade.target == job.self && fade.begun && ! fade.done)
+                    for (const auto& moved : fade.to)
+                        if (moved.first == property)
+                            return true;
+
+            const auto& points = property == video::Property::opacity ? job.points
+                                                                      : job.moved[static_cast<std::size_t> (property)];
+
+            return at >= 0 && ! points.empty() && points.back().sample > at;
+        };
+
+        //  The look, restated as one: nothing in it moves, so nothing waits.
+        auto look = job.spec;
+        takeLook (look, now);
+
+        //  The geometry's own numbers are a moving value's base: kept below, where a step may take them instead.
+        look.scale = job.spec.scale;
+        look.offsetX = job.spec.offsetX;
+        look.offsetY = job.spec.offsetY;
+        look.rotation = job.spec.rotation;
+
+        auto restate = ! sameLook (look, job.spec);
+        job.spec = look;
+        job.editWaiting = false;
+
+        const std::pair<video::Property, double> moving[] {
+            { video::Property::opacity, std::clamp (osc::parseDouble (document.getAttribute ("/godot/cue/" + job.cue + "/opacity")
+                                                                        .value_or (std::string {})).value_or (100.0) / 100.0, 0.0, 1.0) },
+            { video::Property::scale, now.scale },
+            { video::Property::offsetX, now.offsetX },
+            { video::Property::offsetY, now.offsetY },
+            { video::Property::rotation, now.rotation } };
+
+        for (const auto& [property, wanted] : moving)
+        {
+            auto& seen = job.rowSeen[static_cast<std::size_t> (property)];
+
+            if (juce::exactlyEqual (wanted, seen))
+                continue;
+
+            if (heldNow (property))
+            {
+                job.editWaiting = true;
+                continue;
+            }
+
+            const auto& points = property == video::Property::opacity ? job.points
+                                                                      : job.moved[static_cast<std::size_t> (property)];
+
+            /*  NEVER MOVED YET: the layer's own number, which the far side
+                reads while no point says otherwise. Moved before - a fade, a
+                step - and it is a step a horizon ahead, from where it is. */
+            if (property != video::Property::opacity && points.empty())
+            {
+                if (property == video::Property::scale)         job.spec.scale = wanted;
+                else if (property == video::Property::offsetX)  job.spec.offsetX = wanted;
+                else if (property == video::Property::offsetY)  job.spec.offsetY = wanted;
+                else                                            job.spec.rotation = wanted;
+
+                restate = true;
+            }
+            else if (at >= 0)
+            {
+                placeVideoPoint (job, property, { at, videoValueOf (job, property, at) });
+                placeVideoPoint (job, property, { at, wanted });
+            }
+
+            if (property == video::Property::opacity)
+                job.opacity = wanted;
+
+            seen = wanted;
+        }
+
+        if (restate && videoSink != nullptr)
+            videoSink->restate (job.spec);
     }
 
     void Runner::publishMoviePlayhead (Engine& engine, VideoJob& job, Run& run)

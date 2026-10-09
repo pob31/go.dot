@@ -128,6 +128,13 @@ namespace wfg::video
             and then pointed at is never seen for a frame at full. */
         virtual void show (const LayerSpec&) = 0;
 
+        /*  A LAYER ALREADY UP TOLD HOW IT LOOKS NOW (namespace draft §47, AAE):
+            its blend, colour, fit, geometry's own numbers, flips, grade and
+            mask - and nothing else. Where it is in its fades, its playhead and
+            when it goes are untouched, which `show` would start again. A sink
+            that draws nothing has nothing to do. */
+        virtual void restate (const LayerSpec&) {}
+
         /** From the last point of this value the layer holds, straight to this one. */
         virtual void move (const std::string& id, Property, const Point&) = 0;
 

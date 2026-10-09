@@ -2428,6 +2428,13 @@ namespace wfg::cue
 
             /*  The range index last reported with `run.range`, -1 for none. */
             int rangeReported = -1;
+
+            /*  A PLAYING PICTURE FOLLOWS ITS EDITS (namespace draft §47, AAE):
+                each moving value's row as last taken from the document -
+                the opacity 0..1, the geometry in its own units - and whether
+                an edit waits for a fade on it to let go. */
+            std::array<double, video::propertyCount> rowSeen {};
+            bool editWaiting = false;
         };
 
         std::vector<VideoJob> showing;
@@ -2489,6 +2496,19 @@ namespace wfg::cue
         /*  A movie's playhead a horizon ahead, its loops wrapped and its end
             reached (VZ, WB). */
         void advanceMovie (Engine& engine, VideoJob& job);
+
+        /*  A PLAYING PICTURE TOLD WHAT ITS CUE SAYS NOW (namespace draft §47,
+            AAE): the author, 2026-10-09, a playing cue's picture follows its
+            edits at once, as a playing sound's EQ does. On a tick the show
+            moved - or while an edit waits for a fade - the cue is read again:
+            its look (blend, colour, fit, flips, grade and curves, mask) is
+            restated on the layer; its opacity and geometry step to the row's
+            new number a horizon ahead, or, where a fade or a ramp moves that
+            value, when it lets go - so a fade never jumps. Which canvas, layer,
+            source, file or insert stays the GO's. Under the lock no edit is
+            taken, so nothing moves. */
+        void applyPictureEdits (VideoJob& job, bool reread);
+        std::uint64_t pictureRevision = 0;
 
         /*  A MOVIE'S PLAYHEAD AS ITS RUN READS IT (namespace draft §47, AAC):
             the file's second at the clock's now, the speed it goes at, the
