@@ -554,6 +554,26 @@ picture to another program and back.
 | N.4 | Inserts, on a cue; black and a warning when the return is lost | N.3 |
 | N.5 | The Video tab's kinds, inputs and inserts; the inspector's menus | N.4 |
 
+*Added 2026-10-09, at the author's direction* (namespace draft §47; PRD §3.19
+amended): **working on a picture**, after the author used the video side - all
+built and pushed the same night, S0-S8, each stage its own commit on main:
+
+| Stage | What the author sees |
+|---|---|
+| S0 | A pick in the window aims the D700's EQ, Send and FX pages (AAA) |
+| S1 | The dial's numbers without long tails (AAB) |
+| S2 | A movie's strip at the top of its inspector: in and out points, loops, play, seek, a true playhead, its sound drawn (AAC) |
+| S3 | A movie and its locked sound edited from either line (AAD) |
+| S4 | A playing picture following its edits on the projector (AAE, AAF) |
+| S5 | The picture panel: place, colour, curves and mask, dragged (AAG) |
+| S6 | The picked cue alone on the video monitor, opened with the panel (AAH) |
+| S7 | A movie's pictures along its strip, its cuts marked and snapped to (AAI) |
+| S8 | Inserts by kind with their names written once; their send up before any cue (AAJ, AAK) |
+
+Owed to the bench: the strip and its cuts on real movies, the panel's handles by
+hand, live edits on a projector, the insert round trip with TouchDesigner, the
+D700 pages on a picked cue. A movie that is not HAP has no strip until converted.
+
 ---
 
 ## Phase 9 — Plugins and the rack · L

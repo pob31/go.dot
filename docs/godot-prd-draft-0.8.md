@@ -1639,6 +1639,18 @@ switched on a cue, as a plugin of the set is for sound (§3.18); a lost return d
 warning. Pictures only: sound over NDI is later. The NDI runtime is installed by the user, never
 shipped. After Effects only sends its preview, so it is an input, never an insert.
 
+*Amended 2026-10-09, at the author's direction* (namespace draft §47): **working on a picture.** A movie
+has a **strip** at its foot, as a sound has its waveform, where its in and out points and loops are
+dragged and it plays and seeks; its small pictures are drawn along it and its cuts marked, found by
+Go.dot (proposed, AAI). A video cue's **place, colour and mask** are edited in a **picture panel** at the
+foot rather than the inspector (proposed, AAG). While either is open the **video monitor shows the picked
+cue alone**, as it will look on its canvas, playing or not - for a movie at the frame under an in or out
+point being dragged (AAH). **A playing cue's picture follows its edits at once**, as a playing sound's EQ
+does; refused under the lock (AAE). **A movie and its locked sound are edited from either line** (AAD).
+**Inserts stay the show's**, made by kind with both their names written once so another program is
+patched once (AAJ; the names proposed, AAK). And a pick in the window **aims the control surface's EQ,
+Send and FX pages** (AAA, §3.16).
+
 *Amended 2026-10-06, at the author's direction — Phase 8 started* (`docs/godot-namespace-draft-0.1.md`
 §35, decisions UU–VM). **Stills first, movies second:** 8a builds flat colours, masks, pictures,
 blending and the mesh; HAP, capture and DeckLink are 8b. The words are the author's: *"Canvas
