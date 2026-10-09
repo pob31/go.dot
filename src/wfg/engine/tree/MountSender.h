@@ -119,8 +119,10 @@ namespace wfg::tree
 
             /*  THE SERIAL PORT IT GOES DOWN instead of the network, when the
                 device's transport is serial (namespace draft §51, PC.11): the
-                datagram's bytes handed to `serialSink` to be framed in SLIP. */
-            std::string serial;
+                datagram's bytes handed to `serialSink` to be framed in SLIP.
+                Given its empty value here, as the members above are theirs, so a
+                destination written as host and port alone leaves it out. */
+            std::string serial {};
         };
 
         /*  A BUNDLE'S DATAGRAM IS CLOSED AT THIS MANY BYTES (namespace draft
