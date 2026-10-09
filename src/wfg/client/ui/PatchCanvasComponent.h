@@ -51,6 +51,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -72,6 +73,10 @@ namespace wfg::client::ui
                 download where neither is on the machine. */
             std::function<void (const std::string& cueId)> openInEditor;
             std::function<void()> getEditor;
+
+            /*  ATOMS FOR A NAME THE RUNNING PATCH HEARS (PC.8): what a hand on
+                a toggle, a bang, a slider or a number box sends while playing. */
+            std::function<void (const std::string& runId, const std::string& name, const process::Atoms&)> send;
         };
 
         PatchCanvasComponent (const model::Theme&, Actions);
@@ -103,6 +108,7 @@ namespace wfg::client::ui
         std::optional<std::size_t> typingBox() const noexcept { return typing; }
         juce::TextEditor& typingEditor() noexcept { return editor; }
         juce::TextButton& editorButton() noexcept { return openButton; }
+        bool isPlaying() const noexcept { return playing; }
         void commitTyping();
 
     private:
@@ -142,6 +148,16 @@ namespace wfg::client::ui
         };
         Typing editor;
         std::optional<std::size_t> typing;
+
+        /*  PLAYING (PC.8), Pd's run mode, Ctrl or Cmd with E: a hand on a GUI
+            box reaches the running patch instead of moving it. */
+        bool playing = false;
+        std::map<std::string, std::string> values;
+        std::optional<std::size_t> playingBox;      // the GUI box a hand is on
+        double playingFrom = 0.0;                   // a number box's value as the hand landed
+
+        std::optional<double> shownValue (const model::GuiBox& gui) const;
+        void playAt (std::size_t box, juce::Point<double> at, bool landing);
 
         void startTyping (std::size_t box);
         void place (model::Placed what);

@@ -50,10 +50,31 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace wfg::process
 {
+    /*  One of Pd's atoms: a number or a word - what a patch hears and sends,
+        and what the canvas's live boxes hand it (PC.8). */
+    struct Atom
+    {
+        bool isNumber = true;
+        double number = 0.0;
+        std::string word;
+
+        static Atom of (double value) { return { true, value, {} }; }
+        static Atom of (std::string value) { return { false, 0.0, std::move (value) }; }
+
+        bool operator== (const Atom& other) const
+        {
+            return isNumber == other.isNumber
+                && (isNumber ? ! (number < other.number) && ! (other.number < number) : word == other.word);
+        }
+    };
+
+    using Atoms = std::vector<Atom>;
+
     /*  One record: its text as read, from its first character up to and
         including the semicolon that ends it and the new line after it if there
         was one; and its words, escapes kept. A comma Pd did not escape is a

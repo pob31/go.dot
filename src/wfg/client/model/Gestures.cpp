@@ -582,6 +582,14 @@ namespace wfg::client::gesture
         return { origin::window, "pd.install", {} };
     }
 
+    Event processSend (const std::string& runId, const std::string& name, const process::Atoms& atoms)
+    {
+        std::vector<osc::Value> args { osc::Value::string (runId), osc::Value::string (name) };
+        for (const auto& atom : atoms)
+            args.push_back (atom.isNumber ? osc::Value::float64 (atom.number) : osc::Value::string (atom.word));
+        return { origin::window, "process.send", std::move (args) };
+    }
+
     Event pressStrip (const std::string& stripId, int velocity)
     {
         /*  A HAND WITH NO VELOCITY SAYS NONE. The argument is optional because

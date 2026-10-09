@@ -16,6 +16,7 @@
 
 #include <wfg/client/ui/PatchCanvasComponent.h>
 #include <wfg/client/ui/Look.h>
+#include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
 #include <cmath>
@@ -199,6 +200,13 @@ namespace wfg::client::ui
             repaint();
         }
 
+        //  THE VALUES ON ITS NAMED PORTS (PC.8), drawn while it runs.
+        if (auto fresh = model::portValues (reading.ports); fresh != values)
+        {
+            values = std::move (fresh);
+            repaint();
+        }
+
         //  The door's words: where it opens, or Pd's download as it goes.
         juce::String words;
         if (! reading.editor.empty())
@@ -344,12 +352,93 @@ namespace wfg::client::ui
 
         if (box.lines.empty())
         {
-            //  A GUI box drawn as its kind's word, small, until PC.8 draws it.
-            const auto words = process::splitWords (patch.boxes[box.box].text);
-            const auto name = words.empty() ? std::string {} : process::unescaped (words[0]);
-            g.setFont (Look::font (theme, std::max (8.0f, std::min (h, w) * 0.4f)));
-            g.drawFittedText (juce::String (name), area.toNearestInt(), juce::Justification::centred, 1);
+            /*  A GUI BOX AS ITSELF (PC.8), showing what its send or receive last
+                carried: a toggle crossed when on, a bang's circle, a slider's
+                place, a radio's cell, a number box's number. */
+            const auto gui = model::guiOf (patch, box.box);
+            const auto value = gui.has_value() ? shownValue (*gui) : std::nullopt;
+            g.setColour (ink);
+
+            if (gui.has_value() && gui->kind == "tgl")
+            {
+                if (value.has_value() && (*value < 0.0 || *value > 0.0))
+                {
+                    g.drawLine (area.getX() + 2.0f, area.getY() + 2.0f, area.getRight() - 2.0f, area.getBottom() - 2.0f, line);
+                    g.drawLine (area.getRight() - 2.0f, area.getY() + 2.0f, area.getX() + 2.0f, area.getBottom() - 2.0f, line);
+                }
+            }
+            else if (gui.has_value() && gui->kind == "bng")
+            {
+                g.drawEllipse (area.reduced (2.0f), line);
+            }
+            else if (gui.has_value() && (gui->kind == "hsl" || gui->kind == "vsl"))
+            {
+                const auto span = gui->high - gui->low;
+                const auto at = value.has_value() && (span < 0.0 || span > 0.0)
+                                  ? static_cast<float> (std::clamp ((*value - gui->low) / span, 0.0, 1.0)) : 0.0f;
+                if (gui->kind == "hsl")
+                {
+                    const auto x = area.getX() + at * area.getWidth();
+                    g.drawLine (x, area.getY(), x, area.getBottom(), line * 2.0f);
+                }
+                else
+                {
+                    const auto y = area.getBottom() - at * area.getHeight();
+                    g.drawLine (area.getX(), y, area.getRight(), y, line * 2.0f);
+                }
+            }
+            else if (gui.has_value() && (gui->kind == "hradio" || gui->kind == "vradio"))
+            {
+                const auto cells = static_cast<float> (gui->cells);
+                const bool across = gui->kind == "hradio";
+                for (int c = 1; c < gui->cells; ++c)
+                {
+                    const auto f = static_cast<float> (c) / cells;
+                    if (across)
+                        g.drawLine (area.getX() + f * area.getWidth(), area.getY(), area.getX() + f * area.getWidth(), area.getBottom(), line);
+                    else
+                        g.drawLine (area.getX(), area.getY() + f * area.getHeight(), area.getRight(), area.getY() + f * area.getHeight(), line);
+                }
+                if (value.has_value())
+                {
+                    const auto cell = std::clamp (static_cast<float> (std::floor (*value)), 0.0f, cells - 1.0f);
+                    const auto lit = across ? juce::Rectangle<float> (area.getX() + cell * area.getWidth() / cells, area.getY(),
+                                                                      area.getWidth() / cells, area.getHeight())
+                                            : juce::Rectangle<float> (area.getX(), area.getY() + cell * area.getHeight() / cells,
+                                                                      area.getWidth(), area.getHeight() / cells);
+                    g.fillRect (lit.reduced (2.0f));
+                }
+            }
+            else
+            {
+                const auto words = process::splitWords (patch.boxes[box.box].text);
+                const auto name = words.empty() ? std::string {} : process::unescaped (words[0]);
+                const auto said = gui.has_value() && gui->kind == "nbx"
+                                    ? juce::String (value.has_value() ? osc::formatDouble (*value) : std::string ("0"))
+                                    : juce::String (name);
+                g.setFont (Look::font (theme, std::max (8.0f, std::min (h, w) * 0.6f)));
+                g.drawFittedText (said, area.toNearestInt(), juce::Justification::centred, 1);
+            }
             return;
+        }
+
+        /*  A SEND OR A RECEIVE BOX'S LAST VALUE (PC.8), beside it while it runs. */
+        if (box.kind == BoxKind::object)
+        {
+            const auto words = process::splitWords (patch.boxes[box.box].text);
+            if (words.size() >= 2)
+            {
+                const auto cls = process::unescaped (words[0]);
+                if (cls == "s" || cls == "send" || cls == "r" || cls == "receive")
+                    if (const auto found = values.find (process::unescaped (words[1])); found != values.end())
+                    {
+                        g.setColour (Look::colour (theme, "ink-faint"));
+                        g.setFont (Look::font (theme, std::max (9.0f, static_cast<float> (11.0 * scale))));
+                        g.drawText (juce::String::fromUTF8 (("= " + found->second).c_str()),
+                                    juce::Rectangle<float> (area.getRight() + 6.0f, area.getY(), 240.0f, h),
+                                    juce::Justification::centredLeft, true);
+                    }
+            }
         }
 
         auto y = area.getY() + static_cast<float> (3.0 * scale);
@@ -415,6 +504,15 @@ namespace wfg::client::ui
             g.drawRect (band, 1.0f);
         }
 
+        //  PLAYING, said: a hand reaches the patch rather than moving it.
+        if (playing)
+        {
+            g.setColour (Look::colour (theme, "live"));
+            g.setFont (Look::font (theme, 13.0f));
+            g.drawText (reading.runId.empty() ? "Playing - but the cue is not running" : "Playing - clicks reach the patch (Ctrl+E edits)",
+                        getLocalBounds().reduced (8).removeFromTop (20), juce::Justification::topLeft, true);
+        }
+
         //  WHAT IT CANNOT SHOW, said in the corner rather than nowhere.
         if (! patch.problem.empty() || view.boxes.empty())
         {
@@ -439,11 +537,61 @@ namespace wfg::client::ui
             startTyping (view.boxes[hit.item].box);
     }
 
+    std::optional<double> PatchCanvasComponent::shownValue (const model::GuiBox& gui) const
+    {
+        for (const auto* name : { &gui.send, &gui.receive })
+            if (! name->empty())
+                if (const auto found = values.find (*name); found != values.end())
+                    if (const auto value = osc::parseDouble (found->second.substr (0, found->second.find (' '))))
+                        return value;
+        return std::nullopt;
+    }
+
+    void PatchCanvasComponent::playAt (std::size_t box, juce::Point<double> at, bool landing)
+    {
+        const auto gui = model::guiOf (patch, box);
+        const auto* shown = view.viewOf (box);
+        if (! gui.has_value() || shown == nullptr || gui->receive.empty() || reading.runId.empty() || ! actions.send)
+            return;
+
+        //  A toggle and a bang act as the hand lands, not as it moves.
+        if (! landing && (gui->kind == "tgl" || gui->kind == "bng"))
+            return;
+
+        const auto fx = shown->w > 0.0 ? (at.x - shown->x) / shown->w : 0.0;
+        const auto fy = shown->h > 0.0 ? (at.y - shown->y) / shown->h : 0.0;
+        if (landing)
+            playingFrom = shownValue (*gui).value_or (0.0);
+
+        const auto atoms = model::guiPress (*gui, fx, fy, shownValue (*gui), playingFrom + (downAt.y - at.y));
+        if (! atoms.has_value())
+            return;
+
+        actions.send (reading.runId, gui->receive, *atoms);
+
+        //  Shown at once, before the patch answers.
+        if (! atoms->empty() && atoms->front().isNumber)
+            values[gui->receive] = osc::formatDouble (atoms->front().number);
+        repaint();
+    }
+
     void PatchCanvasComponent::mouseDown (const juce::MouseEvent& e)
     {
         commitTyping();
         grabKeyboardFocus();
         downAt = now = pointer = toCanvas (e.position);
+
+        if (playing)
+        {
+            const auto hit = model::hitPatch (view, downAt.x, downAt.y);
+            playingBox.reset();
+            if (hit.what == model::PatchHit::What::box)
+            {
+                playingBox = view.boxes[hit.item].box;
+                playAt (*playingBox, downAt, true);
+            }
+            return;
+        }
 
         if (e.mods.isMiddleButtonDown() || e.mods.isAltDown())
         {
@@ -515,6 +663,13 @@ namespace wfg::client::ui
 
     void PatchCanvasComponent::mouseDrag (const juce::MouseEvent& e)
     {
+        if (playing)
+        {
+            if (playingBox.has_value())
+                playAt (*playingBox, toCanvas (e.position), false);
+            return;
+        }
+
         if (hand == Hand::panning)
         {
             const auto moved = e.position - panFrom;
@@ -531,6 +686,7 @@ namespace wfg::client::ui
 
     void PatchCanvasComponent::mouseUp (const juce::MouseEvent&)
     {
+        playingBox.reset();
         const auto was = hand;
         hand = Hand::none;
 
@@ -601,6 +757,17 @@ namespace wfg::client::ui
     {
         const auto code = key.getKeyCode();
         const auto command = key.getModifiers().isCommandDown();
+
+        //  PD'S CTRL+E: playing the patch, or editing it.
+        if (command && (code == 'E' || code == 'e'))
+        {
+            commitTyping();
+            playing = ! playing;
+            boxes.clear();
+            lines.clear();
+            repaint();
+            return true;
+        }
 
         //  PD'S CTRL+1 TO CTRL+5: an object, a message, a number, a symbol, a comment.
         if (command && code >= '1' && code <= '5')

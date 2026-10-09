@@ -11,6 +11,7 @@
 #include <wfg/client/ui/CurveLaneComponent.h>
 #include <wfg/client/ui/OscMessagesComponent.h>
 #include <wfg/client/ui/PatchCanvasComponent.h>
+#include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
@@ -5253,4 +5254,94 @@ TEST_CASE ("patch canvas: its door opens the patch in plugdata or Pd, or offers 
     reading.locked = true;
     canvas.show (reading);
     CHECK_FALSE (canvas.editorButton().isEnabled());
+}
+
+TEST_CASE ("patch canvas: Ctrl+E plays the patch - a toggle and a slider reach their names, nothing is written")
+{
+    std::vector<std::string> written;
+    std::vector<std::pair<std::string, std::string>> sent;
+    wfg::client::ui::PatchCanvasComponent::Actions actions;
+    actions.set = [&written] (const std::string&, const std::string& text) { written.push_back (text); };
+    actions.say = [] (const juce::String&) {};
+    actions.send = [&sent] (const std::string& run, const std::string& name, const wfg::process::Atoms& atoms)
+    {
+        std::string words;
+        for (const auto& atom : atoms)
+            words += (words.empty() ? "" : " ") + (atom.isNumber ? wfg::osc::formatDouble (atom.number) : atom.word);
+        sent.emplace_back (run + " " + name, words);
+    };
+
+    wfg::client::ui::PatchCanvasComponent canvas (wfg::client::model::Theme {}, std::move (actions));
+    canvas.setSize (600, 300);
+
+    wfg::client::model::PatchReading reading;
+    reading.cueId = "PRCS0001";
+    reading.runId = "R4NID001";
+    reading.text = "#N canvas 0 50 450 300 12;\n"
+                   "#X obj 10 10 tgl 15 0 /lit /light empty 17 7 0 10 #fcfcfc #000000 #000000 0 1;\n"
+                   "#X obj 10 70 hsl 128 15 0 10 0 0 empty /level empty -2 -8 0 10 #fcfcfc #000000 #000000 0 1;\n"
+                   "#X obj 200 10 r /light;\n";
+    reading.ports = "/light 0\n";
+    canvas.show (reading);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+    const auto mouse = [&] (juce::Point<float> at, bool dragged)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, left, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &canvas, &canvas, now, at, now, 1, dragged);
+    };
+    const auto click = [&] (juce::Point<float> at)
+    {
+        canvas.mouseDown (mouse (at, false));
+        canvas.mouseUp (mouse (at, false));
+    };
+
+    //  CTRL+E: playing.
+    CHECK_FALSE (canvas.isPlaying());
+    CHECK (canvas.keyPressed (juce::KeyPress ('E', juce::ModifierKeys::commandModifier, 0)));
+    CHECK (canvas.isPlaying());
+
+    //  A CLICK ON THE TOGGLE turns it on, through its receive name.
+    const auto onToggle = canvas.onScreen (17.0, 17.0);
+    click (onToggle);
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent[0].first == "R4NID001 /light");
+    CHECK (sent[0].second == "1");
+
+    //  The patch says it is on: the next click turns it off.
+    reading.ports = "/light 1\n";
+    canvas.show (reading);
+    click (onToggle);
+    REQUIRE (sent.size() == 2u);
+    CHECK (sent[1].second == "0");
+
+    //  THE SLIDER takes the place under the hand, and follows a drag.
+    canvas.mouseDown (mouse (canvas.onScreen (42.0, 77.0), false));
+    REQUIRE (sent.size() == 3u);
+    CHECK (sent[2].first == "R4NID001 /level");
+    CHECK (sent[2].second == "2.5");
+    canvas.mouseDrag (mouse (canvas.onScreen (74.0, 77.0), true));
+    canvas.mouseUp (mouse (canvas.onScreen (74.0, 77.0), true));
+    REQUIRE (sent.size() == 4u);
+    CHECK (sent[3].second == "5");
+
+    //  Playing writes nothing to the patch.
+    CHECK (written.empty());
+
+    //  A CUE THAT IS NOT RUNNING has no patch to reach.
+    reading.runId.clear();
+    canvas.show (reading);
+    click (onToggle);
+    CHECK (sent.size() == 4u);
+
+    //  CTRL+E AGAIN: editing - a drag moves the toggle and sends nothing.
+    CHECK (canvas.keyPressed (juce::KeyPress ('E', juce::ModifierKeys::commandModifier, 0)));
+    CHECK_FALSE (canvas.isPlaying());
+    canvas.mouseDown (mouse (onToggle, false));
+    canvas.mouseDrag (mouse (onToggle.translated (20.0f, 0.0f), true));
+    canvas.mouseUp (mouse (onToggle.translated (20.0f, 0.0f), true));
+    CHECK (written.size() == 1u);
+    CHECK (sent.size() == 4u);
 }

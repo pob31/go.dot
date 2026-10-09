@@ -49,6 +49,8 @@
     the interface's rate.
 */
 
+#include <wfg/engine/process/PatchText.h>
+
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -67,25 +69,6 @@ namespace wfg::process
         [ctlout], [pgmout], [bendout], [touchout], [polytouchout] and
         [midiout] sent. Starts with a character no address does. */
     inline constexpr const char* midiName = "#midi";
-
-    /*  One of Pd's atoms: a number or a word. */
-    struct Atom
-    {
-        bool isNumber = true;
-        double number = 0.0;
-        std::string word;
-
-        static Atom of (double value) { return { true, value, {} }; }
-        static Atom of (std::string value) { return { false, 0.0, std::move (value) }; }
-
-        bool operator== (const Atom& other) const
-        {
-            return isNumber == other.isNumber
-                && (isNumber ? ! (number < other.number) && ! (other.number < number) : word == other.word);
-        }
-    };
-
-    using Atoms = std::vector<Atom>;
 
     /*  What a patch sent to a name Go.dot listens on: the name, Pd's selector -
         "bang", "float", "symbol", "list", or a message's first word - and the

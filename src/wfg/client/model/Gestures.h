@@ -40,6 +40,7 @@
 */
 
 #include <wfg/engine/command/Event.h>
+#include <wfg/engine/process/PatchText.h>
 
 #include <optional>
 #include <string>
@@ -422,6 +423,10 @@ namespace wfg::client::gesture
         Go.dot's own folder (namespace draft §51, ACN, ACO). */
     Event editPatch (const std::string& cueId);
     Event installPd();
+
+    /*  ATOMS FOR A NAME A RUNNING PATCH HEARS (namespace draft §51, PC.8): a
+        toggle, a slider, a bang or a number box played on the canvas. */
+    Event processSend (const std::string& runId, const std::string& name, const process::Atoms& atoms);
 
     /*  A HAND ON A SAMPLER STRIP, AND THE HAND LIFTED (PRD §3.27): a pad of
         the virtual panel clicked, a number key held. `velocity` is 1 to 127,

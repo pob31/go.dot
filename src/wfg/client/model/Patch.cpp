@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/Patch.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
 #include <charconv>
@@ -733,6 +734,110 @@ namespace wfg::client::model
         for (std::size_t n = static_cast<std::size_t> (firstNumber); n < now.size(); ++n)
             out.boxes.push_back (now[n]);
         return out;
+    }
+
+    std::map<std::string, std::string> portValues (const std::string& ports)
+    {
+        std::map<std::string, std::string> out;
+        std::size_t at = 0;
+        while (at < ports.size())
+        {
+            auto end = ports.find ('\n', at);
+            if (end == std::string::npos)
+                end = ports.size();
+            const auto line = ports.substr (at, end - at);
+            const auto space = line.find (' ');
+            if (! line.empty())
+                out[line.substr (0, space)] = space == std::string::npos ? std::string {} : line.substr (space + 1);
+            at = end + 1;
+        }
+        return out;
+    }
+
+    std::optional<GuiBox> guiOf (const process::Patch& patch, std::size_t box)
+    {
+        if (box >= patch.boxes.size() || patch.boxes[box].kind != BoxKind::object)
+            return std::nullopt;
+
+        const auto words = process::splitWords (patch.boxes[box].text);
+        if (words.empty())
+            return std::nullopt;
+
+        auto name = process::unescaped (words[0]);
+        if (name == "toggle")  name = "tgl";
+        if (name == "hslider") name = "hsl";
+        if (name == "vslider") name = "vsl";
+        if (name == "hdl")     name = "hradio";
+        if (name == "vdl")     name = "vradio";
+
+        const auto word = [&words] (std::size_t i) { return i < words.size() ? process::unescaped (words[i]) : std::string {}; };
+        const auto number = [&word] (std::size_t i, double otherwise)
+        {
+            return osc::parseDouble (word (i)).value_or (otherwise);
+        };
+        const auto name_ = [&word] (std::size_t i) { auto n = word (i); return n == "empty" ? std::string {} : n; };
+
+        GuiBox gui;
+        gui.kind = name;
+
+        //  Where Pd keeps each kind's send and receive names (after the class).
+        if (name == "tgl")
+        {
+            gui.send = name_ (3);
+            gui.receive = name_ (4);
+            const auto nonzero = number (14, 1.0);
+            gui.nonzero = nonzero < 0.0 || nonzero > 0.0 ? nonzero : 1.0;
+        }
+        else if (name == "bng")
+        {
+            gui.send = name_ (5);
+            gui.receive = name_ (6);
+        }
+        else if (name == "hsl" || name == "vsl" || name == "nbx")
+        {
+            gui.low = number (3, 0.0);
+            gui.high = number (4, name == "nbx" ? 1e37 : 127.0);
+            gui.send = name_ (7);
+            gui.receive = name_ (8);
+        }
+        else if (name == "hradio" || name == "vradio")
+        {
+            gui.cells = std::max (1, static_cast<int> (number (4, 8.0)));
+            gui.send = name_ (5);
+            gui.receive = name_ (6);
+        }
+        else
+        {
+            return std::nullopt;
+        }
+        return gui;
+    }
+
+    std::optional<process::Atoms> guiPress (const GuiBox& gui, double fx, double fy, std::optional<double> shown,
+                                            std::optional<double> dragged)
+    {
+        fx = std::clamp (fx, 0.0, 1.0);
+        fy = std::clamp (fy, 0.0, 1.0);
+        const auto one = [] (double value) { return process::Atoms { process::Atom::of (value) }; };
+
+        if (gui.kind == "bng")
+            return process::Atoms {};
+        if (gui.kind == "tgl")
+        {
+            const bool on = shown.has_value() && (*shown < 0.0 || *shown > 0.0);
+            return one (on ? 0.0 : gui.nonzero);
+        }
+        if (gui.kind == "hsl")
+            return one (gui.low + fx * (gui.high - gui.low));
+        if (gui.kind == "vsl")
+            return one (gui.low + (1.0 - fy) * (gui.high - gui.low));
+        if (gui.kind == "hradio")
+            return one (std::min (static_cast<double> (gui.cells - 1), std::floor (fx * gui.cells)));
+        if (gui.kind == "vradio")
+            return one (std::min (static_cast<double> (gui.cells - 1), std::floor (fy * gui.cells)));
+        if (gui.kind == "nbx")
+            return one (std::clamp (dragged.value_or (shown.value_or (0.0)), gui.low, gui.high));
+        return std::nullopt;
     }
 
     std::string patchDeleted (const std::string& text, const std::vector<std::size_t>& boxes,

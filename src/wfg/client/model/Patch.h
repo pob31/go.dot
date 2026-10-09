@@ -46,6 +46,7 @@
 #include <wfg/engine/process/PatchText.h>
 
 #include <cstddef>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -187,4 +188,30 @@ namespace wfg::client::model
         std::vector<std::size_t> boxes;
     };
     Pasted patchPasted (const std::string& text, const std::string& piece, int dx, int dy);
+
+    //==========================================================================
+    /*  THE PATCH LIVE (PC.8): the run's `ports` readout - "name value..." a
+        line - as a map, and what a GUI box is and says. */
+    std::map<std::string, std::string> portValues (const std::string& ports);
+
+    struct GuiBox
+    {
+        std::string kind;            // tgl, bng, hsl, vsl, nbx, hradio, vradio
+        std::string send;            // empty when it has none
+        std::string receive;
+        double low = 0.0;            // a slider's or a number box's range
+        double high = 127.0;
+        int cells = 8;               // a radio's
+        double nonzero = 1.0;        // what a toggle sends when on
+    };
+
+    std::optional<GuiBox> guiOf (const process::Patch& patch, std::size_t box);
+
+    /*  What a hand on a GUI box sends to its receive name, from where on it the
+        hand is - (fx, fy) from its top-left, nought to one each - and what the
+        box shows now: a toggle flips, a bang bangs, a slider takes the place, a
+        radio its cell, a number box what was dragged to (`dragged`, in its
+        units). Empty for a box that sends nothing to anyone. */
+    std::optional<process::Atoms> guiPress (const GuiBox& gui, double fx, double fy, std::optional<double> shown,
+                                            std::optional<double> dragged = std::nullopt);
 }

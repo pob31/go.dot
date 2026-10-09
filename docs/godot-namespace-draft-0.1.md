@@ -23697,3 +23697,12 @@ would give that (the option ACE did not take).
   a `node.set` from `pd` every half second, and publishes `engine/patchEditor` and
   `engine/patchEditorInstall`. The canvas's corner says "Open in plugdata", "Open in Pd", "Get Pd..."
   or "Getting Pd..."; with neither on the machine the window asks "Download Pure Data?".
+- **PC.8**: the canvas live (ACM). While the cue runs, the run's `ports` readout is drawn on the
+  canvas: a toggle crossed when on, a bang's circle, a slider's place, a radio's lit cell, a number
+  box's number, each from the value last carried by its send or receive name, and "= value" beside a
+  `[s /...]` or `[r /...]` box. Ctrl or Cmd with E is Pd's play mode, said in the canvas's corner: a
+  click on a toggle flips it, a bang bangs, a slider or a radio takes the place under the hand and
+  follows a drag, a number box follows a drag up or down - each one `process.send` of the box's
+  receive name, so the patch answers as if the box were clicked in Pd. A box with no receive name, or
+  a cue that is not running, sends nothing; playing writes nothing to the show. Pd's atom moved into
+  `PatchText`, which both sides read.

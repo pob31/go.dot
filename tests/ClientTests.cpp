@@ -693,6 +693,9 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::setPatchSettled (true), gesture::setPatchSettled (false),
         gesture::createRange ("B3N8R5TW", 1.0, 4.0),
         gesture::fireCue ("B3N8R5TW"),
+        gesture::processSend ("R4NID001", "/light", { process::Atom::of (1.0) }),
+        gesture::processSend ("R4NID001", "/hit", {}),
+        gesture::processSend ("R4NID001", "/say", { process::Atom::of (std::string ("on")), process::Atom::of (0.5) }),
         gesture::splitRange ("B3N8R5TW", 6.0),
         gesture::createSend ("B3N8R5TW", "J3MT5XYA"),
         gesture::createSend ("B3N8R5TW", "J3MT5XYA", -18.5),
@@ -11551,4 +11554,84 @@ TEST_CASE ("client: a patch opened in plugdata or Pd, and Pd downloaded - two ge
     const auto reading = model::readPatchFoot (*snapshot, "PRCS0001");
     CHECK (reading.editor == "plugdata");
     CHECK (reading.editorInstall == "downloading\t40\t\tmsp.ucsd.edu");
+}
+
+//==============================================================================
+/*  PC.8: THE PATCH LIVE - the ports readout as values, what a GUI box is, and
+    what a hand on one sends to its receive name. */
+
+TEST_CASE ("client: a running patch's ports read as values, its GUI boxes known, and a hand on one says what it sends")
+{
+    const auto values = model::portValues ("/a 1 2\n/b on\n/c\n");
+    CHECK (values.size() == 3u);
+    CHECK (values.at ("/a") == "1 2");
+    CHECK (values.at ("/b") == "on");
+    CHECK (values.at ("/c").empty());
+    CHECK (model::portValues ("").empty());
+
+    const auto patch = process::parsePatch (
+        "#N canvas 0 50 450 300 12;\n"
+        "#X obj 10 10 tgl 15 0 /lit /light empty 17 7 0 10 #fcfcfc #000000 #000000 0 5;\n"
+        "#X obj 10 40 bng 15 250 50 0 empty /hit empty 17 7 0 10 #fcfcfc #000000 #000000;\n"
+        "#X obj 10 70 hsl 128 15 0 10 0 0 empty /level empty -2 -8 0 10 #fcfcfc #000000 #000000 0 1;\n"
+        "#X obj 10 100 vsl 15 128 -1 1 0 0 empty /pan empty 0 -9 0 10 #fcfcfc #000000 #000000 0 1;\n"
+        "#X obj 10 240 nbx 5 14 0 100 0 0 empty /n empty 0 -8 0 10 #fcfcfc #000000 #000000 0 256;\n"
+        "#X obj 10 270 hradio 15 1 0 4 empty /pick empty 0 -8 0 10 #fcfcfc #000000 #000000 0;\n"
+        "#X obj 100 10 metro 100;\n"
+        "#X obj 100 40 toggle;\n");
+    REQUIRE (patch.problem.empty());
+
+    const auto toggle = model::guiOf (patch, 0);
+    REQUIRE (toggle.has_value());
+    CHECK (toggle->kind == "tgl");
+    CHECK (toggle->send == "/lit");
+    CHECK (toggle->receive == "/light");
+    CHECK (toggle->nonzero == doctest::Approx (5.0));
+
+    const auto bang = model::guiOf (patch, 1);
+    REQUIRE (bang.has_value());
+    CHECK (bang->send.empty());           // "empty" is Pd's word for none
+    CHECK (bang->receive == "/hit");
+
+    const auto radio = model::guiOf (patch, 5);
+    REQUIRE (radio.has_value());
+    CHECK (radio->cells == 4);
+
+    CHECK_FALSE (model::guiOf (patch, 6).has_value());     // [metro] is no GUI box
+    CHECK_FALSE (model::guiOf (patch, 99).has_value());
+
+    //  [toggle] with no arguments: Pd's defaults, no names.
+    const auto bare = model::guiOf (patch, 7);
+    REQUIRE (bare.has_value());
+    CHECK (bare->kind == "tgl");
+    CHECK (bare->receive.empty());
+
+    //  What a hand sends, written as words to compare.
+    const auto press = [&patch] (std::size_t box, double fx, double fy, std::optional<double> shown = std::nullopt,
+                                 std::optional<double> dragged = std::nullopt) -> std::string
+    {
+        const auto gui = model::guiOf (patch, box);
+        if (! gui.has_value())
+            return "no box";
+        const auto atoms = model::guiPress (*gui, fx, fy, shown, dragged);
+        if (! atoms.has_value())
+            return "nothing";
+        std::string out;
+        for (const auto& atom : *atoms)
+            out += (out.empty() ? "" : " ") + (atom.isNumber ? osc::formatDouble (atom.number) : atom.word);
+        return out.empty() ? "bang" : out;
+    };
+
+    CHECK (press (0, 0.5, 0.5) == "5");                 // off: on, at its nonzero
+    CHECK (press (0, 0.5, 0.5, 5.0) == "0");            // on: off
+    CHECK (press (1, 0.5, 0.5) == "bang");
+    CHECK (press (2, 0.25, 0.5) == "2.5");              // a slider: where the hand is
+    CHECK (press (2, 1.5, 0.5) == "10");                // kept inside the box
+    CHECK (press (3, 0.5, 0.0) == "1");                 // a vertical one: its top is its high
+    CHECK (press (3, 0.5, 1.0) == "-1");
+    CHECK (press (4, 0.5, 0.5, 7.0) == "7");            // a number box: what it shows...
+    CHECK (press (4, 0.5, 0.5, 7.0, 42.0) == "42");     // ...or what it was dragged to
+    CHECK (press (4, 0.5, 0.5, 7.0, 150.0) == "100");   // inside its range
+    CHECK (press (5, 0.6, 0.5) == "2");                 // a radio: the cell under the hand
+    CHECK (press (5, 1.0, 0.5) == "3");
 }

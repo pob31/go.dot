@@ -78,6 +78,9 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId)> editPatch;
             std::function<void()> getPd;
 
+            /*  Atoms for a name a running patch hears (PC.8). */
+            std::function<void (const std::string& runId, const std::string& name, const process::Atoms&)> playPatch;
+
             /** `range.split` at the playhead. */
             std::function<void (const std::string& cueId, double at)> splitRange;
 
