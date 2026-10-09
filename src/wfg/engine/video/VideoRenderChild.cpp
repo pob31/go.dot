@@ -137,18 +137,38 @@ namespace wfg::video
             PictureStore() : juce::Thread ("video pictures")  { startThread(); }
             ~PictureStore() override                            { stopThread (4000); }
 
-            /*  The paths wanted now; any other picture is let go. */
-            void want (const std::set<std::string>& paths)
+            /*  The paths wanted now, IN THE ORDER THEY ARE READ - what is on a
+                layer first, then what the engine named to read ahead, the
+                focused list's first (namespace draft §48); any other picture
+                is let go. */
+            void want (const std::vector<std::string>& paths)
             {
                 {
                     const std::lock_guard<std::mutex> hold (lock);
                     wanted = paths;
 
                     for (auto at = held.begin(); at != held.end();)
-                        at = wanted.count (at->first) > 0 ? std::next (at) : held.erase (at);
+                        at = std::find (wanted.begin(), wanted.end(), at->first) != wanted.end() ? std::next (at)
+                                                                                                 : held.erase (at);
                 }
 
                 notify();
+            }
+
+            /*  HOW FAR ONE HAS GOT (§48): read and ready, failed and why, or
+                still being read. */
+            region::HeldReading statusOf (const std::string& path) const
+            {
+                const std::lock_guard<std::mutex> hold (lock);
+                const auto found = held.find (path);
+
+                if (found == held.end())
+                    return { path, region::HeldState::reading };
+
+                if (found->second.failed)
+                    return { path, region::HeldState::failed, found->second.problem };
+
+                return { path, region::HeldState::ready };
             }
 
             /*  The picture at `path`, or an invalid image while it is being
@@ -171,6 +191,7 @@ namespace wfg::video
                 juce::Image image;
                 std::uint64_t version = 0;
                 bool failed = false;
+                std::string problem {};
             };
 
             void run() override
@@ -198,7 +219,8 @@ namespace wfg::video
 
                     /*  READ OUTSIDE THE LOCK: a large picture takes a while, and
                         the windows ask for the others meanwhile. */
-                    auto image = juce::ImageFileFormat::loadFrom (juce::File (juce::String::fromUTF8 (next.c_str())));
+                    const juce::File file (juce::String::fromUTF8 (next.c_str()));
+                    auto image = juce::ImageFileFormat::loadFrom (file);
 
                     /*  HELD AS A SOFTWARE IMAGE, in ARGB: JUCE 8's own type on
                         Windows lives on the GPU (Direct2D), and is read back
@@ -207,15 +229,20 @@ namespace wfg::video
                     if (image.isValid())
                         image = juce::SoftwareImageType().convert (image.convertedToFormat (juce::Image::ARGB));
 
+                    //  Why not, in words the cue's row can carry (§48).
+                    const auto problem = image.isValid() ? std::string {}
+                                       : file.existsAsFile() ? std::string ("not a picture this build reads")
+                                                             : std::string ("not found");
+
                     const std::lock_guard<std::mutex> hold (lock);
 
-                    if (wanted.count (next) > 0)
-                        held[next] = Held { image, ++versions, ! image.isValid() };
+                    if (std::find (wanted.begin(), wanted.end(), next) != wanted.end())
+                        held[next] = Held { image, ++versions, ! image.isValid(), problem };
                 }
             }
 
             mutable std::mutex lock;
-            std::set<std::string> wanted;
+            std::vector<std::string> wanted;
             std::map<std::string, Held> held;
             std::uint64_t versions = 0;
         };
@@ -2732,6 +2759,11 @@ namespace wfg::video
                 if (nativeToUse)
                     loop = std::make_unique<RenderLoop> (r, pictures, movies);
 
+                /*  HOLDING NOTHING YET (namespace draft §48), said before this
+                    renderer says it is up: a renderer started again must not be
+                    read as holding what the last one held. */
+                region::writeHeld (r, 0, {});
+
                 followDisplays (true);
                 startTimer (10);
             }
@@ -2800,10 +2832,29 @@ namespace wfg::video
                         projector->keepCovering();
                 }
 
-                /*  THE PICTURES WANTED: every layer's, and the standby's the
-                    engine named - read before GO, so GO only shows them (VX). */
+                /*  WHAT THE ENGINE NAMED TO READ AHEAD (VX; namespace draft
+                    §48), read again only when it wrote it again - and read
+                    BEFORE THE LAYERS. The engine writes a GO's layer before the
+                    list that no longer names its file; read the other way
+                    round, a pass between the two would find the file in
+                    neither, and let go of what was read ahead for this frame. */
+                if (const auto seqNow = r.preparedSeq.load (std::memory_order_acquire);
+                    ! preparedRead || seqNow != preparedUnder)
+                {
+                    preparedNow = region::readPrepared (r, &preparedUnder);
+                    preparedRead = true;
+                }
+
+                /*  THE PICTURES WANTED, in the order they are read: every
+                    layer's, the picked cue's, then what the engine named. */
                 const auto layers = readLayers (r);
-                auto wanted = std::set<std::string> {};
+                std::vector<std::string> wanted;
+
+                const auto want = [&wanted] (const std::string& path)
+                {
+                    if (! path.empty() && std::find (wanted.begin(), wanted.end(), path) == wanted.end())
+                        wanted.push_back (path);
+                };
 
                 std::map<std::string, int> moviesWanted;
                 const auto now = clock.sampleAt (r, steadyNanos());
@@ -2816,9 +2867,6 @@ namespace wfg::video
                 region::LayerReading tileLayer;
                 const auto tileUp = r.tileWanted.load (std::memory_order_acquire) != 0
                                       && region::readLayer (r.tileLayer, tileLayer);
-
-                if (tileUp && tileLayer.source == region::Source::picture && ! tileLayer.file.empty())
-                    wanted.insert (tileLayer.file);
 
                 if (tileUp && tileLayer.source == region::Source::movie && ! tileLayer.file.empty())
                 {
@@ -2834,8 +2882,8 @@ namespace wfg::video
 
                 for (const auto& layer : layers)
                 {
-                    if (layer.source == region::Source::picture && ! layer.file.empty())
-                        wanted.insert (layer.file);
+                    if (layer.source == region::Source::picture)
+                        want (layer.file);
 
                     /*  A MOVIE AND THE FRAME ITS PLAYHEAD IS ON NOW - the store
                         reads from there on. */
@@ -2846,15 +2894,20 @@ namespace wfg::video
 
                 movies.want (moviesWanted);
 
-                for (const auto& path : region::readPrepared (r))
-                    if (! path.empty())
-                        wanted.insert (path);
+                if (tileUp && tileLayer.source == region::Source::picture)
+                    want (tileLayer.file);
+
+                for (const auto& item : preparedNow)
+                    if (! item.movie)
+                        want (item.path);
 
                 if (wanted != lastWanted)
                 {
                     lastWanted = wanted;
                     pictures.want (wanted);
                 }
+
+                answerPrepared();
 
                 if (! windowed)
                     probe (config, layers);
@@ -3220,6 +3273,33 @@ namespace wfg::video
 
             }
 
+            /*  WHAT IS HELD OF WHAT THE ENGINE NAMED (namespace draft §48), told
+                back in its order with the list it answers - written when it
+                changed. A movie is being read until the movie store says (RA.4). */
+            void answerPrepared()
+            {
+                std::vector<region::HeldReading> now;
+                now.reserve (preparedNow.size());
+
+                for (const auto& item : preparedNow)
+                    now.push_back (item.movie ? region::HeldReading { item.path, region::HeldState::reading }
+                                              : pictures.statusOf (item.path));
+
+                const auto same = heldWritten.size() == now.size()
+                                    && std::equal (now.begin(), now.end(), heldWritten.begin(),
+                                                   [] (const region::HeldReading& a, const region::HeldReading& b)
+                                                   {
+                                                       return a.path == b.path && a.state == b.state && a.problem == b.problem;
+                                                   });
+
+                if (same && heldAnswered == preparedUnder)
+                    return;
+
+                region::writeHeld (r, preparedUnder, now);
+                heldWritten = std::move (now);
+                heldAnswered = preparedUnder;
+            }
+
             region::Region& r;
             std::int64_t parentPid = 0;
             bool windowed = true;
@@ -3227,6 +3307,13 @@ namespace wfg::video
             std::string boundKey;
             int tintTicks = 0;
             std::uint32_t boundSeq = 0xffffffffu;
+
+            //  What the engine named to read ahead, and the answer last written (§48).
+            std::vector<Preload> preparedNow;
+            std::uint32_t preparedUnder = 0;
+            bool preparedRead = false;
+            std::vector<region::HeldReading> heldWritten;
+            std::uint32_t heldAnswered = 0xffffffffu;
 
             std::vector<DisplayInfo> displays;
             PictureStore pictures;
@@ -3236,7 +3323,7 @@ namespace wfg::video
             //  The picked cue's movie, read apart from what plays (§47, AAH).
             MovieStore tileMovies;
             StoreSampler tileSampler { pictures, tileMovies };
-            std::set<std::string> lastWanted;
+            std::vector<std::string> lastWanted;
             std::vector<std::unique_ptr<OutputWindow>> windows;
             std::unique_ptr<RenderLoop> loop;
             std::vector<std::unique_ptr<ProjectorWindow>> projectors;

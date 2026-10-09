@@ -141,6 +141,22 @@ namespace wfg::video
         std::vector<std::pair<std::string, std::uint32_t>> layerTints;
         std::vector<std::pair<std::string, std::uint32_t>> canvasTints;
 
+        /*  WHAT THE RENDERER HOLDS OF WHAT WAS NAMED TO READ AHEAD (namespace
+            draft §48), in the list's order, and whether that answer is to the
+            list the engine wrote last - an answer to an older one says nothing
+            about this one. Empty, and not current, while no renderer runs. */
+        std::vector<region::HeldReading> held;
+        bool heldCurrent = false;
+
+        const region::HeldReading* heldOf (const std::string& path) const noexcept
+        {
+            for (const auto& entry : held)
+                if (entry.path == path)
+                    return &entry;
+
+            return nullptr;
+        }
+
         const OutputEntry* output (const std::string& id) const noexcept
         {
             for (const auto& entry : outputs)

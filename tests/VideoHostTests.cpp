@@ -226,6 +226,53 @@ TEST_CASE ("video region: the configuration written whole and read back, and tex
     CHECK (clock.sampleRate == 48000);
 }
 
+TEST_CASE ("video region: what to read ahead and what the renderer holds of it, both ways, cut to the region's room")
+{
+    Memory memory;
+    auto& r = *memory.region;
+
+    /*  FORTY NAMED, THIRTY-TWO KEPT, in their order - a movie with its second
+        and its way (namespace draft §48). */
+    std::vector<video::Preload> items;
+
+    for (int n = 0; n < 40; ++n)
+        items.push_back ({ "/show/media/still" + std::to_string (n) + ".png" });
+
+    items[1] = { "/show/media/clip.mov", true, 2.5, -1 };
+
+    video::region::writePrepared (r, items);
+
+    std::uint32_t under = 0;
+    const auto read = video::region::readPrepared (r, &under);
+    REQUIRE (read.size() == static_cast<std::size_t> (video::region::maxPrepared));
+    CHECK (under == r.preparedSeq.load());
+    CHECK (read[0].path == "/show/media/still0.png");
+    CHECK_FALSE (read[0].movie);
+    CHECK (read[1].movie);
+    CHECK (read[1].seconds == doctest::Approx (2.5));
+    CHECK (read[1].direction == -1);
+    CHECK (read.back().path == "/show/media/still31.png");
+
+    /*  THE ANSWER, whole, naming the list it answers; a problem longer than
+        its field is cut. */
+    const std::string longProblem (400, 'x');
+    video::region::writeHeld (r, under, { { "/show/media/still0.png", video::region::HeldState::ready },
+                                          { "/show/media/clip.mov", video::region::HeldState::failed, longProblem } });
+
+    std::vector<video::region::HeldReading> held;
+    std::uint32_t answers = 0;
+    REQUIRE (video::region::readHeld (r, held, answers));
+    CHECK (answers == under);
+    REQUIRE (held.size() == 2);
+    CHECK (held[0].state == video::region::HeldState::ready);
+    CHECK (held[1].state == video::region::HeldState::failed);
+    CHECK (held[1].problem.size() == static_cast<std::size_t> (video::region::textChars - 1));
+
+    /*  A LIST WRITTEN SINCE is a question the answer above is not to. */
+    video::region::writePrepared (r, { { "/show/media/other.png" } });
+    CHECK (r.preparedSeq.load() != answers);
+}
+
 TEST_CASE ("video clock: jitter averaged out, a drift followed, a jump taken as a new start")
 {
     /*  A CLOCK READ BY A THREAD THAT WAKES WHEN IT WAKES, off a counter that
@@ -895,6 +942,147 @@ TEST_CASE ("video host: a picture read off the disk by a renderer with no window
 
         host.sink().move ("RUN00001", video::Property::offsetX, { clock.now(), 10.0 });
         CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
+    }
+
+    folder.deleteRecursively();
+}
+
+namespace
+{
+    /*  A STILL THE SIZE OF A PROJECTOR'S PICTURE, noise all over - a real
+        decode - with a block of `centre` in its middle, where the probe looks. */
+    juce::File noiseStill (const juce::File& folder, const juce::String& name, std::uint32_t centre, int width, int height)
+    {
+        juce::Image image (juce::Image::RGB, width, height, false, juce::SoftwareImageType());
+        juce::Random random (static_cast<juce::int64> (centre) + width);
+
+        {
+            const juce::Image::BitmapData pixels (image, juce::Image::BitmapData::writeOnly);
+
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < width; ++x)
+                    pixels.setPixelColour (x, y, juce::Colour (static_cast<juce::uint32> (random.nextInt()) | 0xFF000000u));
+        }
+
+        {
+            juce::Graphics g (image);
+            g.setColour (juce::Colour (centre | 0xFF000000u));
+            g.fillRect (width / 2 - 64, height / 2 - 64, 128, 128);
+        }
+
+        const auto file = folder.getChildFile (name);
+        juce::FileOutputStream out (file);
+        REQUIRE (out.openedOk());
+        REQUIRE (juce::PNGImageFormat().writeImageToStream (image, out));
+        return file;
+    }
+
+    /*  FROM THE SAMPLE A LAYER IS SHOWN AT TO THE FIRST PROBE THAT SEES IT, in
+        samples at 48 kHz - asked every millisecond, so the answer is the
+        renderer's and not this loop's. -1 if it never comes. */
+    std::int64_t lagToFirstSight (video::VideoHost& host, const TestClock& clock, const video::region::Region& r,
+                                  std::int64_t shownAt, std::uint32_t colour)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (10);
+        auto lastTick = std::chrono::steady_clock::now();
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            if (std::chrono::steady_clock::now() - lastTick >= std::chrono::milliseconds (20))
+            {
+                host.tick (clock.now(), 48000);
+                lastTick = std::chrono::steady_clock::now();
+            }
+
+            std::int64_t sample = -1;
+
+            if (probeOf (r, 0, sample) == colour && sample >= shownAt)
+                return sample - shownAt;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (1));
+        }
+
+        return -1;
+    }
+}
+
+TEST_CASE ("video host: a renderer with no window reads ahead what it is named, says what it holds, and shows a still read ahead at once")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-ahead-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    /*  M54a's stills (namespace draft §48): a projector's size, or 4K on the
+        bench. */
+    const auto bench = juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_BENCH", {}).isNotEmpty();
+    const auto width = bench ? 3840 : 1920;
+    const auto height = bench ? 2160 : 1080;
+    const auto ahead = noiseStill (folder, "ahead.png", 0x00FF00, width, height);
+    const auto cold = noiseStill (folder, "cold.png", 0xFF00FF, width, height);
+    const auto missing = folder.getChildFile ("missing.png");
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        /*  NAMED, THEN HELD - and the one that is not there said so, in words. */
+        host.sink().prepare ({ { ahead.getFullPathName().toStdString() }, { missing.getFullPathName().toStdString() } });
+
+        REQUIRE (tickUntil (host, clock, [&host]
+                            {
+                                const auto readouts = host.readouts();
+                                return readouts.heldCurrent && readouts.held.size() == 2
+                                         && readouts.held[0].state == video::region::HeldState::ready
+                                         && readouts.held[1].state == video::region::HeldState::failed;
+                            }));
+
+        CHECK (host.readouts().held[1].problem == "not found");
+
+        /*  SHOWN, READ AHEAD: seen on the renderer's first pass at or after its
+            sample. Then one never named, read only once it is on a layer. */
+        const auto shownAt = clock.now() + 960;
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "picture";
+        layer.file = ahead.getFullPathName().toStdString();
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { shownAt, 1.0 });
+
+        const auto aheadLag = lagToFirstSight (host, clock, r, shownAt, 0x00FF00);
+
+        const auto coldAt = clock.now() + 960;
+        layer.id = "RUN00002";
+        layer.order = 2;
+        layer.file = cold.getFullPathName().toStdString();
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00002", { coldAt, 1.0 });
+
+        const auto coldLag = lagToFirstSight (host, clock, r, coldAt, 0xFF00FF);
+
+        MESSAGE ("M54a, a ", width, "x", height, " still: read ahead ", static_cast<double> (aheadLag) / 48.0,
+                 " ms after its sample; cold ", static_cast<double> (coldLag) / 48.0, " ms");
+
+        /*  THREE OF THE RENDERER'S PASSES AND SOME ROOM: a still read ahead is
+            never waited for by a decode. The cold one is only reported. */
+        REQUIRE (aheadLag >= 0);
+        CHECK (aheadLag < 48 * 60);
+        CHECK (coldLag >= 0);
     }
 
     folder.deleteRecursively();

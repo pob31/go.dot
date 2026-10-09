@@ -66,15 +66,15 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 16;
+    constexpr std::uint32_t version = 17;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
     constexpr int textChars = 256;
     constexpr int pathChars = 1024;
 
-    /** Pictures held ready ahead of GO, at most (VX). */
-    constexpr int maxPrepared = 8;
+    /** Files held ready ahead of GO, at most (VX; namespace draft §48, AAO). */
+    constexpr int maxPrepared = static_cast<int> (preloadsAtMost);
 
     constexpr int maxCanvases = 16;
     constexpr int maxOutputs = 16;
@@ -425,6 +425,34 @@ namespace wfg::video::region
         char problem[textChars];
     };
 
+    /*  ONE FILE TO READ AHEAD (namespace draft §48), the engine's side: its
+        whole path, whether it is a movie, and for a movie the second GO will
+        start it at and which way it plays. */
+    struct PreparedFile
+    {
+        char path[pathChars];
+        std::atomic<std::uint32_t> movie;
+        std::atomic<double> seconds;
+        std::atomic<std::int32_t> direction;
+    };
+
+    /*  WHAT THE RENDERER HOLDS OF ONE, its side: being read, ready to show at
+        once, or failed - and why, in a few words. */
+    enum class HeldState : std::uint32_t
+    {
+        none = 0,
+        reading = 1,
+        ready = 2,
+        failed = 3
+    };
+
+    struct HeldFile
+    {
+        char path[pathChars];
+        std::atomic<std::uint32_t> state;
+        char problem[textChars];
+    };
+
     struct Region
     {
         std::atomic<std::uint32_t> magic;
@@ -442,11 +470,12 @@ namespace wfg::video::region
         /** Engine to renderer: each canvas's level (WT), by identifier. */
         CanvasLevel canvasLevels[maxCanvases];
 
-        /*  Engine to renderer: the pictures to read ahead of GO - the
-            standby's - as whole paths, under `preparedSeq` (VX). */
+        /*  Engine to renderer: the stills and movies to read ahead of GO -
+            what the next GO starts, the focused list's first - under
+            `preparedSeq` (VX; namespace draft §48). */
         std::atomic<std::uint32_t> preparedSeq;
         std::atomic<std::uint32_t> preparedCount;
-        char prepared[maxPrepared][pathChars];
+        PreparedFile prepared[maxPrepared];
 
         //==============================================================================
         /** Renderer to engine: up, its windows made for the outputs it could bind. */
@@ -497,6 +526,16 @@ namespace wfg::video::region
 
         /** Renderer to engine (§44, YE): each video insert, in the configuration's order. */
         InsertState inserts[maxInserts];
+
+        /*  Renderer to engine (namespace draft §48): what it holds of the list
+            above, in its order, under ONE `heldSeq` for the whole table - and
+            `heldAnswers`, the `preparedSeq` it is the answer to, so an answer
+            to an older list is never read as this one's. A renderer started
+            again begins with none. */
+        std::atomic<std::uint32_t> heldSeq;
+        std::atomic<std::uint32_t> heldAnswers;
+        std::atomic<std::uint32_t> heldCount;
+        HeldFile held[maxPrepared];
 
         /*  THE PICKED CUE'S TILE (namespace draft §47, AAH). Engine to
             renderer: whether the monitor wants it, and the cue as it would be
@@ -553,6 +592,9 @@ namespace wfg::video::region
         mix (static_cast<std::uint32_t> (sizeof (Zone)));
         mix (static_cast<std::uint32_t> (sizeof (Preview)));
         mix (static_cast<std::uint32_t> (sizeof (Tile)));
+        mix (static_cast<std::uint32_t> (maxPrepared));
+        mix (static_cast<std::uint32_t> (sizeof (PreparedFile)));
+        mix (static_cast<std::uint32_t> (sizeof (HeldFile)));
         return hash;
     }
 
@@ -914,33 +956,102 @@ namespace wfg::video::region
         std::vector<InsertReading> inserts {};
     };
 
-    /*  THE PICTURES TO HAVE READY, the engine's side and the renderer's. */
-    inline void writePrepared (Region& r, const std::vector<std::string>& paths) noexcept
+    /*  THE FILES TO HAVE READY (namespace draft §48), the engine's side: the
+        list, in its order, cut at the region's room. */
+    inline void writePrepared (Region& r, const std::vector<Preload>& items) noexcept
     {
         beginWrite (r.preparedSeq);
-        const auto count = std::min<std::size_t> (paths.size(), maxPrepared);
+        const auto count = std::min<std::size_t> (items.size(), maxPrepared);
 
         for (std::size_t n = 0; n < count; ++n)
-            writeText (r.prepared[n], paths[n]);
+        {
+            auto& slot = r.prepared[n];
+            writeText (slot.path, items[n].path);
+            slot.movie.store (items[n].movie ? 1u : 0u, std::memory_order_relaxed);
+            slot.seconds.store (items[n].seconds, std::memory_order_relaxed);
+            slot.direction.store (items[n].direction < 0 ? -1 : 1, std::memory_order_relaxed);
+        }
 
         r.preparedCount.store (static_cast<std::uint32_t> (count), std::memory_order_relaxed);
         endWrite (r.preparedSeq);
     }
 
-    inline std::vector<std::string> readPrepared (const Region& r)
+    /*  And the renderer's: the list, and the `preparedSeq` it was read under -
+        what the answer below names as its question. */
+    inline std::vector<Preload> readPrepared (const Region& r, std::uint32_t* readUnder = nullptr)
     {
-        std::vector<std::string> out;
+        std::vector<Preload> out;
+        std::uint32_t under = 0;
 
         readConsistent (r.preparedSeq, [&]
         {
             out.clear();
+            under = r.preparedSeq.load (std::memory_order_relaxed);
             const auto count = std::min<std::uint32_t> (r.preparedCount.load (std::memory_order_relaxed), maxPrepared);
 
             for (std::uint32_t n = 0; n < count; ++n)
-                out.push_back (readText (r.prepared[n]));
+            {
+                const auto& slot = r.prepared[n];
+                Preload item;
+                item.path = readText (slot.path);
+                item.movie = slot.movie.load (std::memory_order_relaxed) != 0;
+                item.seconds = slot.seconds.load (std::memory_order_relaxed);
+                item.direction = slot.direction.load (std::memory_order_relaxed) < 0 ? -1 : 1;
+                out.push_back (std::move (item));
+            }
         });
 
+        if (readUnder != nullptr)
+            *readUnder = under;
+
         return out;
+    }
+
+    /*  WHAT THE RENDERER HOLDS (namespace draft §48), both sides: a path, its
+        state, and why when it failed. */
+    struct HeldReading
+    {
+        std::string path;
+        HeldState state = HeldState::none;
+        std::string problem {};
+    };
+
+    inline void writeHeld (Region& r, std::uint32_t answers, const std::vector<HeldReading>& held) noexcept
+    {
+        beginWrite (r.heldSeq);
+        const auto count = std::min<std::size_t> (held.size(), maxPrepared);
+
+        for (std::size_t n = 0; n < count; ++n)
+        {
+            writeText (r.held[n].path, held[n].path);
+            r.held[n].state.store (static_cast<std::uint32_t> (held[n].state), std::memory_order_relaxed);
+            writeText (r.held[n].problem, held[n].problem);
+        }
+
+        r.heldCount.store (static_cast<std::uint32_t> (count), std::memory_order_relaxed);
+        r.heldAnswers.store (answers, std::memory_order_relaxed);
+        endWrite (r.heldSeq);
+    }
+
+    /*  The engine's: false when the table could not be read whole. */
+    inline bool readHeld (const Region& r, std::vector<HeldReading>& out, std::uint32_t& answers)
+    {
+        return readConsistent (r.heldSeq, [&]
+        {
+            out.clear();
+            answers = r.heldAnswers.load (std::memory_order_relaxed);
+            const auto count = std::min<std::uint32_t> (r.heldCount.load (std::memory_order_relaxed), maxPrepared);
+
+            for (std::uint32_t n = 0; n < count; ++n)
+            {
+                const auto state = r.held[n].state.load (std::memory_order_relaxed);
+
+                out.push_back ({ readText (r.held[n].path),
+                                 state <= static_cast<std::uint32_t> (HeldState::failed) ? static_cast<HeldState> (state)
+                                                                                        : HeldState::none,
+                                 readText (r.held[n].problem) });
+            }
+        });
     }
 
     inline bool readConfig (const Region& r, ConfigReading& out)

@@ -394,6 +394,13 @@ namespace wfg::video
 
             auto offered = region::readAvailable (*r);
 
+            /*  WHAT IS HELD OF THE READ-AHEAD (§48), and whether it answers the
+                list written last. */
+            std::vector<region::HeldReading> foundHeld;
+            std::uint32_t answers = 0;
+            const auto heldRead = region::readHeld (*r, foundHeld, answers);
+            const auto heldCurrent = heldRead && answers == r->preparedSeq.load (std::memory_order_acquire);
+
             std::vector<Readouts::InsertEntry> foundInserts;
 
             for (auto& state : r->inserts)
@@ -429,6 +436,12 @@ namespace wfg::video
                 latest.inserts = std::move (foundInserts);
                 latest.layerTints = region::readTints (r->layerTints);
                 latest.canvasTints = region::readTints (r->canvasTints);
+
+                if (heldRead)
+                {
+                    latest.held = std::move (foundHeld);
+                    latest.heldCurrent = heldCurrent;
+                }
             }
             else
             {
@@ -438,6 +451,8 @@ namespace wfg::video
                 latest.inserts.clear();
                 latest.layerTints.clear();
                 latest.canvasTints.clear();
+                latest.held.clear();
+                latest.heldCurrent = false;
             }
         }
 

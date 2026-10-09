@@ -205,16 +205,7 @@ namespace wfg::video
 
         void prepare (const std::vector<Preload>& items) override
         {
-            /*  THE STILLS, for now: the region's table holds paths of pictures
-                only until it carries a movie's second too (namespace draft
-                §48, RA.3). */
-            std::vector<std::string> paths;
-
-            for (const auto& item : items)
-                if (! item.movie)
-                    paths.push_back (item.path);
-
-            region::writePrepared (r, paths);
+            region::writePrepared (r, items);
         }
 
         /*  EVERY SLOT WHOSE REMOVAL THE CLOCK HAS PASSED, by `margin`, freed.
