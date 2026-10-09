@@ -23379,4 +23379,29 @@ take).
 
 ### 50.7 Built so far
 
-- **DK.0, this section** (2026-10-09).
+All of it, 2026-10-09, each stage its own commit on main:
+
+- **DK.0** (e7014e8): this section; PRD §3.28, §6.9; §16.3, §16.6, §37.5 and §49.8 amended.
+- **DK.1** (53f22f9): the rows `dcaCurve` and `dcaOffset` on the owner `mark` (ABT), on a media, a
+  mic, a video cue and a group; the inspector's "picture curve" and "sound offset" after the DCA,
+  greyed where they move nothing; the browser console; the `mix` part carrying them (ACB).
+- **DK.2** (9ddab68): the sound offset heard, once per mark beside its DCAs' trims and never lifting
+  silence (ABV) - a group's reaching its members, a movie's its locked sound.
+- **DK.3** (a60f9de): the picture curve (ABU), and a picture's DCA factor a product - one factor per
+  mark, a sampler member's hand its own (ABO, ABW).
+- **DK.4** (56c8c31): both rows ride live under the lock, as the EQ's, kept or let go on unlock
+  (ABQ); a media cue's `live` word stays the EQ's.
+- **DK.5** (2ce3411): `engine/surface/DcaKnob`, the one rule for a desk and the window - the marks
+  playing under each DCA, found through the runs' parents (ABY), the value shown, a turn's writes,
+  the words and the ring (ABZ).
+- **DK.6** (cde2050): the knob on a D700 and a Mackie desk: a turn writes one `node.setMany`, a press
+  switches (ACA), the screen and ring say it. And an older fault: the D700 DCA strip's letters (§39)
+  were keyed on the document's revision read as text, which it is not, and never changed after the
+  desk first drew.
+- **DK.7** (c7df35b): the knob on the window's virtual panel (ABS).
+- **DK.8**: `tests/blackbox/phase6_surfaces.py` writes the bed's sound offset over the network as a
+  knob does, hears it under the DCA, rides it live under the lock, keeps it on unlock and undoes it
+  in one step, under C and fr-FR, and `wfg replay` reproduces it.
+
+Owed to the bench: the detents and the screen's words with the D700 in hand; a movie and its sound on
+one D700 DCA, both turned.

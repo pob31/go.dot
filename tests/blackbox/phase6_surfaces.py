@@ -227,6 +227,52 @@ def run(locale: "str | None") -> int:
                     report.equal(value_of(server, "/godot/document/canUndo"), False,
                                  "and a ride is nothing anybody decided: there is nothing to undo")
 
+                    # --- what the DCA's knob writes (namespace draft §50) ---
+                    # The bed's mark carries a sound offset, written as the
+                    # knob above the DCA strip writes it - one set of rows -
+                    # and heard beside the DCA's trim.
+                    offset = f"/godot/cue/{BED}/dcaOffset"
+                    hand.send("/godot/cmd/node/setMany", [offset, "-4"])
+
+                    report.equal(wait_for(server, offset, -4.0), -4.0,
+                                 "a DCA mark's sound offset is written into the show")
+                    report.equal(wait_for(server, f"/godot/run/{bed}/level", -10.0), -10.0,
+                                 "and the bed sits four decibels further under its DCA")
+                    report.equal(value_of(server, "/godot/document/canUndo"), True,
+                                 "an edit somebody decided, which can be undone")
+
+                    # Locked, it rides live: heard at once, the show not written.
+                    hand.send("/godot/document/locked", [True])
+                    report.equal(wait_for(server, "/godot/document/locked", True), True,
+                                 "the show is locked")
+
+                    hand.send("/godot/cmd/node/setMany", [offset, "-8"])
+
+                    report.equal(wait_for(server, f"/godot/run/{bed}/level", -14.0), -14.0,
+                                 "under the lock the knob is heard at once")
+                    report.equal(value_of(server, offset), -8.0,
+                                 "and read at its own address")
+                    report.equal(value_of(server, "/godot/document/live"), 1,
+                                 "riding live: one change for the bar to ask about on unlock")
+
+                    # Unlocked and kept: written as one step, and one undo takes it back.
+                    hand.send("/godot/document/locked", [False])
+                    report.equal(wait_for(server, "/godot/document/locked", False), False,
+                                 "the show is unlocked")
+
+                    hand.send("/godot/cmd/live/keep")
+
+                    report.equal(wait_for(server, "/godot/document/live", 0), 0,
+                                 "Keep writes what rode into the show")
+                    report.equal(value_of(server, offset), -8.0, "as the value it rode at")
+
+                    hand.send("/godot/cmd/undo")
+
+                    report.equal(wait_for(server, offset, -4.0), -4.0,
+                                 "and one undo takes the kept turn back")
+                    report.equal(wait_for(server, f"/godot/run/{bed}/level", -10.0), -10.0,
+                                 "the bed back where the show had it")
+
                 # --- and everything stops -----------------------------------
                 hand.send("/godot/cmd/run/killAll")
 

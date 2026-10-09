@@ -626,7 +626,8 @@ Then its own round: the knob above a DCA strip (PRD §3.28, decided the same day
 *Added 2026-10-09, at the author's direction* (namespace draft §50; PRD §3.28 and
 §6.9 amended): **the knob above a DCA strip** - the picture's curve and the
 sound's offset, kept on each cue's DCA mark, one of each per mark, on the desk
-and on the window's panel. Each stage its own commit on main:
+and on the window's panel. All built and pushed the same day, DK.0-DK.8, each
+stage its own commit on main (namespace draft §50.7):
 
 | Stage | What the author sees |
 |---|---|
@@ -639,6 +640,9 @@ and on the window's panel. Each stage its own commit on main:
 | DK.6 | The knob on the D700 and a Mackie desk |
 | DK.7 | The knob on the window's panel |
 | DK.8 | The close-out |
+
+Owed to the bench: the detents and the screen's words with the D700 in hand; a
+movie and its sound on one D700 DCA, both turned.
 
 ---
 

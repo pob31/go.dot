@@ -2755,7 +2755,8 @@ reaches - the cue's own, or one that DCA sits inside - the last turned winning;
 Proposed (§6.9): the rows' ranges and names, a curve law, an offset that never
 lifts silence, within one mark its DCAs' trims adding in dB as before and across
 marks the factors multiplying - a sampler member's hand a factor of its own - and
-the press no longer resetting the DCA to nought on a desk.
+the press no longer resetting the DCA to nought on a desk. *Built 2026-10-09* (namespace draft §50.7), on the D700, a
+Mackie desk and the window's panel, in the inspector and under the lock.
 
 ### 3.29 Persistent cues — a section that is checked, not fired
 
