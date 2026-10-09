@@ -1024,6 +1024,12 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("member"))
                     rows.push_back (row);
 
+            /*  AND WHAT ITS DCA MARK CARRIES (namespace draft §50, ABT): the
+                picture's curve and the sound's offset, last, as on the element. */
+            if (isMedia || isMic || isVideo || isGroup)
+                for (auto* row : doc::Schema::rowsForOwner ("mark"))
+                    rows.push_back (row);
+
             if (isFade)
                 for (auto* row : doc::Schema::rowsForOwner ("fade"))
                     rows.push_back (row);

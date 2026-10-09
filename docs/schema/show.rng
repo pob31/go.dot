@@ -230,6 +230,24 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dcaCurve">
+          <a:documentation>The curve on this cue&apos;s DCA mark: how the fader&apos;s travel brings a picture in (PRD 3.28; namespace draft 50, ABK-ABO the author&apos;s, ABT-ABW proposed). Nought is the straight travel of 37.5 WE - half way up the fader, about half faded. Above nought the picture comes in fast at first, at 100 the fourth root of the travel&apos;s factor; below nought it comes in slowly at first, at -100 its fourth power. Kept on the mark, so it travels with the cue through the show; the knob above any DCA the mark reaches writes it, the last one turned winning, and a new cue starts at nought. Within one mark its DCAs&apos; trims add in dB and this shapes their factor; across marks - the cue&apos;s own, each group&apos;s above it - the factors multiply. Read on a picture and on a group with pictures under it; nothing on a sound.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-100</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dcaOffset">
+          <a:documentation>The sound offset on this cue&apos;s DCA mark: how far its sounds sit above or below where the DCA&apos;s fader puts them, so a sound can sit under its picture on one fader (PRD 3.28; namespace draft 50, ABK-ABR the author&apos;s, ABT and ABV proposed). Added once for the mark, beside its DCAs&apos; trims, to every run the mark reaches - the cue&apos;s own, a group&apos;s members, a movie&apos;s locked sound - and never to a mark whose DCAs sum to -120 dB or below: an offset never lifts silence. Kept on the mark, written by the knob above any DCA the mark reaches; a new cue starts at nought. The top is +12 dB, as every other trim&apos;s.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">12</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="enabled">
           <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>
@@ -446,6 +464,24 @@
         <attribute name="dca">
           <a:documentation>The DCA this cue is assigned to, by identifier, or empty. A mark on the member and never a list on the DCA (PRD 3.28), so assigning eight cues is a multi-select edit and nothing flows downward (4.12). Adds that DCA&apos;s trim, and the trim of every DCA it sits inside, to the level of every run of this cue - level only, one to one in dB; a mapping per assignment comes later.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dcaCurve">
+          <a:documentation>The curve on this cue&apos;s DCA mark: how the fader&apos;s travel brings a picture in (PRD 3.28; namespace draft 50, ABK-ABO the author&apos;s, ABT-ABW proposed). Nought is the straight travel of 37.5 WE - half way up the fader, about half faded. Above nought the picture comes in fast at first, at 100 the fourth root of the travel&apos;s factor; below nought it comes in slowly at first, at -100 its fourth power. Kept on the mark, so it travels with the cue through the show; the knob above any DCA the mark reaches writes it, the last one turned winning, and a new cue starts at nought. Within one mark its DCAs&apos; trims add in dB and this shapes their factor; across marks - the cue&apos;s own, each group&apos;s above it - the factors multiply. Read on a picture and on a group with pictures under it; nothing on a sound.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-100</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dcaOffset">
+          <a:documentation>The sound offset on this cue&apos;s DCA mark: how far its sounds sit above or below where the DCA&apos;s fader puts them, so a sound can sit under its picture on one fader (PRD 3.28; namespace draft 50, ABK-ABR the author&apos;s, ABT and ABV proposed). Added once for the mark, beside its DCAs&apos; trims, to every run the mark reaches - the cue&apos;s own, a group&apos;s members, a movie&apos;s locked sound - and never to a mark whose DCAs sum to -120 dB or below: an offset never lifts silence. Kept on the mark, written by the knob above any DCA the mark reaches; a new cue starts at nought. The top is +12 dB, as every other trim&apos;s.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">12</param>
+          </data>
         </attribute>
       </optional>
       <optional>
@@ -898,6 +934,24 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dcaCurve">
+          <a:documentation>The curve on this cue&apos;s DCA mark: how the fader&apos;s travel brings a picture in (PRD 3.28; namespace draft 50, ABK-ABO the author&apos;s, ABT-ABW proposed). Nought is the straight travel of 37.5 WE - half way up the fader, about half faded. Above nought the picture comes in fast at first, at 100 the fourth root of the travel&apos;s factor; below nought it comes in slowly at first, at -100 its fourth power. Kept on the mark, so it travels with the cue through the show; the knob above any DCA the mark reaches writes it, the last one turned winning, and a new cue starts at nought. Within one mark its DCAs&apos; trims add in dB and this shapes their factor; across marks - the cue&apos;s own, each group&apos;s above it - the factors multiply. Read on a picture and on a group with pictures under it; nothing on a sound.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-100</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dcaOffset">
+          <a:documentation>The sound offset on this cue&apos;s DCA mark: how far its sounds sit above or below where the DCA&apos;s fader puts them, so a sound can sit under its picture on one fader (PRD 3.28; namespace draft 50, ABK-ABR the author&apos;s, ABT and ABV proposed). Added once for the mark, beside its DCAs&apos; trims, to every run the mark reaches - the cue&apos;s own, a group&apos;s members, a movie&apos;s locked sound - and never to a mark whose DCAs sum to -120 dB or below: an offset never lifts silence. Kept on the mark, written by the knob above any DCA the mark reaches; a new cue starts at nought. The top is +12 dB, as every other trim&apos;s.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">12</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="directOut">
           <a:documentation>The direct out this cue-s channels land on, by identifier; empty routes it nowhere by this road and is what every cue starts as. A mono cue feeds every channel of a stereo out; a stereo cue onto a mono out is folded, each side at half (2026-10-08); any other cue wider than its out fails the run as bad-route, because which side a third channel belongs to is a layout somebody has to say. Chosen among the outputs whose kind is direct - a mix channel is reached through a Send, at a level, which is the whole difference between the two.</a:documentation>
           <data type="string"/>
@@ -1318,6 +1372,24 @@
         <attribute name="dca">
           <a:documentation>The DCA this cue is assigned to, by identifier, or empty - a mark on the member as a sound&apos;s is (PRD 3.28). The DCA&apos;s trim, and the trim of every DCA it sits inside and of every group&apos;s above the cue, turn into how solid the picture is (namespace draft 37.5, WE, the author&apos;s): nought dB and above is the opacity as it stands, -120 dB is nothing, and between the two the picture follows the show&apos;s fader travel - half way up the fader is about half way faded. Never more solid than the cue&apos;s own opacity.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dcaCurve">
+          <a:documentation>The curve on this cue&apos;s DCA mark: how the fader&apos;s travel brings a picture in (PRD 3.28; namespace draft 50, ABK-ABO the author&apos;s, ABT-ABW proposed). Nought is the straight travel of 37.5 WE - half way up the fader, about half faded. Above nought the picture comes in fast at first, at 100 the fourth root of the travel&apos;s factor; below nought it comes in slowly at first, at -100 its fourth power. Kept on the mark, so it travels with the cue through the show; the knob above any DCA the mark reaches writes it, the last one turned winning, and a new cue starts at nought. Within one mark its DCAs&apos; trims add in dB and this shapes their factor; across marks - the cue&apos;s own, each group&apos;s above it - the factors multiply. Read on a picture and on a group with pictures under it; nothing on a sound.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-100</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dcaOffset">
+          <a:documentation>The sound offset on this cue&apos;s DCA mark: how far its sounds sit above or below where the DCA&apos;s fader puts them, so a sound can sit under its picture on one fader (PRD 3.28; namespace draft 50, ABK-ABR the author&apos;s, ABT and ABV proposed). Added once for the mark, beside its DCAs&apos; trims, to every run the mark reaches - the cue&apos;s own, a group&apos;s members, a movie&apos;s locked sound - and never to a mark whose DCAs sum to -120 dB or below: an offset never lifts silence. Kept on the mark, written by the knob above any DCA the mark reaches; a new cue starts at nought. The top is +12 dB, as every other trim&apos;s.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">12</param>
+          </data>
         </attribute>
       </optional>
       <optional>

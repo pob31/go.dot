@@ -537,6 +537,38 @@ TEST_CASE ("canonical xml: an attribute at its default is omitted, and still rea
     CHECK (document.getAttribute ("/godot/cue/D9FH2JKA/advance") == std::string ("manual"));
 }
 
+TEST_CASE ("canonical xml: a DCA mark's curve and offset are held to their range, written when set and left out at nought (§50)")
+{
+    ShowDocument document;
+    const auto list = document.createList ("Main").id;
+    const auto sound = document.createCue (list, 0, "media", "Rain").id;
+    const auto band = document.createCue (list, 1, "group", "Band").id;
+
+    const auto curveOf = "/godot/cue/" + sound + "/dcaCurve";
+    const auto offsetOf = "/godot/cue/" + band + "/dcaOffset";
+
+    //  A new cue starts straight, with no offset (ABR).
+    CHECK (document.getAttribute (curveOf) == std::string ("0"));
+    CHECK (document.getAttribute (offsetOf) == std::string ("0"));
+
+    CHECK_FALSE (document.setAttribute (curveOf, "101").ok);
+    CHECK_FALSE (document.setAttribute (offsetOf, "13").ok);
+    CHECK_FALSE (document.setAttribute (offsetOf, "-25").ok);
+
+    auto written = CanonicalXml::write (document);
+    CHECK (written.find ("dcaCurve") == std::string::npos);
+    CHECK (written.find ("dcaOffset") == std::string::npos);
+
+    REQUIRE (document.setAttribute (curveOf, "-100").ok);
+    REQUIRE (document.setAttribute (offsetOf, "12").ok);
+    written = CanonicalXml::write (document);
+
+    ShowDocument reread;
+    REQUIRE (CanonicalXml::read (written, reread).ok);
+    CHECK (reread.getAttribute (curveOf) == std::string ("-100"));
+    CHECK (reread.getAttribute (offsetOf) == std::string ("12"));
+}
+
 //==============================================================================
 TEST_CASE ("canonical xml: clearing an attribute writes what never setting it would")
 {

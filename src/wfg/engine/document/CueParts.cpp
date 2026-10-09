@@ -62,8 +62,9 @@ namespace wfg::doc::parts
 
                 { Part::speed, "speed", { "Media", "Video" }, { "rate", "rateMode" }, {}, {} },
 
+                //  The DCA's mapping goes where its mark goes (namespace draft §50, ACB).
                 { Part::mix, "mix", { "Media", "Mic", "Video" },
-                  { "level", "dca", "colour", "directOut", "sharedOut" }, {}, {} },
+                  { "level", "dca", "dcaCurve", "dcaOffset", "colour", "directOut", "sharedOut" }, {}, {} },
 
                 //  How a strip plays it, a sound's or a picture's (namespace draft §49).
                 { Part::play, "play", { "Media", "Video" },

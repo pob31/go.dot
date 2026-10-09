@@ -107,7 +107,8 @@ const SAID_LAST = ["enabled", "preset"];
     question; a fade's `dca` beside `target`, the other thing it can move. */
 const KIND_ORDER = {
   // The speed and its mode after where the file starts (namespace draft §22.7).
-  media:   ["file", "lockedTo", "level", "startOffset", "rate", "rateMode", "levelLane", "dca", "initialLevel", "release", "secondPress",
+  // What its DCA mark carries straight after the DCA (namespace draft §50).
+  media:   ["file", "lockedTo", "level", "startOffset", "rate", "rateMode", "levelLane", "dca", "dcaCurve", "dcaOffset", "initialLevel", "release", "secondPress",
             "velocity", "velocityFloor", "pressure", "releaseFade",
             // The EQ (Phase 9a): the switch, the two filters, then four bands - each its
             // own switch (2026-09-25), then frequency, gain and width, the outer two with a
@@ -121,7 +122,7 @@ const KIND_ORDER = {
   // A video cue (Phase 8a) in the desktop's order - and last, as a sound's, what a hand on its
   // strip does (namespace draft §49).
   video:   ["source", "canvas", "videoInput", "file", "fit", "layer", "blend", "opacity", "dca",
-            "videoInsert", "paint", "fadeIn", "startOffset", "rate",
+            "dcaCurve", "dcaOffset", "videoInsert", "paint", "fadeIn", "startOffset", "rate",
             "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
             "contrast", "saturation", "gamma", "hue", "curveLuma", "curveRed", "curveGreen", "curveBlue",
             "shape", "feather", "invert",
@@ -132,7 +133,7 @@ const KIND_ORDER = {
   start:   ["target"],
   osc:     ["address", "value", "wait", "timeout"],
   midi:    ["port", "channel", "type", "data1", "data2", "sysex", "wait"],
-  group:   ["mode", "takeover", "advance", "selection", "play", "loops", "seed", "dca"],
+  group:   ["mode", "takeover", "advance", "selection", "play", "loops", "seed", "dca", "dcaCurve", "dcaOffset"],
   range:   ["name", "in", "out", "loops"],
   trigger: ["kind", "enabled", "address", "value", "port", "channel",
             "type", "number", "data", "at"],

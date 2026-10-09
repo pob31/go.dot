@@ -131,7 +131,7 @@ namespace wfg::doc
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Header", "Footer", "Trigger" },
-                                                                          { "cue", "group" } },
+                                                                          { "cue", "group", "mark" } },
 
                 /*  A HEADER AND A FOOTER ARE ORDINARY CUE LISTS (§3.6), which
                     is why they are elements holding cues rather than a word on
@@ -191,9 +191,14 @@ namespace wfg::doc
                     sampler group's member carries - its strip, how a press and
                     a release play it, where its fader waits - which a video cue
                     carries too. Last, as they were the last of `media`'s, so a
-                    saved show's attributes keep their order. */
+                    saved show's attributes keep their order.
+
+                    AND AFTER THEM THE `mark` ROWS (namespace draft §50, ABT): the
+                    mapping the cue's DCA mark carries - the picture's curve and
+                    the sound's offset - which a mic, a video cue and a group
+                    carry too. Last again, for the same reason. */
                 { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" },
-                                                          { "cue", "sound", "media", "member" } },
+                                                          { "cue", "sound", "media", "member", "mark" } },
 
                 /*  A LIVE INPUT PLAYED AS A CUE (Phase 9b, decisions BW and CE):
                     a cue first, a sound second - the same level, routing, DCA,
@@ -202,7 +207,7 @@ namespace wfg::doc
                     fade-in. Without what names a file: no Range, and no Insert,
                     whose claim a mic cue's channel IS (namespace draft 18.2). */
                 { "Mic",    true,  { "Route", "Send", "Feed", "Fx", "Trigger" },
-                                                          { "cue", "sound", "mic" } },
+                                                          { "cue", "sound", "mic", "mark" } },
 
                 /*  A PICTURE PUT ON A CANVAS (Phase 8a, namespace draft 35,
                     decision VE): a cue first, a video second - its source (a
@@ -214,7 +219,7 @@ namespace wfg::doc
                     Send, nothing of a voice. And a sampler member's rows, as a
                     sound's (namespace draft §49): played from a strip, its
                     fader is how solid it is. */
-                { "Video",  true,  { "Trigger", "Range" }, { "cue", "video", "member" } },
+                { "Video",  true,  { "Trigger", "Range" }, { "cue", "video", "member", "mark" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,

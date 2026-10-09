@@ -8364,6 +8364,86 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
                                                            "/godot/cue/" + fade.id + "/dca" });
 }
 
+TEST_CASE ("client: a DCA mark's picture curve and sound offset follow the DCA, greyed until one is set and where they move nothing (§50)")
+{
+    Rig rig;
+    const auto desk = declareADesk (rig);
+    const std::string list = "7K2QM9X4";
+
+    const auto sound = rig.document.createCue (list, 0, "media", "Thunder");
+    const auto mic = rig.document.createCue (list, 1, "mic", "Voice");
+    const auto still = rig.document.createCue (list, 2, "video", "Logo");
+    const auto movie = rig.document.createCue (list, 3, "video", "Clip", {}, { { "source", "movie" } });
+    const auto band = rig.document.createCue (list, 4, "group", "Band");
+    REQUIRE (sound.ok);
+    REQUIRE (mic.ok);
+    REQUIRE (still.ok);
+    REQUIRE (movie.ok);
+    REQUIRE (band.ok);
+
+    const std::vector<std::string> cues { sound.id, mic.id, still.id, movie.id, band.id };
+
+    rig.parameters.markStale();
+    auto snapshot = rig.publish (1);
+
+    //  ON THE FOUR KINDS THAT CARRY A MARK, at nought: a new cue starts straight (ABR).
+    for (const auto& id : cues)
+    {
+        INFO ("cue " << id);
+        CHECK (model::text (*snapshot, "/godot/cue/" + id + "/dcaCurve") == "0");
+        CHECK (model::text (*snapshot, "/godot/cue/" + id + "/dcaOffset") == "0");
+    }
+
+    //  STRAIGHT AFTER THE DCA, said as what they are (ABT).
+    const auto panel = model::inspect (*snapshot, movie.id);
+    const auto does = namesUnder (panel, "what it does");
+    const auto dcaAt = positionOf (does, "dca");
+    REQUIRE (dcaAt + 2 < does.size());
+    CHECK (does[dcaAt + 1] == "dcaCurve");
+    CHECK (does[dcaAt + 2] == "dcaOffset");
+
+    const auto* curve = rowIn (panel, "dcaCurve");
+    const auto* offset = rowIn (panel, "dcaOffset");
+    REQUIRE (curve != nullptr);
+    REQUIRE (offset != nullptr);
+    CHECK (curve->label == "picture curve");
+    CHECK (offset->label == "sound offset");
+    CHECK (curve->writable);
+
+    //  WITH NO DCA, neither means anything.
+    for (const auto& id : cues)
+    {
+        INFO ("unmarked " << id);
+        const auto inspected = model::inspect (*snapshot, id);
+        CHECK_FALSE (appliesIn (inspected, "dcaCurve"));
+        CHECK_FALSE (appliesIn (inspected, "dcaOffset"));
+    }
+
+    /*  MARKED: the curve where a picture can be under the mark, the offset where
+        a sound can - a movie's plays under its run, a group holds either. */
+    for (const auto& id : cues)
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/dca", desk.band).ok);
+
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+
+    const auto applies = [&snapshot] (const std::string& id, const char* row)
+    {
+        return appliesIn (model::inspect (*snapshot, id), row);
+    };
+
+    CHECK_FALSE (applies (sound.id, "dcaCurve"));
+    CHECK (applies (sound.id, "dcaOffset"));
+    CHECK_FALSE (applies (mic.id, "dcaCurve"));
+    CHECK (applies (mic.id, "dcaOffset"));
+    CHECK (applies (still.id, "dcaCurve"));
+    CHECK_FALSE (applies (still.id, "dcaOffset"));
+    CHECK (applies (movie.id, "dcaCurve"));
+    CHECK (applies (movie.id, "dcaOffset"));
+    CHECK (applies (band.id, "dcaCurve"));
+    CHECK (applies (band.id, "dcaOffset"));
+}
+
 TEST_CASE ("client: a sampler row is greyed on a cue no hand can press, and drawn on one a hand can")
 {
     Rig rig;

@@ -115,7 +115,9 @@ namespace wfg::cue
                                        /*  An OSC cue's further messages and its curves
                                            (namespace draft 45): a curve on the first
                                            value carries no `arg` once saved. */
-                                       "message", "curve" })
+                                       "message", "curve",
+                                       //  What a cue's DCA mark carries (namespace draft §50).
+                                       "mark" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
                     defaults[std::string (owner) + "/" + std::string (row->name)]
                         = std::string (row->defaultText);

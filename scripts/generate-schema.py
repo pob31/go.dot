@@ -85,6 +85,10 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # a press and a release play it, and where its fader waits.
                 # A media cue and a video cue both carry it.
                 "member",
+                # The mapping a cue's DCA mark carries (namespace draft §50, ABT):
+                # the picture's curve and the sound's offset. A media, a mic, a
+                # video cue and a group all carry it.
+                "mark",
                 # `transport` was `stop` until 2026-09-22. A cue that ADVANCES
                 # is not a cue that stops, and the verb list had grown past the
                 # name: hard, fade, afterMember, afterIteration, advance - the

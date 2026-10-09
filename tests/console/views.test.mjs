@@ -239,6 +239,14 @@ test("the inspector puts a cue's fields in the order somebody works through them
   assert.deepEqual(ordered(["dca", "advance", "takeover", "mode"], "group"),
                    ["mode", "takeover", "advance", "dca"]);
   assert.deepEqual(ordered(["level", "dca", "target"], "fade"), ["target", "dca", "level"]);
+
+  /*  WHAT A DCA MARK CARRIES straight after the DCA (namespace draft §50). */
+  assert.deepEqual(ordered(["initialLevel", "dcaOffset", "dcaCurve", "dca"], "media"),
+                   ["dca", "dcaCurve", "dcaOffset", "initialLevel"]);
+  assert.deepEqual(ordered(["dcaOffset", "videoInsert", "dcaCurve", "dca", "opacity"], "video"),
+                   ["opacity", "dca", "dcaCurve", "dcaOffset", "videoInsert"]);
+  assert.deepEqual(ordered(["dcaOffset", "dca", "dcaCurve", "mode"], "group"),
+                   ["mode", "dca", "dcaCurve", "dcaOffset"]);
   assert.deepEqual(ordered(["colour", "shortName", "number", "name"], "media"),
                    ["number", "name", "shortName", "colour"]);
 

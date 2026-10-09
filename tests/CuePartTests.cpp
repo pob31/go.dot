@@ -311,6 +311,31 @@ TEST_CASE ("cue parts: an EQ pasted replaces the target's EQ whole, on every cue
     CHECK (document.validate().empty());
 }
 
+TEST_CASE ("cue parts: the mix carries what a DCA mark carries, onto a sound, a mic and a movie (§50, ACB)")
+{
+    doc::ShowDocument document;
+    open (document);
+
+    REQUIRE (document.setAttribute ("/godot/cue/CP000002/dcaCurve", "-40").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/CP000002/dcaOffset", "-6").ok);
+
+    const auto fragment = document.partFragmentOf ("mix", "CP000002");
+    CHECK (fragment.find ("dcaCurve=\"-40\"") != std::string::npos);
+    CHECK (fragment.find ("dcaOffset=\"-6\"") != std::string::npos);
+
+    REQUIRE (document.pastePart (fragment, { "CP000004", "CP000005", "CP000006" }, {}).ok);
+
+    for (const auto* cue : { "CP000004", "CP000005", "CP000006" })
+    {
+        INFO (cue);
+        const std::string base = std::string ("/godot/cue/") + cue + "/";
+        CHECK (at (document, base + "dcaCurve") == "-40");
+        CHECK (at (document, base + "dcaOffset") == "-6");
+    }
+
+    CHECK (document.validate().empty());
+}
+
 TEST_CASE ("cue parts: sends pasted match by bus, keep the target's lane, and take away the rest")
 {
     doc::ShowDocument document;

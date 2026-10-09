@@ -78,7 +78,8 @@ namespace wfg::client::model
                     starts: two more things said about how the file is played
                     (namespace draft §22.7). */
                 { "media",   { "file", "lockedTo", "channels", "directOut",
-                               "level", "startOffset", "rate", "rateMode", "dca", "strip", "initialLevel", "release",
+                               "level", "startOffset", "rate", "rateMode", "dca", "dcaCurve", "dcaOffset", "strip",
+                               "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
                                "releaseFade" } },
 
@@ -86,13 +87,14 @@ namespace wfg::client::model
                     comes in, then where it goes - a media cue's sound rows with
                     the input and the channel where the file was. */
                 { "mic",     { "input", "channel", "fadeIn", "directOut",
-                               "level", "dca" } },
+                               "level", "dca", "dcaCurve", "dcaOffset" } },
 
                 /*  A VIDEO CUE (Phase 8a): what it shows, where, how high in
                     the stack, how solid and in what colour, then how it comes
                     in - and last, as a sound's, what a hand on its strip does
                     (namespace draft §49). */
                 { "video",   { "source", "canvas", "videoInput", "file", "fit", "layer", "blend", "opacity", "dca",
+                               "dcaCurve", "dcaOffset",
                                "videoInsert", "paint", "fadeIn",
                                "startOffset", "rate",
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
@@ -122,7 +124,7 @@ namespace wfg::client::model
                     sampler group is asked and the answer to `mode` is what
                     makes it one; the DCA the whole group answers to last. */
                 { "group",   { "mode", "takeover", "advance", "selection", "play", "loops",
-                               "seed", "dca" } },
+                               "seed", "dca", "dcaCurve", "dcaOffset" } },
                 { "range",   { "name", "in", "out", "loops" } },
                 { "trigger", { "kind", "enabled", "address", "value", "port", "channel",
                                "type", "number", "data", "at" } },
@@ -181,6 +183,10 @@ namespace wfg::client::model
                 { "videoInput", "input" },
                 { "videoInsert", "insert" },
                 { "dohRollback", "rollback" },
+                /*  WHAT THE CUE'S DCA MARK CARRIES (namespace draft §50, ABT):
+                    what the knob above its DCA's strip turns. */
+                { "dcaCurve", "picture curve" },
+                { "dcaOffset", "sound offset" },
             };
 
             return table;
@@ -967,6 +973,33 @@ namespace wfg::client::model
             }
         }
 
+        /*  WHAT A DCA MARK CARRIES MEANS SOMETHING ONLY WITH A DCA (namespace
+            draft §50, ABT): both rows greyed on a cue marked with none. The
+            picture's curve has nothing to shape under a sound or a mic; the
+            sound's offset nothing to move under a picture with no sound - a
+            movie's sound plays under its movie's run, so a movie keeps it, as a
+            group does for whatever it holds. */
+        void greyTheMapping (const std::string& kind, std::vector<Field>& decided)
+        {
+            std::string dca, source;
+
+            for (const auto& field : decided)
+            {
+                if (field.name == "dca")
+                    dca = field.value;
+                else if (field.name == "source")
+                    source = field.value;
+            }
+
+            for (auto& field : decided)
+            {
+                if (field.name == "dcaCurve")
+                    field.applies = ! dca.empty() && (kind == "video" || kind == "group");
+                else if (field.name == "dcaOffset")
+                    field.applies = ! dca.empty() && (kind != "video" || source == "movie");
+            }
+        }
+
         /*  WHICH DEVICE A NETWORK CUE IS AIMED AT, as a line of its own above
             the address it is derived from.
 
@@ -1412,6 +1445,7 @@ namespace wfg::client::model
         offerTheGroupsAround (snapshot, cueId, decided);
 
         greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
+        greyTheMapping (out.kind, decided);
 
         /*  THE EQ'S NINETEEN ROWS HAVE AN EDITOR OF THEIR OWN (Phase 9a), the
             panel at the foot, and are not listed here - by prefix, so a
