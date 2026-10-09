@@ -1146,6 +1146,178 @@ TEST_CASE ("video host: a HAP movie read by a renderer with no window, its frame
     folder.deleteRecursively();
 }
 
+TEST_CASE ("video host: a HAP movie named to read ahead is opened and read from the second GO starts it at, beside one a layer plays")
+{
+    using namespace wfg::testing::hapmovie;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-movie-ahead-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    std::vector<Bytes> frames;
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0xFF0000)));
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0x0000FF)));
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0x00FF00)));
+    const auto movie = writeMovie (folder, "three.mov", hapMovie (16, 8, frames, 1));
+    const auto path = movie.getFullPathName().toStdString();
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        const auto readyAt = [&host] (std::size_t n)
+        {
+            const auto readouts = host.readouts();
+            return readouts.heldCurrent && readouts.held.size() > n
+                     && readouts.held[n].state == video::region::HeldState::ready;
+        };
+
+        /*  NAMED AT A SECOND AND A HALF: open, the frame there and those after
+            it read, and ready - before any layer plays it. */
+        host.sink().prepare ({ { path, true, 1.5, 1 } });
+        REQUIRE (tickUntil (host, clock, [&] { return readyAt (0); }));
+
+        /*  A LAYER PLAYING ITS START WHILE IT IS NAMED AT TWO AND A HALF: both
+            heads held - the red under the layer, and still ready for GO. */
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "movie";
+        layer.file = path;
+
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { clock.now(), 1.0 });
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 0.2 });
+
+        std::int64_t seen = -1;
+        REQUIRE (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
+
+        host.sink().prepare ({ { path, true, 2.5, 1 } });
+        REQUIRE (tickUntil (host, clock, [&] { return readyAt (0); }));
+        CHECK (probeOf (r, 0, seen) == 0xFF0000u);
+
+        /*  AND A SECOND LAYER FROM THERE shows green on its first pass. */
+        const auto shownAt = clock.now() + 960;
+        layer.id = "RUN00002";
+        layer.order = 2;
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00002", { shownAt, 1.0 });
+        host.sink().move ("RUN00002", video::Property::time, { shownAt, 2.5 });
+
+        const auto lag = lagToFirstSight (host, clock, r, shownAt, 0x00FF00);
+        REQUIRE (lag >= 0);
+        CHECK (lag < 48 * 60);
+
+        /*  A MOVIE THAT IS NOT THERE is said so. */
+        host.sink().prepare ({ { folder.getChildFile ("gone.mov").getFullPathName().toStdString(), true, 0.0, 1 } });
+        REQUIRE (tickUntil (host, clock, [&host]
+                            {
+                                const auto readouts = host.readouts();
+                                return readouts.heldCurrent && readouts.held.size() == 1
+                                         && readouts.held[0].state == video::region::HeldState::failed;
+                            }));
+        CHECK (host.readouts().held[0].problem == "not found");
+    }
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("video host: M54a, a projector-sized HAP movie read ahead is seen at once, and one never named only once it is read")
+{
+    using namespace wfg::testing::hapmovie;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-m54-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    /*  TEN FRAMES OF 1920 BY 1080 at 25 a second - a megabyte each, as a DXT1
+        HAP frame of that size is - all one colour, a different file each. */
+    const auto movieOf = [&folder] (const char* name, std::uint32_t colour)
+    {
+        std::vector<Bytes> frames;
+
+        for (int n = 0; n < 10; ++n)
+            frames.push_back (section (0xAB, solidDxt1 (1920, 1080, colour)));
+
+        return writeMovie (folder, name, hapMovie (1920, 1080, frames, 25));
+    };
+
+    const auto ahead = movieOf ("ahead.mov", 0x00FF00);
+    const auto cold = movieOf ("cold.mov", 0xFF00FF);
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        host.sink().prepare ({ { ahead.getFullPathName().toStdString(), true, 0.0, 1 } });
+        REQUIRE (tickUntil (host, clock, [&host]
+                            {
+                                const auto readouts = host.readouts();
+                                return readouts.heldCurrent && readouts.held.size() == 1
+                                         && readouts.held[0].state == video::region::HeldState::ready;
+                            }));
+
+        const auto showAt = [&] (const char* id, std::uint64_t order, const juce::File& file)
+        {
+            const auto at = clock.now() + 960;
+            video::LayerSpec layer;
+            layer.id = id;
+            layer.canvas = "VD000011";
+            layer.order = order;
+            layer.source = "movie";
+            layer.file = file.getFullPathName().toStdString();
+            host.sink().show (layer);
+            host.sink().opacity (id, { at, 1.0 });
+            host.sink().move (id, video::Property::time, { at, 0.0 });
+            return at;
+        };
+
+        const auto aheadAt = showAt ("RUN00001", 1, ahead);
+        const auto aheadLag = lagToFirstSight (host, clock, r, aheadAt, 0x00FF00);
+
+        const auto coldAt = showAt ("RUN00002", 2, cold);
+        const auto coldLag = lagToFirstSight (host, clock, r, coldAt, 0xFF00FF);
+
+        MESSAGE ("M54a, a 1920x1080 HAP movie: read ahead ", static_cast<double> (aheadLag) / 48.0,
+                 " ms after its sample; cold ", static_cast<double> (coldLag) / 48.0, " ms");
+
+        REQUIRE (aheadLag >= 0);
+        CHECK (aheadLag < 48 * 60);
+        CHECK (coldLag >= 0);
+    }
+
+    folder.deleteRecursively();
+}
+
 /*  A MOVIE THAT IS NOT HAP, PLAYED AS A PREVIEW (namespace draft 37.5, WF;
     37.6, F.6): an MPEG-4 movie FFmpeg makes - a second red, a second blue, a
     second green - read by a renderer with no window through FFmpeg, its frame
@@ -1224,6 +1396,25 @@ TEST_CASE ("video host: a movie that is not HAP plays as a preview through FFmpe
         /*  AND BACK: the decoder started again from there. */
         host.sink().move ("RUN00001", video::Property::time, { clock.now(), 1.5 });
         CHECK (tickUntil (host, clock, [&] { return is (probeOf (r, 0, seen), 2); }));
+
+        /*  NAMED TO READ AHEAD while no layer plays it (namespace draft §48,
+            AAQ): probed, its decoder started at the second GO will start it
+            at, and ready - then a layer from there is blue at once. */
+        host.sink().remove ("RUN00001", clock.now());
+        host.sink().prepare ({ { movie.getFullPathName().toStdString(), true, 1.5, 1 } });
+
+        REQUIRE (tickUntil (host, clock, [&host]
+                            {
+                                const auto readouts = host.readouts();
+                                return readouts.heldCurrent && readouts.held.size() == 1
+                                         && readouts.held[0].state == video::region::HeldState::ready;
+                            }));
+
+        layer.id = "RUN00002";
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00002", { clock.now(), 1.0 });
+        host.sink().move ("RUN00002", video::Property::time, { clock.now(), 1.5 });
+        CHECK (tickUntil (host, clock, [&] { return is (probeOf (r, 0, seen), 2); }, 2000));
     }
 
     folder.deleteRecursively();

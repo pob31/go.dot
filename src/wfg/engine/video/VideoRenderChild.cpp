@@ -263,18 +263,70 @@ namespace wfg::video
             MovieStore() : juce::Thread ("video movies")  { startThread(); }
             ~MovieStore() override                         { stopThread (4000); }
 
-            /*  Each movie wanted now, and the frame its playhead is on. */
+            /*  Each movie a layer plays now, and the frame its playhead is on.
+                Replaces the layers' list, asked every pass; what the engine
+                named to read ahead is a list of its own (below). */
             void want (const std::map<std::string, int>& frames)
             {
                 {
                     const std::lock_guard<std::mutex> hold (lock);
                     wanted = frames;
-
-                    for (auto at = held.begin(); at != held.end();)
-                        at = wanted.count (at->first) > 0 ? std::next (at) : held.erase (at);
+                    letGoOfUnwanted();
                 }
 
                 notify();
+            }
+
+            /*  WHAT THE ENGINE NAMED TO READ AHEAD (namespace draft §48): each
+                movie, the second GO will start it at and which way it will play
+                - opened, and its frames from there read, beside whatever the
+                layers want; let go when neither wants it. Replaced only when the
+                engine's list changes. */
+            struct Ahead
+            {
+                std::string path;
+                double seconds = 0.0;
+                int direction = 1;
+            };
+
+            void prepare (const std::vector<Ahead>& movies)
+            {
+                {
+                    const std::lock_guard<std::mutex> hold (lock);
+                    prepared = movies;
+                    letGoOfUnwanted();
+                }
+
+                notify();
+            }
+
+            /*  HOW FAR ONE HAS GOT (§48, AAQ): ready once it is open with the
+                frame at `seconds` and the three after it, the way it plays,
+                read; failed and why; being read otherwise. */
+            region::HeldReading statusOf (const std::string& path, double seconds, int direction) const
+            {
+                const std::lock_guard<std::mutex> hold (lock);
+                const auto found = held.find (path);
+
+                if (found == held.end() || ! (found->second.open || found->second.failed))
+                    return { path, region::HeldState::reading };
+
+                const auto& entry = found->second;
+
+                if (entry.failed)
+                    return { path, region::HeldState::failed, entry.problem };
+
+                const auto count = static_cast<int> (entry.info.frames.size());
+                const auto first = entry.info.frameAt (seconds);
+
+                if (first < 0 || count <= 0)
+                    return { path, region::HeldState::reading };
+
+                for (int ahead = 0; ahead < std::min (4, count); ++ahead)
+                    if (entry.frames.count (((first + direction * ahead) % count + count) % count) == 0)
+                        return { path, region::HeldState::reading };
+
+                return { path, region::HeldState::ready };
             }
 
             /*  The frame showing at `seconds`, by the file's own index: -1
@@ -318,10 +370,16 @@ namespace wfg::video
             }
 
         private:
+            /*  At most this many previews decoding for the read-ahead alone
+                (AAQ): each is an FFmpeg of its own. A layer's is never held
+                back; a movie past these waits, still being read. */
+            static constexpr int previewsAhead = 4;
+
             struct Held
             {
                 bool open = false;
                 bool failed = false;
+                std::string problem {};
                 movie::Info info;
                 std::map<int, std::shared_ptr<const MovieFrame>> frames;
 
@@ -458,68 +516,155 @@ namespace wfg::video
                 return worked;
             }
 
+            /*  Wanted by a layer, or named to read ahead. Under the lock. */
+            bool wantedNow (const std::string& path) const
+            {
+                return wanted.count (path) > 0
+                    || std::any_of (prepared.begin(), prepared.end(), [&path] (const Ahead& item) { return item.path == path; });
+            }
+
+            void letGoOfUnwanted()
+            {
+                for (auto at = held.begin(); at != held.end();)
+                    at = wantedNow (at->first) ? std::next (at) : held.erase (at);
+            }
+
+            /*  A HEAD: a frame some frames are read from, and the way they go. */
+            struct Head
+            {
+                int first = 0;
+                int heading = 1;
+            };
+
             void run() override
             {
                 std::map<std::string, std::unique_ptr<movie::MovieFile>> files;
                 std::map<std::string, Preview> previews;
+                std::set<std::string> awaitingPreview;      // not HAP, and no decoder for it yet
                 std::vector<std::uint8_t> bytes;
 
                 while (! threadShouldExit())
                 {
-                    std::map<std::string, int> now;
+                    std::map<std::string, int> onLayers;
+                    std::vector<Ahead> named;
 
                     {
                         const std::lock_guard<std::mutex> hold (lock);
-                        now = wanted;
+                        onLayers = wanted;
+                        named = prepared;
                     }
 
+                    const auto aheadOf = [&named] (const std::string& path) -> const Ahead*
+                    {
+                        for (const auto& item : named)
+                            if (item.path == path)
+                                return &item;
+
+                        return nullptr;
+                    };
+
+                    const auto isWanted = [&] (const std::string& path)
+                    {
+                        return onLayers.count (path) > 0 || aheadOf (path) != nullptr;
+                    };
+
                     for (auto at = files.begin(); at != files.end();)
-                        at = now.count (at->first) > 0 ? std::next (at) : files.erase (at);
+                        at = isWanted (at->first) ? std::next (at) : files.erase (at);
 
                     for (auto at = previews.begin(); at != previews.end();)
-                        at = now.count (at->first) > 0 ? std::next (at) : previews.erase (at);
+                        at = isWanted (at->first) ? std::next (at) : previews.erase (at);
+
+                    for (auto at = awaitingPreview.begin(); at != awaitingPreview.end();)
+                        at = isWanted (*at) ? std::next (at) : awaitingPreview.erase (at);
+
+                    /*  THE LAYERS' FIRST, then the read-ahead's in the engine's
+                        order - the focused list's first. */
+                    std::vector<std::string> paths;
+
+                    for (const auto& entry : onLayers)
+                        paths.push_back (entry.first);
+
+                    for (const auto& item : named)
+                        if (onLayers.count (item.path) == 0 && std::find (paths.begin(), paths.end(), item.path) == paths.end())
+                            paths.push_back (item.path);
 
                     bool worked = false;
 
-                    for (const auto& [path, current] : now)
+                    for (const auto& path : paths)
                     {
+                        const auto layer = onLayers.find (path);
+                        const auto* ahead = aheadOf (path);
                         auto& file = files[path];
 
                         if (file == nullptr)
                         {
                             file = std::make_unique<movie::MovieFile>();
                             std::string why;
-                            auto opened = file->open (path, why) && file->info().isHap();
-                            movie::Info info = opened ? file->info() : movie::Info {};
+                            const auto hap = file->open (path, why) && file->info().isHap();
+                            const auto there = hap || juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile();
 
-                            /*  NOT HAP: a preview, where FFmpeg is here. */
-                            if (! opened)
-                            {
-                                Preview preview;
+                            //  NOT HAP: a preview, where FFmpeg is here - opened below.
+                            if (! hap && there)
+                                awaitingPreview.insert (path);
 
-                                if (openPreview (path, preview, info))
-                                {
-                                    opened = true;
-                                    previews[path] = std::move (preview);
-                                }
-                            }
+                            const std::lock_guard<std::mutex> hold (lock);
+                            auto& entry = held[path];
+                            entry.open = hap;
+                            entry.failed = ! there;
+                            entry.problem = there ? std::string {} : std::string ("not found");
+
+                            if (hap)
+                                entry.info = file->info();
+                        }
+
+                        /*  A PREVIEW'S DECODER, for a layer at once, and for the
+                            read-ahead while fewer than `previewsAhead` decode for
+                            it alone (AAQ). */
+                        if (awaitingPreview.count (path) > 0)
+                        {
+                            const auto aheadDecoders = std::count_if (previews.begin(), previews.end(),
+                                                                      [&onLayers] (const auto& entry)
+                                                                      { return onLayers.count (entry.first) == 0; });
+
+                            if (layer == onLayers.end() && aheadDecoders >= previewsAhead)
+                                continue;
+
+                            awaitingPreview.erase (path);
+
+                            Preview preview;
+                            movie::Info info;
+                            const auto opened = openPreview (path, preview, info);
+                            const auto ffmpegHere = preview.tools.found();
+
+                            if (opened)
+                                previews[path] = std::move (preview);
 
                             const std::lock_guard<std::mutex> hold (lock);
                             auto& entry = held[path];
                             entry.open = opened;
                             entry.failed = ! opened;
+                            entry.problem = opened ? std::string {}
+                                          : ffmpegHere ? std::string ("FFmpeg cannot read it")
+                                                       : std::string ("not HAP, and FFmpeg is not here");
 
                             if (opened)
                                 entry.info = info;
                         }
 
+                        /*  A PREVIEW decodes one way from one place: the layer's
+                            playhead when one plays it, else where GO will start it. */
                         if (const auto preview = previews.find (path); preview != previews.end())
                         {
                             int count = 0;
+                            int current = 0;
 
                             {
                                 const std::lock_guard<std::mutex> hold (lock);
-                                count = static_cast<int> (held[path].info.frames.size());
+                                const auto& info = held[path].info;
+                                count = static_cast<int> (info.frames.size());
+                                current = layer != onLayers.end() ? layer->second
+                                        : ahead != nullptr ? std::max (0, info.frameAt (ahead->seconds))
+                                                           : 0;
                             }
 
                             worked = feedPreview (path, preview->second, std::clamp (current, 0, std::max (0, count - 1)), count)
@@ -527,22 +672,23 @@ namespace wfg::video
                             continue;
                         }
 
-                        if (file->info().frames.empty())
+                        if (! file->info().isHap() || file->info().frames.empty())
                             continue;
 
-                        /*  THE FRAME THE PLAYHEAD IS ON AND THREE AFTER, wrapping
-                            round the end as a loop does; anything well behind
-                            let go. */
+                        /*  ITS HEADS: the frame a layer's playhead is on, and the
+                            frame GO will start it at - each read with the three
+                            after it, the way it goes, wrapping round the end as a
+                            loop does. */
                         const auto count = static_cast<int> (file->info().frames.size());
-                        const auto first = std::clamp (current, 0, count - 1);
-                        int heading = 1;
+                        std::vector<Head> heads;
 
                         {
                             const std::lock_guard<std::mutex> hold (lock);
 
-                            if (const auto found = held.find (path); found != held.end())
+                            if (const auto found = held.find (path); found != held.end() && layer != onLayers.end())
                             {
                                 auto& entry = found->second;
+                                const auto first = std::clamp (layer->second, 0, count - 1);
 
                                 //  A step of more than half the file is a wrap, not a turn.
                                 if (entry.lastFirst >= 0 && first != entry.lastFirst)
@@ -551,43 +697,67 @@ namespace wfg::video
                                     entry.heading = (std::abs (step) * 2 > count) == (step < 0) ? 1 : -1;
                                 }
 
+                                /*  FIRST SEEN ON A LAYER: the way it was read ahead
+                                    is the way it plays (§48). */
+                                else if (entry.lastFirst < 0 && ahead != nullptr)
+                                {
+                                    entry.heading = ahead->direction < 0 ? -1 : 1;
+                                }
+
                                 entry.lastFirst = first;
-                                heading = entry.heading;
+                                heads.push_back ({ first, entry.heading });
                             }
                         }
 
-                        for (int ahead = 0; ahead < 4 && ! threadShouldExit(); ++ahead)
-                        {
-                            const auto index = ((first + heading * ahead) % count + count) % count;
+                        if (ahead != nullptr)
+                            heads.push_back ({ std::clamp (file->info().frameAt (ahead->seconds), 0, count - 1),
+                                               ahead->direction < 0 ? -1 : 1 });
 
+                        for (const auto& head : heads)
+                            for (int step = 0; step < 4 && ! threadShouldExit(); ++step)
                             {
+                                const auto index = ((head.first + head.heading * step) % count + count) % count;
+
+                                {
+                                    const std::lock_guard<std::mutex> hold (lock);
+                                    const auto found = held.find (path);
+
+                                    if (found == held.end() || found->second.frames.count (index) > 0)
+                                        continue;
+                                }
+
+                                auto frame = std::make_shared<MovieFrame>();
+                                frame->index = index;
+                                frame->width = file->info().width;
+                                frame->height = file->info().height;
+
+                                if (! file->readFrame (index, bytes)
+                                      || ! hap::unpack (bytes.data(), bytes.size(), frame->texture, frame->blocks))
+                                    frame->texture = hap::Texture::none;
+
                                 const std::lock_guard<std::mutex> hold (lock);
-                                const auto found = held.find (path);
 
-                                if (found == held.end() || found->second.frames.count (index) > 0)
-                                    continue;
+                                if (const auto found = held.find (path); found != held.end())
+                                {
+                                    found->second.frames[index] = std::move (frame);
+                                    worked = true;
+                                }
                             }
 
-                            auto frame = std::make_shared<MovieFrame>();
-                            frame->index = index;
-                            frame->width = file->info().width;
-                            frame->height = file->info().height;
+                        /*  AND ANYTHING NO HEAD IS NEAR, let go: more than eight
+                            frames on from every head, the way each goes. */
+                        const std::lock_guard<std::mutex> hold (lock);
 
-                            if (! file->readFrame (index, bytes)
-                                  || ! hap::unpack (bytes.data(), bytes.size(), frame->texture, frame->blocks))
-                                frame->texture = hap::Texture::none;
-
-                            const std::lock_guard<std::mutex> hold (lock);
-                            auto& entry = held[path];
-                            entry.frames[index] = std::move (frame);
-                            worked = true;
-
-                            for (auto at = entry.frames.begin(); at != entry.frames.end();)
+                        if (const auto found = held.find (path); found != held.end())
+                            for (auto at = found->second.frames.begin(); at != found->second.frames.end();)
                             {
-                                const auto distance = ((at->first - first) * heading % count + count) % count;
-                                at = distance > 8 ? entry.frames.erase (at) : std::next (at);
+                                const auto kept = std::any_of (heads.begin(), heads.end(), [&at, count] (const Head& head)
+                                                               {
+                                                                   return ((at->first - head.first) * head.heading % count + count) % count <= 8;
+                                                               });
+
+                                at = kept ? std::next (at) : found->second.frames.erase (at);
                             }
-                        }
                     }
 
                     if (! worked)
@@ -597,6 +767,7 @@ namespace wfg::video
 
             mutable std::mutex lock;
             std::map<std::string, int> wanted;
+            std::vector<Ahead> prepared;
             std::map<std::string, Held> held;
         };
 
@@ -2843,6 +3014,15 @@ namespace wfg::video
                 {
                     preparedNow = region::readPrepared (r, &preparedUnder);
                     preparedRead = true;
+
+                    //  Its movies to the movie store, from the second GO will start each at.
+                    std::vector<MovieStore::Ahead> moviesAhead;
+
+                    for (const auto& item : preparedNow)
+                        if (item.movie)
+                            moviesAhead.push_back ({ item.path, item.seconds, item.direction });
+
+                    movies.prepare (moviesAhead);
                 }
 
                 /*  THE PICTURES WANTED, in the order they are read: every
@@ -3275,14 +3455,14 @@ namespace wfg::video
 
             /*  WHAT IS HELD OF WHAT THE ENGINE NAMED (namespace draft §48), told
                 back in its order with the list it answers - written when it
-                changed. A movie is being read until the movie store says (RA.4). */
+                changed. */
             void answerPrepared()
             {
                 std::vector<region::HeldReading> now;
                 now.reserve (preparedNow.size());
 
                 for (const auto& item : preparedNow)
-                    now.push_back (item.movie ? region::HeldReading { item.path, region::HeldState::reading }
+                    now.push_back (item.movie ? movies.statusOf (item.path, item.seconds, item.direction)
                                               : pictures.statusOf (item.path));
 
                 const auto same = heldWritten.size() == now.size()
