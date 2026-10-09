@@ -42,6 +42,7 @@
     can move is a pointer nobody can judge.
 */
 
+#include <wfg/client/model/Icons.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
@@ -49,6 +50,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -166,12 +168,18 @@ namespace wfg::client::ui
             panel is up; empty takes the marks off. */
         void setDiff (std::vector<std::string> changedIds, std::vector<std::string> addedIds);
 
+        /*  HOW READY EACH CUE IS FOR GO (namespace draft §48, AAM): a mark per
+            cue identifier, in a cell of its own beside the kind. At tick rate,
+            so only the rows whose mark moved are asked to paint. */
+        void setReadiness (std::map<std::string, model::Mark> marks);
+
         void paint (juce::Graphics& g) override;
         void resized() override;
         bool keyPressed (const juce::KeyPress& key) override;
 
     private:
         int getNumRows() override;
+        juce::String getTooltipForRow (int row) override;
         void paintListBoxItem (int row, juce::Graphics& g, int width, int height,
                                bool rowIsSelected) override;
         void listBoxItemClicked (int row, const juce::MouseEvent& event) override;
@@ -295,6 +303,7 @@ namespace wfg::client::ui
 
         std::vector<std::string> changedIds;
         std::vector<std::string> addedIds;
+        std::map<std::string, model::Mark> readiness;
         std::string standby;
         int standbyRow = -1;
         std::vector<std::string> chosen;     ///< the picked cues, as the selection holds them

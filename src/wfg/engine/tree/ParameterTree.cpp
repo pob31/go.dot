@@ -24,6 +24,7 @@
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Override.h>
+#include <wfg/engine/cue/Preparedness.h>
 
 #include <wfg/engine/midi/PortTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
@@ -1048,7 +1049,7 @@ namespace wfg::tree
                     here it would freeze at whatever it was when a cue was last
                     edited. The runtime half emits it, against the roster this
                     walk leaves behind. Same rule as a slot's `holder`. */
-                if (name == "prepare")
+                if (name == "prepare" || name == "prepareError")
                     continue;
 
                 /*  NOR IS A MEDIA CUE'S `hash`, for the same reason with a
@@ -3404,28 +3405,73 @@ namespace wfg::tree
 
             §13.6's `idle` is the empty string here and is the resting state
             rather than a failure - a MIDI cue can never be prepared and reads
-            it for ever. */
+            it for ever.
+
+            THE WORDS ARE `cue::Preparedness`'s (namespace draft §48, AAR): a
+            sound's from its run, armed only once the audio side said so; a
+            picture's or a movie's, which has no run (AAN), from what is read
+            ahead and what the renderer holds of it. A FINISHED RUN NO LONGER
+            SPEAKS FOR ITS CUE - its word stayed, so a sound whose arm had
+            failed read `armed` until another run of it came - except a failed
+            arm of a cue still ahead, the newest run of its cue: `partial`, and
+            why, beside it as `prepareError`. */
         {
-            std::map<std::string, std::string> preparedness;
+            std::map<std::string, cue::PrepareWord> preparedness;
+
+            std::set<std::string> ahead;
+            bool picturesAhead = false;
+
+            if (lists != nullptr)
+                for (const auto& entry : lists->ahead())
+                {
+                    ahead.insert (entry.cue);
+                    picturesAhead = picturesAhead || entry.kind != "sound";
+                }
+
+            std::map<std::string, std::string> newest;
 
             for (const auto& run : runs.all())
-                if (! run.prepare.empty())
-                    preparedness[run.cue] = run.prepare;
+                newest[run.cue] = run.id;
+
+            for (const auto& run : runs.all())
+            {
+                if (run.prepare.empty())
+                    continue;
+
+                if (run.isFinished()
+                      && ! (run.state == cue::runState::failed && ahead.count (run.cue) > 0 && newest[run.cue] == run.id))
+                    continue;
+
+                preparedness[run.cue] = cue::runWordOf (run);
+            }
+
+            if (picturesAhead)
+            {
+                const auto renderer = videoHost != nullptr ? videoHost->readouts() : video::Readouts {};
+
+                for (const auto& entry : lists->ahead())
+                    if (entry.kind != "sound" && preparedness.count (entry.cue) == 0)
+                        preparedness[entry.cue] = cue::videoWordOf (entry.missing, renderer.renderer, renderer.heldCurrent,
+                                                                    renderer.heldOf (entry.path));
+            }
 
             const auto* row = rowNamed ("cue", "prepare");
+            const auto* errorRow = rowNamed ("cue", "prepareError");
 
-            if (row != nullptr)
-                for (const auto& cueId : declaredCues)
-                {
-                    const auto found = preparedness.find (cueId);
+            for (const auto& cueId : declaredCues)
+            {
+                const auto found = preparedness.find (cueId);
+                const auto known = found != preparedness.end();
 
-                    runtime.push_back (makeLeaf (std::string (godot) + "/cue/" + cueId
-                                                   + "/prepare",
-                                                 *row,
-                                                 found != preparedness.end()
-                                                   ? found->second
-                                                   : std::string (row->defaultText)));
-                }
+                if (row != nullptr)
+                    runtime.push_back (makeLeaf (std::string (godot) + "/cue/" + cueId + "/prepare", *row,
+                                                 known && ! found->second.word.empty() ? found->second.word
+                                                                                       : std::string (row->defaultText)));
+
+                if (errorRow != nullptr)
+                    runtime.push_back (makeLeaf (std::string (godot) + "/cue/" + cueId + "/prepareError", *errorRow,
+                                                 known ? found->second.error : std::string {}));
+            }
         }
 
         /*  WHAT THE ANALYSER HAS PUBLISHED, ASKED ONCE. Every hash below and

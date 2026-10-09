@@ -1347,7 +1347,7 @@
       </optional>
       <optional>
         <attribute name="file">
-          <a:documentation>A picture&apos;s file, as a path relative to the bundle&apos;s media/ folder, as a sound&apos;s is. Read by the renderer as soon as its cue is the standby; GO only shows it, and a picture not read yet stays black until it is (namespace draft 36, VX). A file that is missing is said when the show loads and leaves the picture black, never the show unopened.</a:documentation>
+          <a:documentation>A picture&apos;s file, as a path relative to the bundle&apos;s media/ folder, as a sound&apos;s is. Read by the renderer ahead of GO wherever a sound would be armed - its cue at the standby, or the first a scene there starts (namespace draft 48); GO only shows it, and a picture not read yet stays black until it is (namespace draft 36, VX). A file that is missing is said on its cue&apos;s row - prepare partial, prepareError media-missing - and leaves the picture black, never the show unopened.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

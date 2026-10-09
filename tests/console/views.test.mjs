@@ -1153,3 +1153,37 @@ test("a group's row says in a word how it moves, and a sampler group says pads",
   assert.equal(flagOf("cue:A1"), "auto");
   assert.equal(flagOf("cue:S1"), "manual");
 });
+
+/*  HOW READY A CUE IS (namespace draft §48, AAM): a picture read ahead says
+    so in its own terms; a file the show does not have is "missing", a sound
+    with no voice "no voice" - both warnings, in words, never a colour alone. */
+test("a row says how ready its cue is, and what is missing in a word", () => {
+  folded.clear();
+  selection.reveal = null;
+  serve([
+    leaf("/godot/list/L/order", "V1 V2 S1 S2"),
+    leaf("/godot/cue/V1/kind", "video"),
+    leaf("/godot/cue/V1/prepare", "armed"),
+    leaf("/godot/cue/V2/kind", "video"),
+    leaf("/godot/cue/V2/prepare", "partial"),
+    leaf("/godot/cue/V2/prepareError", "media-missing"),
+    leaf("/godot/cue/S1/kind", "media"),
+    leaf("/godot/cue/S1/prepare", "partial"),
+    leaf("/godot/cue/S1/prepareError", "no-track"),
+    leaf("/godot/cue/S2/kind", "media"),
+    leaf("/godot/cue/S2/prepare", "preparing"),
+  ]);
+
+  const rows = listRows("L", "");
+  const flag = (key, kind) => (new RegExp('class="flag ' + kind + '" title="([^"]*)">([^<]*)<')
+                                 .exec(htmlOf(rows, key)) || []).slice(1);
+
+  assert.deepEqual(flag("cue:V1", "ready"), ["ready: read ahead, GO shows it at once", "armed"]);
+
+  const [missingNote, missingWord] = flag("cue:V2", "warn");
+  assert.equal(missingWord, "missing");
+  assert.match(missingNote, /show nothing/);
+
+  assert.equal(flag("cue:S1", "warn")[1], "no voice");
+  assert.equal(flag("cue:S2", "ready")[1], "preparing");
+});

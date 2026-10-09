@@ -32,6 +32,7 @@
 #include "TestSupport.h"
 
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/Readiness.h>
 #include <wfg/client/model/Video.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
@@ -39,6 +40,7 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/Preparedness.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -1056,6 +1058,149 @@ TEST_CASE ("video read-ahead: in the tick after GO, the layer is shown before th
     REQUIRE (dropped != rig.sink.events.end());
     CHECK (shown < dropped);
     CHECK (namesOf (rig.sink.preloads) == std::vector<std::string> { "second.png" });
+}
+
+//==============================================================================
+/*  WHAT THE ROW SAYS (namespace draft §48, AAR): the word published as a cue's
+    `prepare`, and why as its `prepareError`.
+*/
+TEST_CASE ("prepare words: a sound's from its run, armed once its voice is confirmed; a picture's from what the renderer holds")
+{
+    using video::region::HeldReading;
+    using video::region::HeldState;
+
+    cue::Run run;
+    run.kind = "media";
+    run.state = cue::runState::armed;
+    run.prepare = cue::preparedness::armed;
+
+    //  No player: no track, never confirmed - armed, as it always read.
+    CHECK (cue::runWordOf (run).word == "armed");
+
+    //  A voice asked of the audio side and not yet confirmed: getting ready.
+    run.track = 0;
+    CHECK (cue::runWordOf (run).word == "preparing");
+
+    run.armConfirmed = true;
+    CHECK (cue::runWordOf (run).word == "armed");
+
+    //  An arm that failed: partial, and why.
+    run.state = cue::runState::failed;
+    run.error = cue::runError::mediaMissing;
+    CHECK (cue::runWordOf (run).word == "partial");
+    CHECK (cue::runWordOf (run).error == "media-missing");
+
+    //  A picture or a movie, which has no run.
+    const HeldReading ready { "/m/a.png", HeldState::ready };
+    const HeldReading reading { "/m/a.png", HeldState::reading };
+    const HeldReading failed { "/m/a.png", HeldState::failed, "not found" };
+
+    CHECK (cue::videoWordOf (true, "running", true, &ready).word == "partial");
+    CHECK (cue::videoWordOf (true, "stopped", false, nullptr).error == "media-missing");
+    CHECK (cue::videoWordOf (false, "stopped", false, nullptr).word.empty());
+    CHECK (cue::videoWordOf (false, "starting", false, nullptr).word == "preparing");
+    CHECK (cue::videoWordOf (false, "running", false, &ready).word == "preparing");
+    CHECK (cue::videoWordOf (false, "running", true, nullptr).word.empty());
+    CHECK (cue::videoWordOf (false, "running", true, &reading).word == "preparing");
+    CHECK (cue::videoWordOf (false, "running", true, &ready).word == "armed");
+    CHECK (cue::videoWordOf (false, "running", true, &failed).word == "partial");
+    CHECK (cue::videoWordOf (false, "running", true, &failed).error == "media-missing");
+}
+
+namespace
+{
+    std::shared_ptr<const tree::TreeSnapshot> treeOf (VideoRig& rig)
+    {
+        tree::MountTable mounts;
+        tree::ParameterTree parameters { rig.document, rig.engine.commands(), mounts, rig.runs };
+        parameters.setListState (&rig.runner.listState());
+        parameters.markStale();
+
+        tree::EngineState state;
+        auto snapshot = parameters.publish (rig.tick, state);
+        REQUIRE (snapshot != nullptr);
+        return snapshot;
+    }
+
+    /*  A cue's row as the tree publishes it: (prepare, prepareError). */
+    std::pair<std::string, std::string> rowOf (VideoRig& rig, const std::string& cueId)
+    {
+        const auto snapshot = treeOf (rig);
+
+        return { client::model::text (*snapshot, "/godot/cue/" + cueId + "/prepare"),
+                 client::model::text (*snapshot, "/godot/cue/" + cueId + "/prepareError") };
+    }
+}
+
+TEST_CASE ("video read-ahead: the rows say what is got ready - a missing picture, a sound's failed arm while it is ahead, and nothing once it is not")
+{
+    VideoRig rig;
+
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("wfg-read-ahead-rows-" + juce::String (juce::Time::currentTimeMillis()));
+    REQUIRE (folder.createDirectory());
+    REQUIRE (folder.getChildFile ("there.png").replaceWithText ("not really a picture"));
+    rig.runner.setMediaFolder (folder.getFullPathName().toStdString());
+
+    /*  A SCENE ON STANDBY: a still there, a still gone - and with no renderer,
+        the one there is not being read at all. */
+    const auto timeline = groupIn (rig, 0, "timeline");
+    const auto there = videoCueIn (rig, timeline, 0, "picture", "there.png");
+    const auto gone = videoCueIn (rig, timeline, 1, "picture", "gone.png");
+
+    standbyOn (rig, timeline);
+    CHECK (rowOf (rig, gone) == std::pair<std::string, std::string> { "partial", "media-missing" });
+    CHECK (rowOf (rig, there) == std::pair<std::string, std::string> { "idle", "" });
+
+    /*  AND THE WINDOW'S MARKS, made from those words: the missing still's,
+        and nothing for the one nobody is reading. */
+    {
+        const auto snapshot = treeOf (rig);
+        client::model::ShowModel show;
+        REQUIRE (show.refresh (*snapshot, "VD000001"));
+
+        const auto marks = client::model::readinessOf (*snapshot, show.rows());
+        REQUIRE (marks.count (gone) == 1);
+        CHECK (marks.at (gone).icon == client::model::Icon::missing);
+        CHECK (marks.at (gone).text == "missing");
+        CHECK (marks.count (there) == 0);
+    }
+
+    /*  A SOUND ON STANDBY whose arm failed: partial and why, while it is the
+        newest run of its cue and still ahead. */
+    const auto thunder = rig.document.createCue ("VD000001", 1, "media", "Thunder").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + thunder + "/file", "thunder.wav").ok);
+    standbyOn (rig, thunder);
+
+    rig.runs.create ("RUNFAIL1", thunder, "media");
+    auto* failedArm = rig.runs.find ("RUNFAIL1");
+    REQUIRE (failedArm != nullptr);
+    failedArm->prepare = cue::preparedness::armed;
+    failedArm->state = cue::runState::failed;
+    failedArm->error = cue::runError::mediaMissing;
+
+    CHECK (rowOf (rig, thunder) == std::pair<std::string, std::string> { "partial", "media-missing" });
+
+    /*  ARMED AGAIN, newer: getting ready until the audio side confirms the
+        voice, then armed - the failed one no longer speaks for it. */
+    rig.runs.create ("RUNARM01", thunder, "media");
+    auto* armed = rig.runs.find ("RUNARM01");
+    REQUIRE (armed != nullptr);
+    armed->prepare = cue::preparedness::armed;
+    armed->state = cue::runState::armed;
+    armed->track = 1;
+
+    CHECK (rowOf (rig, thunder).first == "preparing");
+    armed->armConfirmed = true;
+    CHECK (rowOf (rig, thunder) == std::pair<std::string, std::string> { "armed", "" });
+
+    /*  ENDED, AND THE STANDBY GONE ON: a finished run says nothing - where
+        before its word stayed on the row until another run of its cue came. */
+    armed->state = cue::runState::done;
+    standbyOn (rig, timeline);
+    CHECK (rowOf (rig, thunder) == std::pair<std::string, std::string> { "idle", "" });
+
+    folder.deleteRecursively();
 }
 
 TEST_CASE ("video: a fade cue moves a picture's opacity, scale, offset and turn, and stops it when told")

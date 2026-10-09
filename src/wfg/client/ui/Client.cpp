@@ -59,6 +59,7 @@
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/Panic.h>
+#include <wfg/client/model/Readiness.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/DirectOuts.h>
@@ -2076,6 +2077,10 @@ namespace wfg::client
                     shell->cues.setDiff ({}, {});
 
                 shell->cues.show (show, reading.standbyId, selection.ids());
+
+                //  How ready each row's cue is for GO (namespace draft §48, AAM).
+                shell->cues.setReadiness (model::readinessOf (*snapshot, show.rows()));
+
                 if (! revealedErrorCue.empty()) shell->cues.revealCue (revealedErrorCue);
 
                 /*  And the present tense, read fresh: runs have no revision to

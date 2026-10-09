@@ -99,11 +99,19 @@
     },
     "prepare": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/prepare",
-      "DESCRIPTION": "How far ahead this cue has been got ready, derived from its prepared run. PRD 3.12: preparation is per PARAMETER rather than per cue, so a block that is partly anticipatable says so rather than pretending. Idle is the resting state and means nothing has been prepared, which is not a failure - a MIDI cue can never be prepared and reads idle for ever. Preparing is in progress; pending is waiting for a slot somebody else holds (3.9e, in words rather than colour); partial means something in the block could not be anticipated and will happen at entry; armed means everything that could be prepared was, with nothing to verify; verified means every pre-sent value was read back equal, which is the only one of the six that says the desk agrees.",
+      "DESCRIPTION": "How far ahead this cue has been got ready, derived from its prepared run. PRD 3.12: preparation is per PARAMETER rather than per cue, so a block that is partly anticipatable says so rather than pretending. Idle is the resting state and means nothing has been prepared, which is not a failure - a MIDI cue can never be prepared and reads idle for ever. Preparing is in progress; pending is waiting for a slot somebody else holds (3.9e, in words rather than colour); partial means something in the block could not be anticipated and will happen at entry; armed means everything that could be prepared was, with nothing to verify; verified means every pre-sent value was read back equal, which is the only one of the six that says the desk agrees. A sound reads preparing until the audio side has confirmed its voice. A still or a movie, which is read ahead without a run (namespace draft 48), reads preparing while the renderer reads it, armed once it holds it ready to show, and partial when its file is missing or will not read; idle while no renderer runs.",
       "TYPE": "s",
       "ACCESS": 1,
       "VALUE": ["idle"],
       "RANGE": [{"VALS": ["idle", "preparing", "pending", "partial", "armed", "verified"]}],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "prepareError": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/prepareError",
+      "DESCRIPTION": "Why getting this cue ready failed, beside prepare reading partial, as a run's error word: media-missing when its file - a sound's, a still's or a movie's - is not in the show's media or cannot be read, no-track when every voice was busy. Empty otherwise (namespace draft 48).",
+      "TYPE": "s",
+      "ACCESS": 1,
+      "VALUE": [""],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     },
     "preset": {

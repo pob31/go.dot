@@ -77,7 +77,10 @@ namespace wfg::client::model
         identity, clock, list, info, sound,
 
         //  What the foot's head does to the part it shows (namespace draft §38).
-        copy, paste
+        copy, paste,
+
+        //  How ready a row's cue is for GO (namespace draft §48, AAS).
+        loading, ready, partly, missing
     };
 
     /*  THE ICON A ROW IS RECOGNISED BY: a group's mode (a sequence, a

@@ -57,6 +57,11 @@ namespace wfg::client::ui
         constexpr int timeChars = 6;
         constexpr int kindChars = 8;
 
+        /*  HOW READY THE CUE IS, a mark in a cell of its own just left of the
+            kind (namespace draft §48, AAS): where the eye going down the kinds
+            finds it, and never moved by a long name. */
+        constexpr int readyChars = 3;
+
         /*  ONE FILE ONTO ONE MEDIA CUE NAMES ITS FILE, which is asked before
             anything else a dropped file could mean. More than one file could
             not, and a cue of another kind has no file to name. */
@@ -214,6 +219,7 @@ namespace wfg::client::ui
         cells.duration = area.removeFromRight (timeChars * unit);
         cells.preWait = area.removeFromRight (timeChars * unit);
         area.removeFromRight (kindChars * unit);
+        area.removeFromRight (readyChars * unit);
         cells.number = area.removeFromLeft (numberChars * unit);
         area.removeFromLeft (entry.depth * indent);
         area.removeFromLeft (indent);
@@ -793,6 +799,27 @@ namespace wfg::client::ui
                                                            : juce::String (model::kindWord (entry.kind)),
                     kindCell, juce::Justification::centredRight, true);
 
+        /*  HOW READY IT IS FOR GO (namespace draft §48, AAS): the mark's shape
+            in its cell - getting ready, ready, partly, missing - in the faint
+            ink, and what is wrong in the colours that mean trouble; the word
+            itself after the name below, and the whole sentence on hover. */
+        const auto readyCell = area.removeFromRight (readyChars * unit);
+        const auto* ready = [this, &entry]() -> const model::Mark*
+        {
+            const auto found = readiness.find (entry.id);
+            return found != readiness.end() && entry.rowKind == model::RowKind::cue ? &found->second : nullptr;
+        }();
+
+        if (ready != nullptr)
+        {
+            const auto side = juce::jmin (static_cast<float> (unit) * 1.9f, 12.0f * static_cast<float> (theme.type));
+            const auto tone = ready->icon == model::Icon::missing ? Look::colour (theme, "failed")
+                            : ready->icon == model::Icon::partly  ? Look::colour (theme, "waiting")
+                                                                  : faint;
+
+            icons::draw (g, ready->icon, readyCell.toFloat().withSizeKeepingCentre (side, side), tone);
+        }
+
         //  The number, then the name, indented by how deep the cue sits.
         auto numberCell = area.removeFromLeft (numberChars * unit);
         g.setColour (isStandby ? standbyColour : faint);
@@ -939,7 +966,11 @@ namespace wfg::client::ui
             level lane, a DCA, a fade that stops what it faded. Drawn in the
             faint ink, one after another, and cut at the kind column rather
             than written over it. */
-        const auto marks = model::marksFor (entry);
+        auto marks = model::marksFor (entry);
+
+        //  First, what keeps it from being ready, in a word (§48, AAS): "missing".
+        if (ready != nullptr && ! ready->text.empty())
+            marks.insert (marks.begin(), model::Mark { model::Icon::none, ready->text, ready->meaning });
 
         if (! marks.empty())
         {
@@ -1877,6 +1908,9 @@ namespace wfg::client::ui
         g.drawFittedText ("KIND", row.removeFromRight (kindChars * unit),
                           juce::Justification::centredRight, 1, 0.6f);
 
+        //  The readiness cell has no heading: its marks say what they are when hovered.
+        row.removeFromRight (readyChars * unit);
+
         g.drawFittedText ("CUE", row.removeFromLeft (numberChars * unit),
                           juce::Justification::centredLeft, 1, 0.6f);
     }
@@ -1908,6 +1942,51 @@ namespace wfg::client::ui
         changedIds = std::move (changed);
         addedIds = std::move (added);
         list.repaint();
+    }
+
+    void CueListComponent::setReadiness (std::map<std::string, model::Mark> marks)
+    {
+        if (marks == readiness)
+            return;
+
+        /*  AT TICK RATE, SO ROW BY ROW: the cues whose mark came, went or
+            changed are asked to paint, and no others - a standby moving takes
+            one scene's marks away and puts the next one's up. */
+        std::vector<std::string> moved;
+
+        for (const auto& [id, mark] : readiness)
+            if (const auto now = marks.find (id); now == marks.end() || ! (now->second == mark))
+                moved.push_back (id);
+
+        for (const auto& entry : marks)
+            if (readiness.count (entry.first) == 0)
+                moved.push_back (entry.first);
+
+        readiness = std::move (marks);
+
+        for (int at = 0; at < static_cast<int> (rows.size()); ++at)
+        {
+            const auto& entry = rows[static_cast<std::size_t> (at)];
+
+            if (entry.rowKind == model::RowKind::cue && std::find (moved.begin(), moved.end(), entry.id) != moved.end())
+                list.repaintRow (at);
+        }
+    }
+
+    juce::String CueListComponent::getTooltipForRow (int row)
+    {
+        /*  WHAT THE READINESS MARK MEANS, in a sentence (§48, AAS) - the only
+            thing on a row that wants one: the rest says itself. */
+        if (row < 0 || row >= static_cast<int> (rows.size()))
+            return {};
+
+        const auto& entry = rows[static_cast<std::size_t> (row)];
+
+        if (entry.rowKind != model::RowKind::cue)
+            return {};
+
+        const auto found = readiness.find (entry.id);
+        return found != readiness.end() ? juce::String::fromUTF8 (found->second.meaning.c_str()) : juce::String {};
     }
 
     void CueListComponent::paintStep (const model::Row& entry, juce::Graphics& g,

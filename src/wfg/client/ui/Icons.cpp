@@ -476,6 +476,34 @@ namespace wfg::client::ui
                     line (l, 8.5f, 11.0f, 15.5f, 11.0f);
                     line (l, 8.5f, 15.0f, 13.5f, 15.0f);
                     break;
+
+                /*  HOW READY A ROW'S CUE IS (namespace draft §48, AAS): one ring
+                    told apart by what is inside it, so the four read without
+                    their colours (PRD §4.8). */
+                case model::Icon::loading:
+                    //  A ring not yet closed: still being read.
+                    arc (l, 12.0f, 12.0f, 7.0f, 40.0f, 320.0f);
+                    break;
+
+                case model::Icon::ready:
+                    //  A ring and its centre: held, GO shows it at once.
+                    ring (l, 12.0f, 12.0f, 7.0f);
+                    ring (f, 12.0f, 12.0f, 3.5f);
+                    break;
+
+                case model::Icon::partly:
+                    //  A ring half full: some of it got ready, the rest at GO.
+                    ring (l, 12.0f, 12.0f, 7.0f);
+                    f.startNewSubPath (12.0f, 5.0f);
+                    f.addCentredArc (12.0f, 12.0f, 7.0f, 7.0f, 0.0f, 0.0f, pi, false);
+                    f.closeSubPath();
+                    break;
+
+                case model::Icon::missing:
+                    //  A ring struck through: nothing to read.
+                    ring (l, 12.0f, 12.0f, 7.0f);
+                    line (l, 7.0f, 17.0f, 17.0f, 7.0f);
+                    break;
             }
 
             return s;

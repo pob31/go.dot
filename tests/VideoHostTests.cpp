@@ -35,8 +35,14 @@
 #include "HapMovieWriter.h"
 #include "TestSupport.h"
 
+#include <wfg/client/model/Text.h>
+#include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/MediaAnalyser.h>
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/cue/ListState.h>
+#include <wfg/engine/cue/Run.h>
+#include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/Compositor.h>
@@ -1051,6 +1057,30 @@ TEST_CASE ("video host: a renderer with no window reads ahead what it is named, 
                             }));
 
         CHECK (host.readouts().held[1].problem == "not found");
+
+        /*  AND THE ROWS SAY SO (§48, AAR), through the tree as a window reads
+            it: the still held ready reads armed, the one the renderer could not
+            find partial, and why. */
+        {
+            Engine engine;
+            cue::RunTable runs;
+            cue::ListState lists;
+            lists.setAhead ({ { "VD000002", "picture", ahead.getFullPathName().toStdString() },
+                              { "VD000003", "picture", missing.getFullPathName().toStdString() } });
+
+            tree::MountTable mounts;
+            tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+            parameters.setListState (&lists);
+            parameters.setVideo (&host);
+            parameters.markStale();
+
+            tree::EngineState state;
+            const auto snapshot = parameters.publish (0, state);
+            REQUIRE (snapshot != nullptr);
+            CHECK (client::model::text (*snapshot, "/godot/cue/VD000002/prepare") == "armed");
+            CHECK (client::model::text (*snapshot, "/godot/cue/VD000003/prepare") == "partial");
+            CHECK (client::model::text (*snapshot, "/godot/cue/VD000003/prepareError") == "media-missing");
+        }
 
         /*  SHOWN, READ AHEAD: seen on the renderer's first pass at or after its
             sample. Then one never named, read only once it is on a layer. */

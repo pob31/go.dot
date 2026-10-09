@@ -111,6 +111,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/SlotAnalysis.cpp
     wfg/engine/cue/SamplerLayout.h
     wfg/engine/cue/SamplerLayout.cpp
+    wfg/engine/cue/Preparedness.h
+    wfg/engine/cue/Preparedness.cpp
     wfg/engine/cue/RunCommands.h
     wfg/engine/cue/RunCommands.cpp
     wfg/engine/cue/Runner.h
@@ -590,6 +592,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Picture.cpp
     wfg/client/model/Icons.h
     wfg/client/model/Icons.cpp
+    wfg/client/model/Readiness.h
+    wfg/client/model/Readiness.cpp
     wfg/client/model/Inspector.h
     wfg/client/model/Inspector.cpp
     wfg/client/model/LoadToTime.h

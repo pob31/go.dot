@@ -144,15 +144,33 @@ function frame(out, fold, word, count, rail, note, lines) {
                    ' style="--rail:' + rail + '"></div>' });
 }
 
-/*  What each of §13.6's six words means, said once so the row can be short. */
-function prepareNote(word) {
+/*  What each of §13.6's six words means, said once so the row can be short -
+    and, for a still or a movie read ahead without a run (namespace draft §48),
+    what getting it ready means for a picture. */
+function prepareNote(word, kind) {
+  const picture = kind === "video";
   return ({
-    preparing: "the horizon is getting this ready now",
+    preparing: picture ? "the renderer is reading the file ahead of GO"
+                       : "the horizon is getting this ready now",
     pending:   "waiting for a slot another cue is holding - it will land when that run ends",
     partial:   "part of this could not be got ready ahead and will happen at entry",
-    armed:     "ready: its voice is reserved and its media is made ready",
+    armed:     picture ? "ready: read ahead, GO shows it at once"
+                       : "ready: its voice is reserved and its media is made ready",
     verified:  "ready, and every value sent ahead was read back equal",
   })[word] || word;
+}
+
+/*  WHY GETTING IT READY FAILED, in the row's words (§48): `missing` for a
+    file the show does not have or cannot read, `no voice` when every track
+    was busy - a warning beside the cue, never a colour alone (§4.8). */
+function prepareProblem(error, kind) {
+  if (error === "media-missing")
+    return { word: "missing",
+             note: "the file is not in the show's media, or Go.dot cannot read it - GO will " +
+                   (kind === "video" ? "show nothing" : "play nothing") };
+  if (error === "no-track")
+    return { word: "no voice", note: "every track was busy when it was got ready - GO will not play it" };
+  return error ? { word: error, note: error } : null;
 }
 
 
@@ -294,6 +312,7 @@ function cueRow(id, depth, section, rail, standby, out) {
       `idle` is the resting state and says nothing, which is most rows most of
       the time. */
   const prepare = tree.cue(id, "prepare", "idle");
+  const problem = prepare === "partial" ? prepareProblem(tree.cue(id, "prepareError", ""), kind) : null;
 
   const twist = isGroup
     ? '<span class="twist" data-fold="' + id + '">' + (open ? "▼" : "▶") + "</span>"
@@ -385,9 +404,11 @@ function cueRow(id, depth, section, rail, standby, out) {
                      " were not there") +
              '">\u2191 ' + esc(cueName(preparedBy)) + "</span>"
            : "") +
-        (prepare && prepare !== "idle"
+        (problem
+           ? '<span class="flag warn" title="' + esc(problem.note) + '">' + esc(problem.word) + "</span>"
+           : prepare && prepare !== "idle"
            ? '<span class="flag ' + (prepare === "pending" ? "warn" : "ready") +
-             '" title="' + esc(prepareNote(prepare)) + '">' + esc(prepare) + "</span>"
+             '" title="' + esc(prepareNote(prepare, kind)) + '">' + esc(prepare) + "</span>"
            : "") +
         (shares.length
            ? '<span class="flag warn" title="' +
