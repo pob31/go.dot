@@ -423,7 +423,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 5.0, false, "park",
           "",
-          "How many EQ and send changes a locked show is riding live: what the window-s bar counts while the show is unlocked, offering to keep them in the show - one undo step - or discard them (author, 2026-09-25)." },
+          "How many EQ, send, plugin and DCA mark changes a locked show is riding live (a DCA mark's curve and offset since namespace draft 50): what the window-s bar counts while the show is unlocked, offering to keep them in the show - one undo step - or discard them (author, 2026-09-25)." },
         { "document", "recording",
           ValueType::boolean, 'T', false, Access::read, Kind::state, Persist::none,
           true, "false",

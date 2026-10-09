@@ -13697,6 +13697,145 @@ TEST_CASE ("live: under the lock an EQ turn is heard, written to nothing, and no
     }
 }
 
+TEST_CASE ("live: under the lock a DCA mark's sound offset rides live - heard, written to nothing, kept or let go on unlock (§50, ABQ)")
+{
+    LiveRig rig;
+    rig.runner.setDcas (&rig.dcas);
+
+    const auto band = rig.document.createDca ("Band").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/dca", band).ok);
+
+    const auto run = rig.play();
+    rig.tickOnce();
+    const auto before = rig.runs.find (run)->level;
+    const auto offset = "/godot/cue/" + rig.mediaId + "/dcaOffset";
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+
+    //  A TURN ON A LOCKED SHOW: heard on the next tick, the show untouched, no step.
+    CHECK (rig.set (offset, osc::Value::float64 (-6.0)).applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (run)->level == doctest::Approx (before - 6.0));
+    CHECK (rig.saved (offset) == "0");
+    CHECK (rig.steps() == steps);
+
+    //  WHAT A CLIENT SEES: the value heard, at its own address - and not in the EQ panel's word.
+    CHECK (rig.published (offset) == "-6");
+    CHECK (rig.published ("/godot/cue/" + rig.mediaId + "/live").empty());
+    CHECK (rig.published ("/godot/document/live") == "1");
+
+    SUBCASE ("turned back to what the show says, nothing rides")
+    {
+        CHECK (rig.set (offset, osc::Value::float64 (0.0)).applied == 1);
+        CHECK (rig.live.rowOf (rig.mediaId, "dcaOffset") == nullptr);
+        CHECK (rig.published ("/godot/document/live") == "0");
+    }
+
+    SUBCASE ("a value out of its range is refused, and what rides is unchanged")
+    {
+        CHECK (rig.set (offset, osc::Value::float64 (20.0)).rejected == 1);
+        REQUIRE (rig.live.rowOf (rig.mediaId, "dcaOffset") != nullptr);
+        CHECK (*rig.live.rowOf (rig.mediaId, "dcaOffset") == "-6");
+    }
+
+    SUBCASE ("Keep, once unlocked, is one undo step, and Undo takes it back")
+    {
+        CHECK (rig.submitAndTick ("live.keep").rejected == 1);
+
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+        CHECK (rig.saved (offset) == "-6");
+        CHECK (rig.live.empty());
+        CHECK (rig.steps() == steps + 1);
+
+        CHECK (rig.submitAndTick ("undo").applied == 1);
+        CHECK (rig.saved (offset) == "0");
+        rig.tickOnce();
+        CHECK (rig.runs.find (run)->level == doctest::Approx (before));
+    }
+
+    SUBCASE ("Discard lets the sound go back to where its mark puts it")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.live.empty());
+        CHECK (rig.runs.find (run)->level == doctest::Approx (before));
+        CHECK (rig.published (offset) == "0");
+        CHECK (rig.steps() == steps);
+    }
+}
+
+TEST_CASE ("live: a knob's set over several marks rides live under the lock, and unlocked one origin's turning is one step (§50, ABP, ABQ)")
+{
+    LiveRig rig;
+
+    const auto band = rig.document.createDca ("Band").id;
+    const auto scene = rig.document.createCue (rig.listId, 2, "group", "Scene").id;
+    const auto wash = rig.document.createCue (rig.listId, 3, "video", "Wash").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/dca", band).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + wash + "/dca", band).ok);
+
+    const auto curve = "/godot/cue/" + wash + "/dcaCurve";
+    const auto offset = "/godot/cue/" + scene + "/dcaOffset";
+
+    const auto knob = [&rig, &curve, &offset] (double curveValue, double offsetValue)
+    {
+        REQUIRE (rig.engine.submit ("surface:SURF0001", "node.setMany",
+                                    { osc::Value::string (curve), osc::Value::float64 (curveValue),
+                                      osc::Value::string (offset), osc::Value::float64 (offsetValue) }));
+        return rig.tickOnce();
+    };
+
+    //  UNDER THE LOCK: the whole set held live, no step of the history.
+    rig.lock (true);
+    const auto lockedSteps = rig.steps();
+
+    CHECK (knob (40.0, -3.0).applied == 1);
+    CHECK (rig.saved (curve) == "0");
+    CHECK (rig.saved (offset) == "0");
+    REQUIRE (rig.live.rowOf (wash, "dcaCurve") != nullptr);
+    REQUIRE (rig.live.rowOf (scene, "dcaOffset") != nullptr);
+    CHECK (*rig.live.rowOf (wash, "dcaCurve") == "40");
+    CHECK (rig.published (curve) == "40");
+    CHECK (rig.published (offset) == "-3");
+    CHECK (rig.steps() == lockedSteps);
+
+    //  A mark's row beside a row of the show is refused whole under the lock, and nothing moves.
+    const auto name = "/godot/cue/" + wash + "/name";
+    REQUIRE (rig.engine.submit ("surface:SURF0001", "node.setMany",
+                                { osc::Value::string (curve), osc::Value::float64 (80.0),
+                                  osc::Value::string (name), osc::Value::string ("Other") }));
+    CHECK (rig.tickOnce().rejected == 1);
+    CHECK (*rig.live.rowOf (wash, "dcaCurve") == "40");
+
+    //  UNLOCKED AND LET GO: the knob now writes the show.
+    rig.lock (false);
+    REQUIRE (rig.submitAndTick ("live.drop").applied == 1);
+    const auto steps = rig.steps();
+
+    //  A SECOND OF TURNING from one surface is one step, the set the same each tick.
+    for (int n = 1; n <= 50; ++n)
+        CHECK (knob (static_cast<double> (n), -0.2 * static_cast<double> (n)).applied == 1);
+
+    CHECK (rig.saved (curve) == "50");
+    CHECK (rig.saved (offset) == "-10");
+    CHECK (rig.steps() == steps + 1);
+
+    //  A PAUSE of more than half a second, and the next turn is a step of its own.
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    CHECK (knob (60.0, -12.0).applied == 1);
+    CHECK (rig.steps() == steps + 2);
+
+    CHECK (rig.submitAndTick ("undo").applied == 1);
+    CHECK (rig.saved (curve) == "50");
+}
+
 TEST_CASE ("live: under the lock a send rides live, a new one is made live, and Keep makes it real")
 {
     LiveRig rig;

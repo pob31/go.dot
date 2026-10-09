@@ -2655,6 +2655,7 @@ namespace wfg::cue
             edited - and never on a tick that changed nothing. */
         std::map<std::string, DcaMarkSpec> dcaMarks;
         std::uint64_t dcaChainsRevision = 0;
+        std::uint64_t dcaChainsLayer = 0;     // the live layer's revision it was read at (§50, ABQ)
         bool dcaChainsRead = false;
 
         /*  EACH OUTPUT AS `applyOutputLevels` READS IT, at the revision it was

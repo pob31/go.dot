@@ -78,6 +78,20 @@ namespace wfg::cue
             return parts.owner == "send" && (parts.row == "level" || parts.row == "on");
         }
 
+        /*  WHAT A CUE'S DCA MARK CARRIES rides live under the lock as its EQ
+            does (namespace draft §50, ABQ): the knob above a DCA strip turned in
+            a show is heard and seen at once, and kept or let go on unlock. */
+        bool isMarkRow (const Parts& parts)
+        {
+            return parts.owner == "cue" && (parts.row == "dcaCurve" || parts.row == "dcaOffset");
+        }
+
+        //  A cue's own row held live: its EQ's, or its DCA mark's.
+        bool isCueRow (const Parts& parts)
+        {
+            return isEqRow (parts) || isMarkRow (parts);
+        }
+
         const doc::AttributeRow* rowFor (std::string_view owner, std::string_view name)
         {
             for (const auto* row : doc::Schema::rowsForOwner (owner))
@@ -318,7 +332,7 @@ namespace wfg::cue
         {
             const auto parts = partsOf (address);
 
-            if (! parts.has_value() || (! isEqRow (*parts) && ! isSendRow (*parts)))
+            if (! parts.has_value() || (! isCueRow (*parts) && ! isSendRow (*parts)))
                 return std::nullopt;
 
             const auto* riding = isSendRow (*parts) ? live.sendOf (parts->id) : nullptr;
@@ -343,7 +357,7 @@ namespace wfg::cue
                 is the document's alone. */
             if (! document.isLocked())
             {
-                const auto isRiding = isEqRow (*parts)
+                const auto isRiding = isCueRow (*parts)
                                         ? live.rowOf (parts->id, parts->row) != nullptr
                                         : riding != nullptr
                                             && (parts->row == "level" ? riding->level.has_value()
@@ -357,7 +371,7 @@ namespace wfg::cue
                 if (! edit.ok)
                     return Outcome::rejected (edit.reason);
 
-                if (isEqRow (*parts))
+                if (isCueRow (*parts))
                     live.dropRow (parts->id, parts->row);
                 else
                     live.dropSendValue (parts->id, parts->row);
@@ -387,7 +401,7 @@ namespace wfg::cue
                 window shows is of what really differs. */
             const auto saved = document.getAttribute (address).value_or (std::string {});
 
-            if (isEqRow (*parts))
+            if (isCueRow (*parts))
             {
                 if (canonical == saved)
                     live.dropRow (parts->id, parts->row);
@@ -509,7 +523,7 @@ namespace wfg::cue
         if (! parts.has_value())
             return false;
 
-        if (isEqRow (*parts))
+        if (isCueRow (*parts))
             return document.isLocked();
 
         if (isSendRow (*parts))
@@ -548,7 +562,7 @@ namespace wfg::cue
             since been given a send into that bus, that one takes the values. A
             cue or a bus deleted since is skipped. */
         registry.add ({ "live.keep",
-                        "Writes the EQ, send and plugin changes ridden live while the show was locked into"
+                        "Writes the EQ, send, plugin and DCA mark changes ridden live while the show was locked into"
                         " the show, as one undo step. Refused while the show is locked.",
                         {},
                         true,

@@ -18,7 +18,9 @@
 
 /*
     A CUE'S EQ AND SENDS, RIDDEN WHILE THE SHOW IS LOCKED (author, 2026-09-25) -
-    AND ITS PLUGINS' PARAMETERS (2026-09-26, the FX page: "ride live, like EQ").
+    AND ITS PLUGINS' PARAMETERS (2026-09-26, the FX page: "ride live, like EQ"),
+    AND WHAT ITS DCA MARK CARRIES (namespace draft §50, ABQ): the picture's
+    curve and the sound's offset the knob above a DCA strip turns.
 
     The lock refuses every edit to the show, and a cue's EQ and its send levels
     are saved in the cue. The author decided that under the lock they are

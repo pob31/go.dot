@@ -50,6 +50,7 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <sstream>
 #include <utility>
 
 namespace wfg::tree
@@ -1160,7 +1161,17 @@ namespace wfg::tree
                     cue's EQ reads what plays. */
                 else if (name == "live" && isMedia)
                 {
-                    text = live != nullptr ? live->rowsOf (id) : std::string {};
+                    /*  THE EQ'S ROWS ONLY: what the EQ panel says is riding. A
+                        DCA mark held live (namespace draft §50) is the knob's,
+                        and the window's bar counts it. */
+                    if (live != nullptr)
+                    {
+                        std::istringstream words (live->rowsOf (id));
+
+                        for (std::string word; words >> word;)
+                            if (word.rfind ("eq", 0) == 0)
+                                text += (text.empty() ? "" : " ") + word;
+                    }
                 }
                 /*  WHAT THIS RUN HAS SWITCHED (namespace draft §27): read off the
                     node, where `setOverride` holds it. Safe in this cached half,
@@ -1188,6 +1199,12 @@ namespace wfg::tree
                 }
                 else if (isMedia && live != nullptr && name.rfind ("eq", 0) == 0
                            && live->rowOf (id, name) != nullptr)
+                {
+                    text = *live->rowOf (id, name);
+                }
+                //  And what a DCA mark carries, held live, on every kind that has one (§50, ABQ).
+                else if ((isMedia || isMic || isVideo || isGroup) && live != nullptr
+                           && (name == "dcaCurve" || name == "dcaOffset") && live->rowOf (id, name) != nullptr)
                 {
                     text = *live->rowOf (id, name);
                 }

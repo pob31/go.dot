@@ -6935,12 +6935,16 @@ namespace wfg::cue
         /*  READ ONCE PER SHOW REVISION, because it is a walk of the document
             and this is asked for every run on every tick. A mark, a nesting or
             what a mark carries is an edit to the show, and an edit moves the
-            revision; nothing else can change the answer. */
-        if (! dcaChainsRead || dcaChainsRevision != document.showRevision())
+            revision - and, under the lock, a knob's turn moves the live
+            layer's (namespace draft §50, ABQ), which the show's does not. */
+        const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
+
+        if (! dcaChainsRead || dcaChainsRevision != document.showRevision() || dcaChainsLayer != layer)
         {
             dcaMarks.clear();
             dcaChainsRead = true;
             dcaChainsRevision = document.showRevision();
+            dcaChainsLayer = layer;
 
             const auto root = document.root();
             const juce::Identifier dcaProperty { "dca" };
@@ -6950,9 +6954,17 @@ namespace wfg::cue
 
             /*  WHAT THE MARK CARRIES (namespace draft §50, ABT), nought when it
                 is absent - the canonical writer leaves a default out, and both
-                rows' default is nought: a new cue starts straight (ABR). */
-            const auto numberAt = [] (const juce::ValueTree& node, const juce::Identifier& name)
+                rows' default is nought: a new cue starts straight (ABR). What a
+                locked show rides first (ABQ): the value heard until somebody
+                keeps it or lets it go. */
+            const auto numberAt = [this] (const juce::ValueTree& node, const juce::Identifier& name)
             {
+                if (liveLayer != nullptr)
+                    if (const auto* riding = liveLayer->rowOf (node[idProperty].toString().toStdString(),
+                                                               name.toString().toStdString()))
+                        if (const auto value = osc::parseDouble (*riding))
+                            return *value;
+
                 return osc::parseDouble (node[name].toString().toStdString()).value_or (0.0);
             };
 
