@@ -22725,3 +22725,29 @@ moved along the fader -7.2345678 dB. Two things changed:
   an inspector box and the dial's line in the title show three decimals for a time and a speed, two for
   anything else, and as many more as four figures need below one, the zeros at the end left off. The box
   still writes exactly what is typed into it.
+
+### 47.5 A movie's strip, its seek and its playhead (AAC, mine)
+
+The foot panel had edited a movie's Ranges since 37.5: Show > Waveform... (Ctrl+W) reached it on a
+movie, with an empty bar. Nothing at the top of the inspector offered it, which is where the author
+looked. Now:
+
+- **A movie's inspector offers "Strip, in and out points"** (the word *strip* is mine), the button
+  the waveform has for a sound. A fill, a picture and a capture have no length and are offered none.
+- **The strip plays.** Its play button fires the cue, as a sound's does, and a press on its ruler seeks
+  the movie: `run.seek` now takes a movie's run, landing by §30.4's rules over its Ranges - inside one
+  at that second, keeping the pass it was on for a scrub; in a gap at the next range's in point; past
+  the last out point a millisecond inside it; with no Range, within the file - as a step on its
+  playhead a horizon ahead. A fill, a picture or a capture is still refused `bad-value`.
+- **The sounds locked to it go with it**, sought to the same second. The picture holds the frame it was
+  sought to until they are playing again, and runs on from the sample they start on, so picture and
+  sound leave a seek together; a sound that has not come back within two seconds is left behind and the
+  picture runs on alone. With no player there is nothing to wait for.
+- **A movie's run reads where it is in the file**: `position` is the file's second at the clock's now -
+  the start offset, the speed, the Ranges and the bounces all in it - where it read the seconds since
+  the GO; `rateNow` its speed and way; entering a Range is logged as `run.range`, as a sound's is, and
+  the pass is a readout.
+- **The strip draws the sound locked to the movie** - the cue on the line below it, as the list draws
+  the pair - on the movie's own seconds, since that sound is the movie's own, taken out over the same
+  span. A movie with no sound has an empty bar until its pictures are drawn (AAI). It has no level lane:
+  its sound's is on the sound's own line.

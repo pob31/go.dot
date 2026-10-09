@@ -893,6 +893,20 @@ namespace wfg::cue
         bool seekMedia (Engine& engine, std::int64_t tick, const std::string& runId,
                         double seconds, bool keepPass);
 
+        /*  A MOVIE SOUGHT (namespace draft §47, AAC): its playhead stepped to
+            `seconds` of the file a horizon ahead, landing by §30.4's rules over
+            its Ranges as a sound's does - inside a range at that second, on the
+            pass it was on when `keepPass` asks; in a gap at the next range's
+            in point; past the last out point a hair inside it; with none,
+            within the file - and the sounds locked to it sought to the same
+            second. Until those sounds are playing again the picture holds the
+            frame it was sought to, and runs on from the sample they start on,
+            so picture and sound leave the seek together. False for a video run
+            that is not a movie - a fill, a picture, a capture has no second to
+            go to. */
+        bool seekMovie (Engine& engine, std::int64_t tick, const std::string& runId,
+                        double seconds, bool keepPass);
+
         /*  A LEVEL LANE'S PASS STARTS (namespace draft §20.9; 2026-10-05,
             §30.4): what `lane.record` calls. The cue is fired as `cue.fire`
             fires it, and the run it hands back plays from `from` - nought being
@@ -2405,6 +2419,15 @@ namespace wfg::cue
             /*  WHAT THE DCAS ABOVE IT LEAVE OF ITS OPACITY (namespace draft
                 37.5, WE), as last placed: all of it until one says less. */
             double dcaFactor = 1.0;
+
+            /*  A SEEK'S LOCKED SOUNDS (namespace draft §47, AAC): the runs
+                sought with it and not yet launched again, the picture held
+                until they are - for at most `movieSoundWaitTicks`. */
+            std::vector<std::string> soundsSought;
+            int soundWaitTicks = 0;
+
+            /*  The range index last reported with `run.range`, -1 for none. */
+            int rangeReported = -1;
         };
 
         std::vector<VideoJob> showing;
@@ -2466,6 +2489,17 @@ namespace wfg::cue
         /*  A movie's playhead a horizon ahead, its loops wrapped and its end
             reached (VZ, WB). */
         void advanceMovie (Engine& engine, VideoJob& job);
+
+        /*  A MOVIE'S PLAYHEAD AS ITS RUN READS IT (namespace draft §47, AAC):
+            the file's second at the clock's now, the speed it goes at, the
+            range it is in and which pass - what a sound's run reads, so the
+            panel draws a movie's playhead where the picture is. */
+        void publishMoviePlayhead (Engine& engine, VideoJob& job, Run& run);
+
+        /*  Whether a run is a movie's: its playhead is its own (above), never
+            the seconds since its GO. */
+        bool isMovieRun (const std::string& runId) const noexcept;
+
         std::uint64_t videoOrder = 0;
 
         tree::MountTable* mounts = nullptr;

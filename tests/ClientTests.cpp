@@ -10649,3 +10649,42 @@ TEST_CASE ("client: a decided number is shown without a long tail, a time to the
     CHECK (model::shownNumber (0.0, "") == "0");
     CHECK (model::shownNumber (1234567.25, "Hz") == "1234567.25");
 }
+
+TEST_CASE ("client: a movie offers its strip at the top of the inspector, and the strip draws the sound locked to it (§47, AAC)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto movie = rig.document.createCue (list, 0, "video", "Sunrise", {},
+                                               { { "source", "movie" }, { "file", "sunrise.mov" } });
+    REQUIRE (movie.ok);
+    const auto sound = rig.document.createCue (list, 1, "media", "Sunrise sound", {},
+                                               { { "lockedTo", movie.id }, { "file", "sunrise (sound).wav" } });
+    REQUIRE (sound.ok);
+    const auto still = rig.document.createCue (list, 2, "video", "Logo", {}, { { "source", "picture" } });
+    REQUIRE (still.ok);
+
+    const auto snapshot = rig.publish (1);
+
+    const auto subjectsOf = [] (const model::Inspection& inspection)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& panel : inspection.panels)
+            out.push_back (panel.value);
+
+        return out;
+    };
+
+    CHECK (subjectsOf (model::inspect (*snapshot, movie.id)) == std::vector<std::string> { "waveform" });
+    CHECK (subjectsOf (model::inspect (*snapshot, still.id)).empty());
+
+    const auto reading = model::readFoot (*snapshot, { model::Subject::Kind::waveform, movie.id });
+    CHECK (reading.movie);
+    CHECK (reading.soundFile == "sunrise (sound).wav");
+    CHECK (reading.notice.find ("Nothing to show") == std::string::npos);
+
+    const auto onStill = model::readFoot (*snapshot, { model::Subject::Kind::waveform, still.id });
+    CHECK_FALSE (onStill.movie);
+    CHECK (onStill.soundFile.empty());
+}

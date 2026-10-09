@@ -15,6 +15,7 @@
 */
 
 #include <wfg/client/model/Foot.h>
+#include <wfg/client/model/Dual.h>
 
 #include <wfg/client/model/NewCue.h>
 
@@ -368,6 +369,14 @@ namespace wfg::client::model
                 missing, or still being looked at - three different situations
                 with three different answers. */
             const auto movie = out.cueKind == "video" && at (cue + "source") == "movie";
+
+            /*  A MOVIE'S OWN SOUND, drawn under its time (§47, AAC): the cue
+                locked to it on the line below, as the list draws the pair. */
+            out.movie = movie;
+
+            if (movie)
+                if (const auto sound = dualOf (snapshot, out.subject.objectId).sound; ! sound.empty())
+                    out.soundFile = at ("/godot/cue/" + sound + "/file");
 
             /*  AND A CUE WITH NO SOUND TO DRAW SAYS PLAINLY THAT THE PANEL
                 IS NOT FOR IT (author, 2026-10-07: "make it plain obvious that

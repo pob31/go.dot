@@ -44,7 +44,7 @@ namespace wfg::client::ui
             at one in varispeed, its speed and its mode otherwise. */
         juce::String speedWords (const model::FootReading& reading)
         {
-            if (reading.cueKind != "media")
+            if (reading.cueKind != "media" && ! reading.movie)
                 return {};
 
             const auto speed = model::speedText (reading.rate);
@@ -141,7 +141,8 @@ namespace wfg::client::ui
                 return;
             }
 
-            if (reading.cueKind != "media" || actions.play == nullptr)
+            //  A sound, or a movie (§47, AAC): what has a playhead to play from.
+            if ((reading.cueKind != "media" && ! reading.movie) || actions.play == nullptr)
                 return;
 
             askedToPlay = true;
@@ -464,7 +465,7 @@ namespace wfg::client::ui
                                                                   : "\xe2\x96\xb6"));
         transport.setTooltip (sounding ? "Stop, and keep the playhead where it is"
                                        : "Play this cue from the playhead");
-        transport.setEnabled (sounding || reading.cueKind == "media");
+        transport.setEnabled (sounding || reading.cueKind == "media" || reading.movie);
     }
 
     void WaveformEditorComponent::applyTheme (const model::Theme& themeToUse)
@@ -843,22 +844,27 @@ namespace wfg::client::ui
     {
         const auto bar = barArea();
 
-        if (barsFile == reading.file && barsWidth == bar.getWidth()
+        /*  A MOVIE DRAWS THE SOUND LOCKED TO IT (namespace draft §47, AAC):
+            the same seconds, since the sound is the movie's own, taken out
+            over the same span. */
+        const auto& drawnFile = reading.movie ? reading.soundFile : reading.file;
+
+        if (barsFile == drawnFile && barsWidth == bar.getWidth()
               && juce::approximatelyEqual (barsFrom, view.from)
               && juce::approximatelyEqual (barsTo, view.to))
             return bars;
 
         bars.clear();
-        barsFile = reading.file;
+        barsFile = drawnFile;
         barsWidth = bar.getWidth();
         barsFrom = view.from;
         barsTo = view.to;
 
-        if (media == nullptr || reading.file.empty() || bar.getWidth() <= 0)
+        if (media == nullptr || drawnFile.empty() || bar.getWidth() <= 0)
             return bars;
 
         const auto& analysed = *media;
-        const auto found = analysed.find (reading.file);
+        const auto found = analysed.find (drawnFile);
 
         if (found == analysed.end() || found->second.pyramid == nullptr)
             return bars;
@@ -1060,7 +1066,8 @@ namespace wfg::client::ui
     {
         const auto points = lane();
 
-        if (bar.getWidth() <= 1 || ! (view.span() > 0.0))
+        //  A movie has no level lane: its sound's is on the sound's own line.
+        if (reading.movie || bar.getWidth() <= 1 || ! (view.span() > 0.0))
             return;
 
         juce::Path line;

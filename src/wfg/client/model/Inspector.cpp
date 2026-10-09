@@ -1034,7 +1034,8 @@ namespace wfg::client::model
         }
     }
 
-    std::vector<Field> openersFor (const std::string& kind, const std::string& cueId)
+    std::vector<Field> openersFor (const std::string& kind, const std::string& cueId,
+                                   const std::string& source)
     {
         std::vector<Field> out;
 
@@ -1060,6 +1061,18 @@ namespace wfg::client::model
             offer ("EQ, four bands and two filters", "eq");
             offer ("FX, the signal chain on this cue", "fx");
             offer ("Sends, levels into the show's mix channels", "sends");
+        }
+        else if (kind == "video")
+        {
+            /*  A MOVIE'S STRIP (namespace draft §47, AAC): its length across the
+                foot, its in and out points and loops dragged on it, as a sound's
+                waveform is. The author, 2026-10-09: "Video files should display
+                something similar to the waveform with a toggle at the top of the
+                inspector ... I couldn't figure out how to do this." The panel
+                had edited a movie's Ranges since 37.5; nothing offered it. A
+                fill, a picture or a capture has no length to draw. */
+            if (source == "movie")
+                offer ("Strip, in and out points", "waveform");
         }
         else if (kind == "mic")
         {
@@ -1464,7 +1477,7 @@ namespace wfg::client::model
             scroll away on any cue with a long list of rows - a media cue in a
             sampler group most of all - and a door is quickest where the eye
             lands first. */
-        out.panels = openersFor (out.kind, cueId);
+        out.panels = openersFor (out.kind, cueId, text (snapshot, "/godot/cue/" + cueId + "/source"));
         out.panelCue = cueId;
 
         for (auto* block : { &isBlock, &whenBlock, &doesBlock, &samplerBlock, &listBlock })

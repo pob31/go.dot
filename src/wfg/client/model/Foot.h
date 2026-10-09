@@ -178,6 +178,12 @@ namespace wfg::client::model
         std::string cueName;     ///< what the title says it is showing
         std::string cueKind;
         std::string file;        ///< the media the cue names, for the analyser's table
+
+        /*  A MOVIE'S STRIP (namespace draft §47, AAC): whether the cue is a
+            movie, and the file of the sound locked to it, whose waveform is
+            drawn under the movie's time - empty when it has none. */
+        bool movie = false;
+        std::string soundFile;
         double fileLength = 0.0; ///< the cue's `duration`, or nought when unknown
         double startOffset = 0.0;
 

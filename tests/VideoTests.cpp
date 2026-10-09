@@ -1907,3 +1907,146 @@ TEST_CASE ("video: a movie's Range that bounces goes out and back, a pass each w
     const auto playedFor = static_cast<double> (rig.sink.removed.front().second - times.front().sample) / 48000.0;
     CHECK (playedFor == doctest::Approx (2.0).epsilon (0.05));
 }
+
+//==============================================================================
+/*  A MOVIE'S STRIP (namespace draft §47, AAC): sought as a sound is, and its
+    run reading where it is in the file. */
+TEST_CASE ("video: a movie sought lands where its Ranges say, and steps its playhead there (§47)")
+{
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 2.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov") }).applied >= 1);
+
+    const auto first = rig.document.createRange ("VD000060", 0.2, 1.2);
+    REQUIRE (first.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + first.id + "/loops", "0").ok);    // for ever
+    REQUIRE (rig.document.createRange ("VD000060", 1.5, 1.9).ok);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+    rig.ticks (3);
+
+    const auto* run = rig.runOf ("VD000060");
+    REQUIRE (run != nullptr);
+    const auto id = run->id;
+    const auto& times = rig.sink.geometry[id][video::Property::time];
+    REQUIRE_FALSE (times.empty());
+
+    const auto lastStepTo = [&times]
+    {
+        for (auto n = times.size(); n-- > 1;)
+            if (times[n].sample == times[n - 1].sample)
+                return times[n].value;
+
+        return -1.0;
+    };
+
+    //  Inside a range: there.
+    CHECK (rig.submitAndTick ("run.seek", { osc::Value::string (id), osc::Value::float64 (0.9) }).applied == 1);
+    CHECK (lastStepTo() == doctest::Approx (0.9));
+
+    //  In the gap between them: the next range's in point.
+    rig.submitAndTick ("run.seek", { osc::Value::string (id), osc::Value::float64 (1.3) });
+    CHECK (lastStepTo() == doctest::Approx (1.5));
+
+    //  Past the last out point: a hair inside it, never the top of the file.
+    rig.submitAndTick ("run.seek", { osc::Value::string (id), osc::Value::float64 (5.0) });
+    CHECK (lastStepTo() == doctest::Approx (1.899));
+    CHECK_FALSE (rig.runs.find (id)->isFinished());
+
+    //  And it plays on from there to the last range's end, and ends.
+    rig.ticks (20);
+    CHECK (rig.runs.find (id)->isFinished());
+    CHECK (times.back().value == doctest::Approx (1.9));
+}
+
+TEST_CASE ("video: a movie's run reads the file's second, at its speed from its offset, not the seconds since its GO (§47)")
+{
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 20.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov"),
+                                                osc::Value::string ("rate"), osc::Value::string ("2"),
+                                                osc::Value::string ("startOffset"), osc::Value::string ("5") }).applied >= 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+    rig.ticks (25);
+
+    const auto* run = rig.runOf ("VD000060");
+    REQUIRE (run != nullptr);
+
+    /*  HALF A SECOND SINCE ITS GO, less the horizon it came up on, at double
+        speed from five seconds: a little under six - where seconds since the
+        GO would read half a second. */
+    CHECK (run->position > 5.6);
+    CHECK (run->position < 6.0);
+    CHECK (run->rateNow == doctest::Approx (2.0));
+
+    //  Sought, it reads from there.
+    const auto id = run->id;
+    rig.submitAndTick ("run.seek", { osc::Value::string (id), osc::Value::float64 (12.0) });
+    rig.ticks (10);
+    CHECK (rig.runs.find (id)->position >= 12.0);
+    CHECK (rig.runs.find (id)->position < 12.4);
+}
+
+TEST_CASE ("video: a movie sought takes its locked sound to the same second, and a fill has no second to go to (§47)")
+{
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 20.0 }, { "clip (sound).wav", 20.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov") }).applied >= 1);
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (1),
+                                                osc::Value::string ("media"), osc::Value::string ("Clip sound"),
+                                                osc::Value::string ("VD000061"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip (sound).wav") }).applied >= 1);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000061/lockedTo", "VD000060").ok);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+    rig.ticks (3);
+
+    const auto* movie = rig.runOf ("VD000060");
+    const auto* sound = rig.runOf ("VD000061");
+    REQUIRE (movie != nullptr);
+    REQUIRE (sound != nullptr);
+    const auto movieId = movie->id;
+    const auto soundId = sound->id;
+
+    CHECK (rig.submitAndTick ("run.seek", { osc::Value::string (movieId), osc::Value::float64 (7.0) }).applied == 1);
+
+    const auto* sought = rig.runs.find (soundId);
+    REQUIRE (sought != nullptr);
+    CHECK (sought->startOffset == doctest::Approx (7.0));
+    CHECK (sought->position == doctest::Approx (7.0));
+    CHECK (rig.sink.geometry[movieId][video::Property::time].back().value == doctest::Approx (7.0));
+
+    //  A fill, up and running, is refused: there is no second of it to go to.
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (2);
+    const auto* fill = rig.runOf ("VD000002");
+    REQUIRE (fill != nullptr);
+    const auto refused = rig.submitAndTick ("run.seek", { osc::Value::string (fill->id), osc::Value::float64 (1.0) });
+    CHECK (refused.applied == 0);
+    CHECK (refused.rejected == 1);
+}

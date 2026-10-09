@@ -84,6 +84,12 @@ namespace wfg::cue
             ran off the end of the ruler hears the end, not the top again. */
         constexpr double seekHairSeconds = 0.001;
 
+        /*  HOW LONG A SOUGHT MOVIE WAITS FOR ITS LOCKED SOUNDS to play again
+            before it runs on alone (namespace draft §47, AAC): two seconds, far
+            past any arm a sound's file needs, so a sound that never comes back
+            - its file gone, the device lost - leaves a picture that moves. */
+        constexpr int movieSoundWaitTicks = 100;
+
         std::string kindOfCue (const juce::ValueTree& cue)
         {
             const auto element = cue.getType().toString();
@@ -3180,6 +3186,131 @@ namespace wfg::cue
 
         if (audio != nullptr && run->track >= 0)
             requestArmOn (engine, cue, *run, run->ownLevel);
+
+        return true;
+    }
+
+    bool Runner::seekMovie (Engine& engine, std::int64_t tick, const std::string& runId,
+                            double seconds, bool keepPass)
+    {
+        VideoJob* job = nullptr;
+
+        for (auto& candidate : showing)
+            if (candidate.self == runId && candidate.movie)
+                job = &candidate;
+
+        if (job == nullptr)
+            return false;
+
+        //  On its way out, or at its end: nothing to move, and nothing wrong.
+        if (job->removed || job->movieEnded)
+            return true;
+
+        double duration = 0.0;
+
+        if (const auto* known = handlerDurations())
+            if (const auto found = known->find (job->movieFile); found != known->end())
+                duration = found->second;
+
+        /*  WHERE IT LANDS, by §30.4's rules as a sound's seek lands (seekMedia):
+            the ranges are the movie's own, which its locked sounds carry copies
+            of, so the picture and the sound land on the same second. */
+        const auto ranges = rangesOf (document.findById (job->cue));
+        auto target = std::max (0.0, seconds);
+        auto index = -1;
+        auto pass = 0;
+
+        if (! ranges.empty())
+        {
+            const auto count = static_cast<int> (ranges.size());
+            const auto sliceAt = [&ranges] (int at) -> const RangeSpec&
+            {
+                return ranges[static_cast<std::size_t> (at)];
+            };
+
+            for (auto at = 0; at < count && index < 0; ++at)
+                if (target >= sliceAt (at).in && target < sliceAt (at).out)
+                    index = at;
+
+            if (index < 0)
+            {
+                auto next = -1;
+                auto last = 0;
+
+                for (auto at = 0; at < count; ++at)
+                {
+                    if (sliceAt (at).in > target && (next < 0 || sliceAt (at).in < sliceAt (next).in))
+                        next = at;
+
+                    if (sliceAt (at).out > sliceAt (last).out)
+                        last = at;
+                }
+
+                index = next >= 0 ? next : last;
+                target = next >= 0 ? sliceAt (next).in
+                                   : std::max (sliceAt (last).in, sliceAt (last).out - seekHairSeconds);
+            }
+
+            //  THE PASS IT WAS ON, kept for a scrub inside the range it is in.
+            if (keepPass && sliceAt (index).id == job->rangeId)
+            {
+                pass = job->pass;
+
+                if (sliceAt (index).loops > 0)
+                    pass = std::min (pass, sliceAt (index).loops - 1);
+            }
+        }
+        else if (duration > 0.0)
+        {
+            target = std::min (target, std::max (0.0, duration - seekHairSeconds));
+        }
+
+        /*  A STEP on the playhead's ring, a horizon ahead: where it is there,
+            then where it goes. Before it is up there is no ring yet, and it
+            comes up where it was sought to. */
+        const auto at = videoSampleAhead();
+
+        if (job->placed && at >= 0)
+        {
+            placeVideoPoint (*job, video::Property::time, { at, videoValueOf (*job, video::Property::time, at) });
+            placeVideoPoint (*job, video::Property::time, { at, target });
+            job->movieAt = at;
+        }
+
+        job->moviePosition = target;
+        job->rangeId = index >= 0 ? ranges[static_cast<std::size_t> (index)].id : std::string {};
+        job->pass = pass;
+
+        //  A BOUNCING RANGE goes back on its odd passes (§41).
+        job->bounce = index >= 0 && ranges[static_cast<std::size_t> (index)].pingPong && pass % 2 == 1 ? -1 : 1;
+
+        //  With no range, backwards play stops at the start offset - or here, sought before it.
+        if (index < 0)
+            job->pieceStart = std::min (job->pieceStart, target);
+
+        /*  AND ITS LOCKED SOUNDS, to the same second (WJ: the movie leads).
+            Their ids are copied first: a seek re-arms a run, and the table's
+            pointers are not the thing to hold across that. */
+        std::vector<std::string> sounds;
+
+        for (const auto* child : runs.childrenOf (runId))
+            if (child != nullptr && ! child->isFinished() && child->kind == "media"
+                  && followsAMovie (document.findById (child->cue)))
+                sounds.push_back (child->id);
+
+        job->soundsSought.clear();
+        job->soundWaitTicks = 0;
+
+        for (const auto& sound : sounds)
+        {
+            if (! seekMedia (engine, tick, sound, target, keepPass))
+                continue;
+
+            /*  WAITED FOR only where a voice will come back: with no player, a
+                sound's run has no launch to wait for. */
+            if (const auto* soundRun = runs.find (sound); audio != nullptr && soundRun != nullptr && soundRun->track >= 0)
+                job->soundsSought.push_back (sound);
+        }
 
         return true;
     }
@@ -16652,6 +16783,11 @@ namespace wfg::cue
             if (job.movie && job.placed && ! job.movieEnded)
                 advanceMovie (engine, job);
 
+            //  And its run reads where it is in the file (§47, AAC).
+            if (job.movie && job.placed)
+                if (auto* movieRun = runs.find (job.self); movieRun != nullptr && ! movieRun->isFinished())
+                    publishMoviePlayhead (engine, job, *movieRun);
+
             /*  A DCA RIDDEN WHILE IT IS UP, through Esc's fade-out too. */
             if (job.placed && ! job.removed)
                 followVideoDcas (job, *run);
@@ -16839,6 +16975,40 @@ namespace wfg::cue
 
     void Runner::advanceMovie (Engine& engine, VideoJob& job)
     {
+        /*  SOUGHT, AND WAITING FOR ITS SOUNDS (namespace draft §47, AAC): the
+            frame it was sought to is held until every sound sought with it is
+            launched again, and then it runs on from the sample the last of
+            them starts on - or alone, once they have taken too long. */
+        if (! job.soundsSought.empty())
+        {
+            std::int64_t from = -1;
+            auto waiting = false;
+
+            for (const auto& sound : job.soundsSought)
+            {
+                const auto* soundRun = runs.find (sound);
+
+                if (soundRun == nullptr || soundRun->isFinished())
+                    continue;
+
+                if (soundRun->launchedAtSample <= 0)
+                    waiting = true;
+                else
+                    from = std::max (from, soundRun->launchedAtSample);
+            }
+
+            if (waiting && ++job.soundWaitTicks < movieSoundWaitTicks)
+                return;
+
+            job.soundsSought.clear();
+
+            if (from > job.movieAt)
+            {
+                placeVideoPoint (job, video::Property::time, { from, job.moviePosition });
+                job.movieAt = from;
+            }
+        }
+
         const auto at = videoSampleAhead();
         const auto rate = videoSampleRate();
 
@@ -16984,6 +17154,43 @@ namespace wfg::cue
         placeVideoPoint (job, video::Property::time, { at, target });
         job.moviePosition = target;
         job.movieAt = at;
+    }
+
+    void Runner::publishMoviePlayhead (Engine& engine, VideoJob& job, Run& run)
+    {
+        const auto now = videoClockNow();
+
+        run.position = now >= 0 ? videoValueOf (job, video::Property::time, now) : job.moviePosition;
+        run.rateNow = job.rate * static_cast<double> (job.bounce);
+
+        auto index = -1;
+
+        if (! job.rangeId.empty())
+        {
+            const auto ranges = rangesOf (document.findById (job.cue));
+
+            for (std::size_t n = 0; n < ranges.size(); ++n)
+                if (ranges[n].id == job.rangeId)
+                    index = static_cast<int> (n);
+        }
+
+        /*  ENTERING A RANGE IS A TRANSITION, reported as a sound's is (§3.15);
+            which pass of it is arithmetic, and a readout. */
+        if (index >= 0 && index != job.rangeReported)
+            engine.submit (origin::engine, "run.range",
+                           { osc::Value::string (run.id), osc::Value::int32 (static_cast<std::int32_t> (index)) });
+
+        job.rangeReported = index;
+        run.rangeIteration = index >= 0 ? job.pass + 1 : 0;
+    }
+
+    bool Runner::isMovieRun (const std::string& runId) const noexcept
+    {
+        for (const auto& job : showing)
+            if (job.self == runId && job.movie)
+                return true;
+
+        return false;
     }
 
     void Runner::advanceVideoFades (Engine& engine, std::int64_t tick)
@@ -17818,10 +18025,13 @@ namespace wfg::cue
                 /*  NOR AN OSC CUE WHOSE CURVES ARE PLAYING (namespace draft 45):
                     `advanceCurves` sets its playhead on its own clock, looped
                     and sought, which ticks since the GO would overwrite. */
+                /*  NOR A MOVIE (namespace draft §47, AAC): `advanceVideo`
+                    reads its playhead off the picture's own, in the file. */
                 if (run->launchRequestedAtTick > 0 && ! run->isWaiting()
                       && run->state != runState::armed
                       && run->state != runState::preparing
-                      && ! (run->kind == "osc" && isCurving (run->id)))
+                      && ! (run->kind == "osc" && isCurving (run->id))
+                      && ! (run->kind == "video" && isMovieRun (run->id)))
                     run->position = static_cast<double> (tick - run->launchRequestedAtTick)
                                       / static_cast<double> (TickClock::rateHz);
 
@@ -19987,6 +20197,17 @@ namespace wfg::cue
                                     spends the resume on it (D2, GN). */
                                 runner.seekingRun (engine, context.tick, runId);
                                 runner.seekMedia (engine, context.tick, runId, seconds, true);
+                                return Outcome::ok (applied);
+                            }
+
+                            /*  A MOVIE (namespace draft §47, AAC): its
+                                playhead, and its locked sounds with it. A
+                                fill, a picture or a capture has no second. */
+                            if (run->kind == "video")
+                            {
+                                if (! runner.seekMovie (engine, context.tick, runId, seconds, true))
+                                    return Outcome::rejected (reason::badValue);
+
                                 return Outcome::ok (applied);
                             }
 

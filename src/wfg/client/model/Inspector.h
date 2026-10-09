@@ -303,7 +303,8 @@ namespace wfg::client::model
         it replaces, because a dead control teaches somebody the feature is
         broken rather than absent. Each is added here on the day its editor
         lands, and that one line is the whole of the change. */
-    std::vector<Field> openersFor (const std::string& kind, const std::string& cueId);
+    std::vector<Field> openersFor (const std::string& kind, const std::string& cueId,
+                                   const std::string& source = {});
 
     /*  AND OVER SEVERAL CUES (namespace draft §30.11): the panels that edit
         every picked cue they serve at once - the EQ and the sends, for media
