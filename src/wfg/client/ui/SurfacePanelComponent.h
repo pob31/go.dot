@@ -39,8 +39,14 @@
     on the pad the click landed, `strip.release` when the button comes up, and
     the keys 1 to 8 are the first eight columns at velocity 100.
 
-    NOT AN EDITOR. A ride and a press are not decisions about the show, so the
-    panel keeps working under the lock; nothing here opens an undo step.
+    A RIDE AND A PRESS ARE NOT DECISIONS ABOUT THE SHOW, so the panel keeps
+    working under the lock and they open no undo step. THE KNOB ABOVE A DCA
+    STRIP IS ONE (namespace draft §50): it writes the DCA marks of what plays
+    under the DCA, as one `node.setMany` - an undo step, and under the lock a
+    ride that the window's bar asks about on unlock, as a desk's knob does.
+    A vertical drag turns it, a click switches between the picture's curve and
+    the sound's offset; the value it was grabbed at is held and the target sent
+    whole, as the fader is, so no detent is lost to the round trip.
 
     It reads only what `Client.cpp`'s timer hands it - the one call site that
     takes a snapshot (`check-client-boundary.py`, rule c).
@@ -99,6 +105,14 @@ namespace wfg::client::ui
         void dragFader (std::size_t column, double fraction);
         void endFader (std::size_t column);
 
+        /*  THE KNOB ABOVE A DCA STRIP (namespace draft §50): a click switches
+            what it turns; a turn is `steps` detents from where it was when it
+            was taken, sent at the next pass or when it is let go - one
+            `node.setMany` over the marks of what plays under the DCA. */
+        void clickKnob (std::size_t column);
+        void turnKnob (std::size_t column, int steps);
+        void endKnob (std::size_t column);
+
         /*  EVERY HAND OFF AT ONCE: the window closing, or losing the keyboard
             while a key was holding a pad down - whose key-up would otherwise
             never arrive, leaving a hold clip sounding for ever. */
@@ -141,7 +155,7 @@ namespace wfg::client::ui
             somewhere the eye says is another part. */
         struct Parts
         {
-            juce::Rectangle<int> column, number, label, word, fader, value, pad;
+            juce::Rectangle<int> column, number, label, word, knob, fader, value, pad;
         };
 
         /*  THE FADER A HAND IS ON: the address it touched - kept for the
@@ -196,6 +210,28 @@ namespace wfg::client::ui
         void letGoOfFader();
         void flush();
 
+        /*  THE KNOB A HAND IS ON (namespace draft §50): its strip and DCA, what
+            it turns, the value it was taken at and the one wanted now, the
+            marks it writes as they were when it was taken, and how far the
+            pointer has gone - under three pixels it was a click. */
+        struct KnobGrab
+        {
+            std::string strip;
+            std::string dca;
+            surface::KnobMode mode = surface::KnobMode::offset;
+            bool any = false;
+            double heldValue = 0.0;
+            double wanted = 0.0;
+            bool unsent = false;
+            std::vector<surface::DcaMark> marks;
+            float fromY = 0.0f;
+            float travelled = 0.0f;
+        };
+
+        surface::KnobMode knobModeOf (const model::StripRow& strip) const;
+        bool takeKnob (std::size_t column);
+        void flushKnob();
+
         model::Theme theme;
         std::function<void (Event)> send;
 
@@ -215,6 +251,11 @@ namespace wfg::client::ui
         std::string shape;
 
         std::optional<Grab> grab;
+        std::optional<KnobGrab> knobGrab;
+
+        /*  WHAT EACH STRIP'S KNOB TURNS, where a click left it, by strip and the
+            DCA it rides - a new DCA starts where its own letters say (ABX). */
+        std::map<std::string, surface::KnobMode> knobModes;
         std::optional<Down> mousePad;
         std::map<std::size_t, Down> keysDown;
 

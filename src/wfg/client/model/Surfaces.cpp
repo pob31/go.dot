@@ -466,6 +466,11 @@ namespace wfg::client::model
         std::map<std::string, surface::DcaLight> lights;
         bool lightsRead = false;
 
+        //  And what each DCA's knob reaches, with what is assigned to it (namespace draft §50).
+        std::map<std::string, std::vector<surface::DcaMark>> marks;
+        std::map<std::string, surface::DcaContents> contents;
+        bool marksRead = false;
+
         for (const auto* node : snapshot.all())
         {
             if (node->address == surfaceOrderAddress)
@@ -571,6 +576,22 @@ namespace wfg::client::model
 
                     row.dcaColour = hex;
                 }
+
+                /*  AND WHAT THE KNOB ABOVE IT REACHES (namespace draft §50): the
+                    bridge's rule, so the window's knob and a desk's write the
+                    same marks. */
+                if (! marksRead)
+                {
+                    marks = surface::dcaMarksPlaying (snapshot);
+                    contents = surface::dcaContents (snapshot);
+                    marksRead = true;
+                }
+
+                if (const auto under = marks.find (row.dca); under != marks.end())
+                    row.dcaMarks = under->second;
+
+                if (const auto assigned = contents.find (row.dca); assigned != contents.end())
+                    row.dcaPictures = assigned->second.picture;
             }
 
             /*  WHAT IS UNDER THE FADER NOW, read off the node the fader rides -

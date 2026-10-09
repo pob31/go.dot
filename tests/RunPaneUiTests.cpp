@@ -2049,6 +2049,138 @@ TEST_CASE ("surface panel: a pad press sends strip.press with a velocity, a fade
     }
 }
 
+TEST_CASE ("surface panel: the knob above a DCA strip turns the marks playing under it as one write, a click switches it, and a sampler strip has none (§50)")
+{
+    std::vector<wfg::Event> sent;
+
+    ui::SurfacePanelComponent panel (model::Theme {},
+                                     [&sent] (wfg::Event event) { sent.push_back (std::move (event)); });
+    panel.setSize (900, 420);
+
+    model::SurfaceRow desk;
+    desk.id = "SRF00001";
+    desk.name = "Desk";
+    desk.profile = "virtual";
+    desk.strips = 2;
+    desk.connected = true;
+
+    model::StripRow gunshot;
+    gunshot.id = "STP00001";
+    gunshot.surface = desk.id;
+    gunshot.index = 0;
+    gunshot.role = "sampler";
+    gunshot.endpoint = "absolute";
+    gunshot.word = "free";
+
+    /*  A DCA STRIP WITH PICTURES ASSIGNED, two marks playing under it: a movie
+        with its sound, curve 20 and offset -3, and a wash, curve 20. */
+    model::StripRow screens;
+    screens.id = "STP00002";
+    screens.surface = desk.id;
+    screens.index = 1;
+    screens.role = "dca";
+    screens.dca = "DCA00001";
+    screens.endpoint = "absolute";
+    screens.target = "/godot/dca/DCA00001/trim";
+    screens.word = "dca";
+    screens.dcaName = "Screens";
+    screens.hasLevel = true;
+    screens.levelDb = 0.0;
+    screens.dcaPictures = true;
+
+    wfg::surface::DcaMark movie;
+    movie.cue = "MOV00001";
+    movie.curve = 20.0;
+    movie.offsetDb = -3.0;
+    movie.picture = true;
+    movie.sound = true;
+
+    wfg::surface::DcaMark wash;
+    wash.cue = "VID00002";
+    wash.curve = 20.0;
+    wash.picture = true;
+
+    screens.dcaMarks = { movie, wash };
+
+    const std::vector<model::SurfaceRow> surfaces { desk };
+    const std::vector<model::StripRow> strips { gunshot, screens };
+
+    panel.show (surfaces, strips);
+    REQUIRE (panel.columnCount() == 2u);
+
+    //  It draws, the knob too.
+    juce::Image canvas (juce::Image::ARGB, 900, 420, true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, true);
+    }
+
+    const auto pairsOf = [] (const wfg::Event& event)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& arg : event.args)
+            out.push_back (arg.getString());
+
+        return out;
+    };
+
+    SUBCASE ("a turn is one write over the marks the curve moves, from where it was taken, on the pass")
+    {
+        panel.turnKnob (1, 2);
+        CHECK (sent.empty());
+
+        //  Five detents from where it was taken, not seven: the target is sent whole.
+        panel.turnKnob (1, 5);
+        panel.show (surfaces, strips);
+
+        REQUIRE (sent.size() == 1u);
+        CHECK (sent[0].command == "node.setMany");
+        CHECK (sent[0].origin == "window");
+        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/cue/MOV00001/dcaCurve", "30",
+                                                                "/godot/cue/VID00002/dcaCurve", "30" });
+
+        //  Let go with nothing unsent, nothing more goes.
+        panel.endKnob (1);
+        CHECK (sent.size() == 1u);
+    }
+
+    SUBCASE ("a click switches it to the sound's offset and sends nothing; a turn then moves the marks with a sound")
+    {
+        panel.clickKnob (1);
+        CHECK (sent.empty());
+
+        panel.turnKnob (1, -2);
+        panel.endKnob (1);
+
+        REQUIRE (sent.size() == 1u);
+        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/cue/MOV00001/dcaOffset", "-4" });
+    }
+
+    SUBCASE ("with nothing playing under its DCA, a turn sends nothing")
+    {
+        auto quiet = strips;
+        quiet[1].dcaMarks.clear();
+        panel.show (surfaces, quiet);
+
+        panel.turnKnob (1, 3);
+        panel.endKnob (1);
+        CHECK (sent.empty());
+    }
+
+    SUBCASE ("a sampler strip has no knob, and the DCA's pad still puts its trim back at nought")
+    {
+        panel.turnKnob (0, 3);
+        panel.endKnob (0);
+        CHECK (sent.empty());
+
+        panel.pressPad (1, 0.5);
+        REQUIRE (sent.size() == 1u);
+        CHECK (sent[0].command == "node.set");
+        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/dca/DCA00001/trim", "0" });
+    }
+}
+
 TEST_CASE ("run pane: a sampler group counts its members in words")
 {
     /*  §16.7: a sampler group's run reads its members as a count - a bank of

@@ -7760,6 +7760,24 @@ TEST_CASE ("client: every strip is read in the order a sampler group fills them,
     strips = model::readStrips (*rig.publish (2));
     CHECK (strips[9].levelDb == doctest::Approx (-6.0));
 
+    /*  AND WHAT THE KNOB ABOVE IT REACHES (namespace draft §50): a picture
+        marked with the DCA and playing - the bridge's own rule - and that
+        pictures are assigned to it, where its knob starts. */
+    CHECK (strips[9].dcaMarks.empty());
+
+    const auto wash = rig.document.createCue ("7K2QM9X4", 0, "video", "Wash");
+    REQUIRE (wash.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + wash.id + "/dca", desk.band).ok);
+    rig.runs.create ("RUNWASH1", wash.id, "video");
+    rig.runs.find ("RUNWASH1")->state = cue::runState::playing;
+
+    rig.parameters.markStale();
+    strips = model::readStrips (*rig.publish (3));
+    REQUIRE (strips[9].dcaMarks.size() == 1u);
+    CHECK (strips[9].dcaMarks[0].cue == wash.id);
+    CHECK (strips[9].dcaMarks[0].picture);
+    CHECK (strips[9].dcaPictures);
+
     rig.parameters.setDcas (nullptr);
 
     //  One surface's strips, in index order; a surface that is not there has none.

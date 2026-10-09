@@ -152,6 +152,7 @@ namespace wfg::client::ui
             fast the mouse reports (the send mixer's arrangement, and the
             bridge's coalescing for the hardware, §16.6). */
         flush();
+        flushKnob();
 
         std::vector<model::StripRow> ordered;
         std::vector<Band> laidOut;
@@ -195,7 +196,7 @@ namespace wfg::client::ui
             a fader. A word or a level changing moves nothing and costs a
             repaint; a strip appearing costs a layout. */
         for (const auto& strip : strips)
-            drawn += strip.id + (strip.endpoint == "gate" ? "g" : "f");
+            drawn += strip.id + (strip.endpoint == "gate" ? "g" : "f") + (strip.role == "dca" ? "d" : "");
 
         if (drawn != shape)
         {
@@ -297,6 +298,14 @@ namespace wfg::client::ui
         {
             parts.pad = area;
             return parts;
+        }
+
+        /*  A DCA STRIP HAS A KNOB ABOVE ITS FADER, as a desk's strip does
+            (namespace draft §50): the picture's curve or the sound's offset. */
+        if (strips[column].role == "dca")
+        {
+            parts.knob = area.removeFromTop (scaled (52));
+            area.removeFromTop (scaled (4));
         }
 
         parts.pad = area.removeFromBottom (juce::jmin (scaled (60), area.getHeight() / 3));
@@ -531,6 +540,53 @@ namespace wfg::client::ui
                               juce::Justification::centredLeft, 1, 0.6f);
         }
 
+        /*  THE KNOB ABOVE A DCA STRIP (namespace draft §50, ABZ): a dial whose
+            arc runs from its top - straight, or nought dB - to where the value
+            is, and under it what it turns and the value, as a desk's third row
+            says it; dim with nothing playing under the DCA. The hand's value
+            while a hand is on it, as the fader's. */
+        if (! parts.knob.isEmpty())
+        {
+            const auto mode = knobModeOf (strip);
+            auto reading = surface::knobReading (strip.dcaMarks, mode);
+
+            if (knobGrab.has_value() && knobGrab->strip == strip.id && knobGrab->any)
+                reading.value = knobGrab->wanted;
+
+            auto area = parts.knob;
+            const auto said = area.removeFromBottom (scaled (14));
+            const auto side = static_cast<float> (juce::jmin (area.getWidth(), area.getHeight()) - scaled (4));
+            const auto dial = area.toFloat().withSizeKeepingCentre (side, side);
+
+            g.setColour (Look::colour (theme, "panel-high"));
+            g.fillEllipse (dial);
+            g.setColour (Look::colour (theme, "rule"));
+            g.drawEllipse (dial, 1.0f);
+
+            if (reading.any)
+            {
+                constexpr auto sweep = juce::MathConstants<float>::pi * 0.75f;
+                const auto fraction = static_cast<float> (surface::knobRingFraction (mode, reading.value));
+                const auto angle = (fraction - 0.5f) * 2.0f * sweep;
+                const auto radius = side * 0.5f - 2.0f;
+
+                juce::Path arc;
+                arc.addCentredArc (dial.getCentreX(), dial.getCentreY(), radius, radius, 0.0f, 0.0f, angle, true);
+
+                const auto grabbed = knobGrab.has_value() && knobGrab->strip == strip.id;
+                g.setColour (Look::colour (theme, grabbed ? "picked" : "ink"));
+                g.strokePath (arc, juce::PathStrokeType (3.0f));
+
+                const auto tip = dial.getCentre() + juce::Point<float> (std::sin (angle), -std::cos (angle)) * radius;
+                g.drawLine (juce::Line<float> (dial.getCentre(), tip), 1.5f);
+            }
+
+            g.setFont (Look::font (theme, 10.0f));
+            g.setColour (Look::colour (theme, reading.any ? "ink" : "ink-off"));
+            g.drawFittedText (juce::String (surface::knobWords (mode, reading, 8)), said,
+                              juce::Justification::centred, 1, 0.7f);
+        }
+
         /*  THE FADER, where the strip has one: a groove, unity marked, and the
             cap where the level is. A strip riding nothing is drawn at the
             bottom, dimmed, and takes no drag - there is no node for a hand to
@@ -654,6 +710,16 @@ namespace wfg::client::ui
         const auto parts = partsOf (column);
         const auto where = event.getPosition();
 
+        /*  THE KNOB IS TAKEN where it is; whether the hand turns it or only
+            clicks is known when it lets go (namespace draft §50). */
+        if (parts.knob.contains (where))
+        {
+            if (takeKnob (column))
+                knobGrab->fromY = event.position.y;
+
+            return;
+        }
+
         if (parts.pad.contains (where))
         {
             /*  HOW FAR UP THE PAD, from the bottom edge: the top of a pad is
@@ -674,6 +740,16 @@ namespace wfg::client::ui
 
     void SurfacePanelComponent::dragged (const juce::MouseEvent& event)
     {
+        /*  A KNOB TURNED BY A DRAG, up is clockwise, six pixels a detent from
+            where the hand went down (namespace draft §50). */
+        if (knobGrab.has_value())
+        {
+            const auto moved = knobGrab->fromY - event.position.y;
+            knobGrab->travelled = juce::jmax (knobGrab->travelled, std::abs (moved));
+            turnKnob (columnOf (knobGrab->strip), juce::roundToInt (moved / static_cast<float> (scaled (6))));
+            return;
+        }
+
         if (! grab.has_value())
             return;
 
@@ -698,6 +774,24 @@ namespace wfg::client::ui
 
     void SurfacePanelComponent::released (const juce::MouseEvent&)
     {
+        //  A KNOB LET GO: a click under three pixels switches what it turns; a turn is sent.
+        if (knobGrab.has_value())
+        {
+            const auto column = columnOf (knobGrab->strip);
+
+            if (knobGrab->travelled < 3.0f)
+            {
+                knobGrab.reset();
+                clickKnob (column);
+            }
+            else
+            {
+                endKnob (column);
+            }
+
+            return;
+        }
+
         if (grab.has_value())
             letGoOfFader();
 
@@ -779,6 +873,95 @@ namespace wfg::client::ui
         mousePad.reset();
         letGoOf (down);
         canvas.repaint();
+    }
+
+    //==============================================================================
+    surface::KnobMode SurfacePanelComponent::knobModeOf (const model::StripRow& strip) const
+    {
+        if (const auto found = knobModes.find (strip.id + "|" + strip.dca); found != knobModes.end())
+            return found->second;
+
+        return strip.dcaPictures ? surface::KnobMode::curve : surface::KnobMode::offset;
+    }
+
+    bool SurfacePanelComponent::takeKnob (std::size_t column)
+    {
+        if (column >= strips.size())
+            return false;
+
+        const auto& strip = strips[column];
+
+        if (knobGrab.has_value())
+            return knobGrab->strip == strip.id;
+
+        if (strip.role != "dca" || strip.dca.empty())
+            return false;
+
+        KnobGrab taken;
+        taken.strip = strip.id;
+        taken.dca = strip.dca;
+        taken.mode = knobModeOf (strip);
+        taken.marks = strip.dcaMarks;
+
+        const auto reading = surface::knobReading (taken.marks, taken.mode);
+        taken.any = reading.any;
+        taken.heldValue = reading.value;
+        taken.wanted = reading.value;
+        knobGrab = taken;
+
+        canvas.repaint();
+        return true;
+    }
+
+    void SurfacePanelComponent::clickKnob (std::size_t column)
+    {
+        if (column >= strips.size() || strips[column].role != "dca")
+            return;
+
+        const auto& strip = strips[column];
+        knobModes[strip.id + "|" + strip.dca] = knobModeOf (strip) == surface::KnobMode::curve
+                                                  ? surface::KnobMode::offset
+                                                  : surface::KnobMode::curve;
+        canvas.repaint();
+    }
+
+    void SurfacePanelComponent::turnKnob (std::size_t column, int steps)
+    {
+        if (! takeKnob (column) || ! knobGrab->any)
+            return;
+
+        const auto wanted = surface::knobTurned (knobGrab->mode, knobGrab->heldValue, steps);
+
+        if (std::abs (wanted - knobGrab->wanted) < 1.0e-9)
+            return;
+
+        knobGrab->wanted = wanted;
+        knobGrab->unsent = true;
+        canvas.repaint();
+    }
+
+    void SurfacePanelComponent::endKnob (std::size_t column)
+    {
+        if (! knobGrab.has_value() || column >= strips.size() || strips[column].id != knobGrab->strip)
+            return;
+
+        flushKnob();
+        knobGrab.reset();
+        canvas.repaint();
+    }
+
+    void SurfacePanelComponent::flushKnob()
+    {
+        if (! knobGrab.has_value() || ! knobGrab->unsent)
+            return;
+
+        knobGrab->unsent = false;
+
+        /*  EVERY MARK THE MODE MOVES, to the one value, as one write - the
+            bridge's rule (`knobWrites`), so the window and a desk agree. */
+        if (const auto writes = surface::knobWrites (knobGrab->marks, knobGrab->mode, knobGrab->wanted);
+            ! writes.empty() && send)
+            send (gesture::setNodes (writes));
     }
 
     bool SurfacePanelComponent::takeFader (std::size_t column)
@@ -886,6 +1069,13 @@ namespace wfg::client::ui
     {
         if (grab.has_value())
             letGoOfFader();
+
+        //  A knob mid-turn sends where it got to (namespace draft §50).
+        if (knobGrab.has_value())
+        {
+            flushKnob();
+            knobGrab.reset();
+        }
 
         if (mousePad.has_value())
         {

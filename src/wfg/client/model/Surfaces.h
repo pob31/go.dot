@@ -42,6 +42,7 @@
     std only, and a pure reading of the snapshot the window already holds.
 */
 
+#include <wfg/engine/surface/DcaKnob.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstddef>
@@ -101,6 +102,14 @@ namespace wfg::client::model
             WR): "#RRGGBB" - its members' sound and pictures blended, as its
             rotary lights - or empty with nothing up. */
         std::string dcaColour;
+
+        /*  FOR A DCA STRIP, WHAT THE KNOB ABOVE IT REACHES (namespace draft
+            §50): the marks of what plays under its DCA now, the one shown
+            first - the bridge's own rule - and whether pictures are assigned
+            to it, which is where its knob starts. */
+        std::vector<surface::DcaMark> dcaMarks;
+        bool dcaPictures = false;
+
         bool hasLevel = false;   // whether `target` names a node with a value
         double levelDb = -120.0; // that value
         bool held = false;       // the holder run's `held`
