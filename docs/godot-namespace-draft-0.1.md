@@ -20967,7 +20967,7 @@ implementer's, waiting for the author's yes.
 - **Not built, and waiting for the bench or the author**: a real encoder's HAP file on a projector
   (frame pacing, how many 4K streams a machine plays); Hap R and Hap Q Alpha; a movie's sound (WC);
   the DCA on opacity (WD); in and out points and slices; a movie's frame at standby read before GO
-  (it is read from the first frame when it comes up).
+  (it is read from the first frame when it comes up) - *built 2026-10-09, §48.*
 
 ### 37.5 The author's answers, 2026-10-07
 
@@ -22975,8 +22975,8 @@ Mine, proposed:
   gave it.
 - **AAQ** What **ready** means: §48.5.
 - **AAR** The words: §48.3.
-- **AAS** The mark is a shape in a cell of its own just left of the kind, its word in a tooltip, and
-  *missing* written out beside it. Colour never says it alone (PRD §4.8).
+- **AAS** The mark is a shape in a cell of its own just left of the kind, its sentence in a tooltip,
+  and *missing* (or *no voice*) written out after the cue's name. Colour never says it alone (PRD §4.8).
 - **AAT** At most one picture put on the graphics card a frame, within 512 MB of pictures held ahead;
   one past that is ready once decoded.
 - **AAU** The engine looks for each file whenever what is read ahead changes, so *missing* is said with no
@@ -23016,11 +23016,22 @@ Mine, proposed:
 
 ### 48.6 Measurements
 
-- **M54** From GO to the first picture of a still and of a HAP movie, read ahead against cold. **M54a**
-  headless, on every platform: the renderer's probe at the canvas's centre, in samples at 48 kHz from the
-  sample the layer was shown at; CI holds only the read-ahead cases. **M54b** on Windows with
-  `WFG_VIDEO_BENCH`: through a Spout output read back - a 4K still cold, decoded only, and on the card -
-  and the frames late while one upload happens under a playing movie. Owed to the bench: the light on a
+- **M54** From GO to the first picture of a still and of a HAP movie, read ahead against cold.
+- **M54a**, headless, on every platform: the renderer's probe at the canvas's centre, in samples from
+  the one the layer was shown at, a twentieth of a second ahead as a GO places it; CI holds only the
+  read-ahead cases, under 60 ms. *Measured 2026-10-09* (`VideoHostTests`, Windows, Debug): a 1920x1080
+  noise still read ahead was seen 0.8 to 8 ms after its sample - the renderer's first pass - and one
+  never named 976 to 1026 ms after, its decode. A 1920x1080 HAP movie of ten frames was seen on the
+  first pass either way (9 ms read ahead, 2 ms cold): a short file just written opens and reads inside
+  the twentieth of a second a layer is placed ahead, so a movie's gain is for long ones, whose index
+  takes longer to read, and for files not yet in the system's cache - **owed to the bench**.
+- **M54b**, on the graphics card, on the bench (`WFG_VIDEO_BENCH`, `WFG_GPU_HARDWARE`), each frame timed
+  to the device's finish. *Measured 2026-10-09* on the machine's NVIDIA RTX PRO 2000, Debug: a frame with
+  nothing in it 30.3 ms (its read-back, mostly); GO on a 3840x2160 still only decoded 57.9 ms; the frame
+  before GO that put one on the card 46.7 ms, and GO on it 34.8 ms. The upload is some 16 to 28 ms - a
+  frame or two at sixty - and is now spent before GO, one still a frame. In place of the Spout read-back
+  first drawn: the painter in the test's own process, which times the same upload with nothing between.
+  Owed to the bench: frames late while an upload happens under a playing movie, and the light on a
   projector.
 
 ### 48.7 Stages
@@ -23046,5 +23057,35 @@ show opens, or by `wfg validate`. A movie's first frame on the graphics card ahe
 
 ### 48.9 Built so far
 
-- **RA.0, this section** (2026-10-09).
+All of it, 2026-10-09:
+
+- **RA.0, this section.**
+- **RA.1, what a GO starts first, and where a movie starts, each written once.** `Runner::launchedFirst`
+  is `armablesFor`'s walk taken out of it as cues, and `armablesFor` keeps its sounds; `movieStartOf` is
+  GO's own movie playhead - start offset, speed held to twenty either way, first range's in or out
+  point, the file's end backwards - and both GO and the read-ahead ask it.
+- **RA.2, the read-ahead set.** `Runner::prepareStandbyVideo` walks `launchedFirst` from the focused
+  list's standby, then every other list's, and hands the picture side a `video::Preload` for each
+  still and movie: its whole path, a movie's second and way. A missing file is not sent and is
+  written missing, and looked for again once a second while one is. Every cue got ready - sounds too -
+  is written as `ListState::ahead`. Asked of the show's revision and the lengths' map each tick, it
+  runs LAST in `advanceVideo`: a GO moves the standby, and with the list written before the layer the
+  renderer could read the list in between and let go of the picture GO had just shown.
+- **RA.3, region version 17.** `PreparedFile` and `HeldFile`; the answer names the list it answers
+  (`heldAnswers`), and a renderer started again begins with none. The picture store decodes in the
+  order asked and says how far each has got; the session reads the list before the layers.
+- **RA.4, movies read ahead.** The movie store keeps the engine's list beside the layers' - which it
+  replaced every pass - and reads from each head, a layer's playhead and the second GO will start at,
+  the frame and three after it. At most four previews decode for the read-ahead alone.
+- **RA.5, the words** (`cue::Preparedness`): a picture's from what the renderer holds; a sound
+  `preparing` until `audio.armed`; `cue/prepareError`; and a finished run no longer speaks for its cue,
+  except a failed arm still ahead - its word had stayed, so a sound whose arm failed read `armed`.
+- **RA.6, the mark** (`client::model::readinessOf`, `CueListComponent::setReadiness`): an open ring, a
+  ring with a centre, a half-full ring, a ring struck through; the browser console's flag says
+  *missing* and *no voice*.
+- **RA.7, stills on the card** (`render::Painter::keepPictures`): one upload a frame, within 512 MB,
+  kept through the frame's sweep; a still is ready once there while frames are drawn.
+- **RA.8, the close-out**: PRD §3.12, §3.19, §6.9 and §6.11; the devplan's Phase 8b; M54.
+
+§37.4's *"a movie's frame at standby read before GO"* is built here.
 

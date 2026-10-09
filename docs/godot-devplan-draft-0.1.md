@@ -574,6 +574,30 @@ Owed to the bench: the strip and its cuts on real movies, the panel's handles by
 hand, live edits on a projector, the insert round trip with TouchDesigner, the
 D700 pages on a picked cue. A movie that is not HAP has no strip until converted.
 
+*Added 2026-10-09, at the author's direction* (namespace draft §48; PRD §3.12 and
+§3.19 amended): **pictures read ahead where sounds are armed, and how ready each
+cue is on its row** - the first step towards video in a sampler group, asked the
+same day. All built and pushed, RA.0-RA.8, each stage its own commit on main
+(RA.5 and RA.6 together):
+
+| Stage | What the author sees |
+|---|---|
+| RA.0 | Namespace draft §48 |
+| RA.1 | Nothing: what a GO starts first, and a movie's starting second, each written once |
+| RA.2 | Nothing yet: a scene's first stills and movies named to read ahead, a missing file found |
+| RA.3 | Nothing yet: the renderer reads them before GO and says what it holds |
+| RA.4 | A cut to a movie on standby shows its first frame |
+| RA.5 | The words: `cue/prepare` for pictures, `cue/prepareError` |
+| RA.6 | A mark on every row that can be got ready - getting ready, ready, partly, missing - in the window and the browser console |
+| RA.7 | A large still shown at GO without its upload in that frame |
+| RA.8 | M54, the PRD, this paragraph |
+
+Owed to the bench: M54 on long movies and files not yet in the system's cache;
+frames late while a still is uploaded under a playing movie; the light on a
+projector; the author's eye on the marks. The questions video in a sampler group
+asks - what a fader does to a picture, where it waits, a still that never ends,
+which picture lies on top - wait for the author.
+
 ---
 
 ## Phase 9 — Plugins and the rack · L

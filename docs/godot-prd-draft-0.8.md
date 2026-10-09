@@ -1029,6 +1029,13 @@ carries only the perceptible commit. Jumping away rolls preparation back —
 silently, guaranteed by the revocability rule. Row shows `idle / preparing /
 armed-verified`.
 
+*Amended 2026-10-09, at the author's direction* (namespace draft §48, AAM): **the row shows it in the
+window as on the page** - a mark in a cell of its own beside the kind, for every cue got ready ahead,
+a sound's as much as a picture's: getting ready, ready, partly ready, or missing, *missing* also in a
+word, and what each means on hover. Why getting a cue ready failed is published beside its word
+(`prepareError`: `media-missing`, `no-track`). A sound reads ready once the audio side has confirmed
+its voice, not when the arm is asked (proposed, AAR).
+
 Own processors may receive tick N+1 values during tick N as OSC bundles with
 timetags, erasing network jitter. Third parties get plain send-on-change.
 
@@ -1650,6 +1657,17 @@ does; refused under the lock (AAE). **A movie and its locked sound are edited fr
 **Inserts stay the show's**, made by kind with both their names written once so another program is
 patched once (AAJ; the names proposed, AAK). And a pick in the window **aims the control surface's EQ,
 Send and FX pages** (AAA, §3.16).
+
+*Amended 2026-10-09, at the author's direction* (namespace draft §48): **pictures are read ahead where
+sounds are armed** - the first step towards video in a sampler group (§3.27), whose own questions are
+not decided. What the next GO starts - the standby, a scene's first cue, a timeline's cues that start
+at once - is read by the renderer before GO: a still decoded and put on the graphics card, a movie
+opened and its frames read from the second GO will start it at (AAL). **No run is made for a picture,
+and GO never waits for one:** a picture not read yet when GO comes still shows late (AAN). Up to 32
+files ahead, room for a bank (AAO). Each cue's row says how ready it is (§3.12). Proposed (§6.9): other
+lists' standby pictures read too, after the focused list's (AAP); what *ready* means for a still, a HAP
+movie and a preview (AAQ); one upload to the card a frame, within 512 MB (AAT); a missing file found
+by the engine, renderer or not (AAU).
 
 *Amended 2026-10-06, at the author's direction — Phase 8 started* (`docs/godot-namespace-draft-0.1.md`
 §35, decisions UU–VM). **Stills first, movies second:** 8a builds flat colours, masks, pictures,
@@ -3724,6 +3742,19 @@ calls YW-ZM in §45.2 are the author's to overrule; these are what the work left
 - **An OSC cue's messages as a foot part** to copy and paste (namespace draft §38).
 - **The SpaceMouse's left button** starting and stopping a pass (ZM).
 
+Added 2026-10-09 *(proposed)*, with pictures read ahead (namespace draft §48). The implementer's calls
+AAP-AAU in §48.2 are the author's to overrule; these are what the work left out:
+
+- **Reading further ahead than the standby** - the next few cues, the least recently used let go, as
+  namespace draft §35.4 first drew it. Today a picture is read where a sound is armed, and no further.
+- **A missing picture said when the show opens**, or by `wfg validate`, rather than when its cue comes
+  ahead.
+- **A movie's first frame on the graphics card ahead**, as a still's is: a movie's frames are read
+  ahead, and uploaded on the frame they show.
+- **The older OpenGL renderer** (`--renderer=gl`) putting stills on the card ahead: it decodes them only.
+- **Video in a sampler group** (§3.27): what a strip's fader does to a picture, where it waits, a still
+  that never ends, and which picture lies on top.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -3847,6 +3878,13 @@ Mackie vs HUI first — first week with the D700.
   arithmetic. *Measured 2026-10-08* (namespace draft §45.6): M51, 101 datagrams over two seconds, each
   within 0.029 m of the drawing on a 5 m/s ramp; M52, 75 to 85 ms from a push to the curve's ride read
   back over HTTP; M53's arithmetic checked, its time owed to the bench.
+- **Pictures read ahead** (§3.19, 2026-10-09, namespace draft §48): **M54** - from GO to the first
+  picture, read ahead against cold. *Measured 2026-10-09* on a Debug build (§48.6): a 1920x1080 still
+  read ahead is seen on the renderer's first pass after the sample it is shown at (1 to 8 ms), one
+  never named about a second later, its decode; a short HAP movie is seen on the first pass either way,
+  so its gain is for long movies and files not in the system's cache - owed to the bench. On the
+  graphics card, GO on a 3840x2160 still only decoded took 58 ms against 35 ms for one put on the card a
+  frame before: its upload, a frame or two at sixty, is now spent before GO.
 
 ---
 
