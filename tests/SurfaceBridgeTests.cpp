@@ -58,6 +58,7 @@
 #include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/DcaColour.h>
+#include <wfg/engine/surface/DcaKnob.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
@@ -4649,4 +4650,177 @@ TEST_CASE ("surface bridge: a DCA's ring shows what it rides - its sounds by tim
 
     //  4: its only member has ended.
     CHECK (lights.count ("DCA00004") == 0);
+}
+
+//==============================================================================
+/*  THE KNOB ABOVE A DCA STRIP (namespace draft §50): what it reaches, the value
+    it shows, what a turn writes, and what its screen and ring say. */
+TEST_CASE ("dca knob: the marks a knob reaches are found through the runs' parents, each once, the newest run's nearest shown first (§50, ABY)")
+{
+    FakeTree fake;
+    fake.text ("/godot/dca/order", "DCA00001 DCA00002");
+    fake.text ("/godot/dca/DCA00002/dca", "DCA00001");     // 2 inside 1
+    fake.text ("/godot/run/order", "RUN00001 RUN00002 RUN00003 RUN00004 RUN00005 RUN00006 RUN00007 RUN00008");
+
+    const auto run = [&fake] (const char* id, const char* kind, const char* cue, const char* state,
+                              double started, const char* parent)
+    {
+        const auto base = std::string ("/godot/run/") + id + "/";
+        fake.text (base + "kind", kind);
+        fake.text (base + "cue", cue);
+        fake.text (base + "state", state);
+        fake.number (base + "started", started);
+        fake.text (base + "parent", parent);
+    };
+
+    //  A movie marked with 2, its locked sound playing under its run; the sound's own cue unmarked.
+    run ("RUN00001", "video", "MOV00001", "playing", 10.0, "");
+    run ("RUN00002", "media", "SND00001", "playing", 10.0, "RUN00001");
+    fake.text ("/godot/cue/MOV00001/dca", "DCA00002");
+    fake.number ("/godot/cue/MOV00001/dcaCurve", 20.0);
+    fake.number ("/godot/cue/MOV00001/dcaOffset", -3.0);
+    fake.text ("/godot/cue/SND00001/dca", "");
+
+    //  A group marked with 1, two of its sounds playing under its run: its mark once.
+    run ("RUN00003", "group", "GRP00001", "playing", 20.0, "");
+    run ("RUN00004", "media", "SND00002", "playing", 30.0, "RUN00003");
+    run ("RUN00005", "media", "SND00003", "playing", 20.0, "RUN00003");
+    fake.text ("/godot/cue/GRP00001/dca", "DCA00001");
+    fake.number ("/godot/cue/GRP00001/dcaOffset", -6.0);
+
+    /*  A member fired by name while its group is not running: the cue's parent
+        is a marked group, the run has none - nothing that group's mark says
+        reaches it, so the knob does not write it. */
+    run ("RUN00006", "media", "SND00004", "playing", 40.0, "");
+    fake.text ("/godot/cue/SND00004/parent", "GRP00002");
+    fake.text ("/godot/cue/GRP00002/dca", "DCA00001");
+
+    //  Ended and armed, though marked: nothing playing.
+    run ("RUN00007", "media", "SND00005", "done", 50.0, "");
+    run ("RUN00008", "media", "SND00006", "armed", 60.0, "");
+    fake.text ("/godot/cue/SND00005/dca", "DCA00001");
+    fake.text ("/godot/cue/SND00006/dca", "DCA00001");
+
+    const auto snapshot = fake.publish (1);
+    const auto marks = surface::dcaMarksPlaying (*snapshot);
+
+    //  2: the movie's mark, with a picture and a sound under it.
+    REQUIRE (marks.count ("DCA00002") == 1);
+    const auto& two = marks.at ("DCA00002");
+    REQUIRE (two.size() == 1u);
+    CHECK (two[0].cue == "MOV00001");
+    CHECK (two[0].picture);
+    CHECK (two[0].sound);
+    CHECK (two[0].curve == doctest::Approx (20.0));
+    CHECK (two[0].offsetDb == doctest::Approx (-3.0));
+
+    //  1: through 2 the movie's, and the group's once - the group's first, its newest run started last.
+    REQUIRE (marks.count ("DCA00001") == 1);
+    const auto& one = marks.at ("DCA00001");
+    std::vector<std::string> cues;
+
+    for (const auto& mark : one)
+        cues.push_back (mark.cue);
+
+    CHECK (cues == std::vector<std::string> { "GRP00001", "MOV00001" });
+    CHECK (one[0].sound);
+    CHECK_FALSE (one[0].picture);
+}
+
+TEST_CASE ("dca knob: the value shown, a turn's writes, its words and its ring (§50, ABX, ABY, ABZ)")
+{
+    using surface::KnobMode;
+
+    //  Shown first to last: a movie with its sound, a group of pictures, a sound alone.
+    std::vector<surface::DcaMark> marks (3);
+    marks[0].cue = "MOV00001";
+    marks[0].curve = 20.0;
+    marks[0].offsetDb = -3.0;
+    marks[0].picture = true;
+    marks[0].sound = true;
+    marks[1].cue = "GRP00001";
+    marks[1].curve = 40.0;
+    marks[1].offsetDb = -3.0;
+    marks[1].picture = true;
+    marks[2].cue = "SND00001";
+    marks[2].offsetDb = -6.0;
+    marks[2].sound = true;
+
+    //  THE VALUE SHOWN is the first mark the mode moves; another saying otherwise is a disagreement.
+    const auto curve = surface::knobReading (marks, KnobMode::curve);
+    CHECK (curve.any);
+    CHECK (curve.value == doctest::Approx (20.0));
+    CHECK (curve.disagree);
+
+    const auto offset = surface::knobReading (marks, KnobMode::offset);
+    CHECK (offset.value == doctest::Approx (-3.0));
+    CHECK (offset.disagree);
+
+    CHECK_FALSE (surface::knobReading ({ marks[2] }, KnobMode::curve).any);
+
+    using Writes = std::vector<std::pair<std::string, std::string>>;
+
+    //  A TURN: three detents up the curve on the marks with a picture, two down the offset on those with a sound.
+    CHECK (surface::knobTurned (KnobMode::curve, 20.0, 3) == doctest::Approx (26.0));
+    CHECK (surface::knobWrites (marks, KnobMode::curve, 26.0)
+             == Writes { { "/godot/cue/MOV00001/dcaCurve", "26" }, { "/godot/cue/GRP00001/dcaCurve", "26" } });
+
+    CHECK (surface::knobTurned (KnobMode::offset, -3.0, -2) == doctest::Approx (-4.0));
+    CHECK (surface::knobWrites (marks, KnobMode::offset, -4.0)
+             == Writes { { "/godot/cue/MOV00001/dcaOffset", "-4" }, { "/godot/cue/SND00001/dcaOffset", "-4" } });
+
+    //  A mark already there is not written, a mark reached twice once, and the ends hold.
+    CHECK (surface::knobWrites (marks, KnobMode::offset, -3.0) == Writes { { "/godot/cue/SND00001/dcaOffset", "-3" } });
+    CHECK (surface::knobWrites ({ marks[2], marks[2] }, KnobMode::offset, -1.0).size() == 1u);
+    CHECK (surface::knobTurned (KnobMode::curve, 98.0, 5) == doctest::Approx (100.0));
+    CHECK (surface::knobTurned (KnobMode::offset, 11.0, 10) == doctest::Approx (12.0));
+    CHECK (surface::knobTurned (KnobMode::offset, -23.5, -5) == doctest::Approx (-24.0));
+
+    //  THE WORDS, in eight characters and in seven, never longer.
+    const auto said = [] (KnobMode mode, bool any, double value, bool disagree, int width)
+    {
+        surface::KnobReading reading;
+        reading.any = any;
+        reading.value = value;
+        reading.disagree = disagree;
+        const auto words = surface::knobWords (mode, reading, width);
+        CHECK (static_cast<int> (words.size()) <= width);
+        return words;
+    };
+
+    CHECK (said (KnobMode::curve, true, 20.0, false, 8) == "pic +20");
+    CHECK (said (KnobMode::curve, true, -100.0, true, 8) == "pic*-100");
+    CHECK (said (KnobMode::offset, true, -3.5, false, 8) == "snd -3.5");
+    CHECK (said (KnobMode::offset, true, -24.0, true, 8) == "snd*-24");
+    CHECK (said (KnobMode::offset, true, 0.0, false, 8) == "snd 0");
+    CHECK (said (KnobMode::curve, false, 0.0, false, 8) == "pic --");
+    CHECK (said (KnobMode::curve, true, 20.0, false, 7) == "p +20");
+    CHECK (said (KnobMode::offset, true, -3.5, true, 7) == "s*-3.5");
+
+    //  THE RING: the middle at straight and at nought dB, the offset's halves unequal.
+    CHECK (surface::knobRingFraction (KnobMode::curve, 0.0) == doctest::Approx (0.5));
+    CHECK (surface::knobRingFraction (KnobMode::curve, -100.0) == doctest::Approx (0.0));
+    CHECK (surface::knobRingFraction (KnobMode::curve, 100.0) == doctest::Approx (1.0));
+    CHECK (surface::knobRingFraction (KnobMode::offset, 0.0) == doctest::Approx (0.5));
+    CHECK (surface::knobRingFraction (KnobMode::offset, -24.0) == doctest::Approx (0.0));
+    CHECK (surface::knobRingFraction (KnobMode::offset, -12.0) == doctest::Approx (0.25));
+    CHECK (surface::knobRingFraction (KnobMode::offset, 6.0) == doctest::Approx (0.75));
+    CHECK (surface::knobRingFraction (KnobMode::offset, 12.0) == doctest::Approx (1.0));
+
+    //  WHERE A STRIP STARTS: on the curve with pictures assigned, on the offset otherwise.
+    surface::DcaContents sounds;
+    sounds.sound = true;
+    auto both = sounds;
+    both.picture = true;
+    CHECK (surface::knobStartMode (sounds) == KnobMode::offset);
+    CHECK (surface::knobStartMode (both) == KnobMode::curve);
+
+    //  AND THE RANGES ARE THE ROWS': one table, said twice.
+    for (const auto* row : doc::Schema::rowsForOwner ("mark"))
+    {
+        INFO ("row " << row->name);
+        const auto curveRow = row->name == "dcaCurve";
+        CHECK (row->minimum == doctest::Approx (curveRow ? surface::knobCurveMin : surface::knobOffsetMinDb));
+        CHECK (row->maximum == doctest::Approx (curveRow ? surface::knobCurveMax : surface::knobOffsetMaxDb));
+    }
 }

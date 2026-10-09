@@ -175,6 +175,8 @@ add_library(wfg_engine STATIC
     wfg/engine/surface/SurfaceBridge.h
     wfg/engine/surface/DcaColour.cpp
     wfg/engine/surface/DcaColour.h
+    wfg/engine/surface/DcaKnob.cpp
+    wfg/engine/surface/DcaKnob.h
     wfg/engine/surface/SurfaceBridge.cpp
     wfg/engine/surface/SurfaceTable.h
     wfg/engine/surface/SurfaceCommands.h
