@@ -8653,6 +8653,11 @@ slot's**: a `Strip` carries the owners `slot` and `strip`, as a rack `Channel` c
 `rackChannel`, so its name is `slot/name` and the `strip` owner must not declare one — the check M-B
 added, that no element's owners declare a name twice, covers it.
 
+*2026-10-09 (§49, ABB):* the member rows marked "— media" above - `release`, `secondPress`, `velocity`,
+`velocityFloor`, `pressure`, and with them `strip`, `stripNow`, `stripsBefore`, `releaseFade` and
+`initialLevel` - move to an owner of their own, `member`, carried by Media and Video alike; and
+`surface.aim` takes a movie's id as its locked sound's (ABG).
+
 **Published out of both halves of the tree, as a slot is** (§13.2). What the show decided, and what
 its structure alone decides — a strip's `index`, `surface` and `endpoint`, a surface's `strips` —
 comes from the document half, rebuilt when the show changes. What changes while nothing about the
@@ -21439,6 +21444,9 @@ would have taken a strip and played without its picture. Now:
 - Switching an existing group with other members to `sampler` is not refused; the members it cannot
   play stay inert, as before. A mic or a picture as a member stays PRD §6.9's.
 
+*2026-10-09:* a picture as a member is decided - §49. A sampler takes video cues of every kind, and a
+sound locked to a movie beside its movie (ABE); the list's words say *sounds and pictures*.
+
 ### 39.5 The projector's window on a scaled display
 
 On Windows a window is created on the main display and sized with that display's scale, then moved
@@ -23088,4 +23096,114 @@ All of it, 2026-10-09:
 - **RA.8, the close-out**: PRD §3.12, §3.19, §6.9 and §6.11; the devplan's Phase 8b; M54.
 
 §37.4's *"a movie's frame at standby read before GO"* is built here.
+
+## 49. Pictures in a sampler group
+
+Written 2026-10-09, the second step of the author's question *"What would be the impact of allowing
+videos to be trigger in "Sampler Groups" too?"* - §48 was the first. Asked the four questions a picture
+on a strip raises, the author answered: *"yes opacity"*; *"It can wait at a set level that goes for sound
+and video, indeed."*; *"the mute buttons act as kills. The stop cue probably does that too."*; and
+*"layer number decides. (the order might be what suits the hands best or the order to play items and not
+the video layering, so like for normal video cues, use the layer number)."*
+
+### 49.1 What it is, before its names
+
+A sampler group's members may be pictures as well as sounds: a still, a movie, a colour, a mask, a
+camera. GO arms the bank and each picture lands on a fader or a pad as a sound does; a hand on the fader
+brings it up, and the fader is how solid it is - all of it at the top of its travel, nothing at the
+bottom, half way up about half. The fader waits where the member says, as a sound's does. Let go of a
+picture that is held and it fades out; one that plays out stays until its strip's MUTE takes it away, or
+a stop cue. Two pictures up at once lie as their layers say. A movie brings its sound: both are ready
+when the bank arms, both start on one press, and the one fader moves both.
+
+### 49.2 Decisions
+
+The author's (2026-10-09): **AAV**-**AAY** the four answers above; **AAZ** and **ABA** each the option I
+recommended, the words of each option mine.
+
+- **AAV** A strip's fader is the picture's **opacity**, along the fader's travel - `video::opacityForTrim`,
+  the DCA's law (WE).
+- **AAW** The fader **waits at the member's `initialLevel`**, the same row and the same rule for a sound
+  and a picture.
+- **AAX** **A still never ends by itself**: the strip's MUTE kills it (`run.kill`) and a stop cue stops
+  it. Nothing new.
+- **AAY** **The layer's number decides** which picture is on top, the later on a tie (VI), as for any
+  video cue - not the strips' order, which is the hands'.
+- **AAZ** **Every video cue may be a member**: fill, mask, picture, movie, capture.
+- **ABA** **A movie's locked sound comes with it**, armed on a voice of its own when the bank arms and
+  launched with the picture; the fader moves both. Its own stage, the last.
+
+Mine, proposed:
+
+- **ABB** The member rows are one **owner, `member`**, carried by Media and by Video, as `sound` is by
+  Media and Mic: one definition of each row.
+- **ABC** **The bank's set level** - the group's level and trim (PRD §3.6) - reaches its sounds and not its
+  pictures; a picture follows its strip's hand and its DCAs. A movie's sound takes it like any sound.
+- **ABD** What each row does to a picture: §49.3. A **restart on anything without a playhead does
+  nothing**; a press ignores a pre-wait, as a sound's does, and keeps the cue's fade-in.
+- **ABE** A **sound locked to a movie** may stand in a bank only with its movie, straight after it, and
+  is not a member: it is played by its movie.
+- **ABF** **An armed bank's stills and movies are read ahead** (§48): after the focused list's standby,
+  before the other lists', within the 32.
+- **ABG** On a surface: a **picture strip's colour is its picture's tint**; a **movie's meter is its
+  sound's**, a silent picture's dark; **SELECT on a movie aims its sound** (AAA's rule), on another
+  picture it does nothing.
+- **ABH** A movie member whose sound has **no voice** reads *pending*, and a press waits for it, so
+  picture and sound leave on one sample.
+- **ABI** The inspector calls the `strip` row **"fader or pad"**, apart from a movie's strip of frames
+  (AAC).
+- **ABJ** A **still playing out keeps its strip through a takeover**, a sound's play-out rule; the next
+  bank's member there reads *pending* until MUTE.
+
+### 49.3 The rows
+
+The member rows move from the owner `media` to `member` (ABB) - the same addresses, the same defaults,
+on a Video as on a Media:
+
+| Row | A still, a fill, a mask, a capture | A movie |
+|---|---|---|
+| `strip`, `stripNow`, `stripsBefore` | as for a sound | as for a sound |
+| `initialLevel` | where the fader waits; the opacity times `opacityForTrim` - nought dB and above all of it, -6 dB 92 %, -20 dB 75 %, -40 dB 49 % | the same, and its sound's trim in dB |
+| `release` `hold` | up while held; let go, or the fader at the bottom, takes it down over `releaseFade` | the same, its sound with it |
+| `release` `playOut` | up until MUTE, a stop cue or a second press that stops; at the bottom of the fader, unseen and still holding | plays to its end, then is armed again |
+| `secondPress` `restart` / `noop` / `stop` | nothing / nothing / down over `releaseFade` | from its start (`movieStartOf`), its sound too / nothing / down, its sound too |
+| `velocity`, `velocityFloor`, `pressure` | set or ride the trim, so the opacity | both |
+
+### 49.4 Measurements
+
+- **M55** From a press to the first picture. **M55a** on CI, exact: the first opacity point a horizon on
+  from the press (`videoLeadTicks` ticks), a fader's touch one tick more. **M55b** headless, as M54a: a
+  member read ahead against cold. **M55c** on the bench: a D700 fader to the light on a projector.
+
+### 49.5 Stages
+
+| Stage | What the author sees |
+|---|---|
+| VS.0 | This section; PRD §3.27, §3.28 and §6.9 |
+| VS.1 | A video cue's inspector has the member rows, greyed outside a bank |
+| VS.2 | A picture may be put in a sampler group; a movie takes its sound with it |
+| VS.3 | A picture comes up from a strip, its fader its opacity |
+| VS.4 | Let go, it fades out; MUTE takes it away |
+| VS.5 | An armed bank's pictures are ready before the hand moves |
+| VS.6 | The surface: a picture strip in its picture's colour; SELECT on a movie aims its sound |
+| VS.7 | The list takes pictures into a bank by drag, drop and the add menus |
+| VS.8 | A movie's sound comes with it, on a voice of its own |
+| VS.9 | M55, the docs, the close-out |
+
+### 49.6 Not built
+
+*(Proposed, PRD §6.9.)* The bank's set level on a picture (ABC); a curve of its own on a member; the
+video monitor following a strip.
+
+### 49.7 Built so far
+
+- **VS.0, this section** (2026-10-09).
+
+### 49.8 Afterwards: the knob above a DCA strip (the author's, 2026-10-09)
+
+Asked the same day *"if the rotary dial above a DCA with sound and video could be used to adjust either
+the audio level offset or the opacity curve from linear at 50% to something that either fades in slower
+at first or fast at first"*, and *"how to store this through out the cueing"*, the author chose, from the
+options I offered: **both, a press switches**; **on each cue's DCA mark**; **after this section**. PRD
+§3.28 says it as decided. Its own round, with its own section.
 

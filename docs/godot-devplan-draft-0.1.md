@@ -598,6 +598,26 @@ projector; the author's eye on the marks. The questions video in a sampler group
 asks - what a fader does to a picture, where it waits, a still that never ends,
 which picture lies on top - wait for the author.
 
+*Added 2026-10-09, at the author's direction* (namespace draft §49; PRD §3.27,
+§3.28 and §6.9 amended): **pictures in a sampler group** - the author's answers to
+those four questions, every kind of video cue, and a movie's sound with it. Each
+stage its own commit on main:
+
+| Stage | What the author sees |
+|---|---|
+| VS.0 | Namespace draft §49 |
+| VS.1 | A video cue's inspector has the member rows, greyed outside a bank |
+| VS.2 | A picture may be put in a sampler group; a movie takes its sound with it |
+| VS.3 | A picture comes up from a strip, its fader its opacity |
+| VS.4 | Let go, it fades out; MUTE takes it away |
+| VS.5 | An armed bank's pictures are ready before the hand moves |
+| VS.6 | The surface: a picture strip in its picture's colour; SELECT on a movie aims its sound |
+| VS.7 | The list takes pictures into a bank by drag, drop and the add menus |
+| VS.8 | A movie's sound comes with it, on a voice of its own |
+| VS.9 | M55, the docs, the close-out |
+
+Then its own round: the knob above a DCA strip (PRD §3.28, decided the same day).
+
 ---
 
 ## Phase 9 — Plugins and the rack · L

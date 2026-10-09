@@ -2486,6 +2486,18 @@ fader-start for a picture, Phase 8's problem) and own their outputs, levels and
 mappings as §4.12 requires. What reads as the group's direct out is §3.5's
 bulk-edit view over its members, never a property of the group.
 
+*Amended 2026-10-09, at the author's direction* (`docs/godot-namespace-draft-0.1.md` §49): **video cues
+are members too** - any of them: a fill, a mask, a still, a movie, a capture (AAZ). **A strip's fader is
+the picture's opacity**, along the fader's travel as a DCA's is (AAV). **It waits at the member's set
+level**, the same rule and the same row as a sound's (AAW). **A still never ends by itself**: the strip's
+MUTE kills it, as it kills a sound, and a stop cue stops it (AAX). **Which picture is on top is its
+layer's number**, as for any video cue, the later on a tie (AAY). **A movie's locked sound comes with
+it**, on a voice of its own from the moment the bank arms, so the press starts both on one sample and
+the fader moves both (ABA). Proposed (§6.9): the bank's set level reaches its sounds but not its pictures
+(ABC); a restart on a still does nothing (ABD); an armed bank's pictures read ahead (ABF); a picture
+strip's colour is its picture's tint, and SELECT on a movie aims its sound (ABG); a still playing out
+keeps its strip through a takeover, until MUTE (ABJ).
+
 **Strips.** §3.16's word for a fader or a pad. Each strip's role is the
 layout's (§3.9a): a **DCA strip** is pinned; a **sampler strip** is filled by
 whichever sampler group is armed, in member order, left to right. A member may
@@ -2718,6 +2730,21 @@ VCA on a channel and on its master would. And a **DCA strip's ring shows what th
 DCA rides** as one colour: its sounds by their timbre (§3.30) weighted by loudness,
 its pictures by their average tint, their opacity in it - a tenth of white while a
 picture is up but see-through, so the rotary stays visible.
+
+*Decided 2026-10-09, at the author's direction - not built yet, its own round after
+video in a sampler group (namespace draft §49.8).* **The knob above a DCA strip
+shapes what the DCA does**, which nothing used: a turn on the surface's own page
+moved nothing. It sets two numbers, and **a press of it switches** between them,
+the strip's screen saying which and its value and the ring showing it: **the
+picture's curve** - in its middle the fader's straight travel as today, one way a
+picture that comes in slowly at first, the other way one that comes in fast - and
+**an offset in dB on the DCA's sounds**, so a sound can sit under or over its
+picture on one fader. Both are **kept on each cue's mark of its DCA** - this
+section's "what the DCA controls on that member and with what mapping" - so they
+move through the show with the cues: a turn writes the cues playing under that
+DCA now, one undo step, live and unsaved under the lock as the EQ page is; a new
+cue starts straight, with no offset. A picture under two DCAs then takes each
+one's curve in turn, multiplying, as nested trims on an opacity compose.
 
 ### 3.29 Persistent cues — a section that is checked, not fired
 
@@ -3752,8 +3779,18 @@ AAP-AAU in §48.2 are the author's to overrule; these are what the work left out
 - **A movie's first frame on the graphics card ahead**, as a still's is: a movie's frames are read
   ahead, and uploaded on the frame they show.
 - **The older OpenGL renderer** (`--renderer=gl`) putting stills on the card ahead: it decodes them only.
-- **Video in a sampler group** (§3.27): what a strip's fader does to a picture, where it waits, a still
-  that never ends, and which picture lies on top.
+- ~~**Video in a sampler group** (§3.27): what a strip's fader does to a picture, where it waits, a still
+  that never ends, and which picture lies on top.~~ *Answered 2026-10-09* - the opacity, the set level,
+  MUTE or a stop cue, the layer's number (§3.27; namespace draft §49).
+
+Added 2026-10-09 *(proposed)*, with video in a sampler group (namespace draft §49). The implementer's
+calls ABB-ABJ in §49.2 are the author's to overrule; what the work leaves out:
+
+- **The bank's set level on a picture** (ABC): today it reaches the sounds only.
+- **A curve of its own on a member** - a picture on a strip follows the fader's travel straight. The
+  knob above a DCA strip bends a DCA's (decided the same day, its own round after this one).
+- **The video monitor following a strip's hand**, or a picture strip's meter showing anything but its
+  movie's sound.
 
 ### 6.10 Protocol implementation order (§3.16)
 
