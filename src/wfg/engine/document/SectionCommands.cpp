@@ -57,6 +57,13 @@ namespace wfg::doc
             return args.size() > index && args[index].isNumber() ? args[index].asDouble() : 0.0;
         }
 
+        /*  A flag sent as a number - leaveGap, alone, ripple: set when it is one,
+            or anything further from nought than a half. */
+        bool flagAt (const std::vector<osc::Value>& args, std::size_t index)
+        {
+            return std::abs (numberAt (args, index)) > 0.5;
+        }
+
         /*  A SECOND ON THE MOVIE'S FRAME GRID (55.5, ADT): the nearest frame. */
         double snappedToFrames (double seconds, double fps)
         {
@@ -257,7 +264,7 @@ namespace wfg::doc
                                     ! movie.refusal.empty())
                                     return refusedMovie (movie);
 
-                            return fromEdit (document.removeSection (stringAt (args, 0), numberAt (args, 1) != 0.0), args);
+                            return fromEdit (document.removeSection (stringAt (args, 0), flagAt (args, 1)), args);
                         } });
 
         //----------------------------------------------------------------------
@@ -357,7 +364,7 @@ namespace wfg::doc
                                 return refusedMovie (movie);
 
                             return fromEdit (document.fadeSection (stringAt (args, 0), *side, numberAt (args, 2),
-                                                                   numberAt (args, 3) != 0.0),
+                                                                   flagAt (args, 3)),
                                              args);
                         } });
 
@@ -380,7 +387,7 @@ namespace wfg::doc
                                 return refusedMovie (movie);
 
                             return fromEdit (document.curveSection (stringAt (args, 0), *side, numberAt (args, 2),
-                                                                    numberAt (args, 3) != 0.0),
+                                                                    flagAt (args, 3)),
                                              args);
                         } });
 
@@ -477,10 +484,10 @@ namespace wfg::doc
 
                             auto first = stringAt (args, 4);
                             auto second = stringAt (args, 5);
-                            const auto edit = document.deleteSpan (span.cueId, span.from, span.to, numberAt (args, 3) != 0.0,
+                            const auto edit = document.deleteSpan (span.cueId, span.from, span.to, flagAt (args, 3),
                                                                    span.length, first, second);
 
-                            auto applied = withValue (args, 3, osc::Value::int32 (numberAt (args, 3) != 0.0 ? 1 : 0));
+                            auto applied = withValue (args, 3, osc::Value::int32 (flagAt (args, 3) ? 1 : 0));
                             return fromEdit (edit, spanApplied (std::move (applied), span, 4, first, second, 6, 7));
                         } });
 
