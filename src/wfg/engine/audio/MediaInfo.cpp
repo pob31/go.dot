@@ -160,7 +160,10 @@ namespace wfg::audio
             {
                 const auto relative = entry.getFile().getRelativePathFrom (own).replaceCharacter ('\\', '/');
 
-                if (! relative.startsWith (".timbre/") && ! relative.contains (".tmp-"))
+                /*  Nor the renders of open edits (namespace draft §55, ADM): a
+                    cache the copy makes again for itself. */
+                if (! relative.startsWith (".timbre/") && ! relative.startsWith (".edits/")
+                      && ! relative.contains (".tmp-"))
                     consider (entry.getFile(), relative);
             }
 

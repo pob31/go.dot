@@ -104,6 +104,8 @@ add_executable(wfg_tests
     SendLaneTests.cpp
     SectionTests.cpp
     MediaEditTests.cpp
+    EditPlaybackTests.cpp
+    MediaEditRenderTests.cpp
     CuePartTests.cpp
     AlsReaderTests.cpp
     AlsWalkTests.cpp

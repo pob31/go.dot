@@ -1087,6 +1087,7 @@ TEST_CASE ("Bundle::carryMedia: a copy outside the show takes its own media and 
     writeBytes (paris.getChildFile ("media").getChildFile ("takes").getChildFile ("Looper take 1.wav"), "a take\n");
     writeBytes (paris.getChildFile ("media").getChildFile (".timbre").getChildFile ("cache.bin"), "colours\n");
     writeBytes (paris.getChildFile ("media").getChildFile ("half.wav.tmp-42"), "a write cut short\n");
+    writeBytes (paris.getChildFile ("media").getChildFile (".edits").getChildFile ("0123456789abcdef.wav"), "a render\n");
     writeBytes (paris.getChildFile ("escape.wav"), "outside media/\n");
 
     const auto archive = temp.parent.getChildFile ("Archive").getChildFile ("Paris");
@@ -1109,6 +1110,7 @@ TEST_CASE ("Bundle::carryMedia: a copy outside the show takes its own media and 
 
     //  Not the cache, not a half write, not a name that leaves media/, not a sound already missing.
     CHECK_FALSE (media.getChildFile (".timbre").exists());
+    CHECK_FALSE (media.getChildFile (".edits").exists());   // nor an edit's render (namespace draft §55)
     CHECK_FALSE (media.getChildFile ("half.wav.tmp-42").exists());
     CHECK_FALSE (archive.getChildFile ("escape.wav").exists());
     CHECK_FALSE (media.getChildFile ("gone.wav").exists());

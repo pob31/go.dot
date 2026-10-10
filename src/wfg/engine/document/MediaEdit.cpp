@@ -311,7 +311,7 @@ namespace wfg::doc
         return climbing;
     }
 
-    std::string laneText (const std::vector<LanePoint>& points)
+    std::string writeLaneText (const std::vector<LanePoint>& points)
     {
         std::string text;
 
@@ -333,7 +333,7 @@ namespace wfg::doc
         if (! lane.problem.empty())
             return std::string (text);
 
-        return laneText (carryLane (lane.points, runs));
+        return writeLaneText (carryLane (lane.points, runs));
     }
 
     std::vector<CarriedRange> carryRanges (const std::vector<CarriedRange>& ranges, const std::vector<TimeRun>& runs)

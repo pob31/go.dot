@@ -574,8 +574,8 @@ namespace wfg::audio
 
                 /*  The cache itself, and what is still being written - a take's
                     hidden part, a save's or a conversion's temporary. */
-                if (relative.startsWith (".timbre/") || name.startsWith (".") || name.contains (".tmp-")
-                      || name.endsWith (".part"))
+                if (relative.startsWith (".timbre/") || relative.startsWith (".edits/")
+                      || name.startsWith (".") || name.contains (".tmp-") || name.endsWith (".part"))
                     continue;
 
                 const auto path = file.getFullPathName().toStdString();

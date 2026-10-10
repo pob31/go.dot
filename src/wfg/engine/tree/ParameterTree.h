@@ -126,6 +126,10 @@ namespace wfg::tree
             `MediaAnalyser::sweepText` writes it; empty before any. */
         std::string mediaCacheSweep;
 
+        /*  The renders of the open edits (namespace draft §55), one a line:
+            cue, state, percent, problem. A readout, never stored. */
+        std::string editRender;
+
         /*  THE SERIAL PORTS THIS MACHINE HAS (namespace draft §51, ACR), a
             path, a tab and a few words a line; looked for by serve. */
         std::string serialPorts;

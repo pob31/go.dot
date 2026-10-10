@@ -113,6 +113,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/SlotAnalysis.cpp
     wfg/engine/cue/SamplerLayout.h
     wfg/engine/cue/SamplerLayout.cpp
+    wfg/engine/cue/PlayedMedia.cpp
+    wfg/engine/cue/PlayedMedia.h
     wfg/engine/cue/Preparedness.h
     wfg/engine/cue/Preparedness.cpp
     wfg/engine/cue/RunCommands.h
@@ -253,6 +255,9 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/RateVoice.h
     wfg/engine/audio/DeviceLayer.h
     wfg/engine/audio/DeviceLayer.cpp
+    wfg/engine/audio/EditRenderTable.h
+    wfg/engine/audio/EditRenderer.cpp
+    wfg/engine/audio/EditRenderer.h
     wfg/engine/audio/MediaInfo.h
     wfg/engine/audio/MediaInfo.cpp
     wfg/engine/audio/Timbre.h
@@ -304,6 +309,8 @@ add_library(wfg_engine STATIC
     wfg/engine/document/LevelLane.h
     wfg/engine/document/MediaEdit.cpp
     wfg/engine/document/MediaEdit.h
+    wfg/engine/document/SectionCommands.cpp
+    wfg/engine/document/SectionCommands.h
     wfg/engine/document/Ids.cpp
     wfg/engine/document/Ids.h
     wfg/engine/document/OutputLayout.cpp

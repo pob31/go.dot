@@ -56,6 +56,7 @@
     document, or on any thread at all by `wfg validate`, which has no engine.
 */
 
+#include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -626,19 +627,17 @@ namespace wfg::cue
             if (anyRange)
                 return onTheClock (node, total);
 
-            if (durations == nullptr)
+            /*  As long as the cue plays (namespace draft §55): its edit's
+                sections put together while the edit is open, else its file.
+                Nought is "this build could not read it", which the side table
+                is explicit about, and it is exactly the case the solver's
+                confused list exists for. Not a length. */
+            const auto length = playedLengthOf (node, durations);
+
+            if (! length.has_value())
                 return std::nullopt;
 
-            const auto file = reader.text (node, "media", "file");
-            const auto found = durations->find (file);
-
-            /*  Nought is "this build could not read it", which the side
-                table is explicit about, and it is exactly the case the
-                solver's confused list exists for. Not a length. */
-            if (found == durations->end() || ! (found->second > 0.0))
-                return std::nullopt;
-
-            const auto span = found->second - reader.number (node, "media", "startOffset");
+            const auto span = *length - reader.number (node, "media", "startOffset");
             return span > 0.0 ? onTheClock (node, span) : std::nullopt;
         }
 

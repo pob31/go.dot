@@ -27,6 +27,7 @@
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Override.h>
 #include <wfg/engine/cue/AutoName.h>
+#include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/cue/Preparedness.h>
 
 #include <wfg/engine/midi/PortTable.h>
@@ -1172,13 +1173,11 @@ namespace wfg::tree
                         keyed by a `file` they do not have: every fade and stop
                         published a duration of nought whatever the show said,
                         since PR 4.1. Theirs falls through to the stored text. */
-                    const auto named = node[juce::Identifier ("file")].toString().toStdString();
-                    const auto found = durations != nullptr ? durations->find (named)
-                                                            : std::map<std::string, double>::const_iterator {};
-
-                    text = (durations != nullptr && found != durations->end())
-                             ? osc::formatDouble (found->second)
-                             : osc::formatDouble (0.0);
+                    /*  AS LONG AS THE CUE PLAYS (namespace draft §55): its edit's
+                        sections put together while the edit is open - a fact of
+                        the show, which this cached half may carry - else its
+                        file's, from the table. */
+                    text = osc::formatDouble (cue::playedLengthOf (node, durations).value_or (0.0));
                 }
                 else if (name == "outsBusy" && isMedia)
                 {
@@ -3159,6 +3158,7 @@ namespace wfg::tree
             else if (name == "patchEditorInstall") text = state.patchEditorInstall;
             else if (name == "serialPorts")    text = state.serialPorts;
             else if (name == "mediaCacheSweep") text = state.mediaCacheSweep;
+            else if (name == "editRender")      text = state.editRender;
             else                               text = std::string (row->defaultText);
 
             engineValue (*row, "engine", text);

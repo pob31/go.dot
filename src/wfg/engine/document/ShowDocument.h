@@ -70,6 +70,7 @@
 */
 
 #include <wfg/engine/document/Ids.h>
+#include <wfg/engine/document/MediaEdit.h>
 #include <wfg/engine/document/OutputLayout.h>
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -80,6 +81,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -404,6 +406,52 @@ namespace wfg::doc
 
         EditResult createRange (const std::string& cueId, double in, double out,
                                 const std::string& id = {});
+
+        //======================================================================
+        /*  A SOUND'S EDIT: ITS SECTIONS (namespace draft §55). The pieces of
+            a sound cue's file in their order are the edited timeline the cue
+            plays, and the cue's file time is always the time of what it
+            plays (ADK) - so every change that shifts that timeline carries
+            the lane points, the ranges and the start offset through the map
+            from the old timeline to the new, in the same step. Every road
+            carries (ADO): `node.set` on a section's in or out point, the
+            `remove` and `move` doors and these methods are one implementation.
+            Each refuses, in this order and before its first write: the lock,
+            an identifier that is nothing, a cue that plays no file, a sound
+            locked to a movie, a frozen edit, then its own geometry. */
+        std::vector<Section> sectionsOf (const juce::ValueTree& cue) const;
+        bool hasOpenEdit (const juce::ValueTree& cue) const;
+        bool isFrozenEdit (const juce::ValueTree& cue) const;
+
+        /*  Cuts the edited timeline at `at`; a cue with no sections yet first
+            gets one over the whole file, `fileLength` long, under an identifier
+            drawn from the cue's so a replay draws the same. The new piece is
+            the second half and answers with its identifier. A cut on a cut, at
+            the top or at the end divides nothing: `bad-value`. */
+        EditResult splitSection (const std::string& cueId, double at, double fileLength,
+                                 const std::string& id = {});
+
+        /** A split taken back: the section and the next made one again, when they are still one in the file. */
+        EditResult joinSection (const std::string& sectionId);
+
+        /** The section's edges moved; what sat on the timeline carried. */
+        EditResult trimSection (const std::string& sectionId, double in, double out);
+
+        /** The section moved to a place among the sections; what sat on the timeline carried. */
+        EditResult moveSection (const std::string& sectionId, int index);
+
+        /** The section taken out; what sat on it goes with it, the rest closes up. */
+        EditResult removeSection (const std::string& sectionId);
+
+        /** The sections gone, everything carried back to the file's own time. */
+        EditResult clearSections (const std::string& cueId);
+
+        /*  The edit frozen (ADN): `file` becomes the bounce and `editSource`
+            keeps the file it was made from; and unfrozen, the swap back. The
+            bounce itself is the renderer's to write; these are the document's
+            half, submitted as `media.frozen` and `media.unfreeze`. */
+        EditResult freezeEdit (const std::string& cueId, const std::string& source, const std::string& bounce);
+        EditResult unfreezeEdit (const std::string& cueId);
 
         /*  A list's persistent section (§3.29), made once: asking twice answers
             with the one it has, as `createRole` does for a header. */
@@ -1106,6 +1154,15 @@ namespace wfg::doc
         void keepSoundsWith (const juce::ValueTree& movie);
         void keepSoundsAfter (const juce::ValueTree& node, std::string_view row);
         bool keepingSounds = false;
+
+        /*  A SECTION EDIT'S CARRY (namespace draft §55, ADO): `carryingSections`
+            is the `keepingSounds` pattern - set while a section method writes
+            through the doors, so the doors do not delegate back to it. */
+        std::optional<EditResult> refuseSectionEdit (const juce::ValueTree& cue) const;
+        EditResult carrySectionEdit (juce::ValueTree cue, const std::function<EditResult()>& write);
+        EditResult carryThrough (juce::ValueTree cue, const std::vector<TimeRun>& runs);
+        std::string derivedIdFor (const std::string& joined);
+        bool carryingSections = false;
 
         /*  A NAME THAT WAS ONLY EVER THE DEFAULT FOLLOWS ITS CUE (namespace
             draft §53, the author, 2026-10-10: "as long as the name is a default

@@ -1311,6 +1311,60 @@ namespace wfg::doc
             return EditResult::succeeded (target.node[idProperty].toString().toStdString());
         }
 
+        /*  A SECTION'S ROWS (namespace draft §55, ADO): an in or an out point
+            written here is an edge moved, which shifts everything after it on
+            the edited timeline, so it is the trim method's - one implementation
+            for a client's `node.set` and for `section.trim`, and the carry with
+            it. A crossfade is held to the material once written; a trim is a
+            plain write. All refused on a frozen edit and on a sound locked to
+            a movie, as every section edit is. `carryingSections` is the method
+            writing through this door itself. */
+        if (target.attribute->element == "Section" && ! carryingSections)
+        {
+            const auto name = target.attribute->name();
+            const auto sectionId = target.node[idProperty].toString().toStdString();
+
+            if (auto refusal = refuseSectionEdit (target.node.getParent()))
+                return *refusal;
+
+            const auto number = osc::parseDouble (text);
+
+            if (! number.has_value() || ! std::isfinite (*number))
+                return EditResult::failed (reason::typeMismatch);
+
+            if (name == "in" || name == "out")
+            {
+                const auto in = name == "in" ? *number : static_cast<double> (target.node.getProperty ("in", 0.0));
+                const auto out = name == "out" ? *number : static_cast<double> (target.node.getProperty ("out", 0.0));
+
+                return trimSection (sectionId, in, out);
+            }
+
+            if (name == "crossfade")
+            {
+                if (*number < 0.0)
+                    return EditResult::failed (reason::badValue);
+
+                const juce::ScopedValueSetter<bool> plain (carryingSections, true);
+                const auto written = setAttribute (address, text);
+
+                if (! written.ok)
+                    return written;
+
+                const auto cue = target.node.getParent();
+                const auto sections = sectionsOf (cue);
+                const auto held = clampCrossfades (sections);
+
+                for (std::size_t i = 0; i < sections.size(); ++i)
+                    if (std::abs (held[i].crossfade - sections[i].crossfade) >= sameInstant)
+                        if (const auto clamped = setAttribute ("/godot/section/" + sections[i].id + "/crossfade",
+                                                               osc::formatDouble (held[i].crossfade)); ! clamped.ok)
+                            return clamped;
+
+                return written;
+            }
+        }
+
         Value value;
         const auto parsed = Schema::parseValue (*target.attribute, text, value);
 
@@ -2713,8 +2767,7 @@ namespace wfg::doc
             Inside this of either edge, there is already a cut here and a
             second one would make a range of no length - so nothing happens,
             and that one rule answers for a cut, for the top of the file and
-            for its end alike. */
-        constexpr auto sameInstant = 0.001;
+            for its end alike - `doc::sameInstant`, the edit's too. */
 
         for (int index = 0; index < cue.getNumChildren(); ++index)
         {
@@ -2764,6 +2817,470 @@ namespace wfg::doc
         }
 
         return EditResult::failed (reason::badValue);
+    }
+
+
+    //==============================================================================
+    /*  A SOUND'S EDIT (namespace draft §55). */
+
+    std::vector<Section> ShowDocument::sectionsOf (const juce::ValueTree& cue) const
+    {
+        std::vector<Section> sections;
+
+        if (! cue.isValid())
+            return sections;
+
+        for (const auto& child : cue)
+        {
+            if (! child.hasType ("Section"))
+                continue;
+
+            Section section;
+            section.id = child[idProperty].toString().toStdString();
+            section.in = static_cast<double> (child.getProperty ("in", 0.0));
+            section.out = static_cast<double> (child.getProperty ("out", 0.0));
+            section.trimDb = static_cast<double> (child.getProperty ("trim", 0.0));
+            section.crossfade = static_cast<double> (child.getProperty ("crossfade", defaultCrossfade));
+            sections.push_back (section);
+        }
+
+        return sections;
+    }
+
+    bool ShowDocument::hasOpenEdit (const juce::ValueTree& cue) const
+    {
+        return cue.isValid() && cue.hasType ("Media")
+            && cue.getChildWithName ("Section").isValid()
+            && cue["editSource"].toString().isEmpty();
+    }
+
+    bool ShowDocument::isFrozenEdit (const juce::ValueTree& cue) const
+    {
+        return cue.isValid() && cue.hasType ("Media") && ! cue["editSource"].toString().isEmpty();
+    }
+
+    std::optional<EditResult> ShowDocument::refuseSectionEdit (const juce::ValueTree& cue) const
+    {
+        if (auto refusal = refuseIfLocked())
+            return refusal;
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! cue.hasType ("Media"))
+            return EditResult::failed (reason::typeMismatch);
+
+        if (followsAMovie (cue))
+            return EditResult::failed (reason::lockedToMovie);
+
+        if (isFrozenEdit (cue))
+            return EditResult::failed (reason::frozen);
+
+        return std::nullopt;
+    }
+
+    std::string ShowDocument::derivedIdFor (const std::string& joined)
+    {
+        /*  FNV-1a over the words, the same on every machine, salted until the
+            identifier is free: the pattern a sound's copy of a movie's range
+            uses, so a replay of the log that made it makes the same one. */
+        for (std::uint64_t salt = 0; salt < 64; ++salt)
+        {
+            std::uint64_t hash = 14695981039346656037ull ^ salt;
+
+            for (const auto c : joined)
+            {
+                hash ^= static_cast<std::uint8_t> (c);
+                hash *= 1099511628211ull;
+            }
+
+            /*  Free, not reserved: the door that makes the object reserves it,
+                and would refuse one reserved twice. */
+            if (const auto candidate = Id::encode (hash); ! registry.isTaken (candidate))
+                return candidate;
+        }
+
+        return {};
+    }
+
+    namespace
+    {
+        /*  The section and the sound it belongs to; the sound is nothing when
+            the identifier is not a section's. */
+        std::pair<juce::ValueTree, juce::ValueTree> sectionAndCue (const ShowDocument& document, const std::string& sectionId)
+        {
+            const auto section = document.findById (sectionId);
+
+            if (! section.isValid() || ! section.hasType ("Section"))
+                return { section, {} };
+
+            return { section, section.getParent() };
+        }
+    }
+
+    EditResult ShowDocument::splitSection (const std::string& cueId, double at, double fileLength,
+                                           const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (! std::isfinite (at))
+            return EditResult::failed (reason::badValue);
+
+        /*  A SPLIT SHIFTS NOTHING: the two halves abut where the one was, so
+            the doors write plainly and nothing is carried. */
+        const juce::ScopedValueSetter<bool> cutting (carryingSections, true);
+
+        auto sections = sectionsOf (cue);
+
+        if (sections.empty())
+        {
+            /*  THE WHOLE FILE FIRST, as the one section every edit starts from,
+                under an identifier drawn from the cue's - the record carries the
+                second half's, and a replay must make the same first half. */
+            if (! std::isfinite (fileLength) || ! (fileLength > 0.0))
+                return EditResult::failed (reason::badValue);
+
+            const auto wholeId = derivedIdFor (cueId + "/whole");
+
+            if (wholeId.empty())
+                return EditResult::failed (reason::unknownId);
+
+            const auto whole = insertObject (cue, endOfSequence, "Section", wholeId,
+                                             { { "in", "0" }, { "out", osc::formatDouble (fileLength) } });
+
+            if (! whole.ok)
+                return whole;
+
+            sections = sectionsOf (cue);
+        }
+
+        const auto place = placeOf (sections, at);
+
+        if (! place.has_value())
+            return EditResult::failed (reason::badValue);
+
+        const auto& section = sections[place->index];
+        const auto from = sectionStarts (sections)[place->index];
+
+        /*  Inside a millisecond of either end there is already a cut here,
+            which answers for a cut, for the top of the file and for its end. */
+        if (! (at > from + sameInstant) || ! (at < from + section.length() - sameInstant))
+            return EditResult::failed (reason::badValue);
+
+        int childIndex = -1;
+
+        for (int i = 0; i < cue.getNumChildren(); ++i)
+            if (cue.getChild (i).hasType ("Section")
+                  && cue.getChild (i)[idProperty].toString().toStdString() == section.id)
+                childIndex = i;
+
+        if (childIndex < 0)
+            return EditResult::failed (reason::unknownId);
+
+        /*  THE SECOND HALF GOES DIRECTLY AFTER THE FIRST, as a range's does,
+            with the first half's trim: cutting a quiet piece gives two quiet
+            pieces. Its crossfade is the default, unheard while the join is
+            continuous and there for when a move parts them. */
+        const auto made = insertObject (cue, childIndex + 1, "Section", id,
+                                         { { "in", osc::formatDouble (place->fileSecond) },
+                                           { "out", osc::formatDouble (section.out) },
+                                           { "trim", osc::formatDouble (section.trimDb) } });
+
+        if (! made.ok)
+            return made;
+
+        if (const auto shortened = setAttribute ("/godot/section/" + section.id + "/out",
+                                                 osc::formatDouble (place->fileSecond)); ! shortened.ok)
+            return shortened;
+
+        return made;
+    }
+
+    EditResult ShowDocument::joinSection (const std::string& sectionId)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        const auto sections = sectionsOf (cue);
+        std::size_t k = sections.size();
+
+        for (std::size_t i = 0; i < sections.size(); ++i)
+            if (sections[i].id == sectionId)
+                k = i;
+
+        if (k + 1 >= sections.size() || ! isContinuousJoin (sections[k], sections[k + 1]))
+            return EditResult::failed (reason::badValue);
+
+        /*  One in the file again: the identity on the timeline, so nothing is
+            carried. The survivor keeps its trim and its crossfade. */
+        const juce::ScopedValueSetter<bool> joining (carryingSections, true);
+        const auto nextId = sections[k + 1].id;
+
+        if (const auto widened = setAttribute ("/godot/section/" + sectionId + "/out",
+                                               osc::formatDouble (sections[k + 1].out)); ! widened.ok)
+            return widened;
+
+        if (const auto taken = remove (nextId); ! taken.ok)
+            return taken;
+
+        return EditResult::succeeded (sectionId);
+    }
+
+    EditResult ShowDocument::trimSection (const std::string& sectionId, double in, double out)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (! std::isfinite (in) || ! std::isfinite (out) || in < 0.0 || ! (out > in))
+            return EditResult::failed (reason::badValue);
+
+        const auto base = "/godot/section/" + sectionId + "/";
+
+        return carrySectionEdit (cue, [this, base, in, out]
+        {
+            if (const auto moved = setAttribute (base + "in", osc::formatDouble (in)); ! moved.ok)
+                return moved;
+
+            return setAttribute (base + "out", osc::formatDouble (out));
+        });
+    }
+
+    EditResult ShowDocument::moveSection (const std::string& sectionId, int index)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (index < 0)
+            return EditResult::failed (reason::badAddress);
+
+        return carrySectionEdit (cue, [this, section, cue, sectionId, index]
+        {
+            /*  The place is counted among the sections; the raw index is that
+                of the section holding it, which is where a `moveChild` lands
+                the child - directly before it moving earlier, directly after it
+                moving later, both of which are "that place" once the moved
+                section is no longer counted where it was. */
+            std::vector<int> raws;
+
+            for (int i = 0; i < cue.getNumChildren(); ++i)
+                if (cue.getChild (i).hasType ("Section"))
+                    raws.push_back (i);
+
+            if (raws.empty())
+                return EditResult::failed (reason::unknownId);
+
+            auto parent = cue;
+            const auto from = parent.indexOf (section);
+            const auto to = raws[static_cast<std::size_t> (std::min<int> (index, static_cast<int> (raws.size()) - 1))];
+
+            if (from != to)
+                parent.moveChild (from, to, structuralHistory());
+
+            return EditResult::succeeded (sectionId);
+        });
+    }
+
+    EditResult ShowDocument::removeSection (const std::string& sectionId)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        return carrySectionEdit (cue, [this, sectionId] { return remove (sectionId); });
+    }
+
+    EditResult ShowDocument::clearSections (const std::string& cueId)
+    {
+        auto cue = findById (cueId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        const auto sections = sectionsOf (cue);
+
+        if (sections.empty())
+            return EditResult::failed (reason::badValue);
+
+        return carrySectionEdit (cue, [this, sections, cueId]
+        {
+            for (const auto& section : sections)
+                if (const auto taken = remove (section.id); ! taken.ok)
+                    return taken;
+
+            return EditResult::succeeded (cueId);
+        });
+    }
+
+    EditResult ShowDocument::carrySectionEdit (juce::ValueTree cue, const std::function<EditResult()>& write)
+    {
+        const auto before = sectionsOf (cue);
+        const juce::ScopedValueSetter<bool> carrying (carryingSections, true);
+
+        const auto written = write();
+
+        if (! written.ok)
+            return written;
+
+        /*  THE MAP FROM THE OLD TIMELINE TO THE NEW; with the last section gone
+            the cue plays its whole file again, so the new timeline is the
+            file's own. */
+        const auto after = sectionsOf (cue);
+        const auto runs = after.empty() ? timeMapToFile (before) : timeMap (before, after);
+
+        if (const auto carried = carryThrough (cue, runs); ! carried.ok)
+            return carried;
+
+        /*  AND THE CROSSFADES HELD to the material as it now stands: a section
+            moved to the front of the file has nothing before it, a shortened
+            one has less room. */
+        const auto held = clampCrossfades (after);
+
+        for (std::size_t i = 0; i < after.size(); ++i)
+            if (std::abs (held[i].crossfade - after[i].crossfade) >= sameInstant)
+                if (const auto clamped = setAttribute ("/godot/section/" + after[i].id + "/crossfade",
+                                                       osc::formatDouble (held[i].crossfade)); ! clamped.ok)
+                    return clamped;
+
+        return written;
+    }
+
+    EditResult ShowDocument::carryThrough (juce::ValueTree cue, const std::vector<TimeRun>& runs)
+    {
+        const auto cueId = cue[idProperty].toString().toStdString();
+        const auto base = "/godot/cue/" + cueId + "/";
+
+        /*  THE LEVEL LANE, and every send's. */
+        if (const auto text = cue["levelLane"].toString().toStdString(); ! text.empty())
+            if (const auto moved = carryLaneText (text, runs); moved != text)
+                if (const auto written = setAttribute (base + "levelLane", moved); ! written.ok)
+                    return written;
+
+        for (const auto& child : cue)
+        {
+            if (! child.hasType ("Send"))
+                continue;
+
+            const auto text = child["levelLane"].toString().toStdString();
+
+            if (text.empty())
+                continue;
+
+            if (const auto moved = carryLaneText (text, runs); moved != text)
+                if (const auto written = setAttribute ("/godot/send/" + child[idProperty].toString().toStdString() + "/levelLane",
+                                                       moved); ! written.ok)
+                    return written;
+        }
+
+        /*  THE RANGES: each point on its own; one left ending before it begins
+            is taken out. Written in the order that never leaves a range for a
+            moment ending before it begins: the in point first when it draws
+            away from the old out point, the out point first otherwise. */
+        std::vector<CarriedRange> ranges;
+
+        for (const auto& child : cue)
+            if (child.hasType ("Range"))
+                ranges.push_back ({ child[idProperty].toString().toStdString(),
+                                    static_cast<double> (child.getProperty ("in", 0.0)),
+                                    static_cast<double> (child.getProperty ("out", 0.0)), false });
+
+        const auto moved = carryRanges (ranges, runs);
+
+        for (std::size_t i = 0; i < moved.size(); ++i)
+        {
+            const auto& range = moved[i];
+            const auto rangeBase = "/godot/range/" + range.id + "/";
+
+            if (range.removed)
+            {
+                if (const auto taken = remove (range.id); ! taken.ok)
+                    return taken;
+
+                continue;
+            }
+
+            const auto inText = osc::formatDouble (range.in);
+            const auto outText = osc::formatDouble (range.out);
+            const auto inFirst = range.in < ranges[i].out;
+
+            if (const auto first = setAttribute (rangeBase + (inFirst ? "in" : "out"), inFirst ? inText : outText); ! first.ok)
+                return first;
+
+            if (const auto second = setAttribute (rangeBase + (inFirst ? "out" : "in"), inFirst ? outText : inText); ! second.ok)
+                return second;
+        }
+
+        /*  THE START OFFSET; nought stays nought. */
+        if (const auto offset = static_cast<double> (cue.getProperty ("startOffset", 0.0)); offset > 0.0)
+            if (const auto carriedOffset = carryStartOffset (offset, runs); std::abs (carriedOffset - offset) >= sameInstant)
+                if (const auto written = setAttribute (base + "startOffset", osc::formatDouble (carriedOffset)); ! written.ok)
+                    return written;
+
+        return EditResult::succeeded (cueId);
+    }
+
+    EditResult ShowDocument::freezeEdit (const std::string& cueId, const std::string& source, const std::string& bounce)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! cue.hasType ("Media"))
+            return EditResult::failed (reason::typeMismatch);
+
+        if (followsAMovie (cue))
+            return EditResult::failed (reason::lockedToMovie);
+
+        /*  Only an open edit freezes, and only onto the file it was made from:
+            a record that names another file is a log edited by hand. */
+        if (sectionsOf (cue).empty() || isFrozenEdit (cue) || source.empty() || bounce.empty()
+              || cue["file"].toString().toStdString() != source)
+            return EditResult::failed (reason::badValue);
+
+        const auto base = "/godot/cue/" + cueId + "/";
+
+        if (const auto kept = setAttribute (base + "editSource", source); ! kept.ok)
+            return kept;
+
+        return setAttribute (base + "file", bounce);
+    }
+
+    EditResult ShowDocument::unfreezeEdit (const std::string& cueId)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! cue.hasType ("Media"))
+            return EditResult::failed (reason::typeMismatch);
+
+        if (! isFrozenEdit (cue))
+            return EditResult::failed (reason::badValue);
+
+        const auto base = "/godot/cue/" + cueId + "/";
+        const auto source = cue["editSource"].toString().toStdString();
+
+        if (const auto back = setAttribute (base + "file", source); ! back.ok)
+            return back;
+
+        return setAttribute (base + "editSource", "");
     }
 
     EditResult ShowDocument::createTrigger (const std::string& cueId, const std::string& kind,
@@ -3466,6 +3983,11 @@ namespace wfg::doc
         if (node.hasType ("Range") && ! keepingSounds && followsAMovie (parent))
             return EditResult::failed (reason::lockedToMovie);
 
+        /*  A SECTION TAKEN OUT carries what sat on it (namespace draft §55,
+            ADO): the one implementation, whichever verb asked. */
+        if (node.hasType ("Section") && ! carryingSections)
+            return removeSection (id);
+
         /*  Every identifier under it comes back, not just its own — deleting a
             group deletes its cues, and leaving their identifiers reserved would
             slowly poison the registry over a long editing session. */
@@ -3613,6 +4135,17 @@ namespace wfg::doc
                 return EditResult::failed (reason::badAddress);
 
         auto oldParent = node.getParent();
+
+        /*  A SECTION MOVED is moved among its cue's sections and carries what
+            sat on the timeline (namespace draft §55, ADO); into another cue it
+            goes nowhere, since its points are seconds of this cue's file. */
+        if (node.hasType ("Section") && ! carryingSections)
+        {
+            if (newParent != oldParent)
+                return EditResult::failed (reason::badAddress);
+
+            return moveSection (id, newIndex);
+        }
 
         /*  A RANGE MOVED OUT OF OR INTO A SOUND LOCKED TO ITS MOVIE is the
             movie's to move (namespace draft 37.5, WL). */

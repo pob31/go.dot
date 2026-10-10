@@ -227,6 +227,12 @@ namespace wfg::cue
         /** The cue names a file the bundle does not have. */
         inline constexpr const char* mediaMissing = "media-missing";
 
+        /*  A SOUND WHOSE EDIT HAS NO RENDER YET (namespace draft §55, ADM): the
+            cue plays the render of its sections while its edit is open, and
+            the renderer has not made one of the edit as it now is. The
+            standby is armed again by itself once it lands. */
+        inline constexpr const char* rendering = "rendering";
+
         /** The cue names a bus, or a width, the rig cannot honour. */
         inline constexpr const char* badRoute = "bad-route";
 

@@ -306,6 +306,12 @@ namespace wfg
             the movie, or to detach the sound (clear its `lockedTo`). */
         inline constexpr const char* lockedToMovie   = "locked-to-movie";
 
+        /*  A FROZEN EDIT (namespace draft §55, ADN) was asked to change its
+            sections, or a section's row: the cue plays the bounce, which the
+            change would not reach. The remedy is `media.unfreeze`, after which
+            the sections are live again and the render follows them. */
+        inline constexpr const char* frozen          = "frozen";
+
         /*  THE STACK IS EMPTY, and that is not the same fact as the show being
             unedited: a `document.revert`, a `document.recover` or a bundle load
             clears the history without clearing the show, and an edit that wrote

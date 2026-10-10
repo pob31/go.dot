@@ -65,6 +65,9 @@
 #include <wfg/engine/midi/MidiSender.h>
 #include <wfg/engine/midi/PortBinder.h>
 #include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/SectionCommands.h>
+#include <wfg/engine/audio/EditRenderer.h>
+#include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/RelaxNg.h>
@@ -124,7 +127,9 @@
 #include <thread>
 #include <csignal>
 #include <iostream>
+#include <functional>
 #include <map>
+#include <set>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -383,6 +388,8 @@ namespace
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
+        wfg::doc::registerSectionCommands (engine.commands(), document);
+        wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
         wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
 
@@ -682,6 +689,8 @@ namespace
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
+        wfg::doc::registerSectionCommands (engine.commands(), document);
+        wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
         wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
 
@@ -1304,6 +1313,8 @@ namespace
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
+        wfg::doc::registerSectionCommands (engine.commands(), document);
+        wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
         wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
 
@@ -3772,6 +3783,45 @@ namespace
             exist, and nothing a replay could need. */
         wfg::audio::MediaAnalyser analyser { mediaInfo, mediaFolder };
 
+        /*  AND THE RENDERS OF THE OPEN EDITS (namespace draft §55, ADM): what
+            a sound cue cut into sections plays until it is frozen, made on a
+            thread of its own after every change; a freeze's bounce too, which
+            then becomes `media.frozen`, the document's swap, in the log like
+            any other edit. Declared here for the analyser's reason. */
+        wfg::audio::EditRenderer renderer { mediaInfo, mediaFolder };
+
+        /*  THE OPEN EDITS, as jobs: every sound cue whose sections are live and
+            not the whole file as recorded. Walked at open and after every
+            show edit, as the analyser is handed the files the show names. */
+        const auto openEditJobs = [&document, &mediaInfo]
+        {
+            std::vector<wfg::audio::RenderJob> jobs;
+            const auto lengths = mediaInfo.durations();
+
+            std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& node)
+            {
+                if (document.hasOpenEdit (node))
+                {
+                    const auto file = node["file"].toString().toStdString();
+                    const auto sections = wfg::cue::sectionsIn (node);
+                    const auto known = lengths->find (file);
+                    const auto identity = known != lengths->end() && wfg::doc::isIdentityEdit (sections, known->second);
+
+                    if (! file.empty() && ! identity)
+                        jobs.push_back ({ node["id"].toString().toStdString(), file, sections });
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            };
+
+            visit (document.root());
+            return jobs;
+        };
+
+        /*  The runner follows what the renderer has made, a snapshot a tick. */
+        runner.setEditRenders ([&renderer] { return renderer.snapshot(); });
+
         wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
         /*  AND THE OTHER HALF OF THE SAME OBJECT, for `run/timbre` and
@@ -4278,8 +4328,37 @@ namespace
                                           } };
         wfg::video::registerConversionCommands (engine.commands(), document, &converter);
 
+        /*  A BOUNCE THAT LANDED (namespace draft §55, ADN) becomes `media.frozen`,
+            the swap of the cue's file, as a conversion that is done becomes
+            `media.converted`: one undoable record, which a replay makes without
+            a renderer. A copy that failed says so on the readout and nothing
+            else. */
+        renderer.setOnFrozen ([&engine] (const wfg::audio::EditRenderer::FreezeJob& job,
+                                         const std::string& bounce, const std::string& problem)
+                              {
+                                  if (! problem.empty())
+                                      return;
+
+                                  engine.submit (wfg::origin::engine, "media.frozen",
+                                                 { wfg::osc::Value::string (job.cue),
+                                                   wfg::osc::Value::string (job.source),
+                                                   wfg::osc::Value::string (bounce) });
+                              });
+        wfg::audio::registerEditRenderCommands (engine.commands(), &renderer, document);
+
         /*  AND THE ANALYSIS CACHE SWEPT when somebody asks (namespace draft §52). */
         wfg::audio::registerAnalyserCommands (engine.commands(), &analyser);
+
+        /*  AND A SOUND'S EDIT (namespace draft §55): the first split of a cue
+            with no sections needs its file's length, which the session knows
+            and writes back on the record for a replay to read. */
+        wfg::doc::registerSectionCommands (engine.commands(), document,
+                                           [&mediaInfo] (const std::string& file)
+                                           {
+                                               const auto lengths = mediaInfo.durations();
+                                               const auto found = lengths->find (file);
+                                               return found == lengths->end() ? 0.0 : found->second;
+                                           });
         parameters.setConverter (&converter);
 
         /*  AND FFMPEG ITSELF, downloaded on first use when nothing has it
@@ -4298,6 +4377,7 @@ namespace
         wfg::process::editor::registerCommands (engine.commands(), document, &patchEditing, &pdInstaller);
         std::string patchEditorFound;
         std::uint32_t mediaCacheSweepSeen = 0;
+        std::uint32_t editRenderSeen = 0;
         std::string serialPortsFound;
         videoHost.configure (document);
 
@@ -4429,6 +4509,15 @@ namespace
             what a client draws grey. The tick thread hands it any file a show
             edit introduces, below. */
         analyser.start();
+
+        /*  And the renderer, handed the open edits and then a sweep of the
+            renders under media/.edits that none of them has. */
+        renderer.start();
+
+        for (const auto& job : openEditJobs())
+            renderer.offer (job);
+
+        renderer.sweep (openEditJobs());
 
         for (const auto& named : wfg::audio::mediaFilesNamedBy (document))
             analyser.queue (named);
@@ -5301,6 +5390,24 @@ namespace
                                     for (const auto& named : wfg::audio::pictureFilesNamedBy (document))
                                         analyser.queue (named);
 
+                                    /*  AND THE OPEN EDITS to the renderer
+                                        (namespace draft §55): a cut, a move,
+                                        a trim is a render; an edit that is
+                                        gone or frozen is forgotten. */
+                                    {
+                                        std::set<std::string> open;
+
+                                        for (const auto& job : openEditJobs())
+                                        {
+                                            open.insert (job.cue);
+                                            renderer.offer (job);
+                                        }
+
+                                        for (const auto& [cueId, render] : *renderer.snapshot())
+                                            if (open.count (cueId) == 0)
+                                                renderer.forget (cueId);
+                                    }
+
                                     /*  AND WHAT THE SHOW NOW SAYS ABOUT ITS
                                         DEVICES reaches the table that talks to
                                         them (2026-09-22).
@@ -5477,6 +5584,30 @@ namespace
 
                                 /*  THE ANALYSIS CACHE'S LAST SWEEP (§52), looked at
                                     under the analyser's lock only when it moved. */
+                                /*  THE RENDERS (namespace draft §55): the readout
+                                    when they moved, and a render a newer one
+                                    replaced let go of once no run plays it - a
+                                    sounding run keeps its file until its next
+                                    run (ADP), so what it names waits. */
+                                if (const auto moved = renderer.changes(); moved != editRenderSeen)
+                                {
+                                    editRenderSeen = moved;
+                                    state.editRender = wfg::audio::EditRenderer::readoutText (*renderer.snapshot());
+
+                                    for (const auto& file : renderer.takeStale())
+                                    {
+                                        auto named = false;
+
+                                        for (const auto& run : runs.all())
+                                            named = named || (! run.isFinished() && run.media == file);
+
+                                        if (named)
+                                            renderer.stale (file);
+                                        else
+                                            renderer.discard (file);
+                                    }
+                                }
+
                                 if (const auto moved = analyser.sweepChanges(); moved != mediaCacheSweepSeen)
                                 {
                                     mediaCacheSweepSeen = moved;
@@ -6398,6 +6529,10 @@ namespace
         probe.stop();
         listener.stop();
         spaceMouse.stop();
+
+        /*  The renderer between two blocks, its part file left for the next
+            open's sweep; then the analyser. */
+        renderer.stop();
 
         /*  Between two frames, or a few kilobytes into a hash: a Ctrl-C does
             not sit through a gigabyte of WAV. What it had not reached is

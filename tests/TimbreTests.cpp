@@ -1226,6 +1226,9 @@ TEST_CASE ("timbre cache: a sweep keeps the analysis of every file still in the 
     REQUIRE (media.getChildFile ("sub").createDirectory());
     REQUIRE (writeWav (media.getChildFile ("tone.wav"), sineAt (1000.0, 1.0, 48000.0, 0.5f), 48000));
     REQUIRE (writeWav (media.getChildFile ("sub").getChildFile ("unused.wav"), sineAt (500.0, 0.5, 48000.0, 0.5f), 48000));
+    //  An edit's render (namespace draft §55): never read, never removed.
+    REQUIRE (media.getChildFile (".edits").createDirectory());
+    REQUIRE (media.getChildFile (".edits").getChildFile ("render.wav").replaceWithText ("not a sound"));
 
     const auto tone = audio::analyseMediaFile (root, "tone.wav", false);
     const auto unused = audio::analyseMediaFile (root, "sub/unused.wav", false);
@@ -1276,6 +1279,7 @@ TEST_CASE ("timbre cache: a sweep keeps the analysis of every file still in the 
     CHECK (cache.getChildFile (juce::String (movieKey) + ".tms").existsAsFile());
     CHECK (cache.getChildFile ("notes.txt").existsAsFile());
     CHECK (fresh.existsAsFile());
+    CHECK (media.getChildFile (".edits").getChildFile ("render.wav").existsAsFile());
 
     //  Both sounds hashed, and the index written for the next session.
     CHECK (known.size() == 2u);

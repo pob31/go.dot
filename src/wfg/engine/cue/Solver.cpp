@@ -17,6 +17,7 @@
 #include <wfg/engine/cue/Solver.h>
 
 #include <wfg/engine/cue/CurveJob.h>
+#include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/tree/Mount.h>
@@ -168,15 +169,14 @@ namespace wfg::cue
             if (anyRange)
                 return onTheClock (total, speedOf (read, cue));
 
-            if (durations == nullptr)
+            /*  As long as the cue plays (namespace draft §55): its edit's
+                sections put together while the edit is open, else its file. */
+            const auto length = playedLengthOf (cue, durations);
+
+            if (! length.has_value())
                 return std::nullopt;
 
-            const auto found = durations->find (read.text (cue, "media", "file"));
-
-            if (found == durations->end() || ! (found->second > 0.0))
-                return std::nullopt;
-
-            const auto span = found->second - read.number (cue, "media", "startOffset");
+            const auto span = *length - read.number (cue, "media", "startOffset");
             return span > 0.0 ? std::optional<double> (onTheClock (span, speedOf (read, cue))) : std::nullopt;
         }
 

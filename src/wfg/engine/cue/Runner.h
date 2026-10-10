@@ -48,6 +48,7 @@
 */
 
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/audio/EditRenderTable.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/cue/CueList.h>
@@ -1009,6 +1010,18 @@ namespace wfg::cue
             durations = durationsToRead;
         }
 
+        /*  THE RENDERS OF THE OPEN EDITS (namespace draft §55, ADM, ADP), asked
+            for at the top of each tick as the lengths are and held for that
+            tick. A snapshot that moved is a render that landed: the standby
+            is made ready again when its edit was waiting for one, and an
+            armed cue whose played file changed is armed again. Nothing
+            handed in - a replay, a test - is no renders: an open edit then
+            plays nothing and is as long as its sections. */
+        void setEditRenders (std::function<std::shared_ptr<const audio::EditRenders>()> source)
+        {
+            renderSource = std::move (source);
+        }
+
         /** The object that learns them, when there is one. */
         void setMediaInfo (const audio::MediaInfo* infoToRead) noexcept
         {
@@ -1648,6 +1661,7 @@ namespace wfg::cue
         std::vector<video::Preload> preloadsSent;
         std::uint64_t revisionPrepared = 0;
         const std::map<std::string, double>* durationsPrepared = nullptr;
+        const audio::EditRenders* rendersPrepared = nullptr;
         bool aheadMissing = false;
 
         /*  WHICH GROUPS ARE LIVE, as a number (namespace draft §49, ABF): an
@@ -2450,6 +2464,10 @@ namespace wfg::cue
             that tick so nothing swaps it mid-solve. */
         std::shared_ptr<const std::map<std::string, double>> durationsHeld;
         const std::map<std::string, double>* durations = nullptr;
+
+        std::function<std::shared_ptr<const audio::EditRenders>()> renderSource;
+        std::shared_ptr<const audio::EditRenders> rendersHeld;
+        const audio::EditRenders* renders = nullptr;
         std::vector<GroupJob> scheduled;
 
         /*  The cue the standby was last seen on, so that arming it is asked for

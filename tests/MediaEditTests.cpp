@@ -162,7 +162,7 @@ TEST_CASE ("media edit: a split and a join are the identity on the timeline")
     CHECK (sameRuns (doc::timeMap (split, whole), { { 0.0, 0.0, 10.0 }, { 10.0, 10.0, 20.0 } }));
 
     const auto lane = doc::readLevelLane ("4 0 5 -20 25 -20 26 0").points;
-    CHECK (doc::laneText (doc::carryLane (lane, doc::timeMap (whole, split))) == "4 0 5 -20 25 -20 26 0");
+    CHECK (doc::writeLaneText (doc::carryLane (lane, doc::timeMap (whole, split))) == "4 0 5 -20 25 -20 26 0");
 }
 
 TEST_CASE ("media edit: a move carries what sits on the moved material, and what it passed over")
@@ -179,12 +179,12 @@ TEST_CASE ("media edit: a move carries what sits on the moved material, and what
     /*  The sentence the author wrote: a dip over the verse stays over the
         verse when the verse moves. */
     const auto dip = doc::readLevelLane ("12 0 14 -20 16 -20 18 0").points;
-    CHECK (doc::laneText (doc::carryLane (dip, runs)) == "22 0 24 -20 26 -20 28 0");
+    CHECK (doc::writeLaneText (doc::carryLane (dip, runs)) == "22 0 24 -20 26 -20 28 0");
     CHECK (doc::carryLaneText ("12 0 14 -20 16 -20 18 0", runs) == "22 0 24 -20 26 -20 28 0");
 
     /*  Points on both sides of the move come back in order. */
     const auto across = doc::readLevelLane ("5 0 25 -10").points;
-    CHECK (doc::laneText (doc::carryLane (across, runs)) == "5 -10 15 0");
+    CHECK (doc::writeLaneText (doc::carryLane (across, runs)) == "5 -10 15 0");
 
     /*  A range inside the chorus moves with it; one spanning the intro and
         the chorus is left ending before it begins, and is marked. */
@@ -212,7 +212,7 @@ TEST_CASE ("media edit: a removal drops what sat on the removed material and lan
     CHECK (near (doc::carried (runs, 25.0), 15.0));
 
     const auto lane = doc::readLevelLane ("5 0 12 -20 18 -20 25 0").points;
-    CHECK (doc::laneText (doc::carryLane (lane, runs)) == "5 0 15 0");
+    CHECK (doc::writeLaneText (doc::carryLane (lane, runs)) == "5 0 15 0");
 
     /*  Nothing left of a range in the verse; one across it is shortened to
         what remains. */
@@ -246,7 +246,7 @@ TEST_CASE ("media edit: an edge moved loses or gains a sliver, and the rest shif
 
     /*  Two points landing on one instant: the earlier one is kept. */
     const auto lane = doc::readLevelLane ("8 -3 9 -5 10 -7").points;
-    CHECK (doc::laneText (doc::carryLane (lane, runs)) == "8 -3");
+    CHECK (doc::writeLaneText (doc::carryLane (lane, runs)) == "8 -3");
 
     /*  Grown at the front: new material carries nothing, and what was there
         shifts. */

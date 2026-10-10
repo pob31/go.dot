@@ -17,6 +17,7 @@
 #include <wfg/engine/cue/Runner.h>
 
 #include <wfg/engine/cue/AutoName.h>
+#include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/cue/PictureSpec.h>
 
 #include <wfg/engine/cue/LaneCommands.h>
@@ -1723,7 +1724,7 @@ namespace wfg::cue
         /*  NOT ANOTHER RECORDING (K8's review): a second of one file is no
             place in another. A cue given a new file while it was paused starts
             that file from its top. */
-        if (textOf (cue, "file") != found->second.media)
+        if (playedMediaOf (cue, durations, renders).name != found->second.media)
         {
             plain();
             return;
@@ -1735,13 +1736,12 @@ namespace wfg::cue
             and one past its end - a file swapped for a shorter one of the same
             name - has nothing there to play. A length not known resumes as it
             is; a slice always has somewhere to carry on, its loop or the next. */
-        if (at.range < 0 && durations != nullptr)
+        if (at.range < 0)
         {
-            const auto length = durations->find (textOf (cue, "file"));
+            const auto length = playedLengthOf (cue, durations);
             const auto speed = documentSpeedOf (cue);
 
-            if (length != durations->end() && length->second > 0.0
-                  && at.from >= length->second - 0.5 * speed)
+            if (length.has_value() && at.from >= *length - 0.5 * speed)
             {
                 plain();
                 return;
@@ -5080,8 +5080,17 @@ namespace wfg::cue
             makes every configuration agree with the one that sounds. *Corrected
             in PR 5.6's review (2026-09-14).* The one edge left is a cue that
             named no file at its first arm, whose later arm may still read one. */
+        bool waitingForRender = false;
+
         if (run->media.empty())
-            run->media = textOf (cue, "file");
+        {
+            /*  THE FILE THE CUE PLAYS (namespace draft §55, ADM): its own, or
+                the render of its open edit - none yet is a run that fails
+                as `rendering`, and the standby is asked again once it lands. */
+            const auto played = playedMediaOf (cue, durations, renders);
+            run->media = played.name;
+            waitingForRender = played.openEdit && played.name.empty();
+        }
 
         /*  NO AUDIO SIDE IS A COMPLETE CONFIGURATION, not a failure. A show
             replayed has no Player and must still create the run, advance
@@ -5098,6 +5107,14 @@ namespace wfg::cue
         /*  The run's copy rather than a second read of the document, so the
             file resolved and played below is the file the run says it plays. */
         const auto named = run->media;
+
+        if (waitingForRender)
+        {
+            engine.submit (origin::engine, "run.failed",
+                           { osc::Value::string (runId),
+                             osc::Value::string (runError::rendering) });
+            return;
+        }
 
         /*  RESOLVED AGAINST THE BUNDLE, and checked here rather than three
             layers down. A cue naming a file the bundle does not have fails its
@@ -8711,17 +8728,12 @@ namespace wfg::cue
         if (range >= 0)
             return true;
 
-        const auto* lengths = handlerDurations();
+        const auto length = playedLengthOf (cue, handlerDurations());
 
-        if (lengths == nullptr)
+        if (! length.has_value())
             return true;
 
-        const auto found = lengths->find (textOf (cue, "file"));
-
-        if (found == lengths->end() || ! (found->second > 0.0))
-            return true;
-
-        return at < found->second - 0.5 * documentSpeedOf (cue);
+        return at < *length - 0.5 * documentSpeedOf (cue);
     }
 
     Runner::ResumePoint Runner::countedPoint (const Run& run, std::int64_t tick) const
@@ -17074,9 +17086,8 @@ namespace wfg::cue
             /*  BACKWARDS FROM THE END (namespace draft §41): its piece the other
                 way, from the file's end - when the show knows it; not known, it
                 waits at its start offset. */
-            if (const auto* known = handlerDurations())
-                if (const auto found = known->find (textOf (cue, "file")); found != known->end() && found->second > start.seconds)
-                    start.seconds = found->second;
+            if (const auto length = playedLengthOf (cue, handlerDurations()); length.has_value() && *length > start.seconds)
+                start.seconds = *length;
         }
 
         return start;
@@ -17102,6 +17113,26 @@ namespace wfg::cue
         {
             durationsHeld = mediaInfo->durations();
             durations = durationsHeld.get();
+        }
+
+        /*  AND THE RENDERS OF THE OPEN EDITS (namespace draft §55, ADM), the
+            same way. A snapshot that moved is a render that landed, or
+            failed: the standby, when its edit is open, is made ready again -
+            its arm may have failed as `rendering`, and a failed arm is not
+            retried on its own. */
+        if (renderSource)
+        {
+            auto now = renderSource();
+
+            if (now != rendersHeld)
+            {
+                rendersHeld = std::move (now);
+                renders = rendersHeld.get();
+
+                if (const auto parked = document.findById (armedStandby);
+                    parked.isValid() && editedLengthOf (parked).has_value())
+                    armedStandby.clear();
+            }
         }
 
         /*  WHAT THE START CUES ASKED FOR, fired by name now: the hook decides,
@@ -17332,11 +17363,12 @@ namespace wfg::cue
         const auto banks = banksKey();
 
         if (revisionPrepared == document.revision() && durationsPrepared == known && banksPrepared == banks
-              && ! lookAgain)
+              && rendersPrepared == renders && ! lookAgain)
             return;
 
         revisionPrepared = document.revision();
         durationsPrepared = known;
+        rendersPrepared = renders;
         banksPrepared = banks;
         aheadLookedTick = currentTick;
         aheadMissing = false;
@@ -18350,10 +18382,9 @@ namespace wfg::cue
                     run->pieceStart = run->positionOrigin;
                     run->pieceEnd = run->positionOrigin;
 
-                    if (durations != nullptr)
-                        if (const auto length = durations->find (textOf (document.findById (run->cue), "file"));
-                            length != durations->end() && length->second > run->positionOrigin)
-                            run->pieceEnd = length->second;
+                    if (const auto length = playedLengthOf (document.findById (run->cue), durations);
+                        length.has_value() && *length > run->positionOrigin)
+                        run->pieceEnd = *length;
 
                     /*  A FILE WHOSE LENGTH THE SHOW DOES NOT KNOW has no end to
                         start from: it plays forwards, and turns when its speed
@@ -19517,6 +19548,17 @@ namespace wfg::cue
 
                     if (differs)
                         run->rearmEditedAt = tick;
+                }
+
+                /*  AND THE FILE IT PLAYS (namespace draft §55, ADP): a render of
+                    its edit that landed, a freeze, an unfreeze. Asked each tick,
+                    since a render is no revision of the show; a sounding run
+                    never reaches here and keeps its file until its next run. */
+                if (const auto played = playedMediaOf (cue, durations, renders);
+                    ! played.name.empty() && played.name != run->media)
+                {
+                    run->media = played.name;
+                    run->rearmEditedAt = tick;
                 }
 
                 if (run->rearmEditedAt >= 0 && tick - run->rearmEditedAt >= rearmSettleTicks)

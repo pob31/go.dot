@@ -150,7 +150,7 @@ namespace wfg::doc
     std::vector<LanePoint> carryLane (const std::vector<LanePoint>& points, const std::vector<TimeRun>& runs);
 
     /** A lane's text, as the row holds it. */
-    std::string laneText (const std::vector<LanePoint>& points);
+    std::string writeLaneText (const std::vector<LanePoint>& points);
 
     /*  Text in, text out: the row's lane carried. A text that is no lane - the
         door refuses one, so a document never holds one - is returned as it is. */
