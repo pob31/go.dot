@@ -29,8 +29,9 @@
     it, compressed: DXT1 for Hap, DXT5 for Hap Alpha and for Hap Q - whose
     DXT5 holds colour as scaled YCoCg, turned back to RGB when it is drawn.
 
-    And the CPU's decode of those blocks, for the renderer with no window and
-    for the tests: the colour of one pixel of a frame, exactly as the GPU's
+    And the CPU's decode of those blocks, for the renderer with no window,
+    for the tests and for the dissolve of an edit (§55.5): the colour of one
+    pixel of a frame, or of a whole frame, exactly as the GPU's
     fixed-function decode would give it.
 
     Bounds-checked throughout: a damaged frame is a black frame.
@@ -39,6 +40,7 @@
 #include <wfg/engine/video/Snappy.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -216,6 +218,106 @@ namespace wfg::video::hap
     }
 
     //==============================================================================
+    namespace detail
+    {
+        /*  ONE BLOCK'S SIXTEEN TEXELS, row by row from its top-left: straight
+            colour 0..255 and alpha 0..1, exactly as the GPU's fixed-function
+            decode would give them. Hap Q's colour turned back from scaled
+            YCoCg, as its shader does. */
+        inline void decodeBlock (Texture texture, const std::uint8_t* at, double texels[16][4]) noexcept
+        {
+            double alphas[16];
+
+            for (auto& a : alphas)
+                a = 1.0;
+
+            //  THE ALPHA HALF of a DXT5 block: two ends and eight steps between, or six and the extremes.
+            if (texture != Texture::dxt1)
+            {
+                const auto a0 = static_cast<int> (at[0]), a1 = static_cast<int> (at[1]);
+                std::uint64_t bits = 0;
+
+                for (int n = 0; n < 6; ++n)
+                    bits |= static_cast<std::uint64_t> (at[2 + n]) << (8 * n);
+
+                for (unsigned p = 0; p < 16; ++p)
+                {
+                    const auto code = static_cast<int> ((bits >> (3u * p)) & 0x07u);
+                    int value = 0;
+
+                    if (code == 0)                  value = a0;
+                    else if (code == 1)             value = a1;
+                    else if (a0 > a1)               value = ((8 - code) * a0 + (code - 1) * a1) / 7;
+                    else if (code == 6)             value = 0;
+                    else if (code == 7)             value = 255;
+                    else                            value = ((6 - code) * a0 + (code - 1) * a1) / 5;
+
+                    alphas[p] = static_cast<double> (value) / 255.0;
+                }
+
+                at += 8;
+            }
+
+            //  THE COLOUR HALF: two 5:6:5 ends, and two more between them or one and black.
+            const auto c0 = static_cast<unsigned> (at[0] | (at[1] << 8));
+            const auto c1 = static_cast<unsigned> (at[2] | (at[3] << 8));
+            const auto indices = le32 (at + 4);
+
+            const auto expand = [] (unsigned colour, double rgb[3])
+            {
+                rgb[0] = static_cast<double> (((colour >> 11) & 0x1fu) * 255u / 31u);
+                rgb[1] = static_cast<double> (((colour >> 5) & 0x3fu) * 255u / 63u);
+                rgb[2] = static_cast<double> ((colour & 0x1fu) * 255u / 31u);
+            };
+
+            double e0[3], e1[3];
+            expand (c0, e0);
+            expand (c1, e1);
+
+            const auto fourColours = texture != Texture::dxt1 || c0 > c1;
+
+            for (unsigned p = 0; p < 16; ++p)
+            {
+                const auto code = static_cast<int> ((indices >> (2u * p)) & 0x03u);
+                double c[3];
+                auto a = alphas[p];
+
+                for (int n = 0; n < 3; ++n)
+                {
+                    if (code == 0)              c[n] = e0[n];
+                    else if (code == 1)         c[n] = e1[n];
+                    else if (fourColours)       c[n] = code == 2 ? (2.0 * e0[n] + e1[n]) / 3.0 : (e0[n] + 2.0 * e1[n]) / 3.0;
+                    else if (code == 2)         c[n] = (e0[n] + e1[n]) / 2.0;
+                    else                        c[n] = 0.0;
+                }
+
+                if (texture == Texture::dxt1 && ! fourColours && code == 3)
+                    a = 0.0;
+
+                if (texture == Texture::ycocgDxt5)
+                {
+                    /*  SCALED YCoCg: Co in red, Cg in green, the scale in blue, Y in
+                        alpha - turned back as the HAP shader does. */
+                    const auto scale = (c[2] / 255.0) * (255.0 / 8.0) + 1.0;
+                    const auto co = (c[0] / 255.0 - 128.0 / 255.0) / scale;
+                    const auto cg = (c[1] / 255.0 - 128.0 / 255.0) / scale;
+                    const auto luma = a;
+
+                    texels[p][0] = std::clamp (luma + co - cg, 0.0, 1.0) * 255.0;
+                    texels[p][1] = std::clamp (luma + cg, 0.0, 1.0) * 255.0;
+                    texels[p][2] = std::clamp (luma - co - cg, 0.0, 1.0) * 255.0;
+                    texels[p][3] = 1.0;
+                    continue;
+                }
+
+                texels[p][0] = c[0];
+                texels[p][1] = c[1];
+                texels[p][2] = c[2];
+                texels[p][3] = a;
+            }
+        }
+    }
+
     /*  THE CPU'S DECODE OF ONE PIXEL: (x, y) from the texture's top-left, its
         width in pixels a multiple of four, as 0..255 straight colour and 0..1
         alpha. Hap Q's colour turned back from scaled YCoCg, as its shader
@@ -233,85 +335,67 @@ namespace wfg::video::hap
         if ((block + 1) * stride > blocks.size())
             return false;
 
-        const auto* at = blocks.data() + block * stride;
-        const auto texel = static_cast<unsigned> ((y % 4) * 4 + (x % 4));
+        double texels[16][4];
+        detail::decodeBlock (texture, blocks.data() + block * stride, texels);
 
-        //  THE ALPHA HALF of a DXT5 block: two ends and eight steps between, or six and the extremes.
-        double a = 1.0;
+        const auto texel = static_cast<std::size_t> ((y % 4) * 4 + (x % 4));
+        red = texels[texel][0];
+        green = texels[texel][1];
+        blue = texels[texel][2];
+        alpha = texels[texel][3];
+        return true;
+    }
 
-        if (texture != Texture::dxt1)
+    /*  A WHOLE FRAME DECODED (namespace draft §55.5, ADU): the texture's
+        blocks to straight RGBA, rows from the top-left, four bytes a pixel,
+        each what `pixelAt` gives rounded to a byte - what a dissolve blends.
+        False for a texture not taken, or blocks too few for the size. */
+    inline bool decodeTexture (Texture texture, const std::vector<std::uint8_t>& blocks, int width, int height,
+                               std::vector<std::uint8_t>& rgba)
+    {
+        if (texture == Texture::none || width <= 0 || height <= 0)
+            return false;
+
+        const auto across = (width + 3) / 4;
+        const auto down = (height + 3) / 4;
+        const auto stride = bytesPerBlock (texture);
+
+        if (static_cast<std::size_t> (across * down) * stride > blocks.size())
+            return false;
+
+        rgba.assign (static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 4, 0);
+
+        const auto byteOf = [] (double value) noexcept
         {
-            const auto a0 = static_cast<int> (at[0]), a1 = static_cast<int> (at[1]);
-            std::uint64_t bits = 0;
-
-            for (int n = 0; n < 6; ++n)
-                bits |= static_cast<std::uint64_t> (at[2 + n]) << (8 * n);
-
-            const auto code = static_cast<int> ((bits >> (3u * texel)) & 0x07u);
-            int value = 0;
-
-            if (code == 0)                  value = a0;
-            else if (code == 1)             value = a1;
-            else if (a0 > a1)               value = ((8 - code) * a0 + (code - 1) * a1) / 7;
-            else if (code == 6)             value = 0;
-            else if (code == 7)             value = 255;
-            else                            value = ((6 - code) * a0 + (code - 1) * a1) / 5;
-
-            a = static_cast<double> (value) / 255.0;
-            at += 8;
-        }
-
-        //  THE COLOUR HALF: two 5:6:5 ends, and two more between them or one and black.
-        const auto c0 = static_cast<unsigned> (at[0] | (at[1] << 8));
-        const auto c1 = static_cast<unsigned> (at[2] | (at[3] << 8));
-        const auto indices = detail::le32 (at + 4);
-        const auto code = static_cast<int> ((indices >> (2u * texel)) & 0x03u);
-
-        const auto expand = [] (unsigned colour, double rgb[3])
-        {
-            rgb[0] = static_cast<double> (((colour >> 11) & 0x1fu) * 255u / 31u);
-            rgb[1] = static_cast<double> (((colour >> 5) & 0x3fu) * 255u / 63u);
-            rgb[2] = static_cast<double> ((colour & 0x1fu) * 255u / 31u);
+            return static_cast<std::uint8_t> (std::clamp (std::lround (value), 0l, 255l));
         };
 
-        double e0[3], e1[3], c[3];
-        expand (c0, e0);
-        expand (c1, e1);
+        for (int by = 0; by < down; ++by)
+            for (int bx = 0; bx < across; ++bx)
+            {
+                double texels[16][4];
+                detail::decodeBlock (texture,
+                                     blocks.data() + (static_cast<std::size_t> (by) * static_cast<std::size_t> (across)
+                                                      + static_cast<std::size_t> (bx)) * stride,
+                                     texels);
 
-        const auto fourColours = texture != Texture::dxt1 || c0 > c1;
+                for (int p = 0; p < 16; ++p)
+                {
+                    const auto x = bx * 4 + (p % 4);
+                    const auto y = by * 4 + (p / 4);
 
-        for (int n = 0; n < 3; ++n)
-        {
-            if (code == 0)              c[n] = e0[n];
-            else if (code == 1)         c[n] = e1[n];
-            else if (fourColours)       c[n] = code == 2 ? (2.0 * e0[n] + e1[n]) / 3.0 : (e0[n] + 2.0 * e1[n]) / 3.0;
-            else if (code == 2)         c[n] = (e0[n] + e1[n]) / 2.0;
-            else                        c[n] = 0.0;
-        }
+                    if (x >= width || y >= height)
+                        continue;
 
-        if (texture == Texture::dxt1 && ! fourColours && code == 3)
-            a = 0.0;
+                    auto* at = rgba.data() + (static_cast<std::size_t> (y) * static_cast<std::size_t> (width)
+                                              + static_cast<std::size_t> (x)) * 4;
+                    at[0] = byteOf (texels[p][0]);
+                    at[1] = byteOf (texels[p][1]);
+                    at[2] = byteOf (texels[p][2]);
+                    at[3] = byteOf (texels[p][3] * 255.0);
+                }
+            }
 
-        if (texture == Texture::ycocgDxt5)
-        {
-            /*  SCALED YCoCg: Co in red, Cg in green, the scale in blue, Y in
-                alpha - turned back as the HAP shader does. */
-            const auto scale = (c[2] / 255.0) * (255.0 / 8.0) + 1.0;
-            const auto co = (c[0] / 255.0 - 128.0 / 255.0) / scale;
-            const auto cg = (c[1] / 255.0 - 128.0 / 255.0) / scale;
-            const auto luma = a;
-
-            red = std::clamp (luma + co - cg, 0.0, 1.0) * 255.0;
-            green = std::clamp (luma + cg, 0.0, 1.0) * 255.0;
-            blue = std::clamp (luma - co - cg, 0.0, 1.0) * 255.0;
-            alpha = 1.0;
-            return true;
-        }
-
-        red = c[0];
-        green = c[1];
-        blue = c[2];
-        alpha = a;
         return true;
     }
 }

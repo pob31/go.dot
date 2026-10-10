@@ -154,7 +154,6 @@ namespace wfg::video
 
             const auto width = probe.width, height = probe.height;
             const auto frameBytes = static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 4;
-            const auto rowsOfBlocks = (height + 3) / 4;
             const auto threads = std::clamp (static_cast<int> (std::thread::hardware_concurrency()) - 2, 1, 16);
 
             std::vector<std::uint8_t> pixels (frameBytes), blocks, frame, scratch;
@@ -170,22 +169,8 @@ namespace wfg::video
                 }
 
                 /*  ITS BLOCKS ON EVERY THREAD SPARED, a band of rows each. */
-                blocks.resize (static_cast<std::size_t> (((width + 3) / 4) * rowsOfBlocks) * hap::bytesPerBlock (texture));
-                const auto band = (rowsOfBlocks + threads - 1) / threads;
-                std::vector<std::thread> workers;
-
-                for (int t = 1; t < threads; ++t)
-                    workers.emplace_back ([&, t]
-                                          {
-                                              hap::encodeTexture (texture, pixels.data(), width, height,
-                                                                  static_cast<std::size_t> (width) * 4, blocks, t * band, band);
-                                          });
-
-                hap::encodeTexture (texture, pixels.data(), width, height, static_cast<std::size_t> (width) * 4, blocks, 0, band);
-
-                for (auto& worker : workers)
-                    worker.join();
-
+                hap::encodeTextureThreaded (texture, pixels.data(), width, height,
+                                            static_cast<std::size_t> (width) * 4, blocks, threads);
                 hap::packFrame (texture, blocks, frame, scratch);
 
                 if (! writer.write (frame.data(), frame.size()))

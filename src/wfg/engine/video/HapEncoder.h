@@ -42,6 +42,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 namespace wfg::video::hap
@@ -384,6 +385,32 @@ namespace wfg::video::hap
                 encodeBlock (texture, rgba, width, height, stride, bx, by,
                              out.data() + (static_cast<std::size_t> (by) * static_cast<std::size_t> (across)
                                            + static_cast<std::size_t> (bx)) * bytes);
+    }
+
+    /*  A WHOLE FRAME'S BLOCKS ON EVERY THREAD SPARED, a band of rows of
+        blocks each: the converter's loop, shared with the render of an
+        edit's dissolves (namespace draft §55.5). `threads` at least one. */
+    inline void encodeTextureThreaded (Texture texture, const std::uint8_t* rgba, int width, int height,
+                                       std::size_t stride, std::vector<std::uint8_t>& out, int threads)
+    {
+        const auto across = (width + 3) / 4;
+        const auto rowsOfBlocks = (height + 3) / 4;
+        const auto workers = std::clamp (threads, 1, std::max (1, rowsOfBlocks));
+
+        out.resize (static_cast<std::size_t> (across * rowsOfBlocks) * bytesPerBlock (texture));
+        const auto band = (rowsOfBlocks + workers - 1) / workers;
+        std::vector<std::thread> others;
+
+        for (int t = 1; t < workers; ++t)
+            others.emplace_back ([&, t]
+                                 {
+                                     encodeTexture (texture, rgba, width, height, stride, out, t * band, band);
+                                 });
+
+        encodeTexture (texture, rgba, width, height, stride, out, 0, band);
+
+        for (auto& other : others)
+            other.join();
     }
 
     /*  THE FRAME AS HAP STORES IT: one section, Snappy-packed when that is
