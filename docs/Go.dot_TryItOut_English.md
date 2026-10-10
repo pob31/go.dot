@@ -122,6 +122,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | OSC cues | Send to a desk, a processor or a video server, from a list of the device's addresses: several messages or bundles in one cue, and curves played on the cue's clock, recorded from the device's own reports or a SpaceMouse | *Add > osc*; *Show settings > Network* |
 | Cues written by WFS-DIY and S21_HiJack (new) | Store a snapshot in WFS-DIY or S21_HiJack and it lands in Go.dot as one cue after the standby; store it again and the same cue is updated. Each declares itself as a device, and its own addresses and snapshot names become menus, one per part of the address, under the cue's *target* | WFS-DIY: *Network* tab, protocol Go.dot, then *Write to Go.dot*; S21_HiJack: *Setup > Cueing system: Go.dot* |
 | Address and value menus (new) | On a device that describes itself, pick the address part by part and the value from its list | Cue inspector, under *target* |
+| Device presets (new, being built) | Make a device from a preset for your desk or processor - Yamaha, DiGiCo, Allen & Heath, Behringer and Midas, SSL Live, ETC Eos, grandMA, Holophonix, L-ISA, d&b Soundscape, Spat Revolution, ADM-OSC, MIDI Show Control. Every protocol the device speaks is a preset of its own, the cue's menus follow it, and the message leaves on the device's own wire: OSC, Yamaha's RCP, a telnet line or MIDI | *Show settings > Network > Add* |
 | Doh! rollback | When a GO is taken back, send each device the command that undoes it | Cue inspector; *Network* tab |
 | MIDI cues | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
 | Network monitor | See every message in and out | *Show > Network monitor…* |
@@ -200,10 +201,10 @@ WFS-DIY, XOA/Tight-WFS, S21-HiJack and Choufleur come from the same author as Go
 
 ### Integration with hardware
 
-- **Sound consoles**: snapshot recall, fader and channel moves, and Doh! rollback. A DiGiCo profile is first in line, then Yamaha, Allen&Heath and Behringer/Midas; any desk that speaks OSC or MIDI already works as an opaque device today.
-- **Lighting consoles**: GO and cue recall over OSC and MIDI, and sACN as an input source.
+- **Sound consoles**: snapshot recall, fader and channel moves, and Doh! rollback, as presets being built now (above): DiGiCo, Yamaha, Allen & Heath, Behringer and Midas, SSL Live; any desk that speaks OSC or MIDI already works as an opaque device today.
+- **Lighting consoles**: GO and cue recall over OSC, MIDI and MIDI Show Control - ETC Eos and grandMA presets being built now - and sACN as an input source.
 - **Control surfaces**: Mackie Control in v1; HUI, Icon, Behringer, PreSonus and Stream Deck after. A SpaceMouse already moves OSC cue curves.
-- **Device templates**: a shared library of device descriptions, written by users, for the desks and processors that cannot describe themselves.
+- **Device templates**: a shared library of device descriptions, written by users, for the desks and processors that cannot describe themselves. The presets above are its first entries.
 
 ## Sending feedback
 

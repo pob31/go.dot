@@ -24566,3 +24566,220 @@ it and an address that is exactly a device's root had no device: both ask for eq
 Not built, said here: nothing in Go.dot asks a processor anything once
 it has declared - a description is fetched only when it declares again; two processors with one root (two
 WFS-DIY boxes) share one device, the second moving the first's host.
+
+## 57. Device integration presets: consoles, lighting desks, spatial processors
+
+### 57.1 What it does
+
+Written 2026-10-10. The author: *"Can we plan for the integration of other devices such as sound and
+light consoles and spatial sound processors? the Bitfocus Companion and Chataigne modules are probably
+great sources for the network and MIDI commands to send to the various clients. For Yamaha consoles,
+there is a specific network protocol, not OSC. Should I request (I think it's under NDA) the spec sheet
+for it? Important consoles: Yamaha, DiGiCo SD, Quantum and S series, Allen&Heath (MIDI over Ethernet),
+Midas M32 and H96, Behringer X32 and Wing, SSL Live series; EOS and Grand MA 1, 2, 3 for lights,
+Holophonix, L-Isa, Soundscape, Fletcher Machine. If some consoles have MIDI and OSC (or other network
+protocols) then implement all of them, a user may find one better suited than another and it's not for
+us to choose."* Then: *"The layout of the WFS-DIY and S21_HiJack may be changed to match the rest of
+the device integration presets."* And: *"I forgot to mention Flux Spat Revolution among the common
+spatial sound processors."*
+
+This is PRD §3.22, built as **presets**. A preset is a namespace file shipped with Go.dot - the same
+OSCQuery JSON a show keeps as `namespaces/<id>.json`, which WFS-DIY and S21_HiJack already serve (§56)
+and the mount reader already checks - one file per device family **and per protocol**, each in that
+protocol's own spelling, so the address in a cue is the address in the manual (PRD §3.11). Making a
+device from a preset copies the file into the show, and the cue aimed at it is the OSC cue of §45: a
+message is an address and an atom list, and the device's **wire** renders it - OSC over UDP or TCP,
+Yamaha's RCP text, a telnet line, MIDI bytes on a declared port or over TCP. Curves, fades (§26),
+heard, `verified`, Doh! and the path menus (§56) all come with it.
+
+**What each device takes**, read 2026-10-10 from the vendors' public documents, the Companion modules'
+help pages (MIT; read for the command surface, never copied) and S21_HiJack's own documentation:
+
+| Device | Protocols, every one offered | The wire | Primary source |
+|---|---|---|---|
+| Yamaha CL, QL, TF, DM3, DM7, RIVAGE PM | RCP text over TCP 49280; OSC over UDP 49900 (RIVAGE PM V5+, DM3, DM7); MIDI Program Change scenes, CC/NRPN parameters | `set MIXER:Current/InCh/Fader/Level <x> <y> <dB×100>` (−32768 is −∞), `ssrecall_ex MIXER:Lib/Scene <n>`, newline-delimited, answered `OK`/`OKm`/`ERROR`, every change `NOTIFY`; OSC `/yosc:req/set/<ParamID>/<X>/<Y> <value>` | Yamaha's public OSC specs (RIVAGE PM 1.0.2, DM7 1.1.0, DM3 1.0.0); the MIDI charts; for RCP Companion's `yamaha-rcp`, `BrenekH/yamaha-rcp-docs`. Yamaha's own RCP document is under NDA and is **not requested** (AFA) |
+| DiGiCo S21, S31; SD, Quantum | S-series GP OSC (`/channel/<n>/…`, `/digico/snapshots/fire i`, `/console/resend`, 57 methods); SD/Quantum Pad OSC (`/sd/…`, 577 commands, 2014 list); MIDI Program Change snapshots | S21_HiJack implements both dialects with mocks and a provenance log (`Documentation/OSC_FIELD_NOTES.md`); its console capture already writes GP OSC into Go.dot at `/channel /console /digico` | `DiGiCo S OSC Commandset_OSCpaths.csv` and `_channelNumbers.csv`, `DiGiCo_OTHER_OSC_List_17_11_14.pdf`, the SD App guide, all in S21_HiJack's `Documentation/` |
+| Allen & Heath dLive, Avantis, SQ, Qu | MIDI over TCP (dLive MixRack 51325, Surface 51328; Avantis, SQ, Qu 51325); the same MIDI on DIN and USB | NRPN levels, mutes, sends, assigns; Bank Select + Program Change scenes; SysEx names and colours; the base channel a console setting; echoes come unasked | A&H's public PDFs: dLive MIDI over TCP V1.9/V2.0, SQ MIDI Protocol Issue 5, Avantis MIDI TCP/IP, Qu MIDI |
+| Midas M32, Behringer X32 | OSC over UDP 10023; MIDI Program Change scene, snippet, cue | `/ch/01/mix/fader f` 0..1, `/ch/01/mix/on i`, `/bus/01/mix/fader`, `/dca/1/fader`, `/main/st/mix/fader`, `/-action/goscene i`, `/-action/gosnippet i`, `/-action/gocue i`; `/xremote` subscribes for ten seconds, renewed | Patrick-Gilles Maillot's "X32 OSC Protocol" |
+| Behringer Wing | OSC over UDP 2223; MIDI | `/ch/1/fdr f` in dB (−144 is −∞), `/ch/1/mute i`, bus, aux, dca, mtx and main the same, library actions for scenes; one subscription at a time | Maillot's "WING Remote Protocols" (Behringer-authorised) |
+| Midas HD96-24 | MIDI DIN only: its Ethernet is AES50 audio, no control protocol is published | Program Change scenes, MTC | the HD96-24 user guide |
+| SSL Live L100-L650 | MIDI (DIN): scenes fired by MIDI triggers, MTC; GPIO. **OSC is outbound only**: the console drives a Generic OSC device (8 faders, 8 switches, bidirectional for those) and takes no scene recall over it | a MIDI preset; being the console's Generic OSC device later | livehelp.solidstatelogic.com External Control, Automation; **ask SSL** |
+| ETC Eos family | OSC over TCP 3032 (OSC 1.0, length-prefixed) or 3037 (OSC 1.1, SLIP), UDP 3032/3034; MIDI Show Control and notes; command-line strings | `/eos/cue/<list>/<cue>/fire`, `/eos/key/go_0`, `/eos/key/stop`, `/eos/sub/<n> f`, `/eos/macro/<n>/fire`, `/eos/chan/<n> f`, `/eos/cmd s`, `/eos/user/<n>/…`; feedback `/eos/out/…` after `/eos/subscribe` | ETC "Eos Family Show Control User Guide" |
+| grandMA3 | OSC over UDP or TCP, port and prefix configured, `/cmd s` is the command line, `/Page<p>/Fader<n>`, `/Page<p>/Key<n>`; MSC (Go, Stop, Resume, Timed_Go, Set, Fire, Go_Off) over MIDI and over Ethernet; MIDI remotes | | help.malighting.com; Companion's `malighting-msc` (UDP, ports 6000-6100) |
+| grandMA2 | Telnet 30000 (`login <user> <password>`, then the command line: `Go+ Executor 1.1`, `Goto Cue 12`, `Off Executor 1.1`); MSC over MIDI and Ethernet; MIDI remotes | 30001 is the read-only system monitor | help.malighting.com "Remote control via telnet", "MSC" |
+| grandMA1 | MSC over MIDI and Ethernet (UDP 6004 reported); a telnet remote unverified | | the grandMA1 manual, the author's |
+| Holophonix | OSC over UDP 4003: `/{element}/{id}/{param}` - `/track/1/xyz fff`, `/track/1/aed fff`, `/track/1/gain f`, `/track/1/mute`, `/stereo`, `/multi`, `/bus/2/gain`, `/master`, `/get <pattern>`, OSC patterns; ADM-OSC v1 since 2.4.0 | changes pushed to configured destinations | docs.holophonix.xyz |
+| L-ISA Controller | OSC over UDP 8880: `/ext/src/<n>/p`, `/w`, `/d`, `/e`, `/s` (pan, width, distance, elevation, sub), `/ext/config/src/<n>/…`, `/ext/solo/src/<n>`, `/ext/master/gain`, `/ext/currentsnap/id` back; ADM-OSC | | L-Acoustics "L-ISA Controller OSC API" |
+| d&b Soundscape DS100 | OSC over UDP 50010 in, 50011 out: `/dbaudio1/coordinatemapping/source_position_xy/<area>/<obj> ff`, `/dbaudio1/positioning/source_spread/<obj> f`, `/dbaudio1/matrixinput/reverbsendgain/<obj> f`, `/dbaudio1/matrixinput/gain|mute/<obj>`, `/dbaudio1/scene/recall ii`, `next`, `previous`; ADM-OSC through En-Bridge | | d&b DOC05325 v1.3.10 |
+| Adamson Fletcher Machine | ADM-OSC; its native OSC and MIDI are not public | | **ask Adamson** |
+| FLUX:: Spat Revolution | OSC over UDP, the port set per connection: `/source/<n>/xyz fff`, `/source/<n>/aed fff`, `/source/<n>/gain f`, `/source/<n>/mute`, `/room/<n>/…`, `/master/…`, `/snapshot/…`; index-as-argument (`/source/xyz ifff`); `/source/<n>/relative/<param>`; ADM-OSC v1.0 as an input grammar since 25.01 | | doc.flux.audio, FLUX's public OSC table |
+| ADM-OSC, any processor | `/adm/obj/<n>/azim`, `elev`, `dist`, `aed`, `x`, `y`, `z`, `xy`, `xyz`, `w`, `gain`, `dref`, `dmax`, `mute`, `name`; `/adm/env/change s`; `/adm/lis/xyz`, `ypr` | normalised −1..1 | the v1.0 living standard |
+| MIDI Show Control, any desk | SysEx `F0 7F <device> 02 <format> <command> <data> F7`: Go, Stop, Resume, Timed_Go, Load, Set, Fire, All_Off, Restore, Reset, Go_Off; on a port, and in a datagram to MA desks | | MMA MSC 1.0 |
+
+What the survey changes in the request: the HD96 and SSL Live are MIDI-only for Go.dot's purposes,
+Fletcher Machine starts as ADM-OSC, grandMA1 is MSC. Chataigne's modules add nothing Companion's lack
+for these devices; its DS100 and Holophonix modules are the two worth reading for the spatial grammar.
+
+### 57.2 Decisions
+
+The author's, 2026-10-10, the last two in their own words, the rest each picked from options whose
+words were mine:
+
+- **AFA** (the author's) **Yamaha's RCP document is not requested.** Built from the public OSC specs,
+  Companion's names and the console's own `devinfo`; an NDA document read while writing GPL-3 code
+  would have to be shown independent of the implementation, and the public sources keep the provenance
+  clean the way S21_HiJack's field notes do. Offered as "No, build from public sources".
+- **AFB** (the author's) **OSC-only presets first** - no new transport - then Eos over TCP, Yamaha's
+  RCP, grandMA2's line, the MIDI wire. Offered as "OSC-only presets first".
+- **AFC** (the author's) **The kind word stays `osc`** for a cue aimed at a console; the target line
+  and the Kind column say which device and wire. Offered as "Keep osc".
+- **AFD** (the author's) **Feedback is built in this round, as its last stage** (DP.10). Offered as
+  "Yes, as the last stage".
+- **AFE** (the author's) **Every protocol a device speaks is offered**: *"If some consoles have MIDI
+  and OSC (or other network protocols) then implement all of them, a user may find one better suited
+  than another and it's not for us to choose."*
+- **AFF** (the author's) **WFS-DIY's and S21_HiJack's layouts may change** to match the presets: *"The
+  layout of the WFS-DIY and S21_HiJack may be changed to match the rest of the device integration
+  presets."*
+
+Mine, the author's to overrule:
+
+- **AFG** (mine) **A preset is a namespace file.** The root's `GODOT` key names it: `PRESET` (the
+  slug, equal to the file name), `VERSION`, `VENDOR`, `MODEL`, `TRANSPORT` (`udp|tcp|midi`), `WIRE`
+  (`osc|rcp|line|midi`), `FRAMING` (`length|slip`, for OSC over TCP), `PORT` (the device's usual one)
+  and `SOURCES`, one line per document the file was written from, with the page, the way
+  `tests/fixtures/README.md` asks of a fixture. Nodes keep `TYPE`, `ACCESS`, `RANGE` and `VALS`,
+  `UNIT`, `DESCRIPTION` and the `GODOT` keys §3 already reads, plus the wire's own key where the address
+  alone cannot say how to send it (AFJ) and a `ROLE` (AFM). The mount reader loads one today: unknown
+  `GODOT` keys are ignored, never refused.
+- **AFH** (mine) **One preset per device family and protocol**, in that protocol's own spelling:
+  `behringer-x32-osc`, `behringer-x32-midi`, `yamaha-rcp`, `yamaha-osc`, `yamaha-midi`, `digico-s-osc`,
+  `digico-sd-osc`, `digico-midi`, `allenheath-dlive-midi` (one file for the TCP and the DIN wire),
+  `allenheath-sq-midi`, `allenheath-avantis-midi`, `allenheath-qu-midi`, `behringer-wing-osc`,
+  `behringer-wing-midi`, `midas-hd96-midi`, `ssl-live-midi`, `etc-eos-osc`, `msc`,
+  `malighting-grandma3-osc`, `malighting-grandma2-line`, `holophonix-osc`, `lacoustics-lisa-osc`,
+  `dbaudio-ds100-osc`, `flux-spat-osc`, `adm-osc`. A MIDI wire has no address grammar, so a MIDI
+  preset's addresses are Go.dot's spelling (`/scene/recall i`, `/channel/<n>/fader f`), the one place
+  the role words are the address itself. The `yamaha-rcp` preset carries RCP's X and Y as the last two
+  address segments (`/MIXER:Current/InCh/Fader/Level/<x>/<y> i`), because the mount table and the heard
+  box key on the address and a channel carried as an atom would make every channel one node; the
+  node's `GODOT.RCP` (`{"VERB":"set","XY":2}`) tells the renderer to peel them back into arguments.
+- **AFI** (mine) **The cue stays the OSC cue.** A second cue kind would copy curves, the fade mixer,
+  heard, `verified`, Doh! and the path menus; the wire is the device's, not the cue's.
+- **AFJ** (mine) **Wires render at the flush**, in `MountSender::sendAlone` and `sendBundled`, which
+  already encode and deliver; the sender reads the node's wire spec from the mount table, bundles only
+  when the wire is `osc`, and the bytes leave as today: a datagram, a packet to a link, a message to the
+  MIDI sender's thread. `mount/transport` gains `midi` (a declared `<Port>` named by `mount/port`);
+  `mount/wire` and `mount/framing` are new rows; `ws` stays refused.
+  - `osc`: the codec of §45; over TCP framed by a 4-byte length (OSC 1.0, Eos 3032) or SLIP (OSC 1.1,
+    Eos 3037, grandMA3's TCP), the serial SLIP framer of PC.11 reused.
+  - `rcp`: `<verb> <address without its slash> <atoms, space-separated>` and a newline, the verb the
+    node's `GODOT.RCP` (`set` by default, `ssrecall_ex` for a scene), strings quoted. `OK` and `OKm`
+    end the run `sent`; `ERROR` ends it `refused` with the console's sentence; `NOTIFY` is heard (AFL).
+  - `line`: the message's one string atom and CRLF (grandMA2's command line); `mount/login` holds the
+    `login <user> <password>` line sent when the link opens and after every retry; a node like
+    `/exec/go s` is a template, `GODOT.LINE` = `"Go+ Executor {1}"`.
+  - `midi`: the node's `GODOT.MIDI` says the shape with fixed keys - `{"KIND":"pc","BANKED":true}` (a
+    scene: Bank Select MSB, LSB, Program Change), `{"KIND":"nrpn","MSB":<n>,"LSB":"arg","LAW":"ah-fader"}`
+    (Allen & Heath's levels, the published fader law a named table), `{"KIND":"cc"}`,
+    `{"KIND":"msc","COMMAND":1}` (the device and format from `mount/mscDevice`, `mount/mscFormat`),
+    `{"KIND":"sysex","BYTES":[…]}` - and renders to as many MIDI messages as the shape takes, in order,
+    each through `MidiSink::sendForRun`; over TCP the same bytes go to the link under `raw` framing; in a
+    datagram (MA's MSC over Ethernet, `udp` + `midi`) the SysEx goes as it is.
+  **A TCP transport is a `serial::Link`** behind a second `SerialTable` keyed by mount identifier, so
+  its backoff (half a second, one, two, four, then every eight), its state words and its framing come
+  for free; `Worker::heard` gains `length` and `raw` beside `lines` and `slip`. Its state is two runtime
+  rows, `mount/link` (`off|opening|open|retrying`) and `mount/linkProblem`, not `problem`, which the
+  load overwrites. A run to a closed link **fails** as one to a closed serial port does today, not
+  `not-sent`: the Runner cannot see the link, and the deviation is said here rather than hidden.
+- **AFK** (mine) **A described device's roots are its file's.** A preset whose root is `/` (an X32:
+  `/ch /bus /dca /mtx /main /-action`; the S21: `/channel /console /digico`) mounts each first-level
+  child as a root, the prefix row naming exactly those; `/` itself stays refused. §15.1a's "a described
+  device keeps one root" ends here, and `describedRootOf` answers the root that matched rather than the
+  first prefix.
+- **AFL** (mine) **Feedback words** on `mount/readback` beside `oscquery`: `notify` (RCP, free),
+  `xremote` (the X32, renewed every nine seconds while Rx is on), `subscribe` (the Wing's `/*s`, Eos's
+  `/eos/subscribe` at link open), `midi` (Allen & Heath's NRPN echoes on the port or the link), `get`
+  (Holophonix's `/get`, the DS100 and ADM-OSC asked by address). The wire decodes what comes back into
+  heard values at the node's address - the mirror of AFJ - so a console fader is a curve source and
+  `wait="verified"` works against a console; `canBeAsked` takes the new words without a query port.
+  D4's "Rx stored, not processed" (§15.1) ends here for described devices.
+- **AFM** (mine) **A common vocabulary, `GODOT.ROLE`**: `go`, `stop`, `scene.recall`, `scene.next`,
+  `scene.previous`, `strip.level`, `strip.mute`, `send.level`, `dca.level`, `master.level`,
+  `object.position`, `object.gain`, `object.mute`. A node claims one; the inspector names it under the
+  target line, and a later round retargets a show from one desk to another by it. WFS-DIY and
+  S21_HiJack adopt the same keys and the same layout - a container per section, `VALS` for names, a
+  sentence per node, `PRESET` and `VERSION` at the root - which is the change AFF allows. The words are
+  mine, to be put to the author before they ship.
+- **AFN** (mine) **Presets live in `presets/devices/` of this repo** (PRD §3.22: with the device
+  profiles), installed beside the binary as the `pd/` patches are and found by the same lookup;
+  `wfg presets [--check]` lists them; `PresetTests` loads every file through the mount reader and
+  requires its `SOURCES`; the client, std-only and perhaps remote, reads them as runtime rows under
+  `/godot/preset/<slug>/`. A machine-readable source gets a generator under `scripts/presets/`; the
+  rest are written by hand from the primary document, page cited.
+- **AFO** (mine) **A device from a preset is `mount.createFromPreset <slug> [id]`**, in the mount
+  commands, which hold the bundle folder: the file copied atomically into the bundle as
+  `namespaces/<id>-<version>.json` the way `MountFetcher` writes one, then the mount made with the roots
+  of AFK, its host blank, port, transport, wire and framing from the file, `mount/preset` set to
+  `<slug>@<version>`; on replay the file is already there and the copy is skipped. A newer installed
+  version shows in `mount/presetUpdate` and `mount.refreshPreset <id>` writes a new versioned file and
+  repoints the row, so an undo still names a file that exists. The Network tab's ADD opens a menu - a
+  plain OSC device, then the presets by vendor - and gains a **Kind** column, the second kind D5 was
+  waiting for; a MIDI device sits in the same tab, its Where cell naming the port.
+- **AFP** (mine) **Doh! on a MIDI wire** reads the node's kind as everywhere: a state node is put back
+  like any described node, a `pc` scene recall is an event and stays "leave" (PRD §3.32).
+
+### 57.3 Rows
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `mount/<id>/transport` | `s` | rw | gains `midi`: a declared `<Port>`, named by `port` |
+| `mount/<id>/wire` | `s` | rw | `osc` (default), `rcp`, `line`, `midi` |
+| `mount/<id>/framing` | `s` | rw | `length` (default), `slip`: OSC over TCP only |
+| `mount/<id>/port` | `s` | rw | the `<Port>` a `midi` transport sends on (refers port) |
+| `mount/<id>/login` | `s` | rw | the line sent when a `line` link opens; empty sends nothing |
+| `mount/<id>/mscDevice` | `i` | rw | 0..127, 127 is every device (default) |
+| `mount/<id>/mscFormat` | `i` | rw | 1 lighting, 16 sound, 127 all types (default) |
+| `mount/<id>/preset` | `s` | rw | `<slug>@<version>` the device was made from; empty for a plain device |
+| `mount/<id>/presetUpdate` | `s` | r | the newer installed version, when there is one; runtime |
+| `mount/<id>/link` | `s` | r | `off`, `opening`, `open`, `retrying`; runtime, TCP only |
+| `mount/<id>/linkProblem` | `s` | r | the link's sentence; runtime |
+| `mount/<id>/readback` | `s` | rw | gains `notify`, `xremote`, `subscribe`, `get`, `midi` |
+| `preset/<slug>/name`, `vendor`, `model`, `version`, `transport`, `wire`, `framing`, `port` | | r | the installed presets, runtime; the client's menu reads them |
+
+### 57.4 Commands
+
+| Command | Arguments | Does |
+|---|---|---|
+| `mount.createFromPreset` | `s:slug [s:id]` | copies the preset into the bundle and makes the device (AFO) |
+| `mount.refreshPreset` | `s:id` | writes the newer installed version beside the old file and repoints the row |
+| `mount.replied` | `s:id s:word s:text` | the engine's: a console's `OK`, `OKm` or `ERROR` to a line it sent, logged |
+
+### 57.5 Refused
+
+`unknown-preset` for a slug no installed file carries; `bad-value` for a wire the transport cannot
+carry (`rcp` on `udp`, `osc` on `midi`); `no-port` for a `midi` transport whose port is unbound, the
+word a MIDI cue already uses; `locked` as everywhere.
+
+### 57.6 Stages
+
+| Stage | What |
+|---|---|
+| DP.0 | This section; PRD §3.11, §3.22, §6.9; the devplan's round; both guides a row; `presets/devices/README.md` |
+| DP.1 | `MountSender::destinationFor`, one factory for every destination; found on the way: `writeOscNow` and `writeCurve` built theirs without `serial`, so an OSC cue aimed at a serial device went to UDP port 0 |
+| DP.2 | A described device's roots are its file's (AFK) |
+| DP.3 | `PresetTable`, `wfg presets`, the `preset` rows, the install, `PresetTests`; `adm-osc`, `digico-s-osc`, `dbaudio-ds100-osc` |
+| DP.4 | `mount.createFromPreset`, `mount.refreshPreset`, the Network tab's menu and Kind column (AFO) |
+| DP.5 | `Node::role` and the wire spec, the inspector's role word; `behringer-x32-osc`, `behringer-wing-osc`, `holophonix-osc`, `lacoustics-lisa-osc`, `flux-spat-osc`, `malighting-grandma3-osc`, `yamaha-osc`, `digico-sd-osc` |
+| DP.6 | OSC over TCP: `TcpLink`, the links table, `length` framing, the link rows; `etc-eos-osc` |
+| DP.7 | The `rcp` wire, `mount.replied`; `yamaha-rcp` |
+| DP.8 | The `line` wire, `mount/login`; `malighting-grandma2-line` |
+| DP.9 | The `midi` wire on a port, over TCP and in a datagram; `allenheath-*-midi`, `msc`, the Program Change presets |
+| DP.10 | Feedback (AFL) |
+| DP.11 | `blackbox.presets`, M60, the close-out; WFS-DIY and S21_HiJack adopting the layout (their repositories) |
+
+**M60** (planned): a flush of 32 NRPN faders and 32 RCP lines, tick cost in Release.
+
+### 57.7 Built so far
+
+DP.0, 2026-10-10: this section and the documents it names. Nothing in code yet.

@@ -1002,7 +1002,12 @@ its addresses already start at one. Declaring it three times would be three
 rows, three names and three message counts for one console; giving it one root
 of Go.dot's invention would mean the address in the cue is not the address in
 the manual somebody copied it from. A device that **describes itself** answers
-at one, since its namespace is one tree and mounts in one place.
+at one, since its namespace is one tree and mounts in one place. *Amended
+2026-10-10, with the device presets (§3.22; namespace draft §57, AFK):* a
+described device's roots are its file's — a description whose root is `/`
+mounts each of its first-level children as a root, so an X32's `/ch`, `/bus`
+and `/dca`, or the S21's three roots, are one described device, and the address
+in the cue is still the manual's.
 
 *Added in 0.8, at the author's direction (2026-09-22).* A device that carries no
 namespace description is **opaque**, and that is the ordinary case rather than a
@@ -1962,6 +1967,20 @@ two-way OSCQuery, a device that writes cues into the show itself — are that
 upgrade path and are not yet built *(proposed)*. *Built 2026-10-10 for the last:*
 a device that declares itself and writes cues into the show, its description
 fetched from it and offered as menus (§3.26; namespace draft §56).
+
+*Being built 2026-10-10, at the author's direction (namespace draft §57):* the
+templates are **presets** shipped with Go.dot, one file per device family **and
+per protocol** — Yamaha, DiGiCo, Allen & Heath, Behringer and Midas, SSL Live,
+ETC Eos, grandMA, Holophonix, L-ISA, d&b Soundscape, Spat Revolution, ADM-OSC,
+MIDI Show Control — each in that protocol's own spelling, and every protocol a
+device speaks is offered, because *"a user may find one better suited than
+another and it's not for us to choose"* (AFE). A device made from a preset
+copies the file into the show; the wire the device rides — OSC over UDP or TCP,
+Yamaha's RCP text, a telnet line, MIDI on a port or over TCP — renders the OSC
+cue's messages, so the cue stays an OSC cue and keeps its curves, its waits and
+its Doh! behaviour. Yamaha's RCP document, under NDA, is not requested (AFA).
+The author's decisions are AFA-AFF; AFG-AFP are the implementer's, the author's
+to overrule.
 
 ### 3.23 Choufleur integration (script following and cue prompting)
 
@@ -3705,6 +3724,14 @@ persistent media (§3.29). *Answered 2026-10-02 for the second: Esc is a pause
 
 Added 2026-09-09: authored colour at idle and timbre while sounding, as a
 layout option (§3.30).
+
+Added 2026-10-10, with the device presets (§3.22; namespace draft §57): the
+role words a preset's nodes claim (`scene.recall`, `strip.level`, …, AFM), mine
+and not yet the author's; a run to a closed TCP link failing rather than ending
+`not-sent`, since the Runner cannot see the link (AFJ); a retarget of a whole
+show from one desk to another by those roles; SSL Live taking a scene recall over
+OSC (to ask SSL), the Fletcher Machine's native OSC (to ask Adamson), and the
+grandMA1's remote (its manual).
 
 Added 2026-10-10, with authoring from a processor (§3.26; namespace draft §56):
 an OSC cue that waits for the processor's own report that a recall landed (a

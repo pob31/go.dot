@@ -124,6 +124,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Cues OSC | Envoyer à une console, un processeur ou un serveur vidéo, depuis la liste des adresses de l'appareil : plusieurs messages ou bundles dans une cue, et des courbes jouées sur l'horloge de la cue, enregistrées depuis les retours de l'appareil ou une SpaceMouse | *Add > osc* ; *Show settings > Network* |
 | Cues écrites par WFS-DIY et S21_HiJack (nouveau) | Enregistrer un snapshot dans WFS-DIY ou S21_HiJack le dépose dans Go.dot en une seule cue après la cue en attente ; l'enregistrer de nouveau met à jour la même cue. Chacun se déclare comme appareil, et ses propres adresses et noms de snapshots deviennent des menus, un par partie de l'adresse, sous la *target* de la cue | WFS-DIY : onglet *Network*, protocole Go.dot, puis *Write to Go.dot* ; S21_HiJack : *Setup > Cueing system : Go.dot* |
 | Menus d'adresse et de valeur (nouveau) | Sur un appareil qui se décrit lui-même, choisir l'adresse partie par partie et la valeur dans sa liste | Inspecteur, sous *target* |
+| Presets d'appareils (nouveau, en construction) | Créer un appareil depuis un preset pour votre console ou votre processeur : Yamaha, DiGiCo, Allen & Heath, Behringer et Midas, SSL Live, ETC Eos, grandMA, Holophonix, L-ISA, d&b Soundscape, Spat Revolution, ADM-OSC, MIDI Show Control. Chaque protocole que l'appareil parle est un preset à part, les menus de la cue le suivent, et le message part sur le fil propre à l'appareil : OSC, le RCP de Yamaha, une ligne telnet ou du MIDI | *Show settings > Network > Add* |
 | Retour arrière Doh! | Quand un GO est repris, envoyer à chaque appareil la commande qui l'annule | Inspecteur ; onglet *Network* |
 | Cues MIDI | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
 | Moniteur réseau | Voir chaque message entrant et sortant | *Show > Network monitor…* |
@@ -202,10 +203,10 @@ WFS-DIY, XOA/Tight-WFS, S21-HiJack et Choufleur viennent du même auteur que Go.
 
 ### Intégration matérielle
 
-- **Consoles son** : rappel de snapshots, mouvements de faders et de tranches, retour arrière Doh!. Un profil DiGiCo passe en premier, puis Yamaha, Allen&Heath et Behringer/Midas ; toute console qui parle OSC ou MIDI fonctionne déjà comme appareil opaque.
-- **Consoles lumière** : GO et rappel de cues par OSC et MIDI, et sACN comme source entrante.
+- **Consoles son** : rappel de snapshots, mouvements de faders et de tranches, retour arrière Doh!, sous forme de presets en construction (plus haut) : DiGiCo, Yamaha, Allen & Heath, Behringer et Midas, SSL Live ; toute console qui parle OSC ou MIDI fonctionne déjà comme appareil opaque.
+- **Consoles lumière** : GO et rappel de cues par OSC, MIDI et MIDI Show Control - presets ETC Eos et grandMA en construction - et sACN comme source entrante.
 - **Surfaces de contrôle** : Mackie Control en v1 ; HUI, Icon, Behringer, PreSonus et Stream Deck ensuite. Une SpaceMouse fait déjà bouger les courbes des cues OSC.
-- **Modèles d'appareils** : une bibliothèque partagée de descriptions, écrites par les utilisateurs, pour les consoles et processeurs qui ne se décrivent pas eux-mêmes.
+- **Modèles d'appareils** : une bibliothèque partagée de descriptions, écrites par les utilisateurs, pour les consoles et processeurs qui ne se décrivent pas eux-mêmes. Les presets ci-dessus en sont les premières entrées.
 
 ## Faire un retour
 

@@ -1234,6 +1234,42 @@ timeline from the lower half and the video monitor showing a movie edit's dissol
 
 ---
 
+### Device integration presets: consoles, lighting desks, spatial processors · L
+
+*Added on 2026-10-10*, at the author's direction: Yamaha, DiGiCo SD/Quantum/S, Allen & Heath,
+Midas M32 and HD96, Behringer X32 and Wing, SSL Live; ETC Eos, grandMA 1, 2 and 3; Holophonix,
+L-ISA, d&b Soundscape, Fletcher Machine, Spat Revolution - every protocol each speaks, *"a user may
+find one better suited than another and it's not for us to choose"* (namespace draft §57; PRD §3.22,
+§3.11, §6.9). The author's decisions are AFA-AFF; AFG-AFP are the implementer's, the author's to
+overrule. Not a phase: it follows the handles round, and no later phase is renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| DP.0 | Docs: namespace §57, PRD §3.11/§3.22/§6.9, both guides, `presets/devices/README.md`, this | - |
+| DP.1 | `MountSender::destinationFor`; the serial-destination fix found on the way | DP.0 |
+| DP.2 | A described device's roots are its file's | DP.1 |
+| DP.3 | Presets shipped, listed, published, gated; `adm-osc`, `digico-s-osc`, `dbaudio-ds100-osc` | DP.2 |
+| DP.4 | A device from a preset: `mount.createFromPreset`, the Kind column, the Add menu, refresh | DP.3 |
+| DP.5 | The rest of the OSC/UDP presets; `ROLE` on the node and in the inspector | DP.4 |
+| DP.6 | OSC over TCP: `TcpLink`, `length` framing, the links table, `mount/link`; `etc-eos-osc` | DP.1 |
+| DP.7 | The `rcp` wire; `yamaha-rcp` | DP.6 |
+| DP.8 | The `line` wire, `mount/login`; `malighting-grandma2-line` | DP.7 |
+| DP.9 | The `midi` wire on a port, over TCP and in a datagram; Allen & Heath, MSC, the Program Change presets | DP.6 |
+| DP.10 | Feedback: `notify`, `xremote`, `subscribe`, `get`, `midi` read-back | DP.7-DP.9 |
+| DP.11 | The drivers, M60, the close-out | all |
+
+**Done when:** a device made from a preset in the Network tab offers its tree as menus and its cue
+reaches a mock of each wire byte for byte - a datagram, a length-framed and a SLIP-framed packet, an
+RCP line, a telnet line after the login, an NRPN quad and a banked Program Change on a port and over
+TCP, an MSC Go in a datagram; a console's reply is heard back at the node; `wfg replay` rebuilds a show
+made from presets with no socket; every shipped preset loads and names its sources; CI is green.
+
+**Needs from the author:** the role words (AFM) before they ship; a bench on the desks at hand (the
+S21; Eos Nomad, grandMA onPC, Maillot's X32 emulator and L-ISA Controller need no hardware); the asks
+to SSL, Adamson and the grandMA1 manual.
+
+---
+
 ## Phase 10 — Timecode, panic, hardening · M
 
 **Goal:** the stop levels and the sync sources that a touring show requires.
@@ -1462,6 +1498,9 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   tags; pane contract; BLE sidecar in Rust with `btleplug`, speaking Choufleur's
   opcode table; Go.dot relays the buzz. Embedded vs docked decided here.
 - **OSC device templates** as OSCQuery namespace descriptions; ADM-OSC built in.
+  *(2026-10-10: being built as the device presets - one file per device family and
+  protocol, consoles, lighting desks and spatial processors - the item before Phase 10,
+  namespace draft §57; the author's decisions AFA-AFF.)*
 - **Authoring from a processor** (PRD §3.26, added 2026-09-06): the capture verb
   that lets WFS-DIY write a cue rather than only be commanded by one — QLab's
   authoring API in Go.dot's own protocol. It needs no new transport (§4.11 already
