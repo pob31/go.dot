@@ -311,9 +311,9 @@ namespace wfg::client::ui
             if (pickedSection >= reading.sections.size())
                 return;
 
-            const auto typed = model::trimFrom (trimBox.getText().toStdString());
+            const auto trim = model::trimFrom (trimBox.getText().toStdString());
 
-            if (! typed.has_value())
+            if (! trim.has_value())
             {
                 tell ("that is not a trim: -6, +3, silence");
                 showPickedSection();
@@ -328,7 +328,7 @@ namespace wfg::client::ui
 
             if (actions.set)
                 actions.set ("/godot/section/" + reading.sections[pickedSection].id + "/trim",
-                             osc::formatDouble (*typed));
+                             osc::formatDouble (*trim));
         };
 
         /*  THE PICKED POINT, TYPED. A number that will not parse is put back
