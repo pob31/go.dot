@@ -124,6 +124,16 @@ namespace wfg::tree
                 destination written as host and port alone leaves it out. */
             std::string serial {};
         };
+        /*  THE DESTINATION A DECLARATION NAMES, made in one place (namespace
+            draft §57, DP.1): host, port, rate cap, bundles, and the serial
+            port when the transport is serial. Until it existed the Runner's
+            cue and curve paths spelled theirs out by hand and left `serial`
+            at its empty value, so an OSC cue aimed at a device on a serial
+            port was sent to UDP port 0 while `node.set` to the same device
+            went down the port - which is why every caller takes it from
+            here now, and why a new member of Destination is filled here or
+            nowhere. */
+        static Destination destinationFor (const MountDeclaration& declaration);
 
         /*  A BUNDLE'S DATAGRAM IS CLOSED AT THIS MANY BYTES (namespace draft
             45, ZB): WFS-DIY's own ceiling for the bundles it sends, under the

@@ -320,6 +320,17 @@ namespace wfg::tree
     }
 
     //==============================================================================
+    MountSender::Destination MountSender::destinationFor (const MountDeclaration& declaration)
+    {
+        Destination destination;
+        destination.host = declaration.host;
+        destination.port = declaration.port;
+        destination.rateCap = declaration.rateCap;
+        destination.bundles = declaration.bundles;
+        destination.serial = declaration.transport == "serial" ? declaration.serial : std::string {};
+        return destination;
+    }
+
     MountTable::WriteResult writeToDevice (MountTable& mounts, MountSender& sender,
                                            const std::string& address, const osc::Values& values)
     {
@@ -329,10 +340,7 @@ namespace wfg::tree
             return written;
 
         if (const auto* declaration = mounts.declarationOf (written.mountId); declaration != nullptr && declaration->tx)
-            sender.queue (written.mountId,
-                          { declaration->host, declaration->port, declaration->rateCap, declaration->bundles,
-                            declaration->transport == "serial" ? declaration->serial : std::string {} },
-                          address, written.values);
+            sender.queue (written.mountId, MountSender::destinationFor (*declaration), address, written.values);
 
         return written;
     }

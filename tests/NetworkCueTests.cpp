@@ -4139,3 +4139,62 @@ TEST_CASE ("network cue: Esc ends a playing curve's run once")
     INFO (said);
     CHECK (ended == 1u);
 }
+
+//==============================================================================
+/*  A DEVICE ON A SERIAL PORT, reached by a cue (namespace draft §57, DP.1).
+    `node.set` to such a device went down the port from the day it existed, and
+    a cue aimed at it did not: the Runner spelled the destination out by hand
+    and left the port off, so the datagram went to UDP port 0 and the run
+    failed as one to nowhere. The destination is made in one place now,
+    `MountSender::destinationFor`, and this is the case that fails if a caller
+    stops taking it from there. */
+TEST_CASE ("network cue: a cue, its further message and its curve aimed at a device on a serial port reach the port, and the network hears nothing")
+{
+    NetworkRig rig;
+
+    tree::MountDeclaration onSerial;
+    onSerial.id = "ARDU0001";
+    onSerial.prefix = "/ardu";
+    onSerial.namespaceFile = "namespaces/ardu.json";
+    onSerial.transport = "serial";
+    onSerial.serial = "SR000001";
+    REQUIRE (rig.mounts.load (onSerial, R"JSON({ "FULL_PATH": "/ardu", "CONTENTS": {
+        "led":  { "FULL_PATH": "/ardu/led",  "TYPE": "i", "ACCESS": 3, "VALUE": [0] },
+        "dial": { "FULL_PATH": "/ardu/dial", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0] } } })JSON").ok);
+
+    std::vector<std::pair<std::string, std::string>> handed;   // the port, the address
+    rig.sender.setSerialSink ([&handed] (const std::string& serialId, const std::vector<std::uint8_t>& packet)
+    {
+        const auto decoded = osc::decode (packet.data(), packet.size());
+        handed.emplace_back (serialId, decoded.ok ? decoded.packet.address : std::string ("?"));
+        return true;
+    });
+
+    const auto cueId = rig.makeOsc ("/ardu/dial", "f:0", "none");
+    REQUIRE (rig.document.createMessage (cueId, "/ardu/led", "i:1").ok);
+    curveOn (rig, cueId, 0, "0 0 1 1");
+
+    rig.fire (cueId);
+
+    //  The cue's two messages leave at GO; the curve's first move a tick later.
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (handed.size() >= 3u);
+    CHECK (handed[0].first == "SR000001");
+    CHECK (handed[0].second == "/ardu/dial");
+    CHECK (handed[1].first == "SR000001");
+    CHECK (handed[1].second == "/ardu/led");
+
+    for (const auto& [serialId, address] : handed)
+    {
+        CHECK (serialId == "SR000001");
+        CHECK (address.rfind ("/ardu/", 0) == 0);
+    }
+
+    REQUIRE (rig.runOf (cueId) != nullptr);
+    CHECK (rig.runOf (cueId)->state == cue::runState::playing);
+
+    //  And the network heard none of it: the port is where the device is.
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
+}

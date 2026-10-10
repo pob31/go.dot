@@ -12833,9 +12833,7 @@ namespace wfg::cue
         if (const auto* declaration = mounts->declarationOf (written.mountId);
             declaration != nullptr && declaration->tx && sender_ != nullptr)
         {
-            target.ticket = sender_->queue (written.mountId,
-                                            { declaration->host, declaration->port,
-                                              declaration->rateCap, declaration->bundles },
+            target.ticket = sender_->queue (written.mountId, tree::MountSender::destinationFor (*declaration),
                                             target.address, written.values, job.self);
             target.ticketTick = tick;
         }
@@ -13165,17 +13163,13 @@ namespace wfg::cue
             pre-send of the standby it spares from what it drops (§23.10). */
         if (sender_ != nullptr && declaration != nullptr)
         {
-            job.ticket = sender_->queue (written.mountId,
-                                         { declaration->host, declaration->port,
-                                           declaration->rateCap, declaration->bundles },
-                                         job.address, written.values, job.self);
+            const auto destination = tree::MountSender::destinationFor (*declaration);
+            job.ticket = sender_->queue (written.mountId, destination, job.address, written.values, job.self);
 
             /*  In their order after the first, the order the queue keeps -
                 one bundle where the device takes them (namespace draft 45). */
             for (std::size_t n = 0; n < furtherWritten.size(); ++n)
-                job.further[n].ticket = sender_->queue (written.mountId,
-                                                        { declaration->host, declaration->port,
-                                                          declaration->rateCap, declaration->bundles },
+                job.further[n].ticket = sender_->queue (written.mountId, destination,
                                                         job.further[n].address, furtherWritten[n], job.self);
         }
 
