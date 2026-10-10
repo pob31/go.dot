@@ -1038,6 +1038,15 @@ add_test(NAME blackbox.media-edit.fr_FR
 set_tests_properties(blackbox.media-edit.C blackbox.media-edit.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 180)
 
+# A movie edited the same way (namespace draft §55.5): its shots reordered with a dissolve, its sound
+# cut in step, the pair frozen and unfrozen, the render's frames read back against the source's.
+add_test(NAME blackbox.movie-edit.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/movie_edit.py" --wfg-locale=C)
+add_test(NAME blackbox.movie-edit.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/movie_edit.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.movie-edit.C blackbox.movie-edit.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The output list, and the patch that follows it until a cue has played. Hosted,
 # because the latch is at a real launch: without --hosted the run sits at
 # `armed` and never reaches it.

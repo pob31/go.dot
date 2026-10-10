@@ -1195,6 +1195,11 @@ not HAP says to convert it first, an old show saves unchanged; CI is green.
 **Needs from the author:** a dissolve by eye at four frames and at twenty-five, on a projector; a Hap Q
 movie's join; a frozen pair in a show folder; the row's words for a preview movie.
 
+**Built** 2026-10-10, V.0 to V.8, each on main (namespace draft §55.8 says what each did). The
+implementer's calls ADT-ADX stand as proposed, the author's three picks inside them; what the author
+has not yet seen: the row over a strip on screen, a dissolve on a projector, a frozen pair in a show
+folder.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

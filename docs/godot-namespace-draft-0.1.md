@@ -24199,4 +24199,41 @@ maps to. **Freeze** is the pair's: the movie's render is copied beside its sourc
 
 ### 55.8 Built, movies
 
-In progress: stages V.1 to V.8.
+Built 2026-10-10, V.0 to V.8, each on main. The document: `<Section>` under `<Video>`, every section door
+taking a movie cue and refusing a still, `keepSoundsWith` copying the movie's sections onto its locked
+sound by position as it copies the Ranges, the sound's own lanes carried by `carryLanes`, `freezeEdit`
+swapping the pair's four files in one record, `validate` holding a follower's copies to its movie's
+(V.1). The reader keeping the file's own grid (`timeScale`, `frameDuration`, whether every run agrees),
+the analyser's record carrying the codec and the frame rate, published for a movie cue at `frameRate`
+and `codec` from the runtime half; `MediaFacts` at the verbs, the snapped second written back with the
+rate, the refusal in words where the session knows the codec and never on a replay (V.2).
+`cue::playedMediaOf` answering for a movie, `fileSecondOf` mapping the monitor's second in serve,
+`pictureSpecOf` taking what the movie plays, GO on the render or failing `rendering`, the read-ahead
+naming the render once it lands and the word `rendering` meanwhile (V.3). `video::movie::renderMovieEdit`:
+every frame outside a dissolve the source's bytes, the dissolve linear in straight RGBA from material
+beyond the edges, black beyond the end and clear where the codec carries alpha, a variable-rate source
+on its dominant grid; `hap::decodeTexture` with `pixelAt` restated on the same one-block decode, the
+converter's threaded encode shared (V.4). The renderer by kind, `.edits/<key>.mov`, the readout's fifth
+column and its note, the pair's freeze as one answer or none, `media.freeze` on a movie busy until both
+renders are there and `locked-to-movie` on the sound, a render a showing picture names held (V.5). The
+foot reading's facts and words, `model::placeOf` and `model::cutsOnTimeline` held to the engine's (V.6);
+the row over every movie's strip, the strip and the cuts through the edit (V.7). Tests under C and
+fr-FR: SectionTests, MovieTests, TreeTests, EditPlaybackTests, VideoTests, MovieEditRenderTests (three
+solid shots as the oracle, frame for frame), MediaEditRenderTests, VideoHostTests (the renderer with no
+window playing a rendered edit, its dissolve probed), the client's and the window's cases;
+`tests/blackbox/movie_edit.py` as `blackbox.movie-edit.C` and `.fr_FR` drives the shipped serve: a
+three-shot HAP movie the driver writes itself, split twice on the grid and its shots put blue, green,
+red with a dissolve at one join, the sound's copies and its dip following, both renders done and the
+movie's parsed frame for frame against the source, the pair frozen in one record, a GO playing both,
+Unfreeze finding the renders again, the log replaying record for record.
+
+Found on the way: a crossfade into the file's first second is clamped to nothing by the sound's rule
+(nothing before the start to fade from), so the picture gets a hard cut there too, and "black beyond the
+file" is only ever past the end; a replay hands no file facts, so the verbs refuse a movie only where the
+session knows its codec; `Outcome::ok` is a factory, so a test that checks `.ok` on an outcome checks a
+function - `applied` is the field; `near` is a macro under the Windows headers. Not built, said here:
+`node.set` on a movie section's edge is not snapped (the renders snap); an edge dragged on the row; the
+monitor's tile shows the source's frame at the mapped second and never a dissolve; Esc and Doh! resume a
+movie as they did before this round; a sound longer than its movie is cut to the movie's length; the
+renderer child keeps a replaced render open until no layer names it, so a discard that fails on Windows
+waits for the next open's sweep.

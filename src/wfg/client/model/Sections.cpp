@@ -22,7 +22,9 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string_view>
@@ -336,7 +338,11 @@ namespace wfg::client::model
         {
             const auto next = at + sections[i].length();
 
-            if (editedSecond < next || (i + 1 == sections.size() && editedSecond == next))
+            //  The end itself is the last section's: the same bits, as the engine asks it.
+            const auto atTheEnd = i + 1 == sections.size()
+                                    && std::bit_cast<std::uint64_t> (editedSecond) == std::bit_cast<std::uint64_t> (next);
+
+            if (editedSecond < next || atTheEnd)
                 return SectionPlace { i, sections[i].in + (editedSecond - at) };
 
             at = next;
