@@ -49,6 +49,8 @@
 #include <wfg/client/Client.h>
 
 #include <wfg/client/model/Video.h>
+#include <wfg/client/model/Devices.h>
+#include <wfg/client/model/DeviceTree.h>
 #include <wfg/client/model/Dual.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
@@ -79,6 +81,7 @@
 #include <wfg/client/ui/MainWindow.h>
 #include <wfg/client/ui/MediaCopier.h>
 #include <wfg/client/ui/NewCueMenu.h>
+#include <wfg/client/ui/OscMessagesComponent.h>
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
@@ -476,6 +479,34 @@ namespace wfg::client
                 { send (gesture::promoteMessage (messageId)); };
                 footActions.createCurve = [this] (const std::string& parentId, int arg)
                 { send (gesture::createCurve (parentId, arg)); };
+
+                /*  A MESSAGE'S ADDRESS FROM ITS DEVICE'S TREE (namespace draft
+                    §56, AEP): built on the press from the snapshot this window
+                    last drew, never kept - the tree changes when a processor
+                    declares itself again. A pick is the `node.set` typing the
+                    address would have sent. */
+                footActions.chooseAddress = [this] (const std::string& addressRow, const std::string& current,
+                                                    juce::Component& under)
+                {
+                    if (latest == nullptr)
+                        return;
+
+                    const auto items = model::treeMenu (*latest, model::readDevices (*latest), current);
+
+                    if (items.empty())
+                        return;
+
+                    auto addresses = std::make_shared<std::vector<std::string>>();
+                    auto menu = ui::OscMessagesComponent::menuOf (items, current, *addresses);
+
+                    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&under),
+                                        [this, addressRow, addresses] (int chosen)
+                                        {
+                                            if (chosen > 0 && static_cast<std::size_t> (chosen) <= addresses->size())
+                                                send (gesture::setNode (addressRow,
+                                                                        (*addresses)[static_cast<std::size_t> (chosen) - 1]));
+                                        });
+                };
                 footActions.curveArm = [this] (const std::string& cueId) { send (gesture::curveArm (cueId)); };
                 footActions.curveFree = [this] { send (gesture::curveFree()); };
                 footActions.curveRec = [this] (const std::string& curveId, bool on)

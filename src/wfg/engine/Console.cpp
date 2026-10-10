@@ -73,8 +73,10 @@
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/surface/SpaceMouse.h>
 #include <wfg/engine/tree/MountListener.h>
+#include <wfg/engine/tree/MountFetcher.h>
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
+#include <wfg/engine/tree/RawSender.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
@@ -99,6 +101,7 @@
 #include <wfg/engine/oscquery/OscQueryServer.h>
 #include <wfg/engine/oscquery/TimbreRoute.h>
 #include <wfg/engine/tree/TreeCommands.h>
+#include <wfg/engine/tree/AuthoringCommands.h>
 #include <wfg/engine/log/Replay.h>
 
 /*  juce_core and juce_events are named directly even though tracktion_engine.h
@@ -327,6 +330,7 @@ namespace
         wfg::doc::ShowDocument document;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
+        wfg::tree::RawSender answers;   // a processor's answers (namespace draft §56); no socket but serve's
         wfg::cue::RunTable runs;
 
         /*  What each DCA is trimming by tonight (PRD §3.28): not the show's, so
@@ -403,7 +407,9 @@ namespace
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
         wfg::tree::registerTreeCommands (engine.commands(), touches);
+        wfg::tree::registerAuthoringCommands (engine.commands(), document, answers);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
+        wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, nowhere, answers);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
@@ -628,6 +634,7 @@ namespace
         wfg::doc::ShowDocument document;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
+        wfg::tree::RawSender answers;   // a processor's answers (namespace draft §56); no socket but serve's
         wfg::cue::RunTable runs;
 
         /*  What each DCA is trimming by tonight (PRD §3.28): not the show's, so
@@ -756,14 +763,20 @@ namespace
             side. */
         wfg::doc::DocumentWriter writer;
 
+        /*  AND THE BUNDLE ITSELF, HERE AND FOR THE SAME REASON (2026-10-10):
+            `mount.load` and `mount.described` hold it by reference and run in
+            the replay below, after the bundle block has closed. Declared inside
+            it, the first replayed `mount.described` read a destroyed File, and
+            the replay reproduced every record and then would not exit. */
+        juce::File bundle;
+
         const auto bundlePath = args.containsOption ("--bundle")
                                   ? args.getValueForOption ("--bundle")
                                   : juce::String();
 
         if (bundlePath.isNotEmpty())
         {
-            const juce::File bundle {
-                juce::File::getCurrentWorkingDirectory().getChildFile (bundlePath) };
+            bundle = juce::File::getCurrentWorkingDirectory().getChildFile (bundlePath);
 
             if (! bundle.isDirectory())
             {
@@ -827,7 +840,9 @@ namespace
             wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
             wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
             wfg::tree::registerTreeCommands (engine.commands(), touches);
+            wfg::tree::registerAuthoringCommands (engine.commands(), document, answers);
             wfg::tree::registerMountCommands (engine.commands(), document, mounts, bundle);
+            wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, bundle, answers);
 
             /*  AND THE TRANSACTION HOOK, which `serve` also installs and which
                 a replay is the reason to be careful about.
@@ -1266,6 +1281,7 @@ namespace
         wfg::Engine engine;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
+        wfg::tree::RawSender answers;   // a processor's answers (namespace draft §56); no socket but serve's
         wfg::cue::RunTable runs;
 
         /*  What each DCA is trimming by tonight (PRD §3.28): not the show's, so
@@ -1328,7 +1344,9 @@ namespace
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
         wfg::tree::registerTreeCommands (engine.commands(), touches);
+        wfg::tree::registerAuthoringCommands (engine.commands(), document, answers);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
+        wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, target, answers);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
 
@@ -3434,6 +3452,7 @@ namespace
         wfg::Engine engine;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
+        wfg::tree::RawSender answers;   // a processor's answers (namespace draft §56); no socket but serve's
         wfg::cue::RunTable runs;
 
         /*  What each DCA is trimming by tonight (PRD §3.28): not the show's, so
@@ -3506,6 +3525,11 @@ namespace
             this thread and the answer comes back as a `mount.readback` command,
             applied and logged like everything else the machine learns. */
         wfg::tree::MountProbe probe { engine };
+
+        /*  AND WHAT FETCHES A PROCESSOR'S DESCRIPTION when it declares itself
+            (namespace draft §56, AEM): the probe's shape, a GET off the tick
+            thread, the answer back as `mount.described`. Serve only. */
+        wfg::tree::MountFetcher fetcher { engine };
 
         /*  THE MACHINE'S CATALOGUE CACHE, declared here because the FX door
             below asks it whether a parameter exists (Phase 9a); filled for
@@ -3686,7 +3710,12 @@ namespace
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable, &spaceMouse);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
+        wfg::tree::registerAuthoringCommands (engine.commands(), document, answers,
+                                               [&fetcher, &target] (const std::string& mountId, const std::string& host,
+                                                                    int queryPort, const std::string& prefix)
+                                               { fetcher.fetch ({ mountId, host, queryPort, prefix, target }); });
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
+        wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, target, answers);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
@@ -4517,8 +4546,10 @@ namespace
         /*  The loop closed. From here a mounted write reaches a socket; before
             it, the same write reached the tree and the log and stopped. */
         sender.setSocket (udp);
+        answers.setSocket (udp);
         parameters.setSender (&sender);
         probe.start();
+        fetcher.start();
         listener.start();
         spaceMouse.start();
 
@@ -5255,6 +5286,10 @@ namespace
                                     rebuild and a diff, and a console should not
                                     wait behind a client's screen refresh. */
                                 sender.flush();
+
+                                /*  AND A PROCESSOR'S ANSWERS (namespace draft §56, AEI), after the
+                                    cue's first send, never before it. */
+                                answers.flush();
 
                                 /*  The runtime half of the state, refreshed
                                     before the publish that carries it. Left
@@ -6572,6 +6607,7 @@ namespace
             dummy->stop();
 
         server.stop();
+        fetcher.stop();
         probe.stop();
         listener.stop();
         spaceMouse.stop();

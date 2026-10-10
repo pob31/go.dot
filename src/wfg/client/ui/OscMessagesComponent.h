@@ -30,6 +30,7 @@
     only retyped when a value moves - never under a box somebody is typing in.
 */
 
+#include <wfg/client/model/DeviceTree.h>
 #include <wfg/client/model/OscMessages.h>
 #include <wfg/client/model/Theme.h>
 
@@ -69,6 +70,12 @@ namespace wfg::client::ui
 
             /** A sentence in the panel's head, or nothing to clear it. */
             std::function<void (const juce::String&)> say;
+
+            /*  THE DEVICE'S TREE AS A MENU beside a row's address (namespace
+                draft §56, AEP): the window builds it from the snapshot it holds
+                and writes the pick to `addressRow`, under `under`. */
+            std::function<void (const std::string& addressRow, const std::string& current,
+                                juce::Component& under)> chooseAddress;
         };
 
         OscMessagesComponent (const model::Theme&, Actions);
@@ -91,6 +98,13 @@ namespace wfg::client::ui
         juce::Button* removeValue (std::size_t row, std::size_t arg);
         juce::Button* addValue (std::size_t row);
         juce::Button* removeMessage (std::size_t row);
+        juce::Button* pickAddress (std::size_t row);
+
+        /*  A DEVICE'S TREE AS ONE NESTED POPUP: a submenu per part that holds
+            others, an item per node, `current` ticked. Each item's id is one
+            more than its index in `addresses`, which this fills. */
+        static juce::PopupMenu menuOf (const std::vector<model::TreeMenuItem>& items, const std::string& current,
+                                       std::vector<std::string>& addresses);
         juce::Button* addMessage() { return &add; }
 
     private:

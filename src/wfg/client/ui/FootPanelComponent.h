@@ -104,6 +104,11 @@ namespace wfg::client::ui
             std::function<void (const std::string& messageId)> promoteMessage;
             std::function<void (const std::string& parentId, int arg)> createCurve;
 
+            /*  A MESSAGE'S ADDRESS PICKED FROM ITS DEVICE'S TREE (namespace draft
+                §56, AEP): the window holds the snapshot the menu is built from. */
+            std::function<void (const std::string& addressRow, const std::string& current,
+                                juce::Component& under)> chooseAddress;
+
             /*  RECORDING AN OSC CUE'S CURVES (O.9): the cue armed or let go of,
                 a curve armed or not, a pass from a second, the pass ended. */
             std::function<void (const std::string& cueId)> curveArm;

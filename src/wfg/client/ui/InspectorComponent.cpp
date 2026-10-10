@@ -667,6 +667,7 @@ namespace wfg::client::ui
 
                 case model::Control::busRef:
                 case model::Control::deviceRef:
+                case model::Control::pathRef:
                 case model::Control::portRef:
                 case model::Control::dcaRef:
                 case model::Control::stripRef:
@@ -1041,6 +1042,7 @@ namespace wfg::client::ui
             }
             else if ((field.control == model::Control::busRef
                         || field.control == model::Control::deviceRef
+                        || field.control == model::Control::pathRef
                         || field.control == model::Control::portRef
                         || field.control == model::Control::dcaRef
                         || field.control == model::Control::stripRef
@@ -1387,6 +1389,7 @@ namespace wfg::client::ui
             const auto isMenu = line->field.control == model::Control::choice
                                   || line->field.control == model::Control::busRef
                                   || line->field.control == model::Control::deviceRef
+                                  || line->field.control == model::Control::pathRef
                                   || line->field.control == model::Control::portRef
                                   || line->field.control == model::Control::dcaRef
                                   || line->field.control == model::Control::stripRef

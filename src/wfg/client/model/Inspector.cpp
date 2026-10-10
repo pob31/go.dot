@@ -17,6 +17,7 @@
 #include <wfg/client/model/Inspector.h>
 
 #include <wfg/client/model/Devices.h>
+#include <wfg/client/model/DeviceTree.h>
 #include <wfg/client/model/Dual.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/DirectOuts.h>
@@ -117,7 +118,10 @@ namespace wfg::client::model
                 /*  WHAT DOH! DOES WITH WHAT IT SENT last on both (PRD §3.32,
                     2026-10-01): a question about after the send, so it comes
                     after everything the send itself is. */
-                { "osc",     { "device", "address", "value", "wait", "timeout", "duration", "loop", "doh",
+                /*  The device, then the menus that walk its tree to the address
+                    (namespace draft §56, AEP), deepest last. */
+                { "osc",     { "device", "path1", "path2", "path3", "path4", "path5", "path6", "path7",
+                               "path8", "address", "value", "wait", "timeout", "duration", "loop", "doh",
                                "dohRollback" } },
                 { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait", "doh",
                                "dohRollback" } },
@@ -1089,6 +1093,49 @@ namespace wfg::client::model
                     }
                 }
 
+                /*  THEN THE PATH, ONE MENU PER PART (namespace draft §56, AEP,
+                    the author's: "Selecting the client then shows a menu with
+                    the first item in the path to chose from, then the next
+                    depending on the previous selection and so on"). Derived
+                    from the address and written back to it, as the target is:
+                    a pick is the `node.set` of the same row. A device with no
+                    description has no tree, and the address box stays the
+                    whole answer. */
+                const auto steps = pathSteps (snapshot, devices, field.value);
+
+                for (std::size_t level = 0; level < steps.size(); ++level)
+                {
+                    Field step;
+                    step.address = field.address;
+                    step.name = "path" + std::to_string (level + 1);
+                    step.label = "path " + std::to_string (level + 1);
+                    step.control = Control::pathRef;
+                    step.value = steps[level].picked;
+                    step.typeTags = field.typeTags;
+                    step.writable = true;
+                    step.choices = steps[level].choices;
+                    step.description = level == 0
+                                         ? "The device's own tree, one menu per part of the address: picking here"
+                                           " rewrites the address below and clears the menus after it."
+                                         : "The next part of the address, among what the part above holds.";
+                    decided.push_back (std::move (step));
+                }
+
+                /*  AND A VALUE THE NODE ENUMERATES IS A MENU OF THEM: a
+                    snapshot's name, a preset's number. Only while the value is
+                    one of them or nothing, so a value somebody typed that the
+                    device does not list - S21_HiJack's recall by identifier,
+                    which its menu offers by name - stays theirs to read. */
+                if (const auto options = valueOptions (snapshot, field.value); ! options.empty())
+                    for (auto& other : decided)
+                        if (other.name == "value" && other.writable && ! other.mixed
+                            && (other.value.empty()
+                                || std::find (options.begin(), options.end(), other.value) != options.end()))
+                        {
+                            other.control = Control::choice;
+                            other.options = options;
+                        }
+
                 decided.push_back (std::move (aim));
                 return;
             }
@@ -1721,7 +1768,7 @@ namespace wfg::client::model
                     worst kind of helpful. Aiming several cues at a device is
                     worth having and is a command that does not exist yet;
                     until it does, the honest drawing is no menu. */
-                if (first.control == Control::deviceRef)
+                if (first.control == Control::deviceRef || first.control == Control::pathRef)
                     continue;
 
                 auto field = first;

@@ -41,6 +41,7 @@ namespace wfg::client::ui
         model::OscMessageRow message;
 
         juce::Label number, address;
+        juce::TextButton pick;
         std::vector<std::unique_ptr<Cell>> cells;
         juce::TextButton addArg { "+" }, drop { "x" };
     };
@@ -313,6 +314,18 @@ namespace wfg::client::ui
         };
         content.addAndMakeVisible (row.address);
 
+        /*  THE DEVICE'S TREE, part by part, as one nested menu (namespace draft
+            §56, AEP): a pick writes the row's address as typing does. */
+        row.pick.setButtonText (juce::String::fromUTF8 ("\xe2\x96\xbe"));
+        row.pick.setWantsKeyboardFocus (false);
+        row.pick.setTooltip ("Pick this message's address from the device's own list");
+        row.pick.onClick = [this, raw]
+        {
+            if (actions.chooseAddress)
+                actions.chooseAddress (raw->message.addressRow(), raw->message.address, raw->pick);
+        };
+        content.addAndMakeVisible (row.pick);
+
         for (std::size_t arg = 0; arg < row.message.args.size(); ++arg)
         {
             row.cells.push_back (std::make_unique<Cell>());
@@ -382,6 +395,7 @@ namespace wfg::client::ui
                 row.address.setText (juce::String (row.message.address), juce::dontSendNotification);
 
             row.address.setEditable (editable, editable, false);
+            row.pick.setEnabled (editable);
             row.addArg.setEnabled (editable && row.message.spells);
             row.drop.setEnabled (editable && (at > 0 || rows.size() > 1));
             row.drop.setTooltip (at > 0 ? "Removes this message"
@@ -457,7 +471,10 @@ namespace wfg::client::ui
             };
 
             line->number.setBounds (take (numberWidth));
-            line->address.setBounds (take (addressWidth).reduced (0, 1));
+
+            auto addressCell = take (addressWidth);
+            line->pick.setBounds (addressCell.removeFromRight (scaled (dropWidth, theme)).reduced (1, 2));
+            line->address.setBounds (addressCell.reduced (0, 1));
 
             for (auto& cell : line->cells)
             {
@@ -531,5 +548,30 @@ namespace wfg::client::ui
     juce::Button* OscMessagesComponent::removeMessage (std::size_t row)
     {
         return row < rows.size() ? &rows[row]->drop : nullptr;
+    }
+
+    juce::Button* OscMessagesComponent::pickAddress (std::size_t row)
+    {
+        return row < rows.size() ? &rows[row]->pick : nullptr;
+    }
+
+    juce::PopupMenu OscMessagesComponent::menuOf (const std::vector<model::TreeMenuItem>& items,
+                                                  const std::string& current, std::vector<std::string>& addresses)
+    {
+        juce::PopupMenu menu;
+
+        for (const auto& item : items)
+        {
+            if (! item.children.empty())
+            {
+                menu.addSubMenu (juce::String (item.label), menuOf (item.children, current, addresses));
+                continue;
+            }
+
+            addresses.push_back (item.address);
+            menu.addItem (static_cast<int> (addresses.size()), juce::String (item.label), true, item.address == current);
+        }
+
+        return menu;
     }
 }

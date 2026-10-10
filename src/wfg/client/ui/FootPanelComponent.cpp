@@ -186,6 +186,7 @@ namespace wfg::client::ui
                 editing.promoteMessage = actions.promoteMessage;
                 editing.createCurve = actions.createCurve;
                 editing.removeObject = actions.removeObject;
+                editing.chooseAddress = actions.chooseAddress;
                 editing.say = [this] (const juce::String& sentence)
                 {
                     note = sentence;

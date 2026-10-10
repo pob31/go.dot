@@ -52,6 +52,7 @@
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
+#include <wfg/client/model/DeviceTree.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/Icons.h>
 #include <wfg/client/model/Video.h>
@@ -12367,4 +12368,163 @@ TEST_CASE ("client: the render's readout is read for the cue, and a sound waitin
     const auto mark = model::readinessMark ("partial", "rendering", "media");
     CHECK (mark.icon == model::Icon::loading);
     CHECK (mark.text == "rendering");
+}
+
+
+//==============================================================================
+//  A DESCRIBED DEVICE'S TREE AS MENUS (namespace draft §56, AEP).
+TEST_CASE ("client: a described device's tree is one menu per part of the address")
+{
+    Rig rig;
+    tree::loadAllMountsFromBundle (rig.document, rig.mounts, fixtureBundle());
+    const auto snapshot = rig.publish (1);
+    const auto devices = model::readDevices (*snapshot);
+
+    SUBCASE ("a leaf one level down: one menu, the leaf picked")
+    {
+        const auto steps = model::pathSteps (*snapshot, devices, "/ext/console/mode");
+        REQUIRE (steps.size() == 1u);
+        CHECK (steps[0].picked == "/ext/console/mode");
+
+        std::vector<std::string> keys;
+        for (const auto& [key, label] : steps[0].choices)
+            keys.push_back (key);
+
+        CHECK (keys == std::vector<std::string> { "/ext/console/blackout", "/ext/console/cueNumber",
+                                                  "/ext/console/go", "/ext/console/masterLevel", "/ext/console/mode" });
+    }
+
+    SUBCASE ("the device just picked: the first menu, nothing picked yet")
+    {
+        const auto steps = model::pathSteps (*snapshot, devices, "/ext/console");
+        REQUIRE (steps.size() == 1u);
+        CHECK (steps[0].picked.empty());
+        CHECK (steps[0].choices.size() == 5u);
+    }
+
+    SUBCASE ("three levels of WFS-DIY's tree, containers marked, numbers counted as numbers")
+    {
+        const auto steps = model::pathSteps (*snapshot, devices, "/wfs/input/2/positionX");
+        REQUIRE (steps.size() == 3u);
+        CHECK (steps[0].picked == "/wfs/input");
+        CHECK (steps[1].picked == "/wfs/input/2");
+        CHECK (steps[2].picked == "/wfs/input/2/positionX");
+
+        CHECK (steps[0].choices.front().second == "config \xe2\x80\xba");
+        CHECK (steps[1].choices[0].first == "/wfs/input/1");
+        CHECK (steps[1].choices[1].first == "/wfs/input/2");
+        CHECK (steps[1].choices[9].first == "/wfs/input/10");
+    }
+
+    SUBCASE ("a container picked: the menu after it opens, nothing picked")
+    {
+        const auto steps = model::pathSteps (*snapshot, devices, "/wfs/input/3");
+        REQUIRE (steps.size() == 3u);
+        CHECK (steps[2].picked.empty());
+        CHECK_FALSE (steps[2].choices.empty());
+    }
+
+    SUBCASE ("a device with no description, and an address under none, have no menus")
+    {
+        rig.apply (2, "window", "mount.create", { osc::Value::string ("/sensor"), osc::Value::string ("") });
+        const auto later = rig.publish (3);
+        CHECK (model::pathSteps (*later, model::readDevices (*later), "/sensor/x").empty());
+        CHECK (model::pathSteps (*later, model::readDevices (*later), "/nowhere/x").empty());
+    }
+}
+
+TEST_CASE ("client: a value the node enumerates is offered as atoms")
+{
+    Rig rig;
+    tree::loadAllMountsFromBundle (rig.document, rig.mounts, fixtureBundle());
+    const auto snapshot = rig.publish (1);
+
+    CHECK (model::valueOptions (*snapshot, "/ext/console/mode")
+             == std::vector<std::string> { "s:\"blind\"", "s:\"run\"", "s:\"program\"" });
+    CHECK (model::valueOptions (*snapshot, "/ext/console/masterLevel").empty());
+    CHECK (model::valueOptions (*snapshot, "/ext/console/nothing").empty());
+
+    CHECK (model::naturalLess ("2", "10"));
+    CHECK_FALSE (model::naturalLess ("10", "2"));
+    CHECK (model::naturalLess ("9", "snapshot"));
+    CHECK (model::naturalLess ("input2", "input10"));
+}
+
+TEST_CASE ("client: a network cue on a described device shows its path, and its value as a menu")
+{
+    Rig rig;
+    tree::loadAllMountsFromBundle (rig.document, rig.mounts, fixtureBundle());
+
+    const std::string cue = "N4T9B2QF";
+    rig.apply (1, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0), osc::Value::string ("osc"),
+                 osc::Value::string ("Mode"), osc::Value::string (cue) });
+    rig.apply (2, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/address"),
+                                          osc::Value::string ("/ext/console/mode") });
+    rig.apply (3, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/value"),
+                                          osc::Value::string ("s:\"run\"") });
+
+    const auto inspection = model::inspect (*rig.publish (4), cue);
+
+    std::vector<std::string> names;
+    const model::Field* path = nullptr;
+    const model::Field* value = nullptr;
+
+    for (const auto& block : inspection.blocks)
+        for (const auto& field : block.fields)
+        {
+            names.push_back (field.name);
+            if (field.name == "path1") path = &field;
+            if (field.name == "value") value = &field;
+        }
+
+    REQUIRE (path != nullptr);
+    REQUIRE (value != nullptr);
+
+    //  It writes the address row, as the target does; its value is the part picked.
+    CHECK (path->control == model::Control::pathRef);
+    CHECK (path->label == "path 1");
+    CHECK (path->address == "/godot/cue/" + cue + "/address");
+    CHECK (path->value == "/ext/console/mode");
+
+    //  The node enumerates, and the value is one of them: a menu.
+    CHECK (value->control == model::Control::choice);
+    CHECK (value->options == std::vector<std::string> { "s:\"blind\"", "s:\"run\"", "s:\"program\"" });
+
+    //  Under the target, above the address.
+    const auto at = [&names] (const std::string& name)
+    { return std::find (names.begin(), names.end(), name) - names.begin(); };
+    CHECK (at ("device") < at ("path1"));
+    CHECK (at ("path1") < at ("address"));
+
+    //  A value the device does not list is left as typed.
+    rig.apply (5, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/value"),
+                                          osc::Value::string ("s:\"rehearsal\"") });
+
+    for (const auto& block : model::inspect (*rig.publish (6), cue).blocks)
+        for (const auto& field : block.fields)
+            if (field.name == "value")
+                CHECK (field.control != model::Control::choice);
+}
+
+TEST_CASE ("client: a described device's tree as one nested menu, for a further message's address")
+{
+    Rig rig;
+    tree::loadAllMountsFromBundle (rig.document, rig.mounts, fixtureBundle());
+    const auto snapshot = rig.publish (1);
+    const auto devices = model::readDevices (*snapshot);
+
+    const auto items = model::treeMenu (*snapshot, devices, "/ext/console/mode");
+    REQUIRE (items.size() == 5u);
+    CHECK (items.back().label == "mode");
+    CHECK (items.back().address == "/ext/console/mode");
+    CHECK (items.back().children.empty());
+
+    const auto wfs = model::treeMenu (*snapshot, devices, "/wfs/input/2/positionX");
+    REQUIRE_FALSE (wfs.empty());
+    CHECK (wfs.front().label == "config");
+    CHECK (wfs.front().address.empty());
+    CHECK_FALSE (wfs.front().children.empty());
+
+    CHECK (model::treeMenu (*snapshot, devices, "/nowhere/x").empty());
 }

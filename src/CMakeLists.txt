@@ -379,6 +379,12 @@ add_library(wfg_engine STATIC
     wfg/engine/tree/MountProbe.cpp
     wfg/engine/tree/MountSender.h
     wfg/engine/tree/MountSender.cpp
+    wfg/engine/tree/RawSender.h
+    wfg/engine/tree/RawSender.cpp
+    wfg/engine/tree/MountFetcher.h
+    wfg/engine/tree/MountFetcher.cpp
+    wfg/engine/tree/AuthoringCommands.h
+    wfg/engine/tree/AuthoringCommands.cpp
     wfg/engine/tree/HeardBox.h
     wfg/engine/tree/MountListener.h
     wfg/engine/tree/MountListener.cpp
@@ -580,6 +586,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Surfaces.h
     wfg/client/model/Devices.cpp
     wfg/client/model/Devices.h
+    wfg/client/model/DeviceTree.cpp
+    wfg/client/model/DeviceTree.h
     wfg/client/model/DirectOuts.cpp
     wfg/client/model/Fader.h
     wfg/client/model/Fader.cpp

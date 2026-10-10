@@ -1019,7 +1019,15 @@ namespace wfg::tree
             argument until this was written - `/wfs/input/positionX` takes the
             channel and the metres, and a message carrying only the first is
             one the device reads as something else, or refuses. */
-        if (node->typeTags.empty() || values.size() != node->typeTags.size())
+        /*  AND A NODE THAT TAKES NO ARGUMENT - no TYPE at all, or only `N` and
+            `I` - takes none (namespace draft §56): a command such as a desk's
+            or a processor's GO, which a description says exists and says
+            carries nothing. It goes out as a bare message. Until 2026-10-10
+            every write to one was `type-mismatch`, so a described device's GO
+            could be listed and never sent. */
+        const auto takesNothing = node->typeTags.find_first_not_of ("NI") == std::string::npos;
+
+        if (takesNothing ? ! values.empty() : values.size() != node->typeTags.size())
             return { false, reason::typeMismatch, {}, {} };
 
         osc::Values coerced;

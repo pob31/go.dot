@@ -116,6 +116,13 @@ namespace wfg::client::model
             identifiers. See `model::targetChoices`. */
         deviceRef,
 
+        /*  ONE PART OF A DESCRIBED DEVICE'S ADDRESS, a menu (namespace draft
+            §56, AEP): the target menu's sibling, derived from the same
+            `address` row and committing back to it - each choice's key a whole
+            address, the child's name its label. One line per level of the
+            device's tree. See `model::pathSteps`. */
+        pathRef,
+
         /*  A MENU OF THE SHOW'S MIDI PORTS. The same kind of thing as an
             output's menu and unlike the device one above: it writes an
             IDENTIFIER, because a cue names the port the show declares and a

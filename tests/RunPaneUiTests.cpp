@@ -6197,3 +6197,69 @@ TEST_CASE ("waveform: a movie's strip and its cuts follow the edit - each slot t
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
 }
+
+//==============================================================================
+/*  A MESSAGE'S ADDRESS FROM ITS DEVICE'S TREE (namespace draft §56, AEP): the
+    arrow beside the address asks for the menu with the row it writes and the
+    address it holds, and the menu is the tree nested - a submenu per part that
+    holds others, an item per node, the current one ticked. */
+TEST_CASE ("osc messages: the arrow beside an address asks for its device's tree, built as nested menus")
+{
+    std::vector<std::pair<std::string, std::string>> asked;
+    ui::OscMessagesComponent::Actions actions;
+    actions.chooseAddress = [&] (const std::string& row, const std::string& current, juce::Component&)
+    { asked.emplace_back (row, current); };
+
+    model::OscMessagesReading reading;
+    reading.cueId = "CUE00001";
+
+    model::OscMessageRow own;
+    own.base = "/godot/cue/CUE00001/";
+    own.address = "/wfs/input/1/positionX";
+    own.value = "f:0";
+    own.args = { { 'f', "0", true, {} } };
+
+    model::OscMessageRow further;
+    further.id = "M3SS4G01";
+    further.base = "/godot/message/M3SS4G01/";
+    further.address = "/wfs/input/2/positionY";
+    further.value = "f:1";
+    further.args = { { 'f', "1", true, {} } };
+
+    reading.rows = { own, further };
+
+    ui::OscMessagesComponent table (model::Theme {}, actions);
+    table.setSize (1100, 160);
+    table.show (reading);
+
+    REQUIRE (table.pickAddress (1) != nullptr);
+    table.pickAddress (1)->onClick();
+    REQUIRE (asked.size() == 1u);
+    CHECK (asked.front() == std::pair<std::string, std::string> { "/godot/message/M3SS4G01/address",
+                                                                  "/wfs/input/2/positionY" });
+
+    const std::vector<model::TreeMenuItem> items {
+        { "input", {}, { { "1", {}, { { "positionX", "/wfs/input/1/positionX", {} } } },
+                         { "2", {}, { { "positionY", "/wfs/input/2/positionY", {} } } } } },
+        { "snapshot", {}, { { "load", "/wfs/input/snapshot/load", {} } } } };
+
+    std::vector<std::string> addresses;
+    const auto menu = ui::OscMessagesComponent::menuOf (items, "/wfs/input/2/positionY", addresses);
+    CHECK (addresses == std::vector<std::string> { "/wfs/input/1/positionX", "/wfs/input/2/positionY",
+                                                   "/wfs/input/snapshot/load" });
+
+    int ticked = 0;
+    int submenus = 0;
+
+    for (juce::PopupMenu::MenuItemIterator item (menu, true); item.next();)
+    {
+        if (item.getItem().subMenu != nullptr)
+            ++submenus;
+
+        if (item.getItem().isTicked)
+            ticked = item.getItem().itemID;
+    }
+
+    CHECK (submenus == 4);
+    CHECK (ticked == 2);
+}

@@ -89,6 +89,7 @@ add_executable(wfg_tests
     LooperTests.cpp
     MountTests.cpp
     NetworkCueTests.cpp
+    AuthoringTests.cpp
     ProcessTests.cpp
     SerialTests.cpp
     TrafficTapTests.cpp
@@ -1074,6 +1075,17 @@ add_test(NAME blackbox.devices.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/devices
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.devices.C blackbox.devices.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
+
+# -----------------------------------------------------------------------------
+# A PROCESSOR WRITING CUES INTO THE SHOW (namespace draft §56): the driver is
+# the processor - it declares itself, captures cues, hears GO send them back,
+# is answered and refused - and `wfg replay` rebuilds the show from the log.
+add_test(NAME blackbox.authoring.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/authoring.py" --wfg-locale=C)
+add_test(NAME blackbox.authoring.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/authoring.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.authoring.C blackbox.authoring.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
 
 # -----------------------------------------------------------------------------
