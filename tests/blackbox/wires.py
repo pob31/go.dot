@@ -38,6 +38,10 @@ SLIP console and the cue arriving framed the other way. Then (DP.7) a device
 made from the Yamaha RCP preset against a mock answering as a console does:
 the cue arriving as a line of RCP, the console's OK kept as the device's last
 reply, and a NOTIFY the console says on its own heard at the preset's node.
+Then (DP.8) a lighting desk from the grandMA2 preset against a mock that
+negotiates as a telnet server does: the login row the first line down the
+link, the desk's answer kept printable, the cue's node rendered as the
+console's own command line from its template.
 """
 import subprocess
 import sys
@@ -53,6 +57,7 @@ FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "bundles" / "dev
 
 DEVICE = "E0SW1RE1"        # the device this file makes, over a connection
 CONSOLE = "YAMAH4RC"       # the one it makes from the Yamaha RCP preset
+DESK = "GRANDMA2"          # and the one from the grandMA2 preset, over telnet
 CUE = "B3N8R5TW"           # the fixture's /light/go, re-aimed at the console
 
 locale = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--wfg-locale=")), "C")
@@ -249,6 +254,50 @@ def run() -> int:
                 report.check(wait_for(lambda: read(console + "heard") != heard_before),
                              "a NOTIFY the console says on its own is heard at the preset's node",
                              f"heard {heard_before} -> {read(console + 'heard')}")
+
+            # --- a lighting desk on the line wire, from its preset (DP.8) -----
+            desk = f"/godot/mount/{DESK}/"
+
+            with MockWire("lines", wire="line") as ma:
+                def last_line():
+                    lines = common.http_json(ma.query_port, "/_mock/messages").get("VALUE", [])
+                    return lines[-1] if lines else None
+
+                send("mount.createFromPreset", ["malighting-grandma2-line", DESK])
+                report.check(settle(desk + "wire", "line"),
+                             "a device made from the grandMA2 preset is on the line wire",
+                             f"wire {read(desk + 'wire')!r}, problem {read(desk + 'problem')!r}")
+                report.equal(read(desk + "port"), "30000", "at the console's telnet port")
+
+                send("node.set", [desk + "login", "login admin admin"])
+                send("node.set", [desk + "rx", "true"])
+                send("node.set", [desk + "port", str(ma.port)])
+                report.check(settle(desk + "link", "open", tries=100),
+                             "pointed at the mock, the link opens",
+                             f"link {read(desk + 'link')!r}, problem {read(desk + 'linkProblem')!r}")
+                report.check(wait_for(lambda: ma.ask("received") >= 1),
+                             "and the login row is the first line down it")
+                report.equal(ma.ask("messages"), ["login admin admin", []], "as the row spells it")
+                report.check(settle(desk + "lastReply", "Logged in as admin"),
+                             "the desk's answer is the device's last reply, the telnet bytes it opened with dropped",
+                             f"lastReply {read(desk + 'lastReply')!r}")
+
+                send("node.set", [f"/godot/cue/{CUE}/address", "/exec/1/1/go"])
+                send("node.set", [f"/godot/cue/{CUE}/value", ""])
+                report.check(settle(f"/godot/cue/{CUE}/address", "/exec/1/1/go"),
+                             "the cue re-aimed at the first executor's Go+")
+                send("cue.fire", [CUE])
+                report.check(wait_for(lambda: ma.ask("received") >= 2),
+                             "fired, the cue arrives as the console's own command line")
+                report.equal(last_line(), ["Go+ Executor 1.1", []],
+                             "rendered from the node's template: the page and the executor from the address")
+
+                send("node.set", [f"/godot/cue/{CUE}/address", "/exec/1/2/fader"])
+                send("node.set", [f"/godot/cue/{CUE}/value", "i:50"])
+                report.check(settle(f"/godot/cue/{CUE}/value", "i:50"), "re-aimed at a fader with a level")
+                send("cue.fire", [CUE])
+                report.check(wait_for(lambda: ma.ask("received") >= 3), "fired again")
+                report.equal(last_line(), ["Fader 1.2 At 50", []], "the level in the line where the template puts it")
 
     return report.finish()
 

@@ -223,6 +223,11 @@ namespace wfg::tree
             the wire is in the sender. */
         std::string wire = "osc";
 
+        /*  THE LINE SENT WHEN A CONNECTION OPENS, and after every reopening,
+            for a device on the line wire (namespace draft §57, AFJ; DP.8): a
+            grandMA2's `login <user> <password>`. Empty sends nothing. */
+        std::string login;
+
         /*  WHETHER IT CAN BE ASKED, and where.
 
             `transport` says how to send and says nothing about the other

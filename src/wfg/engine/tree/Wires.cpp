@@ -283,4 +283,139 @@ namespace wfg::tree::wire
         const auto y = std::to_string (line.y + 1);
         return { bare + "/" + x + "/" + y, bare + "/" + x, bare };
     }
+
+    namespace
+    {
+        /*  One atom as a command line spells it: a number plainly, a float
+            with its fraction only where it has one, a string as it is. */
+        std::string lineAtom (const osc::Value& value)
+        {
+            if (value.isInt32())   return std::to_string (value.getInt32());
+            if (value.isInt64())   return std::to_string (value.getInt64());
+            if (value.isBool())    return value.getBool() ? "1" : "0";
+            if (value.isString())  return value.getString();
+
+            if (value.isFloat32() || value.isFloat64())
+            {
+                const auto number = value.isFloat32() ? static_cast<double> (value.getFloat32()) : value.getFloat64();
+                const auto whole = std::lround (number);
+
+                if (std::abs (number - static_cast<double> (whole)) < 1e-6)
+                    return std::to_string (whole);
+
+                /*  THE SHORTEST SPELLING THAT READS BACK, and with a dot
+                    whatever the locale says: to_string would write "12,5" under
+                    fr_FR, which no console reads as a number. */
+                return value.isFloat32() ? osc::formatFloat (value.getFloat32()) : osc::formatDouble (number);
+            }
+
+            return {};
+        }
+    }
+
+    std::string renderLine (const std::string& address, const osc::Values& values, const std::string& templateText)
+    {
+        if (templateText.empty())
+        {
+            std::string out;
+
+            for (const auto& value : values)
+            {
+                const auto text = lineAtom (value);
+
+                if (text.empty())
+                    continue;
+
+                if (! out.empty())
+                    out += ' ';
+
+                out += text;
+            }
+
+            return out;
+        }
+
+        std::vector<std::string> numbers;
+
+        for (const auto& segment : segmentsOf (address))
+            if (wholeNumber (segment) && numbers.size() < 2)
+                numbers.push_back (segment);
+
+        std::string out;
+
+        for (std::size_t at = 0; at < templateText.size(); ++at)
+        {
+            const auto c = templateText[at];
+
+            if (c == '{' && at + 2 < templateText.size() && templateText[at + 2] == '}')
+            {
+                const auto key = templateText[at + 1];
+
+                if (key == 'x' || key == 'y')
+                {
+                    const auto index = key == 'x' ? 0u : 1u;
+
+                    if (index < numbers.size())
+                        out += numbers[index];
+
+                    at += 2;
+                    continue;
+                }
+
+                if (key >= '1' && key <= '9')
+                {
+                    const auto index = static_cast<std::size_t> (key - '1');
+
+                    if (index < values.size())
+                        out += lineAtom (values[index]);
+
+                    at += 2;
+                    continue;
+                }
+            }
+
+            out.push_back (c);
+        }
+
+        return out;
+    }
+
+    std::string printableLine (const std::string& line)
+    {
+        std::string out;
+        auto escape = 0;        // 1: after ESC; 2: inside ESC [ ... until its final byte
+
+        for (const char c : line)
+        {
+            const auto byte = static_cast<unsigned char> (c);
+
+            /*  AN ANSI ESCAPE SEQUENCE - a colour, a cleared screen, what a
+                telnet console dresses its prompt in - goes whole: ESC, an
+                optional bracket, then everything up to a final byte in the
+                range the standard gives it. */
+            if (escape == 1)
+            {
+                escape = c == '[' ? 2 : 0;
+                continue;
+            }
+
+            if (escape == 2)
+            {
+                if (byte >= 0x40 && byte <= 0x7E)
+                    escape = 0;
+                continue;
+            }
+
+            if (byte == 0x1B)
+            {
+                escape = 1;
+                continue;
+            }
+
+            if ((byte >= 0x20 && byte < 0x7F) || c == '\t')
+                out.push_back (c);
+        }
+
+        return out;
+    }
 }

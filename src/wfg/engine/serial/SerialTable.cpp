@@ -108,6 +108,12 @@ namespace wfg::serial
                         decoder = slip::Decoder {};
                         outgoing.clear();
                         open = true;
+
+                        /*  THE GREETING FIRST (DP.8), before anything the tick
+                            hands over: a console that wants a login before it
+                            listens gets it on every opening, when tx is on. */
+                        if (! wanted.greeting.empty() && tx)
+                            outgoing.push_back (wanted.greeting + "\n");
                     }
                     setState ("open", {});
                 }
@@ -313,7 +319,8 @@ namespace wfg::serial
                                              [&at] (const Wanted& w) { return w.id == at->first; });
             const auto& was = at->second->wanted;
             if (found == wanted.end() || found->path.empty() || found->path != was.path
-                  || found->baud != was.baud || found->framing != was.framing)
+                  || found->baud != was.baud || found->framing != was.framing
+                  || found->greeting != was.greeting)
             {
                 retire (at->second);
                 at = workers.erase (at);

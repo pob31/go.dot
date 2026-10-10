@@ -36,7 +36,10 @@ link's retry is for. With --framing lines each line is noted as a message whose
 address is the line, and with --wire rcp (DP.7) the device is a Yamaha console
 as far as the grammar goes: it answers `OK` with the line echoed, and
 `/_mock/say?<line>` has it say a line of its own down every open connection -
-`NOTIFY set ...`, the console reporting a fader moved.
+`NOTIFY set ...`, the console reporting a fader moved. With --wire line (DP.8)
+it is a telnet console as far as the grammar goes: it opens each connection
+with the negotiation bytes a telnet server sends first, which a line must
+survive, and answers a `login <user> ...` line with `Logged in as <user>`.
 
 AND, WITH --listen, A DEVICE THAT PUSHES (namespace draft 45, O.10), as WFS-DIY
 does: HOST_INFO offers LISTEN, the HTTP port takes a WebSocket, a LISTEN or an
@@ -441,6 +444,12 @@ def listen_tcp(device: Device, port_out, framing: str, wire: str = "osc") -> soc
                             except OSError:
                                 return
 
+                        if wire == "line" and line.startswith("login "):
+                            try:
+                                conn.sendall(("Logged in as " + line.split()[1] + "\n").encode("utf-8"))
+                            except OSError:
+                                return
+
                         continue
 
                     messages = []
@@ -465,6 +474,14 @@ def listen_tcp(device: Device, port_out, framing: str, wire: str = "osc") -> soc
             with device.lock:
                 device.connections += 1
                 device.open.append(conn)
+
+            #  A TELNET SERVER NEGOTIATES FIRST (DP.8): DO TERMINAL-TYPE, DO
+            #  WINDOW-SIZE, bytes no line should carry into a show's record.
+            if wire == "line":
+                try:
+                    conn.sendall(b"\xff\xfd\x18\xff\xfd\x1f")
+                except OSError:
+                    pass
 
             threading.Thread(target=serve, args=(conn, peer), daemon=True).start()
 
@@ -666,8 +683,9 @@ def main() -> int:
                         help="udp, a socket for datagrams; tcp, a listener for connections (DP.6)")
     parser.add_argument("--framing", default="length", choices=("length", "slip", "lines"),
                         help="how a connection's stream is cut: a size before each packet, SLIP, or lines")
-    parser.add_argument("--wire", default="osc", choices=("osc", "rcp"),
-                        help="what the bytes are: OSC, or lines of Yamaha's RCP answered with OK (DP.7)")
+    parser.add_argument("--wire", default="osc", choices=("osc", "rcp", "line"),
+                        help="what the bytes are: OSC; lines of Yamaha's RCP answered with OK (DP.7); "
+                             "a telnet console's command lines (DP.8)")
     args = parser.parse_args()
 
     device = Device(args.behaviour, args.alter_to)

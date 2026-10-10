@@ -114,6 +114,7 @@ namespace wfg::tree
         declaration.serial = document.getAttribute (base + "serial").value_or (std::string {});
         declaration.framing = document.getAttribute (base + "framing").value_or (std::string ("length"));
         declaration.wire = document.getAttribute (base + "wire").value_or (std::string ("osc"));
+        declaration.login = document.getAttribute (base + "login").value_or (std::string {});
 
         if (const auto port = document.getAttribute (base + "port"))
             if (const auto parsed = osc::parseDouble (*port))
@@ -165,15 +166,15 @@ namespace wfg::tree
 
         /*  THE WIRE, before the transport: a device that names bytes Go.dot
             cannot render yet is refused in words, whatever carries them
-            (namespace draft §57, AFJ; the line and midi wires of DP.8 and
-            DP.9). The rcp wire (DP.7) is lines of Yamaha's protocol on a
-            connection and nothing else can carry it. */
-        if (declaration->wire != "osc" && declaration->wire != "rcp")
+            (namespace draft §57, AFJ; the midi wire of DP.9). The rcp wire
+            (DP.7) and the line wire (DP.8) are lines of text on a connection
+            and nothing else can carry them. */
+        if (declaration->wire != "osc" && declaration->wire != "rcp" && declaration->wire != "line")
             return refuse ("wire \"" + declaration->wire
-                           + "\" is declared but not built - Go.dot renders osc and rcp to a device today");
+                           + "\" is declared but not built - Go.dot renders osc, rcp and line to a device today");
 
-        if (declaration->wire == "rcp" && declaration->transport != "tcp")
-            return refuse ("the rcp wire is lines of text on a connection - set the transport to tcp");
+        if ((declaration->wire == "rcp" || declaration->wire == "line") && declaration->transport != "tcp")
+            return refuse ("the " + declaration->wire + " wire is lines of text on a connection - set the transport to tcp");
 
         /*  OSC OVER SLIP ON A SERIAL PORT (namespace draft §51, PC.11): the port
             has to be one of the show's, and reading packets rather than lines -

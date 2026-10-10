@@ -24860,3 +24860,22 @@ connection with no host.
   taken apart, the addresses), MountTests (rcp over tcp and nowhere else, the sender's lines by the
   node's spelling and one each whatever the bundles row says, the command), NetworkCueTests (a cue and
   its curve as lines in order), AuthoringTests (the Yamaha device and its nodes' spelling), PresetTests.
+- **DP.8**: the line wire (AFJ). `tree::wire::renderLine` renders a node's `GODOT.LINE` template -
+  `{x}` and `{y}` the address's first two whole-number segments, `{1}` to `{9}` the atoms, the atoms
+  joined where there is no template - and a carriage return, the link adding the newline, so a
+  telnet console reads CR LF; `printableLine` keeps a console's chatter fit for the record. `Node::
+  lineTemplate`; `mount/login`, the line sent as the connection opens and after every reopening -
+  `serial::Wanted::greeting`, said first on every opening when tx is on, a change reopening the
+  port; the load takes `line` over tcp and nothing else; serve reads lines for a line device and
+  logs each printable one as `mount.replied` under the word `line`. `malighting-grandma2-line`
+  (`scripts/presets/malighting_grandma2.py`, from MA Lighting's grandMA2 help: telnet 30000, the
+  login first, the command line as typed): the executors' Go+, Go-, Pause, Off, Toggle, fader and
+  Go+ to a cue by page and number, a cue by number on the main executor, and `/cmd` for a whole
+  line. `mock_target.py --wire line` negotiates as a telnet server does and answers a login;
+  `blackbox.wires` gains the desk: the login row the first line down the link, the answer kept
+  printable, Go+ and a fader level rendered from their templates. Owed: the desktop Network tab has
+  no editor for the login row yet - the tree and the web console set it. Tests: WireTests (the
+  template's placeholders, the atoms, no template, braces that are not one, the printable line),
+  SerialTests (the greeting said on opening, again after the port comes back, a changed one reopening,
+  none with tx off), MountTests (line over tcp with its login, the sender's lines from the templates
+  and the atoms), AuthoringTests (the grandMA2 device and its nodes' templates), PresetTests.

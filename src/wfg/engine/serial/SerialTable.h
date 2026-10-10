@@ -70,6 +70,11 @@ namespace wfg::serial
         std::string framing = "lines";
         bool rx = true;
         bool tx = true;
+
+        /*  A LINE SENT AS SOON AS THE PORT OPENS, and again after every
+            reopening (DP.8): a console's login. Empty sends nothing; one that
+            changes closes and opens the port again, so the new line is said. */
+        std::string greeting;
     };
 
     /*  How one port is, for the tree. */

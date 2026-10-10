@@ -146,3 +146,39 @@ TEST_CASE ("wire: the addresses a reported parameter might be a node at, most sp
 
     CHECK (rcpAddressesOf (RcpLine {}).empty());
 }
+
+//==============================================================================
+/*  DP.8: THE LINE WIRE - a console's own command line from the node's template. */
+
+TEST_CASE ("wire: a command line from the node's template - the page and executor from the address, the atoms by number")
+{
+    CHECK (renderLine ("/exec/1/2/go", {}, "Go+ Executor {x}.{y}") == "Go+ Executor 1.2");
+    CHECK (renderLine ("/exec/3/14/fader", { osc::Value::int32 (50) }, "Fader {x}.{y} At {1}") == "Fader 3.14 At 50");
+    CHECK (renderLine ("/cue/12/goto", {}, "Goto Cue {x}") == "Goto Cue 12");
+    CHECK (renderLine ("/exec/1/1/cue", { osc::Value::int32 (5) }, "Go+ Executor {x}.{y} Cue {1}") == "Go+ Executor 1.1 Cue 5");
+
+    //  A float with no fraction is a whole number; with one, as it is, trimmed.
+    CHECK (renderLine ("/exec/1/1/fader", { osc::Value::float32 (50.0f) }, "Fader {x}.{y} At {1}") == "Fader 1.1 At 50");
+    CHECK (renderLine ("/exec/1/1/fader", { osc::Value::float32 (12.5f) }, "Fader {x}.{y} At {1}") == "Fader 1.1 At 12.5");
+
+    //  Several atoms, a bool, a string as it is; a placeholder with nothing for it is empty.
+    CHECK (renderLine ("/thing", { osc::Value::string ("Main"), osc::Value::boolean (true), osc::Value::int32 (7) },
+                       "Call {1} {2} then {3} and {4}.") == "Call Main 1 then 7 and .");
+    CHECK (renderLine ("/cmd", { osc::Value::int32 (1) }, "Page {x}") == "Page ");
+
+    //  Braces that are not a placeholder stay.
+    CHECK (renderLine ("/exec/1/1/go", {}, "Go {q} {x}") == "Go {q} 1");
+}
+
+TEST_CASE ("wire: with no template the atoms are the line, and a console's chatter is kept printable")
+{
+    CHECK (renderLine ("/cmd", { osc::Value::string ("Goto Cue 12") }, "") == "Goto Cue 12");
+    CHECK (renderLine ("/cmd", { osc::Value::string ("Fader"), osc::Value::int32 (1), osc::Value::float32 (0.5f) }, "")
+             == "Fader 1 0.5");
+    CHECK (renderLine ("/cmd", {}, "").empty());
+
+    CHECK (printableLine ("\xFF\xFD\x18\xFF\xFD\x1FWelcome to grandMA2\r") == "Welcome to grandMA2");
+    CHECK (printableLine ("admin@grandMA2>\tGo+ Executor 1.1") == "admin@grandMA2>\tGo+ Executor 1.1");
+    CHECK (printableLine ("\x1B[2J").empty());
+    CHECK (printableLine ("\x1B[32madmin@grandMA2>\x1B[0m ready") == "admin@grandMA2> ready");
+}

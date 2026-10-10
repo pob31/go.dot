@@ -92,6 +92,12 @@ namespace wfg::tree
         std::string rcpVerb;
         int rcpIndexes = -1;
 
+        /*  AND ON THE LINE WIRE (DP.8), from `GODOT.LINE`: the command line
+            the node renders to, `{x}` and `{y}` the address's first two
+            whole-number segments, `{1}` to `{9}` the atoms; empty, the atoms
+            are the line. */
+        std::string lineTemplate;
+
         //======================================================================
         // The declared range, when the table gives one.
         bool hasMinimum = false;

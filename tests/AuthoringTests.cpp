@@ -962,3 +962,42 @@ TEST_CASE ("preset command: a device from the Yamaha RCP preset is reached over 
 
     folder.deleteRecursively();
 }
+
+TEST_CASE ("preset command: a device from the grandMA2 preset is on the line wire over a connection at 30000, its nodes carrying their command lines")
+{
+    //  DP.8: the first preset whose wire is line.
+    AuthoringRig rig;
+    tree::MountTable mounts;
+    const auto folder = freshBundleFolder ("wfg-presets-ma2");
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &installedPresets());
+
+    const auto* ma = installedPresets().find ("malighting-grandma2-line");
+    REQUIRE (ma != nullptr);
+    REQUIRE (ma->usable());
+    CHECK (ma->transport == "tcp");
+    CHECK (ma->wire == "line");
+    CHECK (ma->port == 30000);
+
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("malighting-grandma2-line") }).applied == 1u);
+    const auto deviceId = rig.lastRecord().args[1].getString();
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/wire") == "line");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/transport") == "tcp");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/login").empty());
+    CHECK (mounts.isLoaded (deviceId));
+    CHECK (mounts.problemOf (deviceId).empty());
+
+    const auto* go = mounts.nodeAt ("/exec/1/1/go");
+    REQUIRE (go != nullptr);
+    CHECK (go->lineTemplate == "Go+ Executor {x}.{y}");
+    CHECK (go->role == "go");
+
+    const auto* fader = mounts.nodeAt ("/exec/2/90/fader");
+    REQUIRE (fader != nullptr);
+    CHECK (fader->lineTemplate == "Fader {x}.{y} At {1}");
+
+    const auto* cmd = mounts.nodeAt ("/cmd");
+    REQUIRE (cmd != nullptr);
+    CHECK (cmd->lineTemplate == "{1}");
+
+    folder.deleteRecursively();
+}

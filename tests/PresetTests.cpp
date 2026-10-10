@@ -155,7 +155,8 @@ TEST_CASE ("preset: every shipped preset loads, is named after its file, and nam
         noticed; each stage adds its own. */
     for (const auto* expected : { "adm-osc", "dbaudio-ds100-osc", "digico-s-osc", "behringer-x32-osc", "behringer-wing-osc",
                                   "holophonix-osc", "lacoustics-lisa-osc", "flux-spat-osc", "malighting-grandma3-osc",
-                                  "digico-sd-osc", "yamaha-osc", "etc-eos-osc", "yamaha-rcp" })
+                                  "digico-sd-osc", "yamaha-osc", "etc-eos-osc", "yamaha-rcp",
+                                  "malighting-grandma2-line" })
     {
         INFO ("expected: " << expected);
         CHECK (table.find (expected) != nullptr);

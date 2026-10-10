@@ -2137,9 +2137,9 @@ TEST_CASE ("mount: the rcp wire rides a connection and nothing else, and a wire 
     CHECK (rig.mounts.declarationOf (id)->wire == "rcp");
     CHECK (tree::MountSender::destinationFor (*rig.mounts.declarationOf (id)).wire == "rcp");
 
-    REQUIRE (rig.document.setAttribute (base + "wire", "line").ok);
+    REQUIRE (rig.document.setAttribute (base + "wire", "midi").ok);
     CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
-    CHECK (rig.mounts.problemOf (id).find ("wire \"line\"") != std::string::npos);
+    CHECK (rig.mounts.problemOf (id).find ("wire \"midi\"") != std::string::npos);
 }
 
 TEST_CASE ("mount sender: a device on the rcp wire is sent lines spelled as its nodes say, one each whatever the bundles row says")
@@ -2203,4 +2203,61 @@ TEST_CASE ("mount: what a console answered arrives as mount.replied, from the li
     CHECK (result.applied == 1u);
     CHECK (rig.mounts.lastReplyOf ("YAMA0001") == "ERROR set InvalidArgument");
     CHECK (rig.mounts.lastReplyOf ("OTHER001").empty());
+}
+
+TEST_CASE ("mount: the line wire rides a connection with its login row, and the sender spells each node's command line")
+{
+    //  DP.8: a grandMA2 over telnet.
+    Rig rig;
+    const auto made = rig.document.createMount ("/exec /cmd", {}, {});
+    REQUIRE (made.ok);
+    const auto id = made.id;
+    const auto base = "/godot/mount/" + id + "/";
+    REQUIRE (rig.document.setAttribute (base + "port", "30000").ok);
+    REQUIRE (rig.document.setAttribute (base + "wire", "line").ok);
+    REQUIRE (rig.document.setAttribute (base + "login", "login admin admin").ok);
+
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).find ("the line wire is lines of text on a connection") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "transport", "tcp").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    REQUIRE (rig.mounts.declarationOf (id) != nullptr);
+    CHECK (rig.mounts.declarationOf (id)->wire == "line");
+    CHECK (rig.mounts.declarationOf (id)->login == "login admin admin");
+
+    //  The sender, over a described console: the template, and the atoms where there is none.
+    tree::MountTable mounts;
+    tree::MountDeclaration ma;
+    ma.id = "MA200001";
+    ma.prefix = "/exec /cmd";
+    ma.namespaceFile = "namespaces/ma.json";
+    ma.transport = "tcp";
+    ma.wire = "line";
+    ma.host = "10.0.0.2";
+    ma.port = 30000;
+    REQUIRE (mounts.load (ma, R"JSON({"FULL_PATH": "/", "CONTENTS": {"exec": {"FULL_PATH": "/exec", "CONTENTS": {"1": {"FULL_PATH": "/exec/1", "CONTENTS": {"2": {"FULL_PATH": "/exec/1/2", "CONTENTS": {"go": {"FULL_PATH": "/exec/1/2/go", "ACCESS": 2, "GODOT": {"LINE": "Go+ Executor {x}.{y}"}}, "fader": {"FULL_PATH": "/exec/1/2/fader", "TYPE": "i", "ACCESS": 3, "VALUE": [0], "GODOT": {"LINE": "Fader {x}.{y} At {1}"}}}}}}}}, "cmd": {"FULL_PATH": "/cmd", "TYPE": "s", "ACCESS": 2}}})JSON").ok);
+
+    tree::MountSender sender;
+    sender.setMounts (&mounts);
+    std::vector<std::string> lines;
+    sender.setLinkSink ([&lines] (const std::string&, const std::vector<std::uint8_t>& bytes)
+    {
+        lines.emplace_back (bytes.begin(), bytes.end());
+        return true;
+    });
+
+    const auto to = tree::MountSender::destinationFor (ma);
+    REQUIRE (to.wire == "line");
+    sender.queue ("MA200001", to, "/exec/1/2/go", osc::Values {});
+    sender.queue ("MA200001", to, "/exec/1/2/fader", osc::Value::int32 (50));
+    sender.queue ("MA200001", to, "/cmd", osc::Value::string ("Goto Cue 12"));
+    sender.flush();
+
+    REQUIRE (lines.size() == 3u);
+    CHECK (lines[0] == "Go+ Executor 1.2\r");
+    CHECK (lines[1] == "Fader 1.2 At 50\r");
+    CHECK (lines[2] == "Goto Cue 12\r");
 }

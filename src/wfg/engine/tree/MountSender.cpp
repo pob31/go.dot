@@ -190,6 +190,20 @@ namespace wfg::tree
             const auto line = wire::renderRcp (message.address, message.values, spec);
             ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));
         }
+        else if (message.destination.wire == "line")
+        {
+            /*  THE LINE WIRE (DP.8): the node's command line from its
+                template, or the atoms as they are, and a carriage return -
+                the link adds the newline, so the console reads CR LF as a
+                telnet line ends. */
+            std::string templateText;
+
+            if (const auto* node = mounts != nullptr ? mounts->nodeAt (message.address) : nullptr; node != nullptr)
+                templateText = node->lineTemplate;
+
+            const auto line = wire::renderLine (message.address, message.values, templateText) + "\r";
+            ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));
+        }
         else if (const auto bytes = osc::encode (osc::Packet::message (message.address, message.values), error))
         {
             ok = deliver (message.destination, *bytes);

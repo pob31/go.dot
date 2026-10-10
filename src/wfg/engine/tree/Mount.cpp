@@ -498,6 +498,9 @@ namespace wfg::tree
                 if (const auto* xy = property (*rcp, "XY"); xy != nullptr)
                     out.rcpIndexes = static_cast<int> (xy->asNumber());
             }
+
+            //  And the command line it renders to on the line wire (DP.8).
+            out.lineTemplate = stringProperty (*godot, "LINE");
         }
 
         /*  Container, state or event.

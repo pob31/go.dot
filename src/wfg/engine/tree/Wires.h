@@ -93,4 +93,21 @@ namespace wfg::tree::wire
         bare. The caller keeps the first the mount has, since the console
         always says X and Y and only the preset knows which it spelled. */
     std::vector<std::string> rcpAddressesOf (const RcpLine& line);
+
+    /*  THE LINE WIRE (DP.8): a console's own command line, one line per
+        message - a grandMA2's telnet remote. The node's `GODOT.LINE` is a
+        template: `{x}` and `{y}` are the address's first two whole-number
+        segments (the page and the executor of `/exec/1/2/go`), `{1}` to
+        `{9}` the message's atoms - an integer as it is, a float with its
+        fraction only where it has one, a bool as 1 or 0, a string as it is.
+        With no template the atoms are the line, joined by spaces: `/cmd s`
+        carries a command line whole. What a placeholder has nothing for is
+        left empty. */
+    std::string renderLine (const std::string& address, const osc::Values& values, const std::string& templateText);
+
+    /*  A line as a console said it, fit to be logged: printable ASCII and
+        tabs, so the telnet negotiation bytes a server opens with and any
+        control character are dropped rather than written into the show's
+        record. */
+    std::string printableLine (const std::string& line);
 }

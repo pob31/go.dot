@@ -500,3 +500,55 @@ TEST_CASE ("serial: a raw link hands every read as one packet and sends the byte
     CHECK (within (2s, [&] { return desk->sent() == std::string (sysex.begin(), sysex.end()); }));
     CHECK_FALSE (table.send ("AHDL0001", "a line"));
 }
+
+TEST_CASE ("serial: a port's greeting is said as it opens and again after it comes back, and a changed one opens it again")
+{
+    //  DP.8: a console's login, the first line down a connection, every time.
+    Bench bench;
+    auto desk = bench.plug ("127.0.0.1:30000");
+    SerialTable table (bench.opener());
+    auto link = port ("MA200001", "127.0.0.1:30000");
+    link.greeting = "login admin admin";
+    table.reconcile ({ link });
+    REQUIRE (within (2s, [&] { return table.stateOf ("MA200001").state == "open"; }));
+    CHECK (within (2s, [&] { return desk->sent() == "login admin admin\n"; }));
+
+    //  Then what the tick hands over, after it.
+    CHECK (table.send ("MA200001", "Go+ Executor 1.1"));
+    CHECK (within (2s, [&] { return desk->sent() == "login admin admin\nGo+ Executor 1.1\n"; }));
+
+    //  Gone and back: the greeting again, before anything else.
+    {
+        const std::lock_guard<std::mutex> held (desk->lock);
+        desk->plugged = false;
+        desk->heard.clear();
+    }
+    REQUIRE (within (3s, [&] { return table.stateOf ("MA200001").state == "retrying"; }));
+    {
+        const std::lock_guard<std::mutex> held (desk->lock);
+        desk->plugged = true;
+    }
+    REQUIRE (within (3s, [&] { return table.stateOf ("MA200001").state == "open"; }));
+    CHECK (within (2s, [&] { return desk->sent() == "login admin admin\n"; }));
+
+    //  A new greeting is a new opening.
+    {
+        const std::lock_guard<std::mutex> held (desk->lock);
+        desk->heard.clear();
+    }
+    link.greeting = "login show show";
+    table.reconcile ({ link });
+    CHECK (within (3s, [&] { return desk->sent() == "login show show\n"; }));
+
+    //  And none with tx off.
+    {
+        const std::lock_guard<std::mutex> held (desk->lock);
+        desk->heard.clear();
+    }
+    link.tx = false;
+    link.greeting = "login quiet quiet";
+    table.reconcile ({ link });
+    REQUIRE (within (3s, [&] { return table.stateOf ("MA200001").state == "open"; }));
+    std::this_thread::sleep_for (100ms);
+    CHECK (desk->sent().empty());
+}

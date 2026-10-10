@@ -3000,6 +3000,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="login">
+          <a:documentation>The line sent as soon as the connection opens, and again after every reopening, for a device on the line wire (namespace draft 57, AFJ, DP.8): a grandMA2-s login &lt;user&gt; &lt;password&gt;, which its telnet remote wants before it takes a command. Empty sends nothing. A decision about the rig, so it is stored; a password in a show file is the operator-s to weigh, and a user made for the show with the rights it needs is the usual answer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>What the show calls this device - &apos;Lighting desk&apos;, &apos;The WFS&apos; - which is what a target menu shows and what somebody reads in a list. The prefix stays the address: a name is for people and renaming one must not move a single cue, which is the reason a MIDI port has both too. Empty shows the prefix instead, so a device is never a blank row.</a:documentation>
           <data type="string"/>

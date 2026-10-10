@@ -2786,9 +2786,15 @@ namespace
             if (! host.empty() && port > 0 && port <= 65535)
                 wish.path = wfg::serial::hostPortOf (host, port);
 
-            /*  A WIRE OF LINES - rcp - reads lines whatever the framing row
-                says (DP.7): the framing is OSC's, a size or SLIP. */
-            wish.framing = reads ("wire", "osc") == "rcp" ? std::string ("lines") : reads ("framing", "length");
+            /*  A WIRE OF LINES - rcp, line - reads lines whatever the framing
+                row says (DP.7, DP.8): the framing is OSC's, a size or SLIP.
+                And a device on the line wire says its login as the connection
+                opens. */
+            const auto wire = reads ("wire", "osc");
+            wish.framing = wire == "rcp" || wire == "line" ? std::string ("lines") : reads ("framing", "length");
+
+            if (wire == "line")
+                wish.greeting = reads ("login", "");
             wish.rx = reads ("rx", "false") == "true";
             wish.tx = reads ("tx", "true") != "false";
             wanted.push_back (std::move (wish));
@@ -5219,6 +5225,23 @@ namespace
                                      mount.replied. */
                                  for (auto& [mountId, lines] : links.takeLines (64))
                                      for (const auto& line : lines)
+                                     {
+                                         /*  A CONSOLE ON THE LINE WIRE (DP.8)
+                                             answers in its own words - a telnet
+                                             prompt, an echo, a sentence - kept as
+                                             the last reply, printable only, under
+                                             the word `line`. */
+                                         if (document.getAttribute ("/godot/mount/" + mountId + "/wire")
+                                               .value_or (std::string ("osc")) == "line")
+                                         {
+                                             if (const auto said = wfg::tree::wire::printableLine (line); ! said.empty())
+                                                 engine.submit ("link:" + mountId, "mount.replied",
+                                                                { wfg::osc::Value::string (mountId),
+                                                                  wfg::osc::Value::string ("line"),
+                                                                  wfg::osc::Value::string (said) });
+                                             continue;
+                                         }
+
                                          if (const auto said = wfg::tree::wire::parseRcpLine (line))
                                          {
                                              if (said->word == "NOTIFY")
@@ -5239,6 +5262,7 @@ namespace
                                                                   wfg::osc::Value::string (said->text) });
                                              }
                                          }
+                                     }
 
                                  /*  A SAVE IN PLUGDATA OR PD, every half second:
                                      the cue's patch as it was saved, one `node.set`
