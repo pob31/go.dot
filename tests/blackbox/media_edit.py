@@ -29,7 +29,11 @@ OSC and the tree:
  3. `media.freeze`: the cue's file becomes "ramp (edit).wav" beside the source, `editSource` keeps
     "ramp.wav", and a GO plays it.
  4. `media.unfreeze`: the file is the source again, the render is found rather than made again.
- 5. The session's log holds every record and replays record for record.
+ 5. The handles' verbs (namespace draft 55.9): a selection deleted leaving silence, everything after
+    where it was; the section after the silence fading in from it, alone, then its curve bent; the
+    silence closed up with ripple, the dip a half second earlier with its sound. Each heard so in the
+    render, sample by sample.
+ 6. The session's log holds every record and replays record for record.
 """
 import struct
 import sys
@@ -168,10 +172,12 @@ def run(locale: str) -> int:
                 report.equal(len(samples[0]), RATE * SECONDS, "and the edit's length")
 
                 if len(samples[0]) == RATE * SECONDS:
-                    first = samples[0][0]
+                    # Twenty milliseconds in: past the moved section's ten-millisecond fade from silence (55.9).
+                    first = samples[0][int(RATE * 0.02)]
                     middle = samples[0][int(RATE * 1.5)]
                     later = samples[0][int(RATE * 2.5)]
-                    report.check(abs(first - ramp_at(3.0)) < 0.01, "its first sample is the file's at three seconds", str(first))
+                    report.check(abs(first - ramp_at(3.02)) < 0.01, "twenty milliseconds in it is the file at three seconds and as much",
+                                 str(first))
                     report.check(abs(middle - ramp_at(0.5)) < 0.01, "at a second and a half, the file's at half a second", str(middle))
                     report.check(abs(later - ramp_at(1.5)) < 0.01, "at two and a half, the file's at a second and a half", str(later))
 
@@ -215,9 +221,92 @@ def run(locale: str) -> int:
             if edits and edits_again:
                 report.equal(edits_again[0].stat().st_mtime_ns, first_write, "found on disk, not made again")
 
+            # --- 5. The handles' verbs, heard in the render (55.9) ------------
+            def newest_render(frames: int, after: int) -> "Path | None":
+                """The newest render under .edits that is `frames` long and written after `after`."""
+                def found():
+                    for path in sorted((media / ".edits").glob("*.wav"), key=lambda p: p.stat().st_mtime_ns, reverse=True):
+                        try:
+                            if path.stat().st_mtime_ns > after and first_sound.frames_on_disk(path) == frames:
+                                return path
+                        except OSError:
+                            continue
+                    return None
+
+                ready = common.wait_until(lambda: found() if len(render_row(server)) >= 2 and render_row(server)[1] == "done" else None,
+                                          timeout=60)
+                return ready
+
+            def sample_at(path: Path, seconds: float) -> float:
+                _, samples = first_sound.read_render(path)
+                return samples[0][int(RATE * seconds)]
+
+            mark = max((p.stat().st_mtime_ns for p in (media / ".edits").glob("*.wav")), default=0)
+
+            # A selection from 2.5 to 3 s deleted, leaving silence: the last section stays where it was.
+            send(server, "/godot/cmd/section/deleteSpan", [CUE, 2.5, 3.0])
+            pieces = common.wait_until(lambda: (lambda s: s if len(s) == 4 else None)(text_of(server, cue + "sections").split()),
+                                       timeout=20)
+            report.check(pieces is not None, "the selection's two ends cut, its middle taken out", text_of(server, cue + "sections"))
+
+            if pieces is None:
+                return report.finish()
+
+            last = pieces[-1]
+            report.equal(first_sound.wait_for(server, f"/godot/section/{last}/gap", 0.5), 0.5,
+                         "half a second of silence before the last section")
+            report.equal(first_sound.value_of(server, cue + "duration"), float(SECONDS), "the cue is still four seconds long")
+            report.equal(wait_for_numbers(server, cue + "levelLane", [3.0, -10.0, 3.5, -10.0]), [3.0, -10.0, 3.5, -10.0],
+                         "and the dip where it was, over the same sound")
+
+            silent = newest_render(RATE * SECONDS, mark)
+            report.check(silent is not None, "the render follows")
+
+            if silent is not None:
+                report.check(abs(sample_at(silent, 2.75)) < 1e-6, "the selection is silence in the render",
+                             str(sample_at(silent, 2.75)))
+                report.check(abs(sample_at(silent, 3.5) - ramp_at(2.5)) < 0.01, "and the last section where it was",
+                             str(sample_at(silent, 3.5)))
+                mark = silent.stat().st_mtime_ns
+
+            # The last section fades in from the silence over 300 ms, alone (it has no partner beside a gap).
+            send(server, "/godot/cmd/section/fade", [last, "in", 0.3, 1])
+            # Sent as OSC's 32-bit float, so within a millionth.
+            report.check(common.wait_until(lambda: abs((first_sound.value_of(server, f"/godot/section/{last}/fadeIn") or 0.0) - 0.3) < 1e-6,
+                                           timeout=20) is not None,
+                         "section.fade: a fade in from silence")
+            faded = newest_render(RATE * SECONDS, mark)
+
+            if faded is not None:
+                report.check(abs(sample_at(faded, 3.15) - ramp_at(2.15) * 0.70710678) < 0.005,
+                             "halfway through it, equal power: three decibels down", str(sample_at(faded, 3.15)))
+                mark = faded.stat().st_mtime_ns
+
+            # Its curve bent up: halfway, a decibel and a half down.
+            send(server, "/godot/cmd/section/curve", [last, "in", 1.0])
+            report.equal(first_sound.wait_for(server, f"/godot/section/{last}/fadeInCurve", 1.0), 1.0,
+                         "section.curve: the fade's curve")
+            bent = newest_render(RATE * SECONDS, mark)
+
+            if bent is not None:
+                report.check(abs(sample_at(bent, 3.15) - ramp_at(2.15) * 0.84089642) < 0.005,
+                             "halfway through it, lifted by the curve", str(sample_at(bent, 3.15)))
+                mark = bent.stat().st_mtime_ns
+
+            # The silence closed up with ripple: everything after it half a second earlier, the dip with its sound.
+            send(server, "/godot/cmd/section/deleteSpan", [CUE, 2.5, 3.0, 1])
+            report.equal(first_sound.wait_for(server, f"/godot/section/{last}/gap", 0.0), 0.0,
+                         "with ripple the silence closes")
+            report.equal(first_sound.wait_for(server, cue + "duration", 3.5), 3.5, "the cue three and a half seconds long")
+            report.equal(wait_for_numbers(server, cue + "levelLane", [2.5, -10.0, 3.0, -10.0]), [2.5, -10.0, 3.0, -10.0],
+                         "and the dip half a second earlier, with its sound")
+            closed = newest_render(RATE * 7 // 2, mark)
+            report.check(closed is not None, "the render follows, three and a half seconds long")
+
         text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
 
-        for record in (" section.split", " section.move", " media.freeze", " media.frozen", " media.unfreeze"):
+        for record in (" section.split", " section.move", " media.freeze", " media.frozen", " media.unfreeze",
+                       " section.deleteSpan", " section.fade", " section.curve"):
             report.check(record in text, f"the log holds{record}")
 
         code, out, err = common.run_wfg("replay", str(log), f"--bundle={bundle}", f"--out={replayed}",

@@ -311,13 +311,18 @@ def run(locale: str) -> int:
                          [0.0, -10.0, 0.5, -10.0], "and the sound's dip is on the first half second, over the same sound")
 
             # --- 2. A dissolve at the join into the green shot, and the renders ----------
-            send(server, "/godot/cmd/node/set", [f"/godot/section/{sections[1]}/crossfade", "0.4"])
-            report.equal(first_sound.wait_for(server, f"/godot/section/{sections[1]}/crossfade", 0.4), 0.4,
+            # section.fade (55.9): the green shot's fade in, and the blue's fade out with it.
+            send(server, "/godot/cmd/section/fade", [sections[1], "in", 0.4])
+            # Sent as OSC's 32-bit float, so within a millionth.
+            near = lambda address, value: common.wait_until(lambda: abs(number_of(server, address) - value) < 1e-6, timeout=20) is not None
+            report.check(near(f"/godot/section/{sections[1]}/fadeIn", 0.4),
                          "a dissolve of four frames at the join into the green shot")
+            report.check(abs(number_of(server, f"/godot/section/{sections[2]}/fadeOut") - 0.39) < 1e-6,
+                         "the blue shot's fade out moved with it, by as much",
+                         str(number_of(server, f"/godot/section/{sections[2]}/fadeOut")))
 
             if copies is not None:
-                report.equal(first_sound.wait_for(server, f"/godot/section/{copies[1]}/crossfade", 0.4), 0.4,
-                             "which the sound's copy carries too")
+                report.check(near(f"/godot/section/{copies[1]}/fadeIn", 0.4), "which the sound's copy carries too")
 
             edits = media / ".edits"
             settled = common.wait_until(lambda: (lambda m, s, movs: (m, s) if len(m) >= 2 and m[1] == "done"

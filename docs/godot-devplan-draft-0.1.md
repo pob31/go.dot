@@ -1226,6 +1226,10 @@ and each heard so in the render; a movie's gap is black; CI is green.
 **Needs from the author:** the handles' feel by hand; a bent crossfade by ear; whether ADZ read the slip
 right.
 
+**Built** 2026-10-10, G.0 to G.4, on main (namespace draft §55.12 says what each did). The implementer's
+calls ADZ-AEH stand as proposed; what the author has not yet seen: the handles on screen, a bent
+crossfade by ear, the keys.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

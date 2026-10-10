@@ -24345,4 +24345,33 @@ when the two are equal; its edges and a selection's ends land on its frame grid.
 
 ### 55.12 Built, handles
 
-In progress: stages G.1 to G.4.
+Built 2026-10-10, G.0 to G.4, on main. The model: `doc::Section` gains `fadeIn`, `fadeOut`, their curves and
+`gap`, the `crossfade` row gone; `sectionStarts` counts the gaps, `isJoin` says two sections touch,
+`clampFades` holds both fades to the material and `heardFades` says what is heard - centred on a join,
+inside at a free edge, nothing at a join still one in the file; `fadeGain` and `fadeWeight` are the one
+rule both renders read; the time map carries the silence before a kept section, lined up by how far its
+material moved; the reader takes this morning's `crossfade` as the two fades it was (G.1). The verbs:
+`section.edge`, `section.fade`, `section.curve`, `section.splitSpan`, `section.deleteSpan` and
+`section.remove`'s `leaveGap`, each one step, each carried, a movie's seconds on its frame grid; a `gap`
+written by `node.set` carries as an edge does (G.2). The window: the bar draws each section's edges, its
+fades as their curves, the silence shaded and the selection over it, and its handles - the volume square
+in the middle on the lane's scale, the fades' squares at the top, the edges' at the foot, a join's one
+edge a diamond; a drag is drawn as the engine will make it (`model::withEdge`, `withFade`, `withCurve`,
+held to the engine's in the client tests) and written once on release; the top half selects time, the
+lower half picks a section and drags it, the wheel over a fade bends its curve and writes once it stops;
+the panel takes x, Backspace and Delete once clicked and passes every other key on (G.3). Tests under C and
+fr-FR: MediaEditTests (gaps, joins, the curve, the weight, the silence runs), SectionTests (each verb, the
+movie's grid, the legacy read, a replay of every new record), MediaEditRenderTests (a gap's silence, a fade
+from silence bent by its curve, an unlocked join at -1 holding the sum at one), MovieEditRenderTests (a gap
+black, fades from and to black), the client's restatements against the engine's doors, the window's
+handles, halves, keys and wheel; `blackbox.media-edit` deletes a selection leaving silence, fades the next
+section in from it alone, bends its curve and closes the silence up with ripple, each heard in the render,
+and `blackbox.movie-edit` sets its dissolve with `section.fade` (G.4).
+
+Found on the way: a section that begins at the file's start can have no fade centred on a join before it,
+so a crossfade into it is the outgoing side's alone - the clamp says so and the handle shows it; a fade
+length sent over OSC as a 32-bit float is stored as that float, the window sending doubles; the strict job
+refused three names and two partly braced freeze jobs in the movie round, fixed forward. Not built, said
+here: a section dragged freely along the timeline (a lower-half drag reorders, as the row does - a gap is
+made by an edge or a deletion); the row's crossfade lozenge is gone, the bar's top handles doing its work;
+the monitor's tile still shows no dissolve; a selection is the window's and is not saved.
