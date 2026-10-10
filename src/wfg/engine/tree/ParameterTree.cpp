@@ -19,6 +19,35 @@
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/tree/PresetTable.h>
 
+#include <cstdlib>
+
+namespace wfg::tree
+{
+    namespace
+    {
+        /*  THE NEWER VERSION OF A DEVICE'S PRESET, when one is installed
+            (namespace draft §57, AFO): `<slug>@<version>` against the table,
+            or nothing - for a device made by hand, a preset gone from the
+            folder, or the same version. */
+        std::string newerPresetFor (const PresetTable* presets, const std::string& fromPreset)
+        {
+            const auto at = fromPreset.find ('@');
+
+            if (presets == nullptr || at == std::string::npos)
+                return {};
+
+            const auto slug = fromPreset.substr (0, at);
+            const auto version = std::atoi (fromPreset.c_str() + at + 1);
+            const auto* installed = presets->find (slug);
+
+            if (installed == nullptr || ! installed->usable() || installed->version <= version)
+                return {};
+
+            return slug + "@" + std::to_string (installed->version);
+        }
+    }
+}
+
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/cue/CurveTable.h>
 #include <wfg/engine/cue/LaneTable.h>
@@ -1754,6 +1783,8 @@ namespace wfg::tree
                             text = std::to_string (mounts.heardOf (id));
                         else if (name == "problem")
                             text = mounts.problemOf (id);
+                        else if (name == "presetUpdate")
+                            text = newerPresetFor (presets, mount.getProperty ("preset").toString().toStdString());
                         else
                             text = storedText (attribute, mount);
 

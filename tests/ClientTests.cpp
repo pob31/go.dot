@@ -133,6 +133,8 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
+#include <wfg/engine/tree/PresetCommands.h>
+#include <wfg/engine/tree/PresetTable.h>
 
 #include <juce_core/juce_core.h>
 
@@ -669,6 +671,9 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     cue::LaneTable lanes;
     cue::registerLaneCommands (rig.engine.commands(), rig.engine, runner, rig.document, lanes);
 
+    /*  And the device presets' two (namespace draft §57, AFO), with no table: the names are what is checked. */
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, rig.mounts, juce::File {}, nullptr);
+
     const std::vector<Event> gestures
     {
         gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneRec ("level", true),
@@ -695,7 +700,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
         gesture::createBus ("direct", 1, -1), gesture::createBus ("mix", 2, 0),
-        gesture::createDevice ("/desk"),
+        gesture::createDevice ("/desk"), gesture::createDeviceFromPreset ("adm-osc"), gesture::refreshPreset ("K3PV7WRB"),
         gesture::deleteBus ("J3MT5XYA"), gesture::moveBus ("J3MT5XYA", 2),
         gesture::setBusWidth ("J3MT5XYA", 2),
         gesture::setPatchSettled (true), gesture::setPatchSettled (false),
@@ -12479,6 +12484,68 @@ TEST_CASE ("client: a described device with several roots walks from the root th
     CHECK_FALSE (top[0].choices.empty());
 
     CHECK (model::deviceOf ("/console/ping", devices) == model::deviceOf ("/channel/1/fader", devices));
+}
+
+TEST_CASE ("client: the installed presets are read from the tree, and a device says its kind and a newer preset")
+{
+    /*  Namespace draft §57, AFN, AFO: serve publishes the presets beside the
+        binary under /godot/preset/<slug>; the Network tab's chooser reads them
+        from the snapshot, and a device made from one says so in its Kind cell,
+        with the newer version when one is installed. */
+    Rig rig;
+    tree::PresetTable table;
+    table.scan (std::string (WFG_REPO_ROOT) + "/presets/devices");
+    REQUIRE (table.find ("adm-osc") != nullptr);
+    rig.parameters.setPresets (&table);
+
+    const auto fromPreset = rig.document.createMount ("/adm", "namespaces/adm-osc-v0.json").id;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + fromPreset + "/preset", "adm-osc@0").ok);
+    const auto byHand = rig.document.createMount ("/desk", {}).id;
+    const auto described = rig.document.createMount ("/proc", "namespaces/proc.json").id;
+
+    const auto snapshot = rig.publish (1);
+    const auto presets = model::readPresets (*snapshot);
+    REQUIRE (presets.size() == table.all().size());
+
+    const auto adm = std::find_if (presets.begin(), presets.end(),
+                                   [] (const model::PresetRow& row) { return row.slug == "adm-osc"; });
+    REQUIRE (adm != presets.end());
+    CHECK (adm->vendor == "ADM-OSC");
+    CHECK (adm->version == 1);
+    CHECK (adm->transport == "udp");
+    CHECK (adm->wire == "osc");
+    CHECK (adm->roots == "/adm");
+    CHECK (adm->nodeCount == table.find ("adm-osc")->nodeCount);
+    CHECK (adm->usable());
+    CHECK (adm->label() == "ADM-OSC " + adm->model);
+
+    //  Sorted by vendor, then model, for the chooser's headings.
+    for (std::size_t at = 1; at < presets.size(); ++at)
+        CHECK (std::make_pair (presets[at - 1].vendor, presets[at - 1].model)
+                 <= std::make_pair (presets[at].vendor, presets[at].model));
+
+    const auto devices = model::readDevices (*snapshot);
+    const auto rowOf = [&devices] (const std::string& id)
+    {
+        return *std::find_if (devices.begin(), devices.end(), [&id] (const model::DeviceRow& row) { return row.id == id; });
+    };
+
+    CHECK (rowOf (fromPreset).preset == "adm-osc@0");
+    CHECK (rowOf (fromPreset).presetUpdate == "adm-osc@1");
+    CHECK (model::kindWordOf (rowOf (fromPreset), presets) == adm->label());
+    CHECK (rowOf (byHand).preset.empty());
+    CHECK (rowOf (byHand).presetUpdate.empty());
+    CHECK (model::kindWordOf (rowOf (byHand), presets) == "OSC");
+    CHECK (model::kindWordOf (rowOf (described), presets) == "described");
+
+    //  A preset not installed any more is said by its slug.
+    auto orphan = rowOf (fromPreset);
+    orphan.preset = "gone-osc@3";
+    CHECK (model::kindWordOf (orphan, presets) == "gone-osc");
+
+    CHECK (gesture::createDeviceFromPreset ("adm-osc").command == "mount.createFromPreset");
+    CHECK (gesture::createDeviceFromPreset ("adm-osc").args[0].getString() == "adm-osc");
+    CHECK (gesture::refreshPreset (fromPreset).command == "mount.refreshPreset");
 }
 
 TEST_CASE ("client: a value the node enumerates is offered as atoms")

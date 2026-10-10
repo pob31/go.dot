@@ -2218,6 +2218,17 @@ namespace wfg::client::ui
                         send (gesture::createDevice (freePrefix()));
                 };
 
+                /*  A DEVICE FROM A PRESET (namespace draft §57, AFO): the page's
+                    chooser, opened over the button, lists what is installed by
+                    vendor; choosing is the gesture, and nothing is sent until
+                    then. The same shape as the Surfaces tab's profile chooser. */
+                addAndMakeVisible (addPreset);
+                addPreset.setTooltip ("Make a device from a preset: a console, a lighting desk or a"
+                                      " spatial processor whose addresses Go.dot already knows.");
+                addPreset.onClick = [this] { openPresetChooser(); };
+                addChildComponent (presetChooser);
+                presetChooser.onChange = [this] { commitPresetChoice(); };
+
                 /*  HIDDEN UNTIL A CELL IS CLICKED, and a child of the page
                     rather than of the list, so scrolling cannot leave it drawn
                     over the wrong row: it is placed from the row's live
@@ -2246,8 +2257,9 @@ namespace wfg::client::ui
             }
 
             void show (std::vector<model::DeviceRow> devices, bool strictNow,
-                       int refusedNow, bool editable)
+                       int refusedNow, bool editable, std::vector<model::PresetRow> presetsNow)
             {
+                presets = std::move (presetsNow);
                 const auto sameRows = devices.size() == rows.size()
                                         && std::equal (devices.begin(), devices.end(), rows.begin(),
                                                        [] (const model::DeviceRow& a,
@@ -2274,6 +2286,7 @@ namespace wfg::client::ui
                 strict = strictNow;
 
                 addDevice.setVisible (editable);
+                addPreset.setVisible (editable);
 
                 /*  TWO SETTINGS, AND THE WORD SAYS WHICH ONE IS IN FORCE -
                     never a light that is on or off (4.8). WFS-DIY's own two
@@ -2306,6 +2319,7 @@ namespace wfg::client::ui
 
                 auto bar = area.removeFromTop (30);
                 addDevice.setBounds (bar.removeFromLeft (128).reduced (3, 0));
+                addPreset.setBounds (bar.removeFromLeft (110).reduced (3, 0));
 
                 auto foot = area.removeFromBottom (32);
                 filter.setBounds (foot.removeFromLeft (220).reduced (3, 2));
@@ -2342,9 +2356,61 @@ namespace wfg::client::ui
                 for (auto at = 0; at < 11; ++at)
                     g.drawText (names[at], cells[static_cast<std::size_t> (at)],
                                 juce::Justification::centredLeft);
+                g.drawText ("Kind", cells[12], juce::Justification::centredLeft);
             }
 
         private:
+            /*  THE CHOOSER OVER THE BUTTON, filled from what serve published
+                (namespace draft §57, AFN): a heading per vendor, a line per
+                preset, one that cannot be used disabled with its problem. */
+            void openPresetChooser()
+            {
+                presetChooser.clear (juce::dontSendNotification);
+                std::string vendor;
+
+                for (std::size_t at = 0; at < presets.size(); ++at)
+                {
+                    const auto& preset = presets[at];
+                    const auto item = static_cast<int> (at) + 1;
+
+                    if (preset.vendor != vendor)
+                    {
+                        vendor = preset.vendor;
+                        presetChooser.addSectionHeading (juce::String (vendor));
+                    }
+
+                    presetChooser.addItem (juce::String (preset.model)
+                                             + (preset.usable() ? juce::String() : "  (" + juce::String (preset.problem) + ")"),
+                                           item);
+                    presetChooser.setItemEnabled (item, preset.usable());
+                }
+
+                if (presets.empty())
+                {
+                    presetChooser.addItem ("(no preset installed beside Go.dot)", 1);
+                    presetChooser.setItemEnabled (1, false);
+                }
+
+                presetChooser.setSelectedId (0, juce::dontSendNotification);
+                presetChooser.setBounds (addPreset.getBounds().withWidth (320));
+                presetChooser.setVisible (true);
+                presetChooser.showPopup();
+            }
+
+            void commitPresetChoice()
+            {
+                const auto chosen = presetChooser.getSelectedId();
+                presetChooser.setVisible (false);
+
+                if (chosen <= 0 || ! send)
+                    return;
+
+                const auto at = static_cast<std::size_t> (chosen - 1);
+
+                if (at < presets.size() && presets[at].usable())
+                    send (gesture::createDeviceFromPreset (presets[at].slug));
+            }
+
             /*  How wide a row actually is, which is the list's width less
                 whatever the scrollbar is taking. Asked of the viewed component
                 rather than the list, because that is the component a row is
@@ -2367,11 +2433,15 @@ namespace wfg::client::ui
                 Doh!'s setting (PRD §3.32), then the two switches, then the
                 numbers; the name takes what is left, because it is the one
                 that wants room. */
-            static std::array<juce::Rectangle<int>, 13> cellsFor (juce::Rectangle<int> row)
+            static std::array<juce::Rectangle<int>, 14> cellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
                 const auto cross = area.removeFromRight (24);
+                /*  THE KIND (namespace draft §57, AFO): the preset a device was
+                    made from, OSC for one made by hand, described for one that
+                    describes itself - the second kind D5 was waiting for. */
+                const auto kind = area.removeFromRight (150);
                 const auto problem = area.removeFromRight (150);
 
                 /*  HEARD beside Sent (O.8): whether the device is talking at
@@ -2398,22 +2468,22 @@ namespace wfg::client::ui
                     at all. Taken from the name, which has the rest of the row. */
                 const auto prefix = area.removeFromRight (200);
 
-                return { area, prefix, host, port, rx, tx, bundles, doh, rollback, sent, heard, problem, cross };
+                return { area, prefix, host, port, rx, tx, bundles, doh, rollback, sent, heard, problem, kind, cross };
             }
 
             /*  What a click at this x is on, by the same arithmetic. Named
                 rather than an index, because a column moving should break a
                 compile and not a gesture. */
-            enum class Cell { name, prefix, host, port, rx, tx, bundles, doh, rollback, none, problem, cross };
+            enum class Cell { name, prefix, host, port, rx, tx, bundles, doh, rollback, none, problem, kind, cross };
 
             static Cell cellAt (int x, int width)
             {
                 const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
                 const Cell order[] { Cell::name, Cell::prefix, Cell::host, Cell::port,
                                      Cell::rx, Cell::tx, Cell::bundles, Cell::doh, Cell::rollback, Cell::none,
-                                     Cell::none, Cell::problem, Cell::cross };
+                                     Cell::none, Cell::problem, Cell::kind, Cell::cross };
 
-                for (auto at = 0; at < 13; ++at)
+                for (auto at = 0; at < 14; ++at)
                     if (x >= cells[static_cast<std::size_t> (at)].getX()
                           && x < cells[static_cast<std::size_t> (at)].getRight())
                         return order[at];
@@ -2527,10 +2597,17 @@ namespace wfg::client::ui
                                 juce::Justification::centredLeft, true);
                 }
 
+                /*  THE KIND, and the newer preset when one is installed: the
+                    word says so (4.8), and a click on the cell moves to it. */
+                g.setColour (Look::colour (theme, entry.presetUpdate.empty() ? "ink-dim" : "ink"));
+                g.drawText (juce::String (model::kindWordOf (entry, presets))
+                              + (entry.presetUpdate.empty() ? juce::String() : juce::String (" - update")),
+                            cells[12], juce::Justification::centredLeft, true);
+
                 if (! locked)
                 {
                     g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[12],
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[13],
                                 juce::Justification::centred);
                 }
             }
@@ -2553,6 +2630,10 @@ namespace wfg::client::ui
                 switch (cellAt (event.x, width))
                 {
                     case Cell::cross:  send (gesture::deleteObject (entry.id)); return;
+                    case Cell::kind:
+                        if (! entry.presetUpdate.empty())
+                            send (gesture::refreshPreset (entry.id));
+                        return;
                     case Cell::rx:     send (gesture::setNode (base + "rx", entry.rx ? "false" : "true")); return;
                     case Cell::tx:     send (gesture::setNode (base + "tx", entry.tx ? "false" : "true")); return;
                     case Cell::bundles: send (gesture::setNode (base + "bundles", entry.bundles ? "false" : "true")); return;
@@ -2595,6 +2676,7 @@ namespace wfg::client::ui
                     case Cell::doh:
                     case Cell::none:
                     case Cell::problem:
+                    case Cell::kind:
                     case Cell::cross:    return {};
                 }
 
@@ -2750,6 +2832,9 @@ namespace wfg::client::ui
 
             juce::ListBox list;
             juce::TextButton addDevice { "ADD" };
+            juce::TextButton addPreset { "PRESET" };
+            juce::ComboBox presetChooser;
+            std::vector<model::PresetRow> presets;
             juce::TextButton filter { "OSC Filter: Accept All" };
             juce::Label summary;
             juce::Rectangle<int> heading;
@@ -7298,7 +7383,8 @@ namespace wfg::client::ui
             network->show (model::readDevices (snapshot),
                            model::isYes (model::flag (snapshot, "/godot/network/strictSenders")),
                            juce::String (model::text (snapshot, "/godot/network/refused")).getIntValue(),
-                           ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+                           ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
+                           model::readPresets (snapshot));
 
             /*  The ports are the document's and the device lists are the
                 engine's, both re-read every pass for the reason the outputs

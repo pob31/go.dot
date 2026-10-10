@@ -361,6 +361,10 @@ namespace wfg::client::gesture
         The identifier comes back on the applied record, which is what the
         window reads to know which row to put a name into. */
     Event createDevice (const std::string& prefix);
+    /*  A device from an installed preset (namespace draft §57, AFO), by its
+        slug; and a device moved to the newer version of its preset. */
+    Event createDeviceFromPreset (const std::string& slug);
+    Event refreshPreset (const std::string& deviceId);
 
     /*  A MIDI port the show declares, by the name a person reads. Which cable
         it is on this machine is said afterwards with `setNode`, because the

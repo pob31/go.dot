@@ -12,6 +12,7 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/cue/Run.h>
 #include <spatcore/ui/patch/PatchMatrixComponent.h>
@@ -900,6 +901,9 @@ TEST_CASE ("inspector UI: over several cues a field is one write to all of them,
 TEST_CASE ("show settings UI: the Network tab declares devices and switches the sender filter")
 {
     Rig rig;
+    tree::PresetTable presets;
+    presets.scan (std::string (WFG_REPO_ROOT) + "/presets/devices");
+    rig.parameters.setPresets (&presets);
 
     client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
         [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
@@ -950,6 +954,33 @@ TEST_CASE ("show settings UI: the Network tab declares devices and switches the 
     REQUIRE (rig.sent.back().args.size() == 2u);
     CHECK (rig.sent.back().args[0].getString() == "/godot/network/strictSenders");
     CHECK (rig.sent.back().args[1].getString() == "true");
+
+    /*  PRESET OPENS THE CHOOSER of what is installed (namespace draft §57,
+        AFO), a heading per vendor, and sends nothing until one is chosen;
+        choosing sends the one command, with the slug. The same shape as the
+        Surfaces tab's profile chooser. */
+    auto* preset = button (panel, "PRESET");
+    REQUIRE (preset != nullptr);
+    const auto beforePreset = rig.sent.size();
+    preset->onClick();
+    CHECK (rig.sent.size() == beforePreset);
+    auto* chooser = component<juce::ComboBox> (panel);
+    REQUIRE (chooser != nullptr);
+    CHECK (chooser->isVisible());
+    REQUIRE (chooser->getNumItems() >= 3);
+    int admOsc = 0;
+    for (auto item = 0; item < chooser->getNumItems(); ++item)
+        if (chooser->getItemText (item).startsWith ("Any processor speaking ADM-OSC"))
+            admOsc = chooser->getItemId (item);
+    REQUIRE (admOsc != 0);
+    chooser->setSelectedId (admOsc, juce::dontSendNotification);
+    REQUIRE (chooser->onChange != nullptr);
+    chooser->onChange();
+    REQUIRE (rig.sent.size() == beforePreset + 1);
+    CHECK (rig.sent.back().command == "mount.createFromPreset");
+    REQUIRE (rig.sent.back().args.size() == 1u);
+    CHECK (rig.sent.back().args[0].getString() == "adm-osc");
+    CHECK_FALSE (chooser->isVisible());
 
     /*  AND UNDER THE LOCK THE STRIP GOES DEAD, devices included. A show in
         show mode is one nobody can restructure, and a device is structure. */

@@ -357,5 +357,10 @@ namespace wfg
             points at - which is somebody else's, and is the thing to go and
             look at. */
         inline constexpr const char* badNamespace   = "bad-namespace";
+
+        /*  A PRESET NO INSTALLED FILE CARRIES (namespace draft §57, AFO): the
+            slug `mount.createFromPreset` names is not under presets/devices,
+            or a replayed record's file is gone from the bundle. */
+        inline constexpr const char* unknownPreset   = "unknown-preset";
     }
 }

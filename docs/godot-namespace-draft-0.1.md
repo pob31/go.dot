@@ -24729,6 +24729,13 @@ Mine, the author's to overrule:
 - **AFP** (mine) **Doh! on a MIDI wire** reads the node's kind as everywhere: a state node is put back
   like any described node, a `pc` scene recall is an event and stays "leave" (PRD §3.32).
 
+- **AFI, confirmed** (the author's, 2026-10-10, late): *"make sure once we have the device definitions
+  that the values can be automated with automation curves as we have added to regular OSC cues."*
+  The cue being the OSC cue gives it by construction, and a case in `NetworkCueTests` holds it against
+  the shipped ADM-OSC preset: a curve on a one-argument gain and on one argument of a three-argument
+  position, each played through the described device's door, and a node the preset lacks refused at
+  GO (DP.5). Then, in their words, *"once this is done proceed with other protocols"*: DP.6 on.
+
 ### 57.3 Rows
 
 | Address | Type | Access | Notes |

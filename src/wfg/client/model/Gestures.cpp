@@ -522,6 +522,16 @@ namespace wfg::client::gesture
                  { osc::Value::string (prefix), osc::Value::string ({}) } };
     }
 
+    Event createDeviceFromPreset (const std::string& slug)
+    {
+        return { origin::window, "mount.createFromPreset", { osc::Value::string (slug) } };
+    }
+
+    Event refreshPreset (const std::string& deviceId)
+    {
+        return { origin::window, "mount.refreshPreset", { osc::Value::string (deviceId) } };
+    }
+
     Event createPort (const std::string& name)
     {
         return { origin::window, "port.create", { osc::Value::string (name) } };

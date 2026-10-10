@@ -376,6 +376,7 @@ add_library(wfg_engine STATIC
     wfg/engine/oscquery/TimbreRoute.h
     wfg/engine/tree/Mount.cpp
     wfg/engine/tree/PresetTable.cpp
+    wfg/engine/tree/PresetCommands.cpp
     wfg/engine/tree/MountProbe.h
     wfg/engine/tree/MountProbe.cpp
     wfg/engine/tree/MountSender.h

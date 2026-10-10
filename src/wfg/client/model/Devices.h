@@ -125,6 +125,11 @@ namespace wfg::client::model
 
         /** A device with no description file. See the header. */
         bool opaque() const { return namespaceFile.empty(); }
+        /*  THE PRESET IT WAS MADE FROM (namespace draft §57, AFO), as
+            `<slug>@<version>`, and the newer version installed beside the
+            binary when there is one; both empty for a device made by hand. */
+        std::string preset;
+        std::string presetUpdate;
 
         /*  HOW IT IS REACHED (namespace draft §51, PC.11): `udp` at its host and
             port, or `serial` - OSC over SLIP on the serial port `serial` names. */
@@ -155,6 +160,37 @@ namespace wfg::client::model
         the engine's own `prefixMatchLength` doing the work rather than a copy
         of it - see the header above. */
     std::string deviceOf (const std::string& address, const std::vector<DeviceRow>&);
+
+    /*  AN INSTALLED PRESET (namespace draft §57, AFN), as serve publishes it
+        under /godot/preset/<slug>: what the Network tab's chooser offers,
+        and what a device's Kind cell is named by. */
+    struct PresetRow
+    {
+        std::string slug;
+        std::string vendor;
+        std::string model;
+        int version = 0;
+        std::string transport = "udp";
+        std::string wire = "osc";
+        std::string framing = "length";
+        int port = 0;
+        std::string roots;
+        int nodeCount = 0;
+        /** Why it cannot be used, in the engine's sentence; empty when it can. */
+        std::string problem;
+
+        bool usable() const { return problem.empty(); }
+        std::string label() const { return vendor + " " + model; }
+    };
+
+    /** Every installed preset, by vendor then model. One pass, as `readDevices`. */
+    std::vector<PresetRow> readPresets (const tree::TreeSnapshot& snapshot);
+
+    /*  WHAT KIND OF DEVICE A ROW IS, in words for its Kind cell: the preset's
+        vendor and model when it was made from one (its slug when that preset
+        is not installed any more), "OSC" for a device made by hand, and
+        "described" for one that describes itself. */
+    std::string kindWordOf (const DeviceRow& row, const std::vector<PresetRow>& presets);
 
     /*  The address this cue would have if it were aimed at another device.
 

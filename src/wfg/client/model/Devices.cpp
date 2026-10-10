@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <algorithm>
 #include <string_view>
 #include <vector>
 
@@ -122,6 +123,8 @@ namespace wfg::client::model
                 word takes back; anything else leaves to the operator. */
             else if (name == "doh")        row.doh = text (node) == "takeBack" ? "takeBack" : "leave";
             else if (name == "dohRollback") row.dohRollback = text (node);
+            else if (name == "preset")       row.preset = text (node);
+            else if (name == "presetUpdate") row.presetUpdate = text (node);
         }
 
         std::vector<DeviceRow> rows;
@@ -131,6 +134,76 @@ namespace wfg::client::model
             rows.push_back (std::move (row));
 
         return rows;
+    }
+
+    std::vector<PresetRow> readPresets (const tree::TreeSnapshot& snapshot)
+    {
+        static constexpr const char* presetPrefix = "/godot/preset/";
+        std::map<std::string, PresetRow> found;
+
+        for (const auto* node : snapshot.all())
+        {
+            if (node->address.rfind (presetPrefix, 0) != 0)
+                continue;
+
+            const auto rest = node->address.substr (std::string (presetPrefix).size());
+            const auto slash = rest.find ('/');
+
+            if (slash == std::string::npos)
+                continue;
+
+            const auto slug = rest.substr (0, slash);
+            const auto name = rest.substr (slash + 1);
+
+            if (name.find ('/') != std::string::npos)
+                continue;
+
+            auto& row = found[slug];
+            row.slug = slug;
+
+            if (name == "vendor")          row.vendor = text (node);
+            else if (name == "model")      row.model = text (node);
+            else if (name == "version")    row.version = number (text (node), 0);
+            else if (name == "transport")  row.transport = text (node).empty() ? std::string ("udp") : text (node);
+            else if (name == "wire")       row.wire = text (node).empty() ? std::string ("osc") : text (node);
+            else if (name == "framing")    row.framing = text (node).empty() ? std::string ("length") : text (node);
+            else if (name == "port")       row.port = number (text (node), 0);
+            else if (name == "roots")      row.roots = text (node);
+            else if (name == "nodeCount")  row.nodeCount = number (text (node), 0);
+            else if (name == "problem")    row.problem = text (node);
+        }
+
+        std::vector<PresetRow> rows;
+        rows.reserve (found.size());
+
+        for (auto& [slug, row] : found)
+            rows.push_back (std::move (row));
+
+        /*  BY VENDOR, THEN MODEL: the chooser draws a heading per vendor, and
+            the table's own order is by slug, which is nobody's. */
+        std::sort (rows.begin(), rows.end(), [] (const PresetRow& a, const PresetRow& b)
+                   {
+                       if (a.vendor != b.vendor) return a.vendor < b.vendor;
+                       if (a.model != b.model)   return a.model < b.model;
+                       return a.slug < b.slug;
+                   });
+        return rows;
+    }
+
+    std::string kindWordOf (const DeviceRow& row, const std::vector<PresetRow>& presets)
+    {
+        if (! row.preset.empty())
+        {
+            const auto slug = row.preset.substr (0, row.preset.find ('@'));
+
+            for (const auto& preset : presets)
+                if (preset.slug == slug)
+                    return preset.label();
+
+            return slug;
+        }
+
+        return row.opaque() ? "OSC" : "described";
     }
 
     std::string deviceOf (const std::string& address, const std::vector<DeviceRow>& rows)

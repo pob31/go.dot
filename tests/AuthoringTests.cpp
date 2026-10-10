@@ -36,6 +36,8 @@
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/tree/AuthoringCommands.h>
+#include <wfg/engine/tree/PresetCommands.h>
+#include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountFetcher.h>
 #include <wfg/engine/tree/RawSender.h>
@@ -669,4 +671,191 @@ TEST_CASE ("authoring: a fetched description is adopted, loaded and answered; a 
     CHECK_FALSE (folder.getChildFile (tree::MountFetcher::fileFor ("NWHERE01")).exists());
 
     folder.deleteRecursively();
+}
+
+//==============================================================================
+//  A DEVICE FROM A PRESET (namespace draft §57, AFO).
+namespace
+{
+    /*  The installed presets, read from the source tree as serve reads them
+        beside the binary; `adm-osc` is the small one, so these cases load it. */
+    const tree::PresetTable& installedPresets()
+    {
+        static const tree::PresetTable table = []
+        {
+            tree::PresetTable scanned;
+            scanned.scan (std::string (WFG_REPO_ROOT) + "/presets/devices");
+            return scanned;
+        }();
+        return table;
+    }
+
+    /*  UNIQUE PER PROCESS, not only per call: the C and fr_FR runs of this
+        suite may run at once, and two of them picking the same not-yet-made
+        name would delete each other's files at the end. */
+    juce::File freshBundleFolder (const char* stem)
+    {
+        return juce::File::getSpecialLocation (juce::File::tempDirectory)
+                 .getNonexistentChildFile (juce::String (stem) + "-" + juce::Uuid().toString().substring (0, 8), {}, false);
+    }
+}
+
+TEST_CASE ("preset command: a device from a preset copies the file once, writes its rows, loads it, and records what it drew")
+{
+    AuthoringRig rig;
+    tree::MountTable mounts;
+    const auto folder = freshBundleFolder ("wfg-presets");
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &installedPresets());
+
+    REQUIRE (installedPresets().find ("adm-osc") != nullptr);
+    const auto nodes = installedPresets().find ("adm-osc")->nodeCount;
+
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("adm-osc") }).applied == 1u);
+    const auto record = rig.lastRecord();
+    REQUIRE (record.args.size() == 7u);
+    const auto deviceId = record.args[1].getString();
+    REQUIRE (deviceId.size() == 8u);
+    CHECK (record.args[2].getString() == "/adm");
+    CHECK (record.args[3].getString() == "namespaces/adm-osc-v1.json");
+    CHECK (record.args[4].getInt32() == 0);
+    CHECK (record.args[5].getString() == "udp");
+    CHECK (record.args[6].getInt32() == 1);
+
+    /*  THE FILE IS IN THE BUNDLE, so the show opens on a machine whose
+        Go.dot has never seen the preset; the rows say where it came from. */
+    CHECK (folder.getChildFile ("namespaces/adm-osc-v1.json").existsAsFile());
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/prefix") == "/adm");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/namespace") == "namespaces/adm-osc-v1.json");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/preset") == "adm-osc@1");
+
+    /*  NO PORT IN THE PRESET - ADM-OSC has none to speak of - so the device is
+        not loaded until one is typed, and its problem cell says why; typed,
+        it loads whole, as the after-tick refresh does in serve. */
+    CHECK_FALSE (mounts.isLoaded (deviceId));
+    CHECK_FALSE (mounts.problemOf (deviceId).empty());
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + deviceId + "/port", "9000").ok);
+    REQUIRE (tree::loadMountFromBundle (rig.document, mounts, folder, deviceId).ok);
+    CHECK (mounts.isLoaded (deviceId));
+    CHECK (static_cast<int> (mounts.nodeCount (deviceId)) == nodes);
+
+    //  A second device from the same preset shares the file.
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("adm-osc") }).applied == 1u);
+    const auto secondId = rig.lastRecord().args[1].getString();
+    CHECK (secondId != deviceId);
+    CHECK (rig.attribute ("/godot/mount/" + secondId + "/namespace") == "namespaces/adm-osc-v1.json");
+    CHECK (folder.getChildFile ("namespaces").getNumberOfChildFiles (juce::File::findFiles, "*.json") == 1);
+
+    //  Undo takes the device away and leaves the file, which the other device still reads.
+    REQUIRE (rig.apply ("cli", "undo", {}).applied == 1u);
+    CHECK_FALSE (rig.document.findById (secondId).isValid());
+    CHECK (folder.getChildFile ("namespaces/adm-osc-v1.json").existsAsFile());
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("preset command: an unknown preset, and a locked show, are refused")
+{
+    AuthoringRig rig;
+    tree::MountTable mounts;
+    const auto folder = freshBundleFolder ("wfg-presets");
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &installedPresets());
+
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("no-such-desk") }).rejected == 1u);
+    CHECK (rig.lastRecord().reason == reason::unknownPreset);
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("adm-osc") }).rejected == 1u);
+    CHECK (rig.lastRecord().reason == reason::locked);
+    CHECK_FALSE (folder.getChildFile ("namespaces/adm-osc-v1.json").existsAsFile());
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("preset command: the record rebuilds the device with no preset installed, the file already in the bundle")
+{
+    const auto folder = freshBundleFolder ("wfg-presets");
+    std::vector<osc::Value> recorded;
+
+    {
+        AuthoringRig rig;
+        tree::MountTable mounts;
+        tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &installedPresets());
+        REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("adm-osc") }).applied == 1u);
+        recorded = rig.lastRecord().args;
+    }
+
+    /*  A REPLAY: no table, the record's seven arguments, the bundle as it was
+        left. The same device comes back, loaded, and nothing is drawn. */
+    AuthoringRig again;
+    tree::MountTable mounts;
+    tree::registerPresetCommands (again.engine.commands(), again.document, mounts, folder, nullptr);
+    REQUIRE (again.apply ("window", "mount.createFromPreset", recorded).applied == 1u);
+
+    const auto deviceId = recorded[1].getString();
+    CHECK (again.lastRecord().args[1].getString() == deviceId);
+    CHECK (again.attribute ("/godot/mount/" + deviceId + "/prefix") == "/adm");
+    CHECK (again.attribute ("/godot/mount/" + deviceId + "/preset") == "adm-osc@1");
+    REQUIRE (again.document.setAttribute ("/godot/mount/" + deviceId + "/port", "9000").ok);
+    REQUIRE (tree::loadMountFromBundle (again.document, mounts, folder, deviceId).ok);
+    CHECK (mounts.isLoaded (deviceId));
+
+    //  With no table and no file, there is nothing to make it from.
+    folder.deleteRecursively();
+    AuthoringRig bare;
+    tree::MountTable none;
+    tree::registerPresetCommands (bare.engine.commands(), bare.document, none, folder, nullptr);
+    REQUIRE (bare.apply ("window", "mount.createFromPreset", recorded).rejected == 1u);
+    CHECK (bare.lastRecord().reason == reason::unknownPreset);
+}
+
+TEST_CASE ("preset command: a newer installed version is written beside the old and the rows move to it; nothing newer is refused")
+{
+    AuthoringRig rig;
+    tree::MountTable mounts;
+    const auto folder = freshBundleFolder ("wfg-presets");
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &installedPresets());
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("adm-osc") }).applied == 1u);
+    const auto deviceId = rig.lastRecord().args[1].getString();
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + deviceId + "/port", "9000").ok);
+
+    //  The same version installed: nothing to refresh to.
+    REQUIRE (rig.apply ("window", "mount.refreshPreset", { text (deviceId) }).rejected == 1u);
+    CHECK (rig.lastRecord().reason == reason::badValue);
+
+    /*  A NEWER VERSION installed: the same file with VERSION 2, in a folder of
+        its own, scanned as serve scans the one beside the binary. The
+        registration replaces the earlier one, as a later registration of a
+        name does. */
+    const auto newerFolder = freshBundleFolder ("wfg-presets-newer");
+    REQUIRE (newerFolder.createDirectory());
+    auto newerText = installedPresets().find ("adm-osc")->text;
+    const auto at = newerText.find ("\"VERSION\":1");
+    REQUIRE (at != std::string::npos);
+    newerText.replace (at, 11, "\"VERSION\":2");
+    REQUIRE (newerFolder.getChildFile ("adm-osc.json").replaceWithText (juce::String (newerText)));
+
+    tree::PresetTable newer;
+    newer.scan (newerFolder.getFullPathName().toStdString());
+    REQUIRE (newer.find ("adm-osc") != nullptr);
+    REQUIRE (newer.find ("adm-osc")->version == 2);
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &newer);
+
+    REQUIRE (rig.apply ("window", "mount.refreshPreset", { text (deviceId) }).applied == 1u);
+    const auto record = rig.lastRecord();
+    REQUIRE (record.args.size() == 4u);
+    CHECK (record.args[1].getString() == "namespaces/adm-osc-v2.json");
+    CHECK (record.args[2].getString() == "/adm");
+    CHECK (record.args[3].getInt32() == 2);
+    CHECK (folder.getChildFile ("namespaces/adm-osc-v1.json").existsAsFile());
+    CHECK (folder.getChildFile ("namespaces/adm-osc-v2.json").existsAsFile());
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/namespace") == "namespaces/adm-osc-v2.json");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/preset") == "adm-osc@2");
+    CHECK (mounts.isLoaded (deviceId));
+
+    //  And undo points back at the old file, which is still there.
+    REQUIRE (rig.apply ("cli", "undo", {}).applied == 1u);
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/namespace") == "namespaces/adm-osc-v1.json");
+
+    folder.deleteRecursively();
+    newerFolder.deleteRecursively();
 }

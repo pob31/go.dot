@@ -76,6 +76,7 @@
 #include <wfg/engine/tree/MountFetcher.h>
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
+#include <wfg/engine/tree/PresetCommands.h>
 #include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/tree/RawSender.h>
 #include <wfg/engine/tree/OscQueryJson.h>
@@ -411,6 +412,7 @@ namespace
         wfg::tree::registerAuthoringCommands (engine.commands(), document, answers);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
         wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, nowhere, answers);
+        wfg::tree::registerPresetCommands (engine.commands(), document, mounts, nowhere, nullptr);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
@@ -844,6 +846,7 @@ namespace
             wfg::tree::registerAuthoringCommands (engine.commands(), document, answers);
             wfg::tree::registerMountCommands (engine.commands(), document, mounts, bundle);
             wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, bundle, answers);
+            wfg::tree::registerPresetCommands (engine.commands(), document, mounts, bundle, nullptr);
 
             /*  AND THE TRANSACTION HOOK, which `serve` also installs and which
                 a replay is the reason to be careful about.
@@ -1412,6 +1415,7 @@ namespace
         wfg::tree::registerAuthoringCommands (engine.commands(), document, answers);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, target, answers);
+        wfg::tree::registerPresetCommands (engine.commands(), document, mounts, target, nullptr);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
 
@@ -3788,6 +3792,7 @@ namespace
                                                { fetcher.fetch ({ mountId, host, queryPort, prefix, target }); });
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, target, answers);
+        wfg::tree::registerPresetCommands (engine.commands(), document, mounts, target, &presets);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);

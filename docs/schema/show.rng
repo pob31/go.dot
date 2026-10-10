@@ -3027,6 +3027,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="preset">
+          <a:documentation>The preset this device was made from, as &lt;slug&gt;@&lt;version&gt; (namespace draft 57, AFO): what mount.createFromPreset wrote, kept so that a newer installed version can be offered; empty for a device made by hand or declared by a processor.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="queryPort">
           <a:documentation>The port the target answers OSCQuery on, which is a different number from the one it listens for messages on - WFS-DIY takes messages on 8000 and describes itself on 5005. Zero means it was not declared, which is the only honest default: most devices do not run an OSCQuery server at all.</a:documentation>
           <data type="integer">
