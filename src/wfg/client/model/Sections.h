@@ -1,0 +1,141 @@
+/*
+    This file is part of Go.dot — https://github.com/pob31/go.dot
+
+    Copyright (C) 2026 Pierre-Olivier Boulant
+
+    Go.dot is free software: you can redistribute it and/or modify it under the
+    terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later
+    version. Go.dot is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+    or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+    (LICENSE, at the repository root) for more details.
+
+    SPDX-License-Identifier: GPL-3.0-or-later
+*/
+
+#pragma once
+
+/*
+    A sound cue's sections, as the waveform panel draws and drags them
+    (namespace draft §55).
+
+    THE SAME ARITHMETIC THE ENGINE WORKS BY, restated because the boundary
+    forbids reaching for it - `model/Lane`'s arrangement: `doc::MediaEdit` is
+    the one judge (the timeline, the clamp on a crossfade), `doc::` is a token
+    this half of the program may not name, and the test that keeps the two
+    honest asserts these against the real ones.
+
+    WHAT A SECTION IS: a piece of the file, its in and out points in seconds
+    of the FILE, a trim in dB and the crossfade at the join into it from the
+    section before, centred on the join. The sections in their order are the
+    EDITED TIMELINE: section k begins where section k-1 ends, and the edit is
+    as long as the sections put together - which is the cue's file time while
+    the edit is open, the time its lane, its ranges and its playhead are on.
+
+    NOTHING HERE WRITES. Each gesture is one command on release; the carry of
+    what sat on the timeline is the engine's, whichever verb asked.
+*/
+
+#include <wfg/client/model/View.h>
+
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace wfg::tree { class TreeSnapshot; }
+
+namespace wfg::client::model
+{
+    struct SectionRow
+    {
+        std::string id;
+        int index = 0;            ///< its place in the edited timeline
+        double in = 0.0;          ///< seconds of the file
+        double out = 0.0;
+        double trimDb = 0.0;
+        double crossfade = 0.01;  ///< seconds, centred on the join into this section; not heard on the first
+
+        double length() const noexcept { return out - in; }
+    };
+
+    /** Every section of this cue, in the order of its edited timeline; none for a cue with no edit. */
+    std::vector<SectionRow> readSections (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /** Where each section begins on the edited timeline. */
+    std::vector<double> sectionStarts (const std::vector<SectionRow>&);
+
+    /** The edit's length: the sections put together. */
+    double editedLength (const std::vector<SectionRow>&);
+
+    /** A join still one in the file, as a split leaves it: plays plain, whatever its crossfade. */
+    bool continuousJoin (const SectionRow& before, const SectionRow& after) noexcept;
+
+    /** The crossfade a join is heard with: nought on the first section and at a continuous join. */
+    double heardCrossfade (const std::vector<SectionRow>&, std::size_t index) noexcept;
+
+    /*  What the door would make of a crossfade asked for at `index`: held to
+        twice the section's in point (nothing before the file's start) and to
+        what the section's length leaves beside its other crossfade - so the
+        handle shows what will land, not what was asked. */
+    double clampedCrossfade (const std::vector<SectionRow>&, std::size_t index, double asked);
+
+    //==============================================================================
+    /** One section's span on the bar, in pixels, for the view looked through. */
+    struct SectionLayout
+    {
+        std::size_t index = 0;
+        double x0 = 0.0;
+        double x1 = 0.0;
+    };
+
+    /** The sections that meet the view, each with its pixel span; a section outside it is left out. */
+    std::vector<SectionLayout> layoutSections (const std::vector<SectionRow>&, const View&, int width);
+
+    enum class SectionHit { none, block, join };
+
+    struct SectionHitResult
+    {
+        SectionHit hit = SectionHit::none;
+        std::size_t index = 0;   ///< the section, or the section a join leads INTO
+    };
+
+    /** A join within `joinGrab` pixels of a section's left edge wins over the block; the first section has no join. */
+    SectionHitResult hitSection (const std::vector<SectionLayout>&, double x, double joinGrab) noexcept;
+
+    /*  Where a dragged block lands: the place among the sections, counting
+        from nought, that a release at `x` means - after every block whose
+        middle is left of it - or -1 when that is where it already is. Over
+        the whole list, so a section outside the view counts too. */
+    int dropSlotFor (const std::vector<SectionRow>&, const View&, int width, std::size_t dragged, double x);
+
+    /** A join handle dragged to `pointerSeconds`: the crossfade is twice the distance from the join. */
+    double crossfadeFromDrag (double joinSeconds, double pointerSeconds) noexcept;
+
+    //==============================================================================
+    /** "-6 dB", "0 dB", "+3 dB". */
+    std::string trimText (double dB);
+
+    /** A trim typed back, by the level box's rules (`levelFrom`). */
+    std::optional<double> trimFrom (const std::string& typed);
+
+    /** The words on a block: its number, then its in and out as the ruler writes them. */
+    std::string sectionLabel (const SectionRow&, std::size_t index);
+
+    //==============================================================================
+    /*  THE RENDER OF A CUE'S OPEN EDIT, as `/godot/engine/editRender` says it:
+        one line a cue - cue, state, percent, problem - a tab between each. */
+    struct EditRenderRow
+    {
+        std::string cue;
+        std::string state;      ///< rendering, done or failed; empty when the cue has no render
+        std::string problem;
+        int percent = 0;
+    };
+
+    EditRenderRow readEditRender (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /** What the panel says of it: "rendering the edit, 42 %", "the edit is rendered", why it failed; nothing with no render. */
+    std::string renderWords (const EditRenderRow&);
+}

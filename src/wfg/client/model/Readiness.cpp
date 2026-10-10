@@ -59,6 +59,12 @@ namespace wfg::client::model
         if (prepare == "partial" && error == "no-track")
             return { Icon::missing, "no voice", "No voice: every track was busy when it was got ready - GO will not play it" };
 
+        /*  A SOUND WHOSE EDIT HAS NO RENDER YET (namespace draft §55, ADM): the
+            renderer is making it; the cue is got ready by itself once it has. */
+        if (prepare == "partial" && error == "rendering")
+            return { Icon::loading, "rendering",
+                     "Rendering the edit: Go.dot is making what the cue plays, and gets it ready once that is there" };
+
         if (prepare == "partial" && ! error.empty())
             return { Icon::missing, "missing",
                      std::string ("Missing: the file is not in the show's media, or Go.dot cannot read it - GO will ")

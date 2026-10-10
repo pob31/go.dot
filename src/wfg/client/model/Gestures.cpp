@@ -252,6 +252,49 @@ namespace wfg::client::gesture
                  { osc::Value::string (cueId), osc::Value::float64 (at) } };
     }
 
+    Event sectionSplit (const std::string& cueId, double at)
+    {
+        return { origin::window, "section.split",
+                 { osc::Value::string (cueId), osc::Value::float64 (at) } };
+    }
+
+    Event sectionJoin (const std::string& sectionId)
+    {
+        return { origin::window, "section.join", { osc::Value::string (sectionId) } };
+    }
+
+    Event sectionTrim (const std::string& sectionId, double in, double out)
+    {
+        return { origin::window, "section.trim",
+                 { osc::Value::string (sectionId), osc::Value::float64 (in), osc::Value::float64 (out) } };
+    }
+
+    Event sectionMove (const std::string& sectionId, int index)
+    {
+        return { origin::window, "section.move",
+                 { osc::Value::string (sectionId), osc::Value::int32 (index) } };
+    }
+
+    Event sectionRemove (const std::string& sectionId)
+    {
+        return { origin::window, "section.remove", { osc::Value::string (sectionId) } };
+    }
+
+    Event sectionClear (const std::string& cueId)
+    {
+        return { origin::window, "section.clear", { osc::Value::string (cueId) } };
+    }
+
+    Event freezeEdit (const std::string& cueId)
+    {
+        return { origin::window, "media.freeze", { osc::Value::string (cueId) } };
+    }
+
+    Event unfreezeEdit (const std::string& cueId)
+    {
+        return { origin::window, "media.unfreeze", { osc::Value::string (cueId) } };
+    }
+
     Event fireCue (const std::string& cueId)
     {
         return { origin::window, "cue.fire", { osc::Value::string (cueId) } };

@@ -30,6 +30,7 @@
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Lane.h>
 #include <wfg/client/model/Ranges.h>
+#include <wfg/client/model/Sections.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/View.h>
 #include <wfg/client/model/Waveform.h>
@@ -69,6 +70,15 @@ namespace wfg::client::ui
 
             /** `range.split` at the playhead, from the table's plus. */
             std::function<void (const std::string& cueId, double at)> splitRange;
+
+            /*  A SOUND'S EDIT (namespace draft §55): the sections row's verbs.
+                A trim and a crossfade are `set` on the section's row. */
+            std::function<void (const std::string& cueId, double at)> splitSection;
+            std::function<void (const std::string& sectionId)> joinSection;
+            std::function<void (const std::string& sectionId, int index)> moveSection;
+            std::function<void (const std::string& sectionId)> removeSection;
+            std::function<void (const std::string& cueId)> freezeEdit;
+            std::function<void (const std::string& cueId)> unfreezeEdit;
 
             /*  THE THREE THE TRANSPORT NEEDS. `play` fires this cue - the real
                 one, through its own routing - `stop` kills the run it made,
@@ -116,6 +126,12 @@ namespace wfg::client::ui
         juce::ToggleButton& sceneChangesButton() noexcept { return showCuts; }
         juce::ToggleButton& snapButton() noexcept         { return snapCuts; }
 
+        /*  THE SECTIONS ROW (namespace draft §55): which section is picked and
+            where the row is, for a test; its buttons are found by their
+            tooltips. Empty when the cue has no row - a movie, a memo. */
+        std::size_t pickedSectionIndex() const noexcept { return pickedSection; }
+        juce::Rectangle<int> sectionsRow() const        { return sectionsArea(); }
+
         void paint (juce::Graphics&) override;
         void resized() override;
 
@@ -148,6 +164,20 @@ namespace wfg::client::ui
 
         juce::Rectangle<int> headArea() const;
         juce::Rectangle<int> barArea() const;
+
+        /*  THE SECTIONS' TWO ROWS under the head (namespace draft §55), for a
+            sound: the buttons, then the blocks drawn over the bar's own
+            seconds. Nothing for a movie or a cue with a notice. */
+        bool editShown() const;
+        juce::Rectangle<int> buttonsArea() const;
+        juce::Rectangle<int> sectionsArea() const;
+        std::vector<model::SectionLayout> sectionLayout() const;
+        double joinSecondsOf (std::size_t index) const;
+        void paintSections (juce::Graphics&, juce::Rectangle<int>);
+        void sayEdit();
+        void showPickedSection();
+        void refuseEdit();
+        void tell (const juce::String&);
         juce::Rectangle<int> rulerArea() const;
 
         /** Where the head is: the run's position when one is sounding, else the point. */
@@ -322,6 +352,23 @@ namespace wfg::client::ui
         int sentPasses = 0;
 
         static constexpr std::size_t noPoint = static_cast<std::size_t> (-1);
+
+        /*  THE SECTIONS ROW (namespace draft §55): its buttons and the picked
+            section's trim box; the picked section; a block being dragged into
+            a new place, and a join handle held - its crossfade as the hand has
+            it, written once on release. The columns are keyed on the edit too,
+            since the bar draws the edited timeline. */
+        static constexpr std::size_t noSection = static_cast<std::size_t> (-1);
+        juce::TextButton splitButton, removeButton, joinButton, freezeButton;
+        juce::Label trimBox;
+        std::string sectionsCue;
+        std::size_t pickedSection = noSection;
+        std::size_t draggedSection = noSection;
+        bool sectionMoved = false;
+        int pressX = 0, dragX = 0;
+        std::size_t heldJoin = noSection;
+        double heldCrossfade = 0.0;
+        std::string barsEdit;
 
         std::size_t grabbedPoint = noPoint;
         std::size_t hoverPoint = noPoint;

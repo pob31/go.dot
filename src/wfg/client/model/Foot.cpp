@@ -409,6 +409,14 @@ namespace wfg::client::model
             out.cueLevel = osc::parseDouble (at (cue + "level")).value_or (0.0);
             out.laneRecord = readLaneRecord (snapshot);
 
+            /*  THE EDIT (namespace draft §55): its sections, whether it is
+                frozen, the render's state, and whether it may be edited. */
+            out.sections = readSections (snapshot, out.subject.objectId);
+            out.editSource = at (cue + "editSource");
+            out.frozen = ! out.editSource.empty();
+            out.render = readEditRender (snapshot, out.subject.objectId);
+            out.editable = out.cueKind == "media" && ! out.locked && ! out.frozen;
+
             /*  WHY THERE IS NOTHING TO DRAW, when there is nothing to draw, in
                 the words that say what to do about it. A panel that just sat
                 blank would leave somebody wondering whether the file is silent,

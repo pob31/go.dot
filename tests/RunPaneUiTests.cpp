@@ -5650,3 +5650,188 @@ TEST_CASE ("M59: the patch canvas draws two hundred boxes and their lines")
     MESSAGE ("M59: two hundred boxes and a hundred and ninety-nine lines drawn in " << ms << " ms");
     CHECK (ms < 250.0);
 }
+
+TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a new order, a join's crossfade, and the buttons (namespace draft §55)")
+{
+    /*  A thirty-second sound in three pieces. A press on the verse picks it
+        and wakes Remove and Join; Split sends the playhead's second and
+        refuses a cut in words; the chorus dragged before the intro is one
+        move on release; a join handle dragged a quarter of a second is one
+        crossfade of half a second; Freeze then Unfreeze in its place; frozen
+        or locked, nothing is sent and the buttons are greyed; a movie has no
+        row. With WFG_SNAPSHOT_DIR set, waveform-sections.png as well. */
+    std::vector<std::pair<std::string, std::string>> written;
+    std::string splitCue, joined, removed, moved, frozen, unfrozen;
+    double splitAt = -1.0;
+    int movedTo = -1;
+    juce::String said;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value) { written.emplace_back (address, value); };
+    actions.say = [&] (const juce::String& sentence) { if (sentence.isNotEmpty()) said = sentence; };
+    actions.splitSection = [&] (const std::string& cue, double at) { splitCue = cue; splitAt = at; };
+    actions.joinSection = [&] (const std::string& id) { joined = id; };
+    actions.moveSection = [&] (const std::string& id, int index) { moved = id; movedTo = index; };
+    actions.removeSection = [&] (const std::string& id) { removed = id; };
+    actions.freezeEdit = [&] (const std::string& cue) { frozen = cue; };
+    actions.unfreezeEdit = [&] (const std::string& cue) { unfrozen = cue; };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setRightColumn (360, 12);
+    editor.setSize (1000, 260);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 30.0;
+    reading.editable = true;
+    reading.sections = { { "SEC00001", 0, 0.0, 10.0, 0.0, 0.01 },
+                         { "SEC00002", 1, 10.0, 20.0, 0.0, 0.01 },
+                         { "SEC00003", 2, 20.0, 30.0, -6.0, 0.2 } };
+    editor.show (reading, nullptr);
+
+    auto* split = buttonTipped (editor, "Splits the sound");
+    auto* remove = buttonTipped (editor, "Removes the picked");
+    auto* join = buttonTipped (editor, "Joins the picked");
+    auto* freeze = buttonTipped (editor, "Freezes the edit");
+    REQUIRE (split != nullptr);
+    REQUIRE (remove != nullptr);
+    REQUIRE (join != nullptr);
+    REQUIRE (freeze != nullptr);
+
+    CHECK (split->isVisible());
+    CHECK (split->isEnabled());
+    CHECK_FALSE (remove->isEnabled());    // nothing picked
+    CHECK_FALSE (join->isEnabled());
+    CHECK_FALSE (freeze->isEnabled());    // the render is not there yet
+    CHECK (freeze->getButtonText() == "Freeze");
+    CHECK (editor.pickedSectionIndex() == static_cast<std::size_t> (-1));
+
+    const auto row = editor.sectionsRow();
+    REQUIRE_FALSE (row.isEmpty());
+    CHECK (row.getRight() <= 1000 - 360 - 12);
+
+    reading.render.state = "done";
+    editor.show (reading, nullptr);
+    CHECK (freeze->isEnabled());
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const auto mouse = [&] (juce::Point<float> at, int clicks, bool dragged, juce::ModifierKeys mods)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, mods, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &editor, &editor, now, at, now,
+                                 clicks, dragged);
+    };
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+    const auto xOf = [&] (double seconds) { return editor.pointPosition ({ seconds, 0.0 }).x; };
+    const auto rowY = static_cast<float> (row.getCentreY());
+    const auto rulerY = static_cast<float> (editor.getHeight() - 3);
+
+    //  A press on the verse picks it: Remove and Join wake - the verse and the chorus are still one in the file.
+    editor.mouseDown (mouse ({ xOf (15.0), rowY }, 1, false, left));
+    editor.mouseUp (mouse ({ xOf (15.0), rowY }, 1, false, left));
+    CHECK (editor.pickedSectionIndex() == 1u);
+    CHECK (remove->isEnabled());
+    CHECK (join->isEnabled());
+    join->onClick();
+    CHECK (joined == "SEC00002");
+    remove->onClick();
+    CHECK (removed == "SEC00002");
+
+    //  Split at the playhead, placed by a press in the ruler at five seconds; on a cut, a word and nothing sent.
+    editor.mouseDown (mouse ({ xOf (5.0), rulerY }, 1, false, left));
+    editor.mouseUp (mouse ({ xOf (5.0), rulerY }, 1, false, left));
+    split->onClick();
+    CHECK (splitCue == "CUE00001");
+    CHECK (splitAt == doctest::Approx (5.0).epsilon (0.02));
+
+    splitCue.clear();
+    editor.mouseDown (mouse ({ xOf (10.0), rulerY }, 1, false, left));
+    editor.mouseUp (mouse ({ xOf (10.0), rulerY }, 1, false, left));
+    split->onClick();
+    CHECK (splitCue.empty());
+    CHECK (said.contains ("already a cut"));
+
+    //  The chorus dragged before the intro: one move, on release.
+    editor.mouseDown (mouse ({ xOf (25.0), rowY }, 1, false, left));
+    editor.mouseDrag (mouse ({ xOf (12.0), rowY }, 1, true, left));
+    editor.mouseDrag (mouse ({ xOf (1.0), rowY }, 1, true, left));
+    editor.mouseUp (mouse ({ xOf (1.0), rowY }, 1, true, left));
+    CHECK (moved == "SEC00003");
+    CHECK (movedTo == 0);
+
+    //  A join handle dragged a quarter of a second: one crossfade of half a second, on release.
+    editor.mouseDown (mouse ({ xOf (20.0), rowY }, 1, false, left));
+    editor.mouseDrag (mouse ({ xOf (20.25), rowY }, 1, true, left));
+    CHECK (said.contains ("crossfade"));
+    editor.mouseUp (mouse ({ xOf (20.25), rowY }, 1, true, left));
+    REQUIRE_FALSE (written.empty());
+    CHECK (written.back().first == "/godot/section/SEC00003/crossfade");
+    CHECK (wfg::osc::parseDouble (written.back().second).value_or (0.0) == doctest::Approx (0.5).epsilon (0.15));
+
+    //  Freeze; frozen, Unfreeze in its place, and a drag sends nothing and says why.
+    freeze->onClick();
+    CHECK (frozen == "CUE00001");
+
+    reading.frozen = true;
+    reading.editable = false;
+    reading.editSource = "bed.wav";
+    editor.show (reading, nullptr);
+    CHECK (freeze->getButtonText() == "Unfreeze");
+    CHECK (freeze->isEnabled());
+    CHECK_FALSE (split->isEnabled());
+
+    moved.clear();
+    editor.mouseDown (mouse ({ xOf (25.0), rowY }, 1, false, left));
+    editor.mouseDrag (mouse ({ xOf (1.0), rowY }, 1, true, left));
+    editor.mouseUp (mouse ({ xOf (1.0), rowY }, 1, true, left));
+    CHECK (moved.empty());
+    CHECK (said.contains ("frozen"));
+
+    freeze->onClick();
+    CHECK (unfrozen == "CUE00001");
+
+    //  Locked: everything greyed.
+    reading.frozen = false;
+    reading.editSource.clear();
+    reading.locked = true;
+    editor.show (reading, nullptr);
+    CHECK_FALSE (split->isEnabled());
+    CHECK_FALSE (freeze->isEnabled());
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        reading.locked = false;
+        reading.editable = true;
+        editor.show (reading, nullptr);
+        editor.mouseDown (mouse ({ xOf (15.0), rowY }, 1, false, left));
+        editor.mouseUp (mouse ({ xOf (15.0), rowY }, 1, false, left));
+
+        juce::Image canvas (juce::Image::ARGB, editor.getWidth(), editor.getHeight(), true);
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, true);
+
+        const auto file = juce::File (dir).getChildFile ("waveform-sections.png");
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (canvas, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    //  A movie has no row.
+    model::FootReading movie;
+    movie.subject = { model::Subject::Kind::waveform, "CUE00002" };
+    movie.cueKind = "video";
+    movie.movie = true;
+    movie.file = "movie.mov";
+    movie.fileLength = 60.0;
+    editor.show (movie, nullptr);
+    CHECK (editor.sectionsRow().isEmpty());
+    CHECK_FALSE (split->isVisible());
+}

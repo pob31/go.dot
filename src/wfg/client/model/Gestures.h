@@ -231,6 +231,18 @@ namespace wfg::client::gesture
         undo step and one record - see `ShowDocument::splitRange`. */
     Event splitRange (const std::string& cueId, double at);
 
+    /*  A SOUND'S EDIT (namespace draft §55.3): the sections cut, joined,
+        trimmed, moved, removed and cleared, and the edit frozen and unfrozen.
+        A trim or a crossfade is `setNode` on the section's row. */
+    Event sectionSplit (const std::string& cueId, double at);
+    Event sectionJoin (const std::string& sectionId);
+    Event sectionTrim (const std::string& sectionId, double in, double out);
+    Event sectionMove (const std::string& sectionId, int index);
+    Event sectionRemove (const std::string& sectionId);
+    Event sectionClear (const std::string& cueId);
+    Event freezeEdit (const std::string& cueId);
+    Event unfreezeEdit (const std::string& cueId);
+
     /** Deletes a cue or a group: ctrl/⌘-Backspace on the picked one. Undo brings it back with its ids. */
     Event deleteObject (const std::string& id);
 

@@ -84,6 +84,14 @@ namespace wfg::client::ui
             /** `range.split` at the playhead. */
             std::function<void (const std::string& cueId, double at)> splitRange;
 
+            /*  A SOUND'S EDIT (namespace draft §55): the waveform's sections row. */
+            std::function<void (const std::string& cueId, double at)> splitSection;
+            std::function<void (const std::string& sectionId)> joinSection;
+            std::function<void (const std::string& sectionId, int index)> moveSection;
+            std::function<void (const std::string& sectionId)> removeSection;
+            std::function<void (const std::string& cueId)> freezeEdit;
+            std::function<void (const std::string& cueId)> unfreezeEdit;
+
             /*  AN OSC CUE'S MESSAGES AND CURVES (namespace draft 45): one more
                 message, the second made the cue's own, a curve on a value. */
             std::function<void (const std::string& cueId, const std::string& address,

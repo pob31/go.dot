@@ -400,6 +400,12 @@ namespace wfg::client::ui
                 editing.createRange = actions.createRange;
                 editing.removeRange = actions.removeObject;
                 editing.splitRange = actions.splitRange;
+                editing.splitSection = actions.splitSection;
+                editing.joinSection = actions.joinSection;
+                editing.moveSection = actions.moveSection;
+                editing.removeSection = actions.removeSection;
+                editing.freezeEdit = actions.freezeEdit;
+                editing.unfreezeEdit = actions.unfreezeEdit;
                 editing.play = actions.play;
                 editing.stop = actions.stop;
                 editing.seek = actions.seek;

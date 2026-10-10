@@ -513,6 +513,21 @@ namespace wfg::client
                 footActions.splitRange = [this] (const std::string& cueId, double at)
                                          { send (gesture::splitRange (cueId, at)); };
 
+                /*  A SOUND'S EDIT (namespace draft §55): every gesture of the
+                    sections row is a named command. */
+                footActions.splitSection = [this] (const std::string& cueId, double at)
+                                           { send (gesture::sectionSplit (cueId, at)); };
+                footActions.joinSection = [this] (const std::string& sectionId)
+                                          { send (gesture::sectionJoin (sectionId)); };
+                footActions.moveSection = [this] (const std::string& sectionId, int index)
+                                          { send (gesture::sectionMove (sectionId, index)); };
+                footActions.removeSection = [this] (const std::string& sectionId)
+                                            { send (gesture::sectionRemove (sectionId)); };
+                footActions.freezeEdit = [this] (const std::string& cueId)
+                                         { send (gesture::freezeEdit (cueId)); };
+                footActions.unfreezeEdit = [this] (const std::string& cueId)
+                                           { send (gesture::unfreezeEdit (cueId)); };
+
                 footActions.createSend = [this] (const std::string& cueId, const std::string& busId,
                                                  double level)
                                          { send (gesture::createSend (cueId, busId, level)); };

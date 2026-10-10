@@ -583,6 +583,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Fader.cpp
     wfg/client/model/Lane.h
     wfg/client/model/Lane.cpp
+    wfg/client/model/Sections.h
+    wfg/client/model/Sections.cpp
     wfg/client/model/OscMessages.h
     wfg/client/model/OscMessages.cpp
     wfg/client/model/Patch.h

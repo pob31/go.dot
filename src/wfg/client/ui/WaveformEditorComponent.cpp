@@ -212,6 +212,125 @@ namespace wfg::client::ui
             addChildComponent (*toggle);
         }
 
+        /*  THE SECTIONS ROW (namespace draft §55): a sound cut into pieces at
+            the playhead, the pieces dragged into an order, a join's crossfade
+            dragged, each piece at a trim, the edit frozen to a file the cue
+            plays. Every button says what it does (§4.8) and is greyed when
+            the edit is not this panel's to make. */
+        splitButton.setButtonText ("Split");
+        splitButton.setTooltip ("Splits the sound at the playhead into two sections");
+        removeButton.setButtonText ("Remove");
+        removeButton.setTooltip ("Removes the picked section: what sat on it goes with it, the rest closes up");
+        joinButton.setButtonText ("Join");
+        joinButton.setTooltip ("Joins the picked section with the next, when the two are still one in the file");
+        freezeButton.setButtonText ("Freeze");
+        freezeButton.setTooltip ("Freezes the edit: the render is bounced to a new file the cue plays");
+
+        for (auto* button : { &splitButton, &removeButton, &joinButton, &freezeButton })
+        {
+            button->setWantsKeyboardFocus (false);
+            addChildComponent (*button);
+        }
+
+        splitButton.onClick = [this]
+        {
+            if (! reading.editable || actions.splitSection == nullptr)
+                return refuseEdit();
+
+            if (reading.sections.empty() && ! (reading.fileLength > 0.0))
+                return tell ("the file's length is not known yet");
+
+            /*  On a cut, at the top or at the end there is nothing to divide:
+                the engine would refuse, and the word is better here. */
+            const auto at = headSeconds();
+            auto onACut = at <= 0.001 || at >= reading.fileLength - 0.001;
+
+            for (const auto start : model::sectionStarts (reading.sections))
+                onACut = onACut || std::abs (at - start) <= 0.001;
+
+            if (onACut)
+                return tell ("there is already a cut here");
+
+            actions.splitSection (reading.subject.objectId, at);
+        };
+
+        removeButton.onClick = [this]
+        {
+            if (! reading.editable || actions.removeSection == nullptr)
+                return refuseEdit();
+
+            if (pickedSection < reading.sections.size())
+                actions.removeSection (reading.sections[pickedSection].id);
+        };
+
+        joinButton.onClick = [this]
+        {
+            if (! reading.editable || actions.joinSection == nullptr)
+                return refuseEdit();
+
+            if (pickedSection + 1 >= reading.sections.size())
+                return;
+
+            if (! model::continuousJoin (reading.sections[pickedSection], reading.sections[pickedSection + 1]))
+                return tell ("these two are no longer one in the file - only a cut can be taken back");
+
+            actions.joinSection (reading.sections[pickedSection].id);
+        };
+
+        freezeButton.onClick = [this]
+        {
+            if (reading.locked)
+                return refuseEdit();
+
+            if (reading.frozen)
+            {
+                if (actions.unfreezeEdit)
+                    actions.unfreezeEdit (reading.subject.objectId);
+
+                return;
+            }
+
+            if (reading.sections.empty())
+                return tell ("Split at the playhead to start an edit.");
+
+            if (reading.render.state != "done")
+                return tell ("the edit is still being rendered - Freeze once it is");
+
+            if (actions.freezeEdit)
+                actions.freezeEdit (reading.subject.objectId);
+        };
+
+        /*  THE PICKED SECTION'S TRIM, TYPED, by the level box's rules: a
+            number that will not parse is put back rather than written. */
+        trimBox.setEditable (true, true, false);
+        trimBox.setJustificationType (juce::Justification::centredRight);
+        trimBox.setTooltip ("The picked section's trim, in dB: nought is the material as recorded");
+        addChildComponent (trimBox);
+        trimBox.onTextChange = [this]
+        {
+            if (pickedSection >= reading.sections.size())
+                return;
+
+            const auto typed = model::trimFrom (trimBox.getText().toStdString());
+
+            if (! typed.has_value())
+            {
+                tell ("that is not a trim: -6, +3, silence");
+                showPickedSection();
+                return;
+            }
+
+            if (! reading.editable)
+            {
+                showPickedSection();
+                return refuseEdit();
+            }
+
+            if (actions.set)
+                actions.set ("/godot/section/" + reading.sections[pickedSection].id + "/trim",
+                             osc::formatDouble (*typed));
+        };
+
         /*  THE PICKED POINT, TYPED. A number that will not parse is put back
             to what the lane says rather than written as nought - a slip of the
             keyboard must not move a level - and a number that parses is held
@@ -601,6 +720,21 @@ namespace wfg::client::ui
         sayWhichLane();
         sayCuts();
 
+        /*  THE SECTIONS (namespace draft §55): another cue lets the pick go;
+            a section gone lets it go; what the buttons may do is read anew. */
+        if (sectionsCue != reading.subject.objectId)
+        {
+            sectionsCue = reading.subject.objectId;
+            pickedSection = draggedSection = heldJoin = noSection;
+            sectionMoved = false;
+        }
+
+        if (pickedSection >= reading.sections.size())
+            pickedSection = noSection;
+
+        sayEdit();
+        showPickedSection();
+
         /*  THE HAND'S COPY OF THE LANE LETS GO once the reading moves from
             where it was when the write went - or after a second of passes,
             for a write the engine refused and which will never come round. */
@@ -863,7 +997,7 @@ namespace wfg::client::ui
     juce::Rectangle<int> WaveformEditorComponent::barArea() const
     {
         auto area = pictureArea();
-        area.removeFromTop (headArea().getHeight());
+        area.removeFromTop (headArea().getHeight() + buttonsArea().getHeight() + sectionsArea().getHeight());
         area.removeFromBottom (rulerArea().getHeight());
         return area.reduced (2, 4);
     }
@@ -942,13 +1076,23 @@ namespace wfg::client::ui
             over the same span. */
         const auto& drawnFile = reading.movie ? reading.soundFile : reading.file;
 
-        if (barsFile == drawnFile && barsWidth == bar.getWidth()
+        /*  THE EDIT IS PART OF THE KEY (namespace draft §55): the bar draws the
+            edited timeline, each section's stretch of the file's own picture
+            laid where the section is, so a cut or a move redraws it. */
+        std::string editKey;
+
+        if (editShown())
+            for (const auto& section : reading.sections)
+                editKey += section.id + ":" + osc::formatDouble (section.in) + "-" + osc::formatDouble (section.out) + ";";
+
+        if (barsFile == drawnFile && barsWidth == bar.getWidth() && barsEdit == editKey
               && juce::approximatelyEqual (barsFrom, view.from)
               && juce::approximatelyEqual (barsTo, view.to))
             return bars;
 
         bars.clear();
         barsFile = drawnFile;
+        barsEdit = editKey;
         barsWidth = bar.getWidth();
         barsFrom = view.from;
         barsTo = view.to;
@@ -962,8 +1106,41 @@ namespace wfg::client::ui
         if (found == analysed.end() || found->second.pyramid == nullptr)
             return bars;
 
-        bars = model::waveform (*found->second.pyramid, found->second.peaks.get(), bar.getWidth(),
-                                view.from, view.to);
+        if (editKey.empty())
+        {
+            bars = model::waveform (*found->second.pyramid, found->second.peaks.get(), bar.getWidth(),
+                                    view.from, view.to);
+            return bars;
+        }
+
+        /*  SECTION BY SECTION: the part of each that meets the view, taken
+            from the file at the section's own seconds and laid at its place
+            on the timeline; a gap between is left silent. */
+        bars.assign (static_cast<std::size_t> (bar.getWidth()), model::Column {});
+        const auto starts = model::sectionStarts (reading.sections);
+
+        for (std::size_t k = 0; k < reading.sections.size(); ++k)
+        {
+            const auto& section = reading.sections[k];
+            const auto from = juce::jmax (starts[k], view.from);
+            const auto to = juce::jmin (starts[k] + section.length(), view.to);
+
+            if (! (to > from))
+                continue;
+
+            const auto x0 = juce::jlimit (0, bar.getWidth(), juce::roundToInt (view.xForSeconds (from, bar.getWidth())));
+            const auto x1 = juce::jlimit (0, bar.getWidth(), juce::roundToInt (view.xForSeconds (to, bar.getWidth())));
+
+            if (x1 <= x0)
+                continue;
+
+            const auto piece = model::waveform (*found->second.pyramid, found->second.peaks.get(), x1 - x0,
+                                                section.in + (from - starts[k]), section.in + (to - starts[k]));
+
+            for (std::size_t i = 0; i < piece.size() && x0 + static_cast<int> (i) < bar.getWidth(); ++i)
+                bars[static_cast<std::size_t> (x0) + i] = piece[i];
+        }
+
         return bars;
     }
 
@@ -988,6 +1165,9 @@ namespace wfg::client::ui
         paintTrail (g, bar);
         paintRuler (g, rulerArea());
         paintHead (g, headArea());
+
+        if (editShown())
+            paintSections (g, sectionsArea());
     }
 
     void WaveformEditorComponent::paintStrip (juce::Graphics& g, juce::Rectangle<int> pictures)
@@ -1479,9 +1659,270 @@ namespace wfg::client::ui
                                                  : "  double-click the level line to add a point")
                              : juce::String();
 
-        g.drawText ((reading.running ? "playing - drag the ruler to move the playhead"
-                                      : "drag the ruler to place the playhead") + lanes,
+        /*  THE RENDER OF AN OPEN EDIT says where it is, ahead of the row's
+            instructions (namespace draft §55). */
+        const auto render = editShown() ? juce::String (model::renderWords (reading.render)) : juce::String();
+        const auto instructions = (reading.running ? "playing - drag the ruler to move the playhead"
+                                                   : "drag the ruler to place the playhead") + lanes;
+
+        g.drawText (render.isNotEmpty() ? render + "  " + juce::String::fromUTF8 ("\xc2\xb7") + "  " + instructions
+                                        : instructions,
                     area, juce::Justification::centredLeft, true);
+    }
+
+
+    //==============================================================================
+    /*  THE SECTIONS ROW (namespace draft §55). */
+
+    bool WaveformEditorComponent::editShown() const
+    {
+        return reading.cueKind == "media" && ! reading.movie && reading.notice.empty();
+    }
+
+    juce::Rectangle<int> WaveformEditorComponent::buttonsArea() const
+    {
+        if (! editShown())
+            return {};
+
+        auto area = pictureArea();
+        area.removeFromTop (headArea().getHeight());
+        return area.removeFromTop (juce::roundToInt (theme.row * theme.type * 0.8));
+    }
+
+    juce::Rectangle<int> WaveformEditorComponent::sectionsArea() const
+    {
+        if (! editShown())
+            return {};
+
+        auto area = pictureArea();
+        area.removeFromTop (headArea().getHeight() + buttonsArea().getHeight());
+        return area.removeFromTop (juce::roundToInt (theme.row * theme.type * 0.8)).reduced (2, 0);
+    }
+
+    std::vector<model::SectionLayout> WaveformEditorComponent::sectionLayout() const
+    {
+        return model::layoutSections (reading.sections, view, barArea().getWidth());
+    }
+
+    double WaveformEditorComponent::joinSecondsOf (std::size_t index) const
+    {
+        const auto starts = model::sectionStarts (reading.sections);
+        return index < starts.size() ? starts[index] : 0.0;
+    }
+
+    void WaveformEditorComponent::tell (const juce::String& sentence)
+    {
+        if (actions.say != nullptr)
+            actions.say (sentence);
+    }
+
+    /*  WHY THE EDIT IS NOT THIS PANEL'S TO MAKE, in the words that say what to
+        do about it. */
+    void WaveformEditorComponent::refuseEdit()
+    {
+        if (reading.locked)
+            tell ("The show is locked.");
+        else if (reading.frozen)
+            tell ("This edit is frozen - Unfreeze to change it.");
+        else if (reading.cueKind == "media")
+            tell ("This sound follows its movie: edit the movie.");
+    }
+
+    /*  WHAT THE ROW'S BUTTONS MAY DO, read off the reading every pass: Split
+        while the edit is live, Remove with a section picked, Join when the
+        picked one and the next are still one in the file, Freeze once the
+        render is there - and Unfreeze in its place while frozen. */
+    void WaveformEditorComponent::sayEdit()
+    {
+        const auto shown = editShown();
+        const auto editable = reading.editable;
+        const auto picked = pickedSection < reading.sections.size();
+
+        splitButton.setEnabled (shown && editable);
+        removeButton.setEnabled (shown && editable && picked);
+        joinButton.setEnabled (shown && editable && picked && pickedSection + 1 < reading.sections.size()
+                                 && model::continuousJoin (reading.sections[pickedSection], reading.sections[pickedSection + 1]));
+
+        freezeButton.setButtonText (reading.frozen ? "Unfreeze" : "Freeze");
+        freezeButton.setTooltip (reading.frozen
+                                   ? "Unfreezes the edit: the cue plays its file again and the sections are live"
+                                   : "Freezes the edit: the render is bounced to a new file the cue plays");
+        freezeButton.setEnabled (shown && ! reading.locked
+                                   && (reading.frozen || (! reading.sections.empty() && reading.render.state == "done")));
+
+        if (splitButton.isVisible() != shown)
+        {
+            for (auto* button : { &splitButton, &removeButton, &joinButton, &freezeButton })
+                button->setVisible (shown);
+
+            resized();
+        }
+    }
+
+    void WaveformEditorComponent::showPickedSection()
+    {
+        const auto visible = editShown() && pickedSection < reading.sections.size();
+        trimBox.setVisible (visible);
+
+        if (! visible)
+            return;
+
+        trimBox.setEditable (reading.editable, reading.editable, false);
+
+        if (! trimBox.isBeingEdited())
+            trimBox.setText (juce::String (model::trimText (reading.sections[pickedSection].trimDb)), juce::dontSendNotification);
+    }
+
+    void WaveformEditorComponent::paintSections (juce::Graphics& g, juce::Rectangle<int> row)
+    {
+        const auto bar = barArea();
+        g.setFont (Look::font (theme, 11.0f));
+
+        if (reading.sections.empty())
+        {
+            /*  NO EDIT: one block, the whole file, and the words that start one. */
+            const auto whole = juce::Rectangle<float> (static_cast<float> (bar.getX()), static_cast<float> (row.getY() + 2),
+                                                       static_cast<float> (bar.getWidth()), static_cast<float> (row.getHeight() - 4));
+            g.setColour (Look::colour (theme, "rule"));
+            g.drawRoundedRectangle (whole, 3.0f, 1.0f);
+            g.setColour (Look::colour (theme, "ink-off"));
+            g.drawFittedText ("the whole file - Split at the playhead to start an edit",
+                              whole.reduced (6.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1);
+            return;
+        }
+
+        const auto layout = sectionLayout();
+        const auto pixelsPerSecond = view.span() > 0.0 ? bar.getWidth() / view.span() : 0.0;
+
+        for (const auto& block : layout)
+        {
+            const auto& section = reading.sections[block.index];
+            const auto left = static_cast<float> (bar.getX()) + static_cast<float> (block.x0);
+            const auto right = static_cast<float> (bar.getX()) + static_cast<float> (block.x1);
+            const auto rect = juce::Rectangle<float> (left, static_cast<float> (row.getY() + 2),
+                                                      right - left, static_cast<float> (row.getHeight() - 4))
+                                .getIntersection (row.toFloat());
+            const auto picked = block.index == pickedSection;
+            const auto dragged = block.index == draggedSection && sectionMoved;
+
+            g.setColour (Look::colour (theme, "panel-in").withAlpha (dragged ? 0.4f : 1.0f));
+            g.fillRoundedRectangle (rect, 3.0f);
+            g.setColour (Look::colour (theme, picked ? "picked" : "rule"));
+            g.drawRoundedRectangle (rect, 3.0f, picked ? 2.0f : 1.0f);
+
+            /*  PICKED IS A SHAPE: a second outline inside the first, and a
+                triangle under the number (§4.8). */
+            if (picked)
+            {
+                g.drawRoundedRectangle (rect.reduced (3.0f), 2.0f, 1.0f);
+                juce::Path mark;
+                mark.addTriangle (rect.getX() + 6.0f, rect.getBottom() - 1.0f,
+                                  rect.getX() + 14.0f, rect.getBottom() - 1.0f,
+                                  rect.getX() + 10.0f, rect.getBottom() - 6.0f);
+                g.fillPath (mark);
+            }
+
+            auto label = juce::String::fromUTF8 (model::sectionLabel (section, block.index).c_str());
+
+            if (std::abs (section.trimDb) >= 0.05)
+                label += "  " + juce::String (model::trimText (section.trimDb));
+
+            if (reading.frozen)
+                label += "  frozen";
+
+            g.setColour (Look::colour (theme, reading.frozen || ! reading.editable ? "ink-off" : "ink"));
+            g.drawFittedText (label, rect.reduced (18.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1);
+
+            /*  THE JOIN INTO THIS SECTION: a line down the bar where the cut is
+                - dotted while the two are still one in the file, solid with a
+                band as wide as the crossfade once they are not - and a lozenge
+                on the row to drag the crossfade by. A section whose in point
+                is the file's start has nothing before it: a hard cut, greyed. */
+            if (block.index > 0)
+            {
+                const auto& before = reading.sections[block.index - 1];
+                const auto continuous = model::continuousJoin (before, section);
+                const auto hardCut = section.in <= 0.001;
+                const auto fade = heldJoin == block.index ? heldCrossfade : model::heardCrossfade (reading.sections, block.index);
+                const auto fadePixels = static_cast<float> (fade * pixelsPerSecond);
+                const auto x = left;
+
+                if (continuous)
+                {
+                    g.setColour (Look::colour (theme, "ink-off"));
+
+                    for (auto y = bar.getY(); y < bar.getBottom(); y += 6)
+                        g.fillRect (juce::roundToInt (x), y, 1, 3);
+                }
+                else
+                {
+                    g.setColour (Look::colour (theme, "standby").withAlpha (0.25f));
+                    g.fillRect (juce::Rectangle<float> (x - fadePixels / 2.0f, static_cast<float> (bar.getY()),
+                                                        juce::jmax (1.0f, fadePixels), static_cast<float> (bar.getHeight())));
+                    g.setColour (Look::colour (theme, "standby"));
+                    g.fillRect (juce::roundToInt (x), bar.getY(), 1, bar.getHeight());
+                }
+
+                const auto wide = juce::jmax (6.0f, fadePixels);
+                juce::Path lozenge;
+                const auto middle = rect.getCentreY();
+                lozenge.addQuadrilateral (x - wide / 2.0f, middle, x, rect.getY() + 1.0f,
+                                          x + wide / 2.0f, middle, x, rect.getBottom() - 1.0f);
+
+                g.setColour (Look::colour (theme, continuous || hardCut ? "ink-off"
+                                                  : heldJoin == block.index ? "picked" : "standby"));
+
+                if (continuous)
+                {
+                    const juce::PathStrokeType dotted { 1.0f };
+                    const float dashes[] { 2.0f, 2.0f };
+                    juce::Path drawn;
+                    dotted.createDashedStroke (drawn, lozenge, dashes, 2);
+                    g.fillPath (drawn);
+                }
+                else
+                {
+                    g.fillPath (lozenge);
+                }
+            }
+        }
+
+        /*  WHERE A DRAGGED BLOCK WILL LAND: a mark at the place among the
+            sections, and the block's ghost under the hand. */
+        if (draggedSection != noSection && sectionMoved && draggedSection < reading.sections.size())
+        {
+            const auto slot = model::dropSlotFor (reading.sections, view, bar.getWidth(), draggedSection,
+                                                  static_cast<double> (dragX - bar.getX()));
+
+            if (slot >= 0)
+            {
+                /*  The mark stands at the left edge of the section that will
+                    follow the dropped one, or at the end of the last. */
+                std::vector<std::size_t> others;
+
+                for (std::size_t i = 0; i < reading.sections.size(); ++i)
+                    if (i != draggedSection)
+                        others.push_back (i);
+
+                const auto starts = model::sectionStarts (reading.sections);
+                const auto at = static_cast<std::size_t> (slot) < others.size()
+                                  ? starts[others[static_cast<std::size_t> (slot)]]
+                                  : starts.back() + reading.sections.back().length();
+                const auto x = bar.getX() + juce::roundToInt (view.xForSeconds (at, bar.getWidth()));
+
+                g.setColour (Look::colour (theme, "picked"));
+                g.fillRect (x - 1, row.getY(), 3, row.getHeight());
+            }
+
+            const auto& dragged = reading.sections[draggedSection];
+            const auto wide = juce::jmax (24.0f, static_cast<float> (dragged.length() * pixelsPerSecond));
+            const auto ghost = juce::Rectangle<float> (static_cast<float> (dragX) - wide / 2.0f, static_cast<float> (row.getY() + 2),
+                                                       wide, static_cast<float> (row.getHeight() - 4));
+            g.setColour (Look::colour (theme, "picked").withAlpha (0.35f));
+            g.fillRoundedRectangle (ghost, 3.0f);
+            g.setColour (Look::colour (theme, "picked"));
+            g.drawRoundedRectangle (ghost, 3.0f, 1.0f);
+        }
     }
 
     void WaveformEditorComponent::paintRuler (juce::Graphics& g, juce::Rectangle<int> ruler)
@@ -1570,6 +2011,19 @@ namespace wfg::client::ui
                 toggle->setBounds (head.removeFromRight (juce::jmin (toggle->getWidth(), head.getWidth())));
             }
 
+        /*  THE SECTIONS' BUTTONS on their own row under the head (namespace
+            draft §55): the three verbs at the left, the trim box and Freeze
+            at the right; the blocks on the row below, over the bar's seconds. */
+        if (auto buttons = buttonsArea(); ! buttons.isEmpty())
+        {
+            const auto wide = juce::jmax (48, buttons.getHeight() * 2);
+            splitButton.setBounds (buttons.removeFromLeft (wide).reduced (2, 1));
+            removeButton.setBounds (buttons.removeFromLeft (wide + 14).reduced (2, 1));
+            joinButton.setBounds (buttons.removeFromLeft (wide).reduced (2, 1));
+            freezeButton.setBounds (buttons.removeFromRight (wide + 22).reduced (2, 1));
+            trimBox.setBounds (buttons.removeFromRight (64).reduced (2, 2));
+        }
+
         auto boxes = pointBoxes();
         pointLevel.setBounds (boxes.removeFromRight (64));
         boxes.removeFromRight (6);
@@ -1657,6 +2111,35 @@ namespace wfg::client::ui
             return;
         }
 
+        /*  THE SECTIONS ROW (namespace draft §55): a join handle held, or a
+            block picked and perhaps about to be dragged. */
+        if (const auto row = sectionsArea(); ! row.isEmpty() && row.contains (event.getPosition()))
+        {
+            const auto hit = model::hitSection (sectionLayout(), static_cast<double> (event.x - barArea().getX()),
+                                                static_cast<double> (grabRadius));
+
+            if (hit.hit == model::SectionHit::join)
+            {
+                if (! reading.editable)
+                    return refuseEdit();
+
+                heldJoin = hit.index;
+                heldCrossfade = reading.sections[hit.index].crossfade;
+            }
+            else if (hit.hit == model::SectionHit::block)
+            {
+                pickedSection = hit.index;
+                draggedSection = hit.index;
+                sectionMoved = false;
+                pressX = dragX = event.x;
+                showPickedSection();
+                sayEdit();
+            }
+
+            repaint();
+            return;
+        }
+
         if (! barArea().contains (event.getPosition()))
             return;
 
@@ -1696,6 +2179,32 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::mouseDrag (const juce::MouseEvent& event)
     {
+        /*  A JOIN HANDLE DRAGGED: the crossfade is twice the distance from the
+            join, held to what the door would make of it, drawn as the hand has
+            it and written once on release (namespace draft §55). */
+        if (heldJoin != noSection && heldJoin < reading.sections.size())
+        {
+            heldCrossfade = model::clampedCrossfade (reading.sections, heldJoin,
+                                                    model::crossfadeFromDrag (joinSecondsOf (heldJoin), secondsAt (event.x)));
+            tell ("crossfade " + juce::String (juce::roundToInt (heldCrossfade * 1000.0)) + " ms at the join into section "
+                    + juce::String (static_cast<int> (heldJoin) + 1));
+            repaint();
+            return;
+        }
+
+        /*  A BLOCK DRAGGED to a new place: a ghost under the hand and a mark
+            where it lands; nothing written until release. */
+        if (draggedSection != noSection)
+        {
+            dragX = event.x;
+
+            if (std::abs (dragX - pressX) > 4)
+                sectionMoved = true;
+
+            repaint();
+            return;
+        }
+
         if (onRuler)
         {
             moveHeadTo (event.x, false, ! event.mods.isAltDown());
@@ -1782,6 +2291,21 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::mouseDoubleClick (const juce::MouseEvent& event)
     {
+        /*  ON A BLOCK, the view frames its section (namespace draft §55). */
+        if (const auto row = sectionsArea(); ! row.isEmpty() && row.contains (event.getPosition()))
+        {
+            const auto hit = model::hitSection (sectionLayout(), static_cast<double> (event.x - barArea().getX()), 0.0);
+
+            if (hit.hit == model::SectionHit::block && hit.index < reading.sections.size())
+            {
+                const auto start = joinSecondsOf (hit.index);
+                view.frame (start, start + reading.sections[hit.index].length());
+                repaint();
+            }
+
+            return;
+        }
+
         /*  ON THE LANE, A DOUBLE CLICK DRAWS (§20.5): on a point it takes the
             point away, and on the line it adds one there - on the line, so the
             level does not move until somebody moves the point. The fade
@@ -1828,6 +2352,42 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::mouseUp (const juce::MouseEvent& event)
     {
+        /*  THE JOIN'S ONE WRITE, and the block's one move (namespace draft §55). */
+        if (heldJoin != noSection)
+        {
+            const auto index = heldJoin;
+            heldJoin = noSection;
+
+            if (index < reading.sections.size() && actions.set != nullptr
+                  && std::abs (heldCrossfade - reading.sections[index].crossfade) >= 0.001)
+                actions.set ("/godot/section/" + reading.sections[index].id + "/crossfade",
+                             osc::formatDouble (heldCrossfade));
+
+            tell ({});
+            repaint();
+            return;
+        }
+
+        if (draggedSection != noSection)
+        {
+            const auto index = draggedSection;
+            draggedSection = noSection;
+
+            if (sectionMoved && index < reading.sections.size())
+            {
+                if (! reading.editable)
+                    refuseEdit();
+                else if (const auto slot = model::dropSlotFor (reading.sections, view, barArea().getWidth(), index,
+                                                               static_cast<double> (event.x - barArea().getX()));
+                         slot >= 0 && actions.moveSection != nullptr)
+                    actions.moveSection (reading.sections[index].id, slot);
+            }
+
+            sectionMoved = false;
+            repaint();
+            return;
+        }
+
         if (onRuler)
         {
             moveHeadTo (event.x, true, ! event.mods.isAltDown());

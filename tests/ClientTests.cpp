@@ -67,6 +67,8 @@
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Ranges.h>
+#include <wfg/client/model/Readiness.h>
+#include <wfg/client/model/Sections.h>
 #include <wfg/client/model/View.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
@@ -116,6 +118,8 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/MediaEdit.h>
+#include <wfg/engine/document/SectionCommands.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/FadePoints.h>
 #include <wfg/engine/document/Ids.h>
@@ -11850,4 +11854,190 @@ TEST_CASE ("client: a sweep of the analysis cache somebody asked for is said as 
     skipped.state = "skipped";
     skipped.problem = "could not read empty.mov";
     CHECK (cacheSweepNews (asked, skipped) == "The analysis cache was not cleaned up: could not read empty.mov.");
+}
+
+//==============================================================================
+/*  A SOUND'S EDIT IN THE WINDOW'S MODEL (namespace draft §55). */
+
+TEST_CASE ("client: the waveform's reading carries the sound's sections, the edit's state, and whether it may be edited")
+{
+    Rig rig ("phase4");
+    doc::registerSectionCommands (rig.engine.commands(), rig.document, [] (const std::string&) { return 30.0; });
+
+    const model::Subject waveform { model::Subject::Kind::waveform, "P4MED001" };
+
+    auto reading = model::readFoot (*rig.publish (1), waveform);
+    CHECK (reading.sections.empty());
+    CHECK_FALSE (reading.frozen);
+    CHECK (reading.editable);
+    CHECK (reading.render.state.empty());
+
+    REQUIRE (rig.apply (2, "cli", "section.split", { osc::Value::string ("P4MED001"), osc::Value::float64 (10.0) }).applied == 1);
+    reading = model::readFoot (*rig.publish (2), waveform);
+
+    REQUIRE (reading.sections.size() == 2u);
+    CHECK (reading.sections[0].index == 0);
+    CHECK (reading.sections[0].in == doctest::Approx (0.0));
+    CHECK (reading.sections[0].out == doctest::Approx (10.0));
+    CHECK (reading.sections[1].index == 1);
+    CHECK (reading.sections[1].in == doctest::Approx (10.0));
+    CHECK (reading.sections[1].out == doctest::Approx (30.0));
+    CHECK (reading.sections[1].crossfade == doctest::Approx (0.01));
+    CHECK (reading.sections[1].trimDb == doctest::Approx (0.0));
+    CHECK (reading.fileLength == doctest::Approx (30.0));   // the tree's duration: the sections put together
+    CHECK (reading.editable);
+
+    /*  Frozen: the sections wait, nothing may be edited, the file is the bounce. */
+    const auto file = reading.file;
+    REQUIRE (rig.apply (3, "cli", "media.frozen", { osc::Value::string ("P4MED001"), osc::Value::string (file),
+                                                    osc::Value::string ("bounce (edit).wav") }).applied == 1);
+    reading = model::readFoot (*rig.publish (3), waveform);
+    CHECK (reading.frozen);
+    CHECK (reading.editSource == file);
+    CHECK (reading.file == "bounce (edit).wav");
+    CHECK (reading.sections.size() == 2u);
+    CHECK_FALSE (reading.editable);
+
+    REQUIRE (rig.apply (4, "cli", "media.unfreeze", { osc::Value::string ("P4MED001") }).applied == 1);
+    reading = model::readFoot (*rig.publish (4), waveform);
+    CHECK_FALSE (reading.frozen);
+    CHECK (reading.editable);
+
+    /*  And not under the lock. */
+    REQUIRE (rig.apply (5, "cli", "node.set", { osc::Value::string ("/godot/document/locked"), osc::Value::string ("true") }).applied == 1);
+    reading = model::readFoot (*rig.publish (5), waveform);
+    CHECK (reading.locked);
+    CHECK_FALSE (reading.editable);
+
+    //  A cue that is not a sound has no sections to read, whatever is published.
+    CHECK (model::readSections (*rig.publish (5), "P4GRP001").empty());
+}
+
+TEST_CASE ("client: the sections' arithmetic is the engine's")
+{
+    const std::vector<model::SectionRow> rows { { "A", 0, 0.0, 10.0, 0.0, 0.01 },
+                                                { "B", 1, 2.0, 3.0, -6.0, 1.6 },
+                                                { "C", 2, 20.0, 30.0, 0.0, 0.6 } };
+    std::vector<doc::Section> same;
+
+    for (const auto& row : rows)
+        same.push_back ({ row.id, row.in, row.out, row.trimDb, row.crossfade });
+
+    const auto ours = model::sectionStarts (rows);
+    const auto theirs = doc::sectionStarts (same);
+    REQUIRE (ours.size() == theirs.size());
+
+    for (std::size_t i = 0; i < ours.size(); ++i)
+        CHECK (ours[i] == doctest::Approx (theirs[i]));
+
+    CHECK (model::editedLength (rows) == doctest::Approx (doc::editedLength (same)));
+    CHECK (model::continuousJoin (rows[0], rows[1]) == doc::isContinuousJoin (same[0], same[1]));
+    CHECK (model::heardCrossfade (rows, 0) == doctest::Approx (doc::crossfadeInto (same, 0)));
+    CHECK (model::heardCrossfade (rows, 2) == doctest::Approx (doc::crossfadeInto (same, 2)));
+
+    for (const double asked : { 0.0, 0.2, 1.6, 4.0, 25.0 })
+        for (std::size_t k = 0; k < rows.size(); ++k)
+        {
+            auto trial = same;
+            trial[k].crossfade = asked;
+            CHECK (model::clampedCrossfade (rows, k, asked) == doctest::Approx (doc::clampCrossfades (trial)[k].crossfade));
+        }
+
+    /*  A continuous join is heard as nothing, whatever it stores. */
+    const std::vector<model::SectionRow> split { { "A", 0, 0.0, 10.0, 0.0, 0.01 }, { "B", 1, 10.0, 20.0, 0.0, 0.5 } };
+    CHECK (model::heardCrossfade (split, 1) == doctest::Approx (0.0));
+}
+
+TEST_CASE ("client: the sections laid on the bar, hit, and dropped")
+{
+    const std::vector<model::SectionRow> rows { { "A", 0, 0.0, 10.0 }, { "B", 1, 10.0, 20.0 }, { "C", 2, 20.0, 30.0 } };
+    model::View view;
+    view.reset (30.0);
+
+    const auto layout = model::layoutSections (rows, view, 300);
+    REQUIRE (layout.size() == 3u);
+    CHECK (layout[1].index == 1);
+    CHECK (layout[1].x0 == doctest::Approx (100.0));
+    CHECK (layout[1].x1 == doctest::Approx (200.0));
+
+    CHECK (model::hitSection (layout, 150.0, 7.0).hit == model::SectionHit::block);
+    CHECK (model::hitSection (layout, 150.0, 7.0).index == 1);
+    CHECK (model::hitSection (layout, 102.0, 7.0).hit == model::SectionHit::join);
+    CHECK (model::hitSection (layout, 102.0, 7.0).index == 1);
+    CHECK (model::hitSection (layout, 3.0, 7.0).hit == model::SectionHit::block);   // no join on the first
+    CHECK (model::hitSection (layout, 3.0, 7.0).index == 0);
+    CHECK (model::hitSection (layout, 400.0, 7.0).hit == model::SectionHit::none);
+
+    CHECK (model::dropSlotFor (rows, view, 300, 2, 20.0) == 0);     // the chorus before the intro
+    CHECK (model::dropSlotFor (rows, view, 300, 0, 160.0) == 1);    // the intro after the verse
+    CHECK (model::dropSlotFor (rows, view, 300, 0, 30.0) == -1);    // where it is
+    CHECK (model::dropSlotFor (rows, view, 300, 2, 290.0) == -1);
+    CHECK (model::dropSlotFor (rows, view, 300, 5, 10.0) == -1);
+
+    /*  Zoomed onto the verse, the intro is off the bar and left out. */
+    view.frame (12.0, 18.0);
+    const auto zoomed = model::layoutSections (rows, view, 300);
+    REQUIRE (zoomed.size() == 1u);
+    CHECK (zoomed[0].index == 1);
+
+    CHECK (model::crossfadeFromDrag (10.0, 10.25) == doctest::Approx (0.5));
+    CHECK (model::crossfadeFromDrag (10.0, 9.9) == doctest::Approx (0.2));
+}
+
+TEST_CASE ("client: a trim's words, the render's words, and every section gesture's command")
+{
+    CHECK (model::trimText (-6.0) == "-6 dB");
+    CHECK (model::trimText (0.0) == "0 dB");
+    CHECK (model::trimText (3.25) == "+3.3 dB");
+    CHECK (model::trimFrom ("-6").value() == doctest::Approx (-6.0));
+    CHECK (model::trimFrom (" -6.5 dB").value() == doctest::Approx (-6.5));
+    CHECK (model::trimFrom ("silence").value() == doctest::Approx (-120.0));
+    CHECK_FALSE (model::trimFrom ("loud").has_value());
+    CHECK (model::sectionLabel ({ "B", 1, 10.0, 20.0 }, 1).rfind ("2  ", 0) == 0);
+
+    model::EditRenderRow row;
+    CHECK (model::renderWords (row).empty());
+    row.state = "rendering";
+    row.percent = 42;
+    CHECK (model::renderWords (row) == "rendering the edit, 42 %");
+    row.state = "done";
+    CHECK (model::renderWords (row) == "the edit is rendered");
+    row.state = "failed";
+    row.problem = "stopped";
+    CHECK (model::renderWords (row) == "the edit could not be rendered: stopped");
+
+    const auto split = gesture::sectionSplit ("C1", 7.5);
+    CHECK (split.command == "section.split");
+    REQUIRE (split.args.size() == 2u);
+    CHECK (split.args[0].getString() == "C1");
+    CHECK (split.args[1].asDouble() == doctest::Approx (7.5));
+    CHECK (gesture::sectionJoin ("S1").command == "section.join");
+    CHECK (gesture::sectionTrim ("S1", 1.0, 2.0).command == "section.trim");
+    CHECK (gesture::sectionTrim ("S1", 1.0, 2.0).args[2].asDouble() == doctest::Approx (2.0));
+    CHECK (gesture::sectionMove ("S1", 2).command == "section.move");
+    CHECK (gesture::sectionMove ("S1", 2).args[1].getInt32() == 2);
+    CHECK (gesture::sectionRemove ("S1").command == "section.remove");
+    CHECK (gesture::sectionClear ("C1").command == "section.clear");
+    CHECK (gesture::freezeEdit ("C1").command == "media.freeze");
+    CHECK (gesture::unfreezeEdit ("C1").command == "media.unfreeze");
+}
+
+TEST_CASE ("client: the render's readout is read for the cue, and a sound waiting for its render is marked so")
+{
+    Rig rig ("phase4");
+
+    EngineState state;
+    state.version = "test";
+    state.editRender = "OTHER001\tdone\t100\t\nP4MED001\trendering\t42\t";
+    const auto snapshot = rig.parameters.publish (1, state);
+
+    const auto row = model::readEditRender (*snapshot, "P4MED001");
+    CHECK (row.state == "rendering");
+    CHECK (row.percent == 42);
+    CHECK (model::readEditRender (*snapshot, "OTHER001").state == "done");
+    CHECK (model::readEditRender (*snapshot, "NOBODY00").state.empty());
+
+    const auto mark = model::readinessMark ("partial", "rendering", "media");
+    CHECK (mark.icon == model::Icon::loading);
+    CHECK (mark.text == "rendering");
 }
