@@ -559,6 +559,8 @@ namespace wfg::client
                     named command, one write on release. */
                 footActions.edgeSection = [this] (const std::string& sectionId, bool inSide, double seconds)
                                           { send (gesture::sectionEdge (sectionId, inSide, seconds)); };
+                footActions.placeSection = [this] (const std::string& sectionId, double seconds)
+                                           { send (gesture::sectionPlace (sectionId, seconds)); };
                 footActions.fadeSection = [this] (const std::string& sectionId, bool inSide, double seconds, bool alone)
                                           { send (gesture::sectionFade (sectionId, inSide, seconds, alone)); };
                 footActions.curveSection = [this] (const std::string& sectionId, bool inSide, double curve, bool alone)

@@ -482,3 +482,63 @@ TEST_CASE ("played media: a movie being edited plays its render as a sound does,
     CHECK_FALSE (cue::playedMediaOf (document.findById (still), &lengths, nullptr).openEdit);
     CHECK (cue::sectionsIn (document.findById (still)).empty());
 }
+
+//==============================================================================
+/*  WHAT THE MONITOR SHOWS OF A MOVIE BEING EDITED (namespace draft §55.13, ADV
+    amended): its render at the edited second, dissolves and black as they
+    play; the source mapped while there is none; nothing in its silence. */
+
+TEST_CASE ("played media: the monitor shows a movie's render at the edited second, the source mapped while there is none, and nothing in its silence")
+{
+    doc::ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+    const auto movieId = document.createCue (listId, 0, "video", "Clip").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + movieId + "/source", "movie").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + movieId + "/file", "clip.mov").ok);
+    const std::map<std::string, double> lengths { { "clip.mov", 30.0 } };
+
+    //  No edit: the file itself, at the second asked.
+    auto frame = cue::tileFrameOf (document.findById (movieId), 7.5, &lengths, nullptr);
+    CHECK (frame.file.empty());
+    CHECK (frame.seconds == doctest::Approx (7.5));
+    CHECK (frame.shown);
+
+    /*  The last shot first, then the first, two seconds of silence, then the
+        second: [20,30] 0..10, [0,10] 10..20, silence, [10,20] 22..32. */
+    REQUIRE (document.splitSection (movieId, 10.0, 30.0, {}).ok);
+    REQUIRE (document.splitSection (movieId, 20.0, 30.0, {}).ok);
+    auto sections = cue::sectionsIn (document.findById (movieId));
+    REQUIRE (document.moveSection (sections[2].id, 0).ok);
+    sections = cue::sectionsIn (document.findById (movieId));
+    REQUIRE (document.setSectionGap (sections[2].id, 2.0).ok);
+    const auto movie = document.findById (movieId);
+
+    //  No render yet: the source where the edit maps the second; nothing in the silence; the last out past the end.
+    frame = cue::tileFrameOf (movie, 2.5, &lengths, nullptr);
+    CHECK (frame.file.empty());
+    CHECK (frame.seconds == doctest::Approx (22.5));
+    CHECK (frame.shown);
+    CHECK_FALSE (cue::tileFrameOf (movie, 21.0, &lengths, nullptr).shown);
+    CHECK (cue::tileFrameOf (movie, 40.0, &lengths, nullptr).seconds == doctest::Approx (20.0));
+
+    //  The render there: it, at the edited second itself - the silence black in it, a dissolve as it plays.
+    audio::EditRenders renders;
+    audio::EditRender render;
+    render.cue = movieId;
+    render.editText = cue::editTextOf (movie);
+    render.file = ".edits/clip-abc.mov";
+    render.state = audio::renderState::done;
+    renders[movieId] = render;
+
+    frame = cue::tileFrameOf (movie, 21.0, &lengths, &renders);
+    CHECK (frame.file == ".edits/clip-abc.mov");
+    CHECK (frame.seconds == doctest::Approx (21.0));
+    CHECK (frame.shown);
+
+    //  Frozen: the bounce, which the cue names, at the second asked.
+    REQUIRE (document.freezeEdit (movieId, "clip.mov", "clip (edit).mov").ok);
+    frame = cue::tileFrameOf (document.findById (movieId), 21.0, &lengths, &renders);
+    CHECK (frame.file.empty());
+    CHECK (frame.seconds == doctest::Approx (21.0));
+    CHECK (frame.shown);
+}

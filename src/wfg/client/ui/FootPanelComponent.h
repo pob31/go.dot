@@ -90,6 +90,7 @@ namespace wfg::client::ui
             std::function<void (const std::string& sectionId, int index)> moveSection;
             std::function<void (const std::string& sectionId, bool leaveGap)> removeSection;
             std::function<void (const std::string& sectionId, bool inSide, double seconds)> edgeSection;
+            std::function<void (const std::string& sectionId, double seconds)> placeSection;
             std::function<void (const std::string& sectionId, bool inSide, double seconds, bool alone)> fadeSection;
             std::function<void (const std::string& sectionId, bool inSide, double curve, bool alone)> curveSection;
             std::function<void (const std::string& cueId, double from, double to)> splitSpan;

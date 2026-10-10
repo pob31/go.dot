@@ -719,6 +719,8 @@ namespace wfg::client::ui
             sectionMoved = false;
             selection.reset();
             gripHeld = gripHover = {};
+            slidSection = noSection;
+            slidePreview.clear();
         }
 
         if (pickedSection >= reading.sections.size())
@@ -1063,6 +1065,9 @@ namespace wfg::client::ui
     {
         const auto bar = barArea();
 
+        //  THE EDIT AS THE HAND HAS IT (§55.13): a slide or a handle drawn waveform and all.
+        const auto& shownSections = sectionsShown();
+
         /*  A MOVIE DRAWS THE SOUND LOCKED TO IT (namespace draft §47, AAC):
             the same seconds, since the sound is the movie's own, taken out
             over the same span. */
@@ -1074,7 +1079,7 @@ namespace wfg::client::ui
         std::string editKey;
 
         if (editShown())
-            for (const auto& section : reading.sections)
+            for (const auto& section : shownSections)
                 editKey += section.id + ":" + osc::formatDouble (section.in) + "-" + osc::formatDouble (section.out)
                          + "@" + osc::formatDouble (section.gap) + "*" + osc::formatDouble (section.trimDb) + ";";
 
@@ -1110,11 +1115,11 @@ namespace wfg::client::ui
             from the file at the section's own seconds and laid at its place
             on the timeline; a gap between is left silent. */
         bars.assign (static_cast<std::size_t> (bar.getWidth()), model::Column {});
-        const auto starts = model::sectionStarts (reading.sections);
+        const auto starts = model::sectionStarts (shownSections);
 
-        for (std::size_t k = 0; k < reading.sections.size(); ++k)
+        for (std::size_t k = 0; k < shownSections.size(); ++k)
         {
-            const auto& section = reading.sections[k];
+            const auto& section = shownSections[k];
             const auto from = juce::jmax (starts[k], view.from);
             const auto to = juce::jmin (starts[k] + section.length(), view.to);
 
@@ -1198,8 +1203,8 @@ namespace wfg::client::ui
         /*  THROUGH THE EDIT (namespace draft §55.5, ADV): the bar draws the
             edited timeline, so the strip ends where the edit does and each slot
             shows the file's picture at the second its section maps to. */
-        const auto edited = editShown() && ! reading.sections.empty();
-        const auto length = edited ? model::editedLength (reading.sections) : strip->duration;
+        const auto edited = editShown() && ! sectionsShown().empty();
+        const auto length = edited ? model::editedLength (sectionsShown()) : strip->duration;
         const auto movieEnd = length > 0.0 && view.span() > 0.0
                                 ? pictures.getX() + static_cast<int> (std::ceil (view.xForSeconds (length, pictures.getWidth())))
                                 : pictures.getRight();
@@ -1215,7 +1220,7 @@ namespace wfg::client::ui
 
             if (edited)
             {
-                const auto place = model::placeOf (reading.sections, fileSecond);
+                const auto place = model::placeOf (sectionsShown(), fileSecond);
 
                 if (! place.has_value())
                     continue;
@@ -1259,14 +1264,14 @@ namespace wfg::client::ui
         if (strip == nullptr)
             return out;
 
-        if (! editShown() || reading.sections.empty())
+        if (! editShown() || sectionsShown().empty())
             return strip->cuts;
 
         /*  THROUGH THE EDIT (namespace draft §55.5): each cut of the file laid
             where the section holding it now is - more than once when the
             material is - and the model's rule says where. */
         for (const auto& cut : strip->cuts)
-            for (const auto seconds : model::cutsOnTimeline (reading.sections, { cut.seconds }))
+            for (const auto seconds : model::cutsOnTimeline (sectionsShown(), { cut.seconds }))
             {
                 auto moved = cut;
                 moved.seconds = seconds;
@@ -1725,6 +1730,9 @@ namespace wfg::client::ui
 
     const std::vector<model::SectionRow>& WaveformEditorComponent::sectionsShown() const
     {
+        if (slidSection != noSection && slideMoved && ! slidePreview.empty())
+            return slidePreview;
+
         if (gripHeld.grip != model::Grip::none && gripMoved && ! gripPreview.empty())
             return gripPreview;
 
@@ -2641,11 +2649,17 @@ namespace wfg::client::ui
                 return;
             }
 
+            /*  THE LOWER HALF PICKS AND SLIDES (§55.13): a press picks the section
+                under it, a drag slides it along the timeline between its
+                neighbours; the row above reorders. */
             if (const auto under = model::sectionAt (reading.sections, secondsAt (event.x)))
             {
                 pickedSection = *under;
-                draggedSection = *under;
-                sectionMoved = false;
+                slidSection = *under;
+                slideFrom = slideValue = model::sectionStarts (reading.sections)[*under];
+                slidePress = secondsAt (event.x);
+                slideMoved = false;
+                slidePreview.clear();
                 lowerPress = true;
                 pressX = dragX = event.x;
                 selection.reset();
@@ -2725,6 +2739,53 @@ namespace wfg::client::ui
                     break;
             }
 
+            repaint();
+            return;
+        }
+
+        /*  A SECTION SLID (§55.13): where it would begin, snapped by its start
+            or its end to the other edges, the playhead and a movie's cuts unless
+            Alt, held between its neighbours - and the edit so, drawn. */
+        if (slidSection != noSection && slidSection < reading.sections.size())
+        {
+            if (std::abs (event.x - pressX) <= 3 && ! slideMoved)
+                return;
+
+            slideMoved = true;
+            const auto length = reading.sections[slidSection].length();
+            auto start = slideFrom + (secondsAt (event.x) - slidePress);
+
+            if (! event.mods.isAltDown())
+            {
+                std::vector<double> targets { headSeconds() };
+                const auto starts = model::sectionStarts (reading.sections);
+
+                for (std::size_t k = 0; k < starts.size(); ++k)
+                    if (k != slidSection)
+                    {
+                        targets.push_back (starts[k]);
+                        targets.push_back (starts[k] + reading.sections[k].length());
+                    }
+
+                if (cutsSnap())
+                    for (const auto& cut : cutsShown())
+                        targets.push_back (cut.seconds);
+
+                const auto byStart = model::snapTo (start, targets, toleranceSeconds());
+                const auto byEnd = model::snapTo (start + length, targets, toleranceSeconds()) - length;
+
+                if (std::abs (byStart - start) > 1.0e-9)
+                    start = byStart;
+                else if (std::abs (byEnd - start) > 1.0e-9)
+                    start = byEnd;
+            }
+
+            const auto limits = model::placeLimits (reading.sections, slidSection);
+            start = std::clamp (start, limits.first, limits.second);
+            slidePreview = model::withPlace (reading.sections, slidSection, start);
+            slideValue = model::sectionStarts (slidePreview)[slidSection];
+            tell ("section " + juce::String (static_cast<int> (slidSection) + 1) + " from " + clockText (slideValue)
+                    + " - it stops at its neighbours; the row above reorders");
             repaint();
             return;
         }
@@ -2969,6 +3030,28 @@ namespace wfg::client::ui
             }
 
             gripMoved = false;
+            tell ({});
+            repaint();
+            return;
+        }
+
+        //  THE SLIDE'S ONE WRITE (§55.13).
+        if (slidSection != noSection)
+        {
+            const auto index = slidSection;
+            slidSection = noSection;
+
+            if (slideMoved && index < reading.sections.size())
+            {
+                if (! reading.editable)
+                    refuseEdit();
+                else if (std::abs (slideValue - slideFrom) >= 0.0005 && actions.placeSection != nullptr)
+                    actions.placeSection (reading.sections[index].id, slideValue);
+            }
+
+            slideMoved = false;
+            slidePreview.clear();
+            lowerPress = false;
             tell ({});
             repaint();
             return;

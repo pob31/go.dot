@@ -62,6 +62,22 @@ namespace wfg::cue
         second the edit maps to. */
     double fileSecondOf (const juce::ValueTree& cue, double editedSecond);
 
+    /*  WHAT THE VIDEO MONITOR SHOWS OF A MOVIE at an edited second (namespace
+        draft §55.13, ADV amended): the render of its open edit at that second -
+        its dissolves, its fades and its black as they play; while the render is
+        not there yet, the source's frame at the second the edit maps to, and
+        nothing in its silence; the file itself otherwise, a bounce included.
+        `file` empty is the file the cue names, as its spec reads it. */
+    struct TileFrame
+    {
+        std::string file;       // relative to the media folder; empty: the cue's own
+        double seconds = 0.0;   // of that file
+        bool shown = true;      // false in an edit's silence
+    };
+
+    TileFrame tileFrameOf (const juce::ValueTree& cue, double editedSecond,
+                           const std::map<std::string, double>* durations, const audio::EditRenders* renders);
+
     struct PlayedMedia
     {
         std::string name;             // the file the cue plays, relative to media/; empty when there is none yet

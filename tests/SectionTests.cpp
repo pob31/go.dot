@@ -1368,6 +1368,7 @@ TEST_CASE ("section.*: the handles' records replay with no facts to the same sho
     REQUIRE (rig.apply ("section.remove", { osc::Value::string (ids[0]), osc::Value::int32 (1) }) == 1u);
     REQUIRE (rig.apply ("section.deleteSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (20.0), osc::Value::float64 (22.0),
                                                 osc::Value::int32 (1) }) == 1u);
+    REQUIRE (rig.apply ("section.place", { osc::Value::string (ids[1]), osc::Value::float64 (22.0) }) == 1u);
     const auto after = doc::CanonicalXml::write (rig.document);
 
     doc::ShowDocument replayed;
@@ -1396,4 +1397,68 @@ TEST_CASE ("section.*: the handles' records replay with no facts to the same sho
     }
 
     CHECK (doc::CanonicalXml::write (replayed) == after);
+}
+
+//==============================================================================
+/*  A SECTION SLID ALONG THE TIMELINE (namespace draft §55.13): the lower
+    half's drag, as section.place. */
+
+TEST_CASE ("section.place: a section slid along the timeline, its material and its points with it, everything else where it was; it stops at its neighbours")
+{
+    EditRig rig;
+    rig.split (10.0);
+    rig.split (20.0);
+    const auto ids = rig.ids();
+    const auto length = [&rig] { return doc::editedLength (rig.document.sectionsOf (rig.document.findById (rig.cueId))); };
+
+    //  The verse taken out, leaving ten seconds of silence before the chorus.
+    REQUIRE (rig.document.removeSection (ids[1], true).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/levelLane", "5 0 25 -10").ok);
+
+    //  THE CHORUS THREE SECONDS EARLIER: its point with it, the cue shorter.
+    CHECK (rig.apply ("section.place", { osc::Value::string (ids[2]), osc::Value::float64 (17.0) }) == 1u);
+    CHECK (rig.seconds ("/godot/section/" + ids[2] + "/gap") == doctest::Approx (7.0));
+    CHECK (rig.lane() == "5 0 22 -10");
+    CHECK (length() == doctest::Approx (27.0));
+
+    //  THE INTRO FOUR SECONDS LATER: the silence before and after it giving and taking, the chorus where it was.
+    REQUIRE (rig.document.placeSection (ids[0], 4.0).ok);
+    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/gap") == doctest::Approx (4.0));
+    CHECK (rig.seconds ("/godot/section/" + ids[2] + "/gap") == doctest::Approx (3.0));
+    CHECK (rig.lane() == "9 0 22 -10");
+
+    //  Into its neighbour, or before the cue's start: refused. Under a millisecond from it: the two meet.
+    CHECK (rig.document.placeSection (ids[0], 7.5).reason == "bad-value");
+    CHECK (rig.document.placeSection (ids[0], -1.0).reason == "bad-value");
+    REQUIRE (rig.document.placeSection (ids[0], 6.9995).ok);
+    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/gap") == doctest::Approx (7.0));
+    CHECK (rig.seconds ("/godot/section/" + ids[2] + "/gap") == doctest::Approx (0.0));
+    CHECK (doc::isJoin (rig.document.sectionsOf (rig.document.findById (rig.cueId)), 1));
+
+    //  One undo puts it back.
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+}
+
+TEST_CASE ("section.place: a movie's section lands on its frame grid, the rate written back, and its sound's copy slides with it")
+{
+    MovieRig rig;   // clip.mov at 25 a second
+    rig.splitMovie (10.0);
+    auto movie = rig.of (rig.movieId);
+    REQUIRE (rig.document.setSectionGap (movie[1].id, 2.0).ok);
+
+    //  11.03 is frame 275.75: 11.04.
+    REQUIRE (rig.apply ("section.place", { osc::Value::string (movie[1].id), osc::Value::float64 (11.03) }) == 1u);
+    movie = rig.of (rig.movieId);
+    CHECK (movie[1].gap == doctest::Approx (1.04));
+    CHECK (rig.of (rig.soundId)[1].gap == doctest::Approx (1.04));
+
+    std::vector<LogRecord> applied;
+
+    for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+        if (record.kind == LogRecord::Kind::applied)
+            applied.push_back (record);
+
+    REQUIRE (applied.size() == 1u);
+    CHECK (applied[0].args[1].asDouble() == doctest::Approx (11.04));
+    CHECK (applied[0].args[2].asDouble() == doctest::Approx (25.0));
 }

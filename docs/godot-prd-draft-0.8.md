@@ -2192,9 +2192,11 @@ frozen together; a movie that is not HAP is converted first. The sections are
 handled on the waveform as Samplitude's objects are *(at the author's direction,
 2026-10-10)*: a volume handle in the middle, at each end a handle for the edge
 and one for the fade's length, Shift to unlock a join's two fades, the wheel to
-bend a fade's curve; the top half selects time and the lower half a section; x
-splits, Backspace deletes leaving silence, Shift+Backspace closes up. The namespace
-draft's §55 holds the decisions and the commands.
+bend a fade's curve; the top half selects time and the lower half picks a section
+and slides it along the timeline; x splits, Backspace deletes leaving silence,
+Shift+Backspace closes up. The video monitor shows a movie being edited as it
+plays, dissolves included. The namespace draft's §55 holds the decisions and the
+commands.
 
 #### Running view and solver
 

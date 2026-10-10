@@ -4463,6 +4463,12 @@ namespace
         std::uint64_t tileWishSeen = 0;
         std::uint64_t tileRevisionSeen = 0;
 
+        /*  AND THE RENDERS IT WAS DRAWN FROM, and the one it shows (§55.13): a
+            render landing is no revision of the show, and a render the tile
+            shows is not let go of under it. */
+        std::uint32_t tileRendersSeen = 0;
+        std::string tileFileShown;
+
         /*  And the lock it was read under: a projector put away while the show
             is unlocked comes back when it is locked (§39), and the lock is
             engine state, which moves no show revision. */
@@ -5126,10 +5132,14 @@ namespace
 
                                      const auto revision = document.showRevision();
 
-                                     if (tileSerial != tileWishSeen || (! tileCue.empty() && revision != tileRevisionSeen))
+                                     const auto rendersNow = renderer.changes();
+
+                                     if (tileSerial != tileWishSeen
+                                           || (! tileCue.empty() && (revision != tileRevisionSeen || rendersNow != tileRendersSeen)))
                                      {
                                          tileWishSeen = tileSerial;
                                          tileRevisionSeen = revision;
+                                         tileRendersSeen = rendersNow;
 
                                          auto spec = tileCue.empty() ? wfg::video::LayerSpec {}
                                                                      : wfg::cue::pictureSpecOf (document, tileCue, mediaFolder);
@@ -5137,6 +5147,7 @@ namespace
                                          if (spec.source.empty())
                                          {
                                              videoHost.hideTile();
+                                             tileFileShown.clear();
                                          }
                                          else
                                          {
@@ -5144,12 +5155,20 @@ namespace
                                              const auto opacity = wfg::osc::parseDouble (document.getAttribute ("/godot/cue/" + tileCue + "/opacity")
                                                                                              .value_or (std::string {})).value_or (100.0);
 
-                                             /*  A MOVIE BEING EDITED (namespace draft §55.5, ADV):
-                                                 the source's frame at the second the edit maps
-                                                 the window's to, so the window never knows. */
-                                             videoHost.showTile (spec,
-                                                                 wfg::cue::fileSecondOf (document.findById (tileCue), tileSeconds),
-                                                                 opacity / 100.0);
+                                             /*  A MOVIE BEING EDITED (namespace draft §55.13, ADV
+                                                 amended): its render at the window's second -
+                                                 the dissolves as they play - or, while there is
+                                                 none yet, the source's frame where the edit maps
+                                                 it, nothing in its silence. The window never knows. */
+                                             const auto frame = wfg::cue::tileFrameOf (document.findById (tileCue), tileSeconds,
+                                                                                     mediaInfo.durations().get(),
+                                                                                     renderer.snapshot().get());
+
+                                             if (spec.source == "movie" && ! frame.file.empty())
+                                                 spec.file = wfg::audio::resolveMediaPath (mediaFolder, frame.file);
+
+                                             tileFileShown = spec.source == "movie" ? frame.file : std::string {};
+                                             videoHost.showTile (spec, frame.seconds, frame.shown ? opacity / 100.0 : 0.0);
                                          }
                                      }
                                  }
@@ -5679,8 +5698,8 @@ namespace
                                         for (const auto& run : runs.all())
                                             named = named || (! run.isFinished() && run.media == file);
 
-                                        //  Or a picture up on it (§55.5).
-                                        named = named || runner.namesMovieFile (file);
+                                        //  Or a picture up on it (§55.5), or the monitor's tile (§55.13).
+                                        named = named || runner.namesMovieFile (file) || (! tileFileShown.empty() && file == tileFileShown);
 
                                         if (named)
                                             renderer.stale (file);

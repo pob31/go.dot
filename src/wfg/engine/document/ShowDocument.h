@@ -475,6 +475,12 @@ namespace wfg::doc
         EditResult curveSection (const std::string& sectionId, bool inSide, double curve, bool alone);
         EditResult setSectionGap (const std::string& sectionId, double gap);
 
+        /*  A SECTION SLID ALONG THE TIMELINE (namespace draft §55.13): it begins
+            at `seconds` of the edited timeline, its material with it, everything
+            else where it was - the silence before it and after it giving and
+            taking. It stops at its neighbours: refused where it would cover one. */
+        EditResult placeSection (const std::string& sectionId, double seconds);
+
         /*  A SELECTION OF TIME (55.9): the sections cut at both its ends, one
             step - an end on a cut or in silence passed over, none to cut
             refused; `ids` in are the identifiers to make them under (empty to

@@ -515,6 +515,51 @@ namespace wfg::client::model
         return sections;
     }
 
+    std::pair<double, double> placeLimits (const std::vector<SectionRow>& sections, std::size_t index)
+    {
+        if (index >= sections.size())
+            return { 0.0, 0.0 };
+
+        const auto starts = sectionStarts (sections);
+        const auto before = index == 0 ? 0.0 : starts[index - 1] + sections[index - 1].length();
+        const auto after = index + 1 < sections.size() ? starts[index + 1] - sections[index].length()
+                                                       : std::numeric_limits<double>::max();
+        return { before, std::max (before, after) };
+    }
+
+    std::vector<SectionRow> withPlace (std::vector<SectionRow> sections, std::size_t index, double seconds)
+    {
+        if (index >= sections.size())
+            return sections;
+
+        const auto starts = sectionStarts (sections);
+        const auto length = sections[index].length();
+        const auto before = index == 0 ? 0.0 : starts[index - 1] + sections[index - 1].length();
+        const auto hasNext = index + 1 < sections.size();
+        const auto after = hasNext ? starts[index + 1] : 0.0;
+
+        auto start = std::max (before, seconds);
+
+        if (hasNext)
+            start = std::min (start, after - length);
+
+        if (start - before < joinInstant)
+            start = before;
+        else if (hasNext && after - (start + length) < joinInstant)
+            start = after - length;
+
+        const auto gap = start - before;
+        sections[index].gap = gap < joinInstant ? 0.0 : gap;
+
+        if (hasNext)
+        {
+            const auto next = std::max (0.0, after - (start + length));
+            sections[index + 1].gap = next < joinInstant ? 0.0 : next;
+        }
+
+        return clampFades (std::move (sections));
+    }
+
     std::optional<std::pair<std::size_t, bool>> fadeAt (const std::vector<SectionRow>& given, double seconds, double slack)
     {
         const auto sections = clampFades (given);

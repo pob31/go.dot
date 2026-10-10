@@ -183,6 +183,14 @@ namespace wfg::client::model
     std::vector<SectionRow> withFade (std::vector<SectionRow>, std::size_t index, bool inSide, double seconds, bool alone);
     std::vector<SectionRow> withCurve (std::vector<SectionRow>, std::size_t index, bool inSide, double curve, bool alone);
 
+    /*  A SECTION SLID (55.13), section.place restated: where it may begin -
+        from where the one before ends, nought for the first, to where the next
+        begins less its length, the last without end - and the edit with it
+        begun at `seconds`, held there, a sliver of silence under a millisecond
+        closed into a join. */
+    std::pair<double, double> placeLimits (const std::vector<SectionRow>&, std::size_t index);
+    std::vector<SectionRow> withPlace (std::vector<SectionRow>, std::size_t index, double seconds);
+
     /*  THE FADE UNDER THE POINTER, for the wheel (55.9): the section and side
         whose fade spans `seconds`, with `slack` seconds of grace either side
         of a short one; at a join, the side the pointer is on. */

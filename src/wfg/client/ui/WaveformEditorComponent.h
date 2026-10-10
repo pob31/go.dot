@@ -84,6 +84,9 @@ namespace wfg::client::ui
                 with its material in place, a fade's length and its curve (alone
                 with Shift), a selection split at both ends or deleted. */
             std::function<void (const std::string& sectionId, bool inSide, double seconds)> edgeSection;
+
+            /** A section slid along the timeline from the lower half (§55.13). */
+            std::function<void (const std::string& sectionId, double seconds)> placeSection;
             std::function<void (const std::string& sectionId, bool inSide, double seconds, bool alone)> fadeSection;
             std::function<void (const std::string& sectionId, bool inSide, double curve, bool alone)> curveSection;
             std::function<void (const std::string& cueId, double from, double to)> splitSpan;
@@ -417,6 +420,14 @@ namespace wfg::client::ui
         double selectFrom = 0.0;
         int selectPressX = 0;
         bool lowerPress = false;
+
+        /*  A SECTION SLID FROM THE LOWER HALF (§55.13): which, where it began,
+            the second the hand pressed at, where it would now begin, and the
+            edit so - drawn, waveform and all, until the one write on release. */
+        std::size_t slidSection = static_cast<std::size_t> (-1);
+        double slideFrom = 0.0, slidePress = 0.0, slideValue = 0.0;
+        bool slideMoved = false;
+        std::vector<model::SectionRow> slidePreview;
         std::optional<std::pair<std::size_t, bool>> curveTarget;
         double curveHeld = 0.0;
         bool curveAlone = false;

@@ -139,6 +139,43 @@ namespace wfg::cue
         return editedSecond < 0.0 ? sections.front().in : sections.back().out;
     }
 
+    TileFrame tileFrameOf (const juce::ValueTree& cue, double editedSecond,
+                           const std::map<std::string, double>* durations, const audio::EditRenders* renders)
+    {
+        TileFrame frame;
+        frame.seconds = editedSecond;
+
+        const auto played = playedMediaOf (cue, durations, renders);
+
+        if (! played.openEdit)
+            return frame;
+
+        //  THE RENDER, at the edited second itself: what plays, dissolves and all.
+        if (! played.name.empty())
+        {
+            frame.file = played.name;
+            return frame;
+        }
+
+        //  NOT THERE YET: the source, mapped; nothing in the silence.
+        const auto sections = sectionsIn (cue);
+
+        if (const auto place = doc::placeOf (sections, editedSecond))
+        {
+            frame.seconds = place->fileSecond;
+            return frame;
+        }
+
+        if (editedSecond >= doc::editedLength (sections) && ! sections.empty())
+        {
+            frame.seconds = sections.back().out;
+            return frame;
+        }
+
+        frame.shown = false;
+        return frame;
+    }
+
     std::optional<double> playedLengthOf (const juce::ValueTree& cue, const std::map<std::string, double>* durations)
     {
         const auto played = playedMediaOf (cue, durations, nullptr);

@@ -1228,7 +1228,9 @@ right.
 
 **Built** 2026-10-10, G.0 to G.4, on main (namespace draft §55.12 says what each did). The implementer's
 calls ADZ-AEH stand as proposed; what the author has not yet seen: the handles on screen, a bent
-crossfade by ear, the keys.
+crossfade by ear, the keys. Then, at the author's request the same evening, a section slid along the
+timeline from the lower half and the video monitor showing a movie edit's dissolves (namespace draft
+§55.13, ADZ, AEC and ADV amended).
 
 ---
 

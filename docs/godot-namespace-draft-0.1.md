@@ -24377,6 +24377,45 @@ made by an edge or a deletion); the row's crossfade lozenge is gone, the bar's t
 the monitor's tile still shows no dissolve; a selection is the window's and is not saved.
 
 
+### 55.13 A section slid, and the dissolve on the monitor
+
+Written 2026-10-10, the handles an hour old. The author: *"Check if you can proceed with the dragging of
+a section and the monitor dissolve."* Both were in 55.12's list of what was not built.
+
+**A drag in the lower half slides a section along the timeline**, its material and the lane points over
+it with it, everything else where it was: the silence before it and after it gives and takes. It stops
+at its neighbours, snapping by its start or its end to the other edges, the playhead and a movie's cuts
+unless Alt is held; a sliver of silence under a millisecond closes into a join. The waveform is drawn
+as the slide would leave it while the hand moves, and one `section.place` is written on release. The row
+of blocks above the bar keeps the reorder.
+
+**The video monitor shows a movie being edited as it plays**: the render of the edit at the second the
+window asks, so a dissolve, a fade from black and a gap's black are seen there as on a projector. While
+the render is not there yet - a few seconds after each change - the monitor shows the source's frame at
+the second the edit maps to, and nothing in the edit's silence. A new render is shown as soon as it
+lands, and a render the monitor shows is not deleted under it.
+
+**Decisions amended** (mine, dated 2026-10-10, the author's to overrule; no new codes):
+
+- **ADZ, amended**: in the lower half a press picks a section and a drag **slides** it along the timeline;
+  the reorder stays the row's.
+- **AEC, amended**: like an edge, a slid section never pushes a neighbour; it stops against it.
+- **ADV, amended**: the monitor shows the render of an open edit, once it is there, rather than the source
+  mapped through the sections; the strip stays the source's, read once.
+
+**The command**: `section.place <section> <seconds> [frameRate]` - the section begins at that second of
+the edited timeline; refused where it would cover a neighbour or begin before the cue's start; on a movie
+the second lands on its frame grid and is written back with the rate. Carried as every edit is.
+
+**Built** 2026-10-10 on main: `ShowDocument::placeSection` and the verb; `cue::tileFrameOf`, the one
+answer to what the monitor shows of a movie at an edited second, which serve's tile asks and re-asks when
+the renders move; `model::placeLimits` and `model::withPlace`, held to the engine's in the client tests;
+the window's lower-half slide, the bar's waveform, strip and cuts drawn from the edit as the hand has it.
+Tests under C and fr-FR: the slide with its points, its refusals and its join, a movie's slide on the
+grid with its sound's copy, the replay; the monitor's frame - render, source mapped, silence, past the
+end, frozen; the window's slide and its stop at a neighbour; `blackbox.media-edit` slides its last
+section half a second and hears the silence where it was.
+
 ## 56. Authoring from a processor: WFS-DIY and S21_HiJack write cues into Go.dot
 
 ### 56.1 What it does

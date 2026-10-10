@@ -344,6 +344,36 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        registry.add ({ "section.place",
+                        "Slides a section along its cue's edited timeline to begin at a second of it, its"
+                        " material with it and everything else where it was - the silence before it and"
+                        " after it giving and taking (namespace draft 55.13). It stops at its neighbours:"
+                        " refused where it would cover one; under a millisecond from one it meets it. The lane"
+                        " points over it go with it. On a movie the second lands on its frame grid, written"
+                        " back with the rate.",
+                        { { "section", 's', false }, { "seconds", 'd', false }, { "frameRate", 'd', true } },
+                        true,
+                        [&document, refusedMovieOf] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto sectionId = stringAt (args, 0);
+                            auto seconds = numberAt (args, 1);
+                            const auto movie = refusedMovieOf (sectionId, numberAt (args, 2));
+
+                            if (! movie.refusal.empty())
+                                return refusedMovie (movie);
+
+                            if (movie.movie)
+                                seconds = snappedToFrames (seconds, movie.fps);
+
+                            auto applied = withValue (args, 1, osc::Value::float64 (seconds));
+
+                            if (movie.movie)
+                                applied = withValue (std::move (applied), 2, osc::Value::float64 (movie.fps));
+
+                            return fromEdit (document.placeSection (sectionId, seconds), std::move (applied));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "section.fade",
                         "Sets how long a section fades in or out, in seconds (namespace draft 55.9, AED): its"
                         " partner across a join - the fade out of the section before, the fade in of the one"

@@ -3354,6 +3354,61 @@ namespace wfg::doc
         return EditResult::succeeded (sectionId);
     }
 
+    EditResult ShowDocument::placeSection (const std::string& sectionId, double seconds)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (! std::isfinite (seconds))
+            return EditResult::failed (reason::badValue);
+
+        const auto sections = sectionsOf (cue);
+        const auto k = indexOfSection (sections, sectionId);
+
+        if (k >= sections.size())
+            return EditResult::failed (reason::unknownId);
+
+        /*  BETWEEN ITS NEIGHBOURS: from where the one before ends - the cue's
+            start for the first - to where the next begins, less its own length;
+            the last may go on as far as it likes. */
+        const auto starts = sectionStarts (sections);
+        const auto length = sections[k].length();
+        const auto before = k == 0 ? 0.0 : starts[k - 1] + sections[k - 1].length();
+        const auto hasNext = k + 1 < sections.size();
+        const auto after = hasNext ? starts[k + 1] : 0.0;
+
+        if (seconds < before - sameInstant / 2.0 || (hasNext && seconds + length > after + sameInstant / 2.0))
+            return EditResult::failed (reason::badValue);
+
+        /*  A SLIVER OF SILENCE UNDER A MILLISECOND IS NONE: the section meets
+            its neighbour, and the two make a join. */
+        auto start = std::max (before, seconds);
+
+        if (hasNext)
+            start = std::min (start, after - length);
+
+        if (start - before < sameInstant)
+            start = before;
+        else if (hasNext && after - (start + length) < sameInstant)
+            start = after - length;
+
+        std::vector<std::pair<std::string, double>> writes { { "/godot/section/" + sectionId + "/gap", start - before } };
+
+        if (hasNext)
+            writes.push_back ({ "/godot/section/" + sections[k + 1].id + "/gap", std::max (0.0, after - (start + length)) });
+
+        return carrySectionEdit (cue, [this, writes, sectionId]
+        {
+            for (const auto& [address, value] : writes)
+                if (const auto written = setAttribute (address, osc::formatDouble (value < sameInstant ? 0.0 : value)); ! written.ok)
+                    return written;
+
+            return EditResult::succeeded (sectionId);
+        });
+    }
+
     EditResult ShowDocument::setSectionGap (const std::string& sectionId, double gap)
     {
         const auto [section, cue] = sectionAndCue (*this, sectionId);

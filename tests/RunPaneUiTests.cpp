@@ -5921,8 +5921,8 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
 
 TEST_CASE ("waveform: the top half selects time and the lower half a section; x splits, Backspace leaves silence, Shift+Backspace closes up; the wheel bends a fade (namespace draft §55.9)")
 {
-    std::string splitCue, spanCue, removed, curvedId;
-    double splitAt = -1.0, spanFrom = -1.0, spanTo = -1.0, curve = 99.0;
+    std::string splitCue, spanCue, removed, curvedId, placedId;
+    double splitAt = -1.0, spanFrom = -1.0, spanTo = -1.0, curve = 99.0, placedAt = -1.0;
     bool ripple = false, leftGap = false, curvedIn = false, curvedAlone = false;
     int deletes = 0;
     juce::String said;
@@ -5936,6 +5936,7 @@ TEST_CASE ("waveform: the top half selects time and the lower half a section; x 
     actions.removeSection = [&] (const std::string& id, bool leaveGap) { removed = id; leftGap = leaveGap; };
     actions.curveSection = [&] (const std::string& id, bool inSide, double value, bool alone)
     { curvedId = id; curvedIn = inSide; curve = value; curvedAlone = alone; };
+    actions.placeSection = [&] (const std::string& id, double seconds) { placedId = id; placedAt = seconds; };
 
     ui::WaveformEditorComponent editor (model::Theme {}, actions);
     editor.setRightColumn (360, 12);
@@ -6004,6 +6005,23 @@ TEST_CASE ("waveform: the top half selects time and the lower half a section; x 
     CHECK (editor.playhead() == doctest::Approx (23.0).epsilon (0.01));
     CHECK (editor.keyPressed (juce::KeyPress ('x')));
     CHECK (splitAt == doctest::Approx (23.0).epsilon (0.01));
+
+    /*  A DRAG IN THE LOWER HALF SLIDES (§55.13): the last section four
+        seconds later, one section.place on release; the first, with no
+        silence beside it, stays where it is and nothing is sent. */
+    editor.mouseDown (mouse ({ xOf (27.0), lowY }, false, left));
+    editor.mouseDrag (mouse ({ xOf (29.0), lowY }, true, left));
+    editor.mouseDrag (mouse ({ xOf (31.0), lowY }, true, left));
+    CHECK (said.contains ("stops at its neighbours"));
+    editor.mouseUp (mouse ({ xOf (31.0), lowY }, true, left));
+    CHECK (placedId == "SEC00002");
+    CHECK (placedAt == doctest::Approx (24.0).epsilon (0.01));
+
+    placedId.clear();
+    editor.mouseDown (mouse ({ xOf (3.0), lowY }, false, left));
+    editor.mouseDrag (mouse ({ xOf (6.0), lowY }, true, left));
+    editor.mouseUp (mouse ({ xOf (6.0), lowY }, true, left));
+    CHECK (placedId.empty());
 
     //  THE LOWER HALF picks the section under it; Backspace leaves its silence, Shift+Backspace closes up.
     editor.mouseDown (mouse ({ xOf (13.0), lowY }, false, left));

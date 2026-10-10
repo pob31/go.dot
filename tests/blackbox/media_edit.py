@@ -303,10 +303,26 @@ def run(locale: str) -> int:
             closed = newest_render(RATE * 7 // 2, mark)
             report.check(closed is not None, "the render follows, three and a half seconds long")
 
+            if closed is not None:
+                mark = closed.stat().st_mtime_ns
+
+            # Slid half a second later (55.13): silence before it again, the dip with it.
+            send(server, "/godot/cmd/section/place", [last, 3.0])
+            report.check(common.wait_until(lambda: abs((first_sound.value_of(server, f"/godot/section/{last}/gap") or 0.0) - 0.5) < 1e-6,
+                                           timeout=20) is not None,
+                         "section.place: the last section slid half a second later")
+            report.equal(first_sound.wait_for(server, cue + "duration", 4.0), 4.0, "the cue four seconds long again")
+            report.equal(wait_for_numbers(server, cue + "levelLane", [3.0, -10.0, 3.5, -10.0]), [3.0, -10.0, 3.5, -10.0],
+                         "and the dip with it")
+            slid = newest_render(RATE * SECONDS, mark)
+
+            if slid is not None:
+                report.check(abs(sample_at(slid, 2.75)) < 1e-6, "silence where it was", str(sample_at(slid, 2.75)))
+
         text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
 
         for record in (" section.split", " section.move", " media.freeze", " media.frozen", " media.unfreeze",
-                       " section.deleteSpan", " section.fade", " section.curve"):
+                       " section.deleteSpan", " section.fade", " section.curve", " section.place"):
             report.check(record in text, f"the log holds{record}")
 
         code, out, err = common.run_wfg("replay", str(log), f"--bundle={bundle}", f"--out={replayed}",

@@ -241,6 +241,7 @@ namespace wfg::client::gesture
     Event sectionMove (const std::string& sectionId, int index);
     Event sectionRemove (const std::string& sectionId, bool leaveGap = false);
     Event sectionEdge (const std::string& sectionId, bool inSide, double seconds);
+    Event sectionPlace (const std::string& sectionId, double seconds);
     Event sectionFade (const std::string& sectionId, bool inSide, double seconds, bool alone);
     Event sectionCurve (const std::string& sectionId, bool inSide, double curve, bool alone);
     Event sectionSplitSpan (const std::string& cueId, double from, double to);

@@ -12225,6 +12225,20 @@ TEST_CASE ("client: what a handle's drag would do is what the engine does - an e
         REQUIRE (rig.document.edgeSection (rows[edge.index].id, edge.inSide, fileSeconds).ok);
         same (drawn, rowsOf());
     }
+
+    /*  A SLIDE (55.13), held between its neighbours: the last into the open,
+        the middle and the first as far as their silence lets them. */
+    for (const auto pick : { std::size_t { 2 }, std::size_t { 1 }, std::size_t { 0 } })
+    {
+        INFO ("slide " << pick);
+        const auto rows = rowsOf();
+        const auto limits = model::placeLimits (rows, pick);
+        CHECK (limits.first <= limits.second);
+        const auto seconds = std::min (limits.second, limits.first + 0.75);
+        const auto drawn = model::withPlace (rows, pick, seconds);
+        REQUIRE (rig.document.placeSection (rows[pick].id, seconds).ok);
+        same (drawn, rowsOf());
+    }
 }
 
 TEST_CASE ("client: the handles on the bar - where each is, which one the pointer is on, and the fade under the wheel (55.9)")
