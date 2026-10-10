@@ -1241,7 +1241,7 @@ namespace wfg::tree
                 {
                     text = sendsOf (node, id, live);
                 }
-                else if (name == "sections" && isMedia)
+                else if (name == "sections" && (isMedia || isVideo))
                 {
                     text = sectionsOf (node);
                 }

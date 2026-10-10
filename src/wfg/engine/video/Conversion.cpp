@@ -652,6 +652,18 @@ namespace wfg::video
                                 if (! (cut > 0.0))
                                     continue;
 
+                                /*  A MOVIE WITH AN EDIT (55.5): its sections are the file's
+                                    seconds and move back by the cut, its sound's copies with
+                                    them; its ranges and its offset are the edited timeline's
+                                    and stay where they are. */
+                                if (! document.sectionsOf (node).empty())
+                                {
+                                    if (const auto shifted = document.shiftSections (id, -cut); ! shifted.ok)
+                                        return Outcome::rejected (shifted.reason);
+
+                                    continue;
+                                }
+
                                 if (const auto edit = document.setAttribute (base + "startOffset",
                                                                              osc::formatDouble (std::max (0.0, offset - cut)));
                                     ! edit.ok)

@@ -38,6 +38,7 @@
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <algorithm>
@@ -168,27 +169,35 @@ TEST_CASE ("section: a cue with no sections lists none, and a memo lists nothing
     CHECK (rig.published ("/godot/cue/" + memo + "/sections") == "(absent)");
 }
 
-TEST_CASE ("section: a section under a movie is refused when the show is read")
+TEST_CASE ("section: a section under a movie reads; under a still it is refused")
 {
-    /*  A child of Media alone (namespace draft §55): a movie's edit is a later
-        round, and until then a Section under a Video is a show this build
-        does not know how to play, refused as any unknown placement is. */
+    /*  A child of Media and of a movie's Video (namespace draft §55.5): a
+        still has no time to cut, and a Section under one is a show somebody
+        edited by hand, refused as any misplaced piece is. */
     SectionRig rig;
 
-    const auto movie = rig.document.createCue (rig.listId, 1, "video", "Title").id;
+    const auto movie = rig.document.createCue (rig.listId, 1, "video", "Clip").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/source", "movie").ok);
     rig.add (0.0, 2.0, "SEC00003", movie);
 
-    const auto xml = doc::CanonicalXml::write (rig.document);
+    auto xml = doc::CanonicalXml::write (rig.document);
     REQUIRE (xml.find ("<Section") != std::string::npos);
 
     doc::ShowDocument reopened;
-    const auto result = doc::CanonicalXml::read (xml, reopened);
+    CHECK (doc::CanonicalXml::read (xml, reopened).ok);
+    CHECK (reopened.getAttribute ("/godot/section/SEC00003/out").value_or ("?") == "2");
 
+    const auto still = rig.document.createCue (rig.listId, 2, "video", "Title").id;
+    rig.add (0.0, 2.0, "SEC00004", still);
+    xml = doc::CanonicalXml::write (rig.document);
+
+    doc::ShowDocument refused;
+    const auto result = doc::CanonicalXml::read (xml, refused);
     CHECK_FALSE (result.ok);
-    CHECK (SectionRig::saying (result.problems, "Section") >= 1);
+    CHECK (SectionRig::saying (result.problems, "still has no time") >= 1);
 }
 
-TEST_CASE ("validate: a section that ends before it begins, or on a sound locked to a movie, is a problem")
+TEST_CASE ("validate: a section that ends before it begins is a problem; a lock to a movie takes the sound's own away")
 {
     SectionRig rig;
 
@@ -199,11 +208,14 @@ TEST_CASE ("validate: a section that ends before it begins, or on a sound locked
     CHECK (SectionRig::saying (rig.document.validate(), "ends before it begins") == 0);
     CHECK (rig.document.validate().empty());
 
-    /*  A sound locked to a movie plays on the movie's time (WL): nothing of
-        its own to cut up. */
+    /*  A sound locked to a movie plays on the movie's time (WL): its own
+        sections give way to copies of the movie's - none here, the movie
+        uncut - and the validator has nothing to say of it (55.5, ADT). */
     const auto movie = rig.document.createCue (rig.listId, 1, "video", "Title").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/source", "movie").ok);
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/lockedTo", movie).ok);
-    CHECK (SectionRig::saying (rig.document.validate(), "locked to a movie") == 1u);
+    CHECK (rig.document.sectionsOf (rig.document.findById (rig.cueId)).empty());
+    CHECK (rig.document.validate().empty());
 
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/lockedTo", "").ok);
     CHECK (rig.document.validate().empty());
@@ -612,17 +624,244 @@ TEST_CASE ("section: a sound locked to a movie and a locked show refuse every se
     rig.split (10.0);
     const auto ids = rig.ids();
 
+    /*  Locked to a movie, the sound's own cut gives way to the movie's
+        sections, copied - none, the movie uncut - and every verb on the
+        sound answers that the movie leads (55.5). */
     const auto movie = rig.document.createCue (rig.listId, 1, "video", "Title").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/source", "movie").ok);
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/lockedTo", movie).ok);
+    CHECK (rig.ids().empty());
+    CHECK (rig.document.findById (ids[1]).isValid() == false);
     CHECK (rig.document.splitSection (rig.cueId, 5.0, 30.0, {}).reason == "locked-to-movie");
-    CHECK (rig.document.moveSection (ids[1], 0).reason == "locked-to-movie");
+    CHECK (rig.document.clearSections (rig.cueId).reason == "locked-to-movie");
     CHECK (rig.document.freezeEdit (rig.cueId, "rain.wav", "rain (edit).wav").reason == "locked-to-movie");
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/lockedTo", "").ok);
 
+    /*  Unlocked, the sound is its own to cut again. */
+    rig.split (10.0);
+    const auto fresh = rig.ids();
+    REQUIRE (fresh.size() == 2u);
+
     REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
     CHECK (rig.document.splitSection (rig.cueId, 5.0, 30.0, {}).reason == "locked");
-    CHECK (rig.document.removeSection (ids[1]).reason == "locked");
-    CHECK (rig.document.setAttribute ("/godot/section/" + ids[1] + "/in", "11").reason == "locked");
+    CHECK (rig.document.removeSection (fresh[1]).reason == "locked");
+    CHECK (rig.document.setAttribute ("/godot/section/" + fresh[1] + "/in", "11").reason == "locked");
     CHECK (rig.document.freezeEdit (rig.cueId, "rain.wav", "rain (edit).wav").reason == "locked");
     CHECK (rig.document.unfreezeEdit (rig.cueId).reason == "locked");
+}
+
+//==============================================================================
+/*  A MOVIE'S EDIT, AND ITS SOUND IN STEP (namespace draft §55.5). */
+
+namespace
+{
+    struct MovieRig : EditRig
+    {
+        MovieRig()
+        {
+            movieId = document.createCue (listId, 2, "video", "Clip").id;
+            REQUIRE (document.setAttribute ("/godot/cue/" + movieId + "/source", "movie").ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + movieId + "/file", "clip.mov").ok);
+
+            soundId = document.createCue (listId, 3, "media", "Clip (sound)").id;
+            REQUIRE (document.setAttribute ("/godot/cue/" + soundId + "/file", "clip (sound).wav").ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + soundId + "/lockedTo", movieId).ok);
+
+            video::registerConversionCommands (engine.commands(), document, nullptr);
+        }
+
+        std::string splitMovie (double at)
+        {
+            const auto edit = document.splitSection (movieId, at, 30.0, {});
+            REQUIRE (edit.ok);
+            return edit.id;
+        }
+
+        std::vector<doc::Section> of (const std::string& cue) const
+        {
+            return document.sectionsOf (document.findById (cue));
+        }
+
+        std::string text (const std::string& address) const
+        {
+            return document.getAttribute (address).value_or ("?");
+        }
+
+        std::string movieId, soundId;
+    };
+}
+
+TEST_CASE ("section: a movie's sections are copied onto its locked sound, which refuses a direct edit")
+{
+    MovieRig rig;
+
+    rig.splitMovie (10.0);
+    rig.splitMovie (20.0);
+
+    auto movie = rig.of (rig.movieId);
+    auto sound = rig.of (rig.soundId);
+    REQUIRE (movie.size() == 3u);
+    REQUIRE (sound.size() == 3u);
+
+    for (std::size_t i = 0; i < 3; ++i)
+    {
+        CHECK (sound[i].in == doctest::Approx (movie[i].in));
+        CHECK (sound[i].out == doctest::Approx (movie[i].out));
+        CHECK (doc::Id::isValid (sound[i].id));
+        CHECK (sound[i].id != movie[i].id);
+    }
+
+    /*  A trim typed on the movie's section lands on the sound's; a move and a
+        removal on the movie are followed. */
+    REQUIRE (rig.document.setAttribute ("/godot/section/" + movie[1].id + "/trim", "-6").ok);
+    CHECK (rig.of (rig.soundId)[1].trimDb == doctest::Approx (-6.0));
+
+    REQUIRE (rig.document.moveSection (movie[2].id, 0).ok);
+    movie = rig.of (rig.movieId);
+    sound = rig.of (rig.soundId);
+    CHECK (movie[0].in == doctest::Approx (20.0));
+    CHECK (sound[0].in == doctest::Approx (20.0));
+    CHECK (sound[1].in == doctest::Approx (0.0));
+
+    REQUIRE (rig.document.removeSection (movie[1].id).ok);
+    CHECK (rig.of (rig.soundId).size() == 2u);
+
+    /*  A split taken back on the movie: the sound's copies become one too. */
+    rig.splitMovie (5.0);
+    REQUIRE (rig.of (rig.soundId).size() == 3u);
+    movie = rig.of (rig.movieId);
+    REQUIRE (rig.document.joinSection (movie[0].id).ok);
+    CHECK (rig.of (rig.soundId).size() == 2u);
+
+    /*  The sound's copies are the movie's to change. */
+    const auto copy = rig.of (rig.soundId)[0].id;
+    CHECK (rig.document.trimSection (copy, 1.0, 2.0).reason == "locked-to-movie");
+    CHECK (rig.document.moveSection (copy, 1).reason == "locked-to-movie");
+    CHECK (rig.document.removeSection (copy).reason == "locked-to-movie");
+    CHECK (rig.document.setAttribute ("/godot/section/" + copy + "/in", "1").reason == "locked-to-movie");
+    CHECK (rig.document.splitSection (rig.soundId, 5.0, 30.0, {}).reason == "locked-to-movie");
+    CHECK (rig.document.clearSections (rig.soundId).reason == "locked-to-movie");
+
+    /*  The movie's edit cleared: the copies go. A still has no time to cut. */
+    REQUIRE (rig.document.clearSections (rig.movieId).ok);
+    CHECK (rig.of (rig.soundId).empty());
+
+    const auto still = rig.document.createCue (rig.listId, 4, "video", "Title").id;
+    CHECK (rig.document.splitSection (still, 5.0, 30.0, {}).reason == "type-mismatch");
+}
+
+TEST_CASE ("section: a movie's sound keeps its own lane on the one timeline, and its ranges are the movie's")
+{
+    MovieRig rig;
+
+    rig.splitMovie (10.0);
+    rig.splitMovie (20.0);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.soundId + "/levelLane", "12 0 14 -20 16 -20 18 0").ok);
+    const auto range = rig.document.createRange (rig.movieId, 12.0, 18.0).id;
+
+    const auto movie = rig.of (rig.movieId);
+    REQUIRE (rig.document.moveSection (movie[2].id, 0).ok);
+
+    CHECK (rig.text ("/godot/cue/" + rig.soundId + "/levelLane") == "22 0 24 -20 26 -20 28 0");
+    CHECK (rig.seconds ("/godot/range/" + range + "/in") == doctest::Approx (22.0));
+    CHECK (rig.seconds ("/godot/range/" + range + "/out") == doctest::Approx (28.0));
+
+    /*  The sound's range is the movie's, copied by position. */
+    const auto sound = rig.document.findById (rig.soundId);
+    std::vector<juce::ValueTree> soundRanges;
+
+    for (const auto& child : sound)
+        if (child.hasType ("Range"))
+            soundRanges.push_back (child);
+
+    REQUIRE (soundRanges.size() == 1u);
+    CHECK (static_cast<double> (soundRanges[0].getProperty ("in")) == doctest::Approx (22.0));
+}
+
+TEST_CASE ("media.frozen and media.unfreeze: a movie and its sound as one pair, in one step")
+{
+    MovieRig rig;
+    rig.splitMovie (10.0);
+
+    const auto movieBase = "/godot/cue/" + rig.movieId + "/";
+    const auto soundBase = "/godot/cue/" + rig.soundId + "/";
+
+    /*  A movie whose sound has sections freezes with it, or not at all; the
+        sound alone never. */
+    CHECK (rig.document.freezeEdit (rig.movieId, "clip.mov", "clip (edit).mov").reason == "bad-value");
+    CHECK (rig.document.freezeEdit (rig.soundId, "clip (sound).wav", "x.wav").reason == "locked-to-movie");
+    CHECK (rig.document.freezeEdit (rig.movieId, "clip.mov", "clip (edit).mov",
+                                    rig.cueId, "rain.wav", "rain (edit).wav").reason == "bad-value");   // not its sound
+
+    CHECK (rig.apply ("media.frozen", { osc::Value::string (rig.movieId), osc::Value::string ("clip.mov"),
+                                        osc::Value::string ("clip (edit).mov"), osc::Value::string (rig.soundId),
+                                        osc::Value::string ("clip (sound).wav"), osc::Value::string ("clip (sound) (edit).wav") }) == 1u);
+
+    CHECK (rig.text (movieBase + "file") == "clip (edit).mov");
+    CHECK (rig.text (movieBase + "editSource") == "clip.mov");
+    CHECK (rig.text (soundBase + "file") == "clip (sound) (edit).wav");
+    CHECK (rig.text (soundBase + "editSource") == "clip (sound).wav");
+    CHECK (rig.of (rig.movieId).size() == 2u);
+    CHECK (rig.of (rig.soundId).size() == 2u);
+    CHECK (rig.document.splitSection (rig.movieId, 5.0, 30.0, {}).reason == "frozen");
+
+    /*  One undo puts all four back. */
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.text (movieBase + "file") == "clip.mov");
+    CHECK (rig.text (movieBase + "editSource").empty());
+    CHECK (rig.text (soundBase + "file") == "clip (sound).wav");
+    CHECK (rig.text (soundBase + "editSource").empty());
+
+    REQUIRE (rig.document.freezeEdit (rig.movieId, "clip.mov", "clip (edit).mov",
+                                      rig.soundId, "clip (sound).wav", "clip (sound) (edit).wav").ok);
+    CHECK (rig.document.unfreezeEdit (rig.soundId).reason == "locked-to-movie");
+
+    CHECK (rig.apply ("media.unfreeze", { osc::Value::string (rig.movieId) }) == 1u);
+    CHECK (rig.text (movieBase + "file") == "clip.mov");
+    CHECK (rig.text (soundBase + "file") == "clip (sound).wav");
+    CHECK (rig.text (soundBase + "editSource").empty());
+    REQUIRE (rig.document.splitSection (rig.movieId, 5.0, 30.0, {}).ok);
+}
+
+TEST_CASE ("media.converted: a cut moves a movie's sections and its sound's copies back, and leaves the ranges on the edited timeline")
+{
+    MovieRig rig;
+    rig.splitMovie (10.0);
+    const auto range = rig.document.createRange (rig.movieId, 12.0, 18.0).id;
+
+    CHECK (rig.apply ("media.converted", { osc::Value::string ("clip.mov"), osc::Value::string ("clip (Hap).mov"),
+                                           osc::Value::float64 (5.0) }) == 1u);
+
+    CHECK (rig.text ("/godot/cue/" + rig.movieId + "/file") == "clip (Hap).mov");
+
+    const auto movie = rig.of (rig.movieId);
+    const auto sound = rig.of (rig.soundId);
+    REQUIRE (movie.size() == 2u);
+    REQUIRE (sound.size() == 2u);
+    CHECK (movie[0].in == doctest::Approx (0.0));
+    CHECK (movie[0].out == doctest::Approx (5.0));
+    CHECK (movie[1].in == doctest::Approx (5.0));
+    CHECK (movie[1].out == doctest::Approx (25.0));
+    CHECK (sound[1].in == doctest::Approx (5.0));
+    CHECK (sound[1].out == doctest::Approx (25.0));
+
+    /*  The range is on the edited timeline, which the cut does not move. */
+    CHECK (rig.seconds ("/godot/range/" + range + "/in") == doctest::Approx (12.0));
+    CHECK (rig.seconds ("/godot/range/" + range + "/out") == doctest::Approx (18.0));
+}
+
+TEST_CASE ("validate: a sound's sections that are not its movie's are a problem")
+{
+    MovieRig rig;
+    rig.splitMovie (10.0);
+    CHECK (rig.document.validate().empty());
+
+    /*  A section of the sound's own, appended by hand: not the movie's. */
+    juce::ValueTree extra { "Section" };
+    extra.setProperty (juce::Identifier ("id"), juce::String ("SEC00009"), nullptr);
+    extra.setProperty (juce::Identifier ("in"), 1.0, nullptr);
+    extra.setProperty (juce::Identifier ("out"), 2.0, nullptr);
+    rig.document.findById (rig.soundId).appendChild (extra, nullptr);
+
+    CHECK (SectionRig::saying (rig.document.validate(), "not the movie's section 3") == 1);
 }

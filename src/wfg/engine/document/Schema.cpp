@@ -219,7 +219,7 @@ namespace wfg::doc
                     Send, nothing of a voice. And a sampler member's rows, as a
                     sound's (namespace draft §49): played from a strip, its
                     fader is how solid it is. */
-                { "Video",  true,  { "Trigger", "Range" }, { "cue", "video", "member", "mark" } },
+                { "Video",  true,  { "Trigger", "Range", "Section" }, { "cue", "video", "member", "mark" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,
@@ -255,8 +255,8 @@ namespace wfg::doc
                     sound cue's sections, in their order, are the edited
                     timeline the cue plays - rendered to a file while the edit
                     is open, bounced to one when it is frozen. Identified for
-                    the reason a Range is, and a child of Media alone: a
-                    movie's edit is a later round. */
+                    the reason a Range is; a child of Media and, since 55.5, of
+                    a movie's Video, whose locked sound carries copies. */
                 { "Section", true,  {},                    { "section" } },
 
                 /*  A TRIGGER IS AN OBJECT ON A CUE, and on ANY cue: §3.7 says a

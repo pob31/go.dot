@@ -155,12 +155,17 @@ namespace wfg::doc
                         "The bounce is there (namespace draft 55, ADN): the cue plays it - file becomes the"
                         " bounce's name, editSource keeps the file the edit was made from - and its"
                         " sections wait for media.unfreeze. Submitted by the renderer once media.freeze's"
-                        " copy has landed; one undoable edit, and the bounce stays on disk when it is undone.",
-                        { { "cue", 's', false }, { "source", 's', false }, { "bounce", 's', false } },
+                        " copy has landed; one undoable edit, and the bounce stays on disk when it is undone."
+                        " A movie's locked sound is frozen with it, in the three arguments after (55.5, ADW).",
+                        { { "cue", 's', false }, { "source", 's', false }, { "bounce", 's', false },
+                          { "sound", 's', true }, { "soundSource", 's', true }, { "soundBounce", 's', true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
-                            return fromEdit (document.freezeEdit (stringAt (args, 0), stringAt (args, 1), stringAt (args, 2)),
+                            /*  A MOVIE'S PAIR (55.5, ADW): its locked sound frozen in the
+                                same record, onto its own bounce. */
+                            return fromEdit (document.freezeEdit (stringAt (args, 0), stringAt (args, 1), stringAt (args, 2),
+                                                                  stringAt (args, 3), stringAt (args, 4), stringAt (args, 5)),
                                              args);
                         } });
 

@@ -1539,22 +1539,20 @@ namespace wfg::doc
 
         if (node.hasType ("Video") && (row == "startOffset" || row == "rate"))
             keepSoundsWith (node);
-        else if (node.hasType ("Range") && node.getParent().hasType ("Video"))
+        else if ((node.hasType ("Range") || node.hasType ("Section")) && node.getParent().hasType ("Video"))
             keepSoundsWith (node.getParent());
         else if (node.hasType ("Media") && row == "lockedTo" && followsAMovie (node))
             keepSoundsWith (findById (node["lockedTo"].toString().toStdString()));
     }
 
-    void ShowDocument::keepSoundsWith (const juce::ValueTree& movie)
+    std::vector<juce::ValueTree> ShowDocument::soundsLockedTo (const juce::ValueTree& movie) const
     {
-        if (! movie.hasType ("Video"))
-            return;
-
-        const juce::ScopedValueSetter<bool> copyingNow (keepingSounds, true);
-        auto* const onto = structuralHistory();
-        const auto movieId = movie[idProperty].toString();
-
         std::vector<juce::ValueTree> sounds;
+
+        if (! movie.isValid())
+            return sounds;
+
+        const auto movieId = movie[idProperty].toString();
 
         std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& node)
         {
@@ -1566,13 +1564,23 @@ namespace wfg::doc
         };
 
         visit (showNode);
+        return sounds;
+    }
 
-        const auto rangesOf = [] (const juce::ValueTree& cue)
+    void ShowDocument::keepSoundsWith (const juce::ValueTree& movie)
+    {
+        if (! movie.hasType ("Video"))
+            return;
+
+        const juce::ScopedValueSetter<bool> copyingNow (keepingSounds, true);
+        auto* const onto = structuralHistory();
+
+        const auto childrenOf = [] (const juce::ValueTree& cue, const char* type)
         {
             std::vector<juce::ValueTree> out;
 
             for (const auto& child : cue)
-                if (child.hasType ("Range"))
+                if (child.hasType (juce::Identifier (type)))
                     out.push_back (child);
 
             return out;
@@ -1597,31 +1605,30 @@ namespace wfg::doc
             }
         };
 
-        const auto movieRanges = rangesOf (movie);
-
-        for (auto sound : sounds)
+        /*  THE MOVIE'S CHILDREN OF ONE KIND, FOLLOWED onto the sound - its Ranges
+            (37.5, WL) and, since 55.5, its Sections: matched by position; one the
+            sound has not got made after its last, under an identifier drawn from
+            the sound's and the movie child's - FNV-1a, the same on every machine -
+            and salted until free; one the movie has not got taken away. The rows
+            copied are the movie's values, bit for bit. */
+        const auto follow = [&] (juce::ValueTree sound, const char* type, std::initializer_list<const char*> rows)
         {
-            for (const auto* row : { "startOffset", "rate" })
-                copy (movie, sound, juce::Identifier (row));
+            const auto theirs = childrenOf (movie, type);
+            auto mine = childrenOf (sound, type);
 
-            auto soundRanges = rangesOf (sound);
-
-            for (std::size_t n = 0; n < movieRanges.size(); ++n)
+            for (std::size_t n = 0; n < theirs.size(); ++n)
             {
-                if (n < soundRanges.size())
+                if (n < mine.size())
                 {
-                    for (const auto* row : { "in", "out", "loops", "name" })
-                        copy (movieRanges[n], soundRanges[n], juce::Identifier (row));
+                    for (const auto* row : rows)
+                        copy (theirs[n], mine[n], juce::Identifier (row));
 
                     continue;
                 }
 
-                /*  A RANGE THE SOUND HAS NOT GOT: made, after its last, under
-                    an identifier drawn from the sound's and the movie range's -
-                    FNV-1a, the same on every machine - and salted until free. */
                 std::string objectId;
                 const auto joined = sound[idProperty].toString().toStdString() + "/"
-                                  + movieRanges[n][idProperty].toString().toStdString();
+                                  + theirs[n][idProperty].toString().toStdString();
 
                 for (std::uint64_t salt = 0; salt < 64 && objectId.empty(); ++salt)
                 {
@@ -1640,27 +1647,35 @@ namespace wfg::doc
                 if (objectId.empty())
                     continue;
 
-                juce::ValueTree made { "Range" };
+                juce::ValueTree made { juce::Identifier (type) };
                 made.setProperty (idProperty, juce::String (objectId), nullptr);
 
-                for (const auto* row : { "in", "out", "loops", "name" })
-                    if (movieRanges[n].hasProperty (row))
-                        made.setProperty (row, movieRanges[n][row], nullptr);
+                for (const auto* row : rows)
+                    if (theirs[n].hasProperty (row))
+                        made.setProperty (row, theirs[n][row], nullptr);
 
-                const auto after = soundRanges.empty() ? sound.getNumChildren()
-                                                       : sound.indexOf (soundRanges.back()) + 1;
+                const auto after = mine.empty() ? sound.getNumChildren()
+                                                : sound.indexOf (mine.back()) + 1;
                 sound.addChild (made, after, onto);
-                soundRanges.push_back (made);
+                mine.push_back (made);
             }
 
-            /*  AND ONE THE MOVIE HAS NOT, taken away. */
-            for (auto n = soundRanges.size(); n > movieRanges.size(); --n)
+            for (auto n = mine.size(); n > theirs.size(); --n)
             {
-                const auto gone = soundRanges[n - 1];
+                const auto gone = mine[n - 1];
                 const auto goneId = gone[idProperty].toString().toStdString();
                 sound.removeChild (gone, onto);
                 registry.release (goneId);
             }
+        };
+
+        for (auto sound : soundsLockedTo (movie))
+        {
+            for (const auto* row : { "startOffset", "rate" })
+                copy (movie, sound, juce::Identifier (row));
+
+            follow (sound, "Range", { "in", "out", "loops", "name" });
+            follow (sound, "Section", { "in", "out", "trim", "crossfade" });
         }
     }
 
@@ -2847,16 +2862,21 @@ namespace wfg::doc
         return sections;
     }
 
+    bool ShowDocument::isMovieCue (const juce::ValueTree& cue) const
+    {
+        return cue.isValid() && cue.hasType ("Video") && cue["source"].toString() == "movie";
+    }
+
     bool ShowDocument::hasOpenEdit (const juce::ValueTree& cue) const
     {
-        return cue.isValid() && cue.hasType ("Media")
+        return cue.isValid() && (cue.hasType ("Media") || isMovieCue (cue))
             && cue.getChildWithName ("Section").isValid()
             && cue["editSource"].toString().isEmpty();
     }
 
     bool ShowDocument::isFrozenEdit (const juce::ValueTree& cue) const
     {
-        return cue.isValid() && cue.hasType ("Media") && ! cue["editSource"].toString().isEmpty();
+        return cue.isValid() && (cue.hasType ("Media") || isMovieCue (cue)) && ! cue["editSource"].toString().isEmpty();
     }
 
     std::optional<EditResult> ShowDocument::refuseSectionEdit (const juce::ValueTree& cue) const
@@ -2867,7 +2887,7 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (! cue.hasType ("Media"))
+        if (! cue.hasType ("Media") && ! isMovieCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         if (followsAMovie (cue))
@@ -2996,6 +3016,10 @@ namespace wfg::doc
                                                  osc::formatDouble (place->fileSecond)); ! shortened.ok)
             return shortened;
 
+        /*  A MOVIE'S SOUND FOLLOWS (55.5): the cut copied onto it. */
+        if (isMovieCue (cue))
+            keepSoundsAfter (cue, "startOffset");
+
         return made;
     }
 
@@ -3027,6 +3051,9 @@ namespace wfg::doc
 
         if (const auto taken = remove (nextId); ! taken.ok)
             return taken;
+
+        if (isMovieCue (cue))
+            keepSoundsAfter (cue, "startOffset");
 
         return EditResult::succeeded (sectionId);
     }
@@ -3140,6 +3167,14 @@ namespace wfg::doc
         if (const auto carried = carryThrough (cue, runs); ! carried.ok)
             return carried;
 
+        /*  A MOVIE'S SOUNDS KEEP THEIR OWN LANES on the one timeline (55.5):
+            carried through the same map. Their ranges and offset are the
+            movie's, copied again by the writes above. */
+        if (isMovieCue (cue))
+            for (const auto& sound : soundsLockedTo (cue))
+                if (const auto lanes = carryLanes (sound, runs); ! lanes.ok)
+                    return lanes;
+
         /*  AND THE CROSSFADES HELD to the material as it now stands: a section
             moved to the front of the file has nothing before it, a shortened
             one has less room. */
@@ -3151,10 +3186,15 @@ namespace wfg::doc
                                                        osc::formatDouble (held[i].crossfade)); ! clamped.ok)
                     return clamped;
 
+        /*  AND THE SOUND'S SECTIONS MADE THE MOVIE'S AGAIN (55.5): a move is a
+            `moveChild` that knocks at no door, so it is asked for here. */
+        if (isMovieCue (cue))
+            keepSoundsAfter (cue, "startOffset");
+
         return written;
     }
 
-    EditResult ShowDocument::carryThrough (juce::ValueTree cue, const std::vector<TimeRun>& runs)
+    EditResult ShowDocument::carryLanes (juce::ValueTree cue, const std::vector<TimeRun>& runs)
     {
         const auto cueId = cue[idProperty].toString().toStdString();
         const auto base = "/godot/cue/" + cueId + "/";
@@ -3180,6 +3220,17 @@ namespace wfg::doc
                                                        moved); ! written.ok)
                     return written;
         }
+
+        return EditResult::succeeded (cueId);
+    }
+
+    EditResult ShowDocument::carryThrough (juce::ValueTree cue, const std::vector<TimeRun>& runs)
+    {
+        const auto cueId = cue[idProperty].toString().toStdString();
+        const auto base = "/godot/cue/" + cueId + "/";
+
+        if (const auto lanes = carryLanes (cue, runs); ! lanes.ok)
+            return lanes;
 
         /*  THE RANGES: each point on its own; one left ending before it begins
             is taken out. Written in the order that never leaves a range for a
@@ -3228,7 +3279,9 @@ namespace wfg::doc
         return EditResult::succeeded (cueId);
     }
 
-    EditResult ShowDocument::freezeEdit (const std::string& cueId, const std::string& source, const std::string& bounce)
+    EditResult ShowDocument::freezeEdit (const std::string& cueId, const std::string& source, const std::string& bounce,
+                                         const std::string& sound, const std::string& soundSource,
+                                         const std::string& soundBounce)
     {
         if (auto refusal = refuseIfLocked())
             return *refusal;
@@ -3238,7 +3291,7 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (! cue.hasType ("Media"))
+        if (! cue.hasType ("Media") && ! isMovieCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         if (followsAMovie (cue))
@@ -3250,12 +3303,52 @@ namespace wfg::doc
               || cue["file"].toString().toStdString() != source)
             return EditResult::failed (reason::badValue);
 
+        /*  THE PAIR (55.5, ADW): a movie's locked sound, whose sections are the
+            movie's copied, is frozen in the same record onto a bounce of its own -
+            named here, with the file it was made from. A record that leaves it
+            out, or names another sound, is a log edited by hand. */
+        juce::ValueTree follower;
+
+        if (isMovieCue (cue))
+        {
+            for (const auto& candidate : soundsLockedTo (cue))
+                if (! follower.isValid() && ! sectionsOf (candidate).empty())
+                    follower = candidate;
+
+            if (follower.isValid() != ! sound.empty())
+                return EditResult::failed (reason::badValue);
+
+            if (follower.isValid()
+                  && (follower[idProperty].toString().toStdString() != sound
+                        || follower["file"].toString().toStdString() != soundSource
+                        || soundSource.empty() || soundBounce.empty() || isFrozenEdit (follower)))
+                return EditResult::failed (reason::badValue);
+        }
+        else if (! sound.empty())
+        {
+            return EditResult::failed (reason::badValue);
+        }
+
         const auto base = "/godot/cue/" + cueId + "/";
 
         if (const auto kept = setAttribute (base + "editSource", source); ! kept.ok)
             return kept;
 
-        return setAttribute (base + "file", bounce);
+        if (const auto swapped = setAttribute (base + "file", bounce); ! swapped.ok)
+            return swapped;
+
+        if (follower.isValid())
+        {
+            const auto soundBase = "/godot/cue/" + sound + "/";
+
+            if (const auto kept = setAttribute (soundBase + "editSource", soundSource); ! kept.ok)
+                return kept;
+
+            if (const auto swapped = setAttribute (soundBase + "file", soundBounce); ! swapped.ok)
+                return swapped;
+        }
+
+        return EditResult::succeeded (cueId);
     }
 
     EditResult ShowDocument::unfreezeEdit (const std::string& cueId)
@@ -3268,19 +3361,71 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (! cue.hasType ("Media"))
+        if (! cue.hasType ("Media") && ! isMovieCue (cue))
             return EditResult::failed (reason::typeMismatch);
+
+        if (followsAMovie (cue))
+            return EditResult::failed (reason::lockedToMovie);
 
         if (! isFrozenEdit (cue))
             return EditResult::failed (reason::badValue);
 
-        const auto base = "/godot/cue/" + cueId + "/";
-        const auto source = cue["editSource"].toString().toStdString();
+        const auto back = [this] (const juce::ValueTree& frozen)
+        {
+            const auto base = "/godot/cue/" + frozen[idProperty].toString().toStdString() + "/";
+            const auto source = frozen["editSource"].toString().toStdString();
 
-        if (const auto back = setAttribute (base + "file", source); ! back.ok)
-            return back;
+            if (const auto swapped = setAttribute (base + "file", source); ! swapped.ok)
+                return swapped;
 
-        return setAttribute (base + "editSource", "");
+            return setAttribute (base + "editSource", "");
+        };
+
+        if (const auto swapped = back (cue); ! swapped.ok)
+            return swapped;
+
+        /*  AND THE PAIR'S OTHER HALF (55.5, ADW). */
+        if (isMovieCue (cue))
+            for (const auto& sound : soundsLockedTo (cue))
+                if (isFrozenEdit (sound))
+                    if (const auto swapped = back (sound); ! swapped.ok)
+                        return swapped;
+
+        return EditResult::succeeded (cueId);
+    }
+
+    EditResult ShowDocument::shiftSections (const std::string& cueId, double delta)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! std::isfinite (delta))
+            return EditResult::failed (reason::badValue);
+
+        const juce::ScopedValueSetter<bool> plain (carryingSections, true);
+
+        for (const auto& section : sectionsOf (cue))
+        {
+            const auto base = "/godot/section/" + section.id + "/";
+            const auto in = osc::formatDouble (std::max (0.0, section.in + delta));
+            const auto out = osc::formatDouble (std::max (0.0, section.out + delta));
+
+            //  Moving back, the in point first draws away from the out; moving on, the out first.
+            const auto inFirst = delta <= 0.0;
+
+            if (const auto first = setAttribute (base + (inFirst ? "in" : "out"), inFirst ? in : out); ! first.ok)
+                return first;
+
+            if (const auto second = setAttribute (base + (inFirst ? "out" : "in"), inFirst ? out : in); ! second.ok)
+                return second;
+        }
+
+        if (isMovieCue (cue))
+            keepSoundsAfter (cue, "startOffset");
+
+        return EditResult::succeeded (cueId);
     }
 
     EditResult ShowDocument::createTrigger (const std::string& cueId, const std::string& kind,
@@ -4087,8 +4232,8 @@ namespace wfg::doc
         if (! repairList.empty())
             setAttribute ("/godot/list/" + repairList + "/standby", repairStandby);
 
-        /*  A MOVIE'S RANGE GONE, and its sounds' with it. */
-        if (node.hasType ("Range") && parent.hasType ("Video"))
+        /*  A MOVIE'S RANGE OR SECTION GONE, and its sounds' with it. */
+        if ((node.hasType ("Range") || node.hasType ("Section")) && parent.hasType ("Video"))
             keepSoundsAfter (parent, "startOffset");
 
         return EditResult::succeeded (id);
@@ -4293,9 +4438,9 @@ namespace wfg::doc
               && ! cue::mayStandOn (findById (vacatedList), id))
             setAttribute ("/godot/list/" + vacatedList + "/standby", "");
 
-        /*  A MOVIE'S RANGES REORDERED, or one moved between movies: their
-            sounds follow. */
-        if (node.hasType ("Range"))
+        /*  A MOVIE'S RANGES OR SECTIONS REORDERED, or one moved between movies:
+            their sounds follow. */
+        if (node.hasType ("Range") || node.hasType ("Section"))
             for (const auto& movie : { oldParent, newParent })
                 if (movie.hasType ("Video"))
                     keepSoundsAfter (movie, "startOffset");
@@ -4716,30 +4861,46 @@ namespace wfg::doc
         Offsets { problems }.visit (showNode);
 
         /*  A SECTION IS A PIECE OF THE FILE (namespace draft §55), so one
-            that ends before it begins is no piece at all, and a sound locked
-            to a movie has no time of its own to cut up: its start offset,
-            speed and Ranges are the movie's (WL), and so would its sections
-            be. Both refused when the show is read, as a range that ends
-            before it begins is refused at its door. */
+            that ends before it begins is no piece at all; a still has no time
+            to cut; and a sound locked to a movie carries the movie's sections,
+            copied (55.5) - ones of its own that do not match are a show
+            somebody edited by hand, refused as a range that ends before it
+            begins is refused at its door. */
         struct Sections
         {
             std::vector<std::string>& problems;
             const ShowDocument& document;
 
+            static std::vector<juce::ValueTree> sectionsUnder (const juce::ValueTree& node)
+            {
+                std::vector<juce::ValueTree> out;
+
+                for (const auto& child : node)
+                    if (child.getType().toString() == "Section")
+                        out.push_back (child);
+
+                return out;
+            }
+
             void visit (const juce::ValueTree& node)
             {
-                if (node.getType().toString() == "Media")
+                const auto type = node.getType().toString();
+
+                if (type == "Media" || type == "Video")
                 {
                     const auto cueId = node[juce::Identifier ("id")].toString().toStdString();
-                    const auto lockedTo = document.findById (node[juce::Identifier ("lockedTo")].toString().toStdString());
-                    const auto followsAMovie = lockedTo.isValid() && lockedTo.hasType (juce::Identifier ("Video"));
+                    const auto movie = type == "Media"
+                                         ? document.findById (node[juce::Identifier ("lockedTo")].toString().toStdString())
+                                         : juce::ValueTree();
+                    const auto followsAMovie = movie.isValid() && movie.hasType (juce::Identifier ("Video"));
+                    const auto still = type == "Video" && node[juce::Identifier ("source")].toString() != "movie";
+                    const auto theirs = followsAMovie ? sectionsUnder (movie) : std::vector<juce::ValueTree> {};
+                    const auto mine = sectionsUnder (node);
 
-                    for (const auto& child : node)
+                    for (std::size_t n = 0; n < mine.size(); ++n)
                     {
-                        if (child.getType().toString() != "Section")
-                            continue;
-
-                        const auto here = "/Show/.../Media[" + cueId + "]/Section["
+                        const auto& child = mine[n];
+                        const auto here = "/Show/.../" + type.toStdString() + "[" + cueId + "]/Section["
                                             + child[juce::Identifier ("id")].toString().toStdString() + "]";
                         const auto in = static_cast<double> (child[juce::Identifier ("in")]);
                         const auto out = static_cast<double> (child[juce::Identifier ("out")]);
@@ -4748,10 +4909,29 @@ namespace wfg::doc
                             problems.push_back (here + ": a section that ends before it begins is no piece"
                                                        " of the file - its out must be after its in");
 
+                        if (still)
+                            problems.push_back (here + ": a still has no time to cut into sections - only a"
+                                                       " movie or a sound has");
+
                         if (followsAMovie)
-                            problems.push_back (here + ": a sound locked to a movie plays on the movie's"
-                                                       " time and cannot be cut into sections - detach it first");
+                        {
+                            const auto matches = n < theirs.size()
+                                && std::abs (static_cast<double> (theirs[n][juce::Identifier ("in")]) - in) < sameInstant
+                                && std::abs (static_cast<double> (theirs[n][juce::Identifier ("out")]) - out) < sameInstant;
+
+                            if (! matches)
+                                problems.push_back (here + ": a sound locked to a movie carries the movie's sections,"
+                                                           " copied - this one is not the movie's section "
+                                                           + std::to_string (n + 1) + " (/Show/.../Video["
+                                                           + movie[juce::Identifier ("id")].toString().toStdString()
+                                                           + "]); detach the sound, or let the movie's edit copy again");
+                        }
                     }
+
+                    if (followsAMovie && mine.size() < theirs.size())
+                        problems.push_back ("/Show/.../Media[" + cueId + "]: a sound locked to a movie carries the"
+                                              " movie's sections, copied - it has " + std::to_string (mine.size())
+                                              + " and its movie " + std::to_string (theirs.size()));
                 }
 
                 for (const auto& child : node)
@@ -5552,10 +5732,10 @@ namespace wfg::doc
                     bounce somebody pointed a cue at by hand has nothing to
                     unfreeze to. The cue plays; Unfreeze would be a swap of
                     names and nothing else, which is worth saying. */
-                if (node.getType().toString() == "Media"
+                if ((node.getType().toString() == "Media" || node.getType().toString() == "Video")
                       && ! node[juce::Identifier ("editSource")].toString().isEmpty()
                       && ! node.getChildWithName (juce::Identifier ("Section")).isValid())
-                    problems.push_back ("/Show/.../Media[" + node[idProperty].toString().toStdString()
+                    problems.push_back ("/Show/.../" + node.getType().toString().toStdString() + "[" + node[idProperty].toString().toStdString()
                                           + "]/@editSource: names \"" + node[juce::Identifier ("editSource")].toString().toStdString()
                                           + "\" and the cue has no sections - nothing is frozen, so Unfreeze"
                                             " would only point the cue back at that file");

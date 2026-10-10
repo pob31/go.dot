@@ -423,6 +423,17 @@ namespace wfg::doc
         bool hasOpenEdit (const juce::ValueTree& cue) const;
         bool isFrozenEdit (const juce::ValueTree& cue) const;
 
+        /*  A MOVIE CUE (namespace draft §55.5): a Video whose source is a
+            movie. Edited as a sound is, in the same row with the same verbs;
+            its locked sound's sections are copies of its own. */
+        bool isMovieCue (const juce::ValueTree& cue) const;
+
+        /*  A MOVIE'S SECTIONS MOVED BACK BY A CUT (a conversion of its used
+            span, 37.5 WI): the file's seconds change under an edit whose
+            timeline does not, so the edges are written plainly, nothing
+            carried, and the sound's copies follow. */
+        EditResult shiftSections (const std::string& cueId, double delta);
+
         /*  Cuts the edited timeline at `at`; a cue with no sections yet first
             gets one over the whole file, `fileLength` long, under an identifier
             drawn from the cue's so a replay draws the same. The new piece is
@@ -450,7 +461,9 @@ namespace wfg::doc
             keeps the file it was made from; and unfrozen, the swap back. The
             bounce itself is the renderer's to write; these are the document's
             half, submitted as `media.frozen` and `media.unfreeze`. */
-        EditResult freezeEdit (const std::string& cueId, const std::string& source, const std::string& bounce);
+        EditResult freezeEdit (const std::string& cueId, const std::string& source, const std::string& bounce,
+                               const std::string& sound = {}, const std::string& soundSource = {},
+                               const std::string& soundBounce = {});
         EditResult unfreezeEdit (const std::string& cueId);
 
         /*  A list's persistent section (§3.29), made once: asking twice answers
@@ -1161,6 +1174,8 @@ namespace wfg::doc
         std::optional<EditResult> refuseSectionEdit (const juce::ValueTree& cue) const;
         EditResult carrySectionEdit (juce::ValueTree cue, const std::function<EditResult()>& write);
         EditResult carryThrough (juce::ValueTree cue, const std::vector<TimeRun>& runs);
+        EditResult carryLanes (juce::ValueTree cue, const std::vector<TimeRun>& runs);
+        std::vector<juce::ValueTree> soundsLockedTo (const juce::ValueTree& movie) const;
         std::string derivedIdFor (const std::string& joined);
         bool carryingSections = false;
 
