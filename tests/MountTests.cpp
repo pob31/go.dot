@@ -2049,11 +2049,11 @@ TEST_CASE ("mount: a device over a connection needs a host, a port and a framing
     CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
     CHECK (rig.mounts.problemOf (id).find ("names no host") != std::string::npos);
 
-    //  A wire not built yet is refused the same way, naming it (AFJ).
+    //  A wire not built yet is refused the same way, naming it (AFJ): midi until DP.9.
     writeRaw ("host", "127.0.0.1");
-    writeRaw ("wire", "rcp");
+    writeRaw ("wire", "midi");
     CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
-    CHECK (rig.mounts.problemOf (id).find ("wire \"rcp\"") != std::string::npos);
+    CHECK (rig.mounts.problemOf (id).find ("wire \"midi\"") != std::string::npos);
     writeRaw ("wire", "osc");
 
     //  By datagram again, as it was: loaded, with its port, the framing kept and not read.
