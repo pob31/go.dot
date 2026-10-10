@@ -131,6 +131,12 @@ namespace wfg::tree
                 framed as the link's framing says. Empty, as `serial` is, for
                 a destination that is a host and a port. */
             std::string link {};
+
+            /*  WHAT THE BYTES ARE (namespace draft §57, AFJ; DP.7), from
+                `mount/wire`: `osc`, the codec; `rcp`, a line of Yamaha's
+                protocol, which never travels in a bundle. Copied at queue time
+                with the rest, for the same reason. */
+            std::string wire = "osc";
         };
         /*  THE DESTINATION A DECLARATION NAMES, made in one place (namespace
             draft §57, DP.1): host, port, rate cap, bundles, and the serial
@@ -182,6 +188,12 @@ namespace wfg::tree
             fails as one to nowhere does. */
         using LinkSink = std::function<bool (const std::string& mountId, const std::vector<std::uint8_t>& packet)>;
         void setLinkSink (LinkSink sink) { linkSink = std::move (sink); }
+
+        /*  THE MOUNT TABLE, for a wire that renders by the node's own spelling
+            (the rcp wire's verb and indexes, DP.7): read at the flush, on the
+            tick thread that owns both. Unset - a rig with no table - and the
+            wire infers what it can from the address. */
+        void setMounts (const MountTable* table) noexcept { mounts = table; }
 
         //======================================================================
         /*  Queues one message. Tick thread.
@@ -270,6 +282,7 @@ namespace wfg::tree
         osc::UdpEndpoint* udp = nullptr;
         SerialSink serialSink;
         LinkSink linkSink;
+        const MountTable* mounts = nullptr;
 
         /*  One datagram's bytes to where the destination says: its serial port,
             or its host and port. */

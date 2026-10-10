@@ -32,7 +32,11 @@ instead, an Eos's on 3032: each connection's stream is cut by --framing -
 and every packet is noted as a datagram's would be. `/_mock/connections` counts
 the connections taken since the start, and `/_mock/drop` closes the open ones
 and keeps listening, which is the console going away and coming back: what a
-link's retry is for.
+link's retry is for. With --framing lines each line is noted as a message whose
+address is the line, and with --wire rcp (DP.7) the device is a Yamaha console
+as far as the grammar goes: it answers `OK` with the line echoed, and
+`/_mock/say?<line>` has it say a line of its own down every open connection -
+`NOTIFY set ...`, the console reporting a fader moved.
 
 AND, WITH --listen, A DEVICE THAT PUSHES (namespace draft 45, O.10), as WFS-DIY
 does: HOST_INFO offers LISTEN, the HTTP port takes a WebSocket, a LISTEN or an
@@ -71,6 +75,7 @@ import socket
 import struct
 import sys
 import threading
+import urllib.parse
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 
@@ -358,6 +363,18 @@ def cut_frames(framing: str, buffer: bytes):
     """The whole packets at the front of `buffer`, and what is left of it."""
     packets = []
 
+    if framing == "lines":
+        while True:
+            end = buffer.find(b"\n")
+
+            if end < 0:
+                break
+
+            packets.append(buffer[:end].rstrip(b"\r"))
+            buffer = buffer[end + 1:]
+
+        return packets, buffer
+
     if framing == "length":
         while len(buffer) >= 4:
             size = int.from_bytes(buffer[:4], "big")
@@ -386,7 +403,7 @@ def cut_frames(framing: str, buffer: bytes):
     return packets, buffer
 
 
-def listen_tcp(device: Device, port_out, framing: str) -> socket.socket:
+def listen_tcp(device: Device, port_out, framing: str, wire: str = "osc") -> socket.socket:
     """A listener for OSC over connections (DP.6), its port reported as the OSC
     port; each connection read on a thread of its own until the far end or
     `/_mock/drop` closes it."""
@@ -412,6 +429,20 @@ def listen_tcp(device: Device, port_out, framing: str) -> socket.socket:
                 packets, buffer = cut_frames(framing, buffer)
 
                 for data in packets:
+                    #  A LINE IS A MESSAGE WHOSE ADDRESS IS THE LINE (DP.7), and
+                    #  a console on the rcp wire answers OK with it echoed.
+                    if framing == "lines":
+                        line = data.decode("utf-8", "replace")
+                        device.note(line, [], sender_ip=peer[0])
+
+                        if wire == "rcp":
+                            try:
+                                conn.sendall(("OK " + line + "\n").encode("utf-8"))
+                            except OSError:
+                                return
+
+                        continue
+
                     messages = []
                     bundle = device.count_bundle() if osc_unbundle(data, messages) else -1
 
@@ -479,6 +510,20 @@ def make_handler(device: Device, listens: bool, osc_port_of):
                 with device.lock:
                     taken = device.connections
                 self.reply(200, {"VALUE": [taken]})
+                return
+
+            #  THE CONSOLE SAYING A LINE OF ITS OWN (DP.7), down every open
+            #  connection: what a NOTIFY is.
+            if path == "/_mock/say":
+                line = urllib.parse.unquote(query)
+                with device.lock:
+                    sockets = list(device.open)
+                for conn in sockets:
+                    try:
+                        conn.sendall((line + "\n").encode("utf-8"))
+                    except OSError:
+                        pass
+                self.reply(200, {"VALUE": [len(sockets)]})
                 return
 
             if path == "/_mock/drop":
@@ -619,8 +664,10 @@ def main() -> int:
                         help="offer LISTEN on a WebSocket at the HTTP port, as WFS-DIY does")
     parser.add_argument("--transport", default="udp", choices=("udp", "tcp"),
                         help="udp, a socket for datagrams; tcp, a listener for connections (DP.6)")
-    parser.add_argument("--framing", default="length", choices=("length", "slip"),
-                        help="how a connection's stream is cut: a size before each packet, or SLIP")
+    parser.add_argument("--framing", default="length", choices=("length", "slip", "lines"),
+                        help="how a connection's stream is cut: a size before each packet, SLIP, or lines")
+    parser.add_argument("--wire", default="osc", choices=("osc", "rcp"),
+                        help="what the bytes are: OSC, or lines of Yamaha's RCP answered with OK (DP.7)")
     args = parser.parse_args()
 
     device = Device(args.behaviour, args.alter_to)
@@ -628,7 +675,7 @@ def main() -> int:
     ports = []
 
     if args.transport == "tcp":
-        listen_tcp(device, ports, args.framing)
+        listen_tcp(device, ports, args.framing, args.wire)
     else:
         listen_udp(device, ports)
 

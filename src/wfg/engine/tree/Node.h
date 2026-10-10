@@ -84,6 +84,14 @@ namespace wfg::tree
             `ROLE`, so a client names it and a later round retargets by it. */
         std::string role;
 
+        /*  HOW THE NODE IS SPELLED ON THE RCP WIRE (namespace draft §57, AFH;
+            DP.7), from `GODOT.RCP`: the verb - `set`, or a scene recall's
+            own - and how many of the address's trailing segments are the
+            console's X and Y; -1 where the file said nothing and the wire
+            infers them from the segments that are whole numbers. */
+        std::string rcpVerb;
+        int rcpIndexes = -1;
+
         //======================================================================
         // The declared range, when the table gives one.
         bool hasMinimum = false;

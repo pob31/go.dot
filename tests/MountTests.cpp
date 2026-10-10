@@ -2109,3 +2109,98 @@ TEST_CASE ("mount sender: a device over a connection is handed its packet to the
     sender.flush();
     CHECK (sender.outcomeOf (refused) == tree::MountSender::Outcome::failed);
 }
+
+//==============================================================================
+/*  DP.7: THE RCP WIRE (namespace draft §57, AFJ, AFH): a device whose bytes are
+    lines of Yamaha's protocol, rendered at the flush by the node's own spelling
+    and never bundled; the load taking it on a connection and nowhere else. */
+
+TEST_CASE ("mount: the rcp wire rides a connection and nothing else, and a wire not built is still refused")
+{
+    Rig rig;
+    const auto made = rig.document.createMount ("/MIXER:Current", {}, {});
+    REQUIRE (made.ok);
+    const auto id = made.id;
+    const auto base = "/godot/mount/" + id + "/";
+    REQUIRE (rig.document.setAttribute (base + "port", "49280").ok);
+    REQUIRE (rig.document.setAttribute (base + "wire", "rcp").ok);
+
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).find ("set the transport to tcp") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "transport", "tcp").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).empty());
+    REQUIRE (rig.mounts.declarationOf (id) != nullptr);
+    CHECK (rig.mounts.declarationOf (id)->wire == "rcp");
+    CHECK (tree::MountSender::destinationFor (*rig.mounts.declarationOf (id)).wire == "rcp");
+
+    REQUIRE (rig.document.setAttribute (base + "wire", "line").ok);
+    CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.problemOf (id).find ("wire \"line\"") != std::string::npos);
+}
+
+TEST_CASE ("mount sender: a device on the rcp wire is sent lines spelled as its nodes say, one each whatever the bundles row says")
+{
+    tree::MountTable mounts;
+    tree::MountDeclaration yamaha;
+    yamaha.id = "YAMA0001";
+    yamaha.prefix = "/MIXER:Current /MIXER:Lib";
+    yamaha.namespaceFile = "namespaces/yamaha.json";
+    yamaha.transport = "tcp";
+    yamaha.wire = "rcp";
+    yamaha.host = "10.0.0.9";
+    yamaha.port = 49280;
+    yamaha.bundles = true;
+    REQUIRE (mounts.load (yamaha, R"JSON({"FULL_PATH": "/", "CONTENTS": {"MIXER:Current": {"FULL_PATH": "/MIXER:Current", "CONTENTS": {"InCh": {"FULL_PATH": "/MIXER:Current/InCh", "CONTENTS": {"Fader": {"FULL_PATH": "/MIXER:Current/InCh/Fader", "CONTENTS": {"Level": {"FULL_PATH": "/MIXER:Current/InCh/Fader/Level", "CONTENTS": {"1": {"FULL_PATH": "/MIXER:Current/InCh/Fader/Level/1", "CONTENTS": {"1": {"FULL_PATH": "/MIXER:Current/InCh/Fader/Level/1/1", "TYPE": "i", "ACCESS": 3, "VALUE": [0], "GODOT": {"RCP": {"VERB": "set", "XY": 2}}}}}}}}}}}}}, "MIXER:Lib": {"FULL_PATH": "/MIXER:Lib", "CONTENTS": {"Scene": {"FULL_PATH": "/MIXER:Lib/Scene", "TYPE": "i", "ACCESS": 2, "GODOT": {"RCP": {"VERB": "ssrecall_ex", "XY": 0}}}}}}})JSON").ok);
+
+    tree::MountSender sender;
+    sender.setMounts (&mounts);
+    std::vector<std::string> lines;
+    sender.setLinkSink ([&lines] (const std::string&, const std::vector<std::uint8_t>& bytes)
+    {
+        lines.emplace_back (bytes.begin(), bytes.end());
+        return true;
+    });
+
+    const auto to = tree::MountSender::destinationFor (yamaha);
+    REQUIRE (to.wire == "rcp");
+    REQUIRE (to.bundles);
+    const auto level = sender.queue ("YAMA0001", to, "/MIXER:Current/InCh/Fader/Level/1/1", osc::Value::int32 (-32768));
+    const auto scene = sender.queue ("YAMA0001", to, "/MIXER:Lib/Scene", osc::Value::int32 (12));
+    sender.flush();
+
+    REQUIRE (lines.size() == 2u);
+    CHECK (lines[0] == "set MIXER:Current/InCh/Fader/Level 0 0 -32768");
+    CHECK (lines[1] == "ssrecall_ex MIXER:Lib/Scene 12");
+    CHECK (sender.outcomeOf (level) == tree::MountSender::Outcome::sent);
+    CHECK (sender.outcomeOf (scene) == tree::MountSender::Outcome::sent);
+    CHECK (sender.sentFor ("YAMA0001") == 2u);
+
+    //  A node the table does not hold is spelled by its address alone.
+    sender.queue ("YAMA0001", to, "/MIXER:Current/St/Fader/Level/2", osc::Value::float32 (999.6f));
+    sender.flush();
+    REQUIRE (lines.size() == 3u);
+    CHECK (lines[2] == "set MIXER:Current/St/Fader/Level 1 0 1000");
+
+    //  And the console's answer is kept, the latest, by device.
+    CHECK (mounts.lastReplyOf ("YAMA0001").empty());
+    mounts.noteReply ("YAMA0001", "OK", "OK set MIXER:Current/InCh/Fader/Level 0 0 -32768");
+    mounts.noteReply ("YAMA0001", "ERROR", "ERROR ssrecall_ex InvalidArgument");
+    CHECK (mounts.lastReplyOf ("YAMA0001") == "ERROR ssrecall_ex InvalidArgument");
+    CHECK (mounts.lastReplyOf ("NOBODY01").empty());
+}
+
+TEST_CASE ("mount: what a console answered arrives as mount.replied, from the link's origin, and is the device's last reply")
+{
+    Rig rig;
+    rig.engine.submit ("link:YAMA0001", "mount.replied",
+                       { osc::Value::string ("YAMA0001"), osc::Value::string ("ERROR"),
+                         osc::Value::string ("ERROR set InvalidArgument") });
+    const auto result = rig.engine.processTick (9);
+    CHECK (result.applied == 1u);
+    CHECK (rig.mounts.lastReplyOf ("YAMA0001") == "ERROR set InvalidArgument");
+    CHECK (rig.mounts.lastReplyOf ("OTHER001").empty());
+}

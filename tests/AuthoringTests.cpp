@@ -713,7 +713,7 @@ TEST_CASE ("preset command: a device from a preset copies the file once, writes 
 
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("adm-osc") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 8u);
+    REQUIRE (record.args.size() == 9u);
     const auto deviceId = record.args[1].getString();
     REQUIRE (deviceId.size() == 8u);
     CHECK (record.args[2].getString() == "/adm");
@@ -722,6 +722,7 @@ TEST_CASE ("preset command: a device from a preset copies the file once, writes 
     CHECK (record.args[5].getString() == "udp");
     CHECK (record.args[6].getInt32() == 1);
     CHECK (record.args[7].getString() == "length");
+    CHECK (record.args[8].getString() == "osc");
 
     /*  THE FILE IS IN THE BUNDLE, so the show opens on a machine whose
         Go.dot has never seen the preset; the rows say where it came from. */
@@ -882,7 +883,7 @@ TEST_CASE ("preset command: a device from the Eos preset is reached over a conne
 
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("etc-eos-osc") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 8u);
+    REQUIRE (record.args.size() == 9u);
     const auto deviceId = record.args[1].getString();
     CHECK (record.args[2].getString() == "/eos");
     CHECK (record.args[4].getInt32() == 3032);
@@ -904,6 +905,60 @@ TEST_CASE ("preset command: a device from the Eos preset is reached over a conne
     const auto to = tree::MountSender::destinationFor (*mounts.declarationOf (deviceId));
     CHECK (to.link == deviceId);
     CHECK (to.port == 3032);
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("preset command: a device from the Yamaha RCP preset is reached over a connection on the rcp wire, at 49280, and its nodes carry their spelling")
+{
+    /*  DP.7: the first preset whose wire is not OSC. Its device carries the
+        wire the file says, the record carries it too, and each node knows
+        how many of its address's segments are the console's X and Y. */
+    AuthoringRig rig;
+    tree::MountTable mounts;
+    const auto folder = freshBundleFolder ("wfg-presets-rcp");
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &installedPresets());
+
+    const auto* yamaha = installedPresets().find ("yamaha-rcp");
+    REQUIRE (yamaha != nullptr);
+    REQUIRE (yamaha->usable());
+    CHECK (yamaha->transport == "tcp");
+    CHECK (yamaha->wire == "rcp");
+    CHECK (yamaha->port == 49280);
+
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("yamaha-rcp") }).applied == 1u);
+    const auto record = rig.lastRecord();
+    REQUIRE (record.args.size() == 9u);
+    const auto deviceId = record.args[1].getString();
+    CHECK (record.args[5].getString() == "tcp");
+    CHECK (record.args[8].getString() == "rcp");
+
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/transport") == "tcp");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/wire") == "rcp");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/port") == "49280");
+    CHECK (mounts.isLoaded (deviceId));
+    CHECK (mounts.problemOf (deviceId).empty());
+
+    //  A parameter with X alone has one index segment; a send, with its mix, two.
+    const auto* level = mounts.nodeAt ("/MIXER:Current/InCh/Fader/Level/1");
+    REQUIRE (level != nullptr);
+    CHECK (level->rcpVerb == "set");
+    CHECK (level->rcpIndexes == 1);
+    CHECK (level->role == "strip.level");
+
+    const auto* send = mounts.nodeAt ("/MIXER:Current/InCh/ToMix/Level/1/1");
+    REQUIRE (send != nullptr);
+    CHECK (send->rcpIndexes == 2);
+    CHECK (send->role == "send.level");
+
+    const auto* scene = mounts.nodeAt ("/MIXER:Lib/Scene");
+    REQUIRE (scene != nullptr);
+    CHECK (scene->rcpVerb == "ssrecall_ex");
+    CHECK (scene->rcpIndexes == 0);
+
+    const auto to = tree::MountSender::destinationFor (*mounts.declarationOf (deviceId));
+    CHECK (to.link == deviceId);
+    CHECK (to.wire == "rcp");
 
     folder.deleteRecursively();
 }

@@ -4345,3 +4345,66 @@ TEST_CASE ("network cue: a cue, its further message and its curve aimed at a dev
     CHECK (rig.runOf (refused)->state == cue::runState::failed);
     CHECK (rig.runOf (refused)->error == cue::runError::sendFailed);
 }
+
+//==============================================================================
+/*  DP.7: A CUE AIMED AT A CONSOLE ON THE RCP WIRE leaves as lines, its curve's
+    moves as lines after it, in order; and what the console answers lands on
+    the device through mount.replied (namespace draft §57, AFJ). */
+TEST_CASE ("network cue: a cue and its curve aimed at a console on the rcp wire reach the link as lines in order, and its answer is kept")
+{
+    NetworkRig rig;
+
+    tree::MountDeclaration yamaha;
+    yamaha.id = "YAMA0001";
+    yamaha.prefix = "/MIXER:Current";
+    yamaha.namespaceFile = "namespaces/yamaha.json";
+    yamaha.transport = "tcp";
+    yamaha.wire = "rcp";
+    yamaha.host = "127.0.0.1";
+    yamaha.port = 49280;
+    REQUIRE (rig.mounts.load (yamaha, R"JSON({ "FULL_PATH": "/MIXER:Current", "CONTENTS": {
+        "InCh": { "FULL_PATH": "/MIXER:Current/InCh", "CONTENTS": {
+            "Fader": { "FULL_PATH": "/MIXER:Current/InCh/Fader", "CONTENTS": {
+                "Level": { "FULL_PATH": "/MIXER:Current/InCh/Fader/Level", "CONTENTS": {
+                    "1": { "FULL_PATH": "/MIXER:Current/InCh/Fader/Level/1", "CONTENTS": {
+                        "1": { "FULL_PATH": "/MIXER:Current/InCh/Fader/Level/1/1", "TYPE": "i", "ACCESS": 3, "VALUE": [0],
+                               "RANGE": [{ "MIN": -32768, "MAX": 1000 }], "GODOT": { "RCP": { "VERB": "set", "XY": 2 } } } } } } },
+                "On": { "FULL_PATH": "/MIXER:Current/InCh/Fader/On", "CONTENTS": {
+                    "1": { "FULL_PATH": "/MIXER:Current/InCh/Fader/On/1", "CONTENTS": {
+                        "1": { "FULL_PATH": "/MIXER:Current/InCh/Fader/On/1/1", "TYPE": "i", "ACCESS": 3, "VALUE": [0],
+                               "GODOT": { "RCP": { "VERB": "set", "XY": 2 } } } } } } } } } } } } })JSON").ok);
+    rig.sender.setMounts (&rig.mounts);
+
+    std::vector<std::string> lines;
+    rig.sender.setLinkSink ([&lines] (const std::string& mountId, const std::vector<std::uint8_t>& bytes)
+    {
+        CHECK (mountId == "YAMA0001");
+        lines.emplace_back (bytes.begin(), bytes.end());
+        return true;
+    });
+
+    const auto cueId = rig.makeOsc ("/MIXER:Current/InCh/Fader/Level/1/1", "i:-32768", "none");
+    REQUIRE (rig.document.createMessage (cueId, "/MIXER:Current/InCh/Fader/On/1/1", "i:1").ok);
+    curveOn (rig, cueId, 0, "0 -32768 1 0");
+
+    rig.fire (cueId);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (lines.size() >= 3u);
+    CHECK (lines[0] == "set MIXER:Current/InCh/Fader/Level 0 0 -32768");
+    CHECK (lines[1] == "set MIXER:Current/InCh/Fader/On 0 0 1");
+
+    //  The curve's moves are lines of the same parameter, integers, climbing.
+    for (std::size_t at = 2; at < lines.size(); ++at)
+        CHECK (lines[at].rfind ("set MIXER:Current/InCh/Fader/Level 0 0 ", 0) == 0);
+
+    REQUIRE (rig.runOf (cueId) != nullptr);
+    CHECK (rig.runOf (cueId)->state == cue::runState::playing);
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
+
+    //  What the console answered is the table's to keep (MountTests holds the command).
+    rig.mounts.noteReply ("YAMA0001", "OK", "OK set MIXER:Current/InCh/Fader/Level 0 0 -32768");
+    CHECK (rig.mounts.lastReplyOf ("YAMA0001") == "OK set MIXER:Current/InCh/Fader/Level 0 0 -32768");
+}

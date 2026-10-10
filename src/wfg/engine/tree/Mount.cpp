@@ -489,6 +489,15 @@ namespace wfg::tree
 
             //  The role, a word; anything else there is not one (AFM).
             out.role = stringProperty (*godot, "ROLE");
+
+            //  And the RCP spelling, where the file gives one (AFH, DP.7).
+            if (const auto* rcp = property (*godot, "RCP"); rcp != nullptr)
+            {
+                out.rcpVerb = stringProperty (*rcp, "VERB");
+
+                if (const auto* xy = property (*rcp, "XY"); xy != nullptr)
+                    out.rcpIndexes = static_cast<int> (xy->asNumber());
+            }
         }
 
         /*  Container, state or event.
@@ -914,6 +923,17 @@ namespace wfg::tree
     void MountTable::noteReadback (const std::string& address, const osc::Values& values)
     {
         readbacks[address] = values;
+    }
+
+    void MountTable::noteReply (const std::string& mountId, const std::string& word, const std::string& line)
+    {
+        replies[mountId] = word.empty() ? line : line;
+    }
+
+    std::string MountTable::lastReplyOf (const std::string& mountId) const
+    {
+        const auto found = replies.find (mountId);
+        return found == replies.end() ? std::string {} : found->second;
     }
 
     const osc::Values* MountTable::readbackOf (const std::string& address) const

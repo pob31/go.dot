@@ -18,6 +18,7 @@
 
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
+#include <wfg/engine/tree/Wires.h>
 
 #include <algorithm>
 #include <cmath>
@@ -117,7 +118,9 @@ namespace wfg::tree
 
             lastSentAt[message.address] = flushes;
 
-            if (message.destination.bundles)
+            /*  AND ONLY THE OSC WIRE BUNDLES (AFJ): a line of text has no
+                bundle to travel in, whatever the device's row says. */
+            if (message.destination.bundles && message.destination.wire == "osc")
             {
                 auto device = std::find_if (bundled.begin(), bundled.end(),
                                             [&message] (const auto& entry) { return entry.first == message.mountId; });
@@ -167,8 +170,30 @@ namespace wfg::tree
             is encoded once however many times it was written - which is the
             point of coalescing, and would be lost if the bytes were built where
             the value arrived. */
-        if (const auto bytes = osc::encode (osc::Packet::message (message.address, message.values), error))
+        if (message.destination.wire == "rcp")
+        {
+            /*  THE RCP WIRE (namespace draft §57, AFJ; DP.7): the line of
+                Yamaha's protocol, spelled as the node says where the table
+                holds one - the verb, how many trailing segments are X and Y
+                - and inferred from the address otherwise. The bytes go to the
+                link, which reads lines and adds the newline. */
+            wire::RcpSpec spec;
+
+            if (const auto* node = mounts != nullptr ? mounts->nodeAt (message.address) : nullptr; node != nullptr)
+            {
+                if (! node->rcpVerb.empty())
+                    spec.verb = node->rcpVerb;
+
+                spec.indexes = node->rcpIndexes;
+            }
+
+            const auto line = wire::renderRcp (message.address, message.values, spec);
+            ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));
+        }
+        else if (const auto bytes = osc::encode (osc::Packet::message (message.address, message.values), error))
+        {
             ok = deliver (message.destination, *bytes);
+        }
 
         if (ok)
             ++sent[message.mountId];
@@ -332,6 +357,7 @@ namespace wfg::tree
         destination.bundles = declaration.bundles;
         destination.serial = declaration.transport == "serial" ? declaration.serial : std::string {};
         destination.link = declaration.transport == "tcp" ? declaration.id : std::string {};
+        destination.wire = declaration.wire.empty() ? std::string ("osc") : declaration.wire;
         return destination;
     }
 

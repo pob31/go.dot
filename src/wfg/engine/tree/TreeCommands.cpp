@@ -165,11 +165,15 @@ namespace wfg::tree
 
         /*  THE WIRE, before the transport: a device that names bytes Go.dot
             cannot render yet is refused in words, whatever carries them
-            (namespace draft §57, AFJ; the rcp, line and midi wires of DP.7
-            to DP.9). */
-        if (declaration->wire != "osc")
+            (namespace draft §57, AFJ; the line and midi wires of DP.8 and
+            DP.9). The rcp wire (DP.7) is lines of Yamaha's protocol on a
+            connection and nothing else can carry it. */
+        if (declaration->wire != "osc" && declaration->wire != "rcp")
             return refuse ("wire \"" + declaration->wire
-                           + "\" is declared but not built - Go.dot renders osc to a device today");
+                           + "\" is declared but not built - Go.dot renders osc and rcp to a device today");
+
+        if (declaration->wire == "rcp" && declaration->transport != "tcp")
+            return refuse ("the rcp wire is lines of text on a connection - set the transport to tcp");
 
         /*  OSC OVER SLIP ON A SERIAL PORT (namespace draft §51, PC.11): the port
             has to be one of the show's, and reading packets rather than lines -
@@ -346,6 +350,21 @@ namespace wfg::tree
             there is none on `run.started` or `audio.armed` - the namespace
             draft calls for one and no engine-origin command has ever had it, so
             adding it to this one alone would be a rule with one member. */
+        /*  WHAT A CONSOLE ANSWERED to a line it was sent (namespace draft §57,
+            AFJ; DP.7): OK, OKm or ERROR with the line, logged as a serial
+            port's lines are and kept as the device's last reply for the
+            Network tab. Engine origin `link:<id>`; a replay holds the same
+            answers on the same ticks. */
+        registry.add ({ "mount.replied",
+                        "A line a console answered to one it was sent: OK, OKm or ERROR, and the line whole.",
+                        { { "mount", 's', false }, { "word", 's', false }, { "line", 's', false } },
+                        true,
+                        [&mounts] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            mounts.noteReply (args[0].getString(), args[1].getString(), args[2].getString());
+                            return Outcome::ok (args);
+                        } });
+
         registry.add ({ "mount.readback",
                         "What a mounted target said one of its nodes currently holds.",
                         { { "mount", 's', false }, { "address", 's', false },

@@ -459,6 +459,13 @@ namespace wfg::tree
             what was written. */
         const Node* nodeAt (const std::string& address) const;
 
+        /*  WHAT A CONSOLE LAST ANSWERED to a line it was sent (namespace draft
+            §57, AFJ; DP.7): the OK, OKm or ERROR line, whole, noted by
+            `mount.replied` and read by `mount/lastReply`. One per device, the
+            latest; a device that answered nothing yet reads empty. */
+        void noteReply (const std::string& mountId, const std::string& word, const std::string& line);
+        std::string lastReplyOf (const std::string& mountId) const;
+
         /*  WHAT THE TARGET SAID, which is a different question from what was
             written to it and is kept apart for exactly that reason.
 
@@ -614,6 +621,7 @@ namespace wfg::tree
             different fact about the same thing and because a reload of the
             namespace must not carry one across. */
         std::map<std::string, osc::Values> readbacks;
+        std::map<std::string, std::string> replies;
 
         /** Observations, by address, and the tick each was taken on. See `noteObservation`. */
         std::map<std::string, osc::Values> observations;

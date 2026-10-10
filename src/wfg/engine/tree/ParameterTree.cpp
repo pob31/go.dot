@@ -1786,6 +1786,8 @@ namespace wfg::tree
                             text = mounts.problemOf (id);
                         else if (name == "presetUpdate")
                             text = newerPresetFor (presets, mount.getProperty ("preset").toString().toStdString());
+                        else if (name == "lastReply")
+                            text = mounts.lastReplyOf (id);
                         else
                             text = storedText (attribute, mount);
 

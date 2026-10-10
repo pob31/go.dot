@@ -24841,3 +24841,22 @@ connection with no host.
   naming it), NetworkCueTests (a cue, its message and its curve down the link in order; a link that
   cannot take it failing the run `send-failed`), ClientTests (the link rows from a table that finds
   nobody, off by datagram, the gesture), AuthoringTests (the Eos device loaded with nothing to type).
+- **DP.7**: the rcp wire (AFJ, AFH). `tree::wire::renderRcp` spells a message as a line of Yamaha's
+  protocol - the verb, the parameter, X and Y from nought taken from the address's last segments,
+  then the atoms, an integer as it is, a float rounded, a bool as 1 or 0, a string quoted - by the
+  node's `GODOT.RCP` (`VERB`, `XY`) where the file gives one and by the trailing whole numbers
+  otherwise; `parseRcpLine` takes a console's line apart and `rcpAddressesOf` says where a reported
+  parameter might be a node. `Node::rcpVerb`/`rcpIndexes`, `Destination::wire`, the sender's mount
+  table for the node's spelling at the flush, the osc wire alone bundling; the load takes `rcp` over
+  tcp and nothing else; serve's links read lines for an rcp device, NOTIFY is heard at the first of
+  its addresses the mount has (the device's report, rx on), OK, OKm and ERROR are logged as
+  `mount.replied` and kept as `mount/lastReply`; `mount.createFromPreset` records the wire as its
+  ninth argument and writes the row. `yamaha-rcp` from the DM7 specification's parameter list
+  (yamaha_osc.py's, imported), TCP 49280, X and Y as the last segments, `GODOT.RCP` on every node,
+  two scene recalls (CL/QL's by number, DM3/DM7/TF/RIVAGE's by list and name); no NDA document read
+  (AFA). `mock_target.py --framing lines --wire rcp` answers OK and says a line on `/_mock/say`;
+  `blackbox.wires` gains the console: the device from the preset, the cue as a line, the OK kept, a
+  NOTIFY heard. Tests: WireTests (the line bytes-exact, the atoms, a verb without indexes, the replies
+  taken apart, the addresses), MountTests (rcp over tcp and nowhere else, the sender's lines by the
+  node's spelling and one each whatever the bundles row says, the command), NetworkCueTests (a cue and
+  its curve as lines in order), AuthoringTests (the Yamaha device and its nodes' spelling), PresetTests.

@@ -93,7 +93,7 @@ namespace wfg::tree
                         " arguments are what it drew and decided, on the record for a replay.",
                         { { "slug", 's', false }, { "id", 's', true }, { "prefix", 's', true },
                           { "namespace", 's', true }, { "port", 'i', true }, { "transport", 's', true },
-                          { "version", 'i', true }, { "framing", 's', true } },
+                          { "version", 'i', true }, { "framing", 's', true }, { "wire", 's', true } },
                         true,
                         [&document, &mounts, &bundleFolder, presets] (CommandContext&, const std::vector<osc::Value>& args)
                         {
@@ -108,7 +108,7 @@ namespace wfg::tree
                             /*  FROM THE RECORD WHEN IT HAS ONE, else from the
                                 installed preset: a replay has no table and its
                                 record says everything the live command decided. */
-                            std::string prefixRow, file, transport, framing = "length";
+                            std::string prefixRow, file, transport, framing = "length", wire = "osc";
                             int port = 0;
                             int version = 0;
 
@@ -122,6 +122,9 @@ namespace wfg::tree
 
                                 if (args.size() >= 8)
                                     framing = args[7].getString();
+
+                                if (args.size() >= 9)
+                                    wire = args[8].getString();
                             }
                             else if (preset != nullptr && preset->usable())
                             {
@@ -131,6 +134,7 @@ namespace wfg::tree
                                 port = preset->port;
                                 transport = preset->transport;
                                 framing = preset->framing;
+                                wire = preset->wire;
                             }
                             else
                             {
@@ -167,6 +171,10 @@ namespace wfg::tree
                             if (transport == "tcp")
                                 writes.push_back ({ "framing", framing });
 
+                            //  And what the bytes are, where they are not OSC (DP.7).
+                            if (wire != "osc")
+                                writes.push_back ({ "wire", wire });
+
                             if (const auto written = writeRows (document, made.id, writes); ! written.applied)
                                 return written;
 
@@ -178,7 +186,8 @@ namespace wfg::tree
                             return Outcome::ok ({ osc::Value::string (slug), osc::Value::string (made.id),
                                                   osc::Value::string (prefixRow), osc::Value::string (file),
                                                   osc::Value::int32 (port), osc::Value::string (transport),
-                                                  osc::Value::int32 (version), osc::Value::string (framing) });
+                                                  osc::Value::int32 (version), osc::Value::string (framing),
+                                                  osc::Value::string (wire) });
                         } });
 
         registry.add ({ "mount.refreshPreset",

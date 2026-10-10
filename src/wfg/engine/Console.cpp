@@ -46,6 +46,7 @@
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/serial/TcpLink.h>
+#include <wfg/engine/tree/Wires.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -2785,7 +2786,9 @@ namespace
             if (! host.empty() && port > 0 && port <= 65535)
                 wish.path = wfg::serial::hostPortOf (host, port);
 
-            wish.framing = reads ("framing", "length");
+            /*  A WIRE OF LINES - rcp - reads lines whatever the framing row
+                says (DP.7): the framing is OSC's, a size or SLIP. */
+            wish.framing = reads ("wire", "osc") == "rcp" ? std::string ("lines") : reads ("framing", "length");
             wish.rx = reads ("rx", "false") == "true";
             wish.tx = reads ("tx", "true") != "false";
             wanted.push_back (std::move (wish));
@@ -3639,7 +3642,12 @@ namespace
                               });
         sender.setLinkSink ([&links] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
                             {
-                                return links.sendPacket (mountId, packet);
+                                /*  A packet to a link cut by packets; a line to one
+                                    reading lines - the rcp wire (DP.7) - its newline
+                                    added by the table. Exactly one of the two takes
+                                    it, by the link's framing. */
+                                return links.sendPacket (mountId, packet)
+                                    || links.send (mountId, std::string (packet.begin(), packet.end()));
                             });
 
         /*  AND THE THREAD THAT ASKS. A verified cue reads a value back off the
@@ -3903,6 +3911,7 @@ namespace
         serialPorts.reconcile (serialWantedOf (document));
         links.reconcile (linkWantedOf (document));
         runner.setSerialPorts (&serialPorts);
+        sender.setMounts (&mounts);
 
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
             std::cerr << "    " << problem << std::endl;
@@ -5199,6 +5208,37 @@ namespace
                                      for (const auto& bytes : packets)
                                          if (const auto decoded = wfg::osc::decode (bytes.data(), bytes.size()); decoded.ok)
                                              nameSpace.write ("link:" + mountId, decoded.packet);
+
+                                 /*  AND THE LINES A CONSOLE SAID DOWN ITS LINK (the
+                                     rcp wire, namespace draft §57, DP.7): NOTIFY is
+                                     the device reporting a parameter - heard, as its
+                                     datagram would be, at the node the preset
+                                     spells for it, the first of the addresses it
+                                     might be that the mount has; OK, OKm and ERROR
+                                     answer a line it was sent, logged as
+                                     mount.replied. */
+                                 for (auto& [mountId, lines] : links.takeLines (64))
+                                     for (const auto& line : lines)
+                                         if (const auto said = wfg::tree::wire::parseRcpLine (line))
+                                         {
+                                             if (said->word == "NOTIFY")
+                                             {
+                                                 for (const auto& address : wfg::tree::wire::rcpAddressesOf (*said))
+                                                     if (mounts.nodeAt (address) != nullptr)
+                                                     {
+                                                         nameSpace.write ("link:" + mountId,
+                                                                          wfg::osc::Packet::message (address, said->values));
+                                                         break;
+                                                     }
+                                             }
+                                             else if (said->word == "OK" || said->word == "OKm" || said->word == "ERROR")
+                                             {
+                                                 engine.submit ("link:" + mountId, "mount.replied",
+                                                                { wfg::osc::Value::string (mountId),
+                                                                  wfg::osc::Value::string (said->word),
+                                                                  wfg::osc::Value::string (said->text) });
+                                             }
+                                         }
 
                                  /*  A SAVE IN PLUGDATA OR PD, every half second:
                                      the cue's patch as it was saved, one `node.set`

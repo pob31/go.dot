@@ -34,7 +34,10 @@ THE SEQUENCE: a device made over a connection, its link seen opening; a cue
 aimed under it arriving down the stream; the cable pulled by the mock and the
 link seen to come back on its own; the console gone for good and the link
 saying so, a cue fired meanwhile leaving nothing; the same device moved to a
-SLIP console and the cue arriving framed the other way.
+SLIP console and the cue arriving framed the other way. Then (DP.7) a device
+made from the Yamaha RCP preset against a mock answering as a console does:
+the cue arriving as a line of RCP, the console's OK kept as the device's last
+reply, and a NOTIFY the console says on its own heard at the preset's node.
 """
 import subprocess
 import sys
@@ -49,6 +52,7 @@ MOCK = Path(__file__).resolve().parent / "mock_target.py"
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "bundles" / "devices"
 
 DEVICE = "E0SW1RE1"        # the device this file makes, over a connection
+CONSOLE = "YAMAH4RC"       # the one it makes from the Yamaha RCP preset
 CUE = "B3N8R5TW"           # the fixture's /light/go, re-aimed at the console
 
 locale = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--wfg-locale=")), "C")
@@ -57,9 +61,9 @@ locale = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--wfg
 class MockWire:
     """`mock_target.py --transport tcp`, on ports it chose, in a process of its own."""
 
-    def __init__(self, framing: str):
+    def __init__(self, framing: str, wire: str = "osc"):
         self.process = subprocess.Popen(
-            [sys.executable, str(MOCK), "--transport=tcp", f"--framing={framing}"],
+            [sys.executable, str(MOCK), "--transport=tcp", f"--framing={framing}", f"--wire={wire}"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
         line = self.process.stdout.readline().split()
@@ -208,6 +212,43 @@ def run() -> int:
             # --- back by datagram: the link let go ---------------------------
             send("node.set", [base + "transport", "udp"])
             report.check(settle(base + "link", "off"), "back by datagram, the link reads off")
+
+            # --- a console on the rcp wire, from its preset (DP.7) -----------
+            console = f"/godot/mount/{CONSOLE}/"
+
+            with MockWire("lines", wire="rcp") as cl:
+                send("mount.createFromPreset", ["yamaha-rcp", CONSOLE])
+                report.check(settle(console + "wire", "rcp"),
+                             "a device made from the Yamaha RCP preset is on the rcp wire",
+                             f"wire {read(console + 'wire')!r}, problem {read(console + 'problem')!r}")
+                report.equal(read(console + "transport"), "tcp", "over a connection")
+                report.equal(read(console + "port"), "49280", "at the console's own port")
+
+                send("node.set", [console + "port", str(cl.port)])
+                send("node.set", [console + "rx", "true"])
+                report.check(settle(console + "link", "open", tries=100),
+                             "pointed at the mock, the link opens reading lines",
+                             f"link {read(console + 'link')!r}, problem {read(console + 'linkProblem')!r}")
+
+                send("node.set", [f"/godot/cue/{CUE}/address", "/MIXER:Current/InCh/Fader/Level/1"])
+                send("node.set", [f"/godot/cue/{CUE}/value", "i:-32768"])
+                report.check(settle(f"/godot/cue/{CUE}/address", "/MIXER:Current/InCh/Fader/Level/1"),
+                             "the cue re-aimed at the console's first fader")
+
+                send("cue.fire", [CUE])
+                report.check(wait_for(lambda: cl.ask("received") == 1),
+                             "fired, the cue arrives as one line of RCP", f"received {cl.ask('received')}")
+                report.equal(cl.ask("messages"), ["set MIXER:Current/InCh/Fader/Level 0 0 -32768", []],
+                             "spelled as the console reads it: the parameter, X and Y from nought, the value")
+                report.check(settle(console + "lastReply", "OK set MIXER:Current/InCh/Fader/Level 0 0 -32768"),
+                             "and the console's OK is the device's last reply",
+                             f"lastReply {read(console + 'lastReply')!r}")
+
+                heard_before = read(console + "heard")
+                common.http_get(cl.query_port, "/_mock/say?NOTIFY%20set%20MIXER:Current/InCh/Fader/Level%200%200%20-1000")
+                report.check(wait_for(lambda: read(console + "heard") != heard_before),
+                             "a NOTIFY the console says on its own is heard at the preset's node",
+                             f"heard {heard_before} -> {read(console + 'heard')}")
 
     return report.finish()
 
