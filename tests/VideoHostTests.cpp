@@ -2643,7 +2643,8 @@ TEST_CASE ("video host: a movie's edit rendered is played by a renderer with no 
     /*  THE BLUE SECOND THEN THE GREEN, four frames of dissolve between. */
     doc::Section blue, green;
     blue.id = "B";  blue.in = 2.0;  blue.out = 3.0;
-    green.id = "G"; green.in = 1.0; green.out = 2.0; green.crossfade = 0.4;
+    blue.fadeIn = 0.0; blue.fadeOut = 0.4;
+    green.id = "G"; green.in = 1.0; green.out = 2.0; green.fadeIn = 0.4; green.fadeOut = 0.0;
 
     const auto render = folder.getChildFile ("edit.mov");
     const auto result = video::movie::renderMovieEdit (movie.getFullPathName().toStdString(), { blue, green },

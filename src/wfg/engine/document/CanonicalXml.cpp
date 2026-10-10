@@ -296,10 +296,19 @@ namespace wfg::doc
 
                 for (int i = 0; i < xml.getNumAttributes(); ++i)
                 {
-                    const auto name = xml.getAttributeName (i).toStdString();
+                    auto name = xml.getAttributeName (i).toStdString();
 
                     if (name == "id")
                         continue;
+
+                    /*  THE MORNING'S CROSSFADE (namespace draft 55.9, AEH): the fade
+                        into its section - and the fade out of the one before, which
+                        the parent says once its sections are all read. */
+                    if (elementName == "Section" && name == "crossfade" && ! xml.hasAttribute ("fadeIn"))
+                    {
+                        name = "fadeIn";
+                        node.setProperty (legacyCrossfade, true, nullptr);
+                    }
 
                     const auto* attribute = element->attribute (name);
 
@@ -450,8 +459,30 @@ namespace wfg::doc
                         node.addChild (built, -1, nullptr);
                 }
 
+                /*  A MORNING'S CROSSFADE WAS BOTH SIDES OF ITS JOIN (AEH): the
+                    section before takes it as its fade out, unless it says one. */
+                juce::ValueTree previous;
+
+                for (auto child : node)
+                {
+                    if (! child.hasType ("Section"))
+                        continue;
+
+                    if (child.hasProperty (legacyCrossfade))
+                    {
+                        child.removeProperty (legacyCrossfade, nullptr);
+
+                        if (previous.isValid() && ! previous.hasProperty ("fadeOut"))
+                            previous.setProperty ("fadeOut", child["fadeIn"], nullptr);
+                    }
+
+                    previous = child;
+                }
+
                 return node;
             }
+
+            const juce::Identifier legacyCrossfade { "wfg-legacy-crossfade" };
         };
     }
 

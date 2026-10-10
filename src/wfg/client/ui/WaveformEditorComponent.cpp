@@ -92,7 +92,11 @@ namespace wfg::client::ui
                                                       Actions actionsToUse)
         : theme (themeToUse), actions (std::move (actionsToUse))
     {
-        setWantsKeyboardFocus (false);
+        /*  THE KEYS ONCE CLICKED (namespace draft §55.9, AEF): x and
+            Backspace are this panel's; every other key goes on up to the
+            window - Space to GO, the arrows to the list, Esc to panic. */
+        setWantsKeyboardFocus (true);
+        setMouseClickGrabsKeyboardFocus (true);
 
         RangeTableComponent::Actions typed;
         typed.set = actions.set;
@@ -232,35 +236,16 @@ namespace wfg::client::ui
             addChildComponent (*button);
         }
 
-        splitButton.onClick = [this]
-        {
-            if (! reading.editable || actions.splitSection == nullptr)
-                return refuseEdit();
-
-            if (reading.sections.empty() && ! (reading.fileLength > 0.0))
-                return tell ("the file's length is not known yet");
-
-            /*  On a cut, at the top or at the end there is nothing to divide:
-                the engine would refuse, and the word is better here. */
-            const auto at = headSeconds();
-            auto onACut = at <= 0.001 || at >= reading.fileLength - 0.001;
-
-            for (const auto start : model::sectionStarts (reading.sections))
-                onACut = onACut || std::abs (at - start) <= 0.001;
-
-            if (onACut)
-                return tell ("there is already a cut here");
-
-            actions.splitSection (reading.subject.objectId, at);
-        };
+        splitButton.onClick = [this] { splitHere(); };
 
         removeButton.onClick = [this]
         {
             if (! reading.editable || actions.removeSection == nullptr)
                 return refuseEdit();
 
+            //  The button closes up, as its words say (AEE); Backspace leaves silence.
             if (pickedSection < reading.sections.size())
-                actions.removeSection (reading.sections[pickedSection].id);
+                actions.removeSection (reading.sections[pickedSection].id, false);
         };
 
         joinButton.onClick = [this]
@@ -724,9 +709,16 @@ namespace wfg::client::ui
             a section gone lets it go; what the buttons may do is read anew. */
         if (sectionsCue != reading.subject.objectId)
         {
+            if (curveTarget.has_value())
+                stopTimer();
+
+            curveTarget.reset();
+            curvePreview.clear();
             sectionsCue = reading.subject.objectId;
-            pickedSection = draggedSection = heldJoin = noSection;
+            pickedSection = draggedSection = noSection;
             sectionMoved = false;
+            selection.reset();
+            gripHeld = gripHover = {};
         }
 
         if (pickedSection >= reading.sections.size())
@@ -1083,7 +1075,8 @@ namespace wfg::client::ui
 
         if (editShown())
             for (const auto& section : reading.sections)
-                editKey += section.id + ":" + osc::formatDouble (section.in) + "-" + osc::formatDouble (section.out) + ";";
+                editKey += section.id + ":" + osc::formatDouble (section.in) + "-" + osc::formatDouble (section.out)
+                         + "@" + osc::formatDouble (section.gap) + "*" + osc::formatDouble (section.trimDb) + ";";
 
         if (barsFile == drawnFile && barsWidth == bar.getWidth() && barsEdit == editKey
               && juce::approximatelyEqual (barsFrom, view.from)
@@ -1134,8 +1127,18 @@ namespace wfg::client::ui
             if (x1 <= x0)
                 continue;
 
-            const auto piece = model::waveform (*found->second.pyramid, found->second.peaks.get(), x1 - x0,
-                                                section.in + (from - starts[k]), section.in + (to - starts[k]));
+            auto piece = model::waveform (*found->second.pyramid, found->second.peaks.get(), x1 - x0,
+                                          section.in + (from - starts[k]), section.in + (to - starts[k]));
+
+            /*  AT ITS TRIM (55.9): a section turned down looks turned down. */
+            const auto gain = std::min (4.0, std::pow (10.0, section.trimDb / 20.0));
+
+            for (auto& column : piece)
+            {
+                column.peak = std::min (1.0, column.peak * gain);
+                column.low = std::max (-1.0, column.low * gain);
+                column.high = std::min (1.0, column.high * gain);
+            }
 
             for (std::size_t i = 0; i < piece.size() && x0 + static_cast<int> (i) < bar.getWidth(); ++i)
                 bars[static_cast<std::size_t> (x0) + i] = piece[i];
@@ -1163,6 +1166,9 @@ namespace wfg::client::ui
         paintRanges (g, bar);
         paintLane (g, bar);
         paintTrail (g, bar);
+
+        if (editShown())
+            paintGrips (g, bar);
         paintRuler (g, rulerArea());
         paintHead (g, headArea());
 
@@ -1715,6 +1721,380 @@ namespace wfg::client::ui
 
 
     //==============================================================================
+    /*  THE HANDLES ON THE BAR (namespace draft §55.9). */
+
+    const std::vector<model::SectionRow>& WaveformEditorComponent::sectionsShown() const
+    {
+        if (gripHeld.grip != model::Grip::none && gripMoved && ! gripPreview.empty())
+            return gripPreview;
+
+        if (curveTarget.has_value() && ! curvePreview.empty())
+            return curvePreview;
+
+        return reading.sections;
+    }
+
+    double WaveformEditorComponent::sourceLength() const
+    {
+        /*  THE FILE'S OWN LENGTH, for an edge pulled past the last section's
+            end: the analyser's record, the edit's file while it is open. */
+        if (media != nullptr)
+        {
+            const auto& named = reading.editSource.empty() ? reading.file : reading.editSource;
+
+            if (const auto found = media->find (named); found != media->end())
+                return found->second.seconds;
+        }
+
+        return 0.0;
+    }
+
+    juce::Point<float> WaveformEditorComponent::gripPosition (model::Grip grip, std::size_t index) const
+    {
+        const auto bar = barArea();
+        const auto& sections = sectionsShown();
+
+        if (index >= sections.size() || bar.isEmpty())
+            return {};
+
+        const auto starts = model::sectionStarts (sections);
+        const auto band = static_cast<float> (model::gripBand (bar.getHeight()));
+        const auto xOf = [this, &bar] (double seconds)
+        {
+            return static_cast<float> (bar.getX()) + static_cast<float> (view.xForSeconds (seconds, bar.getWidth()));
+        };
+
+        switch (grip)
+        {
+            case model::Grip::volume:
+                return { xOf (starts[index] + sections[index].length() / 2.0),
+                         static_cast<float> (bar.getBottom())
+                           - static_cast<float> (model::laneHeightFor (sections[index].trimDb) * bar.getHeight()) };
+            case model::Grip::fadeIn:
+                return { xOf (model::fadeHandleSeconds (sections, index, true)), static_cast<float> (bar.getY()) + band / 2.0f };
+            case model::Grip::fadeOut:
+                return { xOf (model::fadeHandleSeconds (sections, index, false)), static_cast<float> (bar.getY()) + band / 2.0f };
+            case model::Grip::edgeIn:
+                return { xOf (starts[index]), static_cast<float> (bar.getBottom()) - band / 2.0f };
+            case model::Grip::edgeOut:
+                return { xOf (starts[index] + sections[index].length()), static_cast<float> (bar.getBottom()) - band / 2.0f };
+            case model::Grip::none:
+                break;
+        }
+
+        return {};
+    }
+
+    void WaveformEditorComponent::paintGrips (juce::Graphics& g, juce::Rectangle<int> bar)
+    {
+        const auto& sections = sectionsShown();
+
+        if (sections.empty() || bar.getWidth() <= 1 || ! (view.span() > 0.0))
+        {
+            /*  NO EDIT YET: a selection may still be dragged out, to split. */
+            if (selection.has_value())
+            {
+                const auto x0 = static_cast<float> (bar.getX()) + static_cast<float> (view.xForSeconds (selection->first, bar.getWidth()));
+                const auto x1 = static_cast<float> (bar.getX()) + static_cast<float> (view.xForSeconds (selection->second, bar.getWidth()));
+                g.setColour (Look::colour (theme, "picked").withAlpha (0.18f));
+                g.fillRect (juce::Rectangle<float> (x0, static_cast<float> (bar.getY()), std::max (1.0f, x1 - x0),
+                                                    static_cast<float> (bar.getHeight())));
+                g.setColour (Look::colour (theme, "picked"));
+                g.fillRect (juce::Rectangle<float> (x0, static_cast<float> (bar.getY()), 1.0f, static_cast<float> (bar.getHeight())));
+                g.fillRect (juce::Rectangle<float> (x1, static_cast<float> (bar.getY()), 1.0f, static_cast<float> (bar.getHeight())));
+            }
+
+            return;
+        }
+
+        const auto starts = model::sectionStarts (sections);
+        const auto heard = model::heardFades (sections);
+        const auto stored = model::clampFades (sections);
+        const auto top = static_cast<float> (bar.getY());
+        const auto bottom = static_cast<float> (bar.getBottom());
+        const auto height = bottom - top;
+        const auto xOf = [this, &bar] (double seconds)
+        {
+            return static_cast<float> (bar.getX()) + static_cast<float> (view.xForSeconds (seconds, bar.getWidth()));
+        };
+        const auto live = reading.editable;
+        const auto ink = Look::colour (theme, live ? "ink" : "ink-off");
+        const auto accent = Look::colour (theme, live ? "standby" : "ink-off");
+
+        juce::Graphics::ScopedSaveState keepInside (g);
+        g.reduceClipRegion (bar);
+
+        //  SILENCE: the gaps shaded, as no sound is there (55.9).
+        {
+            auto end = 0.0;
+
+            for (std::size_t k = 0; k < sections.size(); ++k)
+            {
+                if (starts[k] > end + 1.0e-6)
+                {
+                    g.setColour (juce::Colours::black.withAlpha (0.35f));
+                    g.fillRect (juce::Rectangle<float> (xOf (end), top, xOf (starts[k]) - xOf (end), height));
+                }
+
+                end = starts[k] + sections[k].length();
+            }
+        }
+
+        //  THE SELECTION, over the bar's whole height, its two ends marked.
+        if (selection.has_value())
+        {
+            const auto x0 = xOf (selection->first);
+            const auto x1 = xOf (selection->second);
+            g.setColour (Look::colour (theme, "picked").withAlpha (0.18f));
+            g.fillRect (juce::Rectangle<float> (x0, top, std::max (1.0f, x1 - x0), height));
+            g.setColour (Look::colour (theme, "picked"));
+            g.fillRect (juce::Rectangle<float> (x0, top, 1.0f, height));
+            g.fillRect (juce::Rectangle<float> (x1, top, 1.0f, height));
+        }
+
+        const auto band = static_cast<float> (model::gripBand (bar.getHeight()));
+        const auto square = [&g] (juce::Point<float> at, float size, bool filled)
+        {
+            const auto box = juce::Rectangle<float> (size, size).withCentre (at);
+
+            if (filled)
+                g.fillRect (box);
+            else
+                g.drawRect (box, 1.0f);
+        };
+
+        for (std::size_t k = 0; k < sections.size(); ++k)
+        {
+            const auto left = xOf (starts[k]);
+            const auto right = xOf (starts[k] + sections[k].length());
+
+            if (right < static_cast<float> (bar.getX()) || left > static_cast<float> (bar.getRight()))
+                continue;
+
+            //  THE SECTION'S EDGES, and the picked one outlined twice (a shape, §4.8).
+            g.setColour (ink.withAlpha (0.5f));
+            g.fillRect (juce::Rectangle<float> (left, top, 1.0f, height));
+            g.fillRect (juce::Rectangle<float> (right - 1.0f, top, 1.0f, height));
+
+            if (k == pickedSection)
+            {
+                g.setColour (Look::colour (theme, "picked"));
+                g.drawRect (juce::Rectangle<float> (left, top, right - left, height), 2.0f);
+                g.drawRect (juce::Rectangle<float> (left + 4.0f, top + 4.0f, std::max (0.0f, right - left - 8.0f), height - 8.0f), 1.0f);
+            }
+
+            /*  THE FADES DRAWN AS THEIR CURVES, gain from the foot to the top:
+                a sound's equal power, a picture's straight, bent by the curve
+                (AEB); a join still one in the file dotted, as it plays plain. */
+            for (const auto inSide : { true, false })
+            {
+                const auto length = inSide ? stored[k].fadeIn : stored[k].fadeOut;
+                const auto centred = inSide ? heard[k].inCentred : heard[k].outCentred;
+                const auto plain = inSide ? heard[k].plainIn : heard[k].plainOut;
+                const auto curve = inSide ? heard[k].inCurve : heard[k].outCurve;
+
+                if (! (length > 0.0))
+                    continue;
+
+                const auto edge = inSide ? starts[k] : starts[k] + sections[k].length();
+                const auto from = inSide ? (centred ? edge - length / 2.0 : edge) : (centred ? edge - length / 2.0 : edge - length);
+                juce::Path shape;
+
+                for (int step = 0; step <= 24; ++step)
+                {
+                    const auto progress = static_cast<double> (step) / 24.0;
+                    const auto gain = model::fadeGain (inSide ? progress : 1.0 - progress, curve, reading.movie);
+                    const auto at = juce::Point<float> (xOf (from + progress * length),
+                                                        bottom - static_cast<float> (gain) * height);
+
+                    if (step == 0)
+                        shape.startNewSubPath (at);
+                    else
+                        shape.lineTo (at);
+                }
+
+                g.setColour (accent.withAlpha (plain ? 0.35f : 0.9f));
+
+                if (plain)
+                {
+                    const float dashes[] { 3.0f, 3.0f };
+                    juce::Path dashed;
+                    juce::PathStrokeType (1.0f).createDashedStroke (dashed, shape, dashes, 2);
+                    g.fillPath (dashed);
+                }
+                else
+                {
+                    g.strokePath (shape, juce::PathStrokeType (1.5f));
+                }
+            }
+
+            //  THE HANDLES: the fades' at the top, the edges' at the foot, the volume in the middle.
+            const auto hot = [this, k] (model::Grip grip)
+            {
+                return (gripHover.grip == grip && gripHover.index == k) || (gripHeld.grip == grip && gripHeld.index == k);
+            };
+
+            for (const auto grip : { model::Grip::fadeIn, model::Grip::fadeOut })
+            {
+                g.setColour (hot (grip) ? Look::colour (theme, "picked") : accent);
+                square (gripPosition (grip, k), hot (grip) ? 9.0f : 7.0f, true);
+            }
+
+            if (! model::isJoin (sections, k) || k == 0)
+            {
+                g.setColour (hot (model::Grip::edgeIn) ? Look::colour (theme, "picked") : ink);
+                square (gripPosition (model::Grip::edgeIn, k), hot (model::Grip::edgeIn) ? 9.0f : 7.0f, true);
+            }
+            else
+            {
+                //  AT A JOIN THE TWO EDGES ARE ONE: the cut, rolled (AEC).
+                g.setColour (hot (model::Grip::edgeIn) ? Look::colour (theme, "picked") : ink);
+                const auto at = gripPosition (model::Grip::edgeIn, k);
+                juce::Path diamond;
+                diamond.addQuadrilateral (at.x - 5.0f, at.y, at.x, at.y - 5.0f, at.x + 5.0f, at.y, at.x, at.y + 5.0f);
+                g.fillPath (diamond);
+            }
+
+            if (k + 1 >= sections.size() || ! model::isJoin (sections, k + 1))
+            {
+                g.setColour (hot (model::Grip::edgeOut) ? Look::colour (theme, "picked") : ink);
+                square (gripPosition (model::Grip::edgeOut, k), hot (model::Grip::edgeOut) ? 9.0f : 7.0f, true);
+            }
+
+            if (reading.cueKind == "media" || ! reading.soundFile.empty())
+            {
+                const auto at = gripPosition (model::Grip::volume, k);
+                g.setColour (hot (model::Grip::volume) ? Look::colour (theme, "picked") : ink);
+                square (at, hot (model::Grip::volume) ? 10.0f : 8.0f, false);
+                g.drawHorizontalLine (juce::roundToInt (at.y), at.x - 10.0f, at.x + 10.0f);
+            }
+        }
+
+        juce::ignoreUnused (band);
+    }
+
+    void WaveformEditorComponent::timerCallback()
+    {
+        stopTimer();
+        flushCurve();
+    }
+
+    void WaveformEditorComponent::flushCurve()
+    {
+        stopTimer();
+
+        if (curveTarget.has_value() && curveTarget->first < reading.sections.size() && actions.curveSection != nullptr)
+        {
+            const auto& section = reading.sections[curveTarget->first];
+            const auto now = curveTarget->second ? section.fadeInCurve : section.fadeOutCurve;
+
+            if (std::abs (now - curveHeld) >= 0.005)
+                actions.curveSection (section.id, curveTarget->second, curveHeld, curveAlone);
+        }
+
+        curveTarget.reset();
+        curvePreview.clear();
+        tell ({});
+        repaint();
+    }
+
+    void WaveformEditorComponent::splitHere()
+    {
+        if (! reading.editable || actions.splitSection == nullptr)
+            return refuseEdit();
+
+        if (reading.sections.empty() && ! (reading.fileLength > 0.0))
+            return tell ("the file's length is not known yet");
+
+        /*  On a cut, at the top or at the end there is nothing to divide, and in
+            silence nothing at all: the engine would refuse, and the word is
+            better here. */
+        const auto at = headSeconds();
+        auto onACut = at <= 0.001 || at >= reading.fileLength - 0.001;
+
+        for (const auto start : model::sectionStarts (reading.sections))
+            onACut = onACut || std::abs (at - start) <= 0.001;
+
+        if (onACut)
+            return tell ("there is already a cut here");
+
+        if (! reading.sections.empty() && ! model::sectionAt (reading.sections, at).has_value())
+            return tell ("the playhead is over silence - nothing to split there");
+
+        actions.splitSection (reading.subject.objectId, at);
+    }
+
+    bool WaveformEditorComponent::keyPressed (const juce::KeyPress& key)
+    {
+        if (! editShown())
+            return false;
+
+        const auto mods = key.getModifiers();
+
+        //  THE MENUS' KEYS - Ctrl/Cmd with anything - are the window's.
+        if (mods.isCommandDown() || mods.isCtrlDown() || mods.isAltDown())
+            return false;
+
+        const auto code = key.getKeyCode();
+
+        /*  x SPLITS (namespace draft §55.9): at both ends of the selection in one
+            step, else at the playhead. */
+        if (code == 'x' || code == 'X')
+        {
+            if (selection.has_value())
+            {
+                if (! reading.editable || actions.splitSpan == nullptr)
+                    refuseEdit();
+                else
+                    actions.splitSpan (reading.subject.objectId, selection->first, selection->second);
+            }
+            else
+            {
+                splitHere();
+            }
+
+            return true;
+        }
+
+        /*  BACKSPACE DELETES (AEE): the selection if there is one, else the
+            picked section - leaving silence, or closing up with Shift. */
+        if (code == juce::KeyPress::backspaceKey || code == juce::KeyPress::deleteKey)
+        {
+            const auto ripple = mods.isShiftDown();
+
+            if (! reading.editable)
+            {
+                refuseEdit();
+                return true;
+            }
+
+            if (selection.has_value())
+            {
+                if (actions.deleteSpan != nullptr)
+                    actions.deleteSpan (reading.subject.objectId, selection->first, selection->second, ripple);
+
+                selection.reset();
+                repaint();
+                return true;
+            }
+
+            if (pickedSection < reading.sections.size() && actions.removeSection != nullptr)
+            {
+                actions.removeSection (reading.sections[pickedSection].id, ! ripple);
+                pickedSection = noSection;
+                showPickedSection();
+                sayEdit();
+                return true;
+            }
+
+            tell ("pick a section in the lower half, or drag a selection in the top half, to delete it");
+            return true;
+        }
+
+        return false;
+    }
+
+    //==============================================================================
     /*  THE SECTIONS ROW (namespace draft §55). */
 
     bool WaveformEditorComponent::editShown() const
@@ -1887,56 +2267,25 @@ namespace wfg::client::ui
             g.setColour (Look::colour (theme, reading.frozen || ! reading.editable ? "ink-off" : "ink"));
             g.drawFittedText (label, rect.reduced (18.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1);
 
-            /*  THE JOIN INTO THIS SECTION: a line down the bar where the cut is
-                - dotted while the two are still one in the file, solid with a
-                band as wide as the crossfade once they are not - and a lozenge
-                on the row to drag the crossfade by. A section whose in point
-                is the file's start has nothing before it: a hard cut, greyed. */
-            if (block.index > 0)
+            /*  THE JOIN INTO THIS SECTION: a line down the bar where the cut is,
+                dotted while the two are still one in the file and solid once they
+                are not. Its fades are the bar's top handles' (55.9). */
+            if (block.join)
             {
                 const auto& before = reading.sections[block.index - 1];
-                const auto continuous = model::continuousJoin (before, section);
-                const auto hardCut = section.in <= 0.001;
-                const auto fade = heldJoin == block.index ? heldCrossfade : model::heardCrossfade (reading.sections, block.index);
-                const auto fadePixels = static_cast<float> (fade * pixelsPerSecond);
-                const auto x = left;
+                const auto x = juce::roundToInt (left);
 
-                if (continuous)
+                if (model::continuousJoin (before, section))
                 {
                     g.setColour (Look::colour (theme, "ink-off"));
 
-                    for (auto y = bar.getY(); y < bar.getBottom(); y += 6)
-                        g.fillRect (juce::roundToInt (x), y, 1, 3);
+                    for (auto y = row.getY(); y < row.getBottom(); y += 4)
+                        g.fillRect (x, y, 1, 2);
                 }
                 else
                 {
-                    g.setColour (Look::colour (theme, "standby").withAlpha (0.25f));
-                    g.fillRect (juce::Rectangle<float> (x - fadePixels / 2.0f, static_cast<float> (bar.getY()),
-                                                        juce::jmax (1.0f, fadePixels), static_cast<float> (bar.getHeight())));
                     g.setColour (Look::colour (theme, "standby"));
-                    g.fillRect (juce::roundToInt (x), bar.getY(), 1, bar.getHeight());
-                }
-
-                const auto wide = juce::jmax (6.0f, fadePixels);
-                juce::Path lozenge;
-                const auto middle = rect.getCentreY();
-                lozenge.addQuadrilateral (x - wide / 2.0f, middle, x, rect.getY() + 1.0f,
-                                          x + wide / 2.0f, middle, x, rect.getBottom() - 1.0f);
-
-                g.setColour (Look::colour (theme, continuous || hardCut ? "ink-off"
-                                                  : heldJoin == block.index ? "picked" : "standby"));
-
-                if (continuous)
-                {
-                    const juce::PathStrokeType dotted { 1.0f };
-                    const float dashes[] { 2.0f, 2.0f };
-                    juce::Path drawn;
-                    dotted.createDashedStroke (drawn, lozenge, dashes, 2);
-                    g.fillPath (drawn);
-                }
-                else
-                {
-                    g.fillPath (lozenge);
+                    g.fillRect (x, row.getY(), 1, row.getHeight());
                 }
             }
         }
@@ -2120,6 +2469,29 @@ namespace wfg::client::ui
             return;
         }
 
+        /*  A SECTION'S HANDLE (namespace draft §55.9): its cursor says which
+            way it goes. */
+        if (editShown() && barArea().contains (event.getPosition()))
+        {
+            const auto bar = barArea();
+            const auto found = model::hitGrip (sectionsShown(), view, bar.getWidth(), bar.getHeight(),
+                                               event.x - bar.getX(), event.y - bar.getY(), grabRadius,
+                                               reading.cueKind == "media" || ! reading.soundFile.empty());
+
+            if (! (found == gripHover))
+            {
+                gripHover = found;
+                repaint();
+            }
+
+            if (gripHover.grip != model::Grip::none)
+            {
+                setMouseCursor (gripHover.grip == model::Grip::volume ? juce::MouseCursor::UpDownResizeCursor
+                                                                     : juce::MouseCursor::LeftRightResizeCursor);
+                return;
+            }
+        }
+
         if (reading.ranges.empty() || ! barArea().contains (event.getPosition()))
         {
             setMouseCursor (juce::MouseCursor::NormalCursor);
@@ -2172,15 +2544,7 @@ namespace wfg::client::ui
             const auto hit = model::hitSection (sectionLayout(), static_cast<double> (event.x - barArea().getX()),
                                                 static_cast<double> (grabRadius));
 
-            if (hit.hit == model::SectionHit::join)
-            {
-                if (! reading.editable)
-                    return refuseEdit();
-
-                heldJoin = hit.index;
-                heldCrossfade = reading.sections[hit.index].crossfade;
-            }
-            else if (hit.hit == model::SectionHit::block)
+            if (hit.hit == model::SectionHit::block || hit.hit == model::SectionHit::join)
             {
                 pickedSection = hit.index;
                 draggedSection = hit.index;
@@ -2219,30 +2583,184 @@ namespace wfg::client::ui
             return;
         }
 
+        /*  A SECTION'S HANDLE (namespace draft §55.9, ADY): the volume, a fade's
+            length, an edge - held, drawn as the hand moves it, written once on
+            release. */
+        if (editShown())
+        {
+            const auto bar = barArea();
+            const auto found = model::hitGrip (sectionsShown(), view, bar.getWidth(), bar.getHeight(),
+                                               event.x - bar.getX(), event.y - bar.getY(), grabRadius,
+                                               reading.cueKind == "media" || ! reading.soundFile.empty());
+
+            if (found.grip != model::Grip::none)
+            {
+                if (! reading.editable)
+                    return refuseEdit();
+
+                gripHeld = found;
+                gripPreview = reading.sections;
+                gripMoved = false;
+                pickedSection = found.index;
+                showPickedSection();
+                sayEdit();
+                repaint();
+                return;
+            }
+        }
+
         grabbed = model::hitTest (reading.ranges, secondsAt (event.x), toleranceSeconds());
+
+        if (grabbed.handle != model::Handle::none)
+            return;
+
+        /*  THE TWO HALVES (namespace draft §55.9, ADZ): the top selects time - a
+            press that does not drag puts the playhead there - and the lower
+            half picks the section under it, a drag moving it into a new place;
+            over silence, or where there is no edit to show, a press pans. */
+        if (editShown())
+        {
+            const auto bar = barArea();
+
+            if (event.y < bar.getCentreY())
+            {
+                selecting = true;
+                selectPressX = event.x;
+                selectFrom = secondsAt (event.x);
+
+                if (! event.mods.isAltDown())
+                {
+                    std::vector<double> targets { headSeconds() };
+
+                    for (const auto start : model::sectionStarts (reading.sections))
+                        targets.push_back (start);
+
+                    selectFrom = model::snapTo (selectFrom, targets, toleranceSeconds());
+                }
+
+                return;
+            }
+
+            if (const auto under = model::sectionAt (reading.sections, secondsAt (event.x)))
+            {
+                pickedSection = *under;
+                draggedSection = *under;
+                sectionMoved = false;
+                lowerPress = true;
+                pressX = dragX = event.x;
+                selection.reset();
+                showPickedSection();
+                sayEdit();
+                repaint();
+                return;
+            }
+
+            pickedSection = noSection;
+            showPickedSection();
+            sayEdit();
+            repaint();
+        }
 
         /*  A PRESS ON NOTHING PANS, which is the gesture people try first on a
             picture that is wider than its window. Grabbing an edge wins, so a
             hand aiming at a handle never scrolls the view out from under it. */
-        if (grabbed.handle == model::Handle::none)
-        {
-            panning = true;
-            panFrom = event.x;
-        }
+        panning = true;
+        panFrom = event.x;
     }
 
     void WaveformEditorComponent::mouseDrag (const juce::MouseEvent& event)
     {
-        /*  A JOIN HANDLE DRAGGED: the crossfade is twice the distance from the
-            join, held to what the door would make of it, drawn as the hand has
-            it and written once on release (namespace draft §55). */
-        if (heldJoin != noSection && heldJoin < reading.sections.size())
+        /*  A HANDLE HELD (namespace draft §55.9): the edit as the drag would
+            leave it, drawn, and said; Shift moves a fade alone (AED). */
+        if (gripHeld.grip != model::Grip::none && gripHeld.index < reading.sections.size())
         {
-            heldCrossfade = model::clampedCrossfade (reading.sections, heldJoin,
-                                                    model::crossfadeFromDrag (joinSecondsOf (heldJoin), secondsAt (event.x)));
-            tell ("crossfade " + juce::String (juce::roundToInt (heldCrossfade * 1000.0)) + " ms at the join into section "
-                    + juce::String (static_cast<int> (heldJoin) + 1));
+            const auto index = gripHeld.index;
+            const auto seconds = secondsAt (event.x);
+            const auto name = juce::String (static_cast<int> (index) + 1);
+            gripMoved = true;
+
+            switch (gripHeld.grip)
+            {
+                case model::Grip::volume:
+                {
+                    auto level = std::clamp (model::laneLevelForHeight (heightAt (event.y)), -120.0, 12.0);
+
+                    if (! event.mods.isAltDown()
+                          && std::abs (heightAt (event.y) - model::laneHeightFor (0.0)) < toleranceHeight() * 0.5)
+                        level = 0.0;
+
+                    gripValue = std::round (level * 10.0) / 10.0;
+                    gripPreview = reading.sections;
+                    gripPreview[index].trimDb = gripValue;
+                    tell ("section " + name + " at " + juce::String (model::trimText (gripValue)));
+                    break;
+                }
+
+                case model::Grip::fadeIn:
+                case model::Grip::fadeOut:
+                {
+                    const auto inSide = gripHeld.grip == model::Grip::fadeIn;
+                    gripAlone = event.mods.isShiftDown();
+                    gripValue = model::fadeFromHandle (reading.sections, index, inSide, seconds);
+                    gripPreview = model::withFade (reading.sections, index, inSide, gripValue, gripAlone);
+                    gripValue = inSide ? gripPreview[index].fadeIn : gripPreview[index].fadeOut;
+                    tell (juce::String (inSide ? "fade in " : "fade out ")
+                            + juce::String (juce::roundToInt (gripValue * 1000.0)) + " ms on section " + name
+                            + (gripAlone ? " alone" : " - Shift moves this side alone"));
+                    break;
+                }
+
+                case model::Grip::edgeIn:
+                case model::Grip::edgeOut:
+                {
+                    const auto inSide = gripHeld.grip == model::Grip::edgeIn;
+                    gripValue = model::edgeFromHandle (reading.sections, index, inSide, seconds, sourceLength());
+                    gripPreview = model::withEdge (reading.sections, index, inSide, gripValue);
+                    tell (juce::String (inSide ? "section " + name + " begins at " : "section " + name + " ends at ")
+                            + clockText (gripValue) + " of the file");
+                    break;
+                }
+
+                case model::Grip::none:
+                    break;
+            }
+
             repaint();
+            return;
+        }
+
+        //  THE SELECTION, dragged out across the top half (55.9).
+        if (selecting)
+        {
+            auto now = secondsAt (event.x);
+
+            if (! event.mods.isAltDown())
+            {
+                std::vector<double> targets { headSeconds() };
+                const auto starts = model::sectionStarts (reading.sections);
+
+                for (std::size_t k = 0; k < starts.size(); ++k)
+                {
+                    targets.push_back (starts[k]);
+                    targets.push_back (starts[k] + reading.sections[k].length());
+                }
+
+                if (cutsSnap())
+                    for (const auto& cut : cutsShown())
+                        targets.push_back (cut.seconds);
+
+                now = model::snapTo (now, targets, toleranceSeconds());
+            }
+
+            if (std::abs (event.x - selectPressX) > 3)
+            {
+                selection = std::make_pair (std::min (selectFrom, now), std::max (selectFrom, now));
+                tell ("selection " + clockText (selection->first) + juce::String::fromUTF8 (" \xe2\x80\x93 ")
+                        + clockText (selection->second) + " - x splits at both ends, Backspace deletes,"
+                        " Shift+Backspace closes up");
+                repaint();
+            }
+
             return;
         }
 
@@ -2406,22 +2924,75 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::mouseUp (const juce::MouseEvent& event)
     {
-        /*  THE JOIN'S ONE WRITE, and the block's one move (namespace draft §55). */
-        if (heldJoin != noSection)
+        /*  A HANDLE'S ONE WRITE (namespace draft §55.9). */
+        if (gripHeld.grip != model::Grip::none)
         {
-            const auto index = heldJoin;
-            heldJoin = noSection;
+            const auto released = gripHeld;
+            gripHeld = {};
 
-            if (index < reading.sections.size() && actions.set != nullptr
-                  && std::abs (heldCrossfade - reading.sections[index].crossfade) >= 0.001)
-                actions.set ("/godot/section/" + reading.sections[index].id + "/crossfade",
-                             osc::formatDouble (heldCrossfade));
+            if (gripMoved && released.index < reading.sections.size())
+            {
+                const auto& section = reading.sections[released.index];
 
+                switch (released.grip)
+                {
+                    case model::Grip::volume:
+                        if (actions.set != nullptr && std::abs (gripValue - section.trimDb) >= 0.05)
+                            actions.set ("/godot/section/" + section.id + "/trim", osc::formatDouble (gripValue));
+                        break;
+
+                    case model::Grip::fadeIn:
+                    case model::Grip::fadeOut:
+                    {
+                        const auto inSide = released.grip == model::Grip::fadeIn;
+
+                        if (actions.fadeSection != nullptr
+                              && std::abs (gripValue - (inSide ? section.fadeIn : section.fadeOut)) >= 0.0005)
+                            actions.fadeSection (section.id, inSide, gripValue, gripAlone);
+                        break;
+                    }
+
+                    case model::Grip::edgeIn:
+                    case model::Grip::edgeOut:
+                    {
+                        const auto inSide = released.grip == model::Grip::edgeIn;
+
+                        if (actions.edgeSection != nullptr
+                              && std::abs (gripValue - (inSide ? section.in : section.out)) >= 0.0005)
+                            actions.edgeSection (section.id, inSide, gripValue);
+                        break;
+                    }
+
+                    case model::Grip::none:
+                        break;
+                }
+            }
+
+            gripMoved = false;
             tell ({});
             repaint();
             return;
         }
 
+        /*  A PRESS IN THE TOP HALF THAT DID NOT DRAG puts the playhead there and
+            lets the selection go; one that did keeps it (55.9). */
+        if (selecting)
+        {
+            selecting = false;
+
+            if (std::abs (event.x - selectPressX) <= 3)
+            {
+                selection.reset();
+                moveHeadTo (event.x, true, ! event.mods.isAltDown());
+                tell ({});
+            }
+
+            repaint();
+            return;
+        }
+
+        /*  THE BLOCK'S ONE MOVE (namespace draft §55), from the row or the lower half. */
+        lowerPress = false;
         if (draggedSection != noSection)
         {
             const auto index = draggedSection;
@@ -2489,6 +3060,42 @@ namespace wfg::client::ui
             return;
 
         const auto bar = barArea();
+
+        /*  OVER A FADE THE WHEEL BENDS ITS CURVE (namespace draft §55.9, AEB):
+            a tenth a notch, both sides of a join unless Shift, written once the
+            wheel has been still a moment - one step to undo, not one a notch. */
+        if (editShown() && bar.contains (event.getPosition()) && ! juce::approximatelyEqual (wheel.deltaY, 0.0f)
+              && std::abs (wheel.deltaY) >= std::abs (wheel.deltaX))
+        {
+            const auto slack = toleranceSeconds();
+
+            if (const auto fade = model::fadeAt (reading.sections, secondsAt (event.x), slack))
+            {
+                if (! reading.editable)
+                    return refuseEdit();
+
+                const auto alone = event.mods.isShiftDown();
+
+                if (curveTarget != fade || curveAlone != alone)
+                {
+                    flushCurve();
+                    curveTarget = fade;
+                    curveAlone = alone;
+                    const auto& section = reading.sections[fade->first];
+                    curveHeld = fade->second ? section.fadeInCurve : section.fadeOutCurve;
+                }
+
+                const auto step = wheel.isSmooth ? static_cast<double> (wheel.deltaY) : (wheel.deltaY > 0.0f ? 0.1 : -0.1);
+                curveHeld = std::clamp (std::round ((curveHeld + step) * 100.0) / 100.0, -1.0, 1.0);
+                curvePreview = model::withCurve (reading.sections, fade->first, fade->second, curveHeld, curveAlone);
+                tell (juce::String (fade->second ? "fade in " : "fade out ") + "curve "
+                        + juce::String (curveHeld, 2) + " on section " + juce::String (static_cast<int> (fade->first) + 1)
+                        + (curveAlone ? " alone" : " - Shift turns this side alone"));
+                startTimer (400);
+                repaint();
+                return;
+            }
+        }
 
         /*  TWO AXES, TWO JOBS (author, 2026-09-21: *"vertical scroll = zoom,
             horizontal scroll = scroll back and forth the view of the

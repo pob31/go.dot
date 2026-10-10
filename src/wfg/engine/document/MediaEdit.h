@@ -18,6 +18,8 @@
 
 #include "LevelLane.h"
 
+#include <juce_data_structures/juce_data_structures.h>
+
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -27,9 +29,10 @@
 /*  A SOUND'S EDIT, AS ARITHMETIC (namespace draft §55).
 
     A sound cue's sections - pieces of its file, each with an in and an out
-    point, a trim and a crossfade at the join into it - in their order are the
-    EDITED TIMELINE the cue plays: section k begins where section k-1 ends, and
-    the edit is as long as its sections put together. Nothing here reads a
+    point, a trim, a fade at each end and a gap of silence before it - in
+    their order are the EDITED TIMELINE the cue plays: section k begins where
+    section k-1 ends and its gap after that (55.9, AEA), and the edit is as long
+    as its sections and their gaps put together. Nothing here reads a
     file: the timeline is a sum of differences, which is what lets a replay
     with no media agree with the session that had it.
 
@@ -40,7 +43,7 @@
     that shifts the timeline (an edge moved, a section moved or removed, the
     edit cleared) is a piecewise map from the old timeline to the new, and
     everything on the old one is carried through it here, by the commands, in
-    the same Undo step. A split, a join, a trim and a crossfade shift nothing.
+    the same Undo step. A split, a join, a trim and a fade shift nothing.
 
     Pure, and shared with nothing that may not name `doc::`: the window's
     model restates the little it needs and the client tests hold the two to
@@ -51,51 +54,98 @@ namespace wfg::doc
     struct Section
     {
         std::string id;
-        double in = 0.0;          // seconds of the file
+        double in = 0.0;            // seconds of the file
         double out = 0.0;
         double trimDb = 0.0;
-        double crossfade = 0.01;  // seconds, centred on the join into this section; ignored on the first
+        double fadeIn = 0.01;       // seconds: centred on a join, inside the section at a free edge (AEA)
+        double fadeOut = 0.01;
+        double fadeInCurve = 0.0;   // -1..1, the exponent of the fade's shape (AEB)
+        double fadeOutCurve = 0.0;
+        double gap = 0.0;           // seconds of silence before it on the edited timeline
 
         double length() const noexcept { return out - in; }
     };
+
+    /*  A <Section> node read, every row its default where the file leaves it
+        out: the one reading the document, the resolver and the commands share. */
+    Section sectionFromNode (const juce::ValueTree& node);
 
     /*  Two instants the file cannot tell apart: the range door's (a split at
         a cut is no split), and here what makes a join CONTINUOUS. */
     constexpr double sameInstant = 0.001;
 
-    /*  The crossfade a new join gets: the click suppressor the slice moves
-        use. And the least a trim difference ramps over at a continuous join. */
-    constexpr double defaultCrossfade = 0.01;
+    /*  The fade a new edge gets, either side of a join: the click suppressor
+        the slice moves use. And the least a trim difference ramps over at a
+        continuous join. */
+    constexpr double defaultFade = 0.01;
     constexpr double leastTrimRamp = 0.005;
 
     //==============================================================================
     /*  THE TIMELINE. */
 
-    /** Where each section begins on the edited timeline: S_0 = 0, S_k = sum of the lengths before it. */
+    /*  Where each section begins on the edited timeline: its gap after where
+        the one before ends, the first's after nought. */
     std::vector<double> sectionStarts (const std::vector<Section>& sections);
 
-    /** The edit's length: the sections' lengths put together. */
+    /** The edit's length: where the last section ends - its sections and their gaps put together. */
     double editedLength (const std::vector<Section>& sections);
+
+    /*  A JOIN: section `index` touches the one before it - no gap, or one
+        under a millisecond. Its fade in and the other's fade out are then
+        centred on the join; at a free edge a fade lies inside its section. */
+    bool isJoin (const std::vector<Section>& sections, std::size_t index) noexcept;
 
     /*  A join still one in the file: the outgoing section's out point IS the
         incoming one's in point, as a split leaves them. Such a join plays
-        plain whatever its crossfade says (ADL). */
+        plain whatever its fades say (ADL). */
     bool isContinuousJoin (const Section& before, const Section& after) noexcept;
 
-    /*  The crossfade a join is rendered with: none on the first section. */
-    double crossfadeInto (const std::vector<Section>& sections, std::size_t index) noexcept;
+    //==============================================================================
+    /*  THE FADES (55.9, AEA, AEB). */
+
+    /*  What a section's two ends are heard with: each fade's length, held to
+        the material, nought at a join still one in the file; whether it is
+        centred on a join (from material beyond the edge) or lies inside the
+        section (from silence); its curve. */
+    struct Fades
+    {
+        double in = 0.0;
+        double out = 0.0;
+        bool inCentred = false;
+        bool outCentred = false;
+        bool plainIn = false;       // a join still one in the file: no fade, a trim ramp
+        bool plainOut = false;
+        double inCurve = 0.0;
+        double outCurve = 0.0;
+    };
+
+    std::vector<Fades> heardFades (const std::vector<Section>& sections);
+
+    /*  A fade's gain at a progress through it, nought to one, for a fade in;
+        a fade out is the same read backwards. A sound's shape is equal power
+        and a picture's linear (ADU), each raised to 2^-curve (AEB). */
+    double fadeGain (double progress, double curve, bool picture) noexcept;
+
+    /*  Where on the edited timeline a section is heard: from the start of a
+        centred fade in before it to the end of a centred fade out after it. */
+    double heardFrom (double start, const Fades& fades) noexcept;
+    double heardTo (double start, double length, const Fades& fades) noexcept;
+
+    /*  How much of a section is heard at second `t` of the edited timeline, its
+        trim aside: nought outside where it is heard, one between its fades. */
+    double fadeWeight (const Fades& fades, double start, double length, double t, bool picture) noexcept;
 
     /*  No edit at all: no sections, or one that is the whole file as recorded.
         A cue in that state plays its file and renders nothing. */
     bool isIdentityEdit (const std::vector<Section>& sections, double sourceLength) noexcept;
 
-    /*  The edit as one line of text - in, out, trim and crossfade of each
-        section, the first one's crossfade written as nought since it is not
-        heard - spelled the same whatever the locale: the render's key and the
-        compare that says whether a render is of the edit as it now is. */
+    /*  The edit as one line of text - each section's in, out, trim, gap, and
+        its fades and curves as they are heard - spelled the same whatever the
+        locale: the render's key and the compare that says whether a render is
+        of the edit as it now is. */
     std::string editText (const std::vector<Section>& sections);
 
-    /** Which section an edited second falls in, and where that is in the file. */
+    /** Which section an edited second falls in, and where that is in the file; nothing in a gap. */
     struct Place
     {
         std::size_t index = 0;
@@ -119,8 +169,9 @@ namespace wfg::doc
     /*  Sections matched by identifier: for each kept in both lists, the
         material in both its old and its new extent is one run. A split or a
         join is the identity in runs; a trim at an edge loses or gains a
-        sliver; a removal loses a section; a move reorders. Sorted by where
-        each run was. */
+        sliver; a removal loses a section; a move reorders. And the silence
+        before a kept section, where its old gap and its new one overlap once
+        the section's material is lined up (55.9). Sorted by where each run was. */
     std::vector<TimeRun> timeMap (const std::vector<Section>& before, const std::vector<Section>& after);
 
     /*  The map from the edited timeline back to the file's own time - what
@@ -176,18 +227,20 @@ namespace wfg::doc
     //==============================================================================
     /*  THE DOOR'S JUDGEMENTS. */
 
-    /*  The crossfades held to the material: a join's crossfade reaches back
-        half its length before the incoming section's in point, so it can be
-        no longer than twice that point (there is nothing before the file's
-        start); and a section's two crossfades, half each, must fit inside it.
-        Of two that do not fit, the larger is shrunk. The first section's is
-        left as stored: it is not heard. */
-    std::vector<Section> clampCrossfades (std::vector<Section> sections);
+    /*  The fades held to the material: a fade in centred on a join reaches
+        back half its length before the section's in point, so it can be no
+        longer than twice that point (there is nothing before the file's
+        start); and what a section's two fades take of it - half of a centred
+        one, all of one inside - must fit inside it. Of two that do not fit,
+        the larger is shrunk. A join still one in the file is not heard and
+        counts for nothing. Curves held to -1..1, negatives and non-numbers to
+        nought. */
+    std::vector<Section> clampFades (std::vector<Section> sections);
 
     /*  Why a list of sections is no edit, in words naming the section at
         fault; empty when it is one. A section's in below nought, an out not
-        after its in, a trim outside the level row's range, a crossfade below
-        nought, or a number that is not one. */
+        after its in, a trim outside the level row's range, a fade or a gap
+        below nought, a curve outside -1..1, or a number that is not one. */
     std::string whyNotSections (const std::vector<Section>& sections,
                                 double trimLow = -120.0, double trimHigh = 12.0);
 }

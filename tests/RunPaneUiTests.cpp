@@ -5657,12 +5657,15 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
         and wakes Remove and Join; Split sends the playhead's second and
         refuses a cut in words; the chorus dragged before the intro is one
         move on release; a join handle dragged a quarter of a second is one
-        crossfade of half a second; Freeze then Unfreeze in its place; frozen
+        fade from the bar's top handle (55.9) - its partner with it, or alone
+        with Shift - an edge rolled from the foot and a volume dragged down;
+        Freeze then Unfreeze in its place; frozen
         or locked, nothing is sent and the buttons are greyed; a movie has no
         row. With WFG_SNAPSHOT_DIR set, waveform-sections.png as well. */
     std::vector<std::pair<std::string, std::string>> written;
-    std::string splitCue, joined, removed, moved, frozen, unfrozen;
-    double splitAt = -1.0;
+    std::string splitCue, joined, removed, moved, frozen, unfrozen, fadedId, edgedId;
+    double splitAt = -1.0, fadedSeconds = -1.0, edgedSeconds = -1.0;
+    bool fadedIn = false, fadedAlone = false, edgedIn = false;
     int movedTo = -1;
     juce::String said;
 
@@ -5672,9 +5675,13 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
     actions.splitSection = [&] (const std::string& cue, double at) { splitCue = cue; splitAt = at; };
     actions.joinSection = [&] (const std::string& id) { joined = id; };
     actions.moveSection = [&] (const std::string& id, int index) { moved = id; movedTo = index; };
-    actions.removeSection = [&] (const std::string& id) { removed = id; };
+    actions.removeSection = [&] (const std::string& id, bool) { removed = id; };
     actions.freezeEdit = [&] (const std::string& cue) { frozen = cue; };
     actions.unfreezeEdit = [&] (const std::string& cue) { unfrozen = cue; };
+    actions.fadeSection = [&] (const std::string& id, bool inSide, double seconds, bool alone)
+    { fadedId = id; fadedIn = inSide; fadedSeconds = seconds; fadedAlone = alone; };
+    actions.edgeSection = [&] (const std::string& id, bool inSide, double seconds)
+    { edgedId = id; edgedIn = inSide; edgedSeconds = seconds; };
 
     ui::WaveformEditorComponent editor (model::Theme {}, actions);
     editor.setRightColumn (360, 12);
@@ -5763,14 +5770,53 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
     CHECK (moved == "SEC00003");
     CHECK (movedTo == 0);
 
-    //  A join handle dragged a quarter of a second: one crossfade of half a second, on release.
-    editor.mouseDown (mouse ({ xOf (20.0), rowY }, 1, false, left));
-    editor.mouseDrag (mouse ({ xOf (20.25), rowY }, 1, true, left));
-    CHECK (said.contains ("crossfade"));
-    editor.mouseUp (mouse ({ xOf (20.25), rowY }, 1, true, left));
-    REQUIRE_FALSE (written.empty());
-    CHECK (written.back().first == "/godot/section/SEC00003/crossfade");
-    CHECK (wfg::osc::parseDouble (written.back().second).value_or (0.0) == doctest::Approx (0.5).epsilon (0.15));
+    /*  THE BAR'S HANDLES (55.9): the chorus's fade in dragged from its top
+        handle a third of a second into it - one section.fade of two thirds
+        on release, centred on the join, its partner with it; with Shift,
+        alone. */
+    {
+        const auto at = editor.gripPosition (model::Grip::fadeIn, 2);
+        editor.mouseDown (mouse (at, 1, false, left));
+        editor.mouseDrag (mouse ({ xOf (20.35), at.y }, 1, true, left));
+        CHECK (said.contains ("fade in"));
+        editor.mouseUp (mouse ({ xOf (20.35), at.y }, 1, true, left));
+        CHECK (fadedId == "SEC00003");
+        CHECK (fadedIn);
+        CHECK (fadedSeconds == doctest::Approx (0.7).epsilon (0.15));
+        CHECK_FALSE (fadedAlone);
+
+        const juce::ModifierKeys leftShift { juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::shiftModifier };
+        editor.mouseDown (mouse (at, 1, false, leftShift));
+        editor.mouseDrag (mouse ({ xOf (20.5), at.y }, 1, true, leftShift));
+        editor.mouseUp (mouse ({ xOf (20.5), at.y }, 1, true, leftShift));
+        CHECK (fadedAlone);
+    }
+
+    //  The cut between the verse and the chorus rolled a second later from the foot.
+    {
+        const auto at = editor.gripPosition (model::Grip::edgeIn, 2);
+        editor.mouseDown (mouse (at, 1, false, left));
+        editor.mouseDrag (mouse ({ xOf (21.0), at.y }, 1, true, left));
+        editor.mouseUp (mouse ({ xOf (21.0), at.y }, 1, true, left));
+        CHECK (edgedId == "SEC00003");
+        CHECK (edgedIn);
+        CHECK (edgedSeconds == doctest::Approx (21.0).epsilon (0.01));
+    }
+
+    //  The intro's volume dragged down to six decibels under: a trim, written once.
+    {
+        const auto at = editor.gripPosition (model::Grip::volume, 0);
+        const auto bar = editor.barBounds();
+        const auto y = static_cast<float> (bar.getBottom())
+                         - static_cast<float> (model::laneHeightFor (-6.0) * bar.getHeight());
+        written.clear();
+        editor.mouseDown (mouse (at, 1, false, left));
+        editor.mouseDrag (mouse ({ at.x, y }, 1, true, left));
+        editor.mouseUp (mouse ({ at.x, y }, 1, true, left));
+        REQUIRE (written.size() == 1u);
+        CHECK (written.back().first == "/godot/section/SEC00001/trim");
+        CHECK (wfg::osc::parseDouble (written.back().second).value_or (0.0) == doctest::Approx (-6.0).epsilon (0.1));
+    }
 
     //  Freeze; frozen, Unfreeze in its place, and a drag sends nothing and says why.
     freeze->onClick();
@@ -5871,6 +5917,151 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
     editor.show (still, nullptr);
     CHECK (editor.sectionsRow().isEmpty());
     CHECK_FALSE (split->isVisible());
+}
+
+TEST_CASE ("waveform: the top half selects time and the lower half a section; x splits, Backspace leaves silence, Shift+Backspace closes up; the wheel bends a fade (namespace draft §55.9)")
+{
+    std::string splitCue, spanCue, removed, curvedId;
+    double splitAt = -1.0, spanFrom = -1.0, spanTo = -1.0, curve = 99.0;
+    bool ripple = false, leftGap = false, curvedIn = false, curvedAlone = false;
+    int deletes = 0;
+    juce::String said;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.say = [&] (const juce::String& sentence) { if (sentence.isNotEmpty()) said = sentence; };
+    actions.splitSection = [&] (const std::string& cue, double at) { splitCue = cue; splitAt = at; };
+    actions.splitSpan = [&] (const std::string& cue, double from, double to) { spanCue = cue; spanFrom = from; spanTo = to; };
+    actions.deleteSpan = [&] (const std::string& cue, double from, double to, bool closeUp)
+    { spanCue = cue; spanFrom = from; spanTo = to; ripple = closeUp; ++deletes; };
+    actions.removeSection = [&] (const std::string& id, bool leaveGap) { removed = id; leftGap = leaveGap; };
+    actions.curveSection = [&] (const std::string& id, bool inSide, double value, bool alone)
+    { curvedId = id; curvedIn = inSide; curve = value; curvedAlone = alone; };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setRightColumn (360, 12);
+    editor.setSize (1000, 260);
+
+    //  The intro, then the chorus at a real join at ten seconds, then the verse.
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 30.0;
+    reading.editable = true;
+    reading.sections = { { "SEC00001", 0, 0.0, 10.0, 0.0, 0.0, 0.4 },
+                         { "SEC00003", 1, 20.0, 30.0, 0.0, 0.4, 0.01 },
+                         { "SEC00002", 2, 10.0, 20.0, 0.0, 0.01, 0.0 } };
+    editor.show (reading, nullptr);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const auto mouse = [&] (juce::Point<float> at, bool dragged, juce::ModifierKeys mods)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, mods, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &editor, &editor, now, at, now, 1, dragged);
+    };
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+    const auto xOf = [&] (double seconds) { return editor.pointPosition ({ seconds, 0.0 }).x; };
+    const auto bar = editor.barBounds();
+    const auto topY = static_cast<float> (bar.getY() + bar.getHeight() / 3);
+    const auto lowY = static_cast<float> (bar.getBottom() - bar.getHeight() / 3);
+
+    //  A SELECTION across the top half, from twelve to eighteen seconds.
+    editor.mouseDown (mouse ({ xOf (12.0), topY }, false, left));
+    editor.mouseDrag (mouse ({ xOf (15.0), topY }, true, left));
+    editor.mouseDrag (mouse ({ xOf (18.0), topY }, true, left));
+    editor.mouseUp (mouse ({ xOf (18.0), topY }, true, left));
+    REQUIRE (editor.selectionShown().has_value());
+    CHECK (editor.selectionShown()->first == doctest::Approx (12.0).epsilon (0.01));
+    CHECK (editor.selectionShown()->second == doctest::Approx (18.0).epsilon (0.01));
+    CHECK (said.contains ("selection"));
+
+    //  x splits at both ends in one step; Backspace deletes it, leaving silence, and lets it go.
+    CHECK (editor.keyPressed (juce::KeyPress ('x')));
+    CHECK (spanCue == "CUE00001");
+    CHECK (spanFrom == doctest::Approx (12.0).epsilon (0.01));
+    CHECK (spanTo == doctest::Approx (18.0).epsilon (0.01));
+    CHECK (deletes == 0);
+
+    CHECK (editor.keyPressed (juce::KeyPress (juce::KeyPress::backspaceKey)));
+    CHECK (deletes == 1);
+    CHECK_FALSE (ripple);
+    CHECK_FALSE (editor.selectionShown().has_value());
+
+    //  Shift+Backspace on a new one closes up.
+    editor.mouseDown (mouse ({ xOf (22.0), topY }, false, left));
+    editor.mouseDrag (mouse ({ xOf (26.0), topY }, true, left));
+    editor.mouseUp (mouse ({ xOf (26.0), topY }, true, left));
+    CHECK (editor.keyPressed (juce::KeyPress (juce::KeyPress::backspaceKey, juce::ModifierKeys::shiftModifier, 0)));
+    CHECK (deletes == 2);
+    CHECK (ripple);
+
+    //  A press in the top half that does not drag: no selection, the playhead there; x then splits at it.
+    editor.mouseDown (mouse ({ xOf (23.0), topY }, false, left));
+    editor.mouseUp (mouse ({ xOf (23.0), topY }, false, left));
+    CHECK_FALSE (editor.selectionShown().has_value());
+    CHECK (editor.playhead() == doctest::Approx (23.0).epsilon (0.01));
+    CHECK (editor.keyPressed (juce::KeyPress ('x')));
+    CHECK (splitAt == doctest::Approx (23.0).epsilon (0.01));
+
+    //  THE LOWER HALF picks the section under it; Backspace leaves its silence, Shift+Backspace closes up.
+    editor.mouseDown (mouse ({ xOf (13.0), lowY }, false, left));
+    editor.mouseUp (mouse ({ xOf (13.0), lowY }, false, left));
+    CHECK (editor.pickedSectionIndex() == 1u);
+    CHECK (editor.keyPressed (juce::KeyPress (juce::KeyPress::deleteKey)));
+    CHECK (removed == "SEC00003");
+    CHECK (leftGap);
+
+    editor.mouseDown (mouse ({ xOf (27.0), lowY }, false, left));
+    editor.mouseUp (mouse ({ xOf (27.0), lowY }, false, left));
+    CHECK (editor.keyPressed (juce::KeyPress (juce::KeyPress::backspaceKey, juce::ModifierKeys::shiftModifier, 0)));
+    CHECK (removed == "SEC00002");
+    CHECK_FALSE (leftGap);
+
+    //  Nothing picked and nothing selected: a word.
+    said.clear();
+    CHECK (editor.keyPressed (juce::KeyPress (juce::KeyPress::backspaceKey)));
+    CHECK (said.contains ("pick a section"));
+
+    //  The window's keys go on to the window: Space for GO, Ctrl with anything.
+    CHECK_FALSE (editor.keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK_FALSE (editor.keyPressed (juce::KeyPress ('x', juce::ModifierKeys::commandModifier, 0)));
+
+    /*  THE WHEEL over the chorus's fade in, just after the join: a notch a
+        tenth, both sides, one write once it settles; with Shift, this side alone. */
+    juce::MouseWheelDetails wheel {};
+    wheel.deltaY = 0.5f;
+    editor.mouseWheelMove (mouse ({ xOf (10.15), topY }, false, {}), wheel);
+    editor.mouseWheelMove (mouse ({ xOf (10.15), topY }, false, {}), wheel);
+    CHECK (said.contains ("curve"));
+    CHECK (curvedId.empty());   // nothing until it settles
+    editor.settleWheel();
+    CHECK (curvedId == "SEC00003");
+    CHECK (curvedIn);
+    CHECK (curve == doctest::Approx (0.2));
+    CHECK_FALSE (curvedAlone);
+
+    wheel.deltaY = -0.5f;
+    editor.mouseWheelMove (mouse ({ xOf (9.85), topY }, false, juce::ModifierKeys::shiftModifier), wheel);
+    editor.settleWheel();
+    CHECK (curvedId == "SEC00001");
+    CHECK_FALSE (curvedIn);
+    CHECK (curve == doctest::Approx (-0.1));
+    CHECK (curvedAlone);
+
+    //  Under the lock, the keys refuse in words and send nothing.
+    reading.editable = false;
+    reading.locked = true;
+    editor.show (reading, nullptr);
+    spanCue.clear();
+    said.clear();
+    editor.mouseDown (mouse ({ xOf (12.0), topY }, false, left));
+    editor.mouseDrag (mouse ({ xOf (18.0), topY }, true, left));
+    editor.mouseUp (mouse ({ xOf (18.0), topY }, true, left));
+    CHECK (editor.keyPressed (juce::KeyPress ('x')));
+    CHECK (spanCue.empty());
+    CHECK (said.contains ("locked"));
 }
 
 TEST_CASE ("waveform: a movie's strip and its cuts follow the edit - each slot the file's picture where its section is, each cut where the material went (§55.5)")

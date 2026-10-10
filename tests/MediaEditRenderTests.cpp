@@ -104,9 +104,20 @@ namespace
         return buffer;
     }
 
-    Section piece (const char* id, double in, double out, double trim = 0.0, double crossfade = 0.0)
+    /*  A section as a test spells it: no fade unless said, no gap unless
+        said - so a cut is exact (namespace draft 55.9). */
+    Section piece (const char* id, double in, double out, double trim = 0.0, double fadeIn = 0.0,
+                   double fadeOut = 0.0, double gap = 0.0)
     {
-        return { id, in, out, trim, crossfade };
+        Section section;
+        section.id = id;
+        section.in = in;
+        section.out = out;
+        section.trimDb = trim;
+        section.fadeIn = fadeIn;
+        section.fadeOut = fadeOut;
+        section.gap = gap;
+        return section;
     }
 
     struct Scratch
@@ -201,7 +212,7 @@ TEST_CASE ("edit render: a crossfade is equal power, centred on the join, from m
         second piece: over the 100 ms around the join the outgoing goes on
         past its out point (frame 3 s + t) fading out, while the incoming
         starts before its in point (frame 1 s - 50 ms + t) fading in. */
-    const std::vector<Section> sections { piece ("B", 2.0, 3.0), piece ("A", 1.0, 2.0, 0.0, 0.1) };
+    const std::vector<Section> sections { piece ("B", 2.0, 3.0, 0.0, 0.0, 0.1), piece ("A", 1.0, 2.0, 0.0, 0.1) };
     const auto result = audio::renderEdit (scratch.source.getFullPathName().toStdString(), sections,
                                            scratch.target ("fade.wav").getFullPathName().toStdString());
     REQUIRE_MESSAGE (result.ok, result.problem);
@@ -243,7 +254,7 @@ TEST_CASE ("edit render: a crossfade past the file's edges reads silence there, 
     /*  The last second then the first, a fade into the first: the outgoing
         goes on past the file's end, which is silence - so at the join only
         the incoming is heard, at its sine. */
-    const std::vector<Section> past { piece ("B", 3.0, 4.0), piece ("A", 1.0, 2.0, 0.0, 0.1) };
+    const std::vector<Section> past { piece ("B", 3.0, 4.0, 0.0, 0.0, 0.1), piece ("A", 1.0, 2.0, 0.0, 0.1) };
     REQUIRE (audio::renderEdit (scratch.source.getFullPathName().toStdString(), past,
                                 scratch.target ("past.wav").getFullPathName().toStdString()).ok);
     const auto end = readWhole (scratch.target ("past.wav"));
@@ -251,6 +262,68 @@ TEST_CASE ("edit render: a crossfade past the file's edges reads silence there, 
     const auto t = rate + fade / 4;
     const auto theta = static_cast<double> (t - (rate - fade / 2)) / fade * 1.5707963267948966;
     CHECK (end.getSample (0, t) == doctest::Approx (rampValue (rate + fade / 4, 0) * static_cast<float> (std::sin (theta))).epsilon (0.001));
+}
+
+TEST_CASE ("edit render: a gap is silence, and a fade beside it lies inside its section, from silence, bent by its curve (55.9)")
+{
+    Scratch scratch;
+
+    /*  The first second fading out over its last 200 ms; half a second of
+        silence; the third second fading in over its first 200 ms at a curve
+        of one. Two and a half seconds of output. */
+    auto bent = piece ("B", 2.0, 3.0, 0.0, 0.2, 0.0, 0.5);
+    bent.fadeInCurve = 1.0;
+    const std::vector<Section> sections { piece ("A", 0.0, 1.0, 0.0, 0.0, 0.2), bent };
+    const auto result = audio::renderEdit (scratch.source.getFullPathName().toStdString(), sections,
+                                           scratch.target ("gap.wav").getFullPathName().toStdString());
+    REQUIRE_MESSAGE (result.ok, result.problem);
+    CHECK (result.seconds == doctest::Approx (2.5));
+
+    const auto out = readWhole (scratch.target ("gap.wav"));
+    REQUIRE (out.getNumSamples() == rate * 5 / 2);
+
+    //  Inside the fade out, halfway: equal power, -3 dB.
+    const auto t0 = static_cast<int> (0.9 * rate);
+    CHECK (out.getSample (0, t0) == doctest::Approx (rampValue (t0, 0) * std::sqrt (0.5f)).epsilon (0.001));
+
+    //  The silence.
+    for (const int t : { rate, rate + rate / 4, rate * 3 / 2 - 1 })
+        CHECK (std::abs (out.getSample (0, t)) < 1.0e-9f);
+
+    //  Inside the fade in, a quarter through: sin (pi/8) to the half, the curve's lift.
+    const auto t1 = rate * 3 / 2 + static_cast<int> (0.05 * rate);
+    const auto lifted = static_cast<float> (std::pow (std::sin (3.14159265358979 / 8.0), 0.5));
+    CHECK (out.getSample (0, t1) == doctest::Approx (rampValue (2 * rate + (t1 - rate * 3 / 2), 0) * lifted).epsilon (0.001));
+
+    //  Past it, the material plain.
+    const auto t2 = 2 * rate;
+    CHECK (out.getSample (0, t2) == doctest::Approx (rampValue (2 * rate + (t2 - rate * 3 / 2), 0)).epsilon (oneStep).scale (1.0));
+}
+
+TEST_CASE ("edit render: a join's two fades unlocked - the outgoing longer - and both bent to hold the sum at one (55.9)")
+{
+    Scratch scratch;
+
+    /*  The third second then the second: the outgoing fades over 200 ms, the
+        incoming over 100 ms, both centred on the join and both at a curve of
+        -1 - sin squared and cos squared. */
+    auto outgoing = piece ("B", 2.0, 3.0, 0.0, 0.0, 0.2);
+    auto incoming = piece ("A", 1.0, 2.0, 0.0, 0.1);
+    outgoing.fadeOutCurve = -1.0;
+    incoming.fadeInCurve = -1.0;
+    REQUIRE (audio::renderEdit (scratch.source.getFullPathName().toStdString(), { outgoing, incoming },
+                                scratch.target ("unlocked.wav").getFullPathName().toStdString()).ok);
+    const auto out = readWhole (scratch.target ("unlocked.wav"));
+    REQUIRE (out.getNumSamples() == 2 * rate);
+
+    //  AT THE JOIN both halfway: a half each.
+    const auto join = rate;
+    CHECK (out.getSample (0, join) == doctest::Approx (0.5f * rampValue (3 * rate, 0) + 0.5f * rampValue (rate, 0)).epsilon (0.001));
+
+    //  80 ms before it only the outgoing is heard, a tenth into its fade.
+    const auto early = static_cast<int> (0.92 * rate);
+    const auto gain = static_cast<float> (std::pow (std::sin (0.9 * 1.5707963267948966), 2.0));
+    CHECK (out.getSample (0, early) == doctest::Approx (gain * rampValue (2 * rate + early, 0)).epsilon (0.001));
 }
 
 TEST_CASE ("edit render: a stop leaves no file behind, and a file that cannot be read says so")

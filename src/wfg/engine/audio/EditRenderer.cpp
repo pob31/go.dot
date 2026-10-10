@@ -35,7 +35,6 @@ namespace wfg::audio
     {
         constexpr int blockFrames = 4096;
         constexpr const char* editsFolder = ".edits";
-        constexpr double halfPi = 1.5707963267948966;
 
         bool stopRequested (const std::atomic<bool>* stop) noexcept
         {
@@ -65,17 +64,19 @@ namespace wfg::audio
         }
 
         /*  A section's geometry in frames: where it sits on the edited
-            timeline, where its material is in the file, and the half-fades
-            either side of it. */
+            timeline, where it is heard - its own frames and the halves of the
+            fades centred on its joins - where its material is in the file, and
+            its fades as heard (namespace draft 55.9). */
         struct Piece
         {
             std::int64_t start = 0;        // edited frame the section begins at
             std::int64_t end = 0;          // edited frame it ends at
+            std::int64_t from = 0;         // the first edited frame it is heard at
+            std::int64_t to = 0;           // the frame after the last
             std::int64_t in = 0;           // the file frame its material begins at
             double trimDb = 0.0;
             float trim = 1.0f;
-            std::int64_t fadeIn = 0;       // the crossfade INTO this section, in frames; 0 for none
-            std::int64_t fadeOut = 0;      // the crossfade into the next section, in frames
+            doc::Fades fades;
             bool rampIn = false;           // a continuous join with a trim to ramp from
             bool rampOut = false;
             std::int64_t rampInFrames = 0;
@@ -86,7 +87,8 @@ namespace wfg::audio
 
         std::vector<Piece> piecesOf (const std::vector<doc::Section>& given, double rate)
         {
-            const auto sections = doc::clampCrossfades (given);
+            const auto sections = doc::clampFades (given);
+            const auto heard = doc::heardFades (given);
             std::vector<Piece> pieces (sections.size());
             std::int64_t at = 0;
 
@@ -95,42 +97,38 @@ namespace wfg::audio
                 auto& piece = pieces[k];
                 const auto& section = sections[k];
 
+                //  THE SILENCE BEFORE IT, a whole number of frames (55.9).
+                if (section.gap >= doc::sameInstant)
+                    at += std::llround (section.gap * rate);
+
                 piece.in = std::llround (section.in * rate);
                 const auto length = std::max<std::int64_t> (1, std::llround (section.out * rate) - piece.in);
                 piece.start = at;
                 piece.end = at + length;
+                piece.fades = heard[k];
+                piece.from = piece.start - (piece.fades.inCentred ? std::llround (piece.fades.in * rate / 2.0) : 0);
+                piece.to = piece.end + (piece.fades.outCentred ? std::llround (piece.fades.out * rate / 2.0) : 0);
                 piece.trimDb = section.trimDb;
                 piece.trim = gainOf (section.trimDb);
                 at = piece.end;
             }
 
+            /*  A JOIN STILL ONE IN THE FILE plays plain; a trim that differs
+                ramps across it, straight in dB, over the longer of its two fades
+                and five milliseconds at the least (ADL). */
             for (std::size_t k = 1; k < sections.size(); ++k)
             {
-                const auto& before = sections[k - 1];
-                const auto& after = sections[k];
-                const auto fade = std::llround (doc::crossfadeInto (sections, k) * rate);
+                if (! heard[k].plainIn || std::abs (sections[k - 1].trimDb - sections[k].trimDb) < 1.0e-6)
+                    continue;
 
-                if (doc::isContinuousJoin (before, after))
-                {
-                    /*  ONE IN THE FILE: plays plain; a trim that differs ramps
-                        across the join, straight in dB, over the crossfade's
-                        length and five milliseconds at the least. */
-                    if (std::abs (before.trimDb - after.trimDb) >= 1.0e-6)
-                    {
-                        const auto ramp = std::max (fade, std::llround (doc::leastTrimRamp * rate));
-                        pieces[k - 1].rampOut = true;
-                        pieces[k - 1].rampOutFrames = ramp;
-                        pieces[k - 1].trimAfterDb = after.trimDb;
-                        pieces[k].rampIn = true;
-                        pieces[k].rampInFrames = ramp;
-                        pieces[k].trimBeforeDb = before.trimDb;
-                    }
-                }
-                else if (fade > 1)
-                {
-                    pieces[k - 1].fadeOut = fade;
-                    pieces[k].fadeIn = fade;
-                }
+                const auto ramp = std::max (std::llround (std::max (sections[k - 1].fadeOut, sections[k].fadeIn) * rate),
+                                            std::llround (doc::leastTrimRamp * rate));
+                pieces[k - 1].rampOut = true;
+                pieces[k - 1].rampOutFrames = ramp;
+                pieces[k - 1].trimAfterDb = sections[k].trimDb;
+                pieces[k].rampIn = true;
+                pieces[k].rampInFrames = ramp;
+                pieces[k].trimBeforeDb = sections[k - 1].trimDb;
             }
 
             return pieces;
@@ -234,12 +232,9 @@ namespace wfg::audio
 
                 for (const auto& piece : pieces)
                 {
-                    /*  Where this piece is heard: its own frames, and the half
-                        fades either side of them. */
-                    const auto from = piece.start - piece.fadeIn / 2;
-                    const auto to = piece.end + piece.fadeOut / 2;
-                    const auto a = std::max (from, t0);
-                    const auto b = std::min (to, t1);
+                    //  Where this piece is heard: its own frames, and the halves of its centred fades.
+                    const auto a = std::max (piece.from, t0);
+                    const auto b = std::min (piece.to, t1);
 
                     if (b <= a)
                         continue;
@@ -247,24 +242,18 @@ namespace wfg::audio
                     const auto count = static_cast<int> (b - a);
                     readFile (piece.in + (a - piece.start), count);
 
+                    const auto lengthSeconds = static_cast<double> (piece.end - piece.start) / rate;
+
                     for (int i = 0; i < count; ++i)
                     {
                         const auto t = a + i;
-                        auto gain = piece.trim;
 
-                        if (piece.fadeIn > 0 && t < piece.start + piece.fadeIn / 2)
-                        {
-                            const auto theta = static_cast<double> (t - (piece.start - piece.fadeIn / 2))
-                                                 / static_cast<double> (piece.fadeIn) * halfPi;
-                            gain *= static_cast<float> (std::sin (theta));
-                        }
-
-                        if (piece.fadeOut > 0 && t >= piece.end - piece.fadeOut / 2)
-                        {
-                            const auto theta = static_cast<double> (t - (piece.end - piece.fadeOut / 2))
-                                                 / static_cast<double> (piece.fadeOut) * halfPi;
-                            gain *= static_cast<float> (std::cos (theta));
-                        }
+                        /*  ITS FADES' WEIGHT (55.9, AEB): equal power raised to the
+                            curve's exponent, centred on a join or inside at a free
+                            edge - the one rule the picture's dissolve reads too. */
+                        auto gain = piece.trim * static_cast<float> (doc::fadeWeight (piece.fades, 0.0, lengthSeconds,
+                                                                                      static_cast<double> (t - piece.start) / rate,
+                                                                                      false));
 
                         if (piece.rampIn && t < piece.start + piece.rampInFrames / 2)
                         {

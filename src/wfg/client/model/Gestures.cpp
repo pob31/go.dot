@@ -275,9 +275,46 @@ namespace wfg::client::gesture
                  { osc::Value::string (sectionId), osc::Value::int32 (index) } };
     }
 
-    Event sectionRemove (const std::string& sectionId)
+    Event sectionRemove (const std::string& sectionId, bool leaveGap)
     {
-        return { origin::window, "section.remove", { osc::Value::string (sectionId) } };
+        if (! leaveGap)
+            return { origin::window, "section.remove", { osc::Value::string (sectionId) } };
+
+        return { origin::window, "section.remove", { osc::Value::string (sectionId), osc::Value::int32 (1) } };
+    }
+
+    Event sectionEdge (const std::string& sectionId, bool inSide, double seconds)
+    {
+        return { origin::window, "section.edge",
+                 { osc::Value::string (sectionId), osc::Value::string (inSide ? "in" : "out"),
+                   osc::Value::float64 (seconds) } };
+    }
+
+    Event sectionFade (const std::string& sectionId, bool inSide, double seconds, bool alone)
+    {
+        return { origin::window, "section.fade",
+                 { osc::Value::string (sectionId), osc::Value::string (inSide ? "in" : "out"),
+                   osc::Value::float64 (seconds), osc::Value::int32 (alone ? 1 : 0) } };
+    }
+
+    Event sectionCurve (const std::string& sectionId, bool inSide, double curve, bool alone)
+    {
+        return { origin::window, "section.curve",
+                 { osc::Value::string (sectionId), osc::Value::string (inSide ? "in" : "out"),
+                   osc::Value::float64 (curve), osc::Value::int32 (alone ? 1 : 0) } };
+    }
+
+    Event sectionSplitSpan (const std::string& cueId, double from, double to)
+    {
+        return { origin::window, "section.splitSpan",
+                 { osc::Value::string (cueId), osc::Value::float64 (from), osc::Value::float64 (to) } };
+    }
+
+    Event sectionDeleteSpan (const std::string& cueId, double from, double to, bool ripple)
+    {
+        return { origin::window, "section.deleteSpan",
+                 { osc::Value::string (cueId), osc::Value::float64 (from), osc::Value::float64 (to),
+                   osc::Value::int32 (ripple ? 1 : 0) } };
     }
 
     Event sectionClear (const std::string& cueId)

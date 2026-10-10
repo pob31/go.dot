@@ -33,6 +33,28 @@ namespace wfg::doc
         {
             return std::abs (a - b) < sameInstant;
         }
+
+        constexpr double halfPi = 1.5707963267948966;
+
+        double finiteOr (double value, double otherwise) noexcept
+        {
+            return std::isfinite (value) ? value : otherwise;
+        }
+    }
+
+    Section sectionFromNode (const juce::ValueTree& node)
+    {
+        Section section;
+        section.id = node[juce::Identifier ("id")].toString().toStdString();
+        section.in = static_cast<double> (node.getProperty ("in", 0.0));
+        section.out = static_cast<double> (node.getProperty ("out", 0.0));
+        section.trimDb = static_cast<double> (node.getProperty ("trim", 0.0));
+        section.fadeIn = static_cast<double> (node.getProperty ("fadeIn", defaultFade));
+        section.fadeOut = static_cast<double> (node.getProperty ("fadeOut", defaultFade));
+        section.fadeInCurve = static_cast<double> (node.getProperty ("fadeInCurve", 0.0));
+        section.fadeOutCurve = static_cast<double> (node.getProperty ("fadeOutCurve", 0.0));
+        section.gap = static_cast<double> (node.getProperty ("gap", 0.0));
+        return section;
     }
 
     //==============================================================================
@@ -45,6 +67,10 @@ namespace wfg::doc
 
         for (const auto& section : sections)
         {
+            //  A gap under a millisecond is none, as a join says (isJoin).
+            if (finiteOr (section.gap, 0.0) >= sameInstant)
+                at += section.gap;
+
             starts.push_back (at);
             at += section.length();
         }
@@ -54,12 +80,15 @@ namespace wfg::doc
 
     double editedLength (const std::vector<Section>& sections)
     {
-        double length = 0.0;
+        if (sections.empty())
+            return 0.0;
 
-        for (const auto& section : sections)
-            length += section.length();
+        return sectionStarts (sections).back() + sections.back().length();
+    }
 
-        return length;
+    bool isJoin (const std::vector<Section>& sections, std::size_t index) noexcept
+    {
+        return index > 0 && index < sections.size() && ! (finiteOr (sections[index].gap, 0.0) >= sameInstant);
     }
 
     bool isContinuousJoin (const Section& before, const Section& after) noexcept
@@ -67,12 +96,85 @@ namespace wfg::doc
         return same (before.out, after.in);
     }
 
-    double crossfadeInto (const std::vector<Section>& sections, std::size_t index) noexcept
+    //==============================================================================
+    std::vector<Fades> heardFades (const std::vector<Section>& sections)
     {
-        if (index == 0 || index >= sections.size())
-            return 0.0;
+        const auto held = clampFades (sections);
+        std::vector<Fades> out (held.size());
 
-        return std::max (0.0, sections[index].crossfade);
+        for (std::size_t k = 0; k < held.size(); ++k)
+        {
+            auto& fades = out[k];
+            const auto joinIn = isJoin (held, k);
+            const auto joinOut = isJoin (held, k + 1);
+
+            fades.inCentred = joinIn;
+            fades.outCentred = joinOut;
+            fades.plainIn = joinIn && isContinuousJoin (held[k - 1], held[k]);
+            fades.plainOut = joinOut && isContinuousJoin (held[k], held[k + 1]);
+            fades.in = fades.plainIn ? 0.0 : held[k].fadeIn;
+            fades.out = fades.plainOut ? 0.0 : held[k].fadeOut;
+            fades.inCurve = held[k].fadeInCurve;
+            fades.outCurve = held[k].fadeOutCurve;
+        }
+
+        return out;
+    }
+
+    double fadeGain (double progress, double curve, bool picture) noexcept
+    {
+        const auto p = std::clamp (finiteOr (progress, 0.0), 0.0, 1.0);
+        const auto base = picture ? p : std::sin (p * halfPi);
+        return std::pow (base, std::exp2 (-std::clamp (finiteOr (curve, 0.0), -1.0, 1.0)));
+    }
+
+    double heardFrom (double start, const Fades& fades) noexcept
+    {
+        return start - (fades.inCentred ? fades.in / 2.0 : 0.0);
+    }
+
+    double heardTo (double start, double length, const Fades& fades) noexcept
+    {
+        return start + length + (fades.outCentred ? fades.out / 2.0 : 0.0);
+    }
+
+    double fadeWeight (const Fades& fades, double start, double length, double t, bool picture) noexcept
+    {
+        auto weight = 1.0;
+
+        if (fades.in > 0.0)
+        {
+            const auto from = fades.inCentred ? start - fades.in / 2.0 : start;
+
+            if (t < from)
+                return 0.0;
+
+            if (t < from + fades.in)
+                weight *= fadeGain ((t - from) / fades.in, fades.inCurve, picture);
+        }
+        else if (t < start)
+        {
+            return 0.0;
+        }
+
+        const auto end = start + length;
+
+        if (fades.out > 0.0)
+        {
+            const auto from = fades.outCentred ? end - fades.out / 2.0 : end - fades.out;
+
+            if (t >= from + fades.out)
+                return 0.0;
+
+            if (t >= from)
+                weight *= fadeGain (1.0 - (t - from) / fades.out, fades.outCurve, picture);
+        }
+        else if (t >= end)
+        {
+            return 0.0;
+        }
+
+        return weight;
     }
 
     bool isIdentityEdit (const std::vector<Section>& sections, double sourceLength) noexcept
@@ -84,21 +186,34 @@ namespace wfg::doc
             return false;
 
         const auto& only = sections.front();
+        const auto heard = heardFades (sections).front();
 
-        return same (only.in, 0.0) && same (only.out, sourceLength) && same (only.trimDb, 0.0);
+        return same (only.in, 0.0) && same (only.out, sourceLength) && same (only.trimDb, 0.0)
+            && ! (only.gap >= sameInstant) && ! (heard.in > 0.0) && ! (heard.out > 0.0);
     }
 
     std::string editText (const std::vector<Section>& sections)
     {
         std::string text;
+        const auto heard = heardFades (sections);
+        const auto starts = sectionStarts (sections);
+        auto end = 0.0;
 
         for (std::size_t i = 0; i < sections.size(); ++i)
         {
             const auto& section = sections[i];
+            const auto& fades = heard[i];
+
+            //  The gap as the timeline has it.
+            const auto gap = starts[i] - end;
 
             text += osc::formatDouble (section.in) + ' ' + osc::formatDouble (section.out) + ' '
-                  + osc::formatDouble (section.trimDb) + ' '
-                  + osc::formatDouble (crossfadeInto (sections, i)) + ';';
+                  + osc::formatDouble (section.trimDb) + ' ' + osc::formatDouble (gap) + ' '
+                  + osc::formatDouble (fades.in) + ' ' + osc::formatDouble (fades.out) + ' '
+                  + osc::formatDouble (fades.in > 0.0 ? fades.inCurve : 0.0) + ' '
+                  + osc::formatDouble (fades.out > 0.0 ? fades.outCurve : 0.0) + ';';
+
+            end = starts[i] + section.length();
         }
 
         return text;
@@ -109,16 +224,19 @@ namespace wfg::doc
         if (sections.empty() || editedSecond < 0.0)
             return std::nullopt;
 
-        double at = 0.0;
+        const auto starts = sectionStarts (sections);
 
         for (std::size_t i = 0; i < sections.size(); ++i)
         {
+            const auto at = starts[i];
             const auto next = at + sections[i].length();
+
+            //  In the silence before it: no place in the file.
+            if (editedSecond < at)
+                return std::nullopt;
 
             if (editedSecond < next || (i + 1 == sections.size() && same (editedSecond, next)))
                 return Place { i, sections[i].in + (editedSecond - at) };
-
-            at = next;
         }
 
         return std::nullopt;
@@ -200,6 +318,20 @@ namespace wfg::doc
             {
                 oldCovered[i] = Stretch { was.in, was.in };   // matched, nothing shared: its material is gone
             }
+
+            /*  THE SILENCE BEFORE IT (55.9), lined up by how far its material
+                moved: a trim into the silence leaves the silence where it was,
+                a ripple carries it with the section. What the old gap and the
+                new have in common, so lined up, is one run. */
+            const auto moved = (newStarts[j] - is.in) - (oldStarts[i] - was.in);
+            const auto gapOf = [] (const Section& s) { return finiteOr (s.gap, 0.0) >= sameInstant ? s.gap : 0.0; };
+            const auto oldGapFrom = oldStarts[i] - gapOf (was) + moved;
+            const auto newGapFrom = newStarts[j] - gapOf (is);
+            const auto gapFrom = std::max (oldGapFrom, newGapFrom);
+            const auto gapTo = std::min (oldStarts[i] + moved, newStarts[j]);
+
+            if (gapTo > gapFrom)
+                runs.push_back ({ gapFrom - moved, gapFrom, gapTo - gapFrom });
         }
 
         for (std::size_t i = 0; i < before.size(); ++i)
@@ -360,40 +492,59 @@ namespace wfg::doc
     }
 
     //==============================================================================
-    std::vector<Section> clampCrossfades (std::vector<Section> sections)
+    std::vector<Section> clampFades (std::vector<Section> sections)
     {
-        /*  The first section's crossfade is not heard and is left alone; for
-            the pair constraint it counts as nothing. */
-        const auto heard = [&sections] (std::size_t i) { return i == 0 ? 0.0 : std::max (0.0, sections[i].crossfade); };
-
-        for (std::size_t i = 1; i < sections.size(); ++i)
-            sections[i].crossfade = std::min (std::max (0.0, sections[i].crossfade), 2.0 * std::max (0.0, sections[i].in));
-
-        for (std::size_t i = 0; i < sections.size(); ++i)
+        for (auto& section : sections)
         {
-            const auto length = std::max (0.0, sections[i].length());
-            const auto own = heard (i);
-            const auto next = i + 1 < sections.size() ? heard (i + 1) : 0.0;
+            section.fadeIn = std::max (0.0, finiteOr (section.fadeIn, 0.0));
+            section.fadeOut = std::max (0.0, finiteOr (section.fadeOut, 0.0));
+            section.fadeInCurve = std::clamp (finiteOr (section.fadeInCurve, 0.0), -1.0, 1.0);
+            section.fadeOutCurve = std::clamp (finiteOr (section.fadeOutCurve, 0.0), -1.0, 1.0);
+        }
 
-            if (own / 2.0 + next / 2.0 <= length)
+        const auto plain = [&sections] (std::size_t k)
+        {
+            return isJoin (sections, k) && isContinuousJoin (sections[k - 1], sections[k]);
+        };
+
+        /*  A FADE IN CENTRED ON A JOIN reaches back half its length before
+            the in point: nothing is there before the file's start. */
+        for (std::size_t k = 1; k < sections.size(); ++k)
+            if (isJoin (sections, k) && ! plain (k))
+                sections[k].fadeIn = std::min (sections[k].fadeIn, 2.0 * std::max (0.0, sections[k].in));
+
+        /*  WHAT THE TWO TAKE OF THE SECTION must fit inside it: half of a
+            centred fade, all of one inside, nothing of one not heard. The
+            larger shrinks to what the other leaves; if that is still too much
+            the other goes down to the section's length. */
+        for (std::size_t k = 0; k < sections.size(); ++k)
+        {
+            auto& section = sections[k];
+            const auto length = std::max (0.0, section.length());
+            const auto inShare = plain (k) ? 0.0 : isJoin (sections, k) ? 0.5 : 1.0;
+            const auto outShare = plain (k + 1) ? 0.0 : isJoin (sections, k + 1) ? 0.5 : 1.0;
+            auto takenIn = section.fadeIn * inShare;
+            auto takenOut = section.fadeOut * outShare;
+
+            if (takenIn + takenOut <= length)
                 continue;
 
-            /*  The larger shrinks to what the other leaves; if that is still
-                too much the other goes down to the section's length. */
-            if (own >= next)
+            if (takenIn >= takenOut)
             {
-                sections[i].crossfade = std::max (0.0, 2.0 * (length - next / 2.0));
-
-                if (i + 1 < sections.size() && next / 2.0 > length)
-                    sections[i + 1].crossfade = 2.0 * length;
+                takenOut = std::min (takenOut, length);
+                takenIn = std::max (0.0, length - takenOut);
             }
             else
             {
-                sections[i + 1].crossfade = std::max (0.0, 2.0 * (length - own / 2.0));
-
-                if (i > 0 && own / 2.0 > length)
-                    sections[i].crossfade = 2.0 * length;
+                takenIn = std::min (takenIn, length);
+                takenOut = std::max (0.0, length - takenIn);
             }
+
+            if (inShare > 0.0)
+                section.fadeIn = takenIn / inShare;
+
+            if (outShare > 0.0)
+                section.fadeOut = takenOut / outShare;
         }
 
         return sections;
@@ -407,7 +558,9 @@ namespace wfg::doc
             const auto here = "section " + std::to_string (i + 1);
 
             if (! std::isfinite (section.in) || ! std::isfinite (section.out)
-                  || ! std::isfinite (section.trimDb) || ! std::isfinite (section.crossfade))
+                  || ! std::isfinite (section.trimDb) || ! std::isfinite (section.fadeIn)
+                  || ! std::isfinite (section.fadeOut) || ! std::isfinite (section.fadeInCurve)
+                  || ! std::isfinite (section.fadeOutCurve) || ! std::isfinite (section.gap))
                 return here + ": a value that is not a number";
 
             if (section.in < 0.0)
@@ -419,8 +572,14 @@ namespace wfg::doc
             if (section.trimDb < trimLow || section.trimDb > trimHigh)
                 return here + ": a trim outside " + osc::formatDouble (trimLow) + ".." + osc::formatDouble (trimHigh) + " dB";
 
-            if (section.crossfade < 0.0)
-                return here + ": a crossfade below nought";
+            if (section.fadeIn < 0.0 || section.fadeOut < 0.0)
+                return here + ": a fade below nought";
+
+            if (section.gap < 0.0)
+                return here + ": a gap below nought";
+
+            if (std::abs (section.fadeInCurve) > 1.0 || std::abs (section.fadeOutCurve) > 1.0)
+                return here + ": a curve outside -1..1";
         }
 
         return {};

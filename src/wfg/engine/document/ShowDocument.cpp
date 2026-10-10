@@ -1315,8 +1315,8 @@ namespace wfg::doc
             written here is an edge moved, which shifts everything after it on
             the edited timeline, so it is the trim method's - one implementation
             for a client's `node.set` and for `section.trim`, and the carry with
-            it. A crossfade is held to the material once written; a trim is a
-            plain write. All refused on a frozen edit and on a sound locked to
+            it, and so is the silence before it (55.9). A fade is held to the
+            material once written; a trim and a curve are plain writes. All refused on a frozen edit and on a sound locked to
             a movie, as every section edit is. `carryingSections` is the method
             writing through this door itself. */
         if (target.attribute->element == "Section" && ! carryingSections)
@@ -1340,7 +1340,9 @@ namespace wfg::doc
                 return trimSection (sectionId, in, out);
             }
 
-            if (name == "crossfade")
+            /*  A FADE'S LENGTH, alone - `section.fade` is the verb that moves its
+                partner (55.9, AED) - held to the material once written. */
+            if (name == "fadeIn" || name == "fadeOut")
             {
                 if (*number < 0.0)
                     return EditResult::failed (reason::badValue);
@@ -1351,18 +1353,15 @@ namespace wfg::doc
                 if (! written.ok)
                     return written;
 
-                const auto cue = target.node.getParent();
-                const auto sections = sectionsOf (cue);
-                const auto held = clampCrossfades (sections);
-
-                for (std::size_t i = 0; i < sections.size(); ++i)
-                    if (std::abs (held[i].crossfade - sections[i].crossfade) >= sameInstant)
-                        if (const auto clamped = setAttribute ("/godot/section/" + sections[i].id + "/crossfade",
-                                                               osc::formatDouble (held[i].crossfade)); ! clamped.ok)
-                            return clamped;
+                if (const auto held = holdFades (target.node.getParent()); ! held.ok)
+                    return held;
 
                 return written;
             }
+
+            //  THE SILENCE BEFORE IT moves everything after, carried (55.9).
+            if (name == "gap")
+                return setSectionGap (sectionId, *number);
         }
 
         Value value;
@@ -1675,7 +1674,7 @@ namespace wfg::doc
                 copy (movie, sound, juce::Identifier (row));
 
             follow (sound, "Range", { "in", "out", "loops", "name" });
-            follow (sound, "Section", { "in", "out", "trim", "crossfade" });
+            follow (sound, "Section", { "in", "out", "trim", "fadeIn", "fadeOut", "fadeInCurve", "fadeOutCurve", "gap" });
         }
     }
 
@@ -2850,13 +2849,7 @@ namespace wfg::doc
             if (! child.hasType ("Section"))
                 continue;
 
-            Section section;
-            section.id = child[idProperty].toString().toStdString();
-            section.in = static_cast<double> (child.getProperty ("in", 0.0));
-            section.out = static_cast<double> (child.getProperty ("out", 0.0));
-            section.trimDb = static_cast<double> (child.getProperty ("trim", 0.0));
-            section.crossfade = static_cast<double> (child.getProperty ("crossfade", defaultCrossfade));
-            sections.push_back (section);
+            sections.push_back (sectionFromNode (child));
         }
 
         return sections;
@@ -2968,8 +2961,10 @@ namespace wfg::doc
             if (wholeId.empty())
                 return EditResult::failed (reason::unknownId);
 
+            /*  The file as recorded: no fade at either end (55.9, AEA). */
             const auto whole = insertObject (cue, endOfSequence, "Section", wholeId,
-                                             { { "in", "0" }, { "out", osc::formatDouble (fileLength) } });
+                                             { { "in", "0" }, { "out", osc::formatDouble (fileLength) },
+                                               { "fadeIn", "0" }, { "fadeOut", "0" } });
 
             if (! whole.ok)
                 return whole;
@@ -3002,19 +2997,26 @@ namespace wfg::doc
 
         /*  THE SECOND HALF GOES DIRECTLY AFTER THE FIRST, as a range's does,
             with the first half's trim: cutting a quiet piece gives two quiet
-            pieces. Its crossfade is the default, unheard while the join is
-            continuous and there for when a move parts them. */
+            pieces. The new join's two fades are the default, unheard while
+            the join is continuous and there for when a move parts them; the
+            second half takes the first's fade out, being its end now (55.9). */
         const auto made = insertObject (cue, childIndex + 1, "Section", id,
                                          { { "in", osc::formatDouble (place->fileSecond) },
                                            { "out", osc::formatDouble (section.out) },
-                                           { "trim", osc::formatDouble (section.trimDb) } });
+                                           { "trim", osc::formatDouble (section.trimDb) },
+                                           { "fadeOut", osc::formatDouble (section.fadeOut) },
+                                           { "fadeOutCurve", osc::formatDouble (section.fadeOutCurve) } });
 
         if (! made.ok)
             return made;
 
-        if (const auto shortened = setAttribute ("/godot/section/" + section.id + "/out",
-                                                 osc::formatDouble (place->fileSecond)); ! shortened.ok)
-            return shortened;
+        const auto first = "/godot/section/" + section.id + "/";
+
+        for (const auto& [row, value] : { std::pair<std::string, double> { "out", place->fileSecond },
+                                          std::pair<std::string, double> { "fadeOut", defaultFade },
+                                          std::pair<std::string, double> { "fadeOutCurve", 0.0 } })
+            if (const auto written = setAttribute (first + row, osc::formatDouble (value)); ! written.ok)
+                return written;
 
         /*  A MOVIE'S SOUND FOLLOWS (55.5): the cut copied onto it. */
         if (isMovieCue (cue))
@@ -3037,17 +3039,22 @@ namespace wfg::doc
             if (sections[i].id == sectionId)
                 k = i;
 
-        if (k + 1 >= sections.size() || ! isContinuousJoin (sections[k], sections[k + 1]))
+        if (k + 1 >= sections.size() || ! isJoin (sections, k + 1)
+              || ! isContinuousJoin (sections[k], sections[k + 1]))
             return EditResult::failed (reason::badValue);
 
         /*  One in the file again: the identity on the timeline, so nothing is
-            carried. The survivor keeps its trim and its crossfade. */
+            carried. The survivor keeps its trim, its gap and its fade in, and
+            takes the other's fade out, its end now (55.9). */
         const juce::ScopedValueSetter<bool> joining (carryingSections, true);
         const auto nextId = sections[k + 1].id;
+        const auto base = "/godot/section/" + sectionId + "/";
 
-        if (const auto widened = setAttribute ("/godot/section/" + sectionId + "/out",
-                                               osc::formatDouble (sections[k + 1].out)); ! widened.ok)
-            return widened;
+        for (const auto& [row, value] : { std::pair<std::string, double> { "out", sections[k + 1].out },
+                                          std::pair<std::string, double> { "fadeOut", sections[k + 1].fadeOut },
+                                          std::pair<std::string, double> { "fadeOutCurve", sections[k + 1].fadeOutCurve } })
+            if (const auto widened = setAttribute (base + row, osc::formatDouble (value)); ! widened.ok)
+                return widened;
 
         if (const auto taken = remove (nextId); ! taken.ok)
             return taken;
@@ -3116,14 +3123,438 @@ namespace wfg::doc
         });
     }
 
-    EditResult ShowDocument::removeSection (const std::string& sectionId)
+    EditResult ShowDocument::removeSection (const std::string& sectionId, bool leaveGap)
     {
         const auto [section, cue] = sectionAndCue (*this, sectionId);
 
         if (auto refusal = refuseSectionEdit (cue))
             return *refusal;
 
-        return carrySectionEdit (cue, [this, sectionId] { return remove (sectionId); });
+        return carrySectionEdit (cue, [this, cue, sectionId, leaveGap]
+        {
+            /*  THE SECTION AFTER IT keeps the silence that stood before this
+                one, and with `leaveGap` this one's time as well, so it stays
+                where it was (55.9, AEE). At the end there is nothing after. */
+            const auto sections = sectionsOf (cue);
+            const auto starts = sectionStarts (sections);
+
+            for (std::size_t k = 0; k + 1 < sections.size(); ++k)
+            {
+                if (sections[k].id != sectionId)
+                    continue;
+
+                const auto before = k == 0 ? 0.0 : starts[k - 1] + sections[k - 1].length();
+                const auto until = leaveGap ? starts[k + 1] : starts[k + 1] - sections[k].length();
+                const auto gap = std::max (0.0, until - before);
+
+                if (const auto written = setAttribute ("/godot/section/" + sections[k + 1].id + "/gap",
+                                                       osc::formatDouble (gap < sameInstant ? 0.0 : gap));
+                    ! written.ok)
+                    return written;
+            }
+
+            return remove (sectionId);
+        });
+    }
+
+    //==============================================================================
+    /*  THE HANDLES (namespace draft §55.9-55.11). */
+
+    namespace
+    {
+        std::size_t indexOfSection (const std::vector<Section>& sections, const std::string& sectionId)
+        {
+            for (std::size_t k = 0; k < sections.size(); ++k)
+                if (sections[k].id == sectionId)
+                    return k;
+
+            return sections.size();
+        }
+    }
+
+    EditResult ShowDocument::edgeSection (const std::string& sectionId, bool inSide, double seconds)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        const auto sections = sectionsOf (cue);
+        const auto k = indexOfSection (sections, sectionId);
+
+        if (k >= sections.size())
+            return EditResult::failed (reason::unknownId);
+
+        if (! std::isfinite (seconds) || seconds < 0.0)
+            return EditResult::failed (reason::badValue);
+
+        const auto& self = sections[k];
+        std::vector<std::pair<std::string, double>> writes;
+        const auto row = [] (const Section& s, const char* name) { return "/godot/section/" + s.id + "/" + name; };
+
+        if (inSide)
+        {
+            const auto delta = seconds - self.in;
+
+            if (! (seconds < self.out - sameInstant))
+                return EditResult::failed (reason::badValue);
+
+            if (isJoin (sections, k))
+            {
+                /*  A ROLL (AEC): the cut between the two moves, the one before
+                    longer or shorter by as much, nothing else moving. */
+                const auto& before = sections[k - 1];
+
+                if (! (before.out + delta > before.in + sameInstant))
+                    return EditResult::failed (reason::badValue);
+
+                writes.push_back ({ row (before, "out"), before.out + delta });
+            }
+            else
+            {
+                //  INTO THE SILENCE BEFORE IT, or out of it; never past it.
+                const auto gap = (self.gap >= sameInstant ? self.gap : 0.0) + delta;
+
+                if (gap < -sameInstant / 2.0)
+                    return EditResult::failed (reason::badValue);
+
+                writes.push_back ({ row (self, "gap"), gap < sameInstant ? 0.0 : gap });
+            }
+
+            writes.push_back ({ row (self, "in"), seconds });
+        }
+        else
+        {
+            const auto delta = seconds - self.out;
+
+            if (! (seconds > self.in + sameInstant))
+                return EditResult::failed (reason::badValue);
+
+            if (k + 1 < sections.size() && isJoin (sections, k + 1))
+            {
+                const auto& after = sections[k + 1];
+
+                if (after.in + delta < 0.0 || ! (after.in + delta < after.out - sameInstant))
+                    return EditResult::failed (reason::badValue);
+
+                writes.push_back ({ row (after, "in"), after.in + delta });
+            }
+            else if (k + 1 < sections.size())
+            {
+                const auto& after = sections[k + 1];
+                const auto gap = (after.gap >= sameInstant ? after.gap : 0.0) - delta;
+
+                if (gap < -sameInstant / 2.0)
+                    return EditResult::failed (reason::badValue);
+
+                writes.push_back ({ row (after, "gap"), gap < sameInstant ? 0.0 : gap });
+            }
+
+            writes.push_back ({ row (self, "out"), seconds });
+        }
+
+        return carrySectionEdit (cue, [this, writes, sectionId]
+        {
+            for (const auto& [address, value] : writes)
+                if (const auto written = setAttribute (address, osc::formatDouble (value)); ! written.ok)
+                    return written;
+
+            return EditResult::succeeded (sectionId);
+        });
+    }
+
+    EditResult ShowDocument::fadeSection (const std::string& sectionId, bool inSide, double seconds, bool alone)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (! std::isfinite (seconds) || seconds < 0.0)
+            return EditResult::failed (reason::badValue);
+
+        const auto sections = sectionsOf (cue);
+        const auto k = indexOfSection (sections, sectionId);
+
+        if (k >= sections.size())
+            return EditResult::failed (reason::unknownId);
+
+        /*  ITS PARTNER ACROSS A JOIN moves by as much, keeping any difference
+            a Shift drag made (AED); alone, it stays. */
+        const auto delta = seconds - (inSide ? sections[k].fadeIn : sections[k].fadeOut);
+        const juce::ScopedValueSetter<bool> plain (carryingSections, true);
+
+        if (const auto written = setAttribute ("/godot/section/" + sectionId + (inSide ? "/fadeIn" : "/fadeOut"),
+                                               osc::formatDouble (seconds)); ! written.ok)
+            return written;
+
+        if (! alone)
+        {
+            const auto partner = inSide ? (isJoin (sections, k) ? k - 1 : sections.size())
+                                        : (isJoin (sections, k + 1) ? k + 1 : sections.size());
+
+            if (partner < sections.size())
+            {
+                const auto now = inSide ? sections[partner].fadeOut : sections[partner].fadeIn;
+
+                if (const auto moved = setAttribute ("/godot/section/" + sections[partner].id
+                                                       + (inSide ? "/fadeOut" : "/fadeIn"),
+                                                     osc::formatDouble (std::max (0.0, now + delta)));
+                    ! moved.ok)
+                    return moved;
+            }
+        }
+
+        if (const auto held = holdFades (cue); ! held.ok)
+            return held;
+
+        return EditResult::succeeded (sectionId);
+    }
+
+    EditResult ShowDocument::curveSection (const std::string& sectionId, bool inSide, double curve, bool alone)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (! std::isfinite (curve) || curve < -1.0 || curve > 1.0)
+            return EditResult::failed (reason::badValue);
+
+        const auto sections = sectionsOf (cue);
+        const auto k = indexOfSection (sections, sectionId);
+
+        if (k >= sections.size())
+            return EditResult::failed (reason::unknownId);
+
+        const auto delta = curve - (inSide ? sections[k].fadeInCurve : sections[k].fadeOutCurve);
+        const juce::ScopedValueSetter<bool> plain (carryingSections, true);
+
+        if (const auto written = setAttribute ("/godot/section/" + sectionId + (inSide ? "/fadeInCurve" : "/fadeOutCurve"),
+                                               osc::formatDouble (curve)); ! written.ok)
+            return written;
+
+        if (! alone)
+        {
+            const auto partner = inSide ? (isJoin (sections, k) ? k - 1 : sections.size())
+                                        : (isJoin (sections, k + 1) ? k + 1 : sections.size());
+
+            if (partner < sections.size())
+            {
+                const auto now = inSide ? sections[partner].fadeOutCurve : sections[partner].fadeInCurve;
+
+                if (const auto moved = setAttribute ("/godot/section/" + sections[partner].id
+                                                       + (inSide ? "/fadeOutCurve" : "/fadeInCurve"),
+                                                     osc::formatDouble (std::clamp (now + delta, -1.0, 1.0)));
+                    ! moved.ok)
+                    return moved;
+            }
+        }
+
+        return EditResult::succeeded (sectionId);
+    }
+
+    EditResult ShowDocument::setSectionGap (const std::string& sectionId, double gap)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (! std::isfinite (gap) || gap < 0.0)
+            return EditResult::failed (reason::badValue);
+
+        const auto address = "/godot/section/" + sectionId + "/gap";
+        const auto value = gap < sameInstant ? 0.0 : gap;
+
+        return carrySectionEdit (cue, [this, address, value] { return setAttribute (address, osc::formatDouble (value)); });
+    }
+
+    EditResult ShowDocument::splitSpan (const std::string& cueId, double from, double to, double fileLength,
+                                        std::string& firstId, std::string& secondId)
+    {
+        auto cue = findById (cueId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (! std::isfinite (from) || ! std::isfinite (to))
+            return EditResult::failed (reason::badValue);
+
+        if (from > to)
+            std::swap (from, to);
+
+        /*  WHICH ENDS CUT, asked of the edit as it stands - with no sections,
+            of the whole file the first split will make - before anything is
+            written, so a refusal leaves the show as it was. */
+        auto sections = sectionsOf (cue);
+
+        if (sections.empty())
+        {
+            if (! std::isfinite (fileLength) || ! (fileLength > 0.0))
+                return EditResult::failed (reason::badValue);
+
+            Section whole;
+            whole.out = fileLength;
+            sections.push_back (whole);
+        }
+
+        const auto starts = sectionStarts (sections);
+
+        const auto cuts = [&sections, &starts] (double at)
+        {
+            const auto place = placeOf (sections, at);
+            return place.has_value() && at > starts[place->index] + sameInstant
+                && at < starts[place->index] + sections[place->index].length() - sameInstant;
+        };
+
+        const auto cutFrom = cuts (from);
+        const auto cutTo = to > from + sameInstant && cuts (to);
+
+        if (! cutFrom && ! cutTo)
+        {
+            firstId.clear();
+            secondId.clear();
+            return EditResult::failed (reason::badValue);
+        }
+
+        if (cutFrom)
+        {
+            const auto made = splitSection (cueId, from, fileLength, firstId);
+
+            if (! made.ok)
+                return made;
+
+            firstId = made.id;
+        }
+        else
+        {
+            firstId.clear();
+        }
+
+        if (cutTo)
+        {
+            const auto made = splitSection (cueId, to, fileLength, secondId);
+
+            if (! made.ok)
+                return made;
+
+            secondId = made.id;
+        }
+        else
+        {
+            secondId.clear();
+        }
+
+        return EditResult::succeeded (cutFrom ? firstId : secondId);
+    }
+
+    EditResult ShowDocument::deleteSpan (const std::string& cueId, double from, double to, bool ripple,
+                                         double fileLength, std::string& firstId, std::string& secondId)
+    {
+        auto cue = findById (cueId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (! std::isfinite (from) || ! std::isfinite (to))
+            return EditResult::failed (reason::badValue);
+
+        if (from > to)
+            std::swap (from, to);
+
+        if (! (to > from + sameInstant))
+            return EditResult::failed (reason::badValue);
+
+        /*  ASKED FIRST, of the edit as it stands: a selection over all of it
+            would leave nothing - and no sections is the whole file again, the
+            opposite of what was asked; without ripple, one over silence alone
+            has nothing to take. */
+        {
+            auto sections = sectionsOf (cue);
+
+            if (sections.empty())
+            {
+                if (! std::isfinite (fileLength) || ! (fileLength > 0.0))
+                    return EditResult::failed (reason::badValue);
+
+                Section whole;
+                whole.out = fileLength;
+                sections.push_back (whole);
+            }
+
+            const auto starts = sectionStarts (sections);
+            auto material = false;
+            auto everything = true;
+
+            for (std::size_t k = 0; k < sections.size(); ++k)
+            {
+                const auto a = starts[k];
+                const auto b = starts[k] + sections[k].length();
+
+                material = material || (std::min (b, to) > std::max (a, from) + sameInstant);
+                everything = everything && a >= from - sameInstant && b <= to + sameInstant;
+            }
+
+            if (everything)
+                return EditResult::failed (reason::badValue);
+
+            if (! material && ! ripple)
+                return EditResult::failed (reason::badValue);
+        }
+
+        /*  THE TWO ENDS CUT FIRST - the identity on the timeline - then the
+            material between taken out, carried as one edit. */
+        std::string madeFirst = firstId, madeSecond = secondId;
+
+        if (const auto cut = splitSpan (cueId, from, to, fileLength, madeFirst, madeSecond);
+            ! cut.ok && cut.reason != reason::badValue)
+            return cut;
+
+        firstId = madeFirst;
+        secondId = madeSecond;
+
+        return carrySectionEdit (cue, [this, cue, cueId, from, to, ripple]
+        {
+            const auto sections = sectionsOf (cue);
+            const auto starts = sectionStarts (sections);
+
+            std::vector<std::string> inside;
+            std::size_t next = sections.size();
+            auto before = 0.0;
+
+            for (std::size_t k = 0; k < sections.size(); ++k)
+            {
+                const auto a = starts[k];
+                const auto b = starts[k] + sections[k].length();
+
+                if (a >= from - sameInstant && b <= to + sameInstant)
+                    inside.push_back (sections[k].id);
+                else if (b <= from + sameInstant)
+                    before = b;
+                else if (next == sections.size() && a >= to - sameInstant)
+                    next = k;
+            }
+
+            /*  THE FIRST SECTION AFTER keeps its place, or moves earlier by the
+                selection's length with ripple (AEE): its gap says so. */
+            if (next < sections.size())
+            {
+                const auto target = ripple ? starts[next] - (to - from) : starts[next];
+                const auto gap = std::max (0.0, target - before);
+
+                if (const auto written = setAttribute ("/godot/section/" + sections[next].id + "/gap",
+                                                       osc::formatDouble (gap < sameInstant ? 0.0 : gap));
+                    ! written.ok)
+                    return written;
+            }
+
+            for (const auto& id : inside)
+                if (const auto taken = remove (id); ! taken.ok)
+                    return taken;
+
+            return EditResult::succeeded (cueId);
+        });
     }
 
     EditResult ShowDocument::clearSections (const std::string& cueId)
@@ -3175,16 +3606,11 @@ namespace wfg::doc
                 if (const auto lanes = carryLanes (sound, runs); ! lanes.ok)
                     return lanes;
 
-        /*  AND THE CROSSFADES HELD to the material as it now stands: a section
+        /*  AND THE FADES HELD to the material as it now stands: a section
             moved to the front of the file has nothing before it, a shortened
-            one has less room. */
-        const auto held = clampCrossfades (after);
-
-        for (std::size_t i = 0; i < after.size(); ++i)
-            if (std::abs (held[i].crossfade - after[i].crossfade) >= sameInstant)
-                if (const auto clamped = setAttribute ("/godot/section/" + after[i].id + "/crossfade",
-                                                       osc::formatDouble (held[i].crossfade)); ! clamped.ok)
-                    return clamped;
+            one has less room, a gap closed makes a free fade a centred one. */
+        if (const auto held = holdFades (cue); ! held.ok)
+            return held;
 
         /*  AND THE SOUND'S SECTIONS MADE THE MOVIE'S AGAIN (55.5): a move is a
             `moveChild` that knocks at no door, so it is asked for here. */
@@ -3192,6 +3618,28 @@ namespace wfg::doc
             keepSoundsAfter (cue, "startOffset");
 
         return written;
+    }
+
+    EditResult ShowDocument::holdFades (const juce::ValueTree& cue)
+    {
+        const auto sections = sectionsOf (cue);
+        const auto held = clampFades (sections);
+        const juce::ScopedValueSetter<bool> plain (carryingSections, true);
+
+        for (std::size_t i = 0; i < sections.size(); ++i)
+        {
+            const auto base = "/godot/section/" + sections[i].id + "/";
+
+            if (std::abs (held[i].fadeIn - sections[i].fadeIn) >= 1.0e-6)
+                if (const auto clamped = setAttribute (base + "fadeIn", osc::formatDouble (held[i].fadeIn)); ! clamped.ok)
+                    return clamped;
+
+            if (std::abs (held[i].fadeOut - sections[i].fadeOut) >= 1.0e-6)
+                if (const auto clamped = setAttribute (base + "fadeOut", osc::formatDouble (held[i].fadeOut)); ! clamped.ok)
+                    return clamped;
+        }
+
+        return EditResult::succeeded (cue[idProperty].toString().toStdString());
     }
 
     EditResult ShowDocument::carryLanes (juce::ValueTree cue, const std::vector<TimeRun>& runs)

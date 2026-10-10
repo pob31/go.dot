@@ -51,7 +51,8 @@
 
 namespace wfg::client::ui
 {
-    class WaveformEditorComponent final : public juce::Component
+    class WaveformEditorComponent final : public juce::Component,
+                                          private juce::Timer
     {
     public:
         struct Actions
@@ -76,8 +77,17 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId, double at)> splitSection;
             std::function<void (const std::string& sectionId)> joinSection;
             std::function<void (const std::string& sectionId, int index)> moveSection;
-            std::function<void (const std::string& sectionId)> removeSection;
+            std::function<void (const std::string& sectionId, bool leaveGap)> removeSection;
             std::function<void (const std::string& cueId)> freezeEdit;
+
+            /*  THE HANDLES ON THE BAR (namespace draft §55.9): an edge moved
+                with its material in place, a fade's length and its curve (alone
+                with Shift), a selection split at both ends or deleted. */
+            std::function<void (const std::string& sectionId, bool inSide, double seconds)> edgeSection;
+            std::function<void (const std::string& sectionId, bool inSide, double seconds, bool alone)> fadeSection;
+            std::function<void (const std::string& sectionId, bool inSide, double curve, bool alone)> curveSection;
+            std::function<void (const std::string& cueId, double from, double to)> splitSpan;
+            std::function<void (const std::string& cueId, double from, double to, bool ripple)> deleteSpan;
             std::function<void (const std::string& cueId)> unfreezeEdit;
 
             /*  THE THREE THE TRANSPORT NEEDS. `play` fires this cue - the real
@@ -153,6 +163,24 @@ namespace wfg::client::ui
         void mouseUp (const juce::MouseEvent&) override;
         void mouseExit (const juce::MouseEvent&) override;
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+        /*  THE KEYS ONCE THE PANEL HAS BEEN CLICKED (namespace draft §55.9,
+            AEF): x splits, Backspace and Delete delete - leaving silence, or
+            closing up with Shift. Every other key goes on to the window. */
+        bool keyPressed (const juce::KeyPress&) override;
+
+        /*  THE SELECTION OF TIME, on the edited timeline, sorted; nothing
+            while there is none. Public for a test. */
+        std::optional<std::pair<double, double>> selectionShown() const noexcept { return selection; }
+
+        /*  THE BAR, in this component's pixels, and where a handle of the
+            section `index` is drawn - for a test to aim at, as `pointPosition`. */
+        juce::Rectangle<int> barBounds() const { return barArea(); }
+        juce::Point<float> gripPosition (model::Grip, std::size_t index) const;
+
+        /*  THE WHEEL'S ONE WRITE NOW, rather than once it has been still a
+            moment - what the timer does, for a test that has no message loop. */
+        void settleWheel() { flushCurve(); }
 
     private:
         /*  WHAT IS LEFT FOR THE PICTURE once the table has its column. The bar
@@ -371,9 +399,34 @@ namespace wfg::client::ui
         std::size_t draggedSection = noSection;
         bool sectionMoved = false;
         int pressX = 0, dragX = 0;
-        std::size_t heldJoin = noSection;
-        double heldCrossfade = 0.0;
         std::string barsEdit;
+
+        /*  THE HANDLES ON THE BAR (namespace draft §55.9): the grip the
+            pointer is over, the one held and the edit as its drag would
+            leave it - drawn until the one write on release; the selection
+            being dragged out in the top half; a curve being turned by the
+            wheel, written once the wheel has been still a moment. */
+        model::GripHit gripHover;
+        model::GripHit gripHeld;
+        std::vector<model::SectionRow> gripPreview;
+        bool gripMoved = false;
+        bool gripAlone = false;
+        double gripValue = 0.0;
+        std::optional<std::pair<double, double>> selection;
+        bool selecting = false;
+        double selectFrom = 0.0;
+        int selectPressX = 0;
+        bool lowerPress = false;
+        std::optional<std::pair<std::size_t, bool>> curveTarget;
+        double curveHeld = 0.0;
+        bool curveAlone = false;
+        std::vector<model::SectionRow> curvePreview;
+        void timerCallback() override;
+        void flushCurve();
+        const std::vector<model::SectionRow>& sectionsShown() const;
+        void paintGrips (juce::Graphics&, juce::Rectangle<int> bar);
+        void splitHere();
+        double sourceLength() const;
 
         std::size_t grabbedPoint = noPoint;
         std::size_t hoverPoint = noPoint;

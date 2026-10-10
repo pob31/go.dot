@@ -17,7 +17,7 @@
 /*  A SOUND CUE'S EDIT: ITS SECTIONS (namespace draft §55).
 
     A sound may be cut into sections - pieces of its file, each with an in and
-    an out point, a trim and a crossfade at the join into it - and the sections
+    an out point, a trim, a fade at each end and a gap before it - and the sections
     in their order are the edited timeline the cue plays. This file is the
     document half of that: what a section IS, where it may sit, what it is
     published as, and the show a section makes impossible. The math of the
@@ -97,7 +97,7 @@ namespace
                 return "(absent)";
 
             /*  A number spelled as the row would be read back: an index as
-                "1", a crossfade as "0.01", in every locale. */
+                "1", a fade as "0.01", in every locale. */
             return node->soleValue()->isString()
                      ? node->soleValue()->getString()
                      : osc::formatDouble (node->soleValue()->asDouble());
@@ -151,9 +151,12 @@ TEST_CASE ("section: it is published at an address of its own, with the cue and 
     CHECK (rig.stored (second, "out") == "12.5");
 
     /*  The rows a section gets by default: no trim, the click suppressor's
-        crossfade. */
+        fade at each end, a straight curve, no gap (55.9). */
     CHECK (rig.published (first, "trim") == "0");
-    CHECK (rig.published (first, "crossfade") == "0.01");
+    CHECK (rig.published (first, "fadeIn") == "0.01");
+    CHECK (rig.published (first, "fadeOut") == "0.01");
+    CHECK (rig.published (first, "fadeInCurve") == "0");
+    CHECK (rig.published (first, "gap") == "0");
 
     /*  The cue lists them in order: the containment read back. */
     CHECK (rig.published ("/godot/cue/" + rig.cueId + "/sections") == "SEC00001 SEC00002");
@@ -244,7 +247,9 @@ TEST_CASE ("section: it survives a save and a reload, being show state")
 
     const auto id = rig.add (12.0, 30.5, "SEC00001");
     REQUIRE (rig.document.setAttribute ("/godot/section/" + id + "/trim", "-6").ok);
-    REQUIRE (rig.document.setAttribute ("/godot/section/" + id + "/crossfade", "0.25").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/section/" + id + "/fadeIn", "0.25").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/section/" + id + "/fadeOutCurve", "-0.5").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/section/" + id + "/gap", "1.5").ok);
 
     const auto xml = doc::CanonicalXml::write (rig.document);
 
@@ -257,7 +262,9 @@ TEST_CASE ("section: it survives a save and a reload, being show state")
     CHECK (reopened.getAttribute ("/godot/section/" + id + "/in").value_or ("?") == "12");
     CHECK (reopened.getAttribute ("/godot/section/" + id + "/out").value_or ("?") == "30.5");
     CHECK (reopened.getAttribute ("/godot/section/" + id + "/trim").value_or ("?") == "-6");
-    CHECK (reopened.getAttribute ("/godot/section/" + id + "/crossfade").value_or ("?") == "0.25");
+    CHECK (reopened.getAttribute ("/godot/section/" + id + "/fadeIn").value_or ("?") == "0.25");
+    CHECK (reopened.getAttribute ("/godot/section/" + id + "/fadeOutCurve").value_or ("?") == "-0.5");
+    CHECK (reopened.getAttribute ("/godot/section/" + id + "/gap").value_or ("?") == "1.5");
     CHECK (reopened.validate().empty());
 }
 
@@ -422,7 +429,7 @@ TEST_CASE ("section.join: only a cut that is still one in the file can be taken 
     CHECK (rig.document.joinSection (again).reason == "bad-value");
 }
 
-TEST_CASE ("section.move: the lane, the ranges and the crossfade go with the sound, in one step")
+TEST_CASE ("section.move: the lane, the ranges and the fades go with the sound, in one step")
 {
     EditRig rig;
 
@@ -434,7 +441,8 @@ TEST_CASE ("section.move: the lane, the ranges and the crossfade go with the sou
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/levelLane", "12 0 14 -20 16 -20 18 0").ok);
     const auto inVerse = rig.document.createRange (rig.cueId, 12.0, 18.0).id;
     const auto across = rig.document.createRange (rig.cueId, 5.0, 25.0).id;
-    REQUIRE (rig.document.setAttribute ("/godot/section/" + ids[2] + "/crossfade", "0.5").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/section/" + ids[2] + "/fadeIn", "0.5").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/section/" + ids[0] + "/fadeIn", "0.3").ok);
 
     CHECK (rig.apply ("section.move", { osc::Value::string (ids[2]), osc::Value::int32 (0) }) == 1u);
 
@@ -445,10 +453,11 @@ TEST_CASE ("section.move: the lane, the ranges and the crossfade go with the sou
     CHECK_FALSE (rig.document.findById (across).isValid());   // the two sides of the move
 
     /*  The intro now follows the chorus, and its in point is the file's
-        start: nothing before it for a crossfade, so its join is a hard cut.
-        The chorus's own crossfade is kept, unheard at the front. */
-    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/crossfade") == doctest::Approx (0.0));
-    CHECK (rig.seconds ("/godot/section/" + ids[2] + "/crossfade") == doctest::Approx (0.5));
+        start: nothing before it for a fade centred on the join, so it is a
+        hard cut. The chorus's own fade in is kept - at the front, a fade
+        from silence inside it (55.9). */
+    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/fadeIn") == doctest::Approx (0.0));
+    CHECK (rig.seconds ("/godot/section/" + ids[2] + "/fadeIn") == doctest::Approx (0.5));
 
     /*  One undo puts all of it back. */
     REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
@@ -456,7 +465,7 @@ TEST_CASE ("section.move: the lane, the ranges and the crossfade go with the sou
     CHECK (rig.lane() == "12 0 14 -20 16 -20 18 0");
     CHECK (rig.document.findById (across).isValid());
     CHECK (rig.seconds ("/godot/range/" + inVerse + "/in") == doctest::Approx (12.0));
-    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/crossfade") == doctest::Approx (0.01));
+    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/fadeIn") == doctest::Approx (0.3));
 }
 
 TEST_CASE ("section.move: the start offset goes with the sound, and nought stays nought")
@@ -562,18 +571,28 @@ TEST_CASE ("section: every road carries - node.set on an edge, object.move and o
     CHECK (rig.document.move (ids[0], other, 0).reason == "bad-address");
 }
 
-TEST_CASE ("section: a crossfade written is held to the material, and a trim is a plain write")
+TEST_CASE ("section: a fade written is held to the material, and a trim and a curve are plain writes")
 {
     EditRig rig;
 
+    /*  The verse taken out, closing up: the chorus (in at twenty) now meets
+        the intro at a real join. */
     rig.split (10.0);
+    rig.split (20.0);
+    REQUIRE (rig.document.removeSection (rig.ids()[1]).ok);
     const auto ids = rig.ids();
+    REQUIRE (ids.size() == 2u);
 
-    /*  Up to twice the in point. */
-    REQUIRE (rig.document.setAttribute ("/godot/section/" + ids[1] + "/crossfade", "25").ok);
-    CHECK (rig.seconds ("/godot/section/" + ids[1] + "/crossfade") == doctest::Approx (20.0));
-    CHECK (rig.document.setAttribute ("/godot/section/" + ids[1] + "/crossfade", "-1").reason == "bad-value");
-    CHECK (rig.document.setAttribute ("/godot/section/" + ids[1] + "/crossfade", "soon").reason == "type-mismatch");
+    /*  Twice the in point would allow forty; the chorus's ten seconds hold
+        half of it centred, so twenty. */
+    REQUIRE (rig.document.setAttribute ("/godot/section/" + ids[1] + "/fadeIn", "25").ok);
+    CHECK (rig.seconds ("/godot/section/" + ids[1] + "/fadeIn") == doctest::Approx (20.0));
+    CHECK (rig.document.setAttribute ("/godot/section/" + ids[1] + "/fadeIn", "-1").reason == "bad-value");
+    CHECK (rig.document.setAttribute ("/godot/section/" + ids[1] + "/fadeIn", "soon").reason == "type-mismatch");
+
+    REQUIRE (rig.document.setAttribute ("/godot/section/" + ids[1] + "/fadeInCurve", "0.4").ok);
+    CHECK (rig.stored (ids[1], "fadeInCurve") == "0.4");
+    CHECK (rig.document.setAttribute ("/godot/section/" + ids[1] + "/fadeInCurve", "2").reason == "type-mismatch");
 
     REQUIRE (rig.document.setAttribute ("/godot/section/" + ids[1] + "/trim", "-4.5").ok);
     CHECK (rig.stored (ids[1], "trim") == "-4.5");
@@ -1032,6 +1051,347 @@ TEST_CASE ("section.*: a movie's records replay with no facts to the same show, 
     {
         REQUIRE (again.submit (origin::cli, record.command, record.args));
         INFO (record.command);
+        REQUIRE (again.processTick (++tick).applied == 1u);
+    }
+
+    CHECK (doc::CanonicalXml::write (replayed) == after);
+}
+
+//==============================================================================
+/*  THE HANDLES (namespace draft §55.9-55.11): removal leaving silence, an edge
+    moved with its material in place, a join's two fades and curves together or
+    alone, the silence before a section, a selection split and deleted. */
+
+TEST_CASE ("section.remove: Backspace leaves silence where the section was, Shift+Backspace closes up, and the silence before it stays")
+{
+    EditRig rig;
+    rig.split (10.0);
+    rig.split (20.0);
+    const auto ids = rig.ids();
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/levelLane", "5 0 15 -10 25 -20").ok);
+
+    //  LEFT AS SILENCE: the chorus stays at twenty, the verse's point goes.
+    CHECK (rig.apply ("section.remove", { osc::Value::string (ids[1]), osc::Value::int32 (1) }) == 1u);
+    CHECK (rig.ids() == std::vector<std::string> { ids[0], ids[2] });
+    CHECK (rig.seconds ("/godot/section/" + ids[2] + "/gap") == doctest::Approx (10.0));
+    CHECK (rig.lane() == "5 0 25 -20");
+    CHECK (doc::editedLength (rig.document.sectionsOf (rig.document.findById (rig.cueId))) == doctest::Approx (30.0));
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.ids() == ids);
+
+    //  CLOSED UP: the chorus ten seconds earlier, its point with it.
+    CHECK (rig.apply ("section.remove", { osc::Value::string (ids[1]) }) == 1u);
+    CHECK (rig.seconds ("/godot/section/" + ids[2] + "/gap") == doctest::Approx (0.0));
+    CHECK (rig.lane() == "5 0 15 -20");
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+
+    /*  THE SILENCE BEFORE IT STAYS: two seconds before the verse and three
+        before the chorus; the verse closed up leaves five before the chorus. */
+    REQUIRE (rig.document.setSectionGap (ids[1], 2.0).ok);
+    REQUIRE (rig.document.setSectionGap (ids[2], 3.0).ok);
+    REQUIRE (rig.document.removeSection (ids[1]).ok);
+    CHECK (rig.seconds ("/godot/section/" + ids[2] + "/gap") == doctest::Approx (5.0));
+}
+
+TEST_CASE ("section.edge: at a join the cut rolls, beside silence the silence gives, and the material stays where it was")
+{
+    EditRig rig;
+    rig.split (10.0);
+    auto ids = rig.ids();
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/levelLane", "1 0 5 -3 15 -10").ok);
+
+    /*  A ROLL: the cut from ten to twelve, the first section longer and the
+        second shorter, every point where it was. */
+    CHECK (rig.apply ("section.edge", { osc::Value::string (ids[1]), osc::Value::string ("in"), osc::Value::float64 (12.0) }) == 1u);
+    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/out") == doctest::Approx (12.0));
+    CHECK (rig.seconds ("/godot/section/" + ids[1] + "/in") == doctest::Approx (12.0));
+    CHECK (rig.lane() == "1 0 5 -3 15 -10");
+
+    //  The same from the other side, one undo step each.
+    CHECK (rig.apply ("section.edge", { osc::Value::string (ids[0]), osc::Value::string ("out"), osc::Value::float64 (11.0) }) == 1u);
+    CHECK (rig.seconds ("/godot/section/" + ids[1] + "/in") == doctest::Approx (11.0));
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.seconds ("/godot/section/" + ids[1] + "/in") == doctest::Approx (12.0));
+
+    /*  BESIDE SILENCE: the first section trimmed two seconds into the file -
+        its material where it was, two seconds of silence before it, the point
+        over the second cut away gone. */
+    CHECK (rig.apply ("section.edge", { osc::Value::string (ids[0]), osc::Value::string ("in"), osc::Value::float64 (2.0) }) == 1u);
+    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/gap") == doctest::Approx (2.0));
+    CHECK (rig.lane() == "5 -3 15 -10");
+
+    //  Back into the silence, as far as it goes and no further.
+    REQUIRE (rig.document.edgeSection (ids[0], true, 0.5).ok);
+    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/gap") == doctest::Approx (0.5));
+    CHECK (rig.document.edgeSection (ids[0], true, 0.0).ok);
+    CHECK (rig.seconds ("/godot/section/" + ids[0] + "/gap") == doctest::Approx (0.0));
+
+    //  Refused: an edge past the other, a roll leaving a section nothing, no side, no number.
+    CHECK (rig.document.edgeSection (ids[1], true, 30.0).reason == "bad-value");
+    CHECK (rig.document.edgeSection (ids[1], true, 0.0005).reason == "bad-value");
+    CHECK (rig.apply ("section.edge", { osc::Value::string (ids[1]), osc::Value::string ("up"), osc::Value::float64 (12.0) }) == 0u);
+
+    /*  A FREE OUT POINT before silence: the first section's end eats into the
+        gap after it, nothing after moving, and no further than the gap. */
+    REQUIRE (rig.document.setSectionGap (ids[1], 3.0).ok);
+    REQUIRE (rig.document.edgeSection (ids[0], false, 14.0).ok);
+    CHECK (rig.seconds ("/godot/section/" + ids[1] + "/gap") == doctest::Approx (1.0));
+    CHECK (rig.document.edgeSection (ids[0], false, 16.0).reason == "bad-value");
+}
+
+TEST_CASE ("section.fade and section.curve: a join's two ends move together keeping a difference, Shift moves one, both held")
+{
+    EditRig rig;
+    rig.split (10.0);
+    rig.split (20.0);
+    auto ids = rig.ids();
+
+    //  The chorus between the intro and the verse: two real joins.
+    REQUIRE (rig.document.moveSection (ids[2], 1).ok);
+    const auto intro = ids[0], chorus = ids[2], verse = ids[1];
+    const auto fade = [&rig] (const std::string& id, const char* side) { return rig.seconds ("/godot/section/" + id + "/" + side); };
+
+    CHECK (rig.apply ("section.fade", { osc::Value::string (chorus), osc::Value::string ("in"), osc::Value::float64 (0.4) }) == 1u);
+    CHECK (fade (chorus, "fadeIn") == doctest::Approx (0.4));
+    CHECK (fade (intro, "fadeOut") == doctest::Approx (0.4));
+
+    //  Alone (Shift): the other side stays.
+    CHECK (rig.apply ("section.fade", { osc::Value::string (chorus), osc::Value::string ("in"), osc::Value::float64 (0.6),
+                                        osc::Value::int32 (1) }) == 1u);
+    CHECK (fade (chorus, "fadeIn") == doctest::Approx (0.6));
+    CHECK (fade (intro, "fadeOut") == doctest::Approx (0.4));
+
+    //  Together again, from the other side: the difference kept.
+    CHECK (rig.apply ("section.fade", { osc::Value::string (intro), osc::Value::string ("out"), osc::Value::float64 (0.5) }) == 1u);
+    CHECK (fade (intro, "fadeOut") == doctest::Approx (0.5));
+    CHECK (fade (chorus, "fadeIn") == doctest::Approx (0.7));
+
+    /*  HELD: the verse's in at ten allows twenty, its ten seconds less its
+        fade out to silence allow a little under; the chorus's fade out, by as
+        much, is held to what the chorus leaves beside its fade in. One step
+        undoes both. */
+    CHECK (rig.apply ("section.fade", { osc::Value::string (verse), osc::Value::string ("in"), osc::Value::float64 (50.0) }) == 1u);
+    CHECK (fade (verse, "fadeIn") == doctest::Approx (2.0 * (10.0 - 0.01)));
+    CHECK (fade (chorus, "fadeOut") == doctest::Approx (2.0 * (10.0 - 0.35)));
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (fade (verse, "fadeIn") == doctest::Approx (0.01));
+    CHECK (fade (chorus, "fadeOut") == doctest::Approx (0.0));
+
+    CHECK (rig.apply ("section.fade", { osc::Value::string (verse), osc::Value::string ("sideways"), osc::Value::float64 (1.0) }) == 0u);
+    CHECK (rig.apply ("section.fade", { osc::Value::string (verse), osc::Value::string ("in"), osc::Value::float64 (-1.0) }) == 0u);
+
+    //  THE CURVES the same way, -1..1.
+    CHECK (rig.apply ("section.curve", { osc::Value::string (chorus), osc::Value::string ("in"), osc::Value::float64 (0.5) }) == 1u);
+    CHECK (fade (chorus, "fadeInCurve") == doctest::Approx (0.5));
+    CHECK (fade (intro, "fadeOutCurve") == doctest::Approx (0.5));
+    CHECK (rig.apply ("section.curve", { osc::Value::string (chorus), osc::Value::string ("in"), osc::Value::float64 (-0.3),
+                                         osc::Value::int32 (1) }) == 1u);
+    CHECK (fade (chorus, "fadeInCurve") == doctest::Approx (-0.3));
+    CHECK (fade (intro, "fadeOutCurve") == doctest::Approx (0.5));
+    CHECK (rig.apply ("section.curve", { osc::Value::string (chorus), osc::Value::string ("in"), osc::Value::float64 (1.5) }) == 0u);
+
+    //  At a free edge there is no partner: the intro's fade in from silence.
+    CHECK (rig.apply ("section.fade", { osc::Value::string (intro), osc::Value::string ("in"), osc::Value::float64 (2.0) }) == 1u);
+    CHECK (fade (intro, "fadeIn") == doctest::Approx (2.0));
+}
+
+TEST_CASE ("section gap: silence before a section moves everything after it, carried")
+{
+    EditRig rig;
+    rig.split (10.0);
+    const auto ids = rig.ids();
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/levelLane", "5 0 15 -10").ok);
+    const auto range = rig.document.createRange (rig.cueId, 12.0, 18.0).id;
+
+    CHECK (rig.apply ("node.set", { osc::Value::string ("/godot/section/" + ids[1] + "/gap"), osc::Value::string ("3") }) == 1u);
+    CHECK (rig.lane() == "5 0 18 -10");
+    CHECK (rig.seconds ("/godot/range/" + range + "/in") == doctest::Approx (15.0));
+    CHECK (doc::editedLength (rig.document.sectionsOf (rig.document.findById (rig.cueId))) == doctest::Approx (33.0));
+
+    //  Under a millisecond is none.
+    REQUIRE (rig.document.setSectionGap (ids[1], 0.0004).ok);
+    CHECK (rig.stored (ids[1], "gap") == "0");
+    CHECK (rig.document.setSectionGap (ids[1], -1.0).reason == "bad-value");
+}
+
+TEST_CASE ("section.splitSpan: a selection's two ends cut in one step, an end on a cut passed over")
+{
+    EditRig rig;
+
+    CHECK (rig.apply ("section.splitSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (5.0), osc::Value::float64 (12.0) }) == 1u);
+    auto ids = rig.ids();
+    REQUIRE (ids.size() == 3u);
+    CHECK (rig.stored (ids[1], "in") == "5");
+    CHECK (rig.stored (ids[2], "in") == "12");
+
+    CHECK (rig.apply ("section.splitSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (5.0), osc::Value::float64 (20.0) }) == 1u);
+    CHECK (rig.ids().size() == 4u);
+
+    //  Both ends on cuts: nothing to cut.
+    CHECK (rig.apply ("section.splitSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (12.0), osc::Value::float64 (5.0) }) == 0u);
+
+    /*  THE RECORDS carry the identifiers made - none for an end passed over -
+        and the length the whole file was cut from. */
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+    std::vector<LogRecord> applied;
+
+    for (const auto& record : parsed.records)
+        if (record.kind == LogRecord::Kind::applied)
+            applied.push_back (record);
+
+    REQUIRE (applied.size() == 2u);
+    REQUIRE (applied[0].args.size() >= 6u);
+    CHECK (applied[0].args[3].getString() == ids[1]);
+    CHECK (applied[0].args[4].getString() == ids[2]);
+    CHECK (applied[0].args[5].asDouble() == doctest::Approx (30.0));
+    CHECK (applied[1].args[3].getString().empty());
+    CHECK_FALSE (applied[1].args[4].getString().empty());
+}
+
+TEST_CASE ("section.deleteSpan: a selection taken out as silence, or closed up with ripple, what sat on it with it")
+{
+    EditRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/levelLane", "3 0 8 -10 20 -20").ok);
+    const auto length = [&rig] { return doc::editedLength (rig.document.sectionsOf (rig.document.findById (rig.cueId))); };
+
+    //  AS SILENCE: five to twelve gone, everything after where it was.
+    CHECK (rig.apply ("section.deleteSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (5.0), osc::Value::float64 (12.0) }) == 1u);
+    auto ids = rig.ids();
+    REQUIRE (ids.size() == 2u);
+    CHECK (rig.stored (ids[0], "out") == "5");
+    CHECK (rig.stored (ids[1], "in") == "12");
+    CHECK (rig.seconds ("/godot/section/" + ids[1] + "/gap") == doctest::Approx (7.0));
+    CHECK (length() == doctest::Approx (30.0));
+    CHECK (rig.lane() == "3 0 20 -20");
+
+    //  Over silence alone there is nothing to take, unless it closes up.
+    CHECK (rig.document.findById (ids[0]).isValid());
+    CHECK (rig.apply ("section.deleteSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (6.0), osc::Value::float64 (10.0) }) == 0u);
+    CHECK (rig.apply ("section.deleteSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (6.0), osc::Value::float64 (10.0),
+                                              osc::Value::int32 (1) }) == 1u);
+    CHECK (rig.seconds ("/godot/section/" + ids[1] + "/gap") == doctest::Approx (3.0));
+    CHECK (rig.lane() == "3 0 16 -20");
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.ids().empty());
+
+    //  CLOSED UP: everything after seven seconds earlier.
+    CHECK (rig.apply ("section.deleteSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (5.0), osc::Value::float64 (12.0),
+                                              osc::Value::int32 (1) }) == 1u);
+    ids = rig.ids();
+    REQUIRE (ids.size() == 2u);
+    CHECK (rig.seconds ("/godot/section/" + ids[1] + "/gap") == doctest::Approx (0.0));
+    CHECK (length() == doctest::Approx (23.0));
+    CHECK (rig.lane() == "3 0 13 -20");
+
+    //  Nothing left would be the whole file again: refused.
+    CHECK (rig.apply ("section.deleteSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (0.0), osc::Value::float64 (23.0) }) == 0u);
+}
+
+TEST_CASE ("section.*: a movie's edges and a selection's ends land on its frame grid, and its sound's copies take the gaps and the fades")
+{
+    MovieRig rig;   // clip.mov at 25 a second, Hap1
+    rig.splitMovie (10.0);
+    auto movie = rig.of (rig.movieId);
+
+    /*  10.03 is frame 250.75: 10.04, the rate written back on the record. */
+    REQUIRE (rig.apply ("section.edge", { osc::Value::string (movie[1].id), osc::Value::string ("in"), osc::Value::float64 (10.03) }) == 1u);
+    movie = rig.of (rig.movieId);
+    CHECK (movie[0].out == doctest::Approx (10.04));
+    CHECK (movie[1].in == doctest::Approx (10.04));
+    CHECK (rig.of (rig.soundId)[1].in == doctest::Approx (10.04));
+
+    REQUIRE (rig.apply ("section.splitSpan", { osc::Value::string (rig.movieId), osc::Value::float64 (1.01), osc::Value::float64 (2.03) }) == 1u);
+    movie = rig.of (rig.movieId);
+    REQUIRE (movie.size() == 4u);
+    CHECK (movie[1].in == doctest::Approx (1.0));
+    CHECK (movie[2].in == doctest::Approx (2.04));
+
+    //  The gaps and the fades are the sound's too.
+    REQUIRE (rig.document.setSectionGap (movie[3].id, 2.0).ok);
+    REQUIRE (rig.document.fadeSection (movie[3].id, true, 0.5, false).ok);
+    const auto sound = rig.of (rig.soundId);
+    REQUIRE (sound.size() == 4u);
+    CHECK (sound[3].gap == doctest::Approx (2.0));
+    CHECK (sound[3].fadeIn == doctest::Approx (0.5));
+
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+    std::vector<LogRecord> applied;
+
+    for (const auto& record : parsed.records)
+        if (record.kind == LogRecord::Kind::applied)
+            applied.push_back (record);
+
+    REQUIRE (applied.size() == 2u);
+    CHECK (applied[0].args[2].asDouble() == doctest::Approx (10.04));
+    CHECK (applied[0].args[3].asDouble() == doctest::Approx (25.0));
+    CHECK (applied[1].args[1].asDouble() == doctest::Approx (1.0));
+    CHECK (applied[1].args[2].asDouble() == doctest::Approx (2.04));
+}
+
+TEST_CASE ("section: a show saved with the morning's crossfade reads it as the fade into its section and the fade out of the one before")
+{
+    SectionRig rig;
+    rig.add (0.0, 10.0, "SEC00001");
+    rig.add (20.0, 30.0, "SEC00002");
+
+    auto xml = doc::CanonicalXml::write (rig.document);
+    const auto at = xml.find ("id=\"SEC00002\"");
+    REQUIRE (at != std::string::npos);
+    xml.insert (at, "crossfade=\"0.3\" ");
+
+    doc::ShowDocument reopened;
+    const auto read = doc::CanonicalXml::read (xml, reopened);
+    INFO (xml);
+    REQUIRE (read.ok);
+    CHECK (reopened.getAttribute ("/godot/section/SEC00002/fadeIn").value_or ("?") == "0.3");
+    CHECK (reopened.getAttribute ("/godot/section/SEC00001/fadeOut").value_or ("?") == "0.3");
+    CHECK (doc::CanonicalXml::write (reopened).find ("crossfade") == std::string::npos);
+    CHECK (doc::CanonicalXml::write (reopened).find ("wfg-legacy") == std::string::npos);
+}
+
+TEST_CASE ("section.*: the handles' records replay with no facts to the same show")
+{
+    EditRig rig;
+    const auto before = doc::CanonicalXml::write (rig.document);
+
+    REQUIRE (rig.apply ("section.splitSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (5.0), osc::Value::float64 (12.0) }) == 1u);
+    const auto ids = rig.ids();
+    REQUIRE (ids.size() == 3u);
+    REQUIRE (rig.apply ("section.move", { osc::Value::string (ids[2]), osc::Value::int32 (0) }) == 1u);
+    REQUIRE (rig.apply ("section.fade", { osc::Value::string (ids[0]), osc::Value::string ("in"), osc::Value::float64 (0.3) }) == 1u);
+    REQUIRE (rig.apply ("section.curve", { osc::Value::string (ids[0]), osc::Value::string ("in"), osc::Value::float64 (-0.4),
+                                           osc::Value::int32 (1) }) == 1u);
+    REQUIRE (rig.apply ("section.edge", { osc::Value::string (ids[1]), osc::Value::string ("out"), osc::Value::float64 (11.0) }) == 1u);
+    REQUIRE (rig.apply ("section.remove", { osc::Value::string (ids[0]), osc::Value::int32 (1) }) == 1u);
+    REQUIRE (rig.apply ("section.deleteSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (20.0), osc::Value::float64 (22.0),
+                                                osc::Value::int32 (1) }) == 1u);
+    const auto after = doc::CanonicalXml::write (rig.document);
+
+    doc::ShowDocument replayed;
+    REQUIRE (doc::CanonicalXml::read (before, replayed).ok);
+
+    Engine again;
+    again.setBeforeApply ([&replayed] (const Command& appliedCommand, const Event& submitted,
+                                       const std::vector<osc::Value>& coerced, std::int64_t tickIndex)
+                          {
+                              replayed.beginTransaction (appliedCommand.name, tickIndex, submitted.origin, coerced);
+                          });
+    doc::registerDocumentCommands (again.commands(), replayed);
+    doc::registerSectionCommands (again.commands(), replayed);
+    again.log().openInMemory ({});
+
+    std::int64_t tick = 0;
+
+    for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+    {
+        if (record.kind != LogRecord::Kind::applied)
+            continue;
+
+        INFO (record.command);
+        REQUIRE (again.submit (origin::cli, record.command, record.args));
         REQUIRE (again.processTick (++tick).applied == 1u);
     }
 

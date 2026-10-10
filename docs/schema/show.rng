@@ -1839,8 +1839,42 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
-        <attribute name="crossfade">
-          <a:documentation>How long the crossfade is at the join INTO this section from the one before, in seconds, centred on the join: the outgoing section goes on past its out point for half of it, fading out, equal power, while this one begins that much before its in point, fading in. Ignored on the first section. Clamped where the material runs out - to twice this section&apos;s in point, since there is nothing before the file&apos;s start - and to what the section&apos;s length leaves beside its other crossfade. A join that is still one in the file (the two pieces adjacent in it, as a split leaves them) plays plain whatever this says, since equal power over identical material is a bump of three decibels; the value is kept for when a move parts them. Ten milliseconds, the default, is the click suppressor the slice moves use.</a:documentation>
+        <attribute name="fadeIn">
+          <a:documentation>How long this section fades in, in seconds (namespace draft 55.9, AEA). At a join - the section touching the one before, no gap between - the fade is centred on the join and begins half its length before this section&apos;s in point, from material beyond the edge, as the fade out of the one before ends half its length after; at a free edge - the cue&apos;s start, or after a gap - it lies inside the section, from silence. Held where the material runs out: to twice the in point at a join, since there is nothing before the file&apos;s start, and to what the section&apos;s length leaves beside its fade out. A join still one in the file, as a split leaves it, plays plain whatever this says; the value is kept for when a move parts them. section.fade moves the fade out across the join with it; node.set moves this alone. Ten milliseconds, the default, is the click suppressor the slice moves use; the whole file as the first section starts with none.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fadeInCurve">
+          <a:documentation>The shape of the fade in (namespace draft 55.9, AEB): the fade&apos;s gain - equal power for a sound, a straight line for a picture - raised to two to the minus this. Nought is the shape itself; towards -1 the middle dips, and at -1 on both sides of a sound&apos;s join the two gains add to one all the way through, for material that is alike; towards +1 it lifts, a dB and a half at the middle. The wheel over the fade moves it a tenth a notch, both sides of a join together unless Shift is held.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-1</param>
+            <param name="maxInclusive">1</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fadeOut">
+          <a:documentation>How long this section fades out, in seconds (namespace draft 55.9, AEA): centred on the join with the section after it when the two touch, the material going on past this section&apos;s out point for half of it; inside the section, to silence, at the cue&apos;s end or before a gap. Held to what the section&apos;s length leaves beside its fade in. Ten milliseconds by default; the whole file as the first section ends with none.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fadeOutCurve">
+          <a:documentation>The shape of the fade out, as fadeInCurve says for the fade in, read backwards (namespace draft 55.9, AEB).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-1</param>
+            <param name="maxInclusive">1</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="gap">
+          <a:documentation>Seconds of silence before this section on the edited timeline (namespace draft 55.9, AEA): it begins this long after the one before ends, or after the cue&apos;s start for the first. A section deleted with Backspace leaves its time here, on the one after it, so nothing after moves. Written here or by section.edge, everything after it moves and the cue&apos;s lane points, ranges and start offset are carried, as an edge moved is. Under a millisecond is none: the two sections touch, and their fades meet at the join.</a:documentation>
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
@@ -1856,7 +1890,7 @@
       </optional>
       <optional>
         <attribute name="out">
-          <a:documentation>Where in the file this piece ends, in seconds of the FILE; after its in, or the show is refused. The piece is as long as out less in, whatever its crossfades: a crossfade is centred on the join and takes its material from beyond the edges, so widening one moves nothing (namespace draft 55, ADL).</a:documentation>
+          <a:documentation>Where in the file this piece ends, in seconds of the FILE; after its in, or the show is refused. The piece is as long as out less in, whatever its fades: a fade at a join is centred on it and takes its material from beyond the edges, so lengthening one moves nothing (namespace draft 55, ADL; 55.9). section.edge moves an edge with the material in place instead: the cut between two sections, or into the silence beside it.</a:documentation>
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
@@ -1864,7 +1898,7 @@
       </optional>
       <optional>
         <attribute name="trim">
-          <a:documentation>A gain on this piece, in dB, baked into the render - over the piece and its halves of the crossfades at either end. Beside the cue&apos;s level and its lane, which are the cue&apos;s and not the file&apos;s: a trim says what this piece of the material should be relative to the rest, which is a fact about the edit. Nought is the material as recorded.</a:documentation>
+          <a:documentation>A gain on this piece, in dB, baked into the render - over the piece and its fades at either end; the square in the middle of the section on the waveform, dragged up or down (namespace draft 55.9). Beside the cue&apos;s level and its lane, which are the cue&apos;s and not the file&apos;s: a trim says what this piece of the material should be relative to the rest, which is a fact about the edit. Nought is the material as recorded.</a:documentation>
           <data type="double">
             <param name="minInclusive">-120</param>
             <param name="maxInclusive">12</param>

@@ -101,12 +101,13 @@ namespace wfg::video::movie
             }
         };
 
-        /*  A JOIN'S DISSOLVE: centred on the join into section `into`, as
-            wide as the crossfade into it. */
-        struct Window
+        /*  WHAT IS SEEN AT AN INSTANT (namespace draft 55.9, AEG): each section
+            heard there, at the second of the file it shows and the weight its
+            fades give it - linear raised to its curve. */
+        struct Seen
         {
-            double from = 0.0, to = 0.0, join = 0.0;
-            std::size_t into = 0;
+            double fileSecond = 0.0;
+            double weight = 0.0;
         };
     }
 
@@ -146,21 +147,11 @@ namespace wfg::video::movie
         const auto delta = static_cast<double> (info.frameDuration) / static_cast<double> (info.timeScale);
 
         /*  THE EDITED TIMELINE on the grid: as many frames as fit the sections
-            put together, each judged at its centre. */
-        const auto clamped = doc::clampCrossfades (sections);
-        const auto starts = doc::sectionStarts (clamped);
-        const auto length = doc::editedLength (clamped);
+            and their gaps, each judged at its centre. */
+        const auto heard = doc::heardFades (sections);
+        const auto starts = doc::sectionStarts (sections);
+        const auto length = doc::editedLength (sections);
         const auto count = std::max<std::int64_t> (1, std::llround (length / delta));
-
-        std::vector<Window> windows;
-
-        for (std::size_t j = 1; j < clamped.size(); ++j)
-        {
-            const auto fade = doc::crossfadeInto (clamped, j);
-
-            if (fade > 0.0 && ! doc::isContinuousJoin (clamped[j - 1], clamped[j]))
-                windows.push_back ({ starts[j] - fade / 2.0, starts[j] + fade / 2.0, starts[j], j });
-        }
 
         const juce::File target { juce::String::fromUTF8 (targetPath.c_str()) };
         target.getParentDirectory().createDirectory();
@@ -184,13 +175,16 @@ namespace wfg::video::movie
         const auto threads = std::clamp (static_cast<int> (std::thread::hardware_concurrency()) - 2, 1, 16);
         Decoder decoder { source, texture, info.width, info.height, {}, {} };
 
-        std::vector<std::uint8_t> outgoing, incoming, blended, blocks, frame, scratch, bytes, black;
+        std::vector<std::uint8_t> outgoing, blended, blocks, frame, scratch, bytes, black;
         int lastIndex = -1;     // the source frame `bytes` holds, written verbatim
 
         const auto write = [&writer] (const std::vector<std::uint8_t>& data)
         {
             return writer.write (data.data(), data.size());
         };
+
+        std::vector<Seen> seen;
+        const auto alpha = texture == hap::Texture::dxt5;
 
         for (std::int64_t k = 0; k < count; ++k)
         {
@@ -199,55 +193,41 @@ namespace wfg::video::movie
 
             const auto t = (static_cast<double> (k) + 0.5) * delta;
 
-            //  WHICH SECTION this instant is in, and where that is in the file.
-            auto j = clamped.size() - 1;
+            seen.clear();
 
-            if (const auto place = doc::placeOf (clamped, t))
-                j = place->index;
-
-            const auto fileSecond = clamped[j].in + (t - starts[j]);
-
-            const Window* window = nullptr;
-
-            for (const auto& candidate : windows)
-                if (t >= candidate.from && t < candidate.to)
-                {
-                    window = &candidate;
-                    break;
-                }
-
-            if (window != nullptr)
+            for (std::size_t j = 0; j < sections.size(); ++j)
             {
-                /*  THE DISSOLVE (ADU): linear in straight RGBA, the outgoing
-                    section's material on past its out point, the incoming
-                    section's from before its in point. */
-                const auto share = (t - window->from) / (window->to - window->from);
-                const auto outSecond = clamped[window->into - 1].out + (t - window->join);
-                const auto inSecond = clamped[window->into].in + (t - window->join);
+                const auto sectionLength = sections[j].length();
 
-                if (! decoder.at (outSecond, outgoing, why) || ! decoder.at (inSecond, incoming, why))
-                    return abandon (why);
+                if (t < doc::heardFrom (starts[j], heard[j]) || t >= doc::heardTo (starts[j], sectionLength, heard[j]))
+                    continue;
 
-                blended.resize (outgoing.size());
-
-                for (std::size_t i = 0; i < blended.size(); ++i)
-                {
-                    const auto mixed = (1.0 - share) * static_cast<double> (outgoing[i]) + share * static_cast<double> (incoming[i]);
-                    blended[i] = static_cast<std::uint8_t> (std::clamp (std::lround (mixed), 0l, 255l));
-                }
-
-                hap::encodeTextureThreaded (texture, blended.data(), info.width, info.height,
-                                            static_cast<std::size_t> (info.width) * 4, blocks, threads);
-                hap::packFrame (texture, blocks, frame, scratch);
-
-                if (! write (frame))
-                    return abandon ("the disk would not take the whole render");
-
-                lastIndex = -1;
+                if (const auto weight = doc::fadeWeight (heard[j], starts[j], sectionLength, t, true); weight > 0.0)
+                    seen.push_back ({ sections[j].in + (t - starts[j]), weight });
             }
-            else if (fileSecond < 0.0 || fileSecond >= info.duration)
+
+            const auto inFile = [&info] (double second) { return second >= 0.0 && second < info.duration; };
+
+            if (seen.size() == 1 && ! (seen.front().weight < 1.0) && inFile (seen.front().fileSecond))
             {
-                //  BEYOND THE FILE: black, encoded once.
+                //  THE SOURCE'S OWN BYTES (ADU), read once while the frame repeats.
+                const auto index = info.frameAt (seen.front().fileSecond);
+
+                if (index != lastIndex)
+                {
+                    if (index < 0 || ! source.readFrame (index, bytes))
+                        return abandon ("a frame of the movie could not be read");
+
+                    lastIndex = index;
+                }
+
+                if (! write (bytes))
+                    return abandon ("the disk would not take the whole render");
+            }
+            else if (seen.empty() || std::none_of (seen.begin(), seen.end(),
+                                                   [&inFile] (const Seen& s) { return inFile (s.fileSecond); }))
+            {
+                //  NOTHING TO SHOW - a gap, or beyond the file: black, encoded once.
                 if (black.empty())
                 {
                     decoder.black (blended);
@@ -263,19 +243,37 @@ namespace wfg::video::movie
             }
             else
             {
-                //  THE SOURCE'S OWN BYTES (ADU), read once while the frame repeats.
-                const auto index = info.frameAt (fileSecond);
+                /*  A DISSOLVE, OR A FADE FROM BLACK (AEG): each side's picture by
+                    its weight, added in straight RGBA - the linear dissolve when
+                    the two weights make one - black or clear where nothing is. */
+                std::vector<double> sum (static_cast<std::size_t> (info.width) * static_cast<std::size_t> (info.height) * 4, 0.0);
 
-                if (index != lastIndex)
+                for (const auto& side : seen)
                 {
-                    if (index < 0 || ! source.readFrame (index, bytes))
-                        return abandon ("a frame of the movie could not be read");
+                    if (! decoder.at (side.fileSecond, outgoing, why))
+                        return abandon (why);
 
-                    lastIndex = index;
+                    for (std::size_t i = 0; i < sum.size() && i < outgoing.size(); ++i)
+                        sum[i] += side.weight * static_cast<double> (outgoing[i]);
                 }
 
-                if (! write (bytes))
+                blended.resize (sum.size());
+
+                for (std::size_t i = 0; i < sum.size(); ++i)
+                    blended[i] = static_cast<std::uint8_t> (std::clamp (std::lround (sum[i]), 0l, 255l));
+
+                if (! alpha)
+                    for (std::size_t i = 3; i < blended.size(); i += 4)
+                        blended[i] = 255;
+
+                hap::encodeTextureThreaded (texture, blended.data(), info.width, info.height,
+                                            static_cast<std::size_t> (info.width) * 4, blocks, threads);
+                hap::packFrame (texture, blocks, frame, scratch);
+
+                if (! write (frame))
                     return abandon ("the disk would not take the whole render");
+
+                lastIndex = -1;
             }
 
             if (progress)

@@ -231,14 +231,20 @@ namespace wfg::client::gesture
         undo step and one record - see `ShowDocument::splitRange`. */
     Event splitRange (const std::string& cueId, double at);
 
-    /*  A SOUND'S EDIT (namespace draft §55.3): the sections cut, joined,
-        trimmed, moved, removed and cleared, and the edit frozen and unfrozen.
-        A trim or a crossfade is `setNode` on the section's row. */
+    /*  A SOUND'S EDIT (namespace draft §55.3, 55.11): the sections cut, joined,
+        trimmed, moved, removed and cleared, and the edit frozen and unfrozen;
+        the handles' edge, fade and curve; a selection split or deleted. A
+        trim is `setNode` on the section's row. */
     Event sectionSplit (const std::string& cueId, double at);
     Event sectionJoin (const std::string& sectionId);
     Event sectionTrim (const std::string& sectionId, double in, double out);
     Event sectionMove (const std::string& sectionId, int index);
-    Event sectionRemove (const std::string& sectionId);
+    Event sectionRemove (const std::string& sectionId, bool leaveGap = false);
+    Event sectionEdge (const std::string& sectionId, bool inSide, double seconds);
+    Event sectionFade (const std::string& sectionId, bool inSide, double seconds, bool alone);
+    Event sectionCurve (const std::string& sectionId, bool inSide, double curve, bool alone);
+    Event sectionSplitSpan (const std::string& cueId, double from, double to);
+    Event sectionDeleteSpan (const std::string& cueId, double from, double to, bool ripple);
     Event sectionClear (const std::string& cueId);
     Event freezeEdit (const std::string& cueId);
     Event unfreezeEdit (const std::string& cueId);

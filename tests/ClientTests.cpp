@@ -11884,7 +11884,9 @@ TEST_CASE ("client: the waveform's reading carries the sound's sections, the edi
     CHECK (reading.sections[1].index == 1);
     CHECK (reading.sections[1].in == doctest::Approx (10.0));
     CHECK (reading.sections[1].out == doctest::Approx (30.0));
-    CHECK (reading.sections[1].crossfade == doctest::Approx (0.01));
+    CHECK (reading.sections[1].fadeIn == doctest::Approx (0.01));
+    CHECK (reading.sections[1].fadeOut == doctest::Approx (0.0));   // the whole file's end, as recorded
+    CHECK (reading.sections[0].fadeOut == doctest::Approx (0.01));
     CHECK (reading.sections[1].trimDb == doctest::Approx (0.0));
     CHECK (reading.fileLength == doctest::Approx (30.0));   // the tree's duration: the sections put together
     CHECK (reading.editable);
@@ -11998,13 +12000,48 @@ TEST_CASE ("client: the waveform's reading of a movie says whether its edit may 
     rig.parameters.setMediaInfo (nullptr);
 }
 
+namespace
+{
+    /*  The engine's sections for the window's rows, field for field. */
+    std::vector<doc::Section> engineSections (const std::vector<model::SectionRow>& rows)
+    {
+        std::vector<doc::Section> out;
+
+        for (const auto& row : rows)
+        {
+            doc::Section section;
+            section.id = row.id;
+            section.in = row.in;
+            section.out = row.out;
+            section.trimDb = row.trimDb;
+            section.fadeIn = row.fadeIn;
+            section.fadeOut = row.fadeOut;
+            section.fadeInCurve = row.fadeInCurve;
+            section.fadeOutCurve = row.fadeOutCurve;
+            section.gap = row.gap;
+            out.push_back (section);
+        }
+
+        return out;
+    }
+
+    model::SectionRow sectionRow (const char* id, double in, double out, double fadeIn = 0.01, double fadeOut = 0.01, double gap = 0.0)
+    {
+        model::SectionRow r;
+        r.id = id;
+        r.in = in;
+        r.out = out;
+        r.fadeIn = fadeIn;
+        r.fadeOut = fadeOut;
+        r.gap = gap;
+        return r;
+    }
+}
+
 TEST_CASE ("client: an edited second placed in the file, and the file's cuts on the edited timeline, as the engine places them (§55.5)")
 {
     const std::vector<model::SectionRow> rows { { "C", 0, 20.0, 30.0 }, { "A", 1, 0.0, 10.0 }, { "B", 2, 10.0, 20.0 } };
-    std::vector<doc::Section> same;
-
-    for (const auto& row : rows)
-        same.push_back ({ row.id, row.in, row.out, row.trimDb, row.crossfade });
+    const auto same = engineSections (rows);
 
     for (const double second : { -1.0, 0.0, 2.5, 9.999, 10.0, 12.5, 29.0, 30.0, 31.0 })
     {
@@ -12036,13 +12073,11 @@ TEST_CASE ("client: an edited second placed in the file, and the file's cuts on 
 
 TEST_CASE ("client: the sections' arithmetic is the engine's")
 {
-    const std::vector<model::SectionRow> rows { { "A", 0, 0.0, 10.0, 0.0, 0.01 },
-                                                { "B", 1, 2.0, 3.0, -6.0, 1.6 },
-                                                { "C", 2, 20.0, 30.0, 0.0, 0.6 } };
-    std::vector<doc::Section> same;
-
-    for (const auto& row : rows)
-        same.push_back ({ row.id, row.in, row.out, row.trimDb, row.crossfade });
+    auto bent = sectionRow ("C", 20.0, 30.0, 0.6, 0.3, 1.5);
+    bent.fadeInCurve = 0.4;
+    const std::vector<model::SectionRow> rows { sectionRow ("A", 0.0, 10.0, 0.0, 0.5), sectionRow ("B", 2.0, 3.0, 1.6, 0.6),
+                                                bent, sectionRow ("D", 30.0, 30.5, 0.2, 0.9) };
+    const auto same = engineSections (rows);
 
     const auto ours = model::sectionStarts (rows);
     const auto theirs = doc::sectionStarts (same);
@@ -12053,20 +12088,191 @@ TEST_CASE ("client: the sections' arithmetic is the engine's")
 
     CHECK (model::editedLength (rows) == doctest::Approx (doc::editedLength (same)));
     CHECK (model::continuousJoin (rows[0], rows[1]) == doc::isContinuousJoin (same[0], same[1]));
-    CHECK (model::heardCrossfade (rows, 0) == doctest::Approx (doc::crossfadeInto (same, 0)));
-    CHECK (model::heardCrossfade (rows, 2) == doctest::Approx (doc::crossfadeInto (same, 2)));
+
+    for (std::size_t k = 0; k <= rows.size(); ++k)
+        CHECK (model::isJoin (rows, k) == doc::isJoin (same, k));
+
+    /*  THE FADES, held and heard, against the engine's - with a gap, a
+        join, a join still one in the file and a short section. */
+    const auto check = [] (const std::vector<model::SectionRow>& mine, const std::vector<doc::Section>& engines)
+    {
+        const auto heldOurs = model::clampFades (mine);
+        const auto heldTheirs = doc::clampFades (engines);
+        const auto heardOurs = model::heardFades (mine);
+        const auto heardTheirs = doc::heardFades (engines);
+
+        for (std::size_t k = 0; k < mine.size(); ++k)
+        {
+            INFO ("section " << k);
+            CHECK (heldOurs[k].fadeIn == doctest::Approx (heldTheirs[k].fadeIn));
+            CHECK (heldOurs[k].fadeOut == doctest::Approx (heldTheirs[k].fadeOut));
+            CHECK (heardOurs[k].in == doctest::Approx (heardTheirs[k].in));
+            CHECK (heardOurs[k].out == doctest::Approx (heardTheirs[k].out));
+            CHECK (heardOurs[k].inCentred == heardTheirs[k].inCentred);
+            CHECK (heardOurs[k].outCentred == heardTheirs[k].outCentred);
+            CHECK (heardOurs[k].plainIn == heardTheirs[k].plainIn);
+            CHECK (heardOurs[k].inCurve == doctest::Approx (heardTheirs[k].inCurve));
+        }
+    };
+
+    check (rows, same);
 
     for (const double asked : { 0.0, 0.2, 1.6, 4.0, 25.0 })
         for (std::size_t k = 0; k < rows.size(); ++k)
         {
-            auto trial = same;
-            trial[k].crossfade = asked;
-            CHECK (model::clampedCrossfade (rows, k, asked) == doctest::Approx (doc::clampCrossfades (trial)[k].crossfade));
+            auto trial = rows;
+            trial[k].fadeIn = asked;
+            trial[k].fadeOut = asked / 2.0;
+            check (trial, engineSections (trial));
         }
 
-    /*  A continuous join is heard as nothing, whatever it stores. */
-    const std::vector<model::SectionRow> split { { "A", 0, 0.0, 10.0, 0.0, 0.01 }, { "B", 1, 10.0, 20.0, 0.0, 0.5 } };
-    CHECK (model::heardCrossfade (split, 1) == doctest::Approx (0.0));
+    const std::vector<model::SectionRow> split { sectionRow ("A", 0.0, 10.0), sectionRow ("B", 10.0, 20.0, 0.5) };
+    check (split, engineSections (split));
+    CHECK (model::heardFades (split)[1].in == doctest::Approx (0.0));
+
+    for (const auto p : { 0.0, 0.3, 0.5, 1.0 })
+        for (const auto c : { -1.0, -0.4, 0.0, 0.7, 1.0 })
+            for (const auto picture : { false, true })
+                CHECK (model::fadeGain (p, c, picture) == doctest::Approx (doc::fadeGain (p, c, picture)));
+}
+
+TEST_CASE ("client: what a handle's drag would do is what the engine does - an edge, a fade, a curve, alone or together (55.9)")
+{
+    /*  A show with the engine's doors, and the window's restatement of each
+        handle beside them: the edit the drag draws is the edit that lands. */
+    Rig rig ("phase4");
+    doc::registerSectionCommands (rig.engine.commands(), rig.document,
+                                  doc::MediaFacts { [] (const std::string&) { return 30.0; }, {}, {} });
+
+    const auto cue = rig.document.findById ("P4MED001");
+    REQUIRE (rig.document.splitSection ("P4MED001", 10.0, 30.0, {}).ok);
+    REQUIRE (rig.document.splitSection ("P4MED001", 20.0, 30.0, {}).ok);
+    auto cut = rig.document.sectionsOf (cue);
+    REQUIRE (rig.document.moveSection (cut[2].id, 1).ok);   // two real joins
+    REQUIRE (rig.document.setSectionGap (rig.document.sectionsOf (cue)[2].id, 2.0).ok);   // and a gap before the last
+
+    const auto rowsOf = [&rig, &cue]
+    {
+        std::vector<model::SectionRow> rows;
+
+        for (const auto& s : rig.document.sectionsOf (cue))
+        {
+            model::SectionRow r;
+            r.id = s.id;
+            r.in = s.in;
+            r.out = s.out;
+            r.trimDb = s.trimDb;
+            r.fadeIn = s.fadeIn;
+            r.fadeOut = s.fadeOut;
+            r.fadeInCurve = s.fadeInCurve;
+            r.fadeOutCurve = s.fadeOutCurve;
+            r.gap = s.gap;
+            rows.push_back (r);
+        }
+
+        return rows;
+    };
+
+    const auto same = [] (const std::vector<model::SectionRow>& ours, const std::vector<model::SectionRow>& theirs)
+    {
+        REQUIRE (ours.size() == theirs.size());
+
+        for (std::size_t k = 0; k < ours.size(); ++k)
+        {
+            INFO ("section " << k);
+            CHECK (ours[k].in == doctest::Approx (theirs[k].in));
+            CHECK (ours[k].out == doctest::Approx (theirs[k].out));
+            CHECK (ours[k].gap == doctest::Approx (theirs[k].gap));
+            CHECK (ours[k].fadeIn == doctest::Approx (theirs[k].fadeIn));
+            CHECK (ours[k].fadeOut == doctest::Approx (theirs[k].fadeOut));
+            CHECK (ours[k].fadeInCurve == doctest::Approx (theirs[k].fadeInCurve));
+            CHECK (ours[k].fadeOutCurve == doctest::Approx (theirs[k].fadeOutCurve));
+        }
+    };
+
+    struct Fade { std::size_t index; bool inSide; double seconds; bool alone; };
+
+    for (const auto& fade : { Fade { 1, true, 0.4, false }, Fade { 1, true, 0.9, true }, Fade { 0, false, 0.3, false },
+                              Fade { 2, true, 5.0, false }, Fade { 1, false, 30.0, false } })
+    {
+        INFO ("fade " << fade.index << (fade.inSide ? " in " : " out ") << fade.seconds << (fade.alone ? " alone" : ""));
+        const auto drawn = model::withFade (rowsOf(), fade.index, fade.inSide, fade.seconds, fade.alone);
+        REQUIRE (rig.document.fadeSection (rowsOf()[fade.index].id, fade.inSide, fade.seconds, fade.alone).ok);
+        same (drawn, rowsOf());
+    }
+
+    struct Curve { std::size_t index; bool inSide; double curve; bool alone; };
+
+    for (const auto& curve : { Curve { 1, true, 0.5, false }, Curve { 1, true, -0.2, true }, Curve { 0, false, 1.0, false } })
+    {
+        const auto drawn = model::withCurve (rowsOf(), curve.index, curve.inSide, curve.curve, curve.alone);
+        REQUIRE (rig.document.curveSection (rowsOf()[curve.index].id, curve.inSide, curve.curve, curve.alone).ok);
+        same (drawn, rowsOf());
+    }
+
+    /*  EDGES, through the handle's clamp: a roll at a join, a trim beside the
+        gap, the first section's start into the silence it makes. */
+    struct Edge { std::size_t index; bool inSide; double timelineSeconds; };
+
+    for (const auto& edge : { Edge { 1, true, 11.0 }, Edge { 1, false, 19.5 }, Edge { 2, true, 24.0 }, Edge { 0, true, 3.0 },
+                              Edge { 2, true, 0.0 } })
+    {
+        INFO ("edge " << edge.index << (edge.inSide ? " in at " : " out at ") << edge.timelineSeconds);
+        const auto rows = rowsOf();
+        const auto fileSeconds = model::edgeFromHandle (rows, edge.index, edge.inSide, edge.timelineSeconds, 30.0);
+        const auto drawn = model::withEdge (rows, edge.index, edge.inSide, fileSeconds);
+        REQUIRE (rig.document.edgeSection (rows[edge.index].id, edge.inSide, fileSeconds).ok);
+        same (drawn, rowsOf());
+    }
+}
+
+TEST_CASE ("client: the handles on the bar - where each is, which one the pointer is on, and the fade under the wheel (55.9)")
+{
+    //  Three sections over a 40 s view on 400 px: the second after a gap of 2 s, the third touching it.
+    const std::vector<model::SectionRow> rows { sectionRow ("A", 0.0, 10.0, 0.0, 1.0), sectionRow ("B", 20.0, 28.0, 1.0, 2.0, 2.0),
+                                                sectionRow ("C", 2.0, 12.0, 2.0, 0.0) };
+    model::View view;
+    view.reset (40.0);
+    const auto x = [&view] (double seconds) { return view.xForSeconds (seconds, 400); };
+    constexpr int height = 100;
+
+    //  The fade handles: A's out inside (9 s), B's in inside (13 s), B's out and C's in centred on the join at 20 s.
+    CHECK (model::fadeHandleSeconds (rows, 0, false) == doctest::Approx (9.0));
+    CHECK (model::fadeHandleSeconds (rows, 1, true) == doctest::Approx (13.0));
+    CHECK (model::fadeHandleSeconds (rows, 1, false) == doctest::Approx (19.0));
+    CHECK (model::fadeHandleSeconds (rows, 2, true) == doctest::Approx (21.0));
+
+    const auto top = 2.0, foot = static_cast<double> (height) - 2.0;
+    CHECK (model::hitGrip (rows, view, 400, height, x (9.0), top, 7.0, true) == model::GripHit { model::Grip::fadeOut, 0 });
+    CHECK (model::hitGrip (rows, view, 400, height, x (21.0), top, 7.0, true) == model::GripHit { model::Grip::fadeIn, 2 });
+    CHECK (model::hitGrip (rows, view, 400, height, x (12.0), foot, 7.0, true) == model::GripHit { model::Grip::edgeIn, 1 });
+    CHECK (model::hitGrip (rows, view, 400, height, x (10.0), foot, 7.0, true) == model::GripHit { model::Grip::edgeOut, 0 });
+    CHECK (model::hitGrip (rows, view, 400, height, x (20.0), foot, 7.0, true) == model::GripHit { model::Grip::edgeIn, 2 });   // the join's one edge
+
+    //  The volume in the middle at its trim's height; nothing in the middle of nowhere, nothing without the volume shown.
+    const auto unity = static_cast<double> (height) * (1.0 - model::laneHeightFor (0.0));
+    CHECK (model::hitGrip (rows, view, 400, height, x (5.0), unity, 7.0, true) == model::GripHit { model::Grip::volume, 0 });
+    CHECK (model::hitGrip (rows, view, 400, height, x (5.0), unity, 7.0, false).grip == model::Grip::none);
+    CHECK (model::hitGrip (rows, view, 400, height, x (5.0), 60.0, 7.0, true).grip == model::Grip::none);
+
+    //  A fade handle dragged: centred on a join twice the distance, inside the distance itself.
+    CHECK (model::fadeFromHandle (rows, 2, true, 22.0) == doctest::Approx (4.0));
+    CHECK (model::fadeFromHandle (rows, 1, true, 14.5) == doctest::Approx (2.5));
+    CHECK (model::fadeFromHandle (rows, 0, false, 7.0) == doctest::Approx (3.0));
+
+    //  An edge dragged: held inside the silence, and a roll held to what leaves both sections something.
+    CHECK (model::edgeFromHandle (rows, 1, true, 9.0, 40.0) == doctest::Approx (18.0));   // B's in no further back than its gap
+    CHECK (model::edgeFromHandle (rows, 2, true, 40.0, 40.0) == doctest::Approx (12.0 - 0.001));
+
+    //  The wheel's fade: the side of the join the pointer is on, and a short fade's grace.
+    CHECK (model::fadeAt (rows, 19.5, 0.1) == std::make_optional (std::make_pair (std::size_t { 1 }, false)));
+    CHECK (model::fadeAt (rows, 20.5, 0.1) == std::make_optional (std::make_pair (std::size_t { 2 }, true)));
+    CHECK (model::fadeAt (rows, 12.5, 0.1) == std::make_optional (std::make_pair (std::size_t { 1 }, true)));
+    CHECK_FALSE (model::fadeAt (rows, 5.0, 0.1).has_value());
+    CHECK (model::fadeAt (rows, 0.05, 0.1) == std::make_optional (std::make_pair (std::size_t { 0 }, true)));
+
+    CHECK (model::sectionAt (rows, 11.0) == std::nullopt);
+    CHECK (model::sectionAt (rows, 15.0) == std::make_optional (std::size_t { 1 }));
 }
 
 TEST_CASE ("client: the sections laid on the bar, hit, and dropped")

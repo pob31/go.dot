@@ -404,6 +404,11 @@ namespace wfg::client::ui
                 editing.joinSection = actions.joinSection;
                 editing.moveSection = actions.moveSection;
                 editing.removeSection = actions.removeSection;
+                editing.edgeSection = actions.edgeSection;
+                editing.fadeSection = actions.fadeSection;
+                editing.curveSection = actions.curveSection;
+                editing.splitSpan = actions.splitSpan;
+                editing.deleteSpan = actions.deleteSpan;
                 editing.freezeEdit = actions.freezeEdit;
                 editing.unfreezeEdit = actions.unfreezeEdit;
                 editing.play = actions.play;

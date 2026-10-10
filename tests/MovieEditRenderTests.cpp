@@ -145,13 +145,16 @@ namespace
         CHECK (std::abs (got.b - b) <= within);
     }
 
-    doc::Section sec (double in, double out, double crossfade = 0.0)
+    /*  A section as a test spells it: no fade and no gap unless said (55.9). */
+    doc::Section sec (double in, double out, double fadeIn = 0.0, double fadeOut = 0.0, double gap = 0.0)
     {
         doc::Section s;
         s.id = "S" + std::to_string (static_cast<int> (in * 100)) + "T" + std::to_string (static_cast<int> (out * 100));
         s.in = in;
         s.out = out;
-        s.crossfade = crossfade;
+        s.fadeIn = fadeIn;
+        s.fadeOut = fadeOut;
+        s.gap = gap;
         return s;
     }
 }
@@ -197,9 +200,8 @@ TEST_CASE ("movie edit render: a cut and a reorder are the source's own bytes, o
         CHECK (frames[k] == sourceFrames[from]);
     }
 
-    /*  A SECTION ALONE, whatever its crossfade says: the first join is not
-        heard, and the frames are the source's. */
-    const auto one = video::movie::renderMovieEdit (source, { sec (1.0, 2.0, 0.5) }, target);
+    /*  A SECTION ALONE with no fade: the frames are the source's. */
+    const auto one = video::movie::renderMovieEdit (source, { sec (1.0, 2.0) }, target);
     REQUIRE_MESSAGE (one.ok, one.problem);
     const auto alone = framesOf (target, info);
     REQUIRE (alone.size() == 10u);
@@ -223,7 +225,7 @@ TEST_CASE ("movie edit render: a dissolve blends from the edges, centred on the 
         frames 8 to 11, judged at 0.85, 0.95, 1.05 and 1.15. The outgoing
         picture goes on past its out point into the file's second second -
         green - and the incoming begins before its in point, still green. */
-    const auto result = video::movie::renderMovieEdit (source, { sec (0.0, 1.0), sec (2.0, 3.0, 0.4) }, target);
+    const auto result = video::movie::renderMovieEdit (source, { sec (0.0, 1.0, 0.0, 0.4), sec (2.0, 3.0, 0.4) }, target);
     REQUIRE_MESSAGE (result.ok, result.problem);
 
     video::movie::Info info;
@@ -244,7 +246,7 @@ TEST_CASE ("movie edit render: a dissolve blends from the edges, centred on the 
     /*  [2,3] THEN [1,2]: the outgoing runs off the end of the file into
         black (3.05 s and 3.15 s), the incoming begins before its in point
         in the file's first second, red. */
-    const auto edges = video::movie::renderMovieEdit (source, { sec (2.0, 3.0), sec (1.0, 2.0, 0.4) }, target);
+    const auto edges = video::movie::renderMovieEdit (source, { sec (2.0, 3.0, 0.0, 0.4), sec (1.0, 2.0, 0.4) }, target);
     REQUIRE_MESSAGE (edges.ok, edges.problem);
     const auto atEdges = framesOf (target, info);
     REQUIRE (atEdges.size() == 20u);
@@ -279,6 +281,34 @@ TEST_CASE ("movie edit render: a dissolve blends from the edges, centred on the 
     folder.deleteRecursively();
 }
 
+TEST_CASE ("movie edit render: a gap is black, and a fade at a free edge fades from black and to it (55.9, AEG)")
+{
+    const auto folder = scratchFolder ("godot-medit");
+    const auto source = writeFixtureMovie (folder, "three.mov");
+    const auto target = folder.getChildFile ("render.mov").getFullPathName().toStdString();
+
+    video::movie::Info sourceInfo;
+    const auto sourceFrames = framesOf (source, sourceInfo);
+
+    /*  The red second fading in over 200 ms and out over 400; half a second of
+        black; the blue second fading in over 400 ms. Twenty-five frames. */
+    const auto result = video::movie::renderMovieEdit (source, { sec (0.0, 1.0, 0.2, 0.4), sec (2.0, 3.0, 0.4, 0.0, 0.5) },
+                                                       target);
+    REQUIRE_MESSAGE (result.ok, result.problem);
+
+    video::movie::Info info;
+    const auto frames = framesOf (target, info);
+    REQUIRE (frames.size() == 25u);
+
+    near (pixelOf (frames[0]), 255 * 0.25, 0, 0);       // 0.05 s of 0.2
+    near (pixelOf (frames[1]), 255 * 0.75, 0, 0);
+    CHECK (frames[3] == sourceFrames[3]);
+    near (pixelOf (frames[7]), 255 * 0.625, 0, 0);      // 0.75 s: 0.15 into a fade out of 0.4
+    near (pixelOf (frames[12]), 0, 0, 0);               // the gap
+    near (pixelOf (frames[16]), 0, 0, 255 * 0.375);     // 1.65 s: 0.15 into a fade in of 0.4
+    CHECK (frames[20] == sourceFrames[25]);             // 2.05 s: the blue second at 2.55 of the file
+}
+
 TEST_CASE ("movie edit render: Hap Alpha and Hap Q keep their texture, and beyond the file Hap Alpha is clear")
 {
     const auto folder = scratchFolder ("godot-medit");
@@ -294,7 +324,7 @@ TEST_CASE ("movie edit render: Hap Alpha and Hap Q keep their texture, and beyon
         const auto sourceFrames = framesOf (source, sourceInfo);
         REQUIRE (sourceInfo.codec == codec);
 
-        const auto result = video::movie::renderMovieEdit (source, { sec (2.0, 3.0), sec (1.0, 2.0, 0.4) }, target);
+        const auto result = video::movie::renderMovieEdit (source, { sec (2.0, 3.0, 0.0, 0.4), sec (1.0, 2.0, 0.4) }, target);
         REQUIRE_MESSAGE (result.ok, result.problem);
 
         video::movie::Info info;

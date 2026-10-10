@@ -17,6 +17,7 @@
 #include "SectionCommands.h"
 
 #include <cmath>
+#include <optional>
 #include <utility>
 
 namespace wfg::doc
@@ -242,9 +243,11 @@ namespace wfg::doc
         //----------------------------------------------------------------------
         registry.add ({ "section.remove",
                         "Takes a section out of the edit: what sat on it goes with it and the rest closes"
-                        " up. With the last section gone the cue plays its whole file again, and every"
+                        " up - or, with leaveGap 1, its time stays as silence and everything after it stays"
+                        " where it was (namespace draft 55.9, AEE); the silence before it stays either way."
+                        " With the last section gone the cue plays its whole file again, and every"
                         " point is carried back to the file's own time.",
-                        { { "section", 's', false } },
+                        { { "section", 's', false }, { "leaveGap", 'i', true } },
                         true,
                         [&document, facts] (CommandContext&, const std::vector<osc::Value>& args)
                         {
@@ -254,7 +257,7 @@ namespace wfg::doc
                                     ! movie.refusal.empty())
                                     return refusedMovie (movie);
 
-                            return fromEdit (document.removeSection (stringAt (args, 0)), args);
+                            return fromEdit (document.removeSection (stringAt (args, 0), numberAt (args, 1) != 0.0), args);
                         } });
 
         //----------------------------------------------------------------------
@@ -270,6 +273,215 @@ namespace wfg::doc
                                 return refusedMovie (movie);
 
                             return fromEdit (document.clearSections (stringAt (args, 0)), args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  THE HANDLES (namespace draft §55.9-55.11): what the waveform's
+            handles and keys send, each one step. A side is "in" or "out". */
+        const auto sideAt = [] (const std::vector<osc::Value>& args, std::size_t index) -> std::optional<bool>
+        {
+            const auto side = stringAt (args, index);
+
+            if (side == "in")
+                return true;
+
+            if (side == "out")
+                return false;
+
+            return std::nullopt;
+        };
+
+        const auto refusedMovieOf = [&document, facts] (const std::string& sectionId, double recordedFps)
+        {
+            MovieFacts movie;
+
+            if (const auto section = document.findById (sectionId); section.isValid() && section.hasType ("Section"))
+                movie = movieFactsOf (document, section.getParent(), facts, recordedFps);
+
+            return movie;
+        };
+
+        registry.add ({ "section.edge",
+                        "Moves a section's in or out point to a second of the file with its material in place"
+                        " (namespace draft 55.9, AEC): where it touches the next or the one before, the cut"
+                        " between the two moves and the neighbour's edge with it; beside silence, the silence"
+                        " gives or takes. Nothing else moves; what sat on material cut away goes with it."
+                        " Refused where a neighbour would be pushed or the section left nothing. On a movie the"
+                        " second lands on its frame grid, written back with the rate (AEG).",
+                        { { "section", 's', false }, { "side", 's', false }, { "seconds", 'd', false },
+                          { "frameRate", 'd', true } },
+                        true,
+                        [&document, sideAt, refusedMovieOf] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto sectionId = stringAt (args, 0);
+                            const auto side = sideAt (args, 1);
+                            auto seconds = numberAt (args, 2);
+
+                            if (! side.has_value())
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto movie = refusedMovieOf (sectionId, numberAt (args, 3));
+
+                            if (! movie.refusal.empty())
+                                return refusedMovie (movie);
+
+                            if (movie.movie)
+                                seconds = snappedToFrames (seconds, movie.fps);
+
+                            auto applied = withValue (args, 2, osc::Value::float64 (seconds));
+
+                            if (movie.movie)
+                                applied = withValue (std::move (applied), 3, osc::Value::float64 (movie.fps));
+
+                            return fromEdit (document.edgeSection (sectionId, *side, seconds), std::move (applied));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "section.fade",
+                        "Sets how long a section fades in or out, in seconds (namespace draft 55.9, AED): its"
+                        " partner across a join - the fade out of the section before, the fade in of the one"
+                        " after - moves by as much, keeping any difference, unless alone is 1. Both held to the"
+                        " material: twice the in point for a fade in centred on a join, and what the section's"
+                        " length leaves beside its other fade.",
+                        { { "section", 's', false }, { "side", 's', false }, { "seconds", 'd', false },
+                          { "alone", 'i', true } },
+                        true,
+                        [&document, sideAt, refusedMovieOf] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto side = sideAt (args, 1);
+
+                            if (! side.has_value())
+                                return Outcome::rejected (reason::badValue);
+
+                            if (const auto movie = refusedMovieOf (stringAt (args, 0), 0.0); ! movie.refusal.empty())
+                                return refusedMovie (movie);
+
+                            return fromEdit (document.fadeSection (stringAt (args, 0), *side, numberAt (args, 2),
+                                                                   numberAt (args, 3) != 0.0),
+                                             args);
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "section.curve",
+                        "Sets the curve of a section's fade in or out, -1..1 (namespace draft 55.9, AEB): the"
+                        " fade's shape raised to two to the minus this; its partner across a join moves by as"
+                        " much unless alone is 1.",
+                        { { "section", 's', false }, { "side", 's', false }, { "curve", 'd', false },
+                          { "alone", 'i', true } },
+                        true,
+                        [&document, sideAt, refusedMovieOf] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto side = sideAt (args, 1);
+
+                            if (! side.has_value())
+                                return Outcome::rejected (reason::badValue);
+
+                            if (const auto movie = refusedMovieOf (stringAt (args, 0), 0.0); ! movie.refusal.empty())
+                                return refusedMovie (movie);
+
+                            return fromEdit (document.curveSection (stringAt (args, 0), *side, numberAt (args, 2),
+                                                                    numberAt (args, 3) != 0.0),
+                                             args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  A SELECTION'S TWO ENDS, and the length a cue with no sections yet is
+            cut from: the ends on a movie's grid, everything written back so a
+            replay with no facts makes the same show. */
+        struct Span
+        {
+            std::string cueId;
+            double from = 0.0, to = 0.0, length = 0.0;
+            MovieFacts movie;
+        };
+
+        const auto spanOf = [&document, facts] (const std::vector<osc::Value>& args, std::size_t lengthAt, std::size_t rateAt)
+        {
+            Span span;
+            span.cueId = stringAt (args, 0);
+            span.from = numberAt (args, 1);
+            span.to = numberAt (args, 2);
+            span.length = numberAt (args, lengthAt);
+
+            const auto cue = document.findById (span.cueId);
+
+            if (! (span.length > 0.0) && facts.lengthOf && cue.isValid())
+                span.length = facts.lengthOf (cue["file"].toString().toStdString());
+
+            span.movie = movieFactsOf (document, cue, facts, numberAt (args, rateAt));
+
+            if (span.movie.movie)
+            {
+                span.from = snappedToFrames (span.from, span.movie.fps);
+                span.to = snappedToFrames (span.to, span.movie.fps);
+            }
+
+            return span;
+        };
+
+        const auto spanApplied = [] (std::vector<osc::Value> args, const Span& span, std::size_t idsAt,
+                                     const std::string& first, const std::string& second, std::size_t lengthAt,
+                                     std::size_t rateAt)
+        {
+            args = withValue (std::move (args), 1, osc::Value::float64 (span.from));
+            args = withValue (std::move (args), 2, osc::Value::float64 (span.to));
+            args = withValue (std::move (args), idsAt, osc::Value::string (first));
+            args = withValue (std::move (args), idsAt + 1, osc::Value::string (second));
+            args = withValue (std::move (args), lengthAt, osc::Value::float64 (span.length));
+
+            if (span.movie.movie)
+                args = withValue (std::move (args), rateAt, osc::Value::float64 (span.movie.fps));
+
+            return args;
+        };
+
+        registry.add ({ "section.splitSpan",
+                        "Cuts a cue's edited timeline at both ends of a selection, in one step (namespace draft"
+                        " 55.9): x with a selection. An end on a cut or in silence is passed over; with neither"
+                        " to cut, refused. The identifiers drawn and the length a cue with no sections is cut"
+                        " from are written back on the record.",
+                        { { "cue", 's', false }, { "from", 'd', false }, { "to", 'd', false },
+                          { "id", 's', true }, { "id2", 's', true }, { "length", 'd', true }, { "frameRate", 'd', true } },
+                        true,
+                        [&document, spanOf, spanApplied] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto span = spanOf (args, 5, 6);
+
+                            if (! span.movie.refusal.empty())
+                                return refusedMovie (span.movie);
+
+                            auto first = stringAt (args, 3);
+                            auto second = stringAt (args, 4);
+                            const auto edit = document.splitSpan (span.cueId, span.from, span.to, span.length, first, second);
+
+                            return fromEdit (edit, spanApplied (args, span, 3, first, second, 5, 6));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "section.deleteSpan",
+                        "Takes the material between two seconds of a cue's edited timeline out (namespace draft"
+                        " 55.9, AEE): as silence, everything after staying where it was - Backspace on a"
+                        " selection - or closed up with ripple 1, everything after moving earlier by the"
+                        " selection's length - Shift+Backspace. The ends are cut first; the lane points, the"
+                        " ranges and the start offset are carried. Refused when nothing would be left, and"
+                        " without ripple when the selection holds only silence.",
+                        { { "cue", 's', false }, { "from", 'd', false }, { "to", 'd', false }, { "ripple", 'i', true },
+                          { "id", 's', true }, { "id2", 's', true }, { "length", 'd', true }, { "frameRate", 'd', true } },
+                        true,
+                        [&document, spanOf, spanApplied] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto span = spanOf (args, 6, 7);
+
+                            if (! span.movie.refusal.empty())
+                                return refusedMovie (span.movie);
+
+                            auto first = stringAt (args, 4);
+                            auto second = stringAt (args, 5);
+                            const auto edit = document.deleteSpan (span.cueId, span.from, span.to, numberAt (args, 3) != 0.0,
+                                                                   span.length, first, second);
+
+                            auto applied = withValue (args, 3, osc::Value::int32 (numberAt (args, 3) != 0.0 ? 1 : 0));
+                            return fromEdit (edit, spanApplied (std::move (applied), span, 4, first, second, 6, 7));
                         } });
 
         //----------------------------------------------------------------------

@@ -521,8 +521,21 @@ namespace wfg::client
                                           { send (gesture::sectionJoin (sectionId)); };
                 footActions.moveSection = [this] (const std::string& sectionId, int index)
                                           { send (gesture::sectionMove (sectionId, index)); };
-                footActions.removeSection = [this] (const std::string& sectionId)
-                                            { send (gesture::sectionRemove (sectionId)); };
+                footActions.removeSection = [this] (const std::string& sectionId, bool leaveGap)
+                                            { send (gesture::sectionRemove (sectionId, leaveGap)); };
+
+                /*  AND THE HANDLES ON THE WAVEFORM (namespace draft §55.9): each a
+                    named command, one write on release. */
+                footActions.edgeSection = [this] (const std::string& sectionId, bool inSide, double seconds)
+                                          { send (gesture::sectionEdge (sectionId, inSide, seconds)); };
+                footActions.fadeSection = [this] (const std::string& sectionId, bool inSide, double seconds, bool alone)
+                                          { send (gesture::sectionFade (sectionId, inSide, seconds, alone)); };
+                footActions.curveSection = [this] (const std::string& sectionId, bool inSide, double curve, bool alone)
+                                           { send (gesture::sectionCurve (sectionId, inSide, curve, alone)); };
+                footActions.splitSpan = [this] (const std::string& cueId, double from, double to)
+                                        { send (gesture::sectionSplitSpan (cueId, from, to)); };
+                footActions.deleteSpan = [this] (const std::string& cueId, double from, double to, bool ripple)
+                                         { send (gesture::sectionDeleteSpan (cueId, from, to, ripple)); };
                 footActions.freezeEdit = [this] (const std::string& cueId)
                                          { send (gesture::freezeEdit (cueId)); };
                 footActions.unfreezeEdit = [this] (const std::string& cueId)

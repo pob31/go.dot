@@ -57,13 +57,7 @@ namespace wfg::cue
             if (! child.hasType ("Section"))
                 continue;
 
-            doc::Section section;
-            section.id = child[idProperty].toString().toStdString();
-            section.in = static_cast<double> (child.getProperty ("in", 0.0));
-            section.out = static_cast<double> (child.getProperty ("out", 0.0));
-            section.trimDb = static_cast<double> (child.getProperty ("trim", 0.0));
-            section.crossfade = static_cast<double> (child.getProperty ("crossfade", doc::defaultCrossfade));
-            sections.push_back (section);
+            sections.push_back (doc::sectionFromNode (child));
         }
 
         return sections;

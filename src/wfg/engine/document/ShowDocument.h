@@ -454,8 +454,38 @@ namespace wfg::doc
         /** The section moved to a place among the sections; what sat on the timeline carried. */
         EditResult moveSection (const std::string& sectionId, int index);
 
-        /** The section taken out; what sat on it goes with it, the rest closes up. */
-        EditResult removeSection (const std::string& sectionId);
+        /*  The section taken out; what sat on it goes with it and the rest
+            closes up - or, with `leaveGap`, its time stays as silence and
+            everything after it stays where it was (55.9, AEE). The silence
+            before it stays either way. */
+        EditResult removeSection (const std::string& sectionId, bool leaveGap = false);
+
+        /*  THE HANDLES (namespace draft §55.9-55.11).
+
+            `edgeSection`: the section's in or out point to `seconds` of the file
+            with its material in place (AEC) - at a join the cut between the two
+            moves, the neighbour's edge with it; beside silence the silence gives
+            or takes; refused where a neighbour would be pushed or the section
+            left nothing. `fadeSection` and `curveSection`: one end's fade
+            length or curve, its partner across a join moved by as much unless
+            `alone` (AED), held to the material. `setSectionGap`: the silence
+            before it, everything after shifting and carried. */
+        EditResult edgeSection (const std::string& sectionId, bool inSide, double seconds);
+        EditResult fadeSection (const std::string& sectionId, bool inSide, double seconds, bool alone);
+        EditResult curveSection (const std::string& sectionId, bool inSide, double curve, bool alone);
+        EditResult setSectionGap (const std::string& sectionId, double gap);
+
+        /*  A SELECTION OF TIME (55.9): the sections cut at both its ends, one
+            step - an end on a cut or in silence passed over, none to cut
+            refused; `ids` in are the identifiers to make them under (empty to
+            draw), out the ones made (empty for an end passed over). And the
+            material between the two taken out - as silence, or closed up with
+            `ripple` - with what sat on it; refused when nothing would be left,
+            and without ripple when there is no material to take. */
+        EditResult splitSpan (const std::string& cueId, double from, double to, double fileLength,
+                              std::string& firstId, std::string& secondId);
+        EditResult deleteSpan (const std::string& cueId, double from, double to, bool ripple, double fileLength,
+                               std::string& firstId, std::string& secondId);
 
         /** The sections gone, everything carried back to the file's own time. */
         EditResult clearSections (const std::string& cueId);
@@ -1176,6 +1206,7 @@ namespace wfg::doc
             through the doors, so the doors do not delegate back to it. */
         std::optional<EditResult> refuseSectionEdit (const juce::ValueTree& cue) const;
         EditResult carrySectionEdit (juce::ValueTree cue, const std::function<EditResult()>& write);
+        EditResult holdFades (const juce::ValueTree& cue);
         EditResult carryThrough (juce::ValueTree cue, const std::vector<TimeRun>& runs);
         EditResult carryLanes (juce::ValueTree cue, const std::vector<TimeRun>& runs);
         std::string derivedIdFor (const std::string& joined);

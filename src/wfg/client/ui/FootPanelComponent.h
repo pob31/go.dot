@@ -88,7 +88,12 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId, double at)> splitSection;
             std::function<void (const std::string& sectionId)> joinSection;
             std::function<void (const std::string& sectionId, int index)> moveSection;
-            std::function<void (const std::string& sectionId)> removeSection;
+            std::function<void (const std::string& sectionId, bool leaveGap)> removeSection;
+            std::function<void (const std::string& sectionId, bool inSide, double seconds)> edgeSection;
+            std::function<void (const std::string& sectionId, bool inSide, double seconds, bool alone)> fadeSection;
+            std::function<void (const std::string& sectionId, bool inSide, double curve, bool alone)> curveSection;
+            std::function<void (const std::string& cueId, double from, double to)> splitSpan;
+            std::function<void (const std::string& cueId, double from, double to, bool ripple)> deleteSpan;
             std::function<void (const std::string& cueId)> freezeEdit;
             std::function<void (const std::string& cueId)> unfreezeEdit;
 
