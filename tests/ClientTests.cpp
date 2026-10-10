@@ -148,6 +148,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 using namespace wfg;
 using namespace wfg::client;
@@ -12696,4 +12698,76 @@ TEST_CASE ("client: a described device's tree as one nested menu, for a further 
     CHECK_FALSE (wfs.front().children.empty());
 
     CHECK (model::treeMenu (*snapshot, devices, "/nowhere/x").empty());
+}
+
+//==============================================================================
+/*  DP.6: A DEVICE OVER A CONNECTION, as a client reads it (namespace draft
+    §57, AFJ): the one gesture that puts it there, its framing, and what its
+    link is doing - the runtime half's, as LISTEN is, since the link moves on
+    its own thread with no command. */
+TEST_CASE ("client: a device over a connection reads its link's word from the table, off for any other way, and the one gesture puts it there")
+{
+    CHECK (model::deviceOnTcp ("EOS00001")
+             == std::vector<std::pair<std::string, std::string>> { { "/godot/mount/EOS00001/transport", "tcp" } });
+
+    Rig rig;
+    rig.apply (5, "window", "mount.create", { osc::Value::string ("/eos"), osc::Value::string ("") });
+    std::string deviceId;
+    for (const auto& device : model::readDevices (*rig.publish (6)))
+        if (device.prefix == "/eos")
+            deviceId = device.id;
+    REQUIRE (! deviceId.empty());
+    const auto base = "/godot/mount/" + deviceId + "/";
+
+    for (const auto& [address, value] : model::deviceOnTcp (deviceId))
+        rig.apply (7, "window", "node.set", { osc::Value::string (address), osc::Value::string (value) });
+    rig.apply (8, "window", "node.set", { osc::Value::string (base + "port"), osc::Value::string ("3032") });
+
+    const auto rowOf = [&rig, &deviceId] (std::int64_t tick)
+    {
+        for (const auto& device : model::readDevices (*rig.publish (tick)))
+            if (device.id == deviceId)
+                return device;
+        return model::DeviceRow {};
+    };
+
+    //  No table - a replay, a tree dump - and the link is off.
+    auto row = rowOf (9);
+    CHECK (row.transport == "tcp");
+    CHECK (row.framing == "length");
+    CHECK (row.link == "off");
+    CHECK (row.linkProblem.empty());
+
+    //  A table whose opener finds nobody: retrying, and the sentence why.
+    wfg::serial::SerialTable links ([] (const std::string& path, int, std::string& problem) -> std::unique_ptr<wfg::serial::Link>
+    {
+        problem = path + ": nothing answered";
+        return nullptr;
+    });
+    wfg::serial::Wanted wish;
+    wish.id = deviceId;
+    wish.path = "127.0.0.1:3032";
+    wish.framing = "length";
+    links.reconcile ({ wish });
+    rig.parameters.setLinks (&links);
+
+    std::int64_t tick = 10;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (3);
+    while (rowOf (tick).link != "retrying" && std::chrono::steady_clock::now() < until)
+    {
+        std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        ++tick;
+    }
+    row = rowOf (++tick);
+    CHECK (row.link == "retrying");
+    CHECK (row.linkProblem == "127.0.0.1:3032: nothing answered");
+
+    //  Back on datagrams: off, whatever the table holds.
+    for (const auto& [address, value] : model::deviceOnNetwork (deviceId))
+        rig.apply (++tick, "window", "node.set", { osc::Value::string (address), osc::Value::string (value) });
+    row = rowOf (++tick);
+    CHECK (row.transport == "udp");
+    CHECK (row.link == "off");
+    CHECK (row.linkProblem.empty());
+    rig.parameters.setLinks (nullptr);
 }

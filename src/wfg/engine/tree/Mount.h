@@ -207,6 +207,22 @@ namespace wfg::tree
             §51, PC.11): OSC over SLIP, its host and port not read. */
         std::string serial;
 
+        /*  HOW PACKETS ARE CUT FROM THE STREAM when `transport` is tcp
+            (namespace draft §57, AFJ; DP.6): `length`, a four-byte size before
+            each packet - OSC 1.0 over TCP, an Eos on 3032 - or `slip` - OSC
+            1.1, an Eos on 3037. Not read for any other transport. The
+            connection itself is serve's links table's to open and keep, keyed
+            by this declaration's identifier; what it is doing is on
+            `mount/link`, not on `problem`. */
+        std::string framing = "length";
+
+        /*  WHAT THE BYTES ARE (namespace draft §57, AFJ): `osc`, the codec of
+            §45, and the only wire rendered until `rcp`, `line` and `midi`
+            come with DP.7 to DP.9; a declaration naming one of those is
+            refused when the show loads, so the word is in the schema before
+            the wire is in the sender. */
+        std::string wire = "osc";
+
         /*  WHETHER IT CAN BE ASKED, and where.
 
             `transport` says how to send and says nothing about the other

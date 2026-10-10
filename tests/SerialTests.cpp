@@ -411,3 +411,92 @@ TEST_CASE ("serial: a port reading OSC hands packets, sends them framed, and tak
     REQUIRE (within (2s, [&] { return table.stateOf ("SR000002").state == "open"; }));
     CHECK_FALSE (table.sendPacket ("SR000002", packet));
 }
+
+//==============================================================================
+/*  DP.6: A STREAM CUT BY LENGTH - OSC 1.0 over TCP, what an Eos takes on 3032 -
+    and a raw one, read and written by the table a serial port is read by, since
+    a connection is a link on it (namespace draft §57, AFJ). The fake device is
+    the same: a link is bytes in and bytes out, whatever is under it. */
+
+TEST_CASE ("serial: a link framed by length hands packets however the bytes come, sends them with their size first, and starts afresh after a size that cannot be")
+{
+    Bench bench;
+    auto eos = bench.plug ("127.0.0.1:3032");
+    SerialTable table (bench.opener());
+    auto link = port ("EOS00001", "127.0.0.1:3032");
+    link.framing = "length";
+    table.reconcile ({ link });
+    REQUIRE (within (2s, [&] { return table.stateOf ("EOS00001").state == "open"; }));
+
+    const std::vector<std::uint8_t> first { '/', 'a', 0, 0, ',', 0, 0, 0 };
+    const std::vector<std::uint8_t> second { '/', 'b', 'c', 0, ',', 'i', 0, 0, 0, 0, 0, 7 };
+    const auto sized = [] (const std::vector<std::uint8_t>& packet)
+    {
+        std::string out (4, '\0');
+        out[3] = static_cast<char> (packet.size());
+        out.append (packet.begin(), packet.end());
+        return out;
+    };
+    const auto both = sized (first) + sized (second);
+
+    //  Cut inside the first size, then inside the second packet, then the rest.
+    eos->say (both.substr (0, 2));
+    eos->say (both.substr (2, 13));
+    eos->say (both.substr (15));
+
+    std::vector<std::vector<std::uint8_t>> got;
+    const auto take = [&]
+    {
+        for (auto& [id, packets] : table.takePackets (64))
+            for (auto& packet : packets)
+                got.push_back (std::move (packet));
+        return got.size() >= 2u;
+    };
+    within (2s, take);
+    REQUIRE (got.size() == 2u);
+    CHECK (got[0] == first);
+    CHECK (got[1] == second);
+    CHECK (table.takeLines (64).empty());
+
+    CHECK (table.sendPacket ("EOS00001", first));
+    CHECK (within (2s, [&] { return eos->sent() == sized (first); }));
+    CHECK_FALSE (table.send ("EOS00001", "a line"));
+
+    //  A size that cannot be a packet drops what is held and counts once; the next read starts afresh.
+    got.clear();
+    eos->say (std::string ("\xFF\xFF\xFF\xFF", 4));
+    eos->say (sized (second));
+    within (2s, [&] { take(); return ! got.empty(); });
+    REQUIRE (got.size() == 1u);
+    CHECK (got[0] == second);
+    CHECK (table.stateOf ("EOS00001").dropped == 1u);
+}
+
+TEST_CASE ("serial: a raw link hands every read as one packet and sends the bytes as they are")
+{
+    Bench bench;
+    auto desk = bench.plug ("127.0.0.1:51325");
+    SerialTable table (bench.opener());
+    auto link = port ("AHDL0001", "127.0.0.1:51325");
+    link.framing = "raw";
+    table.reconcile ({ link });
+    REQUIRE (within (2s, [&] { return table.stateOf ("AHDL0001").state == "open"; }));
+
+    const std::vector<std::uint8_t> sysex { 0xF0, 0x7F, 0x7F, 0x02, 0x01, 0x01, 0xF7 };
+    desk->say (std::string (sysex.begin(), sysex.end()));
+
+    std::vector<std::vector<std::uint8_t>> got;
+    within (2s, [&]
+    {
+        for (auto& [id, packets] : table.takePackets (64))
+            for (auto& packet : packets)
+                got.push_back (std::move (packet));
+        return ! got.empty();
+    });
+    REQUIRE (got.size() == 1u);
+    CHECK (got[0] == sysex);
+
+    CHECK (table.sendPacket ("AHDL0001", sysex));
+    CHECK (within (2s, [&] { return desk->sent() == std::string (sysex.begin(), sysex.end()); }));
+    CHECK_FALSE (table.send ("AHDL0001", "a line"));
+}

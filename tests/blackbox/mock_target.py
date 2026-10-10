@@ -26,6 +26,14 @@ WHAT IT IS. A UDP socket that listens for OSC and remembers what it was told,
 and an HTTP server that answers OSCQuery questions about it. Between them that
 is the whole of what a mounted target does.
 
+WITH --transport tcp (namespace draft 57, AFJ; DP.6) the socket is a LISTENER
+instead, an Eos's on 3032: each connection's stream is cut by --framing -
+`length`, a four-byte size before each packet (OSC 1.0 over TCP), or `slip` -
+and every packet is noted as a datagram's would be. `/_mock/connections` counts
+the connections taken since the start, and `/_mock/drop` closes the open ones
+and keeps listening, which is the console going away and coming back: what a
+link's retry is for.
+
 AND, WITH --listen, A DEVICE THAT PUSHES (namespace draft 45, O.10), as WFS-DIY
 does: HOST_INFO offers LISTEN, the HTTP port takes a WebSocket, a LISTEN or an
 IGNORE names an address, and a value that changes is pushed down the socket as
@@ -238,6 +246,8 @@ class Device:
         self.messages = []
         self.timed = []
         self.bundles = 0
+        self.connections = 0           # taken since the start (--transport tcp)
+        self.open = []                 # the connections open now
         self.listeners = []
         self.started = time.monotonic()
 
@@ -327,6 +337,110 @@ def listen_udp(device: Device, port_out) -> socket.socket:
     return sock
 
 
+def unslip(frame: bytes) -> bytes:
+    """One SLIP frame's bytes: 0xDB 0xDC is a 0xC0 inside it, 0xDB 0xDD a 0xDB."""
+    out = bytearray()
+    escaped = False
+
+    for byte in frame:
+        if escaped:
+            out.append(0xC0 if byte == 0xDC else 0xDB if byte == 0xDD else byte)
+            escaped = False
+        elif byte == 0xDB:
+            escaped = True
+        else:
+            out.append(byte)
+
+    return bytes(out)
+
+
+def cut_frames(framing: str, buffer: bytes):
+    """The whole packets at the front of `buffer`, and what is left of it."""
+    packets = []
+
+    if framing == "length":
+        while len(buffer) >= 4:
+            size = int.from_bytes(buffer[:4], "big")
+
+            if len(buffer) < 4 + size:
+                break
+
+            packets.append(buffer[4:4 + size])
+            buffer = buffer[4 + size:]
+
+        return packets, buffer
+
+    #  SLIP: a frame ends on 0xC0; an empty one between two is nothing.
+    while True:
+        end = buffer.find(b"\xC0")
+
+        if end < 0:
+            break
+
+        frame = buffer[:end]
+        buffer = buffer[end + 1:]
+
+        if frame:
+            packets.append(unslip(frame))
+
+    return packets, buffer
+
+
+def listen_tcp(device: Device, port_out, framing: str) -> socket.socket:
+    """A listener for OSC over connections (DP.6), its port reported as the OSC
+    port; each connection read on a thread of its own until the far end or
+    `/_mock/drop` closes it."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind((HOST, 0))
+    sock.listen(4)
+    port_out.append(sock.getsockname()[1])
+
+    def serve(conn: socket.socket, peer):
+        buffer = b""
+
+        try:
+            while True:
+                try:
+                    chunk = conn.recv(65536)
+                except OSError:
+                    return
+
+                if not chunk:
+                    return
+
+                buffer += chunk
+                packets, buffer = cut_frames(framing, buffer)
+
+                for data in packets:
+                    messages = []
+                    bundle = device.count_bundle() if osc_unbundle(data, messages) else -1
+
+                    for address, args in messages:
+                        device.note(address, args, sender_ip=peer[0], bundle=bundle)
+        finally:
+            with device.lock:
+                if conn in device.open:
+                    device.open.remove(conn)
+
+            conn.close()
+
+    def run():
+        while True:
+            try:
+                conn, peer = sock.accept()
+            except OSError:
+                return
+
+            with device.lock:
+                device.connections += 1
+                device.open.append(conn)
+
+            threading.Thread(target=serve, args=(conn, peer), daemon=True).start()
+
+    threading.Thread(target=run, daemon=True).start()
+    return sock
+
+
 # --------------------------------------------------------------------------- HTTP
 def make_handler(device: Device, listens: bool, osc_port_of):
     class Handler(BaseHTTPRequestHandler):
@@ -357,6 +471,26 @@ def make_handler(device: Device, listens: bool, osc_port_of):
                     return
 
                 self.reply(200, {"VALUE": [True]})
+                return
+
+            #  THE CONNECTIONS TAKEN (DP.6), and a hand pulling the cable: every
+            #  open one closed, the listener kept, so a link is seen to come back.
+            if path == "/_mock/connections":
+                with device.lock:
+                    taken = device.connections
+                self.reply(200, {"VALUE": [taken]})
+                return
+
+            if path == "/_mock/drop":
+                with device.lock:
+                    sockets = list(device.open)
+                for conn in sockets:
+                    try:
+                        conn.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    conn.close()
+                self.reply(200, {"VALUE": [len(sockets)]})
                 return
 
             if path == "/_mock/timed":
@@ -483,12 +617,20 @@ def main() -> int:
                         help="what an `alter` device reports instead")
     parser.add_argument("--listen", action="store_true",
                         help="offer LISTEN on a WebSocket at the HTTP port, as WFS-DIY does")
+    parser.add_argument("--transport", default="udp", choices=("udp", "tcp"),
+                        help="udp, a socket for datagrams; tcp, a listener for connections (DP.6)")
+    parser.add_argument("--framing", default="length", choices=("length", "slip"),
+                        help="how a connection's stream is cut: a size before each packet, or SLIP")
     args = parser.parse_args()
 
     device = Device(args.behaviour, args.alter_to)
 
     ports = []
-    listen_udp(device, ports)
+
+    if args.transport == "tcp":
+        listen_tcp(device, ports, args.framing)
+    else:
+        listen_udp(device, ports)
 
     query_port = 0
     server = None

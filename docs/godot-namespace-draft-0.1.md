@@ -24689,7 +24689,7 @@ Mine, the author's to overrule:
   **A TCP transport is a `serial::Link`** behind a second `SerialTable` keyed by mount identifier, so
   its backoff (half a second, one, two, four, then every eight), its state words and its framing come
   for free; `Worker::heard` gains `length` and `raw` beside `lines` and `slip`. Its state is two runtime
-  rows, `mount/link` (`off|opening|open|retrying`) and `mount/linkProblem`, not `problem`, which the
+  rows, `mount/link` (`off|closed|opening|open|retrying`, the serial table's own words) and `mount/linkProblem`, not `problem`, which the
   load overwrites. A run to a closed link **fails** as one to a closed serial port does today, not
   `not-sent`: the Runner cannot see the link, and the deviation is said here rather than hidden.
 - **AFK** (mine) **A described device's roots are its file's.** A preset whose root is `/` (an X32:
@@ -24749,7 +24749,7 @@ Mine, the author's to overrule:
 | `mount/<id>/mscFormat` | `i` | rw | 1 lighting, 16 sound, 127 all types (default) |
 | `mount/<id>/preset` | `s` | rw | `<slug>@<version>` the device was made from; empty for a plain device |
 | `mount/<id>/presetUpdate` | `s` | r | the newer installed version, when there is one; runtime |
-| `mount/<id>/link` | `s` | r | `off`, `opening`, `open`, `retrying`; runtime, TCP only |
+| `mount/<id>/link` | `s` | r | `off` for any other transport, else the links table's word: `closed`, `opening`, `open`, `retrying`; runtime |
 | `mount/<id>/linkProblem` | `s` | r | the link's sentence; runtime |
 | `mount/<id>/readback` | `s` | rw | gains `notify`, `xremote`, `subscribe`, `get`, `midi` |
 | `preset/<slug>/name`, `vendor`, `model`, `version`, `transport`, `wire`, `framing`, `port` | | r | the installed presets, runtime; the client's menu reads them |
@@ -24766,7 +24766,9 @@ Mine, the author's to overrule:
 
 `unknown-preset` for a slug no installed file carries; `bad-value` for a wire the transport cannot
 carry (`rcp` on `udp`, `osc` on `midi`); `no-port` for a `midi` transport whose port is unbound, the
-word a MIDI cue already uses; `locked` as everywhere.
+word a MIDI cue already uses; `locked` as everywhere. And at the load, in words on `mount/problem`: a
+wire not built yet (`rcp`, `line`, `midi` until DP.7-DP.9), a framing a connection cannot be cut by, a
+connection with no host.
 
 ### 57.6 Stages
 
@@ -24814,4 +24816,28 @@ word a MIDI cue already uses; `locked` as everywhere.
   text), `malighting-grandma3-osc` (`/cmd`, the pages' faders and keys), `digico-sd-osc` (the 2014 Other
   OSC list, kept as text), `yamaha-osc` (the DM7 specification's parameter list, which is RCP's too), and
   `dbaudio-ds100-osc` rewritten from the 1.3.0 document as version 2 - the first preset update a device
-  can take. Every file compact; the largest, the DiGiCo SD's, 3.6 MB for 17 thousand nodes.
+  can take. Every file compact; the largest, the DiGiCo SD's, 3.6 MB for 17 thousand nodes (70f9b78).
+- **DP.6**: OSC over a connection (AFJ). `serial::openTcpLink` makes a `juce::StreamingSocket` a
+  `Link`, so a device over TCP is a port on a second `SerialTable` keyed by the device - its backoff,
+  its state words and its thread for free; the table gains the `length` framing (four bytes of size
+  before each packet, OSC 1.0 over a stream) and `raw` beside `lines` and `slip`, and a size that
+  cannot be a packet drops what is held, counts once and starts afresh. `mount/framing` (`length` or
+  `slip`), `mount/wire` (`osc`; `rcp`, `line` and `midi` in the schema and refused at the load until
+  built), `mount/link` and `mount/linkProblem` published every tick as LISTEN is, by the document's
+  transport word rather than the loaded declaration's. `Destination::link` and the sender's link sink;
+  the load takes `tcp` with a host, a port and a framing; serve's links table reconciled beside the
+  ports' at start and after every edit, what it reads written under `link:<id>` and the hearing keyed
+  the same; `mount.createFromPreset` records the framing as its eighth argument and writes the row for
+  a tcp preset. The Network tab's Where cell is always a menu now - by datagram, over a connection, or
+  on a serial port - and the problem cell says what the link is doing, open quiet and dim, anything
+  else as the failure it is with its sentence. `etc-eos-osc` from ETC's Eos family manual (TCP 3032,
+  length; the cue lists, keys, submasters, macros, presets and palettes, channel and group levels,
+  the command line, the user, the faders). `mock_target.py --transport tcp --framing length|slip`
+  with `/_mock/connections` and `/_mock/drop`, and `blackbox.wires`: the shipped binary opening the
+  link, the cue arriving cut by length, the console closing the connection and the link coming back
+  after its pause, the console gone and the row saying retrying and why, the same device moved to a
+  SLIP console. Tests: SerialTests (length however the bytes come, a size that cannot be, raw),
+  MountTests (the load's three refusals and the wire's, the sender's link sink and the destination
+  naming it), NetworkCueTests (a cue, its message and its curve down the link in order; a link that
+  cannot take it failing the run `send-failed`), ClientTests (the link rows from a table that finds
+  nobody, off by datagram, the gesture), AuthoringTests (the Eos device loaded with nothing to type).

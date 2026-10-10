@@ -42,6 +42,7 @@
 #include <wfg/engine/tree/MountFetcher.h>
 #include <wfg/engine/tree/RawSender.h>
 #include <wfg/engine/tree/TreeCommands.h>
+#include <wfg/engine/tree/MountSender.h>
 
 #include "TestSupport.h"
 
@@ -712,7 +713,7 @@ TEST_CASE ("preset command: a device from a preset copies the file once, writes 
 
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("adm-osc") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 7u);
+    REQUIRE (record.args.size() == 8u);
     const auto deviceId = record.args[1].getString();
     REQUIRE (deviceId.size() == 8u);
     CHECK (record.args[2].getString() == "/adm");
@@ -720,6 +721,7 @@ TEST_CASE ("preset command: a device from a preset copies the file once, writes 
     CHECK (record.args[4].getInt32() == 0);
     CHECK (record.args[5].getString() == "udp");
     CHECK (record.args[6].getInt32() == 1);
+    CHECK (record.args[7].getString() == "length");
 
     /*  THE FILE IS IN THE BUNDLE, so the show opens on a machine whose
         Go.dot has never seen the preset; the rows say where it came from. */
@@ -858,4 +860,50 @@ TEST_CASE ("preset command: a newer installed version is written beside the old 
 
     folder.deleteRecursively();
     newerFolder.deleteRecursively();
+}
+
+TEST_CASE ("preset command: a device from the Eos preset is reached over a connection, cut by length, at the console's own port, and loads with nothing left to type")
+{
+    /*  DP.6: the first preset whose transport is tcp. Its device carries the
+        transport, the framing and the port the file says and loads at once -
+        the host is the default, the port is Eos's - and the connection itself
+        is serve's links table's, not the load's (namespace draft §57, AFJ). */
+    AuthoringRig rig;
+    tree::MountTable mounts;
+    const auto folder = freshBundleFolder ("wfg-presets-eos");
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &installedPresets());
+
+    const auto* eos = installedPresets().find ("etc-eos-osc");
+    REQUIRE (eos != nullptr);
+    REQUIRE (eos->usable());
+    CHECK (eos->transport == "tcp");
+    CHECK (eos->framing == "length");
+    CHECK (eos->port == 3032);
+
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("etc-eos-osc") }).applied == 1u);
+    const auto record = rig.lastRecord();
+    REQUIRE (record.args.size() == 8u);
+    const auto deviceId = record.args[1].getString();
+    CHECK (record.args[2].getString() == "/eos");
+    CHECK (record.args[4].getInt32() == 3032);
+    CHECK (record.args[5].getString() == "tcp");
+    CHECK (record.args[7].getString() == "length");
+
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/transport") == "tcp");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/framing") == "length");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/port") == "3032");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/preset") == "etc-eos-osc@1");
+    CHECK (mounts.isLoaded (deviceId));
+    CHECK (mounts.problemOf (deviceId).empty());
+    REQUIRE (mounts.declarationOf (deviceId) != nullptr);
+    CHECK (mounts.declarationOf (deviceId)->transport == "tcp");
+    CHECK (mounts.declarationOf (deviceId)->framing == "length");
+    CHECK (static_cast<int> (mounts.nodeCount (deviceId)) == eos->nodeCount);
+
+    //  The destination such a device is sent to names its link, beside the port.
+    const auto to = tree::MountSender::destinationFor (*mounts.declarationOf (deviceId));
+    CHECK (to.link == deviceId);
+    CHECK (to.port == 3032);
+
+    folder.deleteRecursively();
 }

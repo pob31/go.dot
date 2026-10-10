@@ -30,6 +30,35 @@ namespace wfg::serial
         constexpr auto firstPause = std::chrono::milliseconds (500);
         constexpr auto longestPause = std::chrono::milliseconds (8000);
         constexpr auto readWait = std::chrono::milliseconds (10);
+
+        /*  The framings that carry packets rather than lines (PC.11; DP.6). */
+        bool readsPackets (const std::string& framing) noexcept
+        {
+            return framing == "slip" || framing == "length" || framing == "raw";
+        }
+
+        /*  One packet as the port's framing puts it on the wire: SLIP's
+            frame, a four-byte big-endian size and the bytes (OSC 1.0 over a
+            stream), or the bytes themselves. */
+        std::string framed (const std::string& framing, const std::vector<std::uint8_t>& packet)
+        {
+            if (framing == "slip")
+                return slip::encode (packet);
+
+            std::string out;
+
+            if (framing == "length")
+            {
+                const auto size = static_cast<std::uint32_t> (packet.size());
+                out.push_back (static_cast<char> ((size >> 24) & 0xFFu));
+                out.push_back (static_cast<char> ((size >> 16) & 0xFFu));
+                out.push_back (static_cast<char> ((size >> 8) & 0xFFu));
+                out.push_back (static_cast<char> (size & 0xFFu));
+            }
+
+            out.append (reinterpret_cast<const char*> (packet.data()), packet.size());
+            return out;
+        }
     }
 
     struct SerialTable::Worker
@@ -127,6 +156,49 @@ namespace wfg::serial
             finished = true;
         }
 
+        void keep (std::vector<std::uint8_t> packet)
+        {
+            if (packets.size() < maxWaiting)
+                packets.push_back (std::move (packet));
+            else
+                ++state.dropped;
+        }
+
+        /*  A STREAM CUT BY LENGTH (DP.6): four bytes of size, big-endian, then
+            the packet; `partial` holds what has arrived of the next one. A
+            size that cannot be a packet - nought, or more than a frame - means
+            the stream is out of step with its framing, which no amount of
+            reading mends: what is held is dropped and counted once, and the
+            next bytes are read as a fresh start. */
+        void heardByLength (const std::string& bytes)
+        {
+            partial.append (bytes);
+
+            while (partial.size() >= 4)
+            {
+                const auto byteAt = [this] (std::size_t at)
+                {
+                    return static_cast<std::uint32_t> (static_cast<std::uint8_t> (partial[at]));
+                };
+                const auto size = static_cast<std::size_t> ((byteAt (0) << 24) | (byteAt (1) << 16)
+                                                            | (byteAt (2) << 8) | byteAt (3));
+
+                if (size == 0 || size > slip::largestFrame)
+                {
+                    partial.clear();
+                    ++state.dropped;
+                    return;
+                }
+
+                if (partial.size() < 4 + size)
+                    return;
+
+                keep (std::vector<std::uint8_t> (partial.begin() + 4,
+                                                 partial.begin() + static_cast<std::ptrdiff_t> (4 + size)));
+                partial.erase (0, 4 + size);
+            }
+        }
+
         void heard (const std::string& bytes)
         {
             const std::lock_guard<std::mutex> held (lock);
@@ -134,12 +206,19 @@ namespace wfg::serial
             if (wanted.framing == "slip")
             {
                 for (auto& packet : decoder.feed (bytes))
-                {
-                    if (packets.size() < maxWaiting)
-                        packets.push_back (std::move (packet));
-                    else
-                        ++state.dropped;
-                }
+                    keep (std::move (packet));
+                return;
+            }
+
+            if (wanted.framing == "length")
+            {
+                heardByLength (bytes);
+                return;
+            }
+
+            if (wanted.framing == "raw")
+            {
+                keep (std::vector<std::uint8_t> (bytes.begin(), bytes.end()));
                 return;
             }
 
@@ -292,7 +371,7 @@ namespace wfg::serial
 
         auto& worker = *found->second;
         const std::lock_guard<std::mutex> workerHeld (worker.lock);
-        if (! worker.open || worker.wanted.framing == "slip")
+        if (! worker.open || readsPackets (worker.wanted.framing))
             return false;
         if (worker.outgoing.size() >= maxWaiting)
         {
@@ -333,14 +412,14 @@ namespace wfg::serial
 
         auto& worker = *found->second;
         const std::lock_guard<std::mutex> workerHeld (worker.lock);
-        if (! worker.open || worker.wanted.framing != "slip")
+        if (! worker.open || ! readsPackets (worker.wanted.framing))
             return false;
         if (worker.outgoing.size() >= maxWaiting)
         {
             ++worker.state.dropped;
             return false;
         }
-        worker.outgoing.push_back (slip::encode (packet));
+        worker.outgoing.push_back (framed (worker.wanted.framing, packet));
         return true;
     }
 

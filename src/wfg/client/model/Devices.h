@@ -132,9 +132,19 @@ namespace wfg::client::model
         std::string presetUpdate;
 
         /*  HOW IT IS REACHED (namespace draft §51, PC.11): `udp` at its host and
-            port, or `serial` - OSC over SLIP on the serial port `serial` names. */
+            port, `serial` - OSC over SLIP on the serial port `serial` names -
+            or `tcp` (namespace draft §57, AFJ; DP.6): a connection to its host
+            and port, the stream cut by `framing` - `length`, a size before
+            each packet, or `slip`. */
         std::string transport = "udp";
         std::string serial;
+        std::string framing = "length";
+
+        /*  WHAT THE CONNECTION IS DOING when it is reached over one, in the
+            engine's word - off, closed, opening, open, retrying - and why it
+            is not open, in its sentence; off and empty for any other device. */
+        std::string link = "off";
+        std::string linkProblem;
 
         /*  What to put in a menu or a list: the name, or the prefix when there
             is none. A device is never a blank row - somebody has to be able to
@@ -148,6 +158,11 @@ namespace wfg::client::model
     std::vector<std::pair<std::string, std::string>> deviceOnSerial (const std::string& deviceId,
                                                                      const std::string& serialId);
     std::vector<std::pair<std::string, std::string>> deviceOnNetwork (const std::string& deviceId);
+
+    /*  AND OVER A CONNECTION (DP.6): its transport, the host and port it
+        already has; the framing stays what the row says - length for a device
+        typed by hand, what the preset said for one made from a preset. */
+    std::vector<std::pair<std::string, std::string>> deviceOnTcp (const std::string& deviceId);
 
         /** Every declared device, in identifier order. */
     std::vector<DeviceRow> readDevices (const tree::TreeSnapshot&);

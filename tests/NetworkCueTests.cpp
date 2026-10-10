@@ -4274,3 +4274,74 @@ TEST_CASE ("network cue: a curve on a preset's node plays through the described 
     CHECK (rig.runOf (nowhere)->state == cue::runState::failed);
     CHECK (rig.runOf (nowhere)->error == reason::badAddress);
 }
+
+//==============================================================================
+/*  DP.6: A DEVICE OVER A CONNECTION (namespace draft §57, AFJ) is sent to as
+    one on a serial port is - its packets handed to a sink, serve's links table
+    - and a link that cannot take them fails the run, as a closed port does. */
+TEST_CASE ("network cue: a cue, its further message and its curve aimed at a device over a connection reach the link in order, and a link that cannot take it fails the run")
+{
+    NetworkRig rig;
+
+    tree::MountDeclaration eos;
+    eos.id = "EOS00001";
+    eos.prefix = "/eos";
+    eos.namespaceFile = "namespaces/eos.json";
+    eos.transport = "tcp";
+    eos.host = "127.0.0.1";
+    eos.port = 3032;
+    REQUIRE (rig.mounts.load (eos, R"JSON({ "FULL_PATH": "/eos", "CONTENTS": {
+        "sub": { "FULL_PATH": "/eos/sub", "CONTENTS": {
+            "1": { "FULL_PATH": "/eos/sub/1", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0] } } },
+        "key": { "FULL_PATH": "/eos/key", "CONTENTS": {
+            "go_0": { "FULL_PATH": "/eos/key/go_0", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0] } } } } })JSON").ok);
+
+    std::vector<std::pair<std::string, std::string>> handed;   // the link, the address
+    bool takes = true;
+    rig.sender.setLinkSink ([&handed, &takes] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
+    {
+        const auto decoded = osc::decode (packet.data(), packet.size());
+        handed.emplace_back (mountId, decoded.ok ? decoded.packet.address : std::string ("?"));
+        return takes;
+    });
+
+    const auto cueId = rig.makeOsc ("/eos/sub/1", "f:0", "none");
+    REQUIRE (rig.document.createMessage (cueId, "/eos/key/go_0", "f:1").ok);
+    curveOn (rig, cueId, 0, "0 0 1 1");
+
+    rig.fire (cueId);
+
+    //  The cue's two messages leave at GO; the curve's first move a tick later.
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (handed.size() >= 3u);
+    CHECK (handed[0].first == "EOS00001");
+    CHECK (handed[0].second == "/eos/sub/1");
+    CHECK (handed[1].first == "EOS00001");
+    CHECK (handed[1].second == "/eos/key/go_0");
+
+    for (const auto& [mountId, address] : handed)
+    {
+        CHECK (mountId == "EOS00001");
+        CHECK (address.rfind ("/eos/", 0) == 0);
+    }
+
+    REQUIRE (rig.runOf (cueId) != nullptr);
+    CHECK (rig.runOf (cueId)->state == cue::runState::playing);
+
+    //  And the network heard none of it: the link is where the device is.
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
+
+    /*  A LINK THAT CANNOT TAKE IT - closed, retrying after the console went
+        away - fails the run as a closed serial port does (AFJ): the Runner
+        cannot see the link, and `sent` is the wait that says so. */
+    takes = false;
+    const auto refused = rig.makeOsc ("/eos/key/go_0", "f:1", "sent");
+    rig.fire (refused);
+    rig.tickOnce();
+
+    REQUIRE (rig.runOf (refused) != nullptr);
+    CHECK (rig.runOf (refused)->state == cue::runState::failed);
+    CHECK (rig.runOf (refused)->error == cue::runError::sendFailed);
+}

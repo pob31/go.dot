@@ -55,7 +55,13 @@
 
 namespace wfg::serial
 {
-    /*  What the show declares for one port. */
+    /*  What the show declares for one port - or, since namespace draft §57
+        (AFJ, DP.6), one CONNECTION: a TCP link is a port whose path is
+        `host:port` and whose baud means nothing, handed to a table built on
+        `openTcpLink`, and its framing is `length` - a four-byte size before
+        each packet, OSC 1.0 over TCP, what an Eos takes on 3032 - or `slip`;
+        `raw` hands every read as one packet, for a wire that frames itself
+        (DP.9). */
     struct Wanted
     {
         std::string id;
@@ -97,10 +103,10 @@ namespace wfg::serial
             declared, does not transmit, is not open, or reads packets. */
         bool send (const std::string& id, const std::string& line);
 
-        /*  A PORT WHOSE FRAMING IS SLIP (PC.11) reads and writes OSC packets
-            rather than lines - for a device on it: the packets it read since
-            the last take, oldest first, at most `perPort` from each; and one
-            packet out, framed. */
+        /*  A PORT WHOSE FRAMING IS SLIP, LENGTH OR RAW (PC.11; DP.6) reads and
+            writes packets rather than lines - for a device on it: the packets
+            it read since the last take, oldest first, at most `perPort` from
+            each; and one packet out, framed as the port's framing says. */
         std::vector<std::pair<std::string, std::vector<std::vector<std::uint8_t>>>> takePackets (std::size_t perPort);
         bool sendPacket (const std::string& id, const std::vector<std::uint8_t>& packet);
 

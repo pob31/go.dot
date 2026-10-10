@@ -1099,6 +1099,19 @@ set_tests_properties(blackbox.authoring.C blackbox.authoring.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
 
 # -----------------------------------------------------------------------------
+# A DEVICE OVER A CONNECTION (namespace draft §57, AFJ; DP.6): the shipped
+# binary against mock_target.py listening for connections - the link opened on
+# its own thread, a cue arriving down the stream cut by length, the console
+# closing the connection and the link coming back after its pause, the console
+# gone and the row saying so, the same device moved to a SLIP console.
+add_test(NAME blackbox.wires.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/wires.py" --wfg-locale=C)
+add_test(NAME blackbox.wires.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/wires.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.wires.C blackbox.wires.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
+
+# -----------------------------------------------------------------------------
 # THE PHASE 2 DONE-WHEN CLAUSE, driven from outside the process.
 #
 # The devplan's criterion word for word: `Rien à faire` -> load show -> GO ->

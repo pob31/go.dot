@@ -45,6 +45,7 @@
 #include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
+#include <wfg/engine/serial/TcpLink.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -2757,6 +2758,42 @@ namespace
         return wanted;
     }
 
+    /*  THE CONNECTIONS AS THE SHOW DECLARES THEM (namespace draft §57, AFJ;
+        DP.6): one per device whose transport is tcp, keyed by the device, at
+        its host and port, cut by its framing - what the links table opens,
+        keeps and opens again. A device with no port yet has no path, which
+        the table reads as nothing to open. */
+    std::vector<wfg::serial::Wanted> linkWantedOf (const wfg::doc::ShowDocument& document)
+    {
+        std::vector<wfg::serial::Wanted> wanted;
+
+        for (const auto& mountId : wfg::tree::declaredMountIds (document))
+        {
+            const auto base = "/godot/mount/" + mountId + "/";
+            const auto reads = [&document, &base] (const char* row, const char* otherwise)
+            { return document.getAttribute (base + row).value_or (std::string (otherwise)); };
+
+            if (reads ("transport", "udp") != "tcp")
+                continue;
+
+            wfg::serial::Wanted wish;
+            wish.id = mountId;
+
+            const auto host = reads ("host", "127.0.0.1");
+            const auto port = static_cast<int> (wfg::osc::parseDouble (reads ("port", "0")).value_or (0.0));
+
+            if (! host.empty() && port > 0 && port <= 65535)
+                wish.path = wfg::serial::hostPortOf (host, port);
+
+            wish.framing = reads ("framing", "length");
+            wish.rx = reads ("rx", "false") == "true";
+            wish.tx = reads ("tx", "true") != "false";
+            wanted.push_back (std::move (wish));
+        }
+
+        return wanted;
+    }
+
     std::vector<wfg::midi::PortWish> portWishesOf (const wfg::doc::ShowDocument& document)
     {
         std::vector<wfg::midi::PortWish> wishes;
@@ -3581,6 +3618,13 @@ namespace
             so must not outlive it. */
         wfg::serial::SerialTable serialPorts;
 
+        /*  AND THE CONNECTIONS TO DEVICES (namespace draft §57, AFJ; DP.6): the
+            same table opening TCP links, keyed by the device whose transport
+            is tcp, so an Eos on 3032 is kept open, read, written and opened
+            again as an Arduino's port is. Before the sender, as the ports
+            are, and for the same reason. */
+        wfg::serial::SerialTable links { wfg::serial::openTcpLink };
+
         /*  THE DEVICE PRESETS beside the binary (namespace draft §57, AFN), read
             once at start: what the Network tab's ADD menu offers, and what
             mount.createFromPreset copies into the show. Serve only: a replay
@@ -3593,6 +3637,10 @@ namespace
                               {
                                   return serialPorts.sendPacket (port, packet);
                               });
+        sender.setLinkSink ([&links] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
+                            {
+                                return links.sendPacket (mountId, packet);
+                            });
 
         /*  AND THE THREAD THAT ASKS. A verified cue reads a value back off the
             target's own OSCQuery server, which is an HTTP exchange with a
@@ -3853,6 +3901,7 @@ namespace
 
         //  The serial ports, opened as the show declares them (declared above).
         serialPorts.reconcile (serialWantedOf (document));
+        links.reconcile (linkWantedOf (document));
         runner.setSerialPorts (&serialPorts);
 
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
@@ -4504,6 +4553,7 @@ namespace
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), &ffmpegInstaller);
         parameters.setInstaller (&ffmpegInstaller);
         parameters.setSerial (&serialPorts, &runner.heardLines());
+        parameters.setLinks (&links);
         parameters.setPresets (&presets);
 
         /*  A PROCESS CUE'S PATCH OPENED IN PLUGDATA OR PD (namespace draft §51,
@@ -5142,6 +5192,14 @@ namespace
                                          if (const auto decoded = wfg::osc::decode (bytes.data(), bytes.size()); decoded.ok)
                                              nameSpace.write ("serial:" + port, decoded.packet);
 
+                                 /*  AND WHAT A DEVICE OVER A CONNECTION SENT
+                                     (namespace draft §57, DP.6), the same way,
+                                     under the origin `link:<id>`. */
+                                 for (auto& [mountId, packets] : links.takePackets (64))
+                                     for (const auto& bytes : packets)
+                                         if (const auto decoded = wfg::osc::decode (bytes.data(), bytes.size()); decoded.ok)
+                                             nameSpace.write ("link:" + mountId, decoded.packet);
+
                                  /*  A SAVE IN PLUGDATA OR PD, every half second:
                                      the cue's patch as it was saved, one `node.set`
                                      from `pd` (namespace draft §51, ACN). */
@@ -5350,6 +5408,16 @@ namespace
                         hearing->byHost["serial:" + port].push_back (
                             { mountId, document.getAttribute (base + "prefix")
                                            .value_or (std::string {}) });
+                    continue;
+                }
+
+                /*  AND ONE OVER A CONNECTION by its link (DP.6):
+                    what arrives down it is the device's. */
+                if (document.getAttribute (base + "transport").value_or (std::string ("udp")) == "tcp")
+                {
+                    hearing->byHost["link:" + mountId].push_back (
+                        { mountId, document.getAttribute (base + "prefix")
+                                       .value_or (std::string {}) });
                     continue;
                 }
 
@@ -5617,6 +5685,7 @@ namespace
                                         again, on its own thread; the tick
                                         never waits for one. */
                                     serialPorts.reconcile (serialWantedOf (document));
+                                    links.reconcile (linkWantedOf (document));
 
                                     if (portBinder.want (portWishesOf (document)))
                                         juce::MessageManager::callAsync ([&portBinder]

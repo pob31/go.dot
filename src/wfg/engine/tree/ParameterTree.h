@@ -379,6 +379,13 @@ namespace wfg::tree
             serialHeard = heard;
         }
 
+        /*  THE CONNECTIONS TO DEVICES (namespace draft §57, AFJ; DP.6): the
+            table serve opens a TCP link on for each device whose transport
+            is tcp, keyed by the device, for `mount/link` and
+            `mount/linkProblem`. Absent - a replay, a tree dump - every
+            device's link reads off. */
+        void setLinks (const serial::SerialTable* table) noexcept { links = table; }
+
         /*  THE DEVICE PRESETS installed beside the binary (namespace draft
             §57, AFN): what the Network tab's ADD menu offers, published
             under /godot/preset/<slug>. Absent in a replay and a tree dump,
@@ -518,6 +525,7 @@ namespace wfg::tree
         const video::ffmpeg::Installer* installer = nullptr;
         const serial::SerialTable* serialTable = nullptr;
         const serial::HeardLines* serialHeard = nullptr;
+        const serial::SerialTable* links = nullptr;
         const PresetTable* presets = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;

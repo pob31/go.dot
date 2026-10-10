@@ -2985,6 +2985,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="framing">
+          <a:documentation>How packets are cut from the stream when the transport is tcp (namespace draft 57, AFJ, DP.6): length, a four-byte size before each packet - OSC 1.0 over TCP, what an Eos takes on 3032 - or slip, the frames of PC.11 on a connection - OSC 1.1, an Eos on 3037. Not read for any other transport. A preset says which; a device typed by hand gets length, the one every console that takes OSC over TCP reads.</a:documentation>
+          <choice>
+            <value>length</value>
+            <value>slip</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="host">
           <a:documentation>Where the target is. A literal address rather than a name, because a socket resolves a hostname on every send whose destination differs from the last one, and a blocking lookup on the tick thread is a frame nobody gets back. It defaults to this machine because the ordinary rig is Go.dot and its processors on one box; anything else says so.</a:documentation>
           <data type="string"/>
@@ -3090,6 +3099,17 @@
           <choice>
             <value>true</value>
             <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="wire">
+          <a:documentation>What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to. Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says.</a:documentation>
+          <choice>
+            <value>osc</value>
+            <value>rcp</value>
+            <value>line</value>
+            <value>midi</value>
           </choice>
         </attribute>
       </optional>

@@ -93,7 +93,7 @@ namespace wfg::tree
                         " arguments are what it drew and decided, on the record for a replay.",
                         { { "slug", 's', false }, { "id", 's', true }, { "prefix", 's', true },
                           { "namespace", 's', true }, { "port", 'i', true }, { "transport", 's', true },
-                          { "version", 'i', true } },
+                          { "version", 'i', true }, { "framing", 's', true } },
                         true,
                         [&document, &mounts, &bundleFolder, presets] (CommandContext&, const std::vector<osc::Value>& args)
                         {
@@ -108,7 +108,7 @@ namespace wfg::tree
                             /*  FROM THE RECORD WHEN IT HAS ONE, else from the
                                 installed preset: a replay has no table and its
                                 record says everything the live command decided. */
-                            std::string prefixRow, file, transport;
+                            std::string prefixRow, file, transport, framing = "length";
                             int port = 0;
                             int version = 0;
 
@@ -119,6 +119,9 @@ namespace wfg::tree
                                 port = args[4].getInt32();
                                 transport = args[5].getString();
                                 version = args[6].getInt32();
+
+                                if (args.size() >= 8)
+                                    framing = args[7].getString();
                             }
                             else if (preset != nullptr && preset->usable())
                             {
@@ -127,6 +130,7 @@ namespace wfg::tree
                                 file = presetFileFor (slug, version);
                                 port = preset->port;
                                 transport = preset->transport;
+                                framing = preset->framing;
                             }
                             else
                             {
@@ -157,6 +161,12 @@ namespace wfg::tree
                             if (transport != "udp")
                                 writes.push_back ({ "transport", transport });
 
+                            /*  AND HOW ITS STREAM IS CUT, for a device over a
+                                connection (DP.6): what the preset's file says,
+                                which an Eos preset says is length. */
+                            if (transport == "tcp")
+                                writes.push_back ({ "framing", framing });
+
                             if (const auto written = writeRows (document, made.id, writes); ! written.applied)
                                 return written;
 
@@ -168,7 +178,7 @@ namespace wfg::tree
                             return Outcome::ok ({ osc::Value::string (slug), osc::Value::string (made.id),
                                                   osc::Value::string (prefixRow), osc::Value::string (file),
                                                   osc::Value::int32 (port), osc::Value::string (transport),
-                                                  osc::Value::int32 (version) });
+                                                  osc::Value::int32 (version), osc::Value::string (framing) });
                         } });
 
         registry.add ({ "mount.refreshPreset",

@@ -1761,8 +1761,9 @@ namespace wfg::tree
                         const doc::Attribute attribute { "Mount", row };
                         const auto name = std::string (row->name);
 
-                        //  LISTEN moves with no command: the runtime half's.
-                        if (name == "listen")
+                        /*  LISTEN moves with no command: the runtime half's.
+                            So does the link (DP.6), on its own thread. */
+                        if (name == "listen" || name == "link" || name == "linkProblem")
                             continue;
 
                         /*  `loaded` and `nodeCount` describe what the engine did
@@ -3760,6 +3761,33 @@ namespace wfg::tree
             for (const auto& mountId : declaredMounts)
                 runtime.push_back (makeLeaf (std::string (godot) + "/mount/" + mountId + "/listen", *listenRow,
                                              listenStatusOf ? listenStatusOf (mountId) : std::string ("off")));
+
+        /*  AND WHAT EACH DEVICE'S CONNECTION IS DOING (namespace draft §57,
+            AFJ; DP.6): off for a device not reached over one, else the links
+            table's word for it - opening, open, retrying, closed - and its
+            sentence. Every publish, as LISTEN: the link moves on its own
+            thread, with no command. A replay and a tree dump have no table,
+            and open nothing: off. */
+        if (const auto* linkRow = rowNamed ("mount", "link"))
+            if (const auto* linkProblemRow = rowNamed ("mount", "linkProblem"))
+                for (const auto& mountId : declaredMounts)
+                {
+                    /*  BY THE DOCUMENT'S WORD, not the loaded declaration's: a
+                        device the load refused - no port yet - still has a
+                        link the table knows nothing of, and a row that read
+                        off for it would be right; one refused for its
+                        framing has a worker reading the stream wrong, and a
+                        row that says so is the honest one. */
+                    const auto overLink = links != nullptr
+                                            && document.getAttribute (std::string (godot) + "/mount/" + mountId + "/transport")
+                                                   .value_or (std::string ("udp")) == "tcp";
+                    const auto linkState = overLink ? links->stateOf (mountId) : serial::PortState {};
+                    const auto base = std::string (godot) + "/mount/" + mountId + "/";
+
+                    runtime.push_back (makeLeaf (base + "link", *linkRow, overLink ? linkState.state : std::string ("off")));
+                    runtime.push_back (makeLeaf (base + "linkProblem", *linkProblemRow,
+                                                 overLink ? linkState.problem : std::string {}));
+                }
 
         /*  WHAT EACH SURFACE'S ROTARIES ARE SHOWING (author, 2026-09-25): its
             page, which of them, how many, and what it last wrote. Every

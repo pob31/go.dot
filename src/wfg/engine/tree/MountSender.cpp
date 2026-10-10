@@ -152,6 +152,9 @@ namespace wfg::tree
         if (! to.serial.empty())
             return serialSink ? serialSink (to.serial, bytes) : false;
 
+        if (! to.link.empty())
+            return linkSink ? linkSink (to.link, bytes) : false;
+
         return udp != nullptr && to.port > 0 && udp->send (to.host, to.port, bytes);
     }
 
@@ -328,6 +331,7 @@ namespace wfg::tree
         destination.rateCap = declaration.rateCap;
         destination.bundles = declaration.bundles;
         destination.serial = declaration.transport == "serial" ? declaration.serial : std::string {};
+        destination.link = declaration.transport == "tcp" ? declaration.id : std::string {};
         return destination;
     }
 

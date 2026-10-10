@@ -2597,6 +2597,18 @@ namespace wfg::client::ui
                                 juce::Justification::centredLeft, true);
                 }
 
+                /*  AND, FOR A DEVICE OVER A CONNECTION (namespace draft §57,
+                    AFJ; DP.6), what the link is doing, in the engine's word:
+                    open is quiet and dim; anything else is the failure it is,
+                    with its sentence - the word carries it, not the colour. */
+                else if (entry.transport == "tcp")
+                {
+                    g.setColour (Look::colour (theme, entry.link == "open" ? "ink-dim" : "failed"));
+                    g.drawText ("link " + juce::String (entry.link)
+                                  + (entry.linkProblem.empty() ? juce::String() : ": " + juce::String (entry.linkProblem)),
+                                cells[11], juce::Justification::centredLeft, true);
+                }
+
                 /*  THE KIND, and the newer preset when one is installed: the
                     word says so (4.8), and a click on the cell moves to it. */
                 g.setColour (Look::colour (theme, entry.presetUpdate.empty() ? "ink-dim" : "ink"));
@@ -2683,23 +2695,21 @@ namespace wfg::client::ui
                 return {};
             }
 
-            /*  WHERE THE DEVICE IS (PC.11): with no serial port in the show, its
-                host typed in place as ever; with one, a menu first - on the
-                network, at an address, or on one of the show's serial ports. */
+            /*  WHERE THE DEVICE IS (PC.11; DP.6): a menu first - on the network
+                by datagram or over a connection, at an address, or on one of
+                the show's serial ports - then the host typed in place. The
+                menu always, since a connection became a way (namespace draft
+                §57, AFJ): until then a show with no serial port went straight
+                to the editor, and a connection would have had no door. */
             void chooseWay (int row, int width)
             {
                 const auto& entry = rows[static_cast<std::size_t> (row)];
 
-                if (serials.empty() && entry.transport != "serial")
-                {
-                    editAt (row, Cell::host, width);
-                    return;
-                }
-
                 juce::PopupMenu menu;
-                menu.addItem (1, "On the network, at an address...", true, entry.transport != "serial");
+                menu.addItem (1, "On the network, by datagram (UDP), at an address...", true, entry.transport == "udp");
+                menu.addItem (2, "On the network, over a connection (TCP), at an address...", true, entry.transport == "tcp");
                 for (std::size_t at = 0; at < serials.size(); ++at)
-                    menu.addItem (static_cast<int> (at) + 2, "On serial port " + juce::String (serials[at].name)
+                    menu.addItem (static_cast<int> (at) + 3, "On serial port " + juce::String (serials[at].name)
                                     + (serials[at].path.empty() ? juce::String() : "  (" + juce::String (serials[at].path) + ")"),
                                   true, entry.transport == "serial" && entry.serial == serials[at].id);
 
@@ -2710,16 +2720,18 @@ namespace wfg::client::ui
                                     {
                                         if (chosen <= 0 || ! send)
                                             return;
-                                        if (chosen == 1)
+                                        if (chosen == 1 || chosen == 2)
                                         {
+                                            const std::string wanted = chosen == 1 ? "udp" : "tcp";
                                             for (const auto& device : rows)
-                                                if (device.id == id && device.transport == "serial")
-                                                    send (gesture::setNodes (model::deviceOnNetwork (id)));
+                                                if (device.id == id && device.transport != wanted)
+                                                    send (gesture::setNodes (chosen == 1 ? model::deviceOnNetwork (id)
+                                                                                         : model::deviceOnTcp (id)));
                                             if (row < static_cast<int> (rows.size()))
                                                 editAt (row, Cell::host, width);
                                             return;
                                         }
-                                        const auto at = static_cast<std::size_t> (chosen - 2);
+                                        const auto at = static_cast<std::size_t> (chosen - 3);
                                         if (at < ports.size())
                                             send (gesture::setNodes (model::deviceOnSerial (id, ports[at].id)));
                                     });

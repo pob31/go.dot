@@ -112,6 +112,8 @@ namespace wfg::tree
         declaration.host = document.getAttribute (base + "host").value_or (std::string ("127.0.0.1"));
         declaration.transport = document.getAttribute (base + "transport").value_or (std::string ("udp"));
         declaration.serial = document.getAttribute (base + "serial").value_or (std::string {});
+        declaration.framing = document.getAttribute (base + "framing").value_or (std::string ("length"));
+        declaration.wire = document.getAttribute (base + "wire").value_or (std::string ("osc"));
 
         if (const auto port = document.getAttribute (base + "port"))
             if (const auto parsed = osc::parseDouble (*port))
@@ -161,6 +163,14 @@ namespace wfg::tree
             return MountResult::failed (mountId + ": " + why);
         };
 
+        /*  THE WIRE, before the transport: a device that names bytes Go.dot
+            cannot render yet is refused in words, whatever carries them
+            (namespace draft §57, AFJ; the rcp, line and midi wires of DP.7
+            to DP.9). */
+        if (declaration->wire != "osc")
+            return refuse ("wire \"" + declaration->wire
+                           + "\" is declared but not built - Go.dot renders osc to a device today");
+
         /*  OSC OVER SLIP ON A SERIAL PORT (namespace draft §51, PC.11): the port
             has to be one of the show's, and reading packets rather than lines -
             a device on a port that reads lines would be sent packets it prints
@@ -179,12 +189,28 @@ namespace wfg::tree
                 return refuse ("its serial port reads lines; a device on a serial port needs OSC over SLIP"
                                " - set the port's framing to slip");
         }
+        /*  OSC OVER A CONNECTION (namespace draft §57, AFJ; DP.6): a host and
+            a port, as a datagram's, and a framing the link can cut the stream
+            by. The connection itself is the links table's to open and keep,
+            on a thread of its own; what fails there is on `mount/link` and
+            is a fact about tonight, not about the declaration. */
+        else if (declaration->transport == "tcp")
+        {
+            if (declaration->framing != "length" && declaration->framing != "slip")
+                return refuse ("framing \"" + declaration->framing
+                               + "\" is not one a connection carries - length, a size before each"
+                                 " packet, or slip");
+
+            if (declaration->host.empty())
+                return refuse ("it is reached over a connection and names no host");
+        }
         else if (declaration->transport != "udp")
             return refuse ("transport \"" + declaration->transport
                            + "\" is declared but not implemented -"
-                             " Go.dot speaks udp and serial to a mount today");
+                             " Go.dot speaks udp, tcp and serial to a mount today");
 
-        if (declaration->transport == "udp" && (declaration->port <= 0 || declaration->port > 65535))
+        if ((declaration->transport == "udp" || declaration->transport == "tcp")
+              && (declaration->port <= 0 || declaration->port > 65535))
             return refuse ("no usable port. A device has to say which port it listens"
                            " on; nothing can be inferred and UDP will never tell you it"
                            " was wrong");

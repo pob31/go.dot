@@ -68,10 +68,13 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_group_selection[] = { "sequential", "shuffle" };
     inline constexpr std::string_view enum_group_takeover[] = { "group", "strip" };
     inline constexpr std::string_view enum_mount_transport[] = { "udp", "tcp", "ws", "serial" };
+    inline constexpr std::string_view enum_mount_framing[] = { "length", "slip" };
+    inline constexpr std::string_view enum_mount_wire[] = { "osc", "rcp", "line", "midi" };
     inline constexpr std::string_view enum_mount_panic[] = { "park", "snap" };
     inline constexpr std::string_view enum_mount_readback[] = { "none", "oscquery" };
     inline constexpr std::string_view enum_mount_listen[] = { "off", "connecting", "listening", "unsupported", "unreachable" };
     inline constexpr std::string_view enum_mount_doh[] = { "takeBack", "leave" };
+    inline constexpr std::string_view enum_mount_link[] = { "off", "closed", "opening", "open", "retrying" };
     inline constexpr std::string_view enum_preset_transport[] = { "udp", "tcp", "midi" };
     inline constexpr std::string_view enum_preset_wire[] = { "osc", "rcp", "line", "midi" };
     inline constexpr std::string_view enum_preset_framing[] = { "length", "slip" };
@@ -2702,6 +2705,22 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "serial",
           "The serial port this device is on when its transport is serial (namespace draft 51, PC.11): a port of the show whose framing is slip. Empty, or a port reading lines, and the device is refused when the show loads, in words." },
+        { "mount", "framing",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "length",
+          false, 0.0, false, 0.0,
+          enum_mount_framing, 2,
+          "", 1.0, false, "park",
+          "",
+          "How packets are cut from the stream when the transport is tcp (namespace draft 57, AFJ, DP.6): length, a four-byte size before each packet - OSC 1.0 over TCP, what an Eos takes on 3032 - or slip, the frames of PC.11 on a connection - OSC 1.1, an Eos on 3037. Not read for any other transport. A preset says which; a device typed by hand gets length, the one every console that takes OSC over TCP reads." },
+        { "mount", "wire",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "osc",
+          false, 0.0, false, 0.0,
+          enum_mount_wire, 4,
+          "", 1.0, false, "park",
+          "",
+          "What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to. Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says." },
         { "mount", "host",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "127.0.0.1",
@@ -2878,6 +2897,22 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "The newer version of this device's preset installed beside the binary, as <slug>@<version>, when there is one; empty otherwise. mount.refreshPreset moves the device to it." },
+        { "mount", "link",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          true, "off",
+          false, 0.0, false, 0.0,
+          enum_mount_link, 5,
+          "", 1.0, false, "park",
+          "",
+          "What the connection to this device is doing when its transport is tcp (namespace draft 57, AFJ, DP.6), in the serial table-s own words, because it is the same table and the connection is a link on it: opening, open, retrying after half a second, one, two, four, then every eight, closed. off for a device reached any other way, and in a replay, which opens nothing. What the machine is doing, never stored." },
+        { "mount", "linkProblem",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "Why the connection is not open, in a sentence - nothing answered at the host and port, the device closed it - and empty while it is open, or there is none. Beside mount/problem rather than in it, because the load writes that one and a connection that drops during the show must not read as a mistyped declaration." },
         { "preset", "vendor",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

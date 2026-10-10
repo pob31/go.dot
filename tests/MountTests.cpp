@@ -1991,3 +1991,121 @@ TEST_CASE ("mount sender: a device on a serial port is handed its packet's bytes
     sender.flush();
     CHECK (sender.outcomeOf (refused) == tree::MountSender::Outcome::failed);
 }
+
+//==============================================================================
+/*  DP.6: A DEVICE OVER A CONNECTION (namespace draft §57, AFJ): transport tcp,
+    the stream cut by length or SLIP, sent down a link serve keeps open. */
+
+TEST_CASE ("mount: a device over a connection needs a host, a port and a framing the link can cut by; the connection itself is not the load's")
+{
+    Rig rig;
+    const auto made = rig.document.createMount ("/eos", {}, {});
+    REQUIRE (made.ok);
+    const auto id = made.id;
+    const auto base = "/godot/mount/" + id + "/";
+    REQUIRE (rig.document.setAttribute (base + "transport", "tcp").ok);
+
+    //  A port, as a datagram's: nothing can be inferred.
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).find ("no usable port") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "port", "3032").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).empty());
+    REQUIRE (rig.mounts.declarationOf (id) != nullptr);
+    CHECK (rig.mounts.declarationOf (id)->transport == "tcp");
+    CHECK (rig.mounts.declarationOf (id)->framing == "length");
+
+    //  SLIP on a connection - OSC 1.1, an Eos on 3037 - is the other framing.
+    REQUIRE (rig.document.setAttribute (base + "framing", "slip").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    REQUIRE (rig.mounts.declarationOf (id) != nullptr);
+    CHECK (rig.mounts.declarationOf (id)->framing == "slip");
+
+    /*  THE ROW REFUSES ANY OTHER WORD; a file that carries one anyway is
+        refused when the show opens, in words that name both it could take.
+        Written under the schema's guard, as a file edited by hand would be,
+        and read as the open reads it: a refresh after an edit keeps a loaded
+        device's nodes and takes the new rows as they are, which is the
+        row's guard doing the refusing in the live case. */
+    CHECK_FALSE (rig.document.setAttribute (base + "framing", "lines").ok);
+    const auto writeRaw = [&rig, &id] (const char* name, const char* value)
+    {
+        for (auto mount : rig.document.root().getChildWithName ("Mounts"))
+            if (mount[juce::Identifier ("id")].toString() == juce::String (id))
+                mount.setProperty (juce::Identifier (name), juce::String (value), nullptr);
+    };
+    writeRaw ("framing", "lines");
+    CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.problemOf (id).find ("length") != std::string::npos);
+    CHECK (rig.mounts.problemOf (id).find ("slip") != std::string::npos);
+
+    //  And a host it has to have.
+    writeRaw ("framing", "length");
+    writeRaw ("host", "");
+    CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.problemOf (id).find ("names no host") != std::string::npos);
+
+    //  A wire not built yet is refused the same way, naming it (AFJ).
+    writeRaw ("host", "127.0.0.1");
+    writeRaw ("wire", "rcp");
+    CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.problemOf (id).find ("wire \"rcp\"") != std::string::npos);
+    writeRaw ("wire", "osc");
+
+    //  By datagram again, as it was: loaded, with its port, the framing kept and not read.
+    REQUIRE (rig.document.setAttribute (base + "transport", "udp").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).empty());
+}
+
+TEST_CASE ("mount sender: a device over a connection is handed its packet to the link, not sent a datagram, and its destination names the link")
+{
+    //  The destination a tcp declaration names is its own identifier: the links table's key.
+    tree::MountDeclaration eos;
+    eos.id = "EOS00001";
+    eos.transport = "tcp";
+    eos.host = "10.0.0.5";
+    eos.port = 3032;
+    const auto to = tree::MountSender::destinationFor (eos);
+    CHECK (to.link == "EOS00001");
+    CHECK (to.serial.empty());
+    CHECK (to.host == "10.0.0.5");
+    CHECK (to.port == 3032);
+    eos.transport = "udp";
+    CHECK (tree::MountSender::destinationFor (eos).link.empty());
+
+    tree::MountSender sender;        // no socket at all: the link is the whole way out
+    std::vector<std::pair<std::string, std::vector<std::uint8_t>>> handed;
+    bool takes = true;
+    sender.setLinkSink ([&] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
+    {
+        handed.emplace_back (mountId, packet);
+        return takes;
+    });
+
+    tree::MountSender::Destination onLink;
+    onLink.link = "EOS00001";
+    onLink.host = "10.0.0.5";
+    onLink.port = 3032;
+    const auto ticket = sender.queue ("EOS00001", onLink, "/eos/sub/1", osc::Value::float32 (0.5f));
+    sender.flush();
+
+    REQUIRE (handed.size() == 1u);
+    CHECK (handed[0].first == "EOS00001");
+    const auto decoded = osc::decode (handed[0].second.data(), handed[0].second.size());
+    REQUIRE (decoded.ok);
+    CHECK (decoded.packet.address == "/eos/sub/1");
+    CHECK (sender.outcomeOf (ticket) == tree::MountSender::Outcome::sent);
+    CHECK (sender.sentFor ("EOS00001") == 1u);
+
+    //  A link that cannot take it - not open, its queue full - fails the message, as a port that cannot does.
+    takes = false;
+    const auto refused = sender.queue ("EOS00001", onLink, "/eos/sub/1", osc::Value::float32 (0.0f));
+    sender.flush();
+    CHECK (sender.outcomeOf (refused) == tree::MountSender::Outcome::failed);
+}

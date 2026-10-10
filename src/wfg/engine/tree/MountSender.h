@@ -123,6 +123,14 @@ namespace wfg::tree
                 Given its empty value here, as the members above are theirs, so a
                 destination written as host and port alone leaves it out. */
             std::string serial {};
+
+            /*  THE CONNECTION IT GOES DOWN instead of a datagram, when the
+                device's transport is tcp (namespace draft §57, AFJ; DP.6): the
+                mount's own identifier, which is what serve's links table is
+                keyed by; the packet's bytes are handed to `linkSink` to be
+                framed as the link's framing says. Empty, as `serial` is, for
+                a destination that is a host and a port. */
+            std::string link {};
         };
         /*  THE DESTINATION A DECLARATION NAMES, made in one place (namespace
             draft §57, DP.1): host, port, rate cap, bundles, and the serial
@@ -167,6 +175,13 @@ namespace wfg::tree
             replay, a rig - and such a message fails as one to nowhere does. */
         using SerialSink = std::function<bool (const std::string& serialId, const std::vector<std::uint8_t>& packet)>;
         void setSerialSink (SerialSink sink) { serialSink = std::move (sink); }
+
+        /*  WHERE A DEVICE OVER A CONNECTION IS SENT (DP.6): the mount's id and
+            the packet's bytes; false when the link could not take it - not
+            open, or its queue full. Unset, as the serial sink, such a message
+            fails as one to nowhere does. */
+        using LinkSink = std::function<bool (const std::string& mountId, const std::vector<std::uint8_t>& packet)>;
+        void setLinkSink (LinkSink sink) { linkSink = std::move (sink); }
 
         //======================================================================
         /*  Queues one message. Tick thread.
@@ -254,6 +269,7 @@ namespace wfg::tree
 
         osc::UdpEndpoint* udp = nullptr;
         SerialSink serialSink;
+        LinkSink linkSink;
 
         /*  One datagram's bytes to where the destination says: its serial port,
             or its host and port. */
