@@ -322,7 +322,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 1.0, false, "park",
           "",
-          "The renders of the open edits this session (namespace draft 55, ADM), one a line: the cue's identifier, rendering, done or failed, how far in percent, and why it failed, a tab between each. A render is made under media/.edits/ after every change to a cue's sections, under a new name for every distinct edit, and is what the cue plays while its edit is open; a cue whose render is not there yet reads rendering in prepareError. A readout of the machine, never stored and never logged." },
+          "The renders of the open edits this session (namespace draft 55, ADM), one a line: the cue's identifier, rendering, done or failed, how far in percent, why it failed - or, done, a note such as a variable-rate movie resampled onto its grid - and its kind, sound or movie (namespace draft 55.5), a tab between each. A render is made under media/.edits/ after every change to a cue's sections, under a new name for every distinct edit, and is what the cue plays while its edit is open; a cue whose render is not there yet reads rendering in prepareError. A readout of the machine, never stored and never logged." },
         { "document", "path",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

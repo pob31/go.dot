@@ -3790,7 +3790,8 @@ namespace
             any other edit. Declared here for the analyser's reason. */
         wfg::audio::EditRenderer renderer { mediaInfo, mediaFolder };
 
-        /*  THE OPEN EDITS, as jobs: every sound cue whose sections are live and
+        /*  THE OPEN EDITS, as jobs: every sound cue - and every movie cue, and
+            the sound cut in step with it (§55.5) - whose sections are live and
             not the whole file as recorded. Walked at open and after every
             show edit, as the analyser is handed the files the show names. */
         const auto openEditJobs = [&document, &mediaInfo]
@@ -4334,15 +4335,26 @@ namespace
             a renderer. A copy that failed says so on the readout and nothing
             else. */
         renderer.setOnFrozen ([&engine] (const wfg::audio::EditRenderer::FreezeJob& job,
-                                         const std::string& bounce, const std::string& problem)
+                                         const std::string& bounce, const std::string& soundBounce,
+                                         const std::string& problem)
                               {
                                   if (! problem.empty())
                                       return;
 
-                                  engine.submit (wfg::origin::engine, "media.frozen",
-                                                 { wfg::osc::Value::string (job.cue),
-                                                   wfg::osc::Value::string (job.source),
-                                                   wfg::osc::Value::string (bounce) });
+                                  std::vector<wfg::osc::Value> args { wfg::osc::Value::string (job.cue),
+                                                                      wfg::osc::Value::string (job.source),
+                                                                      wfg::osc::Value::string (bounce) };
+
+                                  /*  A MOVIE'S PAIR (namespace draft §55.5, ADW): its sound's
+                                      swap in the same record. */
+                                  if (! soundBounce.empty())
+                                  {
+                                      args.push_back (wfg::osc::Value::string (job.soundCue));
+                                      args.push_back (wfg::osc::Value::string (job.soundSource));
+                                      args.push_back (wfg::osc::Value::string (soundBounce));
+                                  }
+
+                                  engine.submit (wfg::origin::engine, "media.frozen", std::move (args));
                               });
         wfg::audio::registerEditRenderCommands (engine.commands(), &renderer, document);
 
@@ -5631,6 +5643,9 @@ namespace
 
                                         for (const auto& run : runs.all())
                                             named = named || (! run.isFinished() && run.media == file);
+
+                                        //  Or a picture up on it (§55.5).
+                                        named = named || runner.namesMovieFile (file);
 
                                         if (named)
                                             renderer.stale (file);

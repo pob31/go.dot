@@ -26,12 +26,14 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include "HapMovieWriter.h"
 #include "TestSupport.h"
 
 #include <wfg/engine/audio/EditRenderer.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/document/MediaEdit.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/video/Movie.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -339,7 +341,8 @@ TEST_CASE ("edit renderer: a job offered is rendered on its thread, published wi
     CHECK (lengths->at (render.file) == doctest::Approx (2.0));
 
     /*  The readout. */
-    CHECK (audio::EditRenderer::readoutText (first) == "CUE00001\tdone\t100\t");
+    CHECK (audio::EditRenderer::readoutText (first) == "CUE00001\tdone\t100\t\tsound");
+    CHECK (render.kind == "sound");
 
     /*  Offered again as it is: nothing moves. */
     const auto before = renderer.changes();
@@ -427,8 +430,10 @@ TEST_CASE ("edit renderer: a freeze copies the render beside its source under a 
 
     std::atomic<bool> told { false };
     std::string bounce, problem;
-    renderer.setOnFrozen ([&] (const audio::EditRenderer::FreezeJob&, const std::string& name, const std::string& why)
+    renderer.setOnFrozen ([&] (const audio::EditRenderer::FreezeJob&, const std::string& name, const std::string& soundName,
+                               const std::string& why)
                           {
+                              CHECK (soundName.empty());
                               bounce = name;
                               problem = why;
                               told.store (true);
@@ -480,11 +485,234 @@ TEST_CASE ("media.freeze: refused until the render of the edit as it now is exis
     CHECK (freeze->handler (context, { osc::Value::string (cueId) }).reason == "bad-value");   // no open edit
 
     REQUIRE (document.splitSection (cueId, 10.0, 30.0, {}).ok);
-    CHECK (freeze->handler (context, { osc::Value::string (cueId) }).ok);   // taken and ignored
+    CHECK (freeze->handler (context, { osc::Value::string (cueId) }).applied);   // taken and ignored
 
     const auto memo = document.createCue (listId, 1, "memo", "Note").id;
     CHECK (freeze->handler (context, { osc::Value::string (memo) }).reason == "type-mismatch");
 
     REQUIRE (document.setAttribute ("/godot/document/locked", "true").ok);
     CHECK (freeze->handler (context, { osc::Value::string (cueId) }).reason == "locked");
+}
+
+//==============================================================================
+/*  A MOVIE'S EDIT ON THE SAME THREAD (namespace draft §55.5, ADV, ADW): a job
+    whose source is a movie renders to a .mov, the sweep keeps it, and a freeze
+    is the pair's - the movie's bounce beside its source and its sound's beside
+    its own, one answer or none. */
+
+namespace
+{
+    using namespace wfg::testing::hapmovie;
+
+    /*  Three seconds of 10 fps HAP, red then green then blue, into media/. */
+    juce::File writeThreeColours (const juce::File& media, const char* name = "three.mov", const char* codec = "Hap1")
+    {
+        std::vector<Bytes> frames;
+        const std::uint32_t colours[3] { 0xFF0000, 0x00FF00, 0x0000FF };
+
+        for (int n = 0; n < 30; ++n)
+            frames.push_back (section (0xAB, solidDxt1 (16, 8, colours[n / 10])));
+
+        return writeMovie (media, name, hapMovie (16, 8, frames, 10, codec));
+    }
+
+    bool rendered (audio::EditRenderer& renderer, const std::string& cue)
+    {
+        return soon ([&] { const auto s = renderer.snapshot(); const auto f = s->find (cue);
+                           return f != s->end() && f->second.state == audio::renderState::done; });
+    }
+
+    std::size_t framesIn (const juce::File& movie)
+    {
+        video::movie::MovieFile file;
+        std::string why;
+        REQUIRE_MESSAGE (file.open (movie.getFullPathName().toStdString(), why), why);
+        return file.info().frames.size();
+    }
+}
+
+TEST_CASE ("edit renderer: a movie's job renders to a .mov on the grid, published with its length and its kind, and the sweep keeps it")
+{
+    Scratch scratch;
+    writeThreeColours (scratch.media);
+    doc::ShowDocument document;
+    audio::MediaInfo media { document, scratch.media.getFullPathName().toStdString() };
+    audio::EditRenderer renderer { media, scratch.media.getFullPathName().toStdString() };
+    REQUIRE (renderer.start());
+
+    const std::vector<Section> sections { piece ("B", 2.0, 3.0), piece ("A", 0.0, 1.0) };
+    renderer.offer ({ "MOV00001", "three.mov", sections });
+    REQUIRE (rendered (renderer, "MOV00001"));
+
+    const auto render = renderer.snapshot()->at ("MOV00001");
+    CHECK (render.kind == "movie");
+    CHECK (render.file.rfind (".edits/", 0) == 0);
+    CHECK (render.file.substr (render.file.size() - 4) == ".mov");
+    CHECK (render.seconds == doctest::Approx (2.0));
+    CHECK (render.problem.empty());
+    CHECK (media.durations()->at (render.file) == doctest::Approx (2.0));
+    CHECK (framesIn (scratch.media.getChildFile (juce::String (render.file))) == 20u);
+    CHECK (audio::EditRenderer::readoutText (*renderer.snapshot()) == "MOV00001\tdone\t100\t\tmovie");
+
+    /*  Beside a sound's, and the sweep keeps both and removes the rest. */
+    renderer.offer (jobFor ("CUE00001", sections));
+    REQUIRE (rendered (renderer, "CUE00001"));
+    const auto soundRender = renderer.snapshot()->at ("CUE00001").file;
+    CHECK (soundRender.substr (soundRender.size() - 4) == ".wav");
+    CHECK (renderer.snapshot()->at ("CUE00001").kind == "sound");
+
+    REQUIRE (scratch.target ("orphan.mov").replaceWithText ("x"));
+    REQUIRE (scratch.target ("orphan.wav").replaceWithText ("x"));
+    renderer.sweep ({ { "MOV00001", "three.mov", sections }, jobFor ("CUE00001", sections) });
+    REQUIRE (soon ([&] { return ! scratch.target ("orphan.mov").exists() && ! scratch.target ("orphan.wav").exists(); }));
+    CHECK (scratch.media.getChildFile (juce::String (render.file)).existsAsFile());
+    CHECK (scratch.media.getChildFile (juce::String (soundRender)).existsAsFile());
+
+    /*  A movie that is not HAP fails with the convert words, and plays nothing. */
+    writeThreeColours (scratch.media, "preview.mov", "avc1");
+    renderer.offer ({ "MOV00002", "preview.mov", { piece ("A", 0.0, 1.0) } });
+    REQUIRE (soon ([&] { const auto s = renderer.snapshot(); const auto f = s->find ("MOV00002");
+                         return f != s->end() && f->second.state == audio::renderState::failed; }));
+    CHECK (renderer.snapshot()->at ("MOV00002").problem.find ("convert the movie to HAP first") != std::string::npos);
+    CHECK (renderer.snapshot()->at ("MOV00002").file.empty());
+
+    renderer.stop();
+}
+
+TEST_CASE ("edit renderer: a movie's freeze is the pair's - its bounce beside its source and its sound's beside its own, one answer or none")
+{
+    Scratch scratch;
+    writeThreeColours (scratch.media);
+    doc::ShowDocument document;
+    audio::MediaInfo media { document, scratch.media.getFullPathName().toStdString() };
+    audio::EditRenderer renderer { media, scratch.media.getFullPathName().toStdString() };
+
+    std::atomic<bool> told { false };
+    std::string bounce, soundBounce, problem;
+    renderer.setOnFrozen ([&] (const audio::EditRenderer::FreezeJob&, const std::string& name, const std::string& soundName,
+                               const std::string& why)
+                          {
+                              bounce = name;
+                              soundBounce = soundName;
+                              problem = why;
+                              told.store (true);
+                          });
+    REQUIRE (renderer.start());
+
+    const std::vector<Section> sections { piece ("B", 2.0, 3.0), piece ("A", 0.0, 1.0) };
+    renderer.offer ({ "MOV00001", "three.mov", sections });
+    renderer.offer (jobFor ("CUE00001", sections));
+    REQUIRE (rendered (renderer, "MOV00001"));
+    REQUIRE (rendered (renderer, "CUE00001"));
+    const auto movieRender = renderer.snapshot()->at ("MOV00001").file;
+    const auto soundRender = renderer.snapshot()->at ("CUE00001").file;
+
+    renderer.freeze ({ "MOV00001", "three.mov", movieRender, "CUE00001", "ramp.wav", soundRender });
+    REQUIRE (soon ([&] { return told.load(); }, 300));
+    CHECK (problem.empty());
+    CHECK (bounce == "three (edit).mov");
+    CHECK (soundBounce == "ramp (edit).wav");
+    REQUIRE (scratch.media.getChildFile ("three (edit).mov").existsAsFile());
+    REQUIRE (scratch.media.getChildFile ("ramp (edit).wav").existsAsFile());
+    CHECK (framesIn (scratch.media.getChildFile ("three (edit).mov")) == 20u);
+    CHECK (media.durations()->at ("three (edit).mov") == doctest::Approx (2.0));
+    CHECK (media.durations()->at ("ramp (edit).wav") == doctest::Approx (2.0));
+    CHECK (readWhole (scratch.media.getChildFile ("ramp (edit).wav")).getNumSamples() == 2 * rate);
+
+    /*  The sound's render missing: nothing lands, not even the movie's. */
+    told.store (false);
+    renderer.freeze ({ "MOV00001", "three.mov", movieRender, "CUE00001", "ramp.wav", ".edits/nothing.wav" });
+    REQUIRE (soon ([&] { return told.load(); }, 300));
+    CHECK (bounce.empty());
+    CHECK (soundBounce.empty());
+    CHECK (problem == "the sound's render is not there");
+    CHECK_FALSE (scratch.media.getChildFile ("three (edit) 2.mov").exists());
+
+    /*  A movie alone, with no sound cut in step: its own bounce, under the
+        next free name. */
+    told.store (false);
+    renderer.freeze ({ "MOV00001", "three.mov", movieRender });
+    REQUIRE (soon ([&] { return told.load(); }, 300));
+    CHECK (problem.empty());
+    CHECK (bounce == "three (edit) 2.mov");
+    CHECK (soundBounce.empty());
+
+    renderer.stop();
+}
+
+TEST_CASE ("media.freeze: a movie is frozen with its sound once both renders are of the edits as they now are; a sound locked to a movie says to edit the movie")
+{
+    Scratch scratch;
+    writeThreeColours (scratch.media);
+
+    doc::ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+    const auto movieId = document.createCue (listId, 0, "video", "Clip").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + movieId + "/source", "movie").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + movieId + "/file", "three.mov").ok);
+    const auto soundId = document.createCue (listId, 1, "media", "Clip (sound)").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + soundId + "/file", "ramp.wav").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + soundId + "/lockedTo", movieId).ok);
+
+    audio::MediaInfo media { document, scratch.media.getFullPathName().toStdString() };
+    audio::EditRenderer renderer { media, scratch.media.getFullPathName().toStdString() };
+
+    std::atomic<bool> told { false };
+    audio::EditRenderer::FreezeJob asked;
+    std::string bounce, soundBounce;
+    renderer.setOnFrozen ([&] (const audio::EditRenderer::FreezeJob& job, const std::string& name, const std::string& soundName,
+                               const std::string&)
+                          {
+                              asked = job;
+                              bounce = name;
+                              soundBounce = soundName;
+                              told.store (true);
+                          });
+    REQUIRE (renderer.start());
+
+    CommandRegistry registry;
+    audio::registerEditRenderCommands (registry, &renderer, document);
+    const auto* freeze = registry.find ("media.freeze");
+    REQUIRE (freeze != nullptr);
+    CommandContext context;
+
+    CHECK (freeze->handler (context, { osc::Value::string (movieId) }).reason == "bad-value");   // no edit yet
+
+    /*  THE MOVIE CUT AND REORDERED; its sound follows. */
+    REQUIRE (document.splitSection (movieId, 1.0, 3.0, {}).ok);
+    const auto cut = document.sectionsOf (document.findById (movieId));
+    REQUIRE (cut.size() == 2u);
+    REQUIRE (document.moveSection (cut[1].id, 0).ok);
+    const auto movieSections = document.sectionsOf (document.findById (movieId));
+    const auto soundSections = document.sectionsOf (document.findById (soundId));
+    REQUIRE (soundSections.size() == 2u);
+
+    CHECK (freeze->handler (context, { osc::Value::string (soundId) }).reason == "locked-to-movie");
+    CHECK (freeze->handler (context, { osc::Value::string (movieId) }).reason == "busy");   // nothing rendered
+
+    renderer.offer ({ movieId, "three.mov", movieSections });
+    REQUIRE (rendered (renderer, movieId));
+    CHECK (freeze->handler (context, { osc::Value::string (movieId) }).reason == "busy");   // the sound's not yet
+
+    renderer.offer ({ soundId, "ramp.wav", soundSections });
+    REQUIRE (rendered (renderer, soundId));
+    INFO ("movie " << movieId << ", sound " << soundId << "; after both: " << audio::EditRenderer::readoutText (*renderer.snapshot()));
+    const auto outcome = freeze->handler (context, { osc::Value::string (movieId) });
+    INFO ("handler: applied=" << outcome.applied << " reason=" << outcome.reason);
+    CHECK (outcome.applied);
+
+    /*  A copy of two files; thirty seconds, since a scanner may hold a new file a while. */
+    const auto landed = soon ([&] { return told.load(); }, 300);
+    INFO ("readout: " << audio::EditRenderer::readoutText (*renderer.snapshot()));
+    INFO ("movie bounce there: " << scratch.media.getChildFile ("three (edit).mov").existsAsFile()
+          << ", sound bounce there: " << scratch.media.getChildFile ("ramp (edit).wav").existsAsFile());
+    REQUIRE (landed);
+    CHECK (asked.cue == movieId);
+    CHECK (asked.source == "three.mov");
+    CHECK (asked.soundCue == soundId);
+    CHECK (asked.soundSource == "ramp.wav");
+    CHECK (bounce == "three (edit).mov");
+    CHECK (soundBounce == "ramp (edit).wav");
+
+    renderer.stop();
 }

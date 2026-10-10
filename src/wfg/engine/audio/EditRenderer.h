@@ -56,6 +56,13 @@
     document's swap, one undoable record, so the bounce and the swap are two
     halves a replay keeps apart as a conversion's are.
 
+    A MOVIE'S EDIT (namespace draft §55.5, ADV, ADW) renders on the same
+    thread, by the same key, to `.edits/<key>.mov` - `video::movie::
+    renderMovieEdit`, every frame outside a dissolve the source's bytes - and
+    its freeze is the pair's: the movie's bounce beside its source as `<stem>
+    (edit).mov` and its locked sound's beside its own, one answer, so one
+    `media.frozen` swaps both; a copy that fails leaves neither.
+
     Modelled on `MediaAnalyser`: a std::thread, a lock, a queue, a stop raised
     under the lock, and a snapshot of what it knows swapped whole so the tick
     thread holds one per tick as it holds the lengths.
@@ -89,7 +96,7 @@ namespace wfg::audio
     std::string renderKeyOf (const std::string& sourceName, std::int64_t sizeBytes, std::int64_t modifiedMs,
                              const std::string& editText);
 
-    /** The bounce a freeze writes: "<stem> (edit).wav", and " 2".." 999" when that name is taken. */
+    /** The bounce a freeze writes: "<stem> (edit).wav" - ".mov" for a movie's - and " 2".." 999" when that name is taken. */
     std::string freeBounceName (const std::string& folder, const std::string& sourceName);
 
     //==============================================================================
@@ -142,10 +149,18 @@ namespace wfg::audio
             std::string cue;
             std::string source;       // the file the edit was made from
             std::string renderFile;   // the render, relative to the media folder
+
+            /*  A MOVIE'S LOCKED SOUND, frozen with it (§55.5, ADW): empty for a
+                sound's freeze, and for a movie with no sound cut in step. */
+            std::string soundCue;
+            std::string soundSource;
+            std::string soundRenderFile;
         };
 
-        /** Told on the renderer's thread when a bounce has landed, or could not. */
-        using FreezeDone = std::function<void (const FreezeJob& job, const std::string& bounce, const std::string& problem)>;
+        /*  Told on the renderer's thread when a bounce has landed, or could not:
+            the movie's or the sound's, and its sound's beside it for a pair. */
+        using FreezeDone = std::function<void (const FreezeJob& job, const std::string& bounce,
+                                               const std::string& soundBounce, const std::string& problem)>;
 
         void setOnFrozen (FreezeDone done);
 
@@ -179,9 +194,12 @@ namespace wfg::audio
         std::thread thread;
     };
 
-    /*  `media.freeze <cue>` (namespace draft §55.3): the bounce asked for.
-        Refused until the render of the edit as it now is exists (`busy`),
-        under the lock, on a cue that is no sound, on one with no open edit.
+    /*  `media.freeze <cue>` (namespace draft §55.3, 55.5): the bounce asked for.
+        Refused until the render of the edit as it now is exists (`busy`) -
+        for a movie, its locked sound's too, the pair frozen together (ADW) -
+        under the lock, on a cue that is no sound and no movie, on one with no
+        open edit, and on a sound locked to a movie (`locked-to-movie`: edit
+        the movie).
         Taken and ignored where nothing renders - a replay, a rig - so a log
         that holds it replays; `media.frozen`, the record the renderer submits
         when the bounce has landed, is the document's and replays as the swap. */

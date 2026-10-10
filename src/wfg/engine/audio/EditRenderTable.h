@@ -20,7 +20,8 @@
 #include <string>
 
 /*  THE RENDERS OF THE OPEN EDITS (namespace draft §55, ADM): what the
-    renderer has made, is making or could not make of each sound cue's
+    renderer has made, is making or could not make of each sound cue's or
+    movie cue's (§55.5)
     sections, published as a snapshot the tick thread holds for a tick - the
     durations' pattern - and read by the one resolver of what a cue plays.
 
@@ -41,7 +42,8 @@ namespace wfg::audio
         std::string cue;        // the sound cue's identifier
         std::string editText;   // the edit this render is of, as doc::editText spells it
         std::string key;        // the render's key, which names its file
-        std::string file;       // the render's name, relative to the media folder (".edits/<key>.wav")
+        std::string file;       // the render's name, relative to the media folder (".edits/<key>.wav", ".mov" for a movie)
+        std::string kind;       // "sound" or "movie" (namespace draft §55.5)
         std::string state;      // renderState's words
         std::string problem;    // why it failed, in words
         int percent = 0;

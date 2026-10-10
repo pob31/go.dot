@@ -16,6 +16,9 @@
 
 #include "EditRenderer.h"
 
+#include <wfg/engine/video/Movie.h>
+#include <wfg/engine/video/MovieEditRender.h>
+
 #include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -37,6 +40,23 @@ namespace wfg::audio
         bool stopRequested (const std::atomic<bool>* stop) noexcept
         {
             return stop != nullptr && stop->load (std::memory_order_relaxed);
+        }
+
+        /*  A JOB'S KIND, by its source's name (namespace draft §55.5): a
+            movie renders to a movie, a sound to a WAV. */
+        bool isMovieJob (const std::string& sourceName) noexcept
+        {
+            return video::movie::isMovieName (sourceName);
+        }
+
+        const char* kindOf (const std::string& sourceName) noexcept
+        {
+            return isMovieJob (sourceName) ? "movie" : "sound";
+        }
+
+        const char* renderExtensionOf (const std::string& sourceName) noexcept
+        {
+            return isMovieJob (sourceName) ? ".mov" : ".wav";
         }
 
         float gainOf (double dB) noexcept
@@ -315,9 +335,11 @@ namespace wfg::audio
         const auto stem = juce::File (juce::String::fromUTF8 (sourceName.c_str())).getFileNameWithoutExtension();
         const auto base = stem + " (edit)";
 
+        const auto extension = renderExtensionOf (sourceName);
+
         for (int n = 1; n < 1000; ++n)
         {
-            const auto name = (n == 1 ? base : base + " " + juce::String (n)) + ".wav";
+            const auto name = (n == 1 ? base : base + " " + juce::String (n)) + extension;
 
             if (! dir.getChildFile (name).exists())
                 return name.toStdString();
@@ -409,6 +431,7 @@ namespace wfg::audio
             auto& entry = (*next)[job.cue];
             const auto previous = entry.file;
             entry.cue = job.cue;
+            entry.kind = kindOf (job.sourceName);
             entry.editText = text;
             entry.state = renderState::rendering;
             entry.percent = 0;
@@ -500,7 +523,8 @@ namespace wfg::audio
             if (! text.empty())
                 text.push_back ('\n');
 
-            text += cue + "\t" + render.state + "\t" + std::to_string (render.percent) + "\t" + render.problem;
+            text += cue + "\t" + render.state + "\t" + std::to_string (render.percent) + "\t" + render.problem
+                  + "\t" + render.kind;
         }
 
         return text;
@@ -587,15 +611,19 @@ namespace wfg::audio
 
     void EditRenderer::render (const RenderJob& job)
     {
+        const auto movie = isMovieJob (job.sourceName);
+        const auto extension = renderExtensionOf (job.sourceName);
+
         EditRender entry;
         entry.cue = job.cue;
+        entry.kind = kindOf (job.sourceName);
         entry.editText = doc::editText (job.sections);
         entry.key = keyFor (job);
-        entry.file = std::string (editsFolder) + "/" + entry.key + ".wav";
+        entry.file = std::string (editsFolder) + "/" + entry.key + extension;
         entry.seconds = doc::editedLength (job.sections);
 
         const auto target = juce::File (juce::String::fromUTF8 (folder.c_str()))
-                              .getChildFile (editsFolder).getChildFile (juce::String (entry.key) + ".wav");
+                              .getChildFile (editsFolder).getChildFile (juce::String (entry.key) + extension);
 
         /*  A RENDER OF THIS VERY EDIT IS THERE ALREADY - an edit put back as it
             was, an unfreeze: it is the render, and nothing is read. */
@@ -609,25 +637,46 @@ namespace wfg::audio
             entry.state = renderState::rendering;
             publishEntry (entry);
 
-            const auto result = renderEdit (resolveMediaPath (folder, job.sourceName), job.sections,
-                                            target.getFullPathName().toStdString(), &stopping,
-                                            [this, &entry] (int percent)
-                                            {
-                                                if (percent != entry.percent && percent % 10 == 0)
-                                                {
-                                                    entry.percent = percent;
-                                                    publishEntry (entry);
-                                                }
-                                            });
+            const auto progress = [this, &entry] (int percent)
+            {
+                if (percent != entry.percent && percent % 10 == 0)
+                {
+                    entry.percent = percent;
+                    publishEntry (entry);
+                }
+            };
+
+            bool ok = false;
+            std::string problem;
+
+            if (movie)
+            {
+                /*  A MOVIE ON ITS OWN GRID (§55.5, ADV): a variable-rate source
+                    lands on its dominant grid, and the readout says so. */
+                const auto result = video::movie::renderMovieEdit (resolveMediaPath (folder, job.sourceName), job.sections,
+                                                                   target.getFullPathName().toStdString(), &stopping, progress);
+                ok = result.ok;
+                problem = result.problem;
+
+                if (ok && result.resampled)
+                    problem = "resampled onto " + osc::formatDouble (result.frameRate) + " fps";
+            }
+            else
+            {
+                const auto result = renderEdit (resolveMediaPath (folder, job.sourceName), job.sections,
+                                                target.getFullPathName().toStdString(), &stopping, progress);
+                ok = result.ok;
+                problem = result.problem;
+            }
 
             if (stopping.load (std::memory_order_relaxed))
                 return;
 
-            entry.state = result.ok ? renderState::done : renderState::failed;
-            entry.percent = result.ok ? 100 : entry.percent;
-            entry.problem = result.problem;
+            entry.state = ok ? renderState::done : renderState::failed;
+            entry.percent = ok ? 100 : entry.percent;
+            entry.problem = problem;
 
-            if (! result.ok)
+            if (! ok)
                 entry.file.clear();
         }
 
@@ -684,7 +733,7 @@ namespace wfg::audio
                 continue;
             }
 
-            if (! file.hasFileExtension ("wav"))
+            if (! file.hasFileExtension ("wav") && ! file.hasFileExtension ("mov"))
                 continue;
 
             if (keep.count (file.getFileNameWithoutExtension().toStdString()) == 0)
@@ -701,7 +750,7 @@ namespace wfg::audio
             done = onFrozen;
         }
 
-        const auto say = [&] (const std::string& bounce, const std::string& problem)
+        const auto say = [&] (const std::string& bounce, const std::string& soundBounce, const std::string& problem)
         {
             if (! problem.empty())
             {
@@ -717,46 +766,86 @@ namespace wfg::audio
             }
 
             if (done)
-                done (job, bounce, problem);
+                done (job, bounce, soundBounce, problem);
         };
 
-        const juce::File render { juce::String::fromUTF8 (resolveMediaPath (folder, job.renderFile).c_str()) };
+        /*  ONE BOUNCE: the render copied beside its source - the show's own
+            media/, or the folder around it where the source lives - under a
+            free name; the name landed, or empty with the problem said. */
+        const auto land = [this] (const std::string& renderFile, const std::string& source,
+                                  std::string& problem) -> std::string
+        {
+            const juce::File render { juce::String::fromUTF8 (resolveMediaPath (folder, renderFile).c_str()) };
 
-        if (! render.existsAsFile())
-            return say ({}, "the render is not there");
+            if (! render.existsAsFile())
+            {
+                problem = "the render is not there";
+                return {};
+            }
 
-        /*  BESIDE ITS SOURCE: the show's own media/, or the folder around it
-            where the source lives. */
-        const auto into = mediaRootOf (folder, job.source);
-        const auto name = freeBounceName (into, job.source);
+            const auto into = mediaRootOf (folder, source);
+            const auto name = freeBounceName (into, source);
+
+            if (name.empty())
+            {
+                problem = "no free name for the bounce";
+                return {};
+            }
+
+            const auto target = juce::File (juce::String::fromUTF8 (into.c_str())).getChildFile (juce::String::fromUTF8 (name.c_str()));
+            const auto partial = target.getSiblingFile ("." + target.getFileName() + ".part");
+            partial.deleteFile();
+
+            if (! render.copyFileTo (partial))
+            {
+                partial.deleteFile();
+                problem = "the bounce could not be written";
+                return {};
+            }
+
+            if (! partial.moveFileTo (target))
+            {
+                partial.deleteFile();
+                problem = "the bounce could not be moved into place";
+                return {};
+            }
+
+            if (media != nullptr)
+            {
+                const auto path = target.getFullPathName().toStdString();
+                MediaRecord record;
+                record.seconds = isMovieJob (source) ? std::max (0.0, video::movie::durationOf (path))
+                                                     : mediaDurationSeconds (path);
+                media->publish (name, std::move (record));
+            }
+
+            return name;
+        };
+
+        std::string problem;
+        const auto name = land (job.renderFile, job.source, problem);
 
         if (name.empty())
-            return say ({}, "no free name for the bounce");
+            return say ({}, {}, problem);
 
-        const auto target = juce::File (juce::String::fromUTF8 (into.c_str())).getChildFile (juce::String::fromUTF8 (name.c_str()));
-        const auto partial = target.getSiblingFile ("." + target.getFileName() + ".part");
-        partial.deleteFile();
+        /*  THE PAIR (§55.5, ADW): the sound's bounce beside its own source,
+            and the movie's taken back when it cannot land - one answer, or
+            none. */
+        std::string soundName;
 
-        if (! render.copyFileTo (partial))
+        if (! job.soundRenderFile.empty())
         {
-            partial.deleteFile();
-            return say ({}, "the bounce could not be written");
+            soundName = land (job.soundRenderFile, job.soundSource, problem);
+
+            if (soundName.empty())
+            {
+                juce::File (juce::String::fromUTF8 (mediaRootOf (folder, job.source).c_str()))
+                    .getChildFile (juce::String::fromUTF8 (name.c_str())).deleteFile();
+                return say ({}, {}, "the sound's " + problem.substr (4));
+            }
         }
 
-        if (! partial.moveFileTo (target))
-        {
-            partial.deleteFile();
-            return say ({}, "the bounce could not be moved into place");
-        }
-
-        if (media != nullptr)
-        {
-            MediaRecord record;
-            record.seconds = mediaDurationSeconds (target.getFullPathName().toStdString());
-            media->publish (name, std::move (record));
-        }
-
-        say (name, {});
+        say (name, soundName, {});
     }
 
     //==============================================================================
@@ -765,8 +854,9 @@ namespace wfg::audio
         registry.add ({ "media.freeze",
                         "Asks for a sound's edit to be frozen (namespace draft 55, ADN): its render copied into"
                         " media/ as \"<stem> (edit).wav\", after which media.frozen points the cue at it. Refused"
-                        " busy until the render of the edit as it now is exists. Taken and ignored where"
-                        " nothing renders.",
+                        " busy until the render of the edit as it now is exists. A movie is frozen with its locked"
+                        " sound, as one pair (55.5, ADW), once both renders are there; the sound's own freeze is"
+                        " refused locked-to-movie. Taken and ignored where nothing renders.",
                         { { "cue", 's', false } },
                         false,
                         [renderer, &document] (CommandContext&, const std::vector<osc::Value>& args)
@@ -780,8 +870,14 @@ namespace wfg::audio
                             if (document.isLocked())
                                 return Outcome::rejected (reason::locked);
 
-                            if (! cue.hasType ("Media"))
+                            const auto movie = document.isMovieCue (cue);
+
+                            if (! cue.hasType ("Media") && ! movie)
                                 return Outcome::rejected (reason::typeMismatch);
+
+                            //  A sound locked to a movie is frozen with it (55.5, ADW): edit the movie.
+                            if (cue.hasType ("Media") && cue["lockedTo"].toString().isNotEmpty())
+                                return Outcome::rejected (reason::lockedToMovie);
 
                             if (! document.hasOpenEdit (cue))
                                 return Outcome::rejected (reason::badValue);
@@ -790,13 +886,47 @@ namespace wfg::audio
                                 return Outcome::ok (args);
 
                             const auto renders = renderer->snapshot();
-                            const auto found = renders->find (cueId);
 
-                            if (found == renders->end() || found->second.state != renderState::done
-                                  || found->second.editText != cue::editTextOf (cue) || found->second.file.empty())
+                            /*  The render of this cue's edit as it now is: its file, or
+                                nothing while it is not there yet. */
+                            const auto renderOf = [&renders] (const juce::ValueTree& node) -> std::string
+                            {
+                                const auto found = renders->find (node["id"].toString().toStdString());
+
+                                if (found == renders->end() || found->second.state != renderState::done
+                                      || found->second.editText != cue::editTextOf (node) || found->second.file.empty())
+                                    return {};
+
+                                return found->second.file;
+                            };
+
+                            EditRenderer::FreezeJob job;
+                            job.cue = cueId;
+                            job.source = cue["file"].toString().toStdString();
+                            job.renderFile = renderOf (cue);
+
+                            if (job.renderFile.empty())
                                 return Outcome::rejected (reason::busy);
 
-                            renderer->freeze ({ cueId, cue["file"].toString().toStdString(), found->second.file });
+                            /*  THE PAIR: a movie's locked sound cut in step freezes with
+                                it, once its render is of the sections as they now are. */
+                            if (movie)
+                                for (const auto& sound : document.soundsLockedTo (cue))
+                                {
+                                    if (! document.hasOpenEdit (sound))
+                                        continue;
+
+                                    job.soundCue = sound["id"].toString().toStdString();
+                                    job.soundSource = sound["file"].toString().toStdString();
+                                    job.soundRenderFile = renderOf (sound);
+
+                                    if (job.soundRenderFile.empty())
+                                        return Outcome::rejected (reason::busy);
+
+                                    break;
+                                }
+
+                            renderer->freeze (job);
                             return Outcome::ok (args);
                         } });
     }

@@ -61,6 +61,7 @@
 #include <wfg/engine/video/Geometry.h>
 #include <wfg/engine/video/Mapping.h>
 #include <wfg/engine/video/Movie.h>
+#include <wfg/engine/video/MovieEditRender.h>
 #include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/RegionSink.h>
 #include <wfg/engine/video/Strip.h>
@@ -2612,6 +2613,89 @@ TEST_CASE ("video host: the picked movie's tile shows the frame at the second as
 
         host.hideTile();
         host.setMonitoring (false);
+    }
+
+    folder.deleteRecursively();
+}
+
+//==============================================================================
+/*  A MOVIE'S EDIT, RENDERED AND PLAYED (namespace draft §55.5): the render is
+    a HAP movie like any other to the renderer with no window, its shots in
+    the edit's order and its dissolve between them. */
+
+TEST_CASE ("video host: a movie's edit rendered is played by a renderer with no window, the shots in their new order and the dissolve between them (§55.5)")
+{
+    using namespace wfg::testing::hapmovie;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-edit-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    /*  THREE SECONDS AT TEN A SECOND: red, green, blue. */
+    std::vector<Bytes> frames;
+    const std::uint32_t colours[3] { 0xFF0000, 0x00FF00, 0x0000FF };
+
+    for (int n = 0; n < 30; ++n)
+        frames.push_back (section (0xAB, solidDxt1 (16, 8, colours[n / 10])));
+
+    const auto movie = writeMovie (folder, "three.mov", hapMovie (16, 8, frames, 10));
+
+    /*  THE BLUE SECOND THEN THE GREEN, four frames of dissolve between. */
+    doc::Section blue, green;
+    blue.id = "B";  blue.in = 2.0;  blue.out = 3.0;
+    green.id = "G"; green.in = 1.0; green.out = 2.0; green.crossfade = 0.4;
+
+    const auto render = folder.getChildFile ("edit.mov");
+    const auto result = video::movie::renderMovieEdit (movie.getFullPathName().toStdString(), { blue, green },
+                                                       render.getFullPathName().toStdString());
+    REQUIRE_MESSAGE (result.ok, result.problem);
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "movie";
+        layer.file = render.getFullPathName().toStdString();
+
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { clock.now(), 1.0 });
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 0.5 });
+
+        std::int64_t seen = -1;
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x0000FFu; }));
+
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 1.5 });
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x00FF00u; }));
+
+        /*  INSIDE THE DISSOLVE, at 0.95 s: blue five eighths, and the red the
+            incoming green's section runs back into three eighths. */
+        const auto closeTo = [] (std::uint32_t colour, int red, int green, int blue, int within)
+        {
+            return std::abs (static_cast<int> ((colour >> 16) & 0xffu) - red) <= within
+                && std::abs (static_cast<int> ((colour >> 8) & 0xffu) - green) <= within
+                && std::abs (static_cast<int> (colour & 0xffu) - blue) <= within;
+        };
+
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 0.95 });
+        CHECK (tickUntil (host, clock, [&] { return closeTo (probeOf (r, 0, seen), 96, 0, 159, 12); }));
     }
 
     folder.deleteRecursively();

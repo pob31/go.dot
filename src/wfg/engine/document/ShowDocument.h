@@ -428,6 +428,9 @@ namespace wfg::doc
             its locked sound's sections are copies of its own. */
         bool isMovieCue (const juce::ValueTree& cue) const;
 
+        /** The media cues locked to a movie cue, in document order: what its edit carries with it (55.5). */
+        std::vector<juce::ValueTree> soundsLockedTo (const juce::ValueTree& movie) const;
+
         /*  A MOVIE'S SECTIONS MOVED BACK BY A CUT (a conversion of its used
             span, 37.5 WI): the file's seconds change under an edit whose
             timeline does not, so the edges are written plainly, nothing
@@ -1175,7 +1178,6 @@ namespace wfg::doc
         EditResult carrySectionEdit (juce::ValueTree cue, const std::function<EditResult()>& write);
         EditResult carryThrough (juce::ValueTree cue, const std::vector<TimeRun>& runs);
         EditResult carryLanes (juce::ValueTree cue, const std::vector<TimeRun>& runs);
-        std::vector<juce::ValueTree> soundsLockedTo (const juce::ValueTree& movie) const;
         std::string derivedIdFor (const std::string& joined);
         bool carryingSections = false;
 

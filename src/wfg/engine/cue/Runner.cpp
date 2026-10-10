@@ -14685,6 +14685,18 @@ namespace wfg::cue
         return out;
     }
 
+    bool Runner::namesMovieFile (const std::string& relativeFile) const
+    {
+        if (relativeFile.empty())
+            return false;
+
+        for (const auto& job : showing)
+            if (job.movie && ! job.removed && job.movieFile == relativeFile)
+                return true;
+
+        return false;
+    }
+
     std::vector<std::string> Runner::soundsLockedTo (const std::string& movieCue) const
     {
         if (movieCue.empty())

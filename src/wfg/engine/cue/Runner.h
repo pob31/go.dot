@@ -1094,6 +1094,12 @@ namespace wfg::cue
         ListState& listState() noexcept { return lists; }
         const ListState& listState() const noexcept { return lists; }
 
+        /*  WHETHER A SHOWING MOVIE PLAYS THIS FILE, by its name relative to the
+            media folder (namespace draft §55.5, ADP): a render a newer one has
+            replaced waits while a picture is up on it, as a sounding run keeps
+            its file. Tick thread. */
+        bool namesMovieFile (const std::string& relativeFile) const;
+
         /*  The list a cue belongs to, by climbing to the top, or empty.
 
             Asked by the handlers that append a step - a cue fired by name or by
