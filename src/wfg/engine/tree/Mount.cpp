@@ -486,6 +486,9 @@ namespace wfg::tree
                 so an array read as "" and was published as `"PANIC": ""`. */
             if (const auto* panic = property (*godot, "PANIC"); panic != nullptr)
                 applyPanic (*panic, out, warnings);
+
+            //  The role, a word; anything else there is not one (AFM).
+            out.role = stringProperty (*godot, "ROLE");
         }
 
         /*  Container, state or event.

@@ -121,7 +121,7 @@ namespace wfg::client::model
                 /*  The device, then the menus that walk its tree to the address
                     (namespace draft §56, AEP), deepest last. */
                 { "osc",     { "device", "path1", "path2", "path3", "path4", "path5", "path6", "path7",
-                               "path8", "address", "value", "wait", "timeout", "duration", "loop", "doh",
+                               "path8", "role", "address", "value", "wait", "timeout", "duration", "loop", "doh",
                                "dohRollback" } },
                 { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait", "doh",
                                "dohRollback" } },
@@ -1045,10 +1045,15 @@ namespace wfg::client::model
                 if (field.name == "device")
                     return;
 
-            for (const auto& field : decided)
+            for (const auto& found : decided)
             {
-                if (field.name != "address" || ! field.writable)
+                if (found.name != "address" || ! found.writable)
                     continue;
+
+                /*  A COPY, because this body grows `decided` with the path
+                    menus and a reference into it would not survive the
+                    growth. */
+                const Field field = found;
 
                 Field aim;
                 aim.address = field.address;
@@ -1119,6 +1124,25 @@ namespace wfg::client::model
                                            " rewrites the address below and clears the menus after it."
                                          : "The next part of the address, among what the part above holds.";
                     decided.push_back (std::move (step));
+                }
+
+                /*  AND WHAT THE NODE IS FOR, when its preset says (namespace
+                    draft §57, AFM): the role word, read only, under the path -
+                    so a cue on "/digico/snapshots/fire" says "scene.recall"
+                    in the vocabulary every preset shares. */
+                if (const auto* node = snapshot.find (field.value); node != nullptr && ! node->role.empty())
+                {
+                    Field role;
+                    role.address = field.address;
+                    role.name = "role";
+                    role.label = "role";
+                    role.control = Control::text;
+                    role.value = node->role;
+                    role.typeTags = "s";
+                    role.writable = false;
+                    role.description = "What this node is for, in the words every preset shares:"
+                                       " a scene recall, a strip's level, an object's position.";
+                    decided.push_back (std::move (role));
                 }
 
                 /*  AND A VALUE THE NODE ENUMERATES IS A MENU OF THEM: a

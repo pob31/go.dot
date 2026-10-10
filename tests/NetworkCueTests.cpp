@@ -39,6 +39,7 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/CurveCommands.h>
 #include <wfg/engine/cue/CurveTable.h>
+#include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -4197,4 +4198,79 @@ TEST_CASE ("network cue: a cue, its further message and its curve aimed at a dev
 
     //  And the network heard none of it: the port is where the device is.
     CHECK_FALSE (rig.listener.waitFor (1, 150));
+}
+
+//==============================================================================
+/*  A PRESET'S NODES TAKE CURVES (namespace draft §57, AFI, the author's
+    confirmation of 2026-10-10: "make sure once we have the device definitions
+    that the values can be automated with automation curves as we have added
+    to regular OSC cues"). A device made from a preset is a described device
+    and a cue aimed at it is the OSC cue of §45, so a curve on its node plays
+    through the device's door as on any other: this is the case that says so,
+    against the shipped ADM-OSC preset - a one-argument gain and one argument
+    of a three-argument position. */
+TEST_CASE ("network cue: a curve on a preset's node plays through the described device, one argument of three included")
+{
+    NetworkRig rig;
+
+    tree::PresetTable presets;
+    presets.scan (std::string (WFG_REPO_ROOT) + "/presets/devices");
+    const auto* adm = presets.find ("adm-osc");
+    REQUIRE (adm != nullptr);
+    REQUIRE (adm->usable());
+
+    tree::MountDeclaration processor;
+    processor.id = "ADMOSC01";
+    processor.prefix = adm->rootRow();
+    processor.namespaceFile = "namespaces/adm-osc-v1.json";
+    processor.host = "127.0.0.1";
+    processor.port = rig.listener.port();
+    REQUIRE (rig.mounts.load (processor, adm->text).ok);
+    CHECK (rig.mounts.nodeCount ("ADMOSC01") == static_cast<std::size_t> (adm->nodeCount));
+
+    //  The gain, one argument, ramped over a second.
+    const auto gain = rig.makeOsc ("/adm/obj/1/gain", "f:0", "none");
+    curveOn (rig, gain, 0, "0 0 1 1");
+
+    //  The position, three arguments, its Y alone ramped from behind to in front.
+    const auto position = rig.makeOsc ("/adm/obj/1/xyz", "f:0 f:-1 f:0", "none");
+    curveOn (rig, position, 1, "0 -1 1 1");
+
+    rig.fire (gain);
+    rig.fire (position);
+
+    //  Twenty-five ticks into the gain's second, twenty-four into the position's.
+    for (int n = 0; n < 24; ++n)
+        rig.tickOnce();
+
+    CHECK (faderOf (rig, "/adm/obj/1/gain") == doctest::Approx (0.5f).epsilon (0.05));
+
+    const auto* xyz = rig.mounts.valueOf ("/adm/obj/1/xyz");
+    REQUIRE (xyz != nullptr);
+    REQUIRE (xyz->size() == 3u);
+    CHECK ((*xyz)[0].getFloat32() == doctest::Approx (0.0f));
+    CHECK ((*xyz)[1].getFloat32() == doctest::Approx (0.0f).epsilon (0.05));
+    CHECK ((*xyz)[2].getFloat32() == doctest::Approx (0.0f));
+    CHECK (rig.runOf (gain)->state == cue::runState::playing);
+    CHECK (rig.runOf (position)->state == cue::runState::playing);
+
+    for (int n = 0; n < 40; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (gain)->state == cue::runState::done);
+    CHECK (faderOf (rig, "/adm/obj/1/gain") == doctest::Approx (1.0f));
+    CHECK ((*rig.mounts.valueOf ("/adm/obj/1/xyz"))[1].getFloat32() == doctest::Approx (1.0f));
+
+    //  And every move left for the processor: the datagrams carry the preset's addresses.
+    REQUIRE (rig.listener.waitFor (50));
+    CHECK (sentTo (rig, "/adm/obj/1/gain") >= 25u);
+    CHECK (sentTo (rig, "/adm/obj/1/xyz") >= 25u);
+
+    //  A node the preset does not have is refused at GO, as any described device refuses it.
+    const auto nowhere = rig.makeOsc ("/adm/obj/999/gain", "f:1", "none");
+    rig.fire (nowhere);
+    rig.tickOnce();
+    REQUIRE (rig.runOf (nowhere) != nullptr);
+    CHECK (rig.runOf (nowhere)->state == cue::runState::failed);
+    CHECK (rig.runOf (nowhere)->error == reason::badAddress);
 }

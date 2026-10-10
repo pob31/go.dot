@@ -162,13 +162,24 @@ namespace wfg::tree
         {
             out += indent (depth) + "\"GODOT\": {";
 
+            /*  THE ROLE RIDES WITH THE KIND, for an event as for a state
+                (namespace draft §57, AFM): a scene recall is an event, and
+                what it is for is the one thing a client wants to know of it. */
             if (node.kind != Kind::state)
             {
-                out += "\"KIND\": " + quoted (kindName (node.kind)) + "}";
+                out += "\"KIND\": " + quoted (kindName (node.kind));
+
+                if (! node.role.empty())
+                    out += ", \"ROLE\": " + quoted (node.role);
+
+                out += "}";
                 return;
             }
 
             out += "\"KIND\": " + quoted (kindName (node.kind));
+
+            if (! node.role.empty())
+                out += ", \"ROLE\": " + quoted (node.role);
             out += ", \"RATE_CAP\": " + osc::formatDouble (node.rateCap);
             out += ", \"ANTICIPATABLE\": " + std::string (node.anticipatable ? "true" : "false");
 

@@ -1,0 +1,320 @@
+SPAT Revolution OSC Table and Guideline
+Available in Version	Category	Parameter Name	SPAT Message	Values	Minimum	Maximum	Default	Format	Description	Commentary	ADM-OSC (official)	ADM-OSC (supported)
+FLUX:: SPAT Revolution supports by default 3 input grammars: FLUX:: OSC grammar, ADM-OSC grammar and IRCAM ADMix positional grammar.		
+For position / radiation messages such as XYZ and AED, it supports indivual messages, abbrievated individual messages, packed messages (XYZ or AED) or partially packed messages (XY or AE or AD).	
+On OSC Output, various OSC connections options are available to configure a custom OSC output.							
+1) AED or/and XYZ packing can be forced on output 2) Auto-Bundle feature of OSC can be enabled or disabled. 3) Message can be sent with Index as Argument rather then in the message (aka /source/aed, [1, 45, 45, 2] instead of /source/1/aed, [45, 45, 2] )
+4) Ping-Pong feature will force send messages coming from an OSC source back to it (by default, we send all message incoming to all output destination except destination that are the source of the message. The destination which is defined as the source are the output with same IP address and a port number in the range of [input OSC port / input OSC port +10]. Example : for Input 127.0.01 Port 8000, Output 127.0.0.1 Port 8009 is considered as the same device, Port 8011 as another device)
+5) Touch/Release messages are used to nicely integrate with DAW Automation features, this can de disabled on output if required or if messages are not supported by destination.	
+6) Alternatively, ADM-OSC grammar can be used on output rather the the standard FLUX:: OSC grammar.							
+																									
+- Remote number wild card (*) OSC Messages with the remote number * will apply message on all elements						
+- Remote number (-1).  Currently selected source(s): Will apply message on the current selection. By default, no messages are sent for the current selection. It can be enabled on the Preferences, enabling "Send current selection messages" on the OSC Main panel.
+- Interpollation Time (XFade time) Add Argument to any messages to define the time the interpolation time. For example, /source/1/azim 20.0 2.0 will interpolate the azimuth of the source one to 20°, on 2 seconds.	
+- Relative OSC. OSC message with a /relative after the remote number will add the value given in argument. For example, /source/2/relative/gain 1.0 will add 1dB to the gain of the source 2. This allow work with timing: /source/2/relative/dist 2.0 3.0 will add 2 meters to the distance of the source 2.
+- Range.  OSC message with remote number as a range like 1-5 or [3-7] will apply the message on the specified range						
+- Dump information ex: /source/*/dump, will send all sources parameters to the OSC output slots), /snapshot/2/dump all the parameters of the snapshot remote number 2.	
+- Get (?) information: /source/*/azim/? (will send all source azimuth to the OSC out slots), /source/*/azim/get (will request all source azimuth to be sent the OSC output slots)	
+																									
+This table lists all the OSC message in SPAT Revolution. The messages in black color are already implemented in the last public release 23.11. The messages in blue are released with 24.06. Changed with version 25.01 are green (ADM-OSC related)
+Project	These messages are related to project settings. All these messages begin by "/global/"
+1.1.0.48049	Global - Config	3D Scale in 3D view	/global/project/scale		0.1	1000	3	Meters	define the scale of the 3D View in Spat Revolution		
+24.06.50385	Source remote numbers	/global/project/source/remotenumber/?	Any	Send a list of the sources remote number
+24.06.50385	Room remote numbers	/global/project/room/remotenumber/?	Any	Send a list of the rooms remote number
+24.06.50385	Master remote numbers	/global/project/master/remotenumber/?	Any	Send a list of the masters remote number
+24.06.50385	Snapshot remote numbers	/global/project/snapshot/remotenumber/?	Any	Send a list of the snapshots remote number
+26.04	Cue count	/global/project/cue/count	Any	Send the number of registered cues.
+26.04	Cue remote numbers	/global/project/cue/remotenumber/?	Any	Send a list of the cues remote numbers.
+26.04	Animation count	/global/project/animation/count	Any	Send the number of registered animations.
+26.04	Animation remote numbers	/global/project/animation/remotenumber/?	Any	Send a list of the animations remote numbers.
+26.04	Timeline count	/global/project/timeline/count	Any	Send the number of registered timelines.
+26.04	Timeline remote numbers	/global/project/timeline/remotenumber/?	Any	Send a list of the timelines remote numbers.
+24.06.50385	Global - Project	Load project	/global/load	String	Path of the session	Load a session
+24.06.50385	Save project	/global/save	Any	Save the session
+24.06.50385	Global - View	Go to specified page	/global/goto	String	Name of the page	Navigate to the specificed page, for example "Snapshots", "Room1", ...
+24.06.50385	Open the sources properties panel	/global/sources/panel/open	Any	If in a room page, open the sources properties panel
+24.06.50385	Open the room properties panel	/global/room/panel/open	Any	If in a room page, open the room properties panel
+24.06.50385	Open the output properties panel	/global/output/panel/open	Any	If in a room page, open the output properties panel
+24.06.50385	Toggle the sources properties panel	/glboal.sources/properties/toggle	Any	If in a room page, toggle the output properties panel
+24.06.50385	Global - Transport	Record	/global/record	Any	Launch the record
+24.06.50385	Record	/global/stop	Any	Stop the record
+26.04	Play	/global/play	Any	Start playback
+26.04	Forward	/global/forward	Any	Move the transport forward
+26.04	Rewind	/global/rewind	Any	Move the transport backward
+																									
+Sources	These messages are related to the sources' properties.			
+All these messages begin by "/source/(k)/". The index (k) has to be replaced by:		(k) is the remote number
+- source index if only one source is aiming. For example: "/source/12/azim", -50 will change the azimuth of the source number 12 to -50°.
+1.1.0.48049	General	Select / Unselect	/source/(k)/select	bool	0	1	0	On/Off	select or unselect the source depending on the argument			/adm/obj/(k)/select												
+1.1.0.48049	Name	/source/(k)/name	String					set the name of the source.		/adm/obj/(k)/name													
+1.1.0.48049	Enable	/source/(k)/enable	Bool	0	1	1	On/Off	enable or disable the source (same as mute)			/adm/obj/(k)/enable												
+1.1.0.48049	Mute	/source/(k)/mute	Bool	0	1	0	On/Off	unmuted or mute a source : 0: muted, 1: unmuted		/adm/obj/(k)/mute i													
+1.1.0.48049	Solo	/source/(k)/solo	Bool	0	1	0	On/Off	solo on unsolo a source			/adm/obj/(k)/solo i												
+2020.10.0	N.R.	/source/(k)/invph	Bool	0	1	0	On/Off	invert the phase of a source			/adm/obj/(k)/invph i												
+1.1.0.48049	Gain	/source/(k)/gain	Float	-144.5	24	0	Decibels	set the global gain of a source		/adm/obj/(k)/gain f													
+1.1.0.48049	LFE	/source/(k)/lfe	Float	-144.5	24	-144.5	Decibels	set the LFE gain of a source		/adm/obj/(k)/s f													
+2022.02.50148	LFE 2	/source/(k)/lfe2	Float	-144.5	24	-144.5	Decibels	set the LFE 2 gain of a source			/adm/obj/(k)/s2 f												
+2022.02.50148	LFE 3	/source/(k)/lfe3	Float	-144.5	24	-144.5	Decibels	set the LFE 3 gain of a source			/adm/obj/(k)/s3 f												
+2022.02.50148	LFE 4	/source/(k)/lfe4	Float	-144.5	24	-144.5	Decibels	set the LFE 4 gain of a source			/adm/obj/(k)/s4 f												
+2022.02.50148	Room Gain	/source/(k)/rg(n)	Float	-144.5	24	-144.5	Decibels	set the room gain for the dedicated room (room number is (n), for example: /source/2/rg4 for the forth room)			/adm/obj/(k)/roomGain(n)												
+2023.11.50341	Color	/source/(k)/color	String					set the color of the source. The value is expressed as a string, in the following format (rgba): "#FFFFFFFF"			/adm/obj/(k)/color
+																									
+1.1.0.48049	Perceptual Factors	Presence	/source/(k)/pres	Float	0	120	100	%	set the presence of a source			/adm/obj/(k)/dg f												
+1.1.0.48049	Warmth	/source/(k)/warmth	Float	0	60	30		set the warmth of a source			/adm/obj/(k)/warmth f												
+1.1.0.48049	Brillance	/source/(k)/bril	Float	0	60	30		set the brillance of a source			/adm/obj/(k)/bril f												
+1.1.0.48049	Room presence	/source/(k)/prer	Float	0	120	48	%	set the room presence of a source			/adm/obj/(k)/prer f												
+1.1.0.48049	Running Reverberance	/source/(k)/revp	Float	0	50	34		set the running reverberance of a source			/adm/obj/(k)/revp f												
+1.1.0.48049	Envelopment	/source/(k)/env	Float	0	50	25		set the envelopment of a source			/adm/obj/(k)/env f												
+																									
+1.1.0.48049	Reverb	Reverb On	/source/(k)/reverb/enable	Bool	0	1	1	On/Off	enable or disable the Reverb			/adm/obj/(k)/reverb/enable i													
+1.1.0.48049	Early On	/source/(k)/early	Bool	0	1	1	On/Off	enable or disable the Reverb Early			/adm/obj/(k)/early i													
+1.1.0.48049	Cluster On	/source/(k)/cluster	Bool	0	1	1	On/Off	enable or disable the Reverb Cluster			/adm/obj/(k)/cluster i													
+1.1.0.48049	Tail On	/source/(k)/tail	Bool	0	1	1	On/Off	enable or disable the Reverb Tail			/adm/obj/(k)/tail													
+																									
+1.1.0.48049	Axis EQ	Axis Gain	/source/(k)/axis/G0	Float	-60	10	0	Decibels	set the global gain of axis filter of a source	/adm/obj/(k)/axis/G0 f													
+1.1.0.48049	Axis Low Gain	/source/(k)/axis/Gl	Float	-30	30	0	Decibels	:set the low gain of axis filter of a source			/adm/obj/(k)/axis/Gl f													
+1.1.0.48049	Axis Medium Gain	/source/(k)/axis/Gm	Float	-30	30	0	Decibels	set the medium gain of axis filter of a source			/adm/obj/(k)/axis/Gm f													
+1.1.0.48049	Axis High Gain	/source/(k)/axis/Gh	Float	-30	30	0	Decibels	set the high gain of axis filter of a source			/adm/obj/(k)/axis/Gh f													
+1.1.0.48049	Axis Low Frequency	/source/(k)/axis/fl	Float	20	20000	177	Hertz	set the low/mid crossover frequency of axis filter of a source			/adm/obj/(k)/axis/fl f													
+1.1.0.48049	Axis High Frequency	/source/(k)/axis/fh	Float	20	20000	5657	Hertz	set the mid/high crossover frequency of axis filter of a source			/adm/obj/(k)/axis/fh f													
+1.1.0.48049	Axis parameters	/source/(k)/axis/params	List of 6 floats				set all the parameters of axis filter of the source, the previous parameters. Parameters are requested in a list, with the following order: [G0, Gl, Gm, Gh, fl, flh]			/adm/obj/(k)/axis/params													
+																									
+1.1.0.48049	Omni EQ	Omni Gain	/source/(k)/omni/G0	Float	-60	10	0	Decibels	set the global gain of omni filter of a source	/adm/obj/(k)/omni/G0 f													
+1.1.0.48049	Omni Low Gain	/source/(k)/omni/Gl	Float	-30	30	1.7	Decibels	:set the low gain of omni filter of a source			/adm/obj/(k)/omni/Gl f													
+1.1.0.48049	Omni Medium Gain	/source/(k)/omni/Gm	Float	-30	30	0	Decibels	set the medium gain of omni filter of a source			/adm/obj/(k)/omni/Gm f													
+1.1.0.48049	Omni High Gain	/source/(k)/omni/Gh	Float	-30	30	-3.8	Decibels	set the high gain of omni filter of a source			/adm/obj/(k)/omni/Gh f													
+1.1.0.48049	Omni Low Frequency	/source/(k)/omni/fl	Float	20	20000	177	Hertz	set the low/mid crossover frequency of omni filter of a source			/adm/obj/(k)/omni/fl f													
+1.1.0.48049	Omni High Frequency	/source/(k)/omni/fh	Float	20	20000	5657	Hertz	set the mid/high crossover frequency of omni filter of a source			/adm/obj/(k)/omni/fh f													
+1.1.0.48049	Omni parameters	/source/(k)/omni/params	List of 6 floats				set all the parameters of omni filter of the source, the previous parameters. Parameters are requested in a list, with the following order: [G0, Gl, Gm, Gh, fl, flh]			/adm/obj/(k)/omni/params													
+																									
+1.1.0.48049	Barycentric	Rotation X	/source/(k)/rotx	Float	-180	180	0	Degrees	set the x rotation	for Multi-Channel source only or multi-selection		/adm/obj/(k)/rotx f													
+1.1.0.48049	Rotation Y	/source/(k)/roty	Float	-180	180	0	Degrees	set the y rotation	for Multi-Channel source only or multi-selection		/adm/obj/(k)/roty f													
+1.1.0.48049	Rotation Z	/source/(k)/rotz	Float	-180	180	0	Degrees	set the z rotation	for Multi-Channel source only or multi-selection		/adm/obj/(k)/rotz f													
+1.1.0.48049	Rotation	/source/(k)/rotation	List of 3 floats				set the barycenter rotation on x, y and z, in degrees. Parameters are the previous, requested in a list, with the following order: [rotx, roty, rotz]			/adm/obj/(k)/rotation													
+1.1.0.48049	Scale (Multichannel)	/source/(k)/scale	Float	0.1	100	1	Meters	set the scale of a multichannel source	for Multi-Channel source only or multi-selection		/adm/obj/(k)/scale f													
+																									
+1.1.0.48049	Radiation	Relative Direction.	/source/(k)/ocmod	Bool	0	1	1	On/Off	enable/disable the relative direction of a source			/adm/obj/(k)/ocmod i													
+1.1.0.48049	Azimuth	/source/(k)/azim	Float	-180	180	0	Degrees	set the azimuth of a source		/adm/obj/(k)/azim f														
+1.1.0.48049	Elevation	/source/(k)/elev	Float	-90	90	0	Degrees	set the elevation of a source		/adm/obj/(k)/elev f														
+1.1.0.48049	Distance	/source/(k)/dist	Float	0.01	100	2,0	Meters	set the distance of a source		/adm/obj/(k)/dist f														
+1.1.0.48049	AED	/source/(k)/aed	List of 3 Floats				set the azimuth, the elevation and the distance of a source. Parameters are the previous, requested in a list, with the following order: [azim, elev, dist]. It work too with [a, e], [a, d], and [a, d, e].		/adm/obj/(k)/aed f f f														
+1.1.0.48049	Yaw	/source/(k)/yaw	Float	-180	180	0	Degrees	set the yaw of a source			/adm/obj/(k)/yaw f													
+1.1.0.48049	Pitch	/source/(k)/pitch	Float	-90	90	0	Degrees	set the pitch of a source			/adm/obj/(k)/pitch f													
+1.1.0.48049	Aperture	/source/(k)/aperture	Float	10	180	80	Degrees	set the aperture of a sourc			/adm/obj/(k)/aperture f													
+2020.10.0	Roll	/source/(k)/roll	Float	-90	90	0	Degrees	set the roll of a source			/adm/obj/(k)/roll f													
+																									
+1.1.0.48049	Position	Position X	/source/(k)/x	Float	-100	100	0	Meters	set the x coordinate of the source using cartesian coordinates		/adm/obj/(k)/x f														
+1.1.0.48049	Position Y	/source/(k)/y	Float	-100	100	2	Meters	set the y coordinate of the source using cartesian coordinates		/adm/obj/(k)/y f														
+1.1.0.48049	Position Z	/source/(k)/z	Float	-100	100	0	Meters	set the z coordinate of the source using cartesian coordinates		/adm/obj/(k)/z f														
+1.1.0.48049	Position Source XY	/source/(k)/xy	List of 2 floats				Parameters are the previous, requested in a list, with the following order: [x, y].		/adm/obj/(k)/xy f f														
+1.1.0.48049	Position Source XYZ	/source/(k)/xyz	List of 3 floats				Parameters are the previous, requested in a list, with the following order: [x, y, z].		/adm/obj/(k)/xyz f f f														
+																									
+1.1.0.48049	Spreading	Spread	/source/(k)/spread	Float	0	100	0	Percentage	set the spread factor of a source		/adm/obj/(k)/w f														
+1.1.0.48049	n. Neighbors (KNN only)	/source/(k)/nneig	Float	1	100	100	Percentage	set the NumNeighbors of a source			/adm/obj/(k)/nneig f													
+																									
+1.1.0.48049	Options	Early Width	/source/(k)/early/width	Float	1	180	10	Degrees	set the early width size of a source		/adm/obj/(k)/early/width f													
+1.1.0.48049	Dopper	/source/(k)/doppler/enable	Bool	0	1	0		enable/disable the doppler effect for a source		/adm/obj/(k)/doppler/enable i													
+1.1.0.48049	Air Absortion	/source/(k)/air/enable	Bool	0	1	1		enable/disable the air absorption		/adm/config/obj/(k)/distatt/air i													
+1.1.0.48049	Drop Factor	/source/(k)/drop/value	Float	-10	30	6	Decibels	set the drop value of a source		/adm/obj/(k)/drop/value													
+1.1.0.48049	Drop Mode	/source/(k)/drop/type	Bool	0	1	1		set drop mode of a source	0: linear, 1: logarithmic	/adm/obj/(k)/drop/type													
+1.1.0.48049	Coordinate Mode	/source/(k)/cm	Bool	0	1	0		set the source XY CoordinateMode, controlling the XY translation mode	0: PolarMode, 1: CartesianMode	/adm/obj/(k)/cm													
+2022.02.50148	Coordinate Mode	/source/(k)/zcm	Bool	0	1	0		set the source Z CoordinateMode, controlling the Z elevation mode.	0: PolarMode, 1: CartesianMode		/adm/obj/(k)/zcm													
+1.1.0.48049	Pan Rev	/source/(k)/prevf	Float	0	100	0		set the panning reverb factor (cluster)  of a source		/adm/obj/(k)/prevf													
+26.04	FX Rack	FX Rack Activate	/source/(k)/globalfx/activate	Bool	0	1	1	On/Off	Activate the source FX rack.
+26.04	FX Rack Bypass	/source/(k)/globalfx/bypass	Bool	0	1	0	On/Off	Bypass the source FX rack.
+26.04	EQ	EQ Output Gain	/source/(k)/eq/outgain	Float	-24	24	0	Decibels	Set the EQ global gain of a source.
+26.04	EQ Activate	/source/(k)/eq/activate	Bool	0	1	0	On/Off	Activate the EQ for a source.
+26.04	EQ Bypass	/source/(k)/eq/bypass	Bool	0	1	0	On/Off	Bypass the EQ for a source.
+26.04	EQ Band Used	/source/(k)/eq/(n)/used	Bool	0	1	On/Off	Enable the selected EQ band. (n) is the EQ band index.	Default depends on band index: bands 1-6 are used by default, bands 7-16 are unused.
+26.04	EQ Band Enable	/source/(k)/eq/(n)/enable	Bool	0	1	1	On/Off	Bypass or enable the selected EQ band. (n) is the EQ band index.
+26.04	EQ Band Type	/source/(k)/eq/(n)/type	Float	0	8	6	Select the filter type for the selected EQ band. (n) is the EQ band index.	0: Low Pass, 1: High Pass, 2: Band Pass, 3: Band Stop, 4: Low Shelf, 5: High Shelf, 6: Peak, 7: Tilt Shelf, 8: Flat Tilt
+26.04	EQ Band Slope	/source/(k)/eq/(n)/slope	Float	1	8	1	Select the filter slope in dB/octave for the selected EQ band. (n) is the EQ band index.	Value is expressed in 6 dB/oct steps: 1 = 6 dB/oct, ..., 8 = 48 dB/oct.
+26.04	EQ Band Cutoff	/source/(k)/eq/(n)/cutoff	Float	5	22000	1000	Hertz	Adjust the center or cutoff frequency of the selected EQ band. (n) is the EQ band index.
+26.04	EQ Band Gain	/source/(k)/eq/(n)/gain	Float	-24	24	0	Decibels	Adjust the gain of the selected EQ band. (n) is the EQ band index.
+26.04	EQ Band Resonance	/source/(k)/eq/(n)/reso	Float	0.01	10	1	Adjust the resonance (Q) of the selected EQ band. (n) is the EQ band index.
+26.04	EQ Band Bandwidth	/source/(k)/eq/(n)/bwidth	Float	0.05	10	1	Octaves	Adjust the bandwidth (Q) of the selected EQ band. (n) is the EQ band index.	Values shown here match the default EQ bandwidth type (Octaves). Other supported modes are Standard Q: 0.05-40, default 1.4; Flux Q: 1-100, default 7; FabFilter Q: 0.025-40, default 1.
+26.04	Drive	Drive Amount	/source/(k)/drive/amount	Float	0	100	0	Percentage	Configure the amount of drive distortion applied to the source.
+26.04	Drive Activate	/source/(k)/drive/activate	Bool	0	1	0	On/Off	Activate the drive effect for the source.
+26.04	Drive Bypass	/source/(k)/drive/bypass	Bool	0	1	0	On/Off	Bypass the drive effect for the source.
+26.04	Phase	Phase Shift	/source/(k)/phase/shift	Bool	0	1	0	On/Off	Enable or disable phase shift for the source.
+26.04	Phase Amount	/source/(k)/phase/amount	Float	-180	180	0	Degrees	Configure the phase shift amount.
+26.04	Phase Group	/source/(k)/phase/group	Float	0	8	0	Select the phase group used for bypass across multiple sources.	0: no group, 1-8: phase group index.
+26.04	Phase Bypass	/source/(k)/phase/bypass	Bool	0	1	0	On/Off	Bypass the phase effect for the source.
+26.04	Phase Activate	/source/(k)/phase/activate	Bool	0	1	0	On/Off	Activate the phase effect for the source.
+26.04	Compressor	Compressor Global Mode	/source/(k)/comp/globalmode	Float	0	8	0	Select the compressor mode preset.
+26.04	Compressor Threshold	/source/(k)/comp/threshold	Float	-60	0	-18	Decibels	Set the threshold level.
+26.04	Compressor Ratio	/source/(k)/comp/ratio	Float	1	10	1	Ratio	Configure the compression ratio.
+26.04	Compressor Attack	/source/(k)/comp/attack	Float	0.1	1000	10	Milliseconds	Set the attack time.
+26.04	Compressor Release	/source/(k)/comp/release	Float	1	10000	500	Milliseconds	Set the release time.
+26.04	Compressor Auto Release	/source/(k)/comp/auto	Bool	0	1	1	On/Off	Enable automatic release time adjustment.
+26.04	Compressor Makeup Gain	/source/(k)/comp/gain	Float	0	24	0	Decibels	Apply makeup gain.
+26.04	Compressor Wet	/source/(k)/comp/wet	Float	0	100	100	Percentage	Adjust the dry/wet balance.
+26.04	Compressor Activate	/source/(k)/comp/activate	Bool	0	1	0	On/Off	Activate the compressor effect for the source.
+26.04	Compressor Bypass	/source/(k)/comp/bypass	Bool	0	1	0	On/Off	Bypass the compressor effect for the source.
+26.04	Compressor Mode	/source/(k)/comp/mode	Float	0	9	7	Select the detection mode for the compressor sidechain.
+26.04	Compressor Peak RMS	/source/(k)/comp/peakrms	Float	0	100	50	Percentage	Set the hold time before the release phase begins.
+26.04	Compressor Knee	/source/(k)/comp/knee	Float	0	24	6.66	Set the minimum release time for dynamic release mode.
+26.04	Compressor Dynamic Factor	/source/(k)/comp/dynfactor	Float	1E-3	4	1	Multiplier	Configure the dynamic factor for adaptive compression behavior.
+26.04	Compressor Dynamic Velocity	/source/(k)/comp/dynvelocity	Float	0.01	100	0.5	Percentage	Adjust the velocity sensitivity for dynamic compression.
+26.04	Compressor Dynamic Ratio	/source/(k)/comp/dynratio	Float	0	100	0	Percentage	Set the low-cut filter frequency for the sidechain.
+26.04	Compressor LID	/source/(k)/comp/lid	Float	0	100	0	Percentage	Set the high-cut filter frequency for the sidechain.
+26.04	Compressor LID Threshold	/source/(k)/comp/lidthreshold	Float	0	24	24	Adjust the knee shape.
+26.04	Compressor HMax	/source/(k)/comp/hmax	Float	0	1	0	On/Off	Switch between peak and RMS level detection modes.
+26.04	Compressor Sidechain Low Cut	/source/(k)/comp/sclowcut	Float	20	20000	20	Hertz	Enable dynamic ratio adjustment based on the input signal level.
+26.04	Compressor Sidechain High Cut	/source/(k)/comp/schighcut	Float	20	20000	20000	Hertz	Configure the Level-Independent Detector.
+26.04	Compressor Release Min	/source/(k)/comp/releasemin	Float	0.1	5000	0.1	Milliseconds	Set the threshold for the Level-Independent Detector.
+26.04	Compressor Hold	/source/(k)/comp/hold	Float	0	500	0	Milliseconds	Enable harmonic limiting to prevent harsh distortion on transients.
+26.04	Touch	Touch Mode	/source/(k)/touch/mode	Float	0	6	5	Select the touch detection mode.
+26.04	Touch Low Frequency	/source/(k)/touch/low_freq	Float	20	22050	3900	Hertz	Set the low frequency boundary for touch detection.
+26.04	Touch High Frequency	/source/(k)/touch/high_freq	Float	20	22050	22050	Hertz	Set the high frequency boundary for touch detection.
+26.04	Touch Listen	/source/(k)/touch/listen	Bool	0	1	0	On/Off	Enable listening to the touch detection signal for monitoring.
+26.04	Touch Amount	/source/(k)/touch/amount	Float	0	100	0	Percentage	Adjust the amount of touch effect applied to the signal.
+26.04	Touch Range	/source/(k)/touch/range	Float	0	24	12	Decibels	Set the dynamic range of the touch effect.
+26.04	Touch Bypass	/source/(k)/touch/bypass	Bool	0	1	0	On/Off	Bypass the touch effect for the source.
+26.04	Touch Activate	/source/(k)/touch/activate	Bool	0	1	0	On/Off	Activate the touch effect for the source.
+26.04	Touch Release	/source/(k)/touch/release	Float	1	1000	20	Milliseconds	Adjust the filter slope for the touch detection band in dB per octave.
+26.04	Touch Dynamic BW	/source/(k)/touch/dyn_bw	Float	0	2	0	Set the release time for the touch envelope follower.
+26.04	Touch ZCR Threshold	/source/(k)/touch/zcrthrs	Float	0.05	0.4	0.08	Configure the dynamic bandwidth mode for adaptive touch detection.
+26.04	Touch Slope	/source/(k)/touch/slope	Float	6	24	24	Set the zero-crossing rate threshold for touch detection sensitivity.	Discrete values: 6, 12, 18, 24 dB/oct.
+																									
+Room	These messages are related to room settings.
+All these messages begin by "/room/(k)/". As for sources, the index (k) has to be replaced by:				
+- room index if only one room is aiming. For example: "/room/2/gain", -10 will change the gain of room number 2 to -10dB.
+																									
+1.1.0.48049	General	Enable	/room/(k)/enable	Bool	0	1	1		enable or disable the room																
+1.1.0.48049	Mute	/room/(k)/mute	Bool	0	1	0		unmuted or mute the room : 0: muted, 1: unmuted																
+24.06.50385	Arm	/room/(k)/arm	Bool	0	1	0	arm the room
+1.1.0.48049	Gain	/room/(k)/gain	Float	-144.5	24	0	Decibels	set the global gain of a room																
+																									
+1.1.0.48049	Reverb/General	Reverb density	/room/(k)/reverb/density	Bool	0	1	0		set the density of the reverb of the room	0: Standard (8 channels), 1: High (16 channels).															
+1.1.0.48049	Size	/room/(k)/size	Float	10	15000	2500	Cubic Meters	set the size of the reverb for the room																
+1.1.0.48049	Reverb Enable	/room/(k)/reverb/enable	Bool	0	1	1		enable/disable the all reverb for the room														
+22.02.50148	Reverb Enable	/room/(k)/reverb/tail/enable	Bool	0	1	1		enable/disable the tail reverb for the room																
+1.1.0.48049	Reverb Start	/room/(k)/reverb/start	Float	1	500	81	Milliseconds	set the start of the reverb for the room																
+1.1.0.48049	Reverb Gain	/room/(k)/reverb/gain	Float	-24	24	0	Decibels	set the gain of the reverb for the room																
+1.1.0.48049	Reverb Factor	/room/(k)/reverb/factor	Float	0.2	2	1		set the factor of the reverb for the room																
+																									
+1.1.0.48049	Reverb/Perceptual
+Factors	Reverberance	/room/(k)/reverberance	Float	5	100	65		set the reverberance of the reverb for the room																
+1.1.0.48049	Heaviness	/room/(k)/heaviness	Float	5	50	25		set the heaviness of the reverb for the room																
+1.1.0.48049	Liveness	/room/(k)/liveness	Float	5	50	35		set the liveness of the reverb for the room																
+																									
+1.1.0.48049	Reverb/Room
+Response	Early Min	/room/(k)/early/min	Float	1	120	24.2	Milliseconds	set the early minimum of the reverb for the room																
+1.1.0.48049	Early Max	/room/(k)/early/max	Float	1	120	40	Milliseconds	set the early maximum of the reverb for the room																
+1.1.0.48049	Early Dist	/room/(k)/early/dist	Float	0.1	0.9	0.5		set the early distribution of the reverb for the room																
+1.1.0.48049	Early Shape	/room/(k)/early/shape	Float	0.1	0.9	0.5		set the early shape of the reverb for the room																
+1.1.0.48049	Cluster Min	/room/(k)/cluster/min	Float	1	120	24.2	Milliseconds	set the cluster minimum of the reverb for the room																
+1.1.0.48049	Cluster Max	/room/(k)/cluster/max	Float	1	120	40	Milliseconds	set the cluster maximum of the reverb for the room																
+1.1.0.48049	Cluster Dist	/room/(k)/cluster/dist	Float	0.1	0.9	0.5		set the cluster distribution of the reverb for the room																
+																									
+1.1.0.48049	Reverb/Options	Infinite	/room/(k)/reverb/infinite	Bool	0	1	0		enable/disabled the infinite reverb for the room																
+1.1.0.48049	Air absorption	/room/(k)/air/enable	Bool	0	1	1		enable/disabled the air absorption for the room																
+2020.10.0	Mod. Density	/room/(k)/reverb/modal/density	Float	0.2	2	1		set the modal density for the reverb of the room																
+1.1.0.48049	Abs. RollOff	/room/(k)/air/freq	Float	20	20000	10000	Hertz	set the roll-off frequency for air absorption for the room																
+																									
+1.1.0.48049	Reverb/Crossover	Reverb CrossOver L	/room/(k)/reverb/fl	Float	20	20000	177	Hertz	set the low/mid crossover frequency of the reverb for the room															
+1.1.0.48049	Reverb CrossOver H	/room/(k)/reverb/fh	Float	20	20000	5657	Hertz	set the mid/high crossover frequency of the reverb for the room															
+																									
+1.1.0.48049	Background	Background Image On/Off	/room/(k)/background/visible	Bool	0	1	0		enable/disable the background for the room																
+1.1.0.48049	Background Image Scale	/room/(k)/background/Scale	Float	10	10000	100	Percentage	set the scale of the background for the room																
+1.1.0.48049	Background Image OffsetX	/room/(k)/background/offsetx	Float	-20	20	0	Meters	set the x offset of the background for the room																
+1.1.0.48049	Background Image OffsetY	/room/(k)/background/offsety	Float	-20	20	0	Meters	set the x offset of the background for the room																
+1.1.0.48049	Background Image Rotation	/room/(k)/background/rotation	Float	-180	180	0	Degrees	set the rotation of the background for the room																
+																									
+2020.10.0	Listener position	Listener X	/room/(k)/x	Float	-100	100	0	Meters	set the x coordinate of the room listener using cartesian coordinates		/adm/lis/x														
+2020.10.0	Listener Y	/room/(k)/y	Float	-100	100	0	Meters	set the y coordinate of the room listener using cartesian coordinates		/adm/lis/y														
+2020.10.0	Listener Z	/room/(k)/z	Float	-100	100	0	Meters	set the z coordinate of the room listener using cartesian coordinates		/adm/lis/z														
+2020.10.0	Listener Yaw	/room/(k)/yaw	Float	-180	180	0	Degrees	set the yaw angle of the room listener																
+2020.10.0	Listener Pitch	/room/(k)/pitch	Float	-90	90	0	Degrees	set the pitch angle of the room listener																
+2020.10.0	Listener Roll	/room/(k)/roll	Float	-90	90	0	Degrees	set the rool angle of the room listener																
+22.02.50148	Listener Position	/room/(k)/xy	List of 2 floats				set the coordinates of the room listener using cartesian coordinates, the previous parameters. Parameters are requested in a list, with the following order: [x, y]		/adm/lis/xyz														
+2020.10.0	Listener Position	/room/(k)/xyz	List of 3 floats				set the coordinates of the room listener using cartesian coordinates, the previous parameters. Parameters are requested in a list, with the following order: [x, y, z]		/adm/lis/xyz														
+2020.10.0	Listener Y, P, R	/room/(k)/ypr	List of 3 floats				set the angles of the room listener, the previous parameters. Parameters are requested in a list, with the following order: [yaw, pitch, roll]		/adm/lis/ypr														
+2020.10.0	Listener 6 degree	/room/(k)/xyzypr	List of 6 floats				set the coordinates and the angles of the room listener, the previous parameters. Parameters are requested in a list, with the following order: [x, y, z, yaw, pitch, roll]		/adm/lis/xyzypr														
+																									
+Masters	These messages are related to master settings.
+All these messages begin by "/master/(k)/". As for sources, the index (k) has to be replaced by:				
+- master index if only one master is aiming. For example: "/master/2/gain", -10 will change the gain of master number 2 to -10dB.
+																									
+1.1.0.48049	General	Name	/master/(k)/name	String					set the name of the master																
+24.06.50385	Arm	/master/(k)/arm	Bool	0	1	0	arm the selected master
+1.1.0.48049	Gain	/master/(k)/gain	Float	-144.5	24	0	Decibels	set the global gain for a master																
+26.04	EQ	EQ Output Gain	/master/(k)/eq/outgain	Float	-24	24	0	Decibels	Set the EQ global gain of a master.
+26.04	EQ Band Used	/master/(k)/eq/(n)/used	Bool	0	1	On/Off	Enable the selected EQ band. (n) is the EQ band index.	Default depends on band index: bands 1-6 are used by default, bands 7-16 are unused.
+26.04	EQ Band Enable	/master/(k)/eq/(n)/enable	Bool	0	1	1	On/Off	Bypass or enable the selected EQ band. (n) is the EQ band index.
+26.04	EQ Band Type	/master/(k)/eq/(n)/type	Float	0	8	6	Select the filter type for the selected EQ band. (n) is the EQ band index.	0: Low Pass, 1: High Pass, 2: Band Pass, 3: Band Stop, 4: Low Shelf, 5: High Shelf, 6: Peak, 7: Tilt Shelf, 8: Flat Tilt
+26.04	EQ Band Slope	/master/(k)/eq/(n)/slope	Float	1	8	1	Select the filter slope in dB/octave for the selected EQ band. (n) is the EQ band index.	Value is expressed in 6 dB/oct steps: 1 = 6 dB/oct, ..., 8 = 48 dB/oct.
+26.04	EQ Band Cutoff	/master/(k)/eq/(n)/cutoff	Float	5	22000	1000	Hertz	Adjust the center or cutoff frequency of the selected EQ band. (n) is the EQ band index.
+26.04	EQ Band Gain	/master/(k)/eq/(n)/gain	Float	-24	24	0	Decibels	Adjust the gain of the selected EQ band. (n) is the EQ band index.
+26.04	EQ Band Resonance	/master/(k)/eq/(n)/reso	Float	0.01	10	1	Adjust the resonance (Q) of the selected EQ band. (n) is the EQ band index.
+26.04	EQ Band Bandwidth	/master/(k)/eq/(n)/bwidth	Float	0.05	10	1	Octaves	Adjust the bandwidth (Q) of the selected EQ band. (n) is the EQ band index.	Values shown here match the default EQ bandwidth type (Octaves). Other supported modes are Standard Q: 0.05-40, default 1.4; Flux Q: 1-100, default 7; FabFilter Q: 0.025-40, default 1.
+																									
+Snapshots	These messages are related to snapshots.
+All these messages begin by "/snaphot/". As for sources, the index (k) has to be replaced by:				
+- snapshot remote number if only one snapshot is aiming. For example: "/snapshot/2/recall/sources", 0 will change the recall of the sources of snapshot number 2 to False.
+- the remote number can be replaced by "current", "next" or "previous: "/snapshot/next/recall" will recall the next snapshot.
+																									
+2020.10.0	General	Snapshot Create	/snapshot/create	String					Create a new snapshot. The name of the snapshot is set by the argument.																
+2020.10.0	Snapshot Count	/snapshot/len	Any					Print and return the snapshot count																
+22.02.50148	Snapshot Delete	/snapshot/(k)/remove	Any					Remove the indicated snapshot																
+22.02.50148	Snapshot Update	/snapshot/(k)/update	Any					Update the indicated snapshot with the actual sources state.																
+22.02.50148	Snapshot Name	/snapshot/(k)/rename	String					Rename the indicated snapshot																
+23.08.50318	Snapshot Name	/snaphsot/(k)/name	String					Rename the indicated snapshot																
+22.02.50148	Snapshot Recall	/snapshot/(k)/recall	[Float, Bolean, Bolean, Boolean, Boolean, Boolean]	Recall a snapshot with the parameter [time, RecallEffectiveSelection, RecallActualSelection, EnableSourcesRecall, EnableRoomsRecall, EnalbeMastersRecall].	Optional: Time will define the crossfade time of the parameters. Default: 0s
+Optional: RecallEffectiveSelection : True will recall the sources' selection on the snapshot creation. Default: True
+Optional: RecallActualSelection: True will recall only the selected sources' parameters. Default: False
+Optional: EnableSourcesRecall: True will recall enable the sources properties' parameters. Default: Global Recall Options
+Optional: EnableRoomsRecall: True will recall enable the rooms properties' parameters. Default: Global Recall Options
+Optional: EnableMastersRecall: True will recall enable the masters properties' parameters. Default: Global Recall Options"Optional: Time will define the crossfade time of the parameters. Default: 0s	/adm/env/change														
+22.02.50148	Snapshot Delete All	/snapshot/removeall						Remove All Snapshots																
+23.08.50318	Global Options	Snapshot Recall Options Sources	/snapshot/global/options/recall/sources	Int	0	1	1		Enable snapshot sources recall																
+23.08.50318	Snapshot Recall Options Rooms	/snapshot/global/options/recall/rooms	Int	0	1	0		Enable snapshot rooms recall																
+23.08.50318	Snapshot Recall Options Masters	/snapshot/global/options/recall/masters	Int	0	1	0		Enable snapshot masters recall																
+23.08.50318	Snapshot Recall Options Sources	/snapshot/global/options/recall/timing	Float	0	10000			Define the default snapshot recall timing.																
+23.08.50318	Snapshot Recall Options Sources	/snapshot/global/options/recall	1 float and a List of 3 int			Recall timing, enable recall of sources, rooms and masters.
+Parameters are requested in a list, with the following order: [Timing, Enable Sources Recall, Enable Rooms Recall, Enable Masters Recall]. Default: [0.0, 1, 0, 0]																
+23.08.50318	Snapshot Relative Recall option	/snapshot/relativeRecall	Int	0	1	0		Enable relative recall																
+23.08.50318	Snapshot Options	Snapshot Global Recall option	/snapshot/(k)/options/recall/global	Int	0	1			Set the global parameter for the snapshot																
+23.08.50318	Snapshot Recall Options Sources	/snapshot/(k)/options/recall/sources	Int	0	1	1		Enable snapshot sources recall																
+23.08.50318	Snapshot Recall Options Rooms	/snapshot/(k)/options/recall/rooms	Int	0	1	0		Enable snapshot rooms recall																
+23.08.50318	Snapshot Recall Options Masters	/snapshot/(k)/options/recall/masters	Int	0	1	0		Enable snapshot masters recall																
+23.08.50318	Snapshot Recall Options Sources	/snapshot/(k)/options/recall/timing	Float	0	10000			Define the default snapshot recall timing.																
+23.08.50318	Snapshot Recall Options Sources	/snapshot/(k)/options/recall	1 float and a List of 3 int			Enable recall of sources, rooms and masters.
+Parameters are requested in a list, with the following order: [Timing, Enable Sources Recall, Enable Rooms Recall, Enable Masters Recall]. Default: [0.0, 1, 0, 0]																
+23.08.50318	Snapshot Active	/snapshot/(k)/active	Int	0	1	1		Activate/deactivate the snapshot																
+23.08.50318	Snapshot name	Previous snapshot name	/snapshot/previous/name	String					SEND ONLY: send the name of the previous snapshot
+23.08.50318	Current snapshot name	/snapshot/current/name	String					SEND ONLY: send the name of the current snapshot
+23.08.50318	Next snapshot name	/snapshot/next/name	String					SEND ONLY: send the name of the next snapshot
+																									
+Cues	These messages are related to cue settings.
+All these messages begin by "/cue/(k)/".
+The index (k) is the cue remote number.
+26.04	General	Cue Dump	/cue/(k)/dump	Any	Ask to get all cue properties.
+26.04	Cue Name	/cue/(k)/name	String	New Cue	Set the name of the cue.
+26.04	Cue Enable	/cue/(k)/enable	Bool	0	1	1	On/Off	Set or get the enabled state of the cue.
+26.04	Cue Trigger	/cue/(k)/trigger	Any	Trigger the cue.
+																									
+Animations	These messages are related to animation settings.
+All these messages begin by "/animation/(k)/".
+The index (k) is the animation remote number.
+26.04	General	Animation Dump	/animation/(k)/dump	Any	Ask to get all animation properties.
+26.04	Animation Name	/animation/(k)/name	String	Set the name of the animation.
+26.04	Animation Play	/animation/(k)/play	Bool	0	1	0	On/Off	Set or get the play state of the animation.
+26.04	Animation Transport Sync	/animation/(k)/transportsync	Bool	0	1	1	On/Off	Set or get the transport sync state of the animation.
+26.04	Animation Transport Anchor	/animation/(k)/transportanchor	Bool	0	1	1	On/Off	Set or get the transport anchor state of the animation.
+26.04	Common Properties	Animation Tempo Sync	/animation/(k)/temposync	Bool	0	1	0	On/Off	Set or get tempo/BPM sync enable.
+26.04	Animation Phase Offset	/animation/(k)/phaseoffset	Float	0	360	0	Degrees	Set or get the initial phase offset.
+26.04	Animation Direction	/animation/(k)/direction	Int	0	1	1	Set or get the playback direction.	0: backward, 1: forward
+26.04	Animation Phase Spread	/animation/(k)/phasespread	Float	0	100	0	Percentage	Set or get the phase spread percentage.
+26.04	Animation Rate	/animation/(k)/rate	Float	0.01	20	1	Hertz	Set or get the LFO rate when not tempo-synced.	Applies to LFO animations when tempo sync is off.
+26.04	Animation Duration	/animation/(k)/duration	Float	0.1	30	5	Seconds	Set or get the trajectory duration when not tempo-synced.	Applies to trajectory and template animations when tempo sync is off.
+26.04	Animation Sync Division	/animation/(k)/syncdivision	Int	7	39	Set or get the rate or duration in bars division when tempo-synced.	Default depends on animation type: LFO = 14 (1/4), trajectory/template = 20 (1/1).
+																									
+Timelines	These messages are related to timeline settings.
+All these messages begin by "/timeline/(k)/".
+The index (k) is the timeline remote number.
+26.04	General	Timeline Dump	/timeline/(k)/dump	Any	Ask to get all timeline properties.
+26.04	Timeline Name	/timeline/(k)/name	String	TimeLine 1	Set the name of the timeline.
+26.04	Timeline Play	/timeline/(k)/play	Bool	0	1	0	On/Off	Set or get the play state of the timeline.
+26.04	Timeline Edit	/timeline/(k)/edit	Bool	0	1	0	On/Off	Set or get the editing state of the timeline.

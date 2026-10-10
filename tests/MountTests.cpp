@@ -252,6 +252,37 @@ TEST_CASE ("mount: the S21's three vocabularies are one device on the wire")
     }
 }
 
+TEST_CASE ("mount: a node's role is read from its GODOT key, and only a word is one")
+{
+    /*  Namespace draft §57, AFM: the vocabulary every preset shares, one
+        word per node that claims one; a node that claims none has none. */
+    MountDeclaration desk;
+    desk.id = "ROLE0001";
+    desk.prefix = "/desk";
+    desk.namespaceFile = "namespaces/desk.json";
+    desk.port = 9000;
+
+    const auto loaded = readNamespace (desk, R"JSON({"FULL_PATH": "/", "CONTENTS": {
+        "fader":  {"FULL_PATH": "/fader",  "TYPE": "f", "ACCESS": 3, "VALUE": [0.0], "GODOT": {"ROLE": "strip.level"}},
+        "recall": {"FULL_PATH": "/recall", "TYPE": "i", "ACCESS": 2, "GODOT": {"ROLE": "scene.recall"}},
+        "mute":   {"FULL_PATH": "/mute",   "TYPE": "T", "ACCESS": 3, "VALUE": [false], "GODOT": {"ROLE": [1, 2]}},
+        "name":   {"FULL_PATH": "/name",   "TYPE": "s", "ACCESS": 3, "VALUE": [""]} } })JSON");
+    REQUIRE (loaded.ok);
+
+    const auto roleOf = [&loaded] (const std::string& address)
+    {
+        for (const auto& node : loaded.nodes)
+            if (node.address == address)
+                return node.role;
+        return std::string ("?");
+    };
+
+    CHECK (roleOf ("/desk/fader") == "strip.level");
+    CHECK (roleOf ("/desk/recall") == "scene.recall");
+    CHECK (roleOf ("/desk/mute").empty());
+    CHECK (roleOf ("/desk/name").empty());
+}
+
 TEST_CASE ("mount: a device with several roots takes a description rooted at \"/\" whose entries are those roots")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));

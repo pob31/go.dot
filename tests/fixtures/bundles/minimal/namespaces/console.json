@@ -21,7 +21,8 @@
     "go": {
       "FULL_PATH": "/go",
       "ACCESS": 2,
-      "DESCRIPTION": "Fire the console's standby cue."
+      "DESCRIPTION": "Fire the console's standby cue.",
+      "GODOT": {"ROLE": "go"}
     },
     "masterLevel": {
       "FULL_PATH": "/masterLevel",

@@ -24789,4 +24789,29 @@ word a MIDI cue already uses; `locked` as everywhere.
 
 ### 57.7 Built so far
 
-DP.0, 2026-10-10: this section and the documents it names. Nothing in code yet.
+- **DP.0**, 2026-10-10: this section and the documents it names.
+- **DP.1**: `MountSender::destinationFor`, the one factory for a declaration's destination; found on the way,
+  the Runner's cue and curve paths built theirs without `serial`, so an OSC cue aimed at a serial device
+  went to UDP port 0. A case in `NetworkCueTests` holds it (2a65d6e).
+- **DP.2**: a described device's roots are its file's (AFK): `readNamespace` takes a file rooted at `/`
+  whose entries are the prefix row's roots and mounts each at its own name, `rootsOfNamespace` answers
+  them, `describedRootOf` walks from the root the address is under; the devices fixture's S21 is
+  described by `s21-direct.json`, three roots (fa89616).
+- **DP.3**: `tree::PresetTable` and `readPreset` (the `GODOT` root key, the wire against the transport, the
+  sources required, the description read as a device will read it), `wfg presets [--check] [--folder]`,
+  the `preset` rows under `/godot/preset/<slug>`, the folder shipped beside the binary as `pd/` is;
+  `adm-osc`, `dbaudio-ds100-osc`, `digico-s-osc` from their generators (fdd9210).
+- **DP.4**: `mount.createFromPreset` and `mount.refreshPreset` (AFO), `mount/preset` and
+  `mount/presetUpdate`, the reason word `unknown-preset`, the PRESET chooser and the Kind column in the
+  Network tab, `model::readPresets` and `kindWordOf`, the two gestures (2827d97). A preset with no port
+  to speak of makes a device that says so until a port is typed.
+- **DP.5**: `Node::role` from `GODOT.ROLE` (AFM), written back as `ROLE` for a state and an event alike,
+  named under the path lines in the inspector; the minimal fixture's console claims `go`; the curve case
+  the author asked for, against the shipped ADM-OSC preset; `_preset.py` shared by the generators;
+  `behringer-x32-osc` (Maillot's X32 document), `behringer-wing-osc` (Maillot's WING document: the strips,
+  mains, sends, DCAs and mute groups; processing and the library actions not yet), `holophonix-osc` (the
+  track specification), `lacoustics-lisa-osc` (the OSC API), `flux-spat-osc` (FLUX's own table, kept as
+  text), `malighting-grandma3-osc` (`/cmd`, the pages' faders and keys), `digico-sd-osc` (the 2014 Other
+  OSC list, kept as text), `yamaha-osc` (the DM7 specification's parameter list, which is RCP's too), and
+  `dbaudio-ds100-osc` rewritten from the 1.3.0 document as version 2 - the first preset update a device
+  can take. Every file compact; the largest, the DiGiCo SD's, 3.6 MB for 17 thousand nodes.

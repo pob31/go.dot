@@ -151,9 +151,11 @@ TEST_CASE ("preset: every shipped preset loads, is named after its file, and nam
     CHECK (std::is_sorted (slugs.begin(), slugs.end()));
     CHECK (table.find ("no-such-preset") == nullptr);
 
-    /*  The three of DP.3, by name, so a generator that stops writing one is
-        noticed; later stages add theirs here. */
-    for (const auto* expected : { "adm-osc", "dbaudio-ds100-osc", "digico-s-osc" })
+    /*  The shipped ones by name, so a generator that stops writing one is
+        noticed; each stage adds its own. */
+    for (const auto* expected : { "adm-osc", "dbaudio-ds100-osc", "digico-s-osc", "behringer-x32-osc", "behringer-wing-osc",
+                                  "holophonix-osc", "lacoustics-lisa-osc", "flux-spat-osc", "malighting-grandma3-osc",
+                                  "digico-sd-osc", "yamaha-osc" })
     {
         INFO ("expected: " << expected);
         CHECK (table.find (expected) != nullptr);

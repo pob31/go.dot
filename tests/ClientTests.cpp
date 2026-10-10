@@ -135,6 +135,8 @@
 #include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/tree/PresetCommands.h>
 #include <wfg/engine/tree/PresetTable.h>
+#include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/tree/OscQueryJson.h>
 
 #include <juce_core/juce_core.h>
 
@@ -12546,6 +12548,58 @@ TEST_CASE ("client: the installed presets are read from the tree, and a device s
     CHECK (gesture::createDeviceFromPreset ("adm-osc").command == "mount.createFromPreset");
     CHECK (gesture::createDeviceFromPreset ("adm-osc").args[0].getString() == "adm-osc");
     CHECK (gesture::refreshPreset (fromPreset).command == "mount.refreshPreset");
+}
+
+TEST_CASE ("client: a node's role is published and named under the path, and a node without one says nothing")
+{
+    /*  Namespace draft §57, AFM: the minimal fixture's console claims the
+        role `go` on its GO. The OSCQuery reply carries it, and the inspector
+        of a cue aimed there names it under the path lines, read only. */
+    Rig rig;
+    tree::loadAllMountsFromBundle (rig.document, rig.mounts, fixtureBundle());
+    const auto snapshot = rig.publish (1);
+
+    const auto described = json::parse (tree::OscQueryJson::describe (*snapshot, "/ext/console/go"));
+    REQUIRE (described.ok());
+    const auto* godot = described.value->find ("GODOT");
+    REQUIRE (godot != nullptr);
+    REQUIRE (godot->find ("ROLE") != nullptr);
+    CHECK (godot->find ("ROLE")->asString() == "go");
+    CHECK (snapshot->find ("/ext/console/go")->role == "go");
+    CHECK (snapshot->find ("/ext/console/mode")->role.empty());
+
+    const std::string cue = "R7T3G2QN";
+    rig.apply (2, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0), osc::Value::string ("osc"),
+                 osc::Value::string ("Go"), osc::Value::string (cue) });
+    rig.apply (3, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/address"),
+                                          osc::Value::string ("/ext/console/go") });
+
+    const auto inspection = model::inspect (*rig.publish (4), cue);
+    std::vector<std::string> names;
+    const model::Field* role = nullptr;
+
+    for (const auto& block : inspection.blocks)
+        for (const auto& field : block.fields)
+        {
+            names.push_back (field.name);
+            if (field.name == "role") role = &field;
+        }
+
+    REQUIRE (role != nullptr);
+    CHECK (role->value == "go");
+    CHECK_FALSE (role->writable);
+    const auto at = [&names] (const std::string& name) { return std::find (names.begin(), names.end(), name) - names.begin(); };
+    CHECK (at ("path1") < at ("role"));
+    CHECK (at ("role") < at ("address"));
+
+    //  Aimed at a node that claims none, there is no such line.
+    rig.apply (5, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/address"),
+                                          osc::Value::string ("/ext/console/mode") });
+    const auto again = model::inspect (*rig.publish (6), cue);
+    for (const auto& block : again.blocks)
+        for (const auto& field : block.fields)
+            CHECK (field.name != "role");
 }
 
 TEST_CASE ("client: a value the node enumerates is offered as atoms")

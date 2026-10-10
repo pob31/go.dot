@@ -77,6 +77,12 @@ namespace wfg::tree
 
         /** One sentence, from the parameter table. What a client shows at 2 a.m. */
         std::string description;
+        /*  WHAT THE NODE IS FOR, in the vocabulary every preset shares
+            (namespace draft §57, AFM): `scene.recall`, `strip.level`,
+            `object.position`... from the description's `GODOT.ROLE`; empty for
+            a node that claims none, which is most of them. Published back as
+            `ROLE`, so a client names it and a later round retargets by it. */
+        std::string role;
 
         //======================================================================
         // The declared range, when the table gives one.
