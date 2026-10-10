@@ -52,7 +52,9 @@ Three ancestors, one synthesis:
 
 ### Non-goals (v1)
 
-- Not a DAW. No composition, no arrangement.
+- Not a DAW. No multitrack arrangement, no composition. A sound may be cut into
+  sections, reordered, crossfaded, trimmed and bounced inside its cue (§3.24,
+  *at the author's direction, 2026-10-10*).
 - Not a lighting console.
 - Not a spatial renderer. That is WFS-DIY / XOA, addressed over the network.
 - No mobile authoring. Tablet is an operating and adjustment surface.
@@ -2164,6 +2166,20 @@ measured. Set once per cue, for every boundary of its ranges *(proposed; per
 range is the alternative)*. One mechanism for both owners; only the object that
 places the boundary differs. §3.9c's budget now carries the cost: a crossfaded
 range keeps a second slot alive across each boundary.
+
+#### Editing a sound
+
+*Added in 0.8, at the author's direction (2026-10-10).* A sound cue may be cut
+into **sections** at the playhead, the sections reordered or removed, each join
+given an equal-power **crossfade** centred on the cut, and each section a
+**trim** in dB. **Freeze** bounces the edit to a new file in `media/` that the
+cue then plays, and **Unfreeze** brings the sections back for more changes. The
+cue's file time is always the time of what it plays, so the §3.10 lanes, the
+Ranges above and the start offset keep their meaning, and the edit commands
+carry them when a section moves or goes: a dip drawn over the verse stays over
+the verse. While the edit is open the cue plays a background render of it; a
+sounding cue keeps its file until its next run. Sounds only; movies later. The
+namespace draft's §55 holds the decisions and the commands.
 
 #### Running view and solver
 

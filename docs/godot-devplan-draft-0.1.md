@@ -1134,6 +1134,35 @@ author" above, on screen and with an Arduino.
 
 ---
 
+### Editing a sound: sections, crossfades, trim, and a freeze · M
+
+*Added on 2026-10-10*, at the author's direction: a sound cue cut into sections at the playhead, the
+sections reordered or removed, a crossfade at each join and a trim on each, frozen to a bounce the cue
+plays and unfrozen for more changes, the lanes and ranges carried with the sound (namespace draft §55;
+PRD §1 non-goals, §3.24). The author's decisions are ADI and ADJ; ADK-ADR are the implementer's, the
+author's to overrule. Sounds only; movies are a later round.
+
+| Stage | What | Depends on |
+|---|---|---|
+| E.0 | Docs: namespace §55, the PRD's non-goal and §3.24, both guides, this | - |
+| E.1 | The Section element: rows, schema, publication, grammar, validate | E.0 |
+| E.2 | The math: the timeline, the map between two section lists, the carry of lanes, ranges and offset, the clamp | E.1 |
+| E.3 | The commands and the carry at the doors; freeze and unfreeze as document edits | E.2 |
+| E.4 | One resolver of the played file; the Runner follows it on standby; lengths from the sections | E.3 |
+| E.5 | The renderer: the render, its thread and cache, `media.freeze`, the readout | E.4 |
+| E.6 | The window's model: the sections, the foot reading, the gestures | E.3 |
+| E.7 | The window: the sections row, the bar on the edited timeline, Freeze and Unfreeze | E.5, E.6 |
+| E.8 | The driver, the replay, the close-out | all |
+
+**Done when:** a music cue split into verse and chorus with the chorus moved first plays without a click
+at the join, the lane's dip stays over the verse, a looping Range over the chorus still loops the chorus,
+Freeze then Unfreeze sound the same, an old show saves unchanged; CI is green.
+
+**Needs from the author:** the row's look and words; the joins by ear at 10 ms and at 200 ms; a trim
+ramp heard; Save as with a frozen cue.
+
+---
+
 ## Phase 10 — Timecode, panic, hardening · M
 
 **Goal:** the stop levels and the sync sources that a touring show requires.

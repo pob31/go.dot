@@ -93,6 +93,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Plugins | Une chaîne VST3, AU ou LV2 sur chaque cue. Les plugins tournent dans un processus à part : un plugin qui plante rend sa cue muette, pas le spectacle | Panneau *FX* ; *Show settings > Plugins* pour le scan |
 | Envois | Niveaux d'une cue vers les canaux de mixage du spectacle | Panneau *Sends* |
 | Courbes d'envoi | Dessiner le niveau de chaque envoi sur le fichier, comme la courbe de niveau le fait pour le volume | Panneau Waveform, choix de la courbe |
+| Monter un son (nouveau) | Couper un son en sections à la tête de lecture, les réordonner ou en retirer, régler le fondu enchaîné à chaque jointure et un trim par section, puis *Freeze* pour rendre le montage dans un nouveau fichier que la cue joue ; *Unfreeze* ramène les sections. Les courbes et les ranges restent sur le son qu'elles couvrent | Panneau *Waveform*, ligne des sections |
 | Modèles de cue | Garder sous un nom les réglages d'une cue média ou vidéo, et en faire naître de nouvelles cues | Menu media ▾ ; Edit > Save as template… ; Show settings > Templates |
 
 ### Organiser le temps

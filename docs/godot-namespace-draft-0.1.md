@@ -23982,3 +23982,122 @@ since §3.24 lets a list walk its file out of order) were already there.
 saying the span. Test: no button with no ranges; with a loop listed first ending at 20 and an intro
 listed second ending at 8, the button says 20 and makes 20 to 30 on its cue; it follows an out point
 moved to 25 without the list being rebuilt; it goes once the rest is a range.
+
+## 55. A sound edited: sections, crossfades, trim, and a freeze
+
+Written 2026-10-10. The author asked: *"I'd like to give the user the possibility to edit media files:
+split, move parts around, adjust crossfades between sections and adjust the trim of each section for
+audio. This might contravene with the PRD, but since Go.dot is really turning into a powerhouse/Swiss army
+knife for show design, I think it can help the end user. Once the edit is confirmed, it can be frozen and
+bounced to a new file. If the user decides to make changes to the edit they should be able to defreeze,
+recover the edits and make changes. If the length of the resulting media changes try to lock the
+automation curves to the media so for instance a dip in volume can stay in sync with the sound it's tied
+to."* It does contravene the PRD's first non-goal, *Not a DAW. No composition, no arrangement.*, which is
+narrowed at their direction: no multitrack arrangement, but a sound may be cut, reordered, crossfaded,
+trimmed and bounced inside its cue. Sounds only; movies are a later round.
+
+### 55.1 What it does
+
+A sound cue may carry **sections**: pieces of its file, each with an in and an out point in the file's
+seconds, a **trim** in dB and a **crossfade** at the join into it from the section before. The sections
+in their order are the **edited timeline**: section *k* begins where the one before ends, and the edit is
+as long as its sections put together. A cue with no sections plays its file as it always did; a split at
+the playhead makes the first two. Split, join (a split taken back, where the two pieces are still one in
+the file), move, remove, trim and crossfade are each a named command, one Undo step.
+
+**The cue's file time is always the time of what it plays.** While the edit is open that is the edited
+timeline; once frozen it is the bounce's, which is the same timeline. So the level lane, the send lanes,
+the Ranges and the start offset mean what they meant to every reader, and nothing about a freeze touches
+them. The lock to the sound the author asked for is done by the edit commands themselves: a move, a
+removal or an edge moved carries every lane point, every range's in and out point and the start offset
+through the map from the old timeline to the new, in the same step - a dip drawn over the verse is over
+the verse wherever the verse goes, a point over removed material goes with it, a range nothing is left of
+is removed and said.
+
+The **crossfade is centred on the join** and takes its material from beyond the sections' edges, as a
+DAW's does: over the crossfade the outgoing section goes on past its out point, fading out, while the
+incoming one begins before its in point, fading in, equal power. The length of the edit never depends on
+it. A join that is still one in the file (as a split leaves it) plays plain whatever its crossfade says,
+since equal power over identical material is a bump of 3 dB; if its two trims differ the trim ramps
+across the crossfade, 5 ms at the least. A section whose in point is the file's start has nothing before
+it, so its join is a hard cut.
+
+**While the edit is open the cue plays a render of it**, made in the background under
+`media/.edits/` after every change, a new file for every distinct edit; the readiness mark on the cue's
+row says *rendering the edit* until it is there. A cue on standby is armed again on the new render once
+the edits stop; a cue that is sounding keeps what it plays until its next run. **Freeze** copies the
+render into `media/` as *the file's name (edit).wav*, 32-bit float at the file's rate and channels, and the
+cue plays that file: a frozen cue is a plain sound cue to everything else - Save as, the analysis cache,
+templates, validate, replay - and its sections wait, greyed, in the waveform panel. **Unfreeze** points
+the cue back at its file; the sections are live again and the render comes back by itself. Both are one
+Undo step; the bounce stays on disk when a freeze is undone, as a conversion's file does.
+
+Refused: every section command and a freeze under the show lock, on a frozen edit (Unfreeze first), and
+on a sound locked to a movie (its time is the movie's). Not refused while the cue sounds: the next run
+plays the edit. Sections are bound to the file: a template never carries them and a part is never pasted
+over them; a cue copied whole takes them along.
+
+### 55.2 Decisions
+
+- **ADI** (the author's) **A sound may be cut into sections at the playhead, the sections reordered or
+  removed, crossfaded at each join and trimmed; Freeze bounces the edit to a new file the cue plays;
+  Unfreeze recovers the sections; the lanes stay locked to the sound.** Sounds only; movies later.
+- **ADJ** (the author's, from four choices offered; the option words are mine) **While the edit is open
+  the cue plays a render that follows each edit** - over playing the sections live through the engine (one
+  Range is one slot and nothing crossfades across slots, so that is the range playback written again) and
+  over nothing until Freeze (hearing a crossfade would mean a freeze each time); **sounds now, movies
+  later; the editor is the foot panel's waveform; the bounce is WAV, 32-bit float**, as the sampler's kept
+  takes are.
+- **ADK** (mine) **The cue's file time is always the time of what it plays**, and the edit commands carry
+  the lanes, the Ranges and the start offset through the map from the old timeline to the new. The other
+  way - lanes kept on the file's own time and mapped at every read - would have touched every reader of a
+  lane for the sake of a freeze that then has nothing to do.
+- **ADL** (mine) **The crossfade is centred on the join, takes its material from beyond the edges and
+  never changes the length**; a join still one in the file plays plain; a trim difference ramps across the
+  crossfade, 5 ms at the least. Centred so that widening a crossfade moves nothing after it, and so that a
+  split's two halves say where the cut is.
+- **ADM** (mine) **The render lives under `media/.edits/`, a new name for every distinct edit, and the
+  edit's length comes from the sections, never from a file.** Windows maps a file it plays so that it cannot
+  be written over, and both the analyser and the player key a file by its path and never notice changed
+  bytes; a fresh name sidesteps all three. The render is never analysed (the panel draws the file's own
+  colours, section by section), Save as never copies it and the analysis sweep leaves it alone.
+- **ADN** (mine) **Freeze is a worker verb and a record, as a conversion is**: `media.freeze` asks, the
+  renderer's thread copies the render and submits `media.frozen`, which is the swap of `file` and the one
+  Undo step. One row, `editSource`, says frozen; when it is empty and sections exist the edit is open.
+- **ADO** (mine) **Every road carries**: `node.set` on a section's in or out point, `object.move`,
+  `object.delete` and the `section.*` verbs are one implementation at the document's doors, so a client
+  using the generic verbs never leaves a lane behind. The window writes once per gesture, as it does for a
+  lane point, since a carry a frame would drop points in every sliver a drag passed through.
+- **ADP** (mine) **A standby run follows the played file; a sounding run keeps its file until its next
+  run**; a bed paused by Esc or Doh! whose file changed meanwhile resumes from its top (K8's rule).
+- **ADQ** (mine) **Sections are bound to the file**: never templated nor pasted as a part; they travel with
+  a whole-cue copy. Refused under the lock, when frozen, and on a sound locked to a movie. A section whose
+  in point is 0 gets a hard cut.
+- **ADR** (mine) **The words**: *Split*, *Remove*, *Join*, *Freeze*, *Unfreeze*, *trim*; a sections row
+  above the waveform bar; every sentence an English literal, the author's to change.
+
+### 55.3 The rows and the commands
+
+- `<Section>` under `<Media>`, addressed `/godot/section/<id>/`: `cue` and `index` (r, derived; the index
+  is the place in the edited timeline), `in` and `out` (d, rw, seconds of the file), `trim` (d, rw, dB,
+  -120..12, 0), `crossfade` (d, rw, seconds, 0.01; ignored on the first section; clamped at the door to
+  twice the in point and to what the section's length leaves beside its other crossfade).
+- `/godot/cue/<id>/editSource` (s, rw) - the file's name while frozen, empty otherwise;
+  `/godot/cue/<id>/sections` (s, r) - the sections' ids in order.
+- `/godot/engine/editRender` (s, r) - one line per open edit: cue, `rendering`, `done` or `failed`, the
+  percent, the problem, a tab between each. A readout, never stored and never logged.
+- `/godot/cue/<id>/prepareError` reads `rendering` for a cue whose edit has no render yet.
+- `section.split <cue> <at> [id] [length]` - cuts the edited timeline at `at` seconds; with no sections
+  yet it first makes one over the whole file, whose length the handler writes back on the record so a
+  replay reads it there. `section.join <section>` - with the next, when the two are one in the file.
+  `section.trim <section> <in> <out>` - the edges. `section.move <section> <index>`.
+  `section.remove <section>`. `section.clear <cue>` - the sections gone, every lane point and range
+  carried back to the file's time.
+- `media.freeze <cue>` - asks the renderer; refused `busy` until the render of the edit as it now is
+  exists; taken and ignored where nothing renders (a replay, a rig). `media.frozen <cue> <source>
+  <bounce>` - the swap, submitted by the renderer. `media.unfreeze <cue>`.
+- Reasons: `frozen` for an edit that must be unfrozen first; `busy` while the render is not there.
+
+### 55.4 Built
+
+In progress: stages E.1 to E.8.

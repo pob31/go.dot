@@ -91,6 +91,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Plugins | A VST3, AU or LV2 chain on every cue. Plugins run in a separate process, so a crashing plugin silences its cue, not the show | *FX* panel; *Show settings > Plugins* to scan |
 | Sends | Levels from a cue into the show's mix channels | *Sends* panel |
 | Send lanes | Draw each send's level over the file, as the level lane does for volume | Waveform panel, lane picker |
+| Editing a sound (new) | Cut a sound into sections at the playhead, drag them into a new order or remove them, drag a join to set its crossfade, type a trim for a section, then *Freeze* to bounce the edit to a new file the cue plays; *Unfreeze* brings the sections back. Lanes and ranges stay on the sound they sit on | *Waveform* panel, the sections row |
 | Cue templates | Keep a media or video cue's settings under a name and start new cues from it | media ▾ menu; Edit > Save as template…; Show settings > Templates |
 
 ### Shaping time
