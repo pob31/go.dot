@@ -24100,4 +24100,28 @@ over them; a cue copied whole takes them along.
 
 ### 55.4 Built
 
-In progress: stages E.1 to E.8.
+Built 2026-10-10, E.0 to E.8, each on main. The document: `<Section>` under `<Media>` (E.1), `doc::MediaEdit`
+for the arithmetic - the timeline, the map between two timelines as runs of kept material matched by
+identifier then by material, the carry of a lane, a range and a start offset, the clamp (E.2) - and the
+section verbs with the carry at the doors, `media.frozen` and `media.unfreeze` as the swap (E.3).
+`cue::playedMediaOf` as the one answer to which file a cue plays and how long it is, asked by the Runner's
+arm and its lengths, the solver, the show walk and the tree's `duration`; a standby run failing as
+`rendering` until the render lands, armed again when the file it plays changes, a launched one keeping
+its file (E.4). `audio::EditRenderer` on its own thread with `renderEdit` as the render, `media.freeze`
+as the worker verb, the readout, the renders swept at open and let go of once no run names them, `.edits/`
+left alone by Save as and the analysis sweep (E.5). The window's model and its gestures (E.6), the two rows
+in the waveform panel (E.7). Tests under C and fr-FR: SectionTests, MediaEditTests, EditPlaybackTests,
+MediaEditRenderTests (a stereo ramp as the oracle), the client's and the window's cases;
+`tests/blackbox/media_edit.py` as `blackbox.media-edit.C` and `.fr_FR` drives the shipped serve: a
+ramp split twice and its chorus moved first with its lane carried, the render under `media/.edits`
+parsed sample by sample, Freeze, a GO on the bounce, Unfreeze finding the render again, and the log
+replaying record for record.
+
+Found on the way: a lane writer named `laneText` in `doc::` is ambiguous with the recorder's by argument
+lookup (named `writeLaneText`); the insert door reserves an identifier itself, so a derived one must only
+be checked free; a trim outside its row's range answers `type-mismatch`, as every row does; the analysis
+sweep tests each file's name and not its folder, so `.edits/` needed its own exclusion. Not built, said
+here: an edge dragged on the row (a section's in or out point is `section.trim` or a `node.set`, from the
+inspector or OSC, until the row grows a handle for it); the first section's crossfade is stored but never
+heard; a cue copied whole takes its sections, a template never does (ADQ); a movie's edit is a later
+round.

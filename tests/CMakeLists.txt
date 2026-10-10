@@ -1028,6 +1028,15 @@ add_test(NAME blackbox.cache-sweep.fr_FR
 set_tests_properties(blackbox.cache-sweep.C blackbox.cache-sweep.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
 
+# A sound edited: sections, a move carrying the lane, the render, Freeze and
+# Unfreeze (namespace draft §55). Hosted, so the GO on the bounce reaches a launch.
+add_test(NAME blackbox.media-edit.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/media_edit.py" --wfg-locale=C)
+add_test(NAME blackbox.media-edit.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/media_edit.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.media-edit.C blackbox.media-edit.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 180)
+
 # The output list, and the patch that follows it until a cue has played. Hosted,
 # because the latch is at a real launch: without --hosted the run sits at
 # `armed` and never reaches it.

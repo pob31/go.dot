@@ -5403,9 +5403,15 @@ namespace
                                             renderer.offer (job);
                                         }
 
+                                        /*  A FROZEN EDIT KEEPS ITS RENDER, for an
+                                            unfreeze to find again; a cue whose
+                                            sections are gone, or that is gone, is
+                                            forgotten and its render let go of. */
                                         for (const auto& [cueId, render] : *renderer.snapshot())
                                             if (open.count (cueId) == 0)
-                                                renderer.forget (cueId);
+                                                if (const auto node = document.findById (cueId);
+                                                    ! node.isValid() || wfg::cue::sectionsIn (node).empty())
+                                                    renderer.forget (cueId);
                                     }
 
                                     /*  AND WHAT THE SHOW NOW SAYS ABOUT ITS

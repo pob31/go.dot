@@ -1161,6 +1161,10 @@ Freeze then Unfreeze sound the same, an old show saves unchanged; CI is green.
 **Needs from the author:** the row's look and words; the joins by ear at 10 ms and at 200 ms; a trim
 ramp heard; Save as with a frozen cue.
 
+**Built** 2026-10-10, E.0 to E.8, each on main (namespace draft §55.4 says what each did). The
+implementer's calls ADK-ADR stand as proposed; what the author has not yet seen: the two rows on
+screen, a join by ear, a bounce in a show folder.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M
