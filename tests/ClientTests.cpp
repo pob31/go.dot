@@ -11862,7 +11862,8 @@ TEST_CASE ("client: a sweep of the analysis cache somebody asked for is said as 
 TEST_CASE ("client: the waveform's reading carries the sound's sections, the edit's state, and whether it may be edited")
 {
     Rig rig ("phase4");
-    doc::registerSectionCommands (rig.engine.commands(), rig.document, [] (const std::string&) { return 30.0; });
+    doc::registerSectionCommands (rig.engine.commands(), rig.document,
+                                  doc::MediaFacts { [] (const std::string&) { return 30.0; }, {}, {} });
 
     const model::Subject waveform { model::Subject::Kind::waveform, "P4MED001" };
 

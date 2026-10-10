@@ -215,10 +215,30 @@ namespace wfg::video::movie
             std::uint64_t clock = 0;
             std::uint32_t frame = 0;
 
+            /*  AND THE GRID (55.5): the duration the most frames have, and
+                whether every frame has it. */
+            std::uint32_t commonest = 0, commonestCount = 0, firstDelta = 0;
+            out.timeScale = timeScale;
+            out.constantRate = true;
+
             for (std::uint32_t run = 0; run < timeCount && frame < sampleCount; ++run)
             {
                 const auto count = be32 (times + 8 * run);
                 const auto delta = be32 (times + 8 * run + 4);
+
+                if (count != 0 && delta != 0)
+                {
+                    if (firstDelta == 0)
+                        firstDelta = delta;
+                    else if (delta != firstDelta)
+                        out.constantRate = false;
+
+                    if (count > commonestCount)
+                    {
+                        commonest = delta;
+                        commonestCount = count;
+                    }
+                }
 
                 for (std::uint32_t n = 0; n < count && frame < sampleCount; ++n, ++frame)
                 {
@@ -228,6 +248,7 @@ namespace wfg::video::movie
             }
 
             out.duration = static_cast<double> (clock) / static_cast<double> (timeScale);
+            out.frameDuration = commonest;
 
             //  WHERE: chunk by chunk, each run of chunks holding so many frames, laid end to end.
             frame = 0;

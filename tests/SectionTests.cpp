@@ -288,8 +288,14 @@ namespace
                                    });
 
             doc::registerDocumentCommands (engine.commands(), document);
-            doc::registerSectionCommands (engine.commands(), document,
-                                          [] (const std::string& file) { return file == "rain.wav" ? 30.0 : 0.0; });
+            /*  What the session knows of its two files: the sound's length,
+                and the movie's length, frame rate and codec - the last two a
+                case's to change (55.5, ADT, ADX). */
+            doc::MediaFacts facts;
+            facts.lengthOf = [] (const std::string& file) { return file == "rain.wav" || file == "clip.mov" ? 30.0 : 0.0; };
+            facts.frameRateOf = [this] (const std::string& file) { return file == "clip.mov" ? movieFps : 0.0; };
+            facts.codecOf = [this] (const std::string& file) { return file == "clip.mov" ? movieCodec : std::string {}; };
+            doc::registerSectionCommands (engine.commands(), document, std::move (facts));
             engine.log().openInMemory ({});
         }
 
@@ -328,6 +334,8 @@ namespace
         }
 
         std::int64_t tick = 0;
+        double movieFps = 25.0;
+        std::string movieCodec = "Hap1";
     };
 }
 
@@ -864,4 +872,168 @@ TEST_CASE ("validate: a sound's sections that are not its movie's are a problem"
     rig.document.findById (rig.soundId).appendChild (extra, nullptr);
 
     CHECK (SectionRig::saying (rig.document.validate(), "not the movie's section 3") == 1);
+}
+
+//==============================================================================
+/*  THE GRID AT THE VERBS, AND THE HAP REFUSAL (namespace draft §55.5, ADT,
+    ADX): a movie's cut lands on its nearest frame, the snapped number and the
+    rate written back on the record; a session that knows the file refuses a
+    movie that is not HAP, or not read yet, in words. */
+
+namespace
+{
+    std::vector<LogRecord> appliedRecords (Engine& engine)
+    {
+        std::vector<LogRecord> out;
+
+        for (const auto& record : LogFile::parse (engine.log().contents()).records)
+            if (record.kind == LogRecord::Kind::applied)
+                out.push_back (record);
+
+        return out;
+    }
+}
+
+TEST_CASE ("section.split and section.trim: a movie's cut lands on its nearest frame, written back with the rate; a sound's does not")
+{
+    MovieRig rig;   // clip.mov at 25 a second, Hap1
+
+    /*  1.01 s x 25 is frame 25.25: frame 25, one second. 1.03 x 25 is 25.75:
+        frame 26, 1.04 s. */
+    REQUIRE (rig.apply ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (1.01) }) == 1u);
+    auto movie = rig.of (rig.movieId);
+    REQUIRE (movie.size() == 2u);
+    CHECK (movie[0].out == doctest::Approx (1.0));
+    CHECK (movie[1].in == doctest::Approx (1.0));
+    CHECK (rig.of (rig.soundId)[1].in == doctest::Approx (1.0));
+
+    REQUIRE (rig.apply ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (1.03) }) == 1u);
+    movie = rig.of (rig.movieId);
+    REQUIRE (movie.size() == 3u);
+    CHECK (movie[1].out == doctest::Approx (1.04));
+    CHECK (movie[2].in == doctest::Approx (1.04));
+
+    /*  Within half a frame of the top, and of a cut: nothing to divide. */
+    CHECK (rig.apply ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (0.01) }) == 0u);
+    CHECK (rig.engine.lastError().find ("bad-value") != std::string::npos);
+    CHECK (rig.apply ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (0.99) }) == 0u);
+    CHECK (rig.engine.lastError().find ("bad-value") != std::string::npos);
+
+    /*  A trim's two edges snap too: 1.013 is frame 25.3, 2.98 is 74.5 - up. */
+    REQUIRE (rig.apply ("section.trim", { osc::Value::string (movie[1].id), osc::Value::float64 (1.013),
+                                          osc::Value::float64 (2.98) }) == 1u);
+    CHECK (rig.stored (movie[1].id, "in") == "1");
+    CHECK (rig.stored (movie[1].id, "out") == "3");
+    CHECK (rig.of (rig.soundId)[1].out == doctest::Approx (3.0));
+
+    /*  A sound is cut where it was asked. */
+    REQUIRE (rig.apply ("section.split", { osc::Value::string (rig.cueId), osc::Value::float64 (1.02) }) == 1u);
+    CHECK (rig.stored (rig.ids()[0], "out") == "1.02");
+
+    /*  THE RECORD: the snapped seconds and the rate, after the arguments the
+        verb already wrote back; the sound's record as it was. */
+    const auto records = appliedRecords (rig.engine);
+    REQUIRE (records.size() == 4u);
+
+    REQUIRE (records[0].args.size() == 5u);
+    CHECK (records[0].args[1].asDouble() == doctest::Approx (1.0));
+    CHECK (records[0].args[3].asDouble() == doctest::Approx (30.0));
+    CHECK (records[0].args[4].asDouble() == doctest::Approx (25.0));
+    CHECK (records[1].args[1].asDouble() == doctest::Approx (1.04));
+
+    REQUIRE (records[2].args.size() == 4u);
+    CHECK (records[2].args[1].asDouble() == doctest::Approx (1.0));
+    CHECK (records[2].args[2].asDouble() == doctest::Approx (3.0));
+    CHECK (records[2].args[3].asDouble() == doctest::Approx (25.0));
+
+    REQUIRE (records[3].args.size() == 4u);
+    CHECK (records[3].args[1].asDouble() == doctest::Approx (1.02));
+}
+
+TEST_CASE ("section.*: a movie that is not read yet, or not HAP, refuses every verb in words; read and HAP, it goes on")
+{
+    MovieRig rig;
+    rig.splitMovie (10.0);
+    const auto movie = rig.of (rig.movieId);
+
+    const auto refused = [&rig] (const std::string& command, std::vector<osc::Value> args, const char* words)
+    {
+        if (rig.apply (command, std::move (args)) != 0u)
+            return false;
+
+        const auto error = rig.engine.lastError();
+        return error.find ("bad-value") != std::string::npos && error.find (words) != std::string::npos;
+    };
+
+    rig.movieCodec = "";
+    CHECK (refused ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (5.0) }, "not read yet"));
+    CHECK (refused ("section.join", { osc::Value::string (movie[0].id) }, "not read yet"));
+
+    rig.movieCodec = "avc1";
+    CHECK (refused ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (5.0) }, "convert the movie to HAP first"));
+    CHECK (refused ("section.trim", { osc::Value::string (movie[1].id), osc::Value::float64 (11.0), osc::Value::float64 (30.0) },
+                    "convert the movie to HAP first"));
+    CHECK (refused ("section.move", { osc::Value::string (movie[1].id), osc::Value::int32 (0) }, "Show > Convert the movie to HAP"));
+    CHECK (refused ("section.remove", { osc::Value::string (movie[1].id) }, "convert the movie to HAP first"));
+    CHECK (refused ("section.clear", { osc::Value::string (rig.movieId) }, "convert the movie to HAP first"));
+    CHECK (rig.of (rig.movieId).size() == 2u);
+
+    /*  HAP but its frames not counted yet: the same words. */
+    rig.movieCodec = "HapY";
+    rig.movieFps = 0.0;
+    CHECK (refused ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (5.0) }, "not read yet"));
+
+    /*  The sound beside it was never in question. */
+    REQUIRE (rig.apply ("section.split", { osc::Value::string (rig.cueId), osc::Value::float64 (5.0) }) == 1u);
+
+    rig.movieFps = 25.0;
+    REQUIRE (rig.apply ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (5.0) }) == 1u);
+    CHECK (rig.of (rig.movieId).size() == 3u);
+    REQUIRE (rig.apply ("section.clear", { osc::Value::string (rig.movieId) }) == 1u);
+    CHECK (rig.of (rig.movieId).empty());
+}
+
+TEST_CASE ("section.*: a movie's records replay with no facts to the same show, the rate read off each record")
+{
+    MovieRig rig;
+    const auto before = doc::CanonicalXml::write (rig.document);
+
+    REQUIRE (rig.apply ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (1.02) }) == 1u);
+    REQUIRE (rig.apply ("section.split", { osc::Value::string (rig.movieId), osc::Value::float64 (3.03) }) == 1u);
+    auto movie = rig.of (rig.movieId);
+    REQUIRE (movie.size() == 3u);
+    REQUIRE (rig.apply ("section.trim", { osc::Value::string (movie[1].id), osc::Value::float64 (1.013),
+                                          osc::Value::float64 (2.98) }) == 1u);
+    REQUIRE (rig.apply ("section.move", { osc::Value::string (movie[2].id), osc::Value::int32 (0) }) == 1u);
+    REQUIRE (rig.apply ("media.frozen", { osc::Value::string (rig.movieId), osc::Value::string ("clip.mov"),
+                                          osc::Value::string ("clip (edit).mov"), osc::Value::string (rig.soundId),
+                                          osc::Value::string ("clip (sound).wav"),
+                                          osc::Value::string ("clip (sound) (edit).wav") }) == 1u);
+    const auto after = doc::CanonicalXml::write (rig.document);
+    CHECK (after != before);
+
+    /*  A SECOND ENGINE WITH NO FACTS - the replay's - fed the records. */
+    doc::ShowDocument replayed;
+    REQUIRE (doc::CanonicalXml::read (before, replayed).ok);
+
+    Engine again;
+    again.setBeforeApply ([&replayed] (const Command& appliedCommand, const Event& submitted,
+                                       const std::vector<osc::Value>& coerced, std::int64_t tickIndex)
+                          {
+                              replayed.beginTransaction (appliedCommand.name, tickIndex, submitted.origin, coerced);
+                          });
+    doc::registerDocumentCommands (again.commands(), replayed);
+    doc::registerSectionCommands (again.commands(), replayed);
+    again.log().openInMemory ({});
+
+    std::int64_t tick = 0;
+
+    for (const auto& record : appliedRecords (rig.engine))
+    {
+        REQUIRE (again.submit (origin::cli, record.command, record.args));
+        INFO (record.command);
+        REQUIRE (again.processTick (++tick).applied == 1u);
+    }
+
+    CHECK (doc::CanonicalXml::write (replayed) == after);
 }

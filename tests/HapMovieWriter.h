@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <initializer_list>
+#include <utility>
 #include <vector>
 
 namespace wfg::testing::hapmovie
@@ -135,10 +136,14 @@ namespace wfg::testing::hapmovie
         return out;
     }
 
+    /*  A FRAME TIMING: `count` frames of `delta` ticks each, one `stts` run. */
+    using TimeRun = std::pair<std::uint32_t, std::uint32_t>;
+
     /*  A QUICKTIME MOVIE of HAP frames: ftyp, mdat, then moov with one video
-        track whose frames all sit in one chunk. */
-    inline Bytes hapMovie (int width, int height, const std::vector<Bytes>& frames, std::uint32_t framesPerSecond,
-                    const char* codec = "Hap1")
+        track whose frames all sit in one chunk, timed by the runs given on a
+        time scale of its own - what a variable-rate file looks like. */
+    inline Bytes hapMovieTimed (int width, int height, const std::vector<Bytes>& frames, std::uint32_t timeScale,
+                                const std::vector<TimeRun>& runs, const char* codec = "Hap1")
     {
         const auto ftyp = box ("ftyp", join ({ Bytes { 'q', 't', ' ', ' ' }, Bytes (4, 0), Bytes { 'q', 't', ' ', ' ' } }));
 
@@ -154,9 +159,13 @@ namespace wfg::testing::hapmovie
         const auto mdat = box ("mdat", media);
         const auto firstFrame = static_cast<std::uint32_t> (ftyp.size() + 8);
         const auto count = static_cast<std::uint32_t> (frames.size());
+        std::uint32_t ticks = 0;
+
+        for (const auto& [runCount, delta] : runs)
+            ticks += runCount * delta;
 
         Bytes mdhd (4, 0);
-        be32 (mdhd, 0); be32 (mdhd, 0); be32 (mdhd, framesPerSecond); be32 (mdhd, count);
+        be32 (mdhd, 0); be32 (mdhd, 0); be32 (mdhd, timeScale); be32 (mdhd, ticks);
         mdhd.insert (mdhd.end(), 4, 0);
 
         Bytes hdlr (4, 0);
@@ -176,7 +185,8 @@ namespace wfg::testing::hapmovie
         const auto sample = box (codec, entry);
         stsd.insert (stsd.end(), sample.begin(), sample.end());
 
-        Bytes stts (4, 0);  be32 (stts, 1); be32 (stts, count); be32 (stts, 1);
+        Bytes stts (4, 0);  be32 (stts, static_cast<std::uint32_t> (runs.size()));
+        for (const auto& [runCount, delta] : runs) { be32 (stts, runCount); be32 (stts, delta); }
         Bytes stsc (4, 0);  be32 (stsc, 1); be32 (stsc, 1); be32 (stsc, count); be32 (stsc, 1);
         Bytes stsz (4, 0);  be32 (stsz, 0); be32 (stsz, count);
         for (const auto size : sizes) be32 (stsz, size);
@@ -188,6 +198,14 @@ namespace wfg::testing::hapmovie
         const auto moov = box ("moov", box ("trak", mdia));
 
         return join ({ ftyp, mdat, moov });
+    }
+
+    /*  THE USUAL MOVIE: every frame one tick on a scale of the frame rate. */
+    inline Bytes hapMovie (int width, int height, const std::vector<Bytes>& frames, std::uint32_t framesPerSecond,
+                           const char* codec = "Hap1")
+    {
+        return hapMovieTimed (width, height, frames, framesPerSecond,
+                              { { static_cast<std::uint32_t> (frames.size()), 1u } }, codec);
     }
 
     inline juce::File writeMovie (const juce::File& folder, const char* name, const Bytes& bytes)

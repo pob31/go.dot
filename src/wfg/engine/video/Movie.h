@@ -56,14 +56,28 @@ namespace wfg::video::movie
         double duration = 0.0;  ///< seconds: the last frame's end
         std::vector<Frame> frames;
 
+        /*  THE FILE'S OWN GRID (namespace draft §55.5, ADV): the track's time
+            scale and the frame duration its `stts` runs give most frames - the
+            one duration when the rate is constant, the commonest otherwise -
+            which is what a render of an edit is written on, verbatim. Nought
+            where the file said nothing. */
+        std::uint32_t timeScale = 0;
+        std::uint32_t frameDuration = 0;
+        bool constantRate = false;
+
         bool isHap() const noexcept  { return codec == "Hap1" || codec == "Hap5" || codec == "HapY"; }
 
         /*  The frame showing at `seconds`: the last to start at or before it,
             the first before the start, the last after the end. -1 with none. */
         int frameAt (double seconds) const noexcept;
 
+        /*  Frames a second: the grid's own when the file has one, else the
+            average over its length. */
         double frameRate() const noexcept
         {
+            if (timeScale != 0 && frameDuration != 0)
+                return static_cast<double> (timeScale) / static_cast<double> (frameDuration);
+
             return frames.empty() || ! (duration > 0.0) ? 0.0 : static_cast<double> (frames.size()) / duration;
         }
     };

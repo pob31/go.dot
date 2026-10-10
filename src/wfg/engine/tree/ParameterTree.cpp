@@ -44,6 +44,7 @@
 #include <wfg/engine/document/Sequence.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/video/Movie.h>
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/video/Conversion.h>
@@ -1022,7 +1023,7 @@ namespace wfg::tree
                 it - so the hash the runtime half looks up is the file this cue
                 names and not a spelling of it. See
                 `ParameterTree::declaredMedia`. */
-            if (isMedia)
+            if (isMedia || (isVideo && node[juce::Identifier ("source")].toString() == "movie"))
                 mediaRoster.emplace_back (id, node[juce::Identifier ("file")].toString().toStdString());
 
             /*  EVERY KIND IS A CUE FIRST. A media cue has a number, a name and
@@ -1127,6 +1128,11 @@ namespace wfg::tree
                     both halves carrying the address would make the answer
                     depend on which one `find` reached first (§14.5). */
                 if (row->owner == "media" && name == "hash")
+                    continue;
+
+                /*  AND A MOVIE'S FRAME RATE AND CODEC (namespace draft §55.5), for
+                    the same reason: read off the file by the analyser, after. */
+                if (row->owner == "video" && (name == "frameRate" || name == "codec"))
                     continue;
 
                 std::string text;
@@ -3626,19 +3632,38 @@ namespace wfg::tree
             publishes the two together, and asking for both here too means no
             client can ever read a hash that `/media/<hash>/timbre` would answer
             with a 404. */
-        if (const auto* row = rowNamed ("media", "hash"))
-            for (const auto& [cueId, file] : declaredMedia)
+        /*  A MOVIE IS ON THE SAME ROSTER (namespace draft §55.5) for its frame
+            rate and codec, which arrive the same way; it has no hash row. */
+        const auto* hashRow = rowNamed ("media", "hash");
+        const auto* rateRow = rowNamed ("video", "frameRate");
+        const auto* codecRow = rowNamed ("video", "codec");
+
+        for (const auto& [cueId, file] : declaredMedia)
+        {
+            const auto record = mediaRecords != nullptr ? mediaRecords->find (file)
+                                                        : audio::MediaRecords::const_iterator {};
+            const auto found = mediaRecords != nullptr && record != mediaRecords->end();
+            const auto base = std::string (godot) + "/cue/" + cueId + "/";
+
+            if (video::movie::isMovieName (file))
             {
-                std::string text;
+                if (rateRow != nullptr)
+                    runtime.push_back (makeLeaf (base + "frameRate", *rateRow,
+                                                 osc::formatDouble (found ? record->second.frameRate : 0.0)));
 
-                if (mediaRecords != nullptr)
-                    if (const auto found = mediaRecords->find (file);
-                        found != mediaRecords->end() && found->second.pyramid != nullptr)
-                        text = found->second.contentHash;
+                if (codecRow != nullptr)
+                    runtime.push_back (makeLeaf (base + "codec", *codecRow, found ? record->second.codec : std::string {}));
 
-                runtime.push_back (makeLeaf (std::string (godot) + "/cue/" + cueId + "/hash",
-                                             *row, text));
+                continue;
             }
+
+            if (hashRow == nullptr)
+                continue;
+
+            runtime.push_back (makeLeaf (base + "hash", *hashRow,
+                                         found && record->second.pyramid != nullptr ? record->second.contentHash
+                                                                                      : std::string {}));
+        }
 
         /*  WHO HOLDS EACH DECLARED SLOT, AND WHO IS WAITING FOR IT.
 

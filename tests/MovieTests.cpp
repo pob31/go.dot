@@ -612,3 +612,65 @@ TEST_CASE ("movie: FFmpeg downloaded, unpacked, checked and put in place")
 
     folder.deleteRecursively();
 }
+
+//==============================================================================
+/*  THE FILE'S OWN GRID (namespace draft §55.5, ADV): what a render of an edit
+    is written on, and what a cut snaps to. */
+
+TEST_CASE ("movie: the file's own grid read - its time scale, the duration most frames have, and whether every frame has it")
+{
+    juce::TemporaryFile scratch;
+    const auto folder = scratch.getFile().getSiblingFile ("godot-grid-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    std::vector<Bytes> frames;
+
+    for (int n = 0; n < 6; ++n)
+        frames.push_back (section (0xAB, solidDxt1 (16, 8, 0xFF0000)));
+
+    /*  SIX FRAMES AT 25: one run, every frame a tick of a 25-a-second scale. */
+    {
+        const auto file = writeMovie (folder, "even.mov", hapMovie (16, 8, frames, 25));
+        video::movie::MovieFile movie;
+        std::string why;
+        REQUIRE_MESSAGE (movie.open (file.getFullPathName().toStdString(), why), why);
+
+        CHECK (movie.info().timeScale == 25u);
+        CHECK (movie.info().frameDuration == 1u);
+        CHECK (movie.info().constantRate);
+        CHECK (movie.info().frameRate() == doctest::Approx (25.0));
+    }
+
+    /*  FOUR FRAMES OF 24 TICKS THEN TWO OF 20 on a scale of 600 - 25 a second
+        for most of the file, 30 for the tail: the grid is the 25, said not to
+        be every frame's, and the rate is the grid's rather than the average. */
+    {
+        const auto file = writeMovie (folder, "uneven.mov", hapMovieTimed (16, 8, frames, 600, { { 4, 24 }, { 2, 20 } }));
+        video::movie::MovieFile movie;
+        std::string why;
+        REQUIRE_MESSAGE (movie.open (file.getFullPathName().toStdString(), why), why);
+
+        const auto& info = movie.info();
+        CHECK (info.timeScale == 600u);
+        CHECK (info.frameDuration == 24u);
+        CHECK_FALSE (info.constantRate);
+        CHECK (info.frameRate() == doctest::Approx (25.0));
+        CHECK (info.duration == doctest::Approx (136.0 / 600.0));
+        REQUIRE (info.frames.size() == 6u);
+        CHECK (info.frames[4].start == doctest::Approx (96.0 / 600.0));
+        CHECK (info.frames[5].start == doctest::Approx (116.0 / 600.0));
+    }
+
+    /*  TWO RUNS OF ONE DURATION - an encoder that split its table for no
+        reason - is still a constant rate. */
+    {
+        const auto file = writeMovie (folder, "split.mov", hapMovieTimed (16, 8, frames, 600, { { 3, 24 }, { 3, 24 } }));
+        video::movie::MovieFile movie;
+        std::string why;
+        REQUIRE_MESSAGE (movie.open (file.getFullPathName().toStdString(), why), why);
+        CHECK (movie.info().constantRate);
+        CHECK (movie.info().frameDuration == 24u);
+    }
+
+    folder.deleteRecursively();
+}

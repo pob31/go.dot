@@ -22,7 +22,7 @@
 #include <functional>
 #include <string>
 
-/*  THE COMMANDS OF A SOUND'S EDIT (namespace draft §55.3): the sections cut,
+/*  THE COMMANDS OF A SOUND'S EDIT, AND A MOVIE'S (namespace draft §55.3, 55.5): the sections cut,
     joined, trimmed, moved, removed and cleared, and the edit frozen and
     unfrozen as document edits. Each is a thin name over a `ShowDocument`
     method, which is where the refusals and the carry live, so `node.set`,
@@ -34,12 +34,20 @@
 */
 namespace wfg::doc
 {
-    /*  The length of a file the show names, in seconds, or nought when it is
-        not known: what the first split of a cue with no sections makes its
-        whole-file section from. A session hands the lengths it knows; a
-        replay hands nothing and reads the length off the record. */
-    using FileLengthOf = std::function<double (const std::string& file)>;
+    /*  WHAT THE SESSION KNOWS OF A FILE, by the name the show gives it: its
+        length in seconds (what the first split of a cue with no sections
+        makes its whole-file section from), and for a movie its frame rate
+        (what a cut snaps to, 55.5 ADT) and its codec (Hap1, Hap5 or HapY, or
+        the verbs refuse it, ADX). Nought and empty when not known. A session
+        hands lambdas over its media table; a replay hands nothing and reads
+        the length and the rate off the record. */
+    struct MediaFacts
+    {
+        std::function<double (const std::string& file)> lengthOf;
+        std::function<double (const std::string& file)> frameRateOf;
+        std::function<std::string (const std::string& file)> codecOf;
+    };
 
     void registerSectionCommands (CommandRegistry& registry, ShowDocument& document,
-                                  FileLengthOf lengthOf = {});
+                                  MediaFacts facts = {});
 }

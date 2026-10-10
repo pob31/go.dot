@@ -120,6 +120,14 @@ namespace wfg::audio
         int width = 0;
         int height = 0;
 
+        /*  A MOVIE'S CODEC AND FRAME RATE (namespace draft §55.5, ADT, ADX):
+            the sample entry's four characters - Hap1, Hap5, HapY, or what a
+            preview's file says - and frames a second off its own grid. What the
+            section verbs snap a cut to and refuse a movie that is not HAP by.
+            Empty and nought for a sound, and until the analyser has read it. */
+        std::string codec;
+        double frameRate = 0.0;
+
         /*  A MOVIE'S STRIP (namespace draft §47, AAI): its cuts and its small
             pictures, once the analyser has found them; empty until then, and
             for a movie that is not HAP. */

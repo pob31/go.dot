@@ -4352,13 +4352,32 @@ namespace
         /*  AND A SOUND'S EDIT (namespace draft §55): the first split of a cue
             with no sections needs its file's length, which the session knows
             and writes back on the record for a replay to read. */
-        wfg::doc::registerSectionCommands (engine.commands(), document,
-                                           [&mediaInfo] (const std::string& file)
-                                           {
-                                               const auto lengths = mediaInfo.durations();
-                                               const auto found = lengths->find (file);
-                                               return found == lengths->end() ? 0.0 : found->second;
-                                           });
+        {
+            wfg::doc::MediaFacts facts;
+            facts.lengthOf = [&mediaInfo] (const std::string& file)
+            {
+                const auto lengths = mediaInfo.durations();
+                const auto found = lengths->find (file);
+                return found == lengths->end() ? 0.0 : found->second;
+            };
+
+            /*  AND A MOVIE'S FRAME RATE AND CODEC (namespace draft §55.5), off the
+                record the analyser published for it. */
+            facts.frameRateOf = [&mediaInfo] (const std::string& file)
+            {
+                const auto records = mediaInfo.snapshot();
+                const auto found = records->find (file);
+                return found == records->end() ? 0.0 : found->second.frameRate;
+            };
+            facts.codecOf = [&mediaInfo] (const std::string& file)
+            {
+                const auto records = mediaInfo.snapshot();
+                const auto found = records->find (file);
+                return found == records->end() ? std::string {} : found->second.codec;
+            };
+
+            wfg::doc::registerSectionCommands (engine.commands(), document, std::move (facts));
+        }
         parameters.setConverter (&converter);
 
         /*  AND FFMPEG ITSELF, downloaded on first use when nothing has it

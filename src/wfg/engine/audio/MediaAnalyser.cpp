@@ -915,6 +915,8 @@ namespace wfg::audio
                     {
                         record.width = file.info().width;
                         record.height = file.info().height;
+                        record.codec = file.info().codec;
+                        record.frameRate = file.info().frameRate();
                     }
 
                     media->publish (named, record);

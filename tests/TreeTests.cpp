@@ -1541,3 +1541,55 @@ TEST_CASE ("tree: a named input publishes its order, its meter and why it is not
     REQUIRE (problem != nullptr);
     CHECK (problem->soleValue()->getString() == "no input interface is open");
 }
+
+//==============================================================================
+/*  A MOVIE'S FRAME RATE AND CODEC (namespace draft §55.5): read off the file
+    by the analyser, published from the runtime half as a sound's hash is, so
+    a file that arrives late is not frozen at nought. */
+
+TEST_CASE ("tree: a movie's frame rate and codec come from the analyser's record, and a movie has no hash")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+    const auto created = rig.document.createCue ("7K2QM9X4", 0, "video", "Clip");
+    REQUIRE (created.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + created.id + "/source", "movie").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + created.id + "/file", "clip.mov").ok);
+    rig.parameters.markStale();
+
+    audio::MediaInfo media { rig.document, nowhere() };
+    rig.parameters.setMediaInfo (&media);
+
+    const auto base = "/godot/cue/" + created.id + "/";
+
+    /*  Before the analyser has read it: nought and empty, and no hash row. */
+    const auto rateAt = [&base] (const TreeSnapshot& snapshot)
+    {
+        const auto* node = snapshot.find (base + "frameRate");
+        REQUIRE (node != nullptr);
+        REQUIRE (node->soleValue().has_value());
+        return node->soleValue()->asDouble();
+    };
+
+    auto snapshot = rig.publish (0);
+    CHECK (rateAt (*snapshot) == doctest::Approx (0.0));
+    CHECK (textAt (*snapshot, base + "codec").empty());
+    CHECK (snapshot->find (base + "hash") == nullptr);
+
+    const auto* node = snapshot->find (base + "frameRate");
+    REQUIRE (node != nullptr);
+    CHECK (node->access == Access::read);
+    CHECK (node->typeTags == "d");
+
+    /*  After: the record's two facts, as text in every locale. */
+    audio::MediaRecord record;
+    record.codec = "Hap5";
+    record.frameRate = 29.97;
+    media.publish ("clip.mov", record);
+
+    snapshot = rig.publish (1);
+    CHECK (rateAt (*snapshot) == doctest::Approx (29.97));
+    CHECK (textAt (*snapshot, base + "codec") == "Hap5");
+    CHECK (snapshot->find (base + "hash") == nullptr);
+}
