@@ -1271,17 +1271,20 @@ set_tests_properties(blackbox.phase5.fr_FR PROPERTIES
 # file under no name in about one kill in twenty-five. A red here is the
 # engine's, never a flake to re-run. Ports are ephemeral and the scratch folder
 # is unique, so no RUN_SERIAL. About twenty seconds on the Windows box in Debug;
-# three hundred for a loaded runner.
+# three hundred for a loaded runner - and under the real-time sanitizer, where
+# every run is a loaded runner, 298 s for the one that passed and 300.04 for the
+# one that did not (2026-10-10, run 38091447705), so the limit is twice that:
+# the time is the sanitizer's, and the check above is what a red still means.
 add_test(NAME blackbox.crash-write.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/crash_during_write.py"
                  --wfg-locale=C)
 set_tests_properties(blackbox.crash-write.C PROPERTIES
-                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 600)
 add_test(NAME blackbox.crash-write.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/crash_during_write.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.crash-write.fr_FR PROPERTIES
-                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 600)
 
 # PRD §3.30'S CHECK, BEFORE ANYTHING IS DRAWN (PR 5.7, namespace draft §14.12):
 # a 1 kHz sine saturated at the ramp's 1 kHz hue, white noise grey, a sweep
