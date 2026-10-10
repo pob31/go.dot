@@ -88,6 +88,7 @@ add_executable(wfg_tests
     CueEqTests.cpp
     LooperTests.cpp
     MountTests.cpp
+    PresetTests.cpp
     NetworkCueTests.cpp
     AuthoringTests.cpp
     ProcessTests.cpp
@@ -847,6 +848,15 @@ add_test(NAME wfg.schema.C
 add_test(NAME wfg.schema.fr_FR
          COMMAND wfg schema --check=${CMAKE_SOURCE_DIR}/docs/schema/show.rng
                  --wfg-locale=${WFG_LOCALE_FR})
+
+# The device presets shipped beside the binary (namespace draft §57, AFN): the
+# shipped verb reads the source tree's folder and exits 1 on the first file that
+# does not load, is not named after itself or names no source. The unit suite
+# reads the same folder through the same table; this is the binary doing it.
+add_test(NAME wfg.presets.C
+         COMMAND wfg presets --check --folder=${CMAKE_SOURCE_DIR}/presets/devices --wfg-locale=C)
+add_test(NAME wfg.presets.fr_FR
+         COMMAND wfg presets --check --folder=${CMAKE_SOURCE_DIR}/presets/devices --wfg-locale=${WFG_LOCALE_FR})
 
 # The product binary opening a real bundle folder: manifest, show.xml, state.xml.
 # Exit 0 means it loaded AND had nothing to report, so a fixture that acquires a

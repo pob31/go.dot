@@ -76,6 +76,7 @@
 #include <wfg/engine/tree/MountFetcher.h>
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
+#include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/tree/RawSender.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/cue/Run.h>
@@ -1128,6 +1129,70 @@ namespace
         what a show file may contain, and this is what keeps that promise
         checkable.
     */
+    /*  WHERE THE DEVICE PRESETS ARE (namespace draft §57, AFN): the folder an
+        option names, else `presets/devices` beside the binary - where the build
+        and the installer put it, as they put `pd` - else the bundle's Resources
+        on macOS. The last is answered even when it is not there, so that what
+        was looked for can be said. */
+    juce::File presetsFolder (const juce::ArgumentList& args, const juce::String& option)
+    {
+        if (args.containsOption (option))
+            return juce::File::getCurrentWorkingDirectory().getChildFile (args.getValueForOption (option));
+
+        const auto program = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+
+        for (const auto& folder : { program.getChildFile ("presets").getChildFile ("devices"),
+                                    program.getSiblingFile ("Resources").getChildFile ("presets").getChildFile ("devices") })
+            if (folder.isDirectory())
+                return folder;
+
+        return program.getChildFile ("presets").getChildFile ("devices");
+    }
+
+    /*  `wfg presets [--check] [--folder=<dir>]`: one line per installed preset -
+        its slug, the device, the transport and wire, the port, how many nodes,
+        its roots, and what is wrong with it when something is. With --check,
+        exit 1 when any cannot be used: the ctest gate over the source tree. */
+    int runPresets (const juce::ArgumentList& args)
+    {
+        const auto folder = presetsFolder (args, "--folder");
+        wfg::tree::PresetTable presets;
+        presets.scan (folder.getFullPathName().toStdString());
+
+        if (presets.all().empty())
+        {
+            std::cerr << "wfg presets: nothing under " << folder.getFullPathName().toStdString() << std::endl;
+            return 1;
+        }
+
+        int problems = 0;
+
+        for (const auto& preset : presets.all())
+        {
+            std::cout << preset.slug << '\t' << preset.vendor << ' ' << preset.model
+                      << '\t' << preset.transport << '/' << preset.wire
+                      << (preset.transport == "tcp" && preset.wire == "osc" ? "/" + preset.framing : std::string {})
+                      << '\t' << preset.port << '\t' << preset.nodeCount << " nodes"
+                      << '\t' << preset.rootRow();
+
+            if (! preset.usable())
+            {
+                std::cout << '\t' << preset.problem;
+                ++problems;
+            }
+
+            std::cout << '\n';
+        }
+
+        if (args.containsOption ("--check") && problems > 0)
+        {
+            std::cerr << "wfg presets: " << problems << " of " << presets.all().size() << " cannot be used" << std::endl;
+            return 1;
+        }
+
+        return 0;
+    }
+
     int runSchema (const juce::ArgumentList& args)
     {
         const auto generated = wfg::doc::RelaxNg::generate();
@@ -3512,6 +3577,13 @@ namespace
             so must not outlive it. */
         wfg::serial::SerialTable serialPorts;
 
+        /*  THE DEVICE PRESETS beside the binary (namespace draft §57, AFN), read
+            once at start: what the Network tab's ADD menu offers, and what
+            mount.createFromPreset copies into the show. Serve only: a replay
+            makes no device and a tree dump offers none. */
+        wfg::tree::PresetTable presets;
+        presets.scan (presetsFolder (args, "--presets").getFullPathName().toStdString());
+
         wfg::tree::MountSender sender;
         sender.setSerialSink ([&serialPorts] (const std::string& port, const std::vector<std::uint8_t>& packet)
                               {
@@ -4427,6 +4499,7 @@ namespace
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), &ffmpegInstaller);
         parameters.setInstaller (&ffmpegInstaller);
         parameters.setSerial (&serialPorts, &runner.heardLines());
+        parameters.setPresets (&presets);
 
         /*  A PROCESS CUE'S PATCH OPENED IN PLUGDATA OR PD (namespace draft §51,
             ACN, ACO): its file in the engine's cache, watched for saves, and Pd
@@ -6818,6 +6891,16 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 
+    app.addCommand ({ "presets",
+                      "presets [--check] [--folder=<dir>]",
+                      "Lists the device presets installed beside the binary, or checks that every one loads and names its sources",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runPresets (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
     /*  THE USAGE STRING IS WHAT AN OPERATOR READS AT 04:12, so every flag the
         verb parses is in it. `--device` and `--device-type` were parsed for a
         phase and appeared in no usage line (§14.10 found it); they are here now
@@ -6843,7 +6926,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
                       " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember]] [--engine-folder=<dir>]"
-                      " [--no-video-window]",
+                      " [--no-video-window] [--presets=<dir>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [&makeClient] (const juce::ArgumentList& args)

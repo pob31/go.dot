@@ -80,6 +80,7 @@ namespace wfg::audio { class MediaInfo; }
 namespace wfg::midi { class PortTable; }
 
 namespace wfg::surface { class SurfaceTable; }
+namespace wfg::tree { class PresetTable; }
 
 namespace wfg::cue { class CurveTable; class DcaTable; class LaneTable; class LiveEdits; class TakeTable; }
 
@@ -378,6 +379,12 @@ namespace wfg::tree
             serialHeard = heard;
         }
 
+        /*  THE DEVICE PRESETS installed beside the binary (namespace draft
+            §57, AFN): what the Network tab's ADD menu offers, published
+            under /godot/preset/<slug>. Absent in a replay and a tree dump,
+            which offer none and make no device. */
+        void setPresets (const PresetTable* table) noexcept { presets = table; }
+
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
             four `none` rows under /godot/plugin/<id>. The surface table's
@@ -511,6 +518,7 @@ namespace wfg::tree
         const video::ffmpeg::Installer* installer = nullptr;
         const serial::SerialTable* serialTable = nullptr;
         const serial::HeardLines* serialHeard = nullptr;
+        const PresetTable* presets = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;

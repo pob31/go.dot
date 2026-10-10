@@ -375,6 +375,7 @@ add_library(wfg_engine STATIC
     wfg/engine/oscquery/TimbreRoute.cpp
     wfg/engine/oscquery/TimbreRoute.h
     wfg/engine/tree/Mount.cpp
+    wfg/engine/tree/PresetTable.cpp
     wfg/engine/tree/MountProbe.h
     wfg/engine/tree/MountProbe.cpp
     wfg/engine/tree/MountSender.h
@@ -788,6 +789,12 @@ target_link_libraries(wfg PRIVATE wfg::engine wfg::client_ui wfg::warnings)
 # from a build finds [go.avg] and the rest as a tester's copy does.
 add_custom_command(TARGET wfg POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/pd" "$<TARGET_FILE_DIR:wfg>/pd"
+    VERBATIM)
+
+# AND THE DEVICE PRESETS (namespace draft §57, AFN), the same way: serve reads
+# `presets/devices` beside itself, and `wfg presets` lists what it found.
+add_custom_command(TARGET wfg POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/presets" "$<TARGET_FILE_DIR:wfg>/presets"
     VERBATIM)
 
 # NOTE: there is no add_test() in this file. Every add_test() in the project

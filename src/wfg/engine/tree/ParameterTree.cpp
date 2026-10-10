@@ -17,6 +17,7 @@
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <wfg/engine/serial/SerialTable.h>
+#include <wfg/engine/tree/PresetTable.h>
 
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/cue/CurveTable.h>
@@ -4077,6 +4078,39 @@ namespace wfg::tree
                         continue;
 
                     runtime.push_back (makeLeaf (base + name, *row, text));
+                }
+            }
+
+            /*  THE INSTALLED DEVICE PRESETS (namespace draft §57, AFN): what the
+                Network tab's ADD menu offers, read once from the folder beside
+                the binary. Runtime rows, never stored: a show keeps the preset
+                a device was made from as that device's own namespace file. */
+            if (presets != nullptr)
+            {
+                for (const auto& preset : presets->all())
+                {
+                    const auto base = std::string (godot) + "/preset/" + preset.slug + "/";
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("preset"))
+                    {
+                        const auto name = std::string (row->name);
+                        std::string text;
+
+                        if (name == "vendor")          text = preset.vendor;
+                        else if (name == "model")      text = preset.model;
+                        else if (name == "version")    text = std::to_string (preset.version);
+                        else if (name == "transport")  text = preset.transport;
+                        else if (name == "wire")       text = preset.wire;
+                        else if (name == "framing")    text = preset.framing;
+                        else if (name == "port")       text = std::to_string (preset.port);
+                        else if (name == "roots")      text = preset.rootRow();
+                        else if (name == "nodeCount")  text = std::to_string (preset.nodeCount);
+                        else if (name == "problem")    text = preset.problem;
+                        else
+                            continue;
+
+                        runtime.push_back (makeLeaf (base + name, *row, text));
+                    }
                 }
             }
 

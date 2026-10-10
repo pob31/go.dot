@@ -70,6 +70,9 @@ OUT_PATH = REPO_ROOT / "src" / "wfg" / "engine" / "document" / "SchemaTable.gene
 #   same container read two ways, and a client walking the tree should not have
 #   to know that one of them is spelled differently.
 KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
+                # The installed device presets (namespace draft §57, AFN):
+                # runtime rows under /godot/preset/<slug>, never stored.
+                "preset",
                 "audio", "bus", "media", "route", "range", "section", "run", "runs",
                 # What a cue that sounds carries whatever its source - level,
                 # routing, the DCA, the EQ, the inserts, the sends (Phase 9b,
