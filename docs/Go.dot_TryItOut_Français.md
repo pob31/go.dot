@@ -122,6 +122,8 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Fonction | Ce qu'elle fait | Où |
 | --- | --- | --- |
 | Cues OSC | Envoyer à une console, un processeur ou un serveur vidéo, depuis la liste des adresses de l'appareil : plusieurs messages ou bundles dans une cue, et des courbes jouées sur l'horloge de la cue, enregistrées depuis les retours de l'appareil ou une SpaceMouse | *Add > osc* ; *Show settings > Network* |
+| Cues écrites par WFS-DIY et S21_HiJack (nouveau) | Enregistrer un snapshot dans WFS-DIY ou S21_HiJack le dépose dans Go.dot en une seule cue après la cue en attente ; l'enregistrer de nouveau met à jour la même cue. Chacun se déclare comme appareil, et ses propres adresses et noms de snapshots deviennent des menus, un par partie de l'adresse, sous la *target* de la cue | WFS-DIY : onglet *Network*, protocole Go.dot, puis *Write to Go.dot* ; S21_HiJack : *Setup > Cueing system : Go.dot* |
+| Menus d'adresse et de valeur (nouveau) | Sur un appareil qui se décrit lui-même, choisir l'adresse partie par partie et la valeur dans sa liste | Inspecteur, sous *target* |
 | Retour arrière Doh! | Quand un GO est repris, envoyer à chaque appareil la commande qui l'annule | Inspecteur ; onglet *Network* |
 | Cues MIDI | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
 | Moniteur réseau | Voir chaque message entrant et sortant | *Show > Network monitor…* |
@@ -188,9 +190,9 @@ On règle une fois le retard du vidéoprojecteur, et le son est retardé d'autan
 
 | Système | Ce que Go.dot en fera |
 | --- | --- |
-| **WFS-DIY** (synthèse de front d'onde) | Piloter ses sources, positions et LFO, réservés par cue pour que deux cues ne se disputent jamais une entrée |
+| **WFS-DIY** (synthèse de front d'onde) | Piloter ses sources, positions et LFO, réservés par cue pour que deux cues ne se disputent jamais une entrée. Écrire ses snapshots dans Go.dot sous forme de cues fonctionne déjà (plus haut) |
 | **XOA / Tight-WFS** | La même chose, pour le rendu ambisonique et WFS |
-| **S21-HiJack** | Le piloter comme compagnon de la DiGiCo S21, sous sa propre branche d'adresses |
+| **S21-HiJack** | Le piloter comme compagnon de la DiGiCo S21, sous sa propre branche d'adresses. Écrire ses snapshots dans Go.dot et être piloté par le GO de Go.dot fonctionnent déjà (plus haut) |
 | **Choufleur** (suivi de texte) | Afficher la position dans le texte et les cues à venir à côté de la liste. Choufleur ne déclenche jamais rien, par principe |
 | Processeurs **ADM-OSC** | Modèle intégré pour tout processeur de spatialisation objet qui parle ADM-OSC |
 | **Millumin** | La porte de sortie pour les spectacles dont la vidéo dépasse Go.dot |

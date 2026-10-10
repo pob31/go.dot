@@ -24375,3 +24375,155 @@ refused three names and two partly braced freeze jobs in the movie round, fixed 
 here: a section dragged freely along the timeline (a lower-half drag reorders, as the row does - a gap is
 made by an edge or a deletion); the row's crossfade lozenge is gone, the bar's top handles doing its work;
 the monitor's tile still shows no dissolve; a selection is the window's and is not saved.
+
+
+## 56. Authoring from a processor: WFS-DIY and S21_HiJack write cues into Go.dot
+
+### 56.1 What it does
+
+Written 2026-10-10. The author: *"Can we plan on a protocol to implement between WFS-DIY or S21_HiJack
+(which have their repos in the same root folder as Go.dot) and Go.dot to create cues from WFS-DIY or
+S21_HiJack straight into Go.dot in a similar fashion that both are already doing into QLab. The QLab
+method is a bit slow and has some back and forth sends. We can probably build a tailor made version since
+we own both ends in this case for the best integration of the cue creation and recall. In WFS-DIY we
+should add a network client type Go.dot. In S21_HiJack, there should be a toggle to set either QLab or
+Go.dot as the show's cueing system. This covers the OSC commands to recall parameters or snapshot files
+and how to create them in Go.dot. You will edit all codebases to make sure the protocol matches on both
+ends."* And, on the menus: *"Each of the path comes as a drop down menu. Selecting the client then shows a
+menu with the first item in the path to chose from, then the next depending on the previous selection and
+so on."*
+
+This is PRD §3.26, built. **The contract both processors implement is `docs/godot-authoring-protocol-0.1.md`**;
+this section is Go.dot's side of it and the record of the decisions.
+
+**A processor declares itself** (`mount.declare`): it becomes a device at its root - `/wfs`, `/s21` - made
+from the datagram's address the first time, its host and ports moved after, its name, Rx and Tx the
+operator's once it exists. Go.dot answers `/godot/declared` at the port the processor named. When it
+carries a query port, Go.dot fetches its OSCQuery description off the tick thread, keeps it in the bundle as
+`namespaces/<id>.json`, and adopts it (`mount.described`): the device becomes a described one, its nodes
+typed and checked, and answered `/godot/described` with how many nodes it read.
+
+**A processor writes a cue** (`cue.capture`): one OSC cue, its own message the first pair and the rest its
+further messages in order, all under one device; after the standby, at the end of a list, in place of a cue
+named by identifier or number, or appended to by a chunk too long for one datagram. **The identifier wins**:
+a cue that already holds it is updated where it stands, so a processor that keeps the identifier beside its
+snapshot updates the same cue every time it exports. One command, one undo step, one answer
+(`/godot/captured <id> created|updated|appended|<reason> <number> <name>`).
+
+**A processor fires Go.dot** with the verbs that exist - `go`, `cue.fire`, `standby.set`, `run.stopAll`,
+`run.killAll` - and two new ones that find a cue by its number first: `cue.fireNumber` and
+`standby.setNumber`; a bundle of `standby.setNumber` and `go` is QLab's `/go "12"`.
+
+**The menus**: an OSC cue aimed at a described device shows, under its `target` menu, one menu per part of
+the address - the root's children, then the children of what was picked - written back to the cue's address;
+a node that enumerates its values makes the value a menu of them.
+
+### 56.2 Decisions
+
+The author's, 2026-10-10, each picked from options whose words were mine:
+
+- **AEI** (the author's) **Go.dot answers a capture with one message to the device**, at its declared host
+  and port; only these verbs answer, and it is not a general reply channel. Offered as "One message back to
+  the device".
+- **AEJ** (the author's) **A processor may declare itself as a device**: made from the datagram's address,
+  its host and ports moved after, name, Rx and Tx only at creation; strict senders still drop an unknown
+  host before anything is read. Offered as "The processor may declare itself".
+- **AEK** (the author's) **A second export updates the cue it made, in place**, by the identifier the
+  processor keeps; one deleted meanwhile is made again at the landing place. Offered as "Update that cue in
+  place".
+- **AEL** (the author's) **Recall stays fire-and-forget** this round; a wait for the processor's report is
+  *(proposed)*, PRD §6.9.
+- **AEM** (the author's) **Both processors describe themselves and the cascaded menus are built now**:
+  WFS-DIY's OSCQuery tree gains its command nodes, S21_HiJack gains an OSCQuery route, and Go.dot fetches
+  the description at the declare. Offered as "Both apps describe themselves; menu built now".
+- **AEN** (the author's) **Also a fire-by-number verb in Go.dot** - against my recommendation, which was by
+  the identifier the processor keeps. Offered as "Also a fire-by-number verb in Go.dot".
+- **AEO** (the author's) **S21_HiJack drives Go.dot through per-cue triggers made from templates**, as it
+  drives QLab. Offered as "Per-cue triggers from templates".
+- **AEP** (the author's) **The menus are QLab's shape**: one drop-down per part of the path, in their words
+  above.
+
+Mine, while building:
+
+- **AEQ** (mine) **The names**: `mount.declare`, `cue.capture`, `mount.described`, `cue.fireNumber`,
+  `standby.setNumber`, `/godot/declared`, `/godot/captured`, `/godot/described`, `where` and its four
+  words, the inspector's `path 1`, `path 2`…, and every on-screen word in WFS-DIY and S21_HiJack. Draft
+  until the author renames them.
+- **AER** (mine) **What a capture draws rides on its record**: the cue's identifier in `id`, its further
+  messages' in `messageIds` - a parameter before the variadic pairs, empty from a processor - so a replay
+  draws nothing (the `cue.createFrom` precedent). A declare's record carries the host it was answered at.
+- **AES** (mine) **The device a capture aims at is found in the document**, by the longest prefix over the
+  declared mounts, not in the MountTable, which knows only what serve's after-tick refresh has loaded.
+- **AET** (mine) **Two devices in one capture is `bad-address`**: there is no `several-devices` reason
+  code, that word being a run's warning.
+- **AEU** (mine) **The answer goes to the device the sender is**, by its `host` row, else to the device the
+  cue aims at - S21_HiJack's console capture aims at the desk and the answer is still S21_HiJack's. A
+  device's Tx does not silence an answer. Answers leave from Go.dot's own socket at the end of the tick
+  (`tree::RawSender`), after the devices' messages, never coalesced, capped or bundled.
+- **AEV** (mine) **A datagram stays under 1,200 bytes**: a longer capture is chunks, `more` on the same
+  identifier, each its own undo step.
+- **AEW** (mine) **Under the lock, only what edits the show is refused**: a declare that changes nothing
+  is answered and its description fetched again; one that would make or move a device is `locked`. A
+  description for a device already naming its file is reloaded under the lock.
+- **AEX** (mine) **A node that takes no argument** - no TYPE, or only `N` and `I` - **takes an empty value**
+  and goes out as a bare message (`MountTable::write`); until now every write to one was `type-mismatch`,
+  so a described device's GO could be listed and never sent.
+- **AEY** (mine) **The path menus are derived lines in the inspector**, after the target, one per level,
+  written back to the address row; in the foot panel's messages table, where a row has no room for a line per
+  level, an arrow beside each address opens the same tree as one nested menu, built on the press; a value becomes a menu only while it is one of the node's values or
+  empty, so S21_HiJack's recall by identifier - its menu offers names - stays as typed.
+- **AEZ** (mine) **A cue number names a cue by exact text**, the focused list searched first and then the
+  others; the record keeps the number, and the existing `cue.fire` and `standby.set` do the rest.
+
+### 56.3 Commands and answers
+
+| Command | Arguments | Answers |
+|---|---|---|
+| `mount.declare` | `s:prefix i:port i:queryPort s:name [s:id] [s:host]` | `/godot/declared s:id s:outcome` |
+| `mount.described` | `s:mount s:file i:nodeCount s:problem` (sent by the engine) | `/godot/described s:id i:nodeCount s:problem` |
+| `cue.capture` | `s:where s:target s:id s:name s:number s:notes s:messageIds [s:address s:value]...` | `/godot/captured s:id s:outcome s:number s:name` |
+| `cue.fireNumber` | `s:number [s:run]` | - |
+| `standby.setNumber` | `s:number` | - |
+
+No parameter row was added: the commands publish themselves under `/godot/cmd`.
+
+### 56.4 Stages
+
+| Stage | What |
+|---|---|
+| CP.0 | The contract, `docs/godot-authoring-protocol-0.1.md`; this section |
+| CP.1 | `tree::RawSender`, the answers' seam, wired into serve after `MountSender::flush` |
+| CP.2 | `mount.declare` |
+| CP.3 | `cue.capture` |
+| CP.4 | `tests/blackbox/authoring.py`, the processor driven from outside |
+| CP.5 | `tree::MountFetcher`, `mount.described`, nodes that take no argument |
+| CP.6 | `cue.fireNumber`, `standby.setNumber` |
+| CP.7 | The path menus and the value menu (`model::pathSteps`, `valueOptions`, `Control::pathRef`); the messages table's menu (`model::treeMenu`, `OscMessagesComponent::menuOf`) |
+| WD | WFS-DIY: the Go.dot client type, `GoDotProtocol.h`, `GoDotCueBuilder.h`, the OSCQuery nodes |
+| S2 | S21_HiJack: the cueing-system toggle, the client, the `/s21` OSCQuery route, triggers and macros |
+
+### 56.5 Built so far
+
+Built 2026-10-10. In Go.dot, CP.0 to CP.7: the path menus in the inspector and the nested menu in the
+messages table. `AuthoringTests` (the declare,
+its refusals and the lock, the capture's landings, the upsert, the chunk, the checks before any write, where
+the answer goes, a replay of the records with no socket, the fetch adopted and failed, a node that takes
+nothing); five client cases (the walk over the minimal fixture's described console and WFS-DIY's captured
+tree, the value menu, the inspector's lines, the nested menu); a UI case (the table's arrow and the
+nested popup); `blackbox.authoring` under C and fr_FR, 31 checks: the driver
+is the processor - it serves its own description, declares, is described, captures, hears GO send the cue
+back to it, updates in place, fires a command that takes nothing by its cue's number, is refused for an
+address under no device and under the lock, moves its port - and `wfg replay` rebuilds the show.
+
+WFS-DIY 1.0.0beta55 (a51bcbd1, 194cbd53) and S21_HiJack 0.3.0 (337b4d0..f28ea92), both pushed, CI green.
+
+Found on the way: **`wfg replay` declared its bundle File inside the block that opened the show**, while
+`mount.load` - and now `mount.described` - hold it by reference and run in the replay after that block
+closes; the first replayed `mount.described` read a destroyed File, reproduced every record and then would
+not exit. It is declared at the verb's scope now, beside the writer that had the same reason. And
+`prefixMatchLength` answers for what is UNDER a root, never the root itself, so a declare of `/ui` passed
+it and an address that is exactly a device's root had no device: both ask for equality now.
+
+Not built, said here: nothing in Go.dot asks a processor anything once
+it has declared - a description is fetched only when it declares again; two processors with one root (two
+WFS-DIY boxes) share one device, the second moving the first's host.

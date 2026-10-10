@@ -490,7 +490,11 @@ is preferred**, and between Go.dot and the author's own processors it is the onl
 they have a network, a namespace and a description of themselves, and MIDI has seven bits. So
 Go.dot implements MIDI triggers because PRD §3.7 lists them and consoles exist, and it expects the
 traffic that matters to arrive as OSC. PRD §3.26, added the same day, is that relationship in the
-other direction.
+other direction. *Built 2026-10-10* (namespace draft §56, the contract in
+`docs/godot-authoring-protocol-0.1.md`): WFS-DIY gained a Go.dot network client type beside QLab,
+and its QLab export's two parameter walks became templates the Go.dot builder shares
+(`QLabCueBuilder::forEachInScopeInputParameter`, `forEachEffectNode`) - reuse in the other
+direction, Go.dot's protocol written into WFS-DIY rather than WFS-DIY's code lifted here.
 
 Around the cue model, then, three things are reusable and one claim of the Phase 2 plan is not:
 

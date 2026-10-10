@@ -120,6 +120,8 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Feature | What it does | Where |
 | --- | --- | --- |
 | OSC cues | Send to a desk, a processor or a video server, from a list of the device's addresses: several messages or bundles in one cue, and curves played on the cue's clock, recorded from the device's own reports or a SpaceMouse | *Add > osc*; *Show settings > Network* |
+| Cues written by WFS-DIY and S21_HiJack (new) | Store a snapshot in WFS-DIY or S21_HiJack and it lands in Go.dot as one cue after the standby; store it again and the same cue is updated. Each declares itself as a device, and its own addresses and snapshot names become menus, one per part of the address, under the cue's *target* | WFS-DIY: *Network* tab, protocol Go.dot, then *Write to Go.dot*; S21_HiJack: *Setup > Cueing system: Go.dot* |
+| Address and value menus (new) | On a device that describes itself, pick the address part by part and the value from its list | Cue inspector, under *target* |
 | Doh! rollback | When a GO is taken back, send each device the command that undoes it | Cue inspector; *Network* tab |
 | MIDI cues | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
 | Network monitor | See every message in and out | *Show > Network monitor…* |
@@ -186,9 +188,9 @@ Set a projector's delay once, and sound is held back to line up with the picture
 
 | System | What Go.dot will do with it |
 | --- | --- |
-| **WFS-DIY** (wave field synthesis) | Command its sources, positions and LFOs, claimed per cue so two cues never fight over one input |
+| **WFS-DIY** (wave field synthesis) | Command its sources, positions and LFOs, claimed per cue so two cues never fight over one input. Writing its snapshots into Go.dot as cues already works (above) |
 | **XOA / Tight-WFS** | The same, for ambisonic and WFS rendering |
-| **S21-HiJack** | Drive it as a sidecar for the DiGiCo S21, under its own branch of addresses |
+| **S21-HiJack** | Drive it as a sidecar for the DiGiCo S21, under its own branch of addresses. Writing its snapshots into Go.dot and being driven by Go.dot's GO already work (above) |
 | **Choufleur** (script following) | Show the script position and upcoming cues next to the cue list. Choufleur never fires anything, by design |
 | **ADM-OSC** processors | Built-in template for any object-based spatial processor that speaks ADM-OSC |
 | **Millumin** | The escape hatch for shows whose video outgrows Go.dot |

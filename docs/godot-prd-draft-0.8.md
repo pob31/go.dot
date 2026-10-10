@@ -1959,7 +1959,9 @@ make one from an address and a port, which is what a desk gets, and a template
 is what upgrades it to a device whose nodes are checked, typed and askable. The
 specialised kinds the author has in mind — a described tree with values,
 two-way OSCQuery, a device that writes cues into the show itself — are that
-upgrade path and are not yet built *(proposed)*.
+upgrade path and are not yet built *(proposed)*. *Built 2026-10-10 for the last:*
+a device that declares itself and writes cues into the show, its description
+fetched from it and offered as menus (§3.26; namespace draft §56).
 
 ### 3.23 Choufleur integration (script following and cue prompting)
 
@@ -2515,6 +2517,30 @@ without either end constraining the other.
 has settled what a cue's content *is* for a mounted namespace, because a capture
 is exactly a solved state written down. Phase 11's integrations is the earliest
 honest home for it.
+
+*Added in 0.8, at the author's direction (2026-10-10), and built the same day.*
+The author asked for it ahead of the solver, for WFS-DIY and S21_HiJack, to
+replace the QLab path both already use. The capture is of what the **processor**
+sends - its own scene, as it writes one into QLab - so it needs no solved state.
+The contract both processors implement is `docs/godot-authoring-protocol-0.1.md`;
+the decisions are the namespace draft's §56 (AEI-AEP the author's):
+
+- **A processor declares itself as a device** (`mount.declare`): made from the
+  datagram's address, its host and ports moved after, its name and switches the
+  operator's. Go.dot fetches its OSCQuery description and keeps it in the show.
+- **A processor writes a cue** (`cue.capture`): one OSC cue holding all its
+  messages, after the standby, at the end of a list, or in place of a cue. **The
+  identifier wins**: a cue that already holds it is updated where it stands, never
+  silently elsewhere, which is this section's "update cue" from the other end.
+- **Go.dot answers each with one message** to the device, and only these verbs
+  answer. A refusal - the show locked, an address under no device - is said.
+- **A processor fires by number too** (`cue.fireNumber`, `standby.setNumber`), as
+  QLab's `/go "12"`.
+- **A described device's tree is a menu, one per part of the path**, under an OSC
+  cue's target - the author's QLab shape - and an enumerated value is a menu of
+  its values.
+- **Recall stays fire-and-forget**: a wait for the processor's own report that a
+  recall landed is *(proposed)* (§6.9).
 
 ### 3.27 Sampler groups — strips, takeover and refresh
 
@@ -3677,6 +3703,11 @@ persistent media (§3.29). *Answered 2026-10-02 for the second: Esc is a pause
 
 Added 2026-09-09: authored colour at idle and timbre while sounding, as a
 layout option (§3.30).
+
+Added 2026-10-10, with authoring from a processor (§3.26; namespace draft §56):
+an OSC cue that waits for the processor's own report that a recall landed (a
+`heard` wait, decision AEL); a value checked against the node's enumerated values
+when a cue fires; two processors of one root kept as two devices.
 
 *Answered 2026-09-26* (the author's decisions, `docs/godot-namespace-draft-0.1.md`
 §17.15): scanning from the app, yes (decision AQ); AU and LV2, yes (AS); a plugin

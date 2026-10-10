@@ -1466,6 +1466,19 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   makes every gesture a command); what it needs is the verb, an explicit landing
   place, and a cue-list view for the processor. Here because a capture is a solved
   state written down, so it wants §3.13 finished.
+  **Built 2026-10-10, ahead of §3.13, at the author's direction** (namespace draft
+  §56, AEI-AEZ; the contract is `docs/godot-authoring-protocol-0.1.md`): the
+  processor declares itself (`mount.declare`) and Go.dot fetches its OSCQuery
+  description (`mount.described`); it writes OSC cues (`cue.capture`) after the
+  standby, at the end of a list or in place of a cue, the same cue updated when its
+  identifier comes back; it fires by number (`cue.fireNumber`, `standby.setNumber`);
+  and an OSC cue aimed at a described device offers its tree as one menu per part of
+  the address. The capture is of what the processor sends - its own scene - rather
+  than of a state Go.dot solves, which is what let it come before §3.13. Stages
+  CP.0-CP.7 in Go.dot, WD in WFS-DIY (1.0.0beta55), S2 in S21_HiJack (0.3.0).
+  The foot panel's messages table offers the same tree as one nested menu per
+  address. Not built: a wait for the processor's own report that a recall
+  landed *(proposed)*.
 - **Stream Deck** profile (bitmap renderable, triggering role); **SpaceMouse**
   as a rate endpoint; further surface profiles. *(2026-10-08: the SpaceMouse
   arrives first as what records an OSC cue's curves - the item before Phase 10,
