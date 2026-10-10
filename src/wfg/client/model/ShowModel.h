@@ -97,7 +97,13 @@ namespace wfg::client::model
         bool shut = false;          ///< for a band: whether those rows are hidden
 
         std::string id;
+
+        /*  WHAT THE ROW IS CALLED, and what somebody called it (namespace draft
+            §53): `ownName` is the cue's `name`, as typed - what an edit starts
+            from and writes back - and `name` is that, or the cue's `autoName`
+            while it has none, which is what every label reads. */
         std::string name;
+        std::string ownName;
         std::string kind;        ///< memo, media, fade, stop, group, osc, midi, …
         std::string number;      ///< the operator's own numbering, a string on purpose
 

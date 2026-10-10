@@ -16,6 +16,7 @@
 
 #include <wfg/engine/cue/Runner.h>
 
+#include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/PictureSpec.h>
 
 #include <wfg/engine/cue/LaneCommands.h>
@@ -11377,7 +11378,9 @@ namespace wfg::cue
             return cueId;
 
         const auto number = cue[juce::Identifier ("number")].toString().toStdString();
-        const auto name = cue[juce::Identifier ("name")].toString().toStdString();
+
+        //  Its name, or what it is called while it has none (namespace draft §53).
+        const auto name = AutoNames { document.root() }.shownAs (cue);
 
         if (! number.empty() && ! name.empty())
             return number + " " + name;
@@ -21305,11 +21308,10 @@ namespace wfg::cue
                                 if (step.origin == 'd')
                                     continue;
 
-                                const auto name = document.getAttribute ("/godot/cue/" + step.cue + "/name")
-                                                      .value_or (std::string {});
-                                const auto made = document.createCue (take.id, at++, "start",
-                                                                      "Start " + (name.empty() ? step.cue : name),
-                                                                      next());
+                                /*  UNNAMED, and so called "Start" and its target's
+                                    name for as long as nobody names it (namespace
+                                    draft §53) - the words it was once given. */
+                                const auto made = document.createCue (take.id, at++, "start", "", next());
 
                                 if (! made.ok)
                                     return Outcome::rejected (made.reason);

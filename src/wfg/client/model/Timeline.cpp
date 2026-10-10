@@ -214,7 +214,7 @@ namespace wfg::client::model
 
             Bar bar;
             bar.id = id;
-            bar.name = text (snapshot, member + "name");
+            bar.name = shownCueName (snapshot, id);
             bar.kind = text (snapshot, member + "kind");
             bar.colour = text (snapshot, member + "colour");
             bar.preWait = secondsAt (snapshot, member + "preWait");

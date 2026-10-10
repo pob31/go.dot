@@ -377,7 +377,7 @@ namespace wfg::client::model
 
         const auto cue = "/godot/cue/" + out.subject.objectId + "/";
 
-        out.cueName = at (cue + "name");
+        out.cueName = shownCueName (snapshot, out.subject.objectId);
         out.cueKind = at (cue + "kind");
 
         if (subject.kind == Subject::Kind::waveform)

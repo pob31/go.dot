@@ -18,7 +18,7 @@
     group's run holding its members'. */
 
 import { tree } from "../plumbing/tree.js";
-import { el, esc } from "./common.js";
+import { el, esc, shownName } from "./common.js";
 import { reconcile } from "./reconcile.js";
 
 /*  WHETHER A RUN'S LAUNCH HAS BEEN PLACED, asked of the one node that knows.
@@ -117,7 +117,7 @@ function runRow(id, depth, out) {
   const state = tree.run(id, "state", "armed");
   const cue = tree.run(id, "cue", "");
   const kind = tree.run(id, "kind", "");
-  const name = tree.cue(cue, "name", "") || cue || "—";
+  const name = shownName(cue) || cue || "—";
 
   const bits = [];
   const track = Number(tree.run(id, "track", -1));

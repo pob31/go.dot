@@ -120,6 +120,15 @@ function refreshFields(pane) {
 
     if (input.type === "checkbox") input.checked = value === true;
     else if (String(input.value) !== String(value)) input.value = value;
+
+    /*  AN UNNAMED CUE'S NAME BOX shows, as its placeholder, what the cue is
+        called while it stays unnamed (namespace draft §53): a fade after its
+        target, a sound after its file. Emptying a name gives it back. One
+        cue's box only - several cues' says whether they agree. */
+    if (input.dataset.all === undefined && /^\/godot\/cue\/[^/]+\/name$/.test(input.dataset.set)) {
+      const automatic = String(tree.get(input.dataset.set.replace(/name$/, "autoName"), ""));
+      if (input.placeholder !== automatic) input.placeholder = automatic;
+    }
   }
 
   /*  AND THE VALUES NOBODY MAY WRITE, which have no box to write into and were

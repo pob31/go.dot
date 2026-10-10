@@ -947,6 +947,68 @@ TEST_CASE ("client: the cue list is rebuilt when the show moves, and not when th
 }
 
 //==============================================================================
+TEST_CASE ("client: an unnamed cue is shown by what it does, and its name box starts empty (namespace draft 53)")
+{
+    Rig rig;
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE_FALSE (listId.empty());
+
+    const auto sound = rig.document.createCue (listId, 0, "media", "").id;
+    const auto fade = rig.document.createCue (listId, 1, "fade", "").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + sound + "/file", "Thunder.wav").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade + "/target", sound).ok);
+    rig.parameters.markStale();
+
+    auto snapshot = rig.publish (1);
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, listId));
+
+    const auto rowOf = [&show] (const std::string& id) -> const model::Row&
+    {
+        const auto at = show.indexOf (id);
+        REQUIRE (at >= 0);
+        return show.rows()[static_cast<std::size_t> (at)];
+    };
+
+    //  The row reads as it is called; an edit starts from what was typed, which is nothing.
+    CHECK (rowOf (fade).name == "Fade out Thunder");
+    CHECK (rowOf (fade).ownName.empty());
+    CHECK (rowOf (sound).name == "Thunder");
+    CHECK (model::shownCueName (*snapshot, fade) == "Fade out Thunder");
+
+    //  The inspector's name box: empty, with the automatic name greyed in it.
+    const auto nameField = [&rig] (std::int64_t tick, const std::string& id)
+    {
+        rig.parameters.markStale();
+        const auto inspection = model::inspect (*rig.publish (tick), id);
+        model::Field found;
+
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == "name")
+                    found = field;
+
+        return found;
+    };
+
+    auto field = nameField (2, fade);
+    CHECK (field.value.empty());
+    CHECK (field.placeholder == "Fade out Thunder");
+
+    //  Named, the name is the row's and the box's, and nothing stands in.
+    REQUIRE (rig.apply (3, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + fade + "/name"),
+                          osc::Value::string ("Storm out") }).applied == 1);
+    snapshot = rig.publish (3);
+    REQUIRE (show.refresh (*snapshot, listId));
+    CHECK (rowOf (fade).name == "Storm out");
+    CHECK (rowOf (fade).ownName == "Storm out");
+
+    field = nameField (4, fade);
+    CHECK (field.value == "Storm out");
+    CHECK (field.placeholder.empty());
+}
+
 TEST_CASE ("client: a band with no section behind it makes one rather than taking nothing")
 {
     /*  The author, 2026-09-22: "drag and drop to an empty group header or

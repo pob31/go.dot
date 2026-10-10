@@ -1336,7 +1336,7 @@ namespace wfg::client
 
             juce::String nameOf (const std::string& cueId) const
             {
-                const auto name = latest != nullptr ? model::text (*latest, "/godot/cue/" + cueId + "/name")
+                const auto name = latest != nullptr ? model::shownCueName (*latest, cueId)
                                                     : std::string {};
                 return juce::String (name.empty() ? cueId : name);
             }
@@ -1560,7 +1560,7 @@ namespace wfg::client
 
                 send (gesture::copyPart (part, cueId));
 
-                const auto name = latest != nullptr ? model::text (*latest, "/godot/cue/" + cueId + "/name")
+                const auto name = latest != nullptr ? model::shownCueName (*latest, cueId)
                                                     : std::string {};
                 shell->transport.setNotice (partWords (part) + " of " + (name.empty() ? juce::String ("the cue")
                                                                                       : juce::String (name))
@@ -1633,7 +1633,7 @@ namespace wfg::client
                 }
 
                 const auto targets = model::pasteTargets (snapshot, clip, subject.objectId, selection.ids());
-                const auto from = model::text (snapshot, "/godot/cue/" + clip.sourceId + "/name");
+                const auto from = model::shownCueName (snapshot, clip.sourceId);
                 const auto source = from.empty() ? juce::String ("a cue") : juce::String (from);
 
                 if (targets.empty())
@@ -1818,7 +1818,7 @@ namespace wfg::client
                     cue = subject.objectId;
                     const auto number = model::text (snapshot, base + "number");
                     caption = juce::String (number.empty() ? std::string {} : "Cue " + number + " ")
-                              + juce::String (model::text (snapshot, base + "name"));
+                              + juce::String (model::shownCueName (snapshot, cue));
 
                     if (isMovie)
                     {
@@ -2954,7 +2954,7 @@ namespace wfg::client
                 const auto said = model::newClash (
                     held.before, model::readOutMarks (snapshot, held.cue), held.ownOut,
                     model::text (snapshot, "/godot/bus/" + held.ownOut + "/name"),
-                    model::text (snapshot, "/godot/cue/" + held.cue + "/name"));
+                    model::shownCueName (snapshot, held.cue));
 
                 if (said.has_value() && shell != nullptr)
                     shell->transport.setNotice (juce::String (*said));
@@ -4402,7 +4402,7 @@ namespace wfg::client
                 if (latest == nullptr || picked.empty())
                     return "at the end of the list";
 
-                const auto name = model::text (*latest, "/godot/cue/" + picked + "/name");
+                const auto name = model::shownCueName (*latest, picked);
 
                 return "after " + (name.empty() ? juce::String ("the picked cue") : juce::String (name));
             }
@@ -4502,7 +4502,7 @@ namespace wfg::client
                     aim = selection.anchor();
 
                     const auto aimName = aim.empty() ? std::string {}
-                                                     : model::text (*latest, "/godot/cue/" + aim + "/name");
+                                                     : model::shownCueName (*latest, aim);
 
                     lines = model::transportMenu (aim.empty() ? std::string {}
                                                               : (aimName.empty() ? std::string ("the picked cue") : aimName),

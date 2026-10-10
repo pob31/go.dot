@@ -63,6 +63,11 @@ namespace wfg::client::model
     /** find() and text() in one call; empty when nothing is at the address. */
     std::string text (const tree::TreeSnapshot& snapshot, std::string_view address);
 
+    /*  WHAT A CUE IS CALLED (namespace draft §53): its `name`, or while it has
+        none its `autoName` - a fade after its target, a sound after its file.
+        What every label reads; an edit of the name reads `name` itself. */
+    std::string shownCueName (const tree::TreeSnapshot& snapshot, std::string_view cueId);
+
     /** A `T` node's three answers: absent, false, true. */
     Flag flag (const tree::TreeSnapshot& snapshot, std::string_view address);
 

@@ -348,7 +348,8 @@ namespace wfg::client::model
 
         Row row;
         row.id = cueId;
-        row.name = attribute (snapshot, cueId, "name");
+        row.ownName = attribute (snapshot, cueId, "name");
+        row.name = row.ownName.empty() ? attribute (snapshot, cueId, "autoName") : row.ownName;
         row.kind = attribute (snapshot, cueId, "kind");
         row.number = attribute (snapshot, cueId, "number");
         row.preset = attribute (snapshot, cueId, "preset");

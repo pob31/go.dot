@@ -444,7 +444,7 @@ namespace wfg::client::model
 
         if (! reading.standbyId.empty())
         {
-            reading.standbyName = text (snapshot, "/godot/cue/" + reading.standbyId + "/name");
+            reading.standbyName = shownCueName (snapshot, reading.standbyId);
             reading.standbyKind = text (snapshot, "/godot/cue/" + reading.standbyId + "/kind");
             reading.standbyNotes = text (snapshot, "/godot/cue/" + reading.standbyId + "/notes");
         }
@@ -482,7 +482,7 @@ namespace wfg::client::model
             reading.dohCue = text (snapshot, "/godot/cue/" + parts[1] + "/number");
 
             if (reading.dohCue.empty())
-                reading.dohCue = text (snapshot, "/godot/cue/" + parts[1] + "/name");
+                reading.dohCue = shownCueName (snapshot, parts[1]);
         }
 
         reading.dohForget = text (snapshot, "/godot/list/dohForget");
@@ -492,7 +492,7 @@ namespace wfg::client::model
             reading.dohForgetCue = text (snapshot, "/godot/cue/" + parts[1] + "/number");
 
             if (reading.dohForgetCue.empty())
-                reading.dohForgetCue = text (snapshot, "/godot/cue/" + parts[1] + "/name");
+                reading.dohForgetCue = shownCueName (snapshot, parts[1]);
         }
 
         /*  WHAT THE LAST DOH! SAID (D4): the runner's readout, and the name of

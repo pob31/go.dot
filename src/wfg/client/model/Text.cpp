@@ -68,6 +68,16 @@ namespace wfg::client::model
         return text (snapshot.find (address));
     }
 
+    std::string shownCueName (const tree::TreeSnapshot& snapshot, std::string_view cueId)
+    {
+        const auto base = "/godot/cue/" + std::string (cueId) + "/";
+
+        if (auto name = text (snapshot, base + "name"); ! name.empty())
+            return name;
+
+        return text (snapshot, base + "autoName");
+    }
+
     Flag flag (const tree::TreeSnapshot& snapshot, std::string_view address)
     {
         const auto* node = snapshot.find (address);

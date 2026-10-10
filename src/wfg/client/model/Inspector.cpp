@@ -790,7 +790,7 @@ namespace wfg::client::model
 
                     const auto id = std::string (address.substr (prefix.size(), address.size() - prefix.size() - suffix.size()));
                     const auto number = text (snapshot, "/godot/cue/" + id + "/number");
-                    const auto name = text (snapshot, "/godot/cue/" + id + "/name");
+                    const auto name = shownCueName (snapshot, id);
                     lock->choices.push_back ({ id, (number.empty() ? std::string {} : number + "  ") + (name.empty() ? id : name) });
                 }
             }
@@ -1360,7 +1360,7 @@ namespace wfg::client::model
             return out;
 
         out.cueId = cueId;
-        out.cueName = text (snapshot, "/godot/cue/" + cueId + "/name");
+        out.cueName = shownCueName (snapshot, cueId);
         out.kind = text (snapshot, "/godot/cue/" + cueId + "/kind");
 
         /*  ONE SCAN OF THE TREE, AND ONLY WHEN A SELECTION CHANGES. `all()` is
@@ -1445,6 +1445,14 @@ namespace wfg::client::model
 
         if (out.kind == "transport")
             wordTheVerb (decided);
+
+        /*  AN UNNAMED CUE'S NAME BOX shows, greyed, what the cue is called
+            while it stays unnamed (namespace draft §53): a fade after its
+            target, a sound after its file. Typing names it; emptying the box
+            gives the automatic name back, and it follows the cue again. */
+        for (auto& field : decided)
+            if (field.name == "name" && field.value.empty() && ! field.mixed)
+                field.placeholder = text (snapshot, "/godot/cue/" + cueId + "/autoName");
 
         /*  THE DCA A CUE ANSWERS TO, on the three kinds that carry the row -
             a media cue and a group marked with one, a fade that moves one - and

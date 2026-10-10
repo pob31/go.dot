@@ -832,7 +832,10 @@ TEST_CASE ("take: Keep as cue makes a media cue after the one sounding there, lo
     CHECK (*(mic + 1) == made);
 
     CHECK (rig.at ("/godot/cue/" + made + "/kind") == "media");
-    CHECK (rig.at ("/godot/cue/" + made + "/name") == "Looper take 1");
+    /*  Called after its file, which is the name it was given: so the name is the
+        default and follows the file from here (namespace draft §53, ADB). */
+    CHECK (rig.at ("/godot/cue/" + made + "/name").empty());
+    CHECK (rig.at ("/godot/cue/" + made + "/autoName") == "Looper take 1");
     CHECK (rig.at ("/godot/cue/" + made + "/file") == "takes/Looper take 1.wav");
     CHECK (rig.at ("/godot/range/" + range + "/cue") == made);
     CHECK (rig.at ("/godot/range/" + range + "/in") == "0.5");

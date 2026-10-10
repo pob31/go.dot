@@ -20,7 +20,7 @@
 import { tree } from "../plumbing/tree.js";
 import { selection } from "../model/selection.js";
 import { folded } from "../model/remember.js";
-import { el, esc, cueName } from "./common.js";
+import { el, esc, cueName, shownName } from "./common.js";
 import { refreshFields } from "./values.js";
 import { reconcile } from "./reconcile.js";
 import { view } from "./view.js";
@@ -252,7 +252,7 @@ function cueRow(id, depth, section, rail, standby, out) {
 
   const enabled = tree.cue(id, "enabled", true) !== false;
   const number = esc(tree.cue(id, "number", ""));
-  const name = esc(tree.cue(id, "name", "") || "—");
+  const name = esc(shownName(id) || "—");
 
   const flags = [];
 
@@ -528,7 +528,7 @@ function presetLine(id, group, depth, rail, out) {
       '<div class="name" style="padding-left:' + (depth * 16) + 'px">' +
         '<span class="twist"></span>' +
         '<span class="kind">' + esc(tree.cue(id, "kind", "memo")) + "</span>" +
-        '<span class="text">' + esc(tree.cue(id, "name", "") || "\u2014") + "</span>" +
+        '<span class="text">' + esc(shownName(id) || "\u2014") + "</span>" +
       "</div>" +
       '<div class="tail">' +
         '<span class="flag" title="got ready by this header; it runs where it sits in the' +

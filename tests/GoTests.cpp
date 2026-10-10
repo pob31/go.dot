@@ -37,6 +37,7 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
+#include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
@@ -10388,7 +10389,9 @@ TEST_CASE ("record: what was pressed between start and stop becomes a take of st
     };
 
     CHECK (attribute (first, "target") == rig.mediaId);
-    CHECK (attribute (first, "name") == "Start Thunder");
+    //  Unnamed, and so called by what it does (namespace draft §53).
+    CHECK (attribute (first, "name").empty());
+    CHECK (cue::AutoNames { rig.document.root() }.of (first) == "Start Thunder");
     CHECK (osc::parseDouble (attribute (first, "preWait")).value_or (-1.0)
              == doctest::Approx ((thunderAt - since) / 50.0));
     CHECK (attribute (second, "target") == rig.memoId);

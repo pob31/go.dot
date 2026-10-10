@@ -118,7 +118,7 @@ namespace wfg::client::model
         const auto nameFor = [&snapshot, &reading] (const std::string& cueId)
         {
             if (! cueId.empty() && reading.names.count (cueId) == 0)
-                reading.names[cueId] = text (snapshot, "/godot/cue/" + cueId + "/name");
+                reading.names[cueId] = shownCueName (snapshot, cueId);
         };
 
         for (const auto& step : reading.steps)

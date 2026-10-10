@@ -103,6 +103,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/ListState.cpp
     wfg/engine/cue/DohSetting.h
     wfg/engine/cue/DohSetting.cpp
+    wfg/engine/cue/AutoName.h
+    wfg/engine/cue/AutoName.cpp
     wfg/engine/cue/ShowWalk.h
     wfg/engine/cue/Override.h
     wfg/engine/cue/Solver.h

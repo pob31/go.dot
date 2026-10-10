@@ -79,7 +79,7 @@ namespace wfg::client::model
             if (const auto found = busy.find (row.id); found != busy.end())
             {
                 mark.state = OutMark::State::taken;
-                mark.byCue = text (snapshot, "/godot/cue/" + found->second + "/name");
+                mark.byCue = shownCueName (snapshot, found->second);
 
                 if (mark.byCue.empty())
                     mark.byCue = found->second;
@@ -87,7 +87,7 @@ namespace wfg::client::model
             else if (const auto perhaps = maybe.find (row.id); perhaps != maybe.end())
             {
                 mark.state = OutMark::State::undecided;
-                mark.byCue = text (snapshot, "/godot/cue/" + perhaps->second + "/name");
+                mark.byCue = shownCueName (snapshot, perhaps->second);
 
                 if (mark.byCue.empty())
                     mark.byCue = perhaps->second;

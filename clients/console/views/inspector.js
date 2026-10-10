@@ -23,7 +23,7 @@ import { tree } from "../plumbing/tree.js";
 import { str } from "../plumbing/osc.js";
 import { panel } from "../model/remember.js";
 import { selection } from "../model/selection.js";
-import { el, esc, cueName } from "./common.js";
+import { el, esc, cueName, shownName } from "./common.js";
 import { isList, shownValue, commitText, refreshFields } from "./values.js";
 
 /*  Every address in the tree that belongs to these objects, whatever owner word
@@ -816,7 +816,7 @@ function renderInspector() {
         esc(String(tree.get("/godot/bus/" + bus + "/name", "") || bus)) +
         '</span><span class="kind">send</span></div>' +
         '<div class="back" data-pick="' + esc(owner) + '">\u2190 ' +
-        esc(tree.cue(owner, "name", "") || owner) + "</div>" +
+        esc(shownName(owner) || owner) + "</div>" +
         fieldsMarkup (fields.filter(decided), kind, true) +
         detailsMarkup ([selection.picked], fields.filter((f) => !decided(f)), kind);
       return;
@@ -840,7 +840,7 @@ function renderInspector() {
         '<div class="who"><span class="text">' + esc(triggerSummary(selection.picked)) +
         '</span><span class="kind">trigger</span></div>' +
         '<div class="back" data-pick="' + esc(owner) + '">\u2190 ' +
-        esc(tree.cue(owner, "name", "") || owner) + "</div>";
+        esc(shownName(owner) || owner) + "</div>";
 
       out += fieldsMarkup(fields.filter(decided), kind, true);
       out += detailsMarkup([selection.picked], fields.filter((f) => !decided(f)), kind);
@@ -897,7 +897,7 @@ function renderInspector() {
     const hasFooter = tree.ids("/godot/cue/" + selection.picked + "/footerOrder").length > 0;
 
     let out =
-      '<div class="who"><span class="text">' + esc(tree.cue(selection.picked, "name", "") || "—") +
+      '<div class="who"><span class="text">' + esc(shownName(selection.picked) || "—") +
       '</span><span class="kind">' + esc(kind) + "</span></div>";
 
     out += fieldsMarkup(fields.filter(decided), kind, true);

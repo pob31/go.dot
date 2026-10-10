@@ -325,7 +325,7 @@ namespace wfg::client::ui
         editAttribute = attribute;
 
         const auto text = cell == model::EditCell::number   ? entry.number
-                        : cell == model::EditCell::name     ? entry.name
+                        : cell == model::EditCell::name     ? entry.ownName
                         : cell == model::EditCell::preWait  ? entry.preWait
                         : cell == model::EditCell::duration ? entry.duration
                                                             : entry.postWait;
@@ -338,6 +338,12 @@ namespace wfg::client::ui
         editor.setJustification (cell == model::EditCell::name || cell == model::EditCell::number
                                    ? juce::Justification::centredLeft : juce::Justification::centredRight);
         editor.setText (juce::String (text), juce::dontSendNotification);
+
+        /*  AN UNNAMED CUE'S BOX STARTS EMPTY and shows, greyed, what the cue
+            is called while it stays so (namespace draft §53): typing names it,
+            and a box emptied again gives it back its automatic name. */
+        const auto standIn = cell == model::EditCell::name && entry.ownName.empty() ? entry.name : std::string {};
+        editor.setTextToShowWhenEmpty (juce::String (standIn), Look::colour (theme, "ink-dim"));
 
         placeEditor();
         editor.setVisible (true);
@@ -378,7 +384,7 @@ namespace wfg::client::ui
             the undo stack to hold for nobody. */
         const auto& entry = rows[static_cast<std::size_t> (juce::jlimit (0, static_cast<int> (rows.size()) - 1, row))];
         const auto was = attribute == "number"   ? entry.number
-                       : attribute == "name"     ? entry.name
+                       : attribute == "name"     ? entry.ownName
                        : attribute == "preWait"  ? entry.preWait
                        : attribute == "duration" ? entry.duration
                                                  : entry.postWait;

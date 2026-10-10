@@ -101,7 +101,7 @@ namespace wfg::client::model
             const auto run = "/godot/run/" + reading.holderRun + "/";
             const auto holderCue = text (snapshot, run + "cue");
 
-            reading.holderName = text (snapshot, "/godot/cue/" + holderCue + "/name");
+            reading.holderName = shownCueName (snapshot, holderCue);
             reading.channelSounds = text (snapshot, run + "kind") == "mic"
                                       && text (snapshot, run + "state") == "playing";
         }

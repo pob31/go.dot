@@ -26,6 +26,7 @@
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Override.h>
+#include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/Preparedness.h>
 
 #include <wfg/engine/midi/PortTable.h>
@@ -949,6 +950,7 @@ namespace wfg::tree
                          const cue::SlotAnalysis& analysis,
                          const cue::SamplerLayout& layout,
                          const cue::LiveEdits* live,
+                         const cue::AutoNames& names,
                          const char* role = "member")
         {
             const auto element = node.getType().toString().toStdString();
@@ -1101,6 +1103,11 @@ namespace wfg::tree
                                                   : isProcess ? "process"
                                                             : "memo";
                 else if (name == "parent") text = parentId;
+                /*  WHAT THE CUE IS CALLED WHILE ITS NAME IS EMPTY (namespace
+                    draft §53), from the show and never stored: a fade's follows
+                    its target's name, so it is worked out on every rebuild of
+                    this half, which any edit of the show brings. */
+                else if (name == "autoName") text = names.of (node);
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "role")   text = role;
                 else if (name == "fx" && (isMedia || isMic)) text = enabledFxInChainOrder (node);
@@ -1412,13 +1419,13 @@ namespace wfg::tree
                     for (const auto& roleChild : child)
                         if (roleChild.hasProperty (idProperty))
                             collectCue (roleChild, id, roleIndex++, out, durations, roster,
-                                        mediaRoster, analysis, layout, live, childRole);
+                                        mediaRoster, analysis, layout, live, names, childRole);
 
                     continue;
                 }
 
                 collectCue (child, id, childIndex++, out, durations, roster, mediaRoster,
-                            analysis, layout, live);
+                            analysis, layout, live, names);
             }
 
             /*  AND THE SENDS A LOCKED SHOW MADE LIVE on this cue, published
@@ -1476,6 +1483,9 @@ namespace wfg::tree
         const auto catalogueRevisionSeen = catalogues != nullptr ? catalogues->revision() : 0;
         const auto liveRevisionSeen = liveEdits != nullptr ? liveEdits->revision() : 0;
         const auto knownRevisionSeen = knownList != nullptr ? knownList->revision() : 0;
+
+        //  Every identified node indexed once, for every cue's automatic name.
+        const cue::AutoNames autoNames { document.root() };
 
         std::vector<Node> nodes;
 
@@ -1631,7 +1641,7 @@ namespace wfg::tree
 
                         if (cue.hasProperty (idProperty))
                             collectCue (cue, id, index++, nodes, durations, cueOrder, mediaOrder,
-                                        analysis, samplerLayout, liveEdits);
+                                        analysis, samplerLayout, liveEdits, autoNames);
                     }
 
                     if (const auto section = list.getChildWithName ("Persistent");
@@ -1643,7 +1653,7 @@ namespace wfg::tree
                             if (cue.hasProperty (idProperty))
                                 collectCue (cue, id, persistentIndex++, nodes, durations,
                                             cueOrder, mediaOrder, analysis, samplerLayout,
-                                            liveEdits, "persistent");
+                                            liveEdits, autoNames, "persistent");
                     }
                 }
             }

@@ -63,7 +63,7 @@ namespace wfg::client::model
         {
             const auto base = "/godot/cue/" + cueId + "/";
             const auto number = text (snapshot, base + "number");
-            const auto name = text (snapshot, base + "name");
+            const auto name = shownCueName (snapshot, cueId);
 
             if (! number.empty() && ! name.empty())
                 return number + " " + name;

@@ -23872,3 +23872,78 @@ the launch sweep. `tests/blackbox/cache_sweep.py`, as `blackbox.cache-sweep.C` a
 whose `.timbre` holds the analysis of two sounds still in `media/`, of one that is gone and a note: the
 launch sweep removes the gone one's two files and says `auto`; a sound taken out and `media.cleanCache`
 sent over OSC removes its two and says `asked`; and the session's log replays record for record.
+
+## 53. Automatic cue names
+
+Written 2026-10-10. The author asked: *"Could cues with a target like fade, stop and the like have an
+automatic name when the target is assigned such as fade with the name of the media... Same for OSC and
+MIDI cues, they could have a reference to their content. Once the default name has been edited by the
+user and until it is clear the default name doesn't come back. Clearing the name puts back the default
+name that can change to a new default if the content or target changes."* And then: *"Same for media
+(audio and video files, or live input) as long as the name is a default name, changing the media or
+input should update the default name."*
+
+### 53.1 What it does
+
+A cue whose `name` is empty is shown by what it does, and that is worked out from the show every time it
+is read, never stored (§4.10: the document holds what somebody decided). `cue/autoName` publishes it
+beside `name`; every client shows `name`, or `autoName` while `name` is empty. So the author's rule is
+what an empty name already means: a name somebody types is kept whatever the cue's target or file
+becomes, and clearing it lets the cue be called by what it does now.
+
+| Cue | Called | For example |
+| --- | --- | --- |
+| Fade | after its target, *out* when it takes the level to silence and moves nothing else, *and stop* when it stops what it faded; a DCA's fade after the DCA | Fade out Intro music; Fade and stop Intro music; Fade DCA Band |
+| Transport | its verb, as the inspector words it, around its target | Stop Intro music; Stop Intro music after this round; Fade out and stop Intro music; Advance Bed to Verse; Enable Thunder; Jump to Thunder and Go; Rec Voice |
+| Start | after its target | Start Intro music |
+| OSC | its first message, the type tags left out, and how many more it sends | /mixer/ch/1/fader 0.5 (+1) |
+| MIDI | its message, channel and port | Program change 5, ch 1 on Desk; CC 7 = 100, ch 1; SysEx F0 7E 7F 06 01 02 ... |
+| Media, picture, movie | its file, without the folder or the extension | Intro music |
+| Capture, fill, mask | its video input's name; Fill; Mask | Stage camera |
+| Mic | its input's name | Voix solo |
+
+A target is named as it is shown: its name, else its automatic name - a fade of a sound nobody named reads
+as the sound's file - else its number (*cue 12*), else its kind. A cue whose target or content is not
+set has no automatic name, and reads *(unnamed)* as before. A group, a memo and a process cue have none.
+
+### 53.2 Decisions
+
+- **ACZ** (the author's) **An empty name is called by what the cue does, and follows it**; a typed name
+  stays until it is cleared. Media, pictures, movies and live inputs too (the author's second message).
+- **ADA** (mine) **Worked out by the engine, published as `cue/autoName`, never stored.** One wording for
+  the window, the web console and a D700's scribble strip, and nothing in `show.xml` that the machine
+  decided. A strip shows the short name, else the name, else the automatic name.
+- **ADB** (mine) **A name that was only ever the default follows too.** A dropped file names its new cue
+  after itself before the file is copied in, and every sound dropped into a show before this section
+  carries its file's name as typed text. So when an edit changes what a cue's automatic name is read
+  from - a file, an input, a source, a target, a verb, an OSC message, a MIDI message or port, what a
+  fade moves - and the cue's name is exactly its automatic name before the edit or after it, the name is
+  emptied in the same Undo step. A name that is anything else is somebody's and stays. Written once, in
+  the document's write door, so every client and a replayed log behave alike.
+- **ADC** (mine) **The words** of 53.1, in English as the rest of the window is: the inspector's own
+  words for a transport verb, *out* only for a fade to silence that moves nothing but the level, numbers
+  as the inspector shows them (a MIDI note as its number, not a note name). Yours to change.
+- **ADE** (mine) **The live recorder's start cues are born unnamed**, so they read *Start* and their
+  target's name - the words they used to be given - and follow a rename of the target.
+- **ADF** (mine) **Shown as a name, edited as an empty box**: the list and every label read the automatic
+  name as they read a typed one; the name box, inline or in the inspector, starts empty with the automatic
+  name greyed in it. Typing over it names the cue; emptying a typed name gives the automatic one back.
+  Typing a cue's automatic name in a target box finds the cue, as its typed name would.
+
+### 53.3 The row
+
+- `/godot/cue/<id>/autoName` (s, r) - what the cue is called while its name is empty, or empty when it
+  has none. Never stored, never logged; worked out on every rebuild of the tree's document half, which
+  any edit brings, so a fade's follows its target's rename.
+
+### 53.4 Built
+
+`cue::AutoNames` (`src/wfg/engine/cue/AutoName.*`), indexed once per rebuild; `ShowDocument::
+defaultNameBefore` / `letNameFollow` at the write door; `cueLabel` in the Runner (every Doh! report),
+`wfg validate`'s insert sentence and the template review read the shown name. The window: `Row::name` is
+the shown name and `Row::ownName` the typed one; `model::shownCueName` for every label that reads a cue
+from the tree. The web console: `shownName` in `views/common.js`, the name box's placeholder in
+`views/values.js`. Tests: `tests/AutoNameTests.cpp` (each kind's words, a chain and a loop of targets, a
+default name following a file and a target while a typed one stays, one Undo step, the published row
+following a rename), a client case (the row, the name box and its placeholder), and the live recorder's
+case reading its start cue's automatic name.

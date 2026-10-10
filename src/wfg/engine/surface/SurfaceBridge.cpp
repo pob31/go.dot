@@ -523,7 +523,7 @@ namespace wfg::surface
 
             //  Addresses that follow what is on the strip, made again only when
             //  that changes - at a handover, or when the show edits the strip.
-            std::string cueId, cueNameAt, cueShortAt, cueNumberAt, cueColourAt, cuePressureAt,
+            std::string cueId, cueNameAt, cueAutoAt, cueShortAt, cueNumberAt, cueColourAt, cuePressureAt,
                         cueFloorAt, cueDurationAt, cueStartAt;
             std::string dcaId, dcaNameAt, dcaShortAt;
             std::string holderId, timbreAt, envelopeAt, meterAt, soloAt, positionAt, tintAt;
@@ -670,7 +670,7 @@ namespace wfg::surface
             bool loopNone = false;
 
             //  The aimed cue's rows every rotary of the page reads.
-            std::string eqOnAt, aimShortAt, aimNameAt, aimColourAt, aimSendsAt;
+            std::string eqOnAt, aimShortAt, aimNameAt, aimAutoAt, aimColourAt, aimSendsAt;
         };
 
         struct Surface
@@ -1030,6 +1030,7 @@ namespace wfg::surface
             paging.eqOnAt = base.empty() ? std::string {} : base + "eqOn";
             paging.aimShortAt = base.empty() ? std::string {} : base + "shortName";
             paging.aimNameAt = base.empty() ? std::string {} : base + "name";
+            paging.aimAutoAt = base.empty() ? std::string {} : base + "autoName";
             paging.aimColourAt = base.empty() ? std::string {} : base + "colour";
             paging.aimSendsAt = base.empty() ? std::string {} : base + "sends";
 
@@ -1312,6 +1313,7 @@ namespace wfg::surface
                 strip.cueId = onStrip;
                 const auto base = onStrip.empty() ? std::string {} : "/godot/cue/" + onStrip + "/";
                 strip.cueNameAt = under (base, "name");
+                strip.cueAutoAt = under (base, "autoName");
                 strip.cueShortAt = under (base, "shortName");
                 strip.cueNumberAt = under (base, "number");
                 strip.cueColourAt = under (base, "colour");
@@ -3047,6 +3049,8 @@ namespace wfg::surface
                     name = shortName;
                 else if (const auto& longName = textAt (at, strip.cueNameAt); ! longName.empty())
                     name = longName;
+                else
+                    name = textAt (at, strip.cueAutoAt);    // called by what it does (namespace draft §53)
             }
 
             if (box.topology.nativeDisplay)
@@ -3504,9 +3508,13 @@ namespace wfg::surface
                     {
                         pageScratch.assign (shortName);
                     }
+                    else if (const auto& longName = textAt (at, paging.aimNameAt); ! longName.empty())
+                    {
+                        pageScratch.assign (longName);
+                    }
                     else
                     {
-                        pageScratch.assign (textAt (at, paging.aimNameAt));
+                        pageScratch.assign (textAt (at, paging.aimAutoAt));
                     }
                 }
 

@@ -26,14 +26,21 @@ function esc(text) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
+/*  WHAT A CUE IS CALLED (namespace draft §53): its name, or while it has none
+    what the engine calls it by - a fade after its target, a sound after its
+    file. Empty only for a cue with neither. */
+function shownName(id) {
+  return tree.cue(id, "name", "") || tree.cue(id, "autoName", "");
+}
+
 /*  A cue as somebody would say it out loud: its number and its name, falling
     back to the identifier for a cue that has neither yet. Used where one row
     has to talk about another. */
 function cueName(id) {
   const number = tree.cue(id, "number", "");
-  const name = tree.cue(id, "name", "");
+  const name = shownName(id);
   const said = [number, name].filter((part) => part !== "" && part !== undefined).join(" ");
   return said || id;
 }
 
-export { el, esc, cueName };
+export { el, esc, cueName, shownName };

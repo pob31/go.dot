@@ -27,6 +27,7 @@
 #include <wfg/engine/import/AlsImport.h>
 #include <wfg/engine/import/QlabImport.h>
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/PictureSpec.h>
 #include <wfg/engine/cue/LiveEdits.h>
@@ -1999,7 +2000,7 @@ namespace
                 const auto cue = node.getParent();
                 const auto entry = document.findById (node.getProperty ("plugin").toString().toStdString());
                 const auto label = "cue " + cue.getProperty ("number").toString() + " \""
-                                     + cue.getProperty ("name").toString() + "\": its "
+                                     + juce::String (wfg::cue::AutoNames { cue.getRoot() }.shownAs (cue)) + "\": its "
                                      + (entry.isValid() ? entry.getProperty ("name").toString()
                                                         : node.getProperty ("plugin").toString())
                                      + " insert names ";

@@ -499,7 +499,7 @@ namespace wfg::client::model
                 characters the engine drew and nobody recognises, and what an
                 operator is looking for in this pane is which cue that is. */
             if (! row.cueId.empty())
-                row.cueName = text (snapshot, "/godot/cue/" + row.cueId + "/name");
+                row.cueName = shownCueName (snapshot, row.cueId);
 
             row.aimed = ! row.cueId.empty() && row.cueId == aim;
 

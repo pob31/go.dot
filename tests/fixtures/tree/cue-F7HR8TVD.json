@@ -3,6 +3,14 @@
   "ACCESS": 0,
   "GODOT": {"KIND": "container"},
   "CONTENTS": {
+    "autoName": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/autoName",
+      "DESCRIPTION": "What the cue is called while its name is empty (namespace draft 53, the author, 2026-10-10): a fade, a stop or a start after its target as the target is shown, an OSC cue after its first message, a MIDI cue after its message and port, a sound or a picture after its file. Worked out from the show and never stored: a name somebody types is kept whatever the target becomes, and clearing it lets the cue be called by what it does now. Empty where the kind has none, or its target or content is not set yet. A client shows name, or this when name is empty.",
+      "TYPE": "s",
+      "ACCESS": 1,
+      "VALUE": [""],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
     "colour": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/colour",
       "DESCRIPTION": "A #RRGGBB decoration. Never the sole carrier of information.",

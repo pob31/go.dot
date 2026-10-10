@@ -16,6 +16,7 @@
 
 #include <wfg/engine/document/ShowDocument.h>
 
+#include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/Override.h>
 #include <wfg/engine/command/Command.h>
@@ -29,6 +30,7 @@
 
 #include <map>
 #include <functional>
+#include <initializer_list>
 #include <cctype>
 #include <cstddef>
 #include <algorithm>
@@ -1385,11 +1387,70 @@ namespace wfg::doc
         const juce::Identifier property { juce::String (std::string (target.attribute->name())) };
         auto* const onto = historyFor (*target.attribute);
 
+        const auto defaultName = defaultNameBefore (target.node, target.attribute->name());
+
         keepBefore (target.node, property, onto);
         target.node.setProperty (property, toVar (value), onto);
 
         keepSoundsAfter (target.node, target.attribute->name());
+        letNameFollow (target.node, defaultName);
         return EditResult::succeeded (target.node[idProperty].toString().toStdString());
+    }
+
+    //==============================================================================
+    namespace
+    {
+        /*  THE ROWS A CUE'S AUTOMATIC NAME IS READ FROM, by element - what
+            `cue::AutoNames` reads, and nothing else, so a fader riding a
+            sound's level never costs a walk of the show. */
+        bool feedsTheName (std::string_view element, std::string_view row)
+        {
+            const auto any = [row] (std::initializer_list<std::string_view> rows)
+            {
+                return std::find (rows.begin(), rows.end(), row) != rows.end();
+            };
+
+            if (element == "Media") return row == "file";
+            if (element == "Mic")   return row == "input";
+            if (element == "Video") return any ({ "file", "source", "videoInput" });
+            if (element == "Start") return row == "target";
+            if (element == "Osc")   return any ({ "address", "value" });
+            if (element == "Midi")  return any ({ "port", "type", "channel", "data1", "data2", "sysex" });
+
+            if (element == "Transport")
+                return any ({ "target", "verb", "andGo", "range" });
+
+            if (element == "Fade")
+                return any ({ "target", "dca", "level", "levelOn", "rateOn", "sends", "eq", "fx", "video",
+                              "stopWhenDone" });
+
+            return false;
+        }
+    }
+
+    std::optional<std::string> ShowDocument::defaultNameBefore (const juce::ValueTree& node, std::string_view row) const
+    {
+        if (! feedsTheName (node.getType().toString().toStdString(), row)
+              || node["name"].toString().isEmpty())
+            return std::nullopt;
+
+        return cue::AutoNames { showNode }.of (node);
+    }
+
+    void ShowDocument::letNameFollow (const juce::ValueTree& node, const std::optional<std::string>& before)
+    {
+        if (! before.has_value())
+            return;
+
+        const auto name = node["name"].toString().toStdString();
+
+        if (name != *before && name != cue::AutoNames { showNode }.of (node))
+            return;
+
+        /*  Through the door, so the lock, the history and a `node.setMany`'s
+            keeping see it as they see every write; `name` feeds no name, so
+            this goes no further. */
+        setAttribute ("/godot/cue/" + node[idProperty].toString().toStdString() + "/name", "");
     }
 
     //==============================================================================

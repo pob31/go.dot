@@ -100,6 +100,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Groups | *Timeline* (members start together), *Sequential on GO*, *Sequential automatic*, *Shuffle* (new order each round), *Sampler* (sounds and pictures fired from pads and faders, a picture's fader setting its opacity) | *Add > group* |
 | Fades | Fade level, sends, EQ and plugin values of any cue or group, with a drawn curve | *Add > fade*, then *Mixer* and *Curve* |
 | Transport cues | Stop, stop after this member or round, start another cue; enable or disable a cue for this run; jump standby to a cue, or jump and GO | *Add > transport* |
+| Automatic names (new) | A cue nobody has named is called by what it does: a fade or a stop by its target (*Fade out Intro music*), an OSC or MIDI cue by its message, a sound, a picture or a mic by its file or input. It follows when the target, file or message changes. Type a name and it stays; clear it and the automatic one comes back | Name column; inspector, *Name* |
 | Triggers | Fire cues from incoming OSC, MIDI or the wall clock | Cue inspector, *when* |
 | Load to time | Jump into the middle of a scene with the right cues playing at the right offsets | Ctrl+T |
 | Anticipation | The cue on standby is loaded and its devices prepared before you press GO | Automatic |

@@ -76,7 +76,7 @@ namespace wfg::client::model
         const auto base = "/godot/cue/" + cueId + "/";
 
         out.cueId = cueId;
-        out.cueName = text (snapshot, base + "name");
+        out.cueName = shownCueName (snapshot, cueId);
         out.curve = text (snapshot, base + "curve");
         out.levelDb = osc::parseDouble (text (snapshot, base + "level")).value_or (0.0);
         out.seconds = osc::parseDouble (text (snapshot, base + "duration")).value_or (0.0);

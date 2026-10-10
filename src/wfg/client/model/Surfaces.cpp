@@ -521,7 +521,7 @@ namespace wfg::client::model
             {
                 const auto cueBase = "/godot/cue/" + row.cue + "/";
 
-                row.cueName = text (snapshot, cueBase + "name");
+                row.cueName = shownCueName (snapshot, row.cue);
                 row.cueShortName = text (snapshot, cueBase + "shortName");
                 row.cueNumber = text (snapshot, cueBase + "number");
                 row.cueColour = text (snapshot, cueBase + "colour");
@@ -934,7 +934,7 @@ namespace wfg::client::model
 
         const auto cueWords = [&snapshot] (const std::string& id)
         {
-            auto name = text (snapshot, "/godot/cue/" + id + "/name");
+            auto name = shownCueName (snapshot, id);
 
             if (name.empty())
                 name = text (snapshot, "/godot/cue/" + id + "/number");

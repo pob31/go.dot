@@ -17,6 +17,7 @@
 #include <wfg/engine/document/Template.h>
 
 #include <wfg/engine/app/OpenShows.h>
+#include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/Schema.h>
@@ -124,7 +125,7 @@ namespace wfg::doc::Template
             }
 
             const auto number = text (node, "number");
-            const auto name = text (node, "name");
+            const auto name = cue::AutoNames { node.getRoot() }.shownAs (node);   // §53
             const auto said = (number.empty() ? std::string() : number + " ") + (name.empty() ? tag : name);
 
             return said.empty() ? idOf (node) : said;

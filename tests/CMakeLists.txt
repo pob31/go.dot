@@ -72,6 +72,7 @@ add_executable(wfg_tests
     FolderIconTests.cpp
     AssociateTests.cpp
     TemplateTests.cpp
+    AutoNameTests.cpp
     CommandTests.cpp
     EventLogTests.cpp
     EngineTests.cpp

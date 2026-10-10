@@ -102,6 +102,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Groupes | *Timeline* (les membres partent ensemble), *Sequential on GO*, *Sequential automatic*, *Shuffle* (nouvel ordre à chaque tour), *Sampler* (sons et images lancés depuis pads et faders, le fader d'une image réglant son opacité) | *Add > group* |
 | Fondus | Faire varier niveau, envois, EQ et paramètres de plugins de n'importe quelle cue ou groupe, selon une courbe dessinée | *Add > fade*, puis *Mixer* et *Curve* |
 | Cues de transport | Arrêter, arrêter après ce membre ou ce tour, lancer une autre cue ; activer ou désactiver une cue pour ce passage ; déplacer l'attente sur une cue, ou y sauter et faire GO | *Add > transport* |
+| Noms automatiques (nouveau) | Une cue que personne n'a nommée porte le nom de ce qu'elle fait : un fondu ou un arrêt celui de sa cible (*Fade out Intro music*), une cue OSC ou MIDI son message, un son, une image ou un micro son fichier ou son entrée. Il suit quand la cible, le fichier ou le message change. Un nom tapé reste ; effacé, le nom automatique revient | Colonne du nom ; inspecteur, *Name* |
 | Déclencheurs | Lancer des cues sur OSC, MIDI entrant ou à une heure donnée | Inspecteur, *when* |
 | Charger à un instant | Sauter au milieu d'une scène avec les bonnes cues aux bons endroits | Ctrl+T |
 | Anticipation | La cue en attente est chargée et ses appareils préparés avant le GO | Automatique |

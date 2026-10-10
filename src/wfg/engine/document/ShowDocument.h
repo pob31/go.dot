@@ -1107,6 +1107,21 @@ namespace wfg::doc
         void keepSoundsAfter (const juce::ValueTree& node, std::string_view row);
         bool keepingSounds = false;
 
+        /*  A NAME THAT WAS ONLY EVER THE DEFAULT FOLLOWS ITS CUE (namespace
+            draft §53, the author, 2026-10-10: "as long as the name is a default
+            name, changing the media or input should update the default name").
+            An empty name already follows, being shown as `cue/autoName`; this
+            is for the name a drop wrote before the cue had its file, and for
+            every sound dropped into a show before §53, whose name is its
+            file's. Before an edit of a row the automatic name is read from,
+            `defaultNameBefore` takes the cue's automatic name - nothing when
+            the row is not one of them or the cue has no name to lose - and
+            after it `letNameFollow` empties a name that was the automatic
+            name before or is the one after, in the same transaction. A name
+            somebody typed that is neither stays. */
+        std::optional<std::string> defaultNameBefore (const juce::ValueTree& node, std::string_view row) const;
+        void letNameFollow (const juce::ValueTree& node, const std::optional<std::string>& before);
+
         /*  EVERY IDENTIFIER IN THE TREE, RESERVED AGAIN, after an undo or a
             redo. Undo touches the registry not at all - `removeChild` with a
             manager holds a ref-counted handle on the child and its undo re-adds
