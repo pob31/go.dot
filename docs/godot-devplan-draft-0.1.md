@@ -1167,6 +1167,36 @@ screen, a join by ear, a bounce in a show folder.
 
 ---
 
+### Editing a movie: sections, dissolves, the sound in step · M
+
+*Added on 2026-10-10*, at the author's direction, the sound's row an hour old: a HAP movie cue cut into
+sections at the playhead on its frame grid, the sections reordered or removed, a linear dissolve at
+each join, its locked sound cut in step, rendered to a HAP movie while open and frozen with its sound
+as one pair; a movie that is not HAP converted first (namespace draft §55.5-55.8; PRD §3.19, §3.24).
+The author's decisions are ADS and the three picks under ADT, ADU and ADW; the rest are the
+implementer's, the author's to overrule.
+
+| Stage | What | Depends on |
+|---|---|---|
+| V.0 | Docs: namespace §55.5-55.8, the PRD's two sentences, both guides, this | - |
+| V.1 | The document: a Video holds Sections, its sound follows, the pair freezes | V.0 |
+| V.2 | The file's facts published (frame rate, codec), the grid at the verbs, the HAP refusal | V.1 |
+| V.3 | The resolver and the Runner: what a movie plays, its read-ahead, the monitor's second | V.2 |
+| V.4 | The render: `renderMovieEdit`, frames copied, dissolves blended | V.2 |
+| V.5 | The renderer service by kind, the pair's freeze, serve | V.3, V.4 |
+| V.6 | The window's model: the movie's facts, the mapping of the strip and the cuts | V.2 |
+| V.7 | The window: the row over the strip | V.5, V.6 |
+| V.8 | The driver, the replay, the close-out | all |
+
+**Done when:** a three-shot HAP movie with its sound is reordered with a dissolve and plays so, the
+sound in step with its lane dip where the shot went, Freeze then Unfreeze show the same, a movie that is
+not HAP says to convert it first, an old show saves unchanged; CI is green.
+
+**Needs from the author:** a dissolve by eye at four frames and at twenty-five, on a projector; a Hap Q
+movie's join; a frozen pair in a show folder; the row's words for a preview movie.
+
+---
+
 ## Phase 10 — Timecode, panic, hardening · M
 
 **Goal:** the stop levels and the sync sources that a touring show requires.

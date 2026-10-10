@@ -24125,3 +24125,78 @@ here: an edge dragged on the row (a section's in or out point is `section.trim` 
 inspector or OSC, until the row grows a handle for it); the first section's crossfade is stored but never
 heard; a cue copied whole takes its sections, a template never does (ADQ); a movie's edit is a later
 round.
+
+### 55.5 Movies
+
+Written 2026-10-10, the sound's row an hour old. The author: *"Can we get to work on the video in a
+similar way? HAP conversion prior to editing is okay."* A HAP movie cue is edited as a sound is, in the
+same row with the same verbs: cut at the playhead, the sections dragged into an order or removed, a
+**dissolve** at each join, and its **locked sound cut in step** - the sound's sections are the movie's,
+copied onto it as its start offset, speed and Ranges are (37.5, WL), so the sound's render and the
+movie's are of one timeline, and the sound keeps its own lanes, carried as the movie's sections move.
+A movie that is not HAP - a preview through FFmpeg - is refused until it is converted with *Show >
+Convert the movie to HAP*; the row says so, greyed.
+
+**On the frame grid.** A cut lands on the movie's nearest frame: `section.split` and `section.trim` on a
+movie snap their seconds to the frame rate the analyser read off the file, and write the snapped number
+back on the record, so a replay with no file stores the same show. The sound's copied points are the
+movie's, bit for bit; on the grid two points are the same instant or at least a frame apart.
+
+**The dissolve** is the picture's crossfade: linear, centred on the join, the outgoing picture going on
+past its out point and the incoming beginning before its in point, as the sound's crossfade does, and
+black beyond the file's edges. A join still one in the file plays plain. Every frame outside a dissolve
+is the source's own bytes, copied: an edit of a constant-rate movie loses nothing.
+
+**What plays.** While the edit is open the cue shows a render under `media/.edits/`, a HAP movie in the
+source's codec, size and frame grid, made on the renderer's thread after every change under a new name
+per edit (ADM); the cue's row says *rendering* until it is there, and the read-ahead loads it when it
+is. The render is never analysed: the strip's thumbnails and scene cuts are the file's, laid on the
+edited timeline through the sections, and the monitor shows the file's frame at the second the edit
+maps to. **Freeze** is the pair's: the movie's render is copied beside its source as *`<stem>
+(edit).mov`* and the sound's as *`<stem> (edit).wav`*, and one record points both cues at their bounces;
+**Unfreeze** points both back. The sound's own Freeze is refused: the movie leads.
+
+### 55.6 Decisions, movies
+
+- **ADS** (the author's) **A HAP movie is edited as a sound is, in the same row with the same verbs; its
+  locked sound follows; a movie that is not HAP is converted first.** Their words above; "HAP conversion
+  prior to editing is okay" is what makes the lossless copy possible.
+- **ADT** (mine; the author chose the grid, offered as "On the nearest frame") **A movie's section points
+  sit on its frame grid, snapped by the verbs and written back on the record; the sound's sections are
+  the movie's, copied as its Ranges are (WL), so the two renders are of one timeline.** Snapped by the
+  verbs and not at the door: a `node.set` record carries the value asked, and a replay without the frame
+  rate would hold a different document.
+- **ADU** (mine; the author chose linear, offered against equal power) **The dissolve is the picture's
+  crossfade: linear, centred on the join, material from beyond the edges, black beyond the file; a
+  continuous join plays plain; every frame outside a dissolve is the source's bytes.** The sound keeps
+  its equal-power crossfade over the same length.
+- **ADV** (mine) **The render is a HAP movie in the source's codec, size and frame grid under
+  `media/.edits/`, on the file's own time base, never analysed**: the strip and the monitor are the
+  source's, mapped through the sections. A variable-rate source lands on its dominant grid, some frames
+  picked twice or skipped, and the readout says so.
+- **ADW** (mine; the author chose one step, offered against each on its own) **Freeze is the pair's: one
+  verb, one record, one undo step, refused on the sound with *edit the movie*.**
+- **ADX** (mine) **A movie that is not HAP, or not read yet, refuses every section verb with words saying
+  what to do; the row says the same, greyed.** The codec and the frame rate come from the analyser's
+  header read, which lands before its strip does.
+
+### 55.7 The rows and the commands, movies
+
+- `/godot/cue/<id>/editSource` and `/godot/cue/<id>/sections` on a video cue too, as 55.3 has them on a
+  sound; `/godot/cue/<id>/frameRate` (d, r) and `/godot/cue/<id>/codec` (s, r) on a video cue, read off
+  the file by the analyser - empty until it has - published from the runtime half as `hash` is.
+- `<Section>` under `<Video>` as under `<Media>`: on a movie `crossfade` is the dissolve and `trim` is the
+  locked sound's; the sound's `<Section>`s are copies, refused to a direct edit (`locked-to-movie`).
+- `section.split <cue> <at> [id] [length] [frameRate]` and `section.trim <section> <in> <out>
+  [frameRate]` on a movie: the seconds snapped to the grid and written back, the rate written back
+  beside them. Refused `bad-value` with words - *the movie is not read yet*, *convert the movie to HAP
+  first* - where the file's codec is not Hap1, Hap5 or HapY.
+- `media.freeze <movie>` - refused `busy` until the movie's render and its locked sound's are of the
+  edits as they now are; `locked-to-movie` on the sound. `media.frozen <movie> <source> <bounce> [<sound>
+  <soundSource> <soundBounce>]` - the pair's swap, one record. `media.unfreeze <movie>` - both back.
+- `/godot/engine/editRender` gains a fifth column, the kind: `sound` or `movie`; its problem column says
+  *resampled onto <fps> fps* for a variable-rate source.
+
+### 55.8 Built, movies
+
+In progress: stages V.1 to V.8.

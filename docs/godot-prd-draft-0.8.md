@@ -1685,6 +1685,11 @@ Go.dot starts and watches, so a graphics driver's fault never reaches the sound 
 relaunched renderer draws again what was up. Everything below that says *surface* for video means
 canvas.
 
+*Added in 0.8, at the author's direction (2026-10-10).* A HAP movie cue may be
+cut into sections and edited as a sound is (§3.24, *Editing a sound*): the
+cuts on its frame grid, a linear dissolve at each join, its locked sound in
+step, the pair frozen together to new files the cues play.
+
 #### 3.19a Surfaces and mapping
 
 *Amended 2026-10-06, at the author's direction:* **one canvas may feed several outputs**, each with
@@ -2178,8 +2183,11 @@ cue's file time is always the time of what it plays, so the §3.10 lanes, the
 Ranges above and the start offset keep their meaning, and the edit commands
 carry them when a section moves or goes: a dip drawn over the verse stays over
 the verse. While the edit is open the cue plays a background render of it; a
-sounding cue keeps its file until its next run. Sounds only; movies later. The
-namespace draft's §55 holds the decisions and the commands.
+sounding cue keeps its file until its next run. A HAP movie is edited the same
+way *(at the author's direction, 2026-10-10)*: its cuts on the frame grid, a
+linear **dissolve** at each join, its locked sound cut in step and the pair
+frozen together; a movie that is not HAP is converted first. The namespace
+draft's §55 holds the decisions and the commands.
 
 #### Running view and solver
 
