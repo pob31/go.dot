@@ -4341,20 +4341,20 @@ namespace
                                   if (! problem.empty())
                                       return;
 
-                                  std::vector<wfg::osc::Value> args { wfg::osc::Value::string (job.cue),
-                                                                      wfg::osc::Value::string (job.source),
-                                                                      wfg::osc::Value::string (bounce) };
+                                  std::vector<wfg::osc::Value> frozen { wfg::osc::Value::string (job.cue),
+                                                                        wfg::osc::Value::string (job.source),
+                                                                        wfg::osc::Value::string (bounce) };
 
                                   /*  A MOVIE'S PAIR (namespace draft §55.5, ADW): its sound's
                                       swap in the same record. */
                                   if (! soundBounce.empty())
                                   {
-                                      args.push_back (wfg::osc::Value::string (job.soundCue));
-                                      args.push_back (wfg::osc::Value::string (job.soundSource));
-                                      args.push_back (wfg::osc::Value::string (soundBounce));
+                                      frozen.push_back (wfg::osc::Value::string (job.soundCue));
+                                      frozen.push_back (wfg::osc::Value::string (job.soundSource));
+                                      frozen.push_back (wfg::osc::Value::string (soundBounce));
                                   }
 
-                                  engine.submit (wfg::origin::engine, "media.frozen", std::move (args));
+                                  engine.submit (wfg::origin::engine, "media.frozen", std::move (frozen));
                               });
         wfg::audio::registerEditRenderCommands (engine.commands(), &renderer, document);
 

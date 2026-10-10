@@ -2687,11 +2687,11 @@ TEST_CASE ("video host: a movie's edit rendered is played by a renderer with no 
 
         /*  INSIDE THE DISSOLVE, at 0.95 s: blue five eighths, and the red the
             incoming green's section runs back into three eighths. */
-        const auto closeTo = [] (std::uint32_t colour, int red, int green, int blue, int within)
+        const auto closeTo = [] (std::uint32_t colour, int r, int g, int b, int within)
         {
-            return std::abs (static_cast<int> ((colour >> 16) & 0xffu) - red) <= within
-                && std::abs (static_cast<int> ((colour >> 8) & 0xffu) - green) <= within
-                && std::abs (static_cast<int> (colour & 0xffu) - blue) <= within;
+            return std::abs (static_cast<int> ((colour >> 16) & 0xffu) - r) <= within
+                && std::abs (static_cast<int> ((colour >> 8) & 0xffu) - g) <= within
+                && std::abs (static_cast<int> (colour & 0xffu) - b) <= within;
         };
 
         host.sink().move ("RUN00001", video::Property::time, { clock.now(), 0.95 });

@@ -447,7 +447,7 @@ TEST_CASE ("edit renderer: a freeze copies the render beside its source under a 
                          return f != s->end() && f->second.state == audio::renderState::done; }));
     const auto render = renderer.snapshot()->at ("CUE00001").file;
 
-    renderer.freeze ({ "CUE00001", "ramp.wav", render });
+    renderer.freeze ({ "CUE00001", "ramp.wav", render, {}, {}, {} });
     REQUIRE (soon ([&] { return told.load(); }));
 
     CHECK (problem.empty());
@@ -459,7 +459,7 @@ TEST_CASE ("edit renderer: a freeze copies the render beside its source under a 
 
     /*  A render that is not there is said so. */
     told.store (false);
-    renderer.freeze ({ "CUE00001", "ramp.wav", ".edits/nothing.wav" });
+    renderer.freeze ({ "CUE00001", "ramp.wav", ".edits/nothing.wav", {}, {}, {} });
     REQUIRE (soon ([&] { return told.load(); }));
     CHECK (bounce.empty());
     CHECK (problem == "the render is not there");
@@ -631,7 +631,7 @@ TEST_CASE ("edit renderer: a movie's freeze is the pair's - its bounce beside it
     /*  A movie alone, with no sound cut in step: its own bounce, under the
         next free name. */
     told.store (false);
-    renderer.freeze ({ "MOV00001", "three.mov", movieRender });
+    renderer.freeze ({ "MOV00001", "three.mov", movieRender, {}, {}, {} });
     REQUIRE (soon ([&] { return told.load(); }, 300));
     CHECK (problem.empty());
     CHECK (bounce == "three (edit) 2.mov");
