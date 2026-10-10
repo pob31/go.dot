@@ -197,7 +197,7 @@ namespace wfg::doc
                     mapping the cue's DCA mark carries - the picture's curve and
                     the sound's offset - which a mic, a video cue and a group
                     carry too. Last again, for the same reason. */
-                { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" },
+                { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Section", "Trigger", "Fx" },
                                                           { "cue", "sound", "media", "member", "mark" } },
 
                 /*  A LIVE INPUT PLAYED AS A CUE (Phase 9b, decisions BW and CE):
@@ -250,6 +250,14 @@ namespace wfg::doc
                     that during a show has nowhere to be armed and is refused
                     with `no-slot` until the show is reloaded. */
                 { "Range",  true,  {},                     { "range" } },
+
+                /*  A PIECE OF THE FILE IN AN EDIT (namespace draft §55): a
+                    sound cue's sections, in their order, are the edited
+                    timeline the cue plays - rendered to a file while the edit
+                    is open, bounced to one when it is frozen. Identified for
+                    the reason a Range is, and a child of Media alone: a
+                    movie's edit is a later round. */
+                { "Section", true,  {},                    { "section" } },
 
                 /*  A TRIGGER IS AN OBJECT ON A CUE, and on ANY cue: §3.7 says a
                     cue or a group carries a list of them, so it is a child of

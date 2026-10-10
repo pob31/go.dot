@@ -631,6 +631,47 @@ namespace wfg::tree
             }
         }
 
+        /*  A SECTION OF A SOUND'S EDIT (namespace draft §55), flat at
+            /godot/section/<id> as a range is, and like a range positional:
+            its index is its place in the edited timeline, counted among
+            sections alone, so a Route or a Range between two sections moves
+            neither. */
+        void collectSection (const juce::ValueTree& node, const std::string& cueId,
+                             int index, std::vector<Node>& out)
+        {
+            const auto id = node[idProperty].toString().toStdString();
+
+            if (id.empty())
+                return;
+
+            const auto base = std::string (godot) + "/section/" + id;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("section"))
+            {
+                const doc::Attribute attribute { "Section", row };
+                const auto name = std::string (row->name);
+
+                const auto text = name == "cue"   ? cueId
+                                : name == "index" ? std::to_string (index)
+                                                  : storedText (attribute, node);
+
+                out.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
+        }
+
+        /*  The identifiers of a sound's sections, in the order of its edited
+            timeline (namespace draft §55): the containment read back. */
+        std::string sectionsOf (const juce::ValueTree& cue)
+        {
+            std::string out;
+
+            for (const auto& child : cue)
+                if (child.hasType ("Section") && child.hasProperty (idProperty))
+                    out += (out.empty() ? "" : " ") + child[idProperty].toString().toStdString();
+
+            return out;
+        }
+
         /*  AN OSC CUE'S FURTHER MESSAGE (namespace draft 45, YP), flat at
             /godot/message/<id> for the Route argument: a client editing one
             message's value writes one node. `cue` and `index` are the
@@ -1201,6 +1242,10 @@ namespace wfg::tree
                 {
                     text = sendsOf (node, id, live);
                 }
+                else if (name == "sections" && isMedia)
+                {
+                    text = sectionsOf (node);
+                }
                 /*  AN OSC CUE'S FURTHER MESSAGES, in their order (namespace
                     draft 45): the containment read back, as `zones` is. */
                 else if (name == "messages")
@@ -1257,6 +1302,7 @@ namespace wfg::tree
 
             int childIndex = 0;
             int rangeIndex = 0;
+            int sectionIndex = 0;
             int messageIndex = 0;
 
             for (const auto& child : node)
@@ -1382,6 +1428,12 @@ namespace wfg::tree
                         this cue's playlist, and a Route or a Trigger sitting
                         between two ranges must not move it. */
                     collectRange (child, id, rangeIndex++, out);
+                    continue;
+                }
+
+                if (childElement == "Section")
+                {
+                    collectSection (child, id, sectionIndex++, out);
                     continue;
                 }
 

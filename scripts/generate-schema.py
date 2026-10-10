@@ -70,7 +70,7 @@ OUT_PATH = REPO_ROOT / "src" / "wfg" / "engine" / "document" / "SchemaTable.gene
 #   same container read two ways, and a client walking the tree should not have
 #   to know that one of them is spelled differently.
 KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
-                "audio", "bus", "media", "route", "range", "run", "runs",
+                "audio", "bus", "media", "route", "range", "section", "run", "runs",
                 # What a cue that sounds carries whatever its source - level,
                 # routing, the DCA, the EQ, the inserts, the sends (Phase 9b,
                 # namespace draft 18.2). A media cue and a mic cue both carry

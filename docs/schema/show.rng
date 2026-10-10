@@ -517,6 +517,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="editSource">
+          <a:documentation>The file this cue&apos;s edit was made from while the edit is FROZEN - bounced to a new file by media.freeze and the cue pointed at it - and empty otherwise (namespace draft 55, ADN). So file names what the cue plays whatever its state: a frozen cue is a plain sound cue to everything that reads file, and this row is what media.unfreeze points file back at. Non-empty with no sections is a show somebody edited by hand, and a warning.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="enabled">
           <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>
@@ -929,6 +935,7 @@
           <ref name="Feed"/>
           <ref name="Insert"/>
           <ref name="Range"/>
+          <ref name="Section"/>
           <ref name="Trigger"/>
           <ref name="Fx"/>
         </choice>
@@ -1814,6 +1821,47 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Section">
+    <element name="Section">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="crossfade">
+          <a:documentation>How long the crossfade is at the join INTO this section from the one before, in seconds, centred on the join: the outgoing section goes on past its out point for half of it, fading out, equal power, while this one begins that much before its in point, fading in. Ignored on the first section. Clamped where the material runs out - to twice this section&apos;s in point, since there is nothing before the file&apos;s start - and to what the section&apos;s length leaves beside its other crossfade. A join that is still one in the file (the two pieces adjacent in it, as a split leaves them) plays plain whatever this says, since equal power over identical material is a bump of three decibels; the value is kept for when a move parts them. Ten milliseconds, the default, is the click suppressor the slice moves use.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="in">
+          <a:documentation>Where in the file this piece begins, in seconds of the FILE. Written through section.trim, or as node.set, which does the same: moving an edge moves everything after it on the edited timeline, so the cue&apos;s lane points, its ranges and its start offset are carried along in the same edit (namespace draft 55, ADO).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="out">
+          <a:documentation>Where in the file this piece ends, in seconds of the FILE; after its in, or the show is refused. The piece is as long as out less in, whatever its crossfades: a crossfade is centred on the join and takes its material from beyond the edges, so widening one moves nothing (namespace draft 55, ADL).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="trim">
+          <a:documentation>A gain on this piece, in dB, baked into the render - over the piece and its halves of the crossfades at either end. Beside the cue&apos;s level and its lane, which are the cue&apos;s and not the file&apos;s: a trim says what this piece of the material should be relative to the rest, which is a fact about the edit. Nought is the material as recorded.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-120</param>
+            <param name="maxInclusive">12</param>
+          </data>
         </attribute>
       </optional>
     </element>

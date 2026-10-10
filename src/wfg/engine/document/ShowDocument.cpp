@@ -457,6 +457,7 @@ namespace wfg::doc
             return {};
         if (element == "Route")                     return "route";
         if (element == "Range")                     return "range";
+        if (element == "Section")                   return "section";
         if (element == "Port")                      return "port";
         if (element == "Trigger")                   return "trigger";
 
@@ -4181,6 +4182,52 @@ namespace wfg::doc
 
         Offsets { problems }.visit (showNode);
 
+        /*  A SECTION IS A PIECE OF THE FILE (namespace draft §55), so one
+            that ends before it begins is no piece at all, and a sound locked
+            to a movie has no time of its own to cut up: its start offset,
+            speed and Ranges are the movie's (WL), and so would its sections
+            be. Both refused when the show is read, as a range that ends
+            before it begins is refused at its door. */
+        struct Sections
+        {
+            std::vector<std::string>& problems;
+            const ShowDocument& document;
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.getType().toString() == "Media")
+                {
+                    const auto cueId = node[juce::Identifier ("id")].toString().toStdString();
+                    const auto lockedTo = document.findById (node[juce::Identifier ("lockedTo")].toString().toStdString());
+                    const auto followsAMovie = lockedTo.isValid() && lockedTo.hasType (juce::Identifier ("Video"));
+
+                    for (const auto& child : node)
+                    {
+                        if (child.getType().toString() != "Section")
+                            continue;
+
+                        const auto here = "/Show/.../Media[" + cueId + "]/Section["
+                                            + child[juce::Identifier ("id")].toString().toStdString() + "]";
+                        const auto in = static_cast<double> (child[juce::Identifier ("in")]);
+                        const auto out = static_cast<double> (child[juce::Identifier ("out")]);
+
+                        if (! (out > in))
+                            problems.push_back (here + ": a section that ends before it begins is no piece"
+                                                       " of the file - its out must be after its in");
+
+                        if (followsAMovie)
+                            problems.push_back (here + ": a sound locked to a movie plays on the movie's"
+                                                       " time and cannot be cut into sections - detach it first");
+                    }
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        Sections { problems, *this }.visit (showNode);
+
         /*  A MIDI CUE CANNOT WAIT TO BE VERIFIED, because nothing will ever
             answer.
 
@@ -4966,6 +5013,19 @@ namespace wfg::doc
                                                 " at the boundary, and away from speed one as a click; the passes of a"
                                                 " range are seamless, and in varispeed so are its boundaries");
                 }
+
+                /*  AN EDIT SOURCE WITH NO SECTIONS (namespace draft §55): a
+                    frozen edit is its sections, kept for Unfreeze, and a
+                    bounce somebody pointed a cue at by hand has nothing to
+                    unfreeze to. The cue plays; Unfreeze would be a swap of
+                    names and nothing else, which is worth saying. */
+                if (node.getType().toString() == "Media"
+                      && ! node[juce::Identifier ("editSource")].toString().isEmpty()
+                      && ! node.getChildWithName (juce::Identifier ("Section")).isValid())
+                    problems.push_back ("/Show/.../Media[" + node[idProperty].toString().toStdString()
+                                          + "]/@editSource: names \"" + node[juce::Identifier ("editSource")].toString().toStdString()
+                                          + "\" and the cue has no sections - nothing is frozen, so Unfreeze"
+                                            " would only point the cue back at that file");
 
                 for (const auto& child : node)
                     visit (child);
