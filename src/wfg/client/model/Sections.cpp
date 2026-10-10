@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <string_view>
 
 namespace wfg::client::model
@@ -321,5 +322,43 @@ namespace wfg::client::model
             return "the edit could not be rendered" + (row.problem.empty() ? std::string {} : ": " + row.problem);
 
         return {};
+    }
+
+    //==============================================================================
+    std::optional<SectionPlace> placeOf (const std::vector<SectionRow>& sections, double editedSecond) noexcept
+    {
+        if (sections.empty() || editedSecond < 0.0)
+            return std::nullopt;
+
+        double at = 0.0;
+
+        for (std::size_t i = 0; i < sections.size(); ++i)
+        {
+            const auto next = at + sections[i].length();
+
+            if (editedSecond < next || (i + 1 == sections.size() && editedSecond == next))
+                return SectionPlace { i, sections[i].in + (editedSecond - at) };
+
+            at = next;
+        }
+
+        return std::nullopt;
+    }
+
+    std::vector<double> cutsOnTimeline (const std::vector<SectionRow>& sections, const std::vector<double>& fileCuts)
+    {
+        if (sections.empty())
+            return fileCuts;
+
+        std::vector<double> out;
+        const auto starts = sectionStarts (sections);
+
+        for (std::size_t j = 0; j < sections.size(); ++j)
+            for (const auto cut : fileCuts)
+                if (cut > sections[j].in && cut < sections[j].out)
+                    out.push_back (starts[j] + (cut - sections[j].in));
+
+        std::sort (out.begin(), out.end());
+        return out;
     }
 }

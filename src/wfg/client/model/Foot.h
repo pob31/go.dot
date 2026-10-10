@@ -203,15 +203,26 @@ namespace wfg::client::model
             the lane may be grabbed, the lane being a decision the lock keeps. */
         std::vector<LanePoint> lane;
         bool locked = false;
-        /*  THE SOUND'S EDIT (namespace draft §55): its sections in the order
-            of the edited timeline, the file it was made from while frozen,
-            the render's state, and whether it may be edited here - a sound,
-            not locked, not frozen, not following a movie. */
+        /*  THE SOUND'S EDIT (namespace draft §55), AND A MOVIE'S (§55.5): its
+            sections in the order of the edited timeline, the file it was made
+            from while frozen, the render's state, and whether it may be edited
+            here - a sound or a HAP movie, not locked, not frozen, not following
+            a movie. */
         std::vector<SectionRow> sections;
         std::string editSource;
         bool frozen = false;
         bool editable = false;
         EditRenderRow render;
+
+        /*  A MOVIE'S FACTS (namespace draft §55.5, ADT, ADX), as the analyser
+            read them: its codec's four characters and its frame rate - empty
+            and nought until it has - whether it is one Go.dot edits (Hap1, Hap5
+            or HapY), and when it is not, the words the row says in place of its
+            buttons: the movie not read yet, or to convert it first. */
+        std::string codec;
+        double frameRate = 0.0;
+        bool hapMovie = false;
+        std::string editWords;
 
         /*  AND ITS SENDS' LANES (namespace draft §28), one per send the cue
             has, in the order the show declares its mixes - the picker's

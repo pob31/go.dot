@@ -98,6 +98,7 @@
 #include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Waveform.h>
 #include <wfg/engine/audio/AudioCommands.h>
+#include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/audio/Peaks.h>
 #include <wfg/engine/audio/Timbre.h>
@@ -11912,6 +11913,125 @@ TEST_CASE ("client: the waveform's reading carries the sound's sections, the edi
 
     //  A cue that is not a sound has no sections to read, whatever is published.
     CHECK (model::readSections (*rig.publish (5), "P4GRP001").empty());
+}
+
+TEST_CASE ("client: the waveform's reading of a movie says whether its edit may be made here, and why not (§55.5)")
+{
+    Rig rig ("phase4");
+
+    /*  A MOVIE CUE beside the sound, and a media table for the analyser's
+        facts about its file - the folder nowhere, since nothing is read. */
+    const auto parent = rig.document.findById ("P4MED001").getParent()[juce::Identifier ("id")].toString().toStdString();
+    const auto movieId = rig.document.createCue (parent, 0, "video", "Clip").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movieId + "/source", "movie").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movieId + "/file", "clip.mov").ok);
+    rig.parameters.markStale();
+
+    audio::MediaInfo media { rig.document, juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                              .getChildFile ("godot-nowhere-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)))
+                                              .getFullPathName().toStdString() };
+    rig.parameters.setMediaInfo (&media);
+
+    const model::Subject waveform { model::Subject::Kind::waveform, movieId };
+
+    /*  NOT READ YET: the row waits, in words. */
+    auto reading = model::readFoot (*rig.publish (1), waveform);
+    CHECK (reading.movie);
+    CHECK (reading.codec.empty());
+    CHECK (reading.frameRate == doctest::Approx (0.0));
+    CHECK_FALSE (reading.hapMovie);
+    CHECK_FALSE (reading.editable);
+    CHECK (reading.editWords == "Reading the movie - the row wakes once Go.dot has read its frames");
+
+    /*  A PREVIEW: convert it first. */
+    audio::MediaRecord record;
+    record.codec = "avc1";
+    record.frameRate = 25.0;
+    media.publish ("clip.mov", record);
+    reading = model::readFoot (*rig.publish (2), waveform);
+    CHECK (reading.codec == "avc1");
+    CHECK (reading.frameRate == doctest::Approx (25.0));
+    CHECK_FALSE (reading.hapMovie);
+    CHECK_FALSE (reading.editable);
+    CHECK (reading.editWords == "Convert the movie to HAP to edit it (Show > Convert the movie to HAP)");
+
+    /*  HAP: the row is live. */
+    record.codec = "Hap5";
+    media.publish ("clip.mov", record);
+    reading = model::readFoot (*rig.publish (3), waveform);
+    CHECK (reading.hapMovie);
+    CHECK (reading.editable);
+    CHECK (reading.editWords.empty());
+    CHECK (reading.sections.empty());
+
+    /*  Its sections read as a sound's; frozen, nothing may be edited. */
+    REQUIRE (rig.document.splitSection (movieId, 1.0, 30.0, {}).ok);
+    rig.parameters.markStale();
+    reading = model::readFoot (*rig.publish (4), waveform);
+    REQUIRE (reading.sections.size() == 2u);
+    CHECK (reading.sections[1].in == doctest::Approx (1.0));
+    CHECK (reading.editable);
+
+    REQUIRE (rig.document.freezeEdit (movieId, "clip.mov", "clip (edit).mov").ok);
+    rig.parameters.markStale();
+    reading = model::readFoot (*rig.publish (5), waveform);
+    CHECK (reading.frozen);
+    CHECK (reading.editSource == "clip.mov");
+    CHECK (reading.file == "clip (edit).mov");
+    CHECK_FALSE (reading.editable);
+
+    REQUIRE (rig.document.unfreezeEdit (movieId).ok);
+    rig.parameters.markStale();
+    CHECK (model::readFoot (*rig.publish (6), waveform).editable);
+
+    /*  And not under the lock; and a sound is never asked about a codec. */
+    REQUIRE (rig.apply (7, "cli", "node.set", { osc::Value::string ("/godot/document/locked"), osc::Value::string ("true") }).applied == 1);
+    reading = model::readFoot (*rig.publish (7), waveform);
+    CHECK (reading.locked);
+    CHECK_FALSE (reading.editable);
+
+    const auto sound = model::readFoot (*rig.publish (7), { model::Subject::Kind::waveform, "P4MED001" });
+    CHECK (sound.codec.empty());
+    CHECK_FALSE (sound.hapMovie);
+    CHECK (sound.editWords.empty());
+
+    rig.parameters.setMediaInfo (nullptr);
+}
+
+TEST_CASE ("client: an edited second placed in the file, and the file's cuts on the edited timeline, as the engine places them (§55.5)")
+{
+    const std::vector<model::SectionRow> rows { { "C", 0, 20.0, 30.0 }, { "A", 1, 0.0, 10.0 }, { "B", 2, 10.0, 20.0 } };
+    std::vector<doc::Section> same;
+
+    for (const auto& row : rows)
+        same.push_back ({ row.id, row.in, row.out, row.trimDb, row.crossfade });
+
+    for (const double second : { -1.0, 0.0, 2.5, 9.999, 10.0, 12.5, 29.0, 30.0, 31.0 })
+    {
+        const auto ours = model::placeOf (rows, second);
+        const auto theirs = doc::placeOf (same, second);
+        INFO ("at " << second);
+        REQUIRE (ours.has_value() == theirs.has_value());
+
+        if (ours.has_value())
+        {
+            CHECK (ours->index == theirs->index);
+            CHECK (ours->fileSecond == doctest::Approx (theirs->fileSecond));
+        }
+    }
+
+    CHECK (model::placeOf (rows, 2.5)->fileSecond == doctest::Approx (22.5));
+    CHECK (model::placeOf (rows, 12.5)->fileSecond == doctest::Approx (2.5));
+    CHECK (model::placeOf (rows, 30.0)->index == 2);
+    CHECK_FALSE (model::placeOf (rows, 31.0).has_value());
+    CHECK_FALSE (model::placeOf ({}, 1.0).has_value());
+
+    /*  THE FILE'S CUTS, laid where their sections now are: 24 s is 4 s into
+        the first block, 5 s is 15 s in; 20 s is an edge and not inside
+        anything; and with no sections the cuts are the file's own. */
+    const std::vector<double> cuts { 5.0, 20.0, 24.0 };
+    CHECK (model::cutsOnTimeline (rows, cuts) == std::vector<double> { 4.0, 15.0 });
+    CHECK (model::cutsOnTimeline ({}, cuts) == cuts);
 }
 
 TEST_CASE ("client: the sections' arithmetic is the engine's")

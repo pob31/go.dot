@@ -409,20 +409,36 @@ namespace wfg::client::model
             out.cueLevel = osc::parseDouble (at (cue + "level")).value_or (0.0);
             out.laneRecord = readLaneRecord (snapshot);
 
-            /*  THE EDIT (namespace draft §55): its sections, whether it is
-                frozen, the render's state, and whether it may be edited. */
+            const auto movie = out.cueKind == "video" && at (cue + "source") == "movie";
+
+            /*  A MOVIE'S FACTS (namespace draft §55.5, ADX): what the analyser
+                read off its file, and whether it is a movie Go.dot edits. */
+            if (movie)
+            {
+                out.codec = at (cue + "codec");
+                out.frameRate = osc::parseDouble (at (cue + "frameRate")).value_or (0.0);
+                out.hapMovie = out.codec == "Hap1" || out.codec == "Hap5" || out.codec == "HapY";
+
+                if (out.codec.empty())
+                    out.editWords = "Reading the movie - the row wakes once Go.dot has read its frames";
+                else if (! out.hapMovie)
+                    out.editWords = "Convert the movie to HAP to edit it (Show > Convert the movie to HAP)";
+            }
+
+            /*  THE EDIT (namespace draft §55, 55.5): its sections, whether it is
+                frozen, the render's state, and whether it may be edited - a
+                sound's or a HAP movie's, not locked, not frozen. */
             out.sections = readSections (snapshot, out.subject.objectId);
             out.editSource = at (cue + "editSource");
             out.frozen = ! out.editSource.empty();
             out.render = readEditRender (snapshot, out.subject.objectId);
-            out.editable = out.cueKind == "media" && ! out.locked && ! out.frozen;
+            out.editable = (out.cueKind == "media" || out.hapMovie) && ! out.locked && ! out.frozen;
 
             /*  WHY THERE IS NOTHING TO DRAW, when there is nothing to draw, in
                 the words that say what to do about it. A panel that just sat
                 blank would leave somebody wondering whether the file is silent,
                 missing, or still being looked at - three different situations
                 with three different answers. */
-            const auto movie = out.cueKind == "video" && at (cue + "source") == "movie";
 
             /*  A MOVIE'S OWN SOUND, drawn under its time (§47, AAC): the cue
                 locked to it on the line below, as the list draws the pair. */

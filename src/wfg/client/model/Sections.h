@@ -114,6 +114,29 @@ namespace wfg::client::model
     double crossfadeFromDrag (double joinSeconds, double pointerSeconds) noexcept;
 
     //==============================================================================
+    /*  A MOVIE'S STRIP THROUGH ITS EDIT (namespace draft §55.5, ADV): the
+        strip's thumbnails and cuts are the FILE's, read once, and the bar
+        draws the edited timeline - so each slot of the bar asks which second
+        of the file an edited second is, and each cut of the file is laid where
+        the section holding it puts it. */
+
+    /** Which section an edited second falls in, and the file's second there. */
+    struct SectionPlace
+    {
+        std::size_t index = 0;
+        double fileSecond = 0.0;
+    };
+
+    /*  The place of an edited second: nothing before the top or past the end
+        (the end itself is the last section's). The engine's `placeOf`. */
+    std::optional<SectionPlace> placeOf (const std::vector<SectionRow>&, double editedSecond) noexcept;
+
+    /*  The file's cuts on the edited timeline: for each section, every cut
+        strictly inside it, moved to where the section begins; in order. The
+        cuts themselves with no sections. */
+    std::vector<double> cutsOnTimeline (const std::vector<SectionRow>&, const std::vector<double>& fileCuts);
+
+    //==============================================================================
     /** "-6 dB", "0 dB", "+3 dB". */
     std::string trimText (double dB);
 
