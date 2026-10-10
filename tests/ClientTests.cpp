@@ -12447,6 +12447,40 @@ TEST_CASE ("client: a described device's tree is one menu per part of the addres
     }
 }
 
+TEST_CASE ("client: a described device with several roots walks from the root the address is under")
+{
+    /*  Namespace draft §57, AFK: the devices bundle's S21 is described by a
+        file rooted at "/" whose entries are its three roots. The menus walk
+        from whichever root the address is under, and the device just picked
+        by one of its roots opens that root's first menu. */
+    Rig rig ("devices");
+    tree::loadAllMountsFromBundle (rig.document, rig.mounts, fixtureBundle ("devices"));
+    const auto snapshot = rig.publish (1);
+    const auto devices = model::readDevices (*snapshot);
+
+    const auto strip = model::pathSteps (*snapshot, devices, "/channel/12/mute");
+    REQUIRE (strip.size() == 2u);
+    CHECK (strip[0].picked == "/channel/12");
+    CHECK (strip[1].picked == "/channel/12/mute");
+    CHECK (strip[0].choices.front().first == "/channel/1");
+
+    //  A node that is both a value and a container (fire, with next and previous under it)
+    //  opens the menu after it, nothing picked - as any container does.
+    const auto snapshotFire = model::pathSteps (*snapshot, devices, "/digico/snapshots/fire");
+    REQUIRE (snapshotFire.size() == 3u);
+    CHECK (snapshotFire[0].picked == "/digico/snapshots");
+    CHECK (snapshotFire[1].picked == "/digico/snapshots/fire");
+    CHECK (snapshotFire[2].picked.empty());
+    CHECK (snapshotFire[2].choices.size() == 2u);
+
+    const auto top = model::pathSteps (*snapshot, devices, "/console");
+    REQUIRE (top.size() == 1u);
+    CHECK (top[0].picked.empty());
+    CHECK_FALSE (top[0].choices.empty());
+
+    CHECK (model::deviceOf ("/console/ping", devices) == model::deviceOf ("/channel/1/fader", devices));
+}
+
 TEST_CASE ("client: a value the node enumerates is offered as atoms")
 {
     Rig rig;

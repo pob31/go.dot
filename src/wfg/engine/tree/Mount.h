@@ -289,6 +289,14 @@ namespace wfg::tree
         string literal rather than against a bundle on disk. */
     MountResult readNamespace (const MountDeclaration& mount, std::string_view json);
 
+    /*  THE ROOTS A DESCRIPTION ANSWERS AT (namespace draft §57, AFK): its
+        root's FULL_PATH when that is not "/", else "/" and each name under
+        its CONTENTS - what a preset whose root is "/" gives a device as its
+        prefix row, and what `readNamespace` requires that row to be. Empty
+        when the text is not a description at all. Pure, as `readNamespace`
+        is. */
+    std::vector<std::string> rootsOfNamespace (std::string_view json);
+
     //==============================================================================
     /*  Every mount that has been loaded, and the values written to them.
 

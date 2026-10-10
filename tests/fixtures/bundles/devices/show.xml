@@ -11,7 +11,7 @@
   <Mounts>
     <Mount id="K3PV7WRB" namespace="namespaces/desk.json" port="9000" prefix="/desk" queryPort="5005" readback="oscquery"/>
     <Mount id="K4QW8YSC" host="127.0.0.1" name="Lighting desk" port="9001" prefix="/light" rx="true"/>
-    <Mount id="K5RX9ZTD" host="127.0.0.1" name="S21" port="9002" prefix="/channel /console /digico"/>
+    <Mount id="K5RX9ZTD" host="127.0.0.1" name="S21" namespace="namespaces/s21-direct.json" port="9002" prefix="/channel /console /digico"/>
   </Mounts>
   <Audio tracks="0"/>
   <MidiPorts/>

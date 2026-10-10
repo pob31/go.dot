@@ -17,6 +17,7 @@
 #include <wfg/client/model/DeviceTree.h>
 
 #include <wfg/client/model/OscMessages.h>
+#include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -124,7 +125,25 @@ namespace wfg::client::model
             if (deviceId.empty() || device == devices.end() || device->opaque())
                 return {};
 
-            return device->firstPrefix();
+            /*  THE ROOT THAT MATCHED, among several (namespace draft §57, AFK:
+                an X32's /ch, /bus and /dca are one described device): the one
+                the address is, else the longest one it is under. */
+            std::string root = device->firstPrefix();
+            std::size_t covered = 0;
+
+            for (const auto& each : device->prefixes())
+            {
+                if (each == address)
+                    return each;
+
+                if (const auto length = tree::prefixMatchLength (address, each); length > covered)
+                {
+                    covered = length;
+                    root = each;
+                }
+            }
+
+            return root;
         }
 
         using Children = std::map<std::string, std::map<std::string, bool>>;   // parent -> name -> holds others

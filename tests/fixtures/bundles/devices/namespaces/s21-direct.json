@@ -1,0 +1,892 @@
+{
+  "FULL_PATH": "/",
+  "DESCRIPTION": "A DiGiCo S21 reached directly, on its S-series GP OSC: three roots with nothing above them. Sixteen channels of the sixty, from S21_HiJack's command set.",
+  "CONTENTS": {
+    "channel": {
+      "FULL_PATH": "/channel",
+      "DESCRIPTION": "The strips, by GP OSC channel number.",
+      "CONTENTS": {
+        "1": {
+          "FULL_PATH": "/channel/1",
+          "DESCRIPTION": "Input channel 1.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/1/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/1/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/1/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/1/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "2": {
+          "FULL_PATH": "/channel/2",
+          "DESCRIPTION": "Input channel 2.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/2/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/2/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/2/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/2/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "3": {
+          "FULL_PATH": "/channel/3",
+          "DESCRIPTION": "Input channel 3.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/3/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/3/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/3/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/3/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "4": {
+          "FULL_PATH": "/channel/4",
+          "DESCRIPTION": "Input channel 4.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/4/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/4/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/4/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/4/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "5": {
+          "FULL_PATH": "/channel/5",
+          "DESCRIPTION": "Input channel 5.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/5/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/5/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/5/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/5/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "6": {
+          "FULL_PATH": "/channel/6",
+          "DESCRIPTION": "Input channel 6.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/6/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/6/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/6/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/6/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "7": {
+          "FULL_PATH": "/channel/7",
+          "DESCRIPTION": "Input channel 7.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/7/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/7/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/7/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/7/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "8": {
+          "FULL_PATH": "/channel/8",
+          "DESCRIPTION": "Input channel 8.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/8/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/8/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/8/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/8/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "9": {
+          "FULL_PATH": "/channel/9",
+          "DESCRIPTION": "Input channel 9.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/9/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/9/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/9/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/9/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "10": {
+          "FULL_PATH": "/channel/10",
+          "DESCRIPTION": "Input channel 10.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/10/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/10/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/10/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/10/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "11": {
+          "FULL_PATH": "/channel/11",
+          "DESCRIPTION": "Input channel 11.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/11/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/11/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/11/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/11/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "12": {
+          "FULL_PATH": "/channel/12",
+          "DESCRIPTION": "Input channel 12.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/12/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/12/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/12/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/12/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "13": {
+          "FULL_PATH": "/channel/13",
+          "DESCRIPTION": "Input channel 13.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/13/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/13/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/13/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/13/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "14": {
+          "FULL_PATH": "/channel/14",
+          "DESCRIPTION": "Input channel 14.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/14/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/14/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/14/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/14/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "15": {
+          "FULL_PATH": "/channel/15",
+          "DESCRIPTION": "Input channel 15.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/15/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/15/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/15/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/15/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        },
+        "16": {
+          "FULL_PATH": "/channel/16",
+          "DESCRIPTION": "Input channel 16.",
+          "CONTENTS": {
+            "name": {
+              "FULL_PATH": "/channel/16/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": [
+                ""
+              ],
+              "DESCRIPTION": "The strip's name."
+            },
+            "mute": {
+              "FULL_PATH": "/channel/16/mute",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Muted."
+            },
+            "solo": {
+              "FULL_PATH": "/channel/16/solo",
+              "TYPE": "T",
+              "ACCESS": 3,
+              "VALUE": [
+                false
+              ],
+              "DESCRIPTION": "Soloed."
+            },
+            "fader": {
+              "FULL_PATH": "/channel/16/fader",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [
+                0.0
+              ],
+              "RANGE": [
+                {
+                  "MIN": -150.0,
+                  "MAX": 10.0
+                }
+              ],
+              "UNIT": [
+                "dB"
+              ],
+              "DESCRIPTION": "The fader, in decibels."
+            }
+          }
+        }
+      }
+    },
+    "console": {
+      "FULL_PATH": "/console",
+      "DESCRIPTION": "The console itself.",
+      "CONTENTS": {
+        "ping": {
+          "FULL_PATH": "/console/ping",
+          "ACCESS": 2,
+          "DESCRIPTION": "Ask the console to answer /console/pong."
+        },
+        "pong": {
+          "FULL_PATH": "/console/pong",
+          "ACCESS": 2,
+          "DESCRIPTION": "The console's answer to a ping."
+        },
+        "resend": {
+          "FULL_PATH": "/console/resend",
+          "ACCESS": 2,
+          "DESCRIPTION": "Ask the console to send every value again."
+        },
+        "channel": {
+          "FULL_PATH": "/console/channel",
+          "CONTENTS": {
+            "counts": {
+              "FULL_PATH": "/console/channel/counts",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "VALUE": [
+                60
+              ],
+              "DESCRIPTION": "How many input channels the session has."
+            }
+          }
+        }
+      }
+    },
+    "digico": {
+      "FULL_PATH": "/digico",
+      "DESCRIPTION": "Snapshots.",
+      "CONTENTS": {
+        "snapshots": {
+          "FULL_PATH": "/digico/snapshots",
+          "CONTENTS": {
+            "fire": {
+              "FULL_PATH": "/digico/snapshots/fire",
+              "TYPE": "i",
+              "ACCESS": 2,
+              "DESCRIPTION": "Recall the snapshot with this number.",
+              "CONTENTS": {
+                "next": {
+                  "FULL_PATH": "/digico/snapshots/fire/next",
+                  "ACCESS": 2,
+                  "DESCRIPTION": "Recall the next snapshot."
+                },
+                "previous": {
+                  "FULL_PATH": "/digico/snapshots/fire/previous",
+                  "ACCESS": 2,
+                  "DESCRIPTION": "Recall the previous snapshot."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

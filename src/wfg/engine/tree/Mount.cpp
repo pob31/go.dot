@@ -526,12 +526,40 @@ namespace wfg::tree
             return rootPath == "/" ? inside : rootPath + inside;
         }
 
+        /*  "/" and each name under a description's CONTENTS: the roots of a
+            device whose file is rooted at "/" (AFK). */
+        std::vector<std::string> rootsUnderJson (const json::Value& root)
+        {
+            std::vector<std::string> roots;
+
+            if (const auto* contents = property (root, "CONTENTS"); contents != nullptr && contents->isObject())
+                for (const auto& member : contents->asObject())
+                    roots.push_back ("/" + member.first);
+
+            return roots;
+        }
+
+        std::string spaceJoined (const std::vector<std::string>& words)
+        {
+            std::string text;
+
+            for (const auto& word : words)
+                text += (text.empty() ? "" : " ") + word;
+
+            return text;
+        }
+
         void collect (const json::Value& node, const std::string& inside,
-                      const std::string& rootPath, const MountDeclaration& mount,
+                      const std::string& rootPath, const std::string& mountAt,
+                      const MountDeclaration& mount,
                       std::vector<Node>& out, std::vector<std::string>& problems,
                       std::vector<std::string>& warnings)
         {
-            const auto address = mount.prefix + inside;
+            /*  WHERE IT IS MOUNTED: the device's one prefix - or nothing, when
+                the device's roots are the file's own first-level names (AFK):
+                the file is rooted at "/" then, and every node sits at its
+                own FULL_PATH, which is the address in the manual. */
+            const auto address = mountAt + inside;
 
             if (! node.isObject())
             {
@@ -574,7 +602,10 @@ namespace wfg::tree
                 value until something writes one. */
             built.values.clear();
 
-            out.push_back (std::move (built));
+            /*  THE FILE'S "/" IS NOT A NODE when its entries are the roots:
+                there is no address "", and nothing is ever aimed at it. */
+            if (! (mountAt.empty() && inside.empty()))
+                out.push_back (std::move (built));
 
             if (! hasChildren)
                 return;
@@ -585,11 +616,12 @@ namespace wfg::tree
 
                 if (name.empty() || name.find ('/') != std::string::npos)
                 {
-                    problems.push_back (address + ": \"" + name + "\" is not a usable node name");
+                    problems.push_back ((address.empty() ? std::string ("/") : address)
+                                        + ": \"" + name + "\" is not a usable node name");
                     continue;
                 }
 
-                collect (member.second, inside + "/" + name, rootPath, mount, out, problems, warnings);
+                collect (member.second, inside + "/" + name, rootPath, mountAt, mount, out, problems, warnings);
             }
         }
     }
@@ -644,25 +676,27 @@ namespace wfg::tree
     }
 
     //==============================================================================
+    std::vector<std::string> rootsOfNamespace (std::string_view jsonText)
+    {
+        const auto parsed = json::parse (jsonText);
+
+        if (! parsed.ok() || ! parsed.value->isObject())
+            return {};
+
+        const auto rootPath = stringProperty (*parsed.value, "FULL_PATH");
+
+        if (! rootPath.empty() && rootPath != "/")
+            return { rootPath };
+
+        return rootsUnderJson (*parsed.value);
+    }
+
     MountResult readNamespace (const MountDeclaration& mount, std::string_view jsonText)
     {
         std::string why;
 
         if (! prefixesAreUsable (mount, why))
             return MountResult::failed (mount.id + ": " + why);
-
-        /*  A DESCRIBED DEVICE HAS ONE ROOT, and that is not a restriction so
-            much as what describing yourself means: the file is one tree and it
-            mounts in one place, so a second prefix would route messages to a
-            box whose nodes are published somewhere else - and every write
-            under it would be refused as an address the device does not have.
-            Several roots are for a device nobody described, which is the case
-            they exist for. */
-        if (prefixesOf (mount.prefix).size() > 1)
-            return MountResult::failed (mount.id + ": a device with a namespace file answers at"
-                                                   " one address. Several are for a device that"
-                                                   " describes nothing, whose messages are sent"
-                                                   " as they are written");
 
         const auto parsed = json::parse (jsonText);
 
@@ -682,8 +716,40 @@ namespace wfg::tree
         if (rootPath.empty())
             rootPath = "/";
 
+        /*  SEVERAL ROOTS (namespace draft §57, AFK): a description rooted at
+            "/" whose first-level entries are the device's roots - an X32's
+            /ch, /bus and /dca, the S21's /channel, /console and /digico -
+            mounts each entry at its own name, so the addresses in the cues
+            are the manual's and `mountOf` finds the device by any of them.
+            The prefix row has to name exactly those: a root the file lacks
+            would take cues to a box whose nodes are published nowhere, and
+            a root the row lacks would publish nodes no cue can reach. A
+            file rooted anywhere else is one tree and mounts in one place,
+            as it always did. */
+        std::string mountAt = mount.prefix;
+
+        if (const auto prefixes = prefixesOf (mount.prefix); prefixes.size() > 1)
+        {
+            if (rootPath != "/")
+                return MountResult::failed (mount.id + ": a device with several roots needs a description"
+                                                       " whose root is \"/\" and whose entries are those"
+                                                       " roots; this file's root is \"" + rootPath + "\"");
+
+            auto roots = rootsUnderJson (*parsed.value);
+            auto named = prefixes;
+            std::sort (roots.begin(), roots.end());
+            std::sort (named.begin(), named.end());
+
+            if (roots != named)
+                return MountResult::failed (mount.id + ": the description's roots are " + spaceJoined (roots)
+                                            + " and the prefix row says " + spaceJoined (named)
+                                            + "; a device with several roots names exactly its file's");
+
+            mountAt.clear();
+        }
+
         MountResult result;
-        collect (*parsed.value, {}, rootPath, mount, result.nodes, result.problems, result.warnings);
+        collect (*parsed.value, {}, rootPath, mountAt, mount, result.nodes, result.problems, result.warnings);
 
         /*  Sorted by address, like every other part of the tree: lookup is a
             binary search and merging is linear. */

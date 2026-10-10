@@ -252,29 +252,74 @@ TEST_CASE ("mount: the S21's three vocabularies are one device on the wire")
     }
 }
 
-TEST_CASE ("mount: a device that describes itself answers at one root")
+TEST_CASE ("mount: a device with several roots takes a description rooted at \"/\" whose entries are those roots")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
 
-    MountDeclaration several;
-    several.id = "G1JS4VWE";
-    several.prefix = "/wfs /other";
-    several.namespaceFile = "namespaces/wfs-diy.json";
-    several.port = 8000;
+    /*  Namespace draft §57, AFK. An X32 answers at /ch, /bus, /dca and more,
+        with nothing above them; a preset for it is rooted at "/" and its
+        entries are those roots, each mounted at its own name, so the address
+        in a cue is the one in the manual. Until this round a described device
+        kept one root and several were for a device nobody described. */
+    MountDeclaration desk;
+    desk.id = "X32A0001";
+    desk.prefix = "/ch /bus";
+    desk.namespaceFile = "namespaces/x32.json";
+    desk.port = 10023;
 
-    /*  The description itself is beside the point - it is refused before a
-        byte of it is read - so the simplest valid one will do. */
-    const auto reloaded = readNamespace (several, R"({"FULL_PATH": "/", "CONTENTS": {}})");
+    const char* twoRoots = R"({"FULL_PATH": "/", "CONTENTS": {
+        "ch":  {"FULL_PATH": "/ch",  "CONTENTS": {"01": {"FULL_PATH": "/ch/01",  "CONTENTS": {"fader": {"FULL_PATH": "/ch/01/fader",  "TYPE": "f", "ACCESS": 3, "VALUE": [0.5]}}}}},
+        "bus": {"FULL_PATH": "/bus", "CONTENTS": {"01": {"FULL_PATH": "/bus/01", "CONTENTS": {"fader": {"FULL_PATH": "/bus/01/fader", "TYPE": "f", "ACCESS": 3, "VALUE": [0.5]}}}}}}})";
 
-    /*  Refused, and the sentence says why rather than leaving somebody to
-        guess: a namespace file is ONE tree and mounts in ONE place, so a second
-        root would route messages to a box whose nodes are published somewhere
-        else - and every write under it would come back as an address the device
-        does not have. Several roots are for a device nobody described. */
-    CHECK_FALSE (reloaded.ok);
-    REQUIRE_FALSE (reloaded.problems.empty());
-    INFO ("said: " << reloaded.problems.front());
-    CHECK (reloaded.problems.front().find ("one address") != std::string::npos);
+    SUBCASE ("the roots are the file's: each entry mounts at its own name, and the file's root is no node")
+    {
+        const auto read = readNamespace (desk, twoRoots);
+        REQUIRE (read.ok);
+
+        std::vector<std::string> addresses;
+        for (const auto& node : read.nodes)
+            addresses.push_back (node.address);
+
+        CHECK (addresses == std::vector<std::string> { "/bus", "/bus/01", "/bus/01/fader",
+                                                       "/ch", "/ch/01", "/ch/01/fader" });
+
+        MountTable mounts;
+        REQUIRE (mounts.load (desk, twoRoots).ok);
+        CHECK (mounts.mountOf ("/bus/01/fader") == "X32A0001");
+        CHECK (mounts.mountOf ("/ch/01/fader") == "X32A0001");
+        CHECK (mounts.write ("/ch/01/fader", osc::Value::float32 (0.75f)).ok);
+        CHECK_FALSE (mounts.write ("/ch/02/fader", osc::Value::float32 (0.75f)).ok);
+    }
+
+    SUBCASE ("the roots the row names must be exactly the file's, and the sentence names both")
+    {
+        desk.prefix = "/ch /dca";
+        const auto read = readNamespace (desk, twoRoots);
+        CHECK_FALSE (read.ok);
+        REQUIRE_FALSE (read.problems.empty());
+        INFO ("said: " << read.problems.front());
+        CHECK (read.problems.front().find ("/bus /ch") != std::string::npos);
+        CHECK (read.problems.front().find ("/ch /dca") != std::string::npos);
+    }
+
+    SUBCASE ("a file rooted anywhere but \"/\" is one tree and mounts in one place, as before")
+    {
+        desk.prefix = "/wfs /other";
+        const auto read = readNamespace (desk, R"({"FULL_PATH": "/wfs", "CONTENTS": {}})");
+        CHECK_FALSE (read.ok);
+        REQUIRE_FALSE (read.problems.empty());
+        INFO ("said: " << read.problems.front());
+        CHECK (read.problems.front().find ("root is \"/\"") != std::string::npos);
+    }
+
+    SUBCASE ("the roots a description answers at, for the row a preset gives a device")
+    {
+        auto roots = rootsOfNamespace (twoRoots);
+        std::sort (roots.begin(), roots.end());
+        CHECK (roots == std::vector<std::string> { "/bus", "/ch" });
+        CHECK (rootsOfNamespace (R"({"FULL_PATH": "/wfs", "CONTENTS": {}})") == std::vector<std::string> { "/wfs" });
+        CHECK (rootsOfNamespace ("not json").empty());
+    }
 }
 
 TEST_CASE ("mount: a device has to say where it answers")

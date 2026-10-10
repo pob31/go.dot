@@ -350,6 +350,33 @@ TEST_CASE ("authoring: a capture lands after the standby as one OSC cue, its mes
     CHECK (rig.memberIds (rig.listId) == std::vector<std::string> { first, second });
 }
 
+TEST_CASE ("authoring: a capture under the processor's root lands on it with a device of several roots declared beside")
+{
+    /*  Namespace draft §57, AFK: a preset rooted at "/" gives its device the
+        file's first-level names as prefixes, never "/" itself, so the longest
+        match that finds a capture's device (AES) is undisturbed - said here
+        so that it stays so. */
+    AuthoringRig rig;
+    REQUIRE (rig.declare().applied == 1u);
+    REQUIRE (rig.processor.waitFor (1));
+    REQUIRE (rig.document.createMount ("/ch /bus /dca", {}).ok);
+
+    const auto first = rig.document.createCue (rig.listId, 0, "memo", "First").id;
+    REQUIRE (rig.document.setAttribute ("/godot/list/" + rig.listId + "/standby", first).ok);
+
+    const auto outcome = rig.capture ("standby", "", "", { { "/proc/a", "i:3" } });
+    REQUIRE (outcome.applied == 1u);
+    const auto cueId = rig.lastRecord().args[2].getString();
+
+    REQUIRE (rig.processor.waitFor (2));
+    CHECK (rig.processor.words (1) == std::vector<std::string> { "/godot/captured", cueId, "created", "", "Snap" });
+
+    //  And one aimed under the desk's roots is the desk's, answered to the processor that asked.
+    CHECK (rig.capture ("standby", "", "", { { "/ch/01/fader", "f:0.5" } }).applied == 1u);
+    REQUIRE (rig.processor.waitFor (3));
+    CHECK (rig.processor.words (2)[2] == "created");
+}
+
 TEST_CASE ("authoring: with nothing standing by a capture lands at the end; with no list it is refused")
 {
     SUBCASE ("the end of the focused list")

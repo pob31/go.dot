@@ -350,6 +350,19 @@ plugged into the show network — so the replay wiring installs the mount write 
 no sender. The write has to happen (the tree must reach the state it reached live); the
 datagram must not.
 
+## `bundles/devices/`
+
+The devices a show talks to, as `blackbox/devices.py` drives them: a desk that describes itself
+(`namespaces/desk.json`, hand-written), an opaque lighting desk, and the author's own DiGiCo S21
+reached directly. The S21 answers at `/channel`, `/console` and `/digico` with nothing above them,
+and since namespace draft §57 (AFK) it is **described**: `namespaces/s21-direct.json` is rooted at
+`/` and its three entries are those roots, each mounted at its own name, so the address in a cue
+is the one in DiGiCo's command set. Written by a script from S21_HiJack's
+`DiGiCo S OSC Commandset_OSCpaths.csv` and `_channelNumbers.csv`, then read by a person: sixteen
+channels of the sixty, with the four strip rows the driver and the client tests use, the console's
+ping, pong, resend and channel count, and the snapshot recall with its next and previous. It is a
+fixture, not the preset: the shipped `digico-s-osc` is generated whole from the same tables.
+
 ## `logs/verified-chain.wfglog`
 
 The seventh fixture, against the `network` bundle, and the one that shows why a read-back had
