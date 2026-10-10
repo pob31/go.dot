@@ -123,7 +123,7 @@ namespace wfg::client
             menuImportAls, menuImportQlab,
             menuConvertUsed, menuConvertWhole, menuConvertUsedQuality, menuConvertWholeQuality,
             menuMovieSound, menuCancelConversion, menuDownloadFfmpeg,
-            menuSaveTemplate, menuVideoMonitor, menuHideProjectors,
+            menuSaveTemplate, menuVideoMonitor, menuHideProjectors, menuCleanCache,
 
             /*  THE TEMPLATES APPLY TEMPLATE OFFERS, numbered from here in the
                 order the show keeps them (namespace draft §38). */
@@ -808,6 +808,7 @@ namespace wfg::client
                     case menuMovieSound:
                     case menuCancelConversion:
                     case menuDownloadFfmpeg:
+                    case menuCleanCache:
                     case menuSaveTemplate:
                     case menuApplyTemplateFirst: break;
                 }
@@ -916,6 +917,12 @@ namespace wfg::client
                     case menuDownloadFfmpeg:
                         return latest != nullptr && model::ffmpegPath (*latest).empty()
                                  && ! model::readFfmpegInstall (*latest).running();
+
+                    /*  NOT UNDER THE LOCK, nor while a sweep runs (§52): a
+                        sweep may read every new sound in the folder, and a
+                        show running wants the disk for its own. */
+                    case menuCleanCache:
+                        return unlocked && latest != nullptr && model::readCacheSweep (*latest).state != "sweeping";
 
                     /*  A PICKED MEDIA OR VIDEO CUE, kept as a template, or the
                         templates of its kind stamped onto every picked cue
@@ -1044,6 +1051,10 @@ namespace wfg::client
                     auto movie = movieMenu();
                     menu.addSubMenu ("Convert the movie to HAP", movie,
                                      ! pickedMovieFile().empty() || menuItemEnabled (menuDownloadFfmpeg));
+
+                    /*  THE ANALYSIS OF FILES NO LONGER IN media/ TAKEN AWAY
+                        NOW (namespace draft §52), as it is at every launch. */
+                    addMenuItem (menu, menuCleanCache, "Clean up the analysis cache");
                     menu.addSeparator();
                     addMenuItem (menu, menuRecord, model::isYes (last.recording) ? "Stop the live recorder"
                                                                                   : "Start the live recorder");
@@ -1126,6 +1137,9 @@ namespace wfg::client
                         break;
                     case menuDownloadFfmpeg:
                         askToDownloadFfmpeg ({});
+                        break;
+                    case menuCleanCache:
+                        send (gesture::cleanAnalysisCache());
                         break;
                     case menuShowSettings:
                         openShowSettings();
@@ -3299,6 +3313,15 @@ namespace wfg::client
 
                 ffmpegInstallSeen = installing;
 
+                /*  AND A SWEEP OF THE ANALYSIS CACHE somebody asked for, as it
+                    starts and as it ends (§52). */
+                const auto sweep = model::readCacheSweep (snapshot);
+
+                if (const auto news = model::cacheSweepNews (cacheSweepSeen, sweep); ! news.empty() && shell != nullptr)
+                    shell->transport.setNotice (juce::String::fromUTF8 (news.c_str()));
+
+                cacheSweepSeen = sweep;
+
                 for (const auto& row : model::readConversions (snapshot))
                 {
                     const auto seen = conversionsSeen.find (row.file);
@@ -4875,6 +4898,7 @@ namespace wfg::client
             bool ffmpegOffered = false;
             std::vector<std::string> moviesWaitingForFfmpeg;
             model::FfmpegInstallRow ffmpegInstallSeen;
+            model::CacheSweepRow cacheSweepSeen;
             std::string importSaid;         ///< the progress last put on the foot, so it is said once
             juce::String importWarning;     ///< what routing an imported cue found missing, said at the end
 

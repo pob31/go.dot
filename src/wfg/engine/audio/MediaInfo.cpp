@@ -107,6 +107,14 @@ namespace wfg::audio
         return mediaFolder;
     }
 
+    std::string mediaFolderAround (const std::string& mediaFolder)
+    {
+        if (mediaFolder.empty())
+            return {};
+
+        return aroundOf (juce::File (juce::String (mediaFolder))).getFullPathName().toStdString();
+    }
+
     std::string resolveMediaPath (const std::string& mediaFolder, const std::string& named)
     {
         if (mediaFolder.empty())

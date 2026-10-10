@@ -405,4 +405,23 @@ namespace wfg::client::model
     std::string copyFailedWords (const std::string& name, const std::string& why);
     std::string noFolderWords (const std::string& name);
     std::string refusedWords (const std::string& mediaName);
+
+    /*  THE ANALYSIS CACHE'S LAST SWEEP (namespace draft §52), as
+        `/godot/engine/mediaCacheSweep` says it; `number` nought before any. */
+    struct CacheSweepRow
+    {
+        int number = 0;
+        std::string state;          ///< sweeping, done or skipped
+        bool asked = false;         ///< media.cleanCache, not the one at launch
+        int removed = 0;
+        std::int64_t bytes = 0;
+        std::string problem;
+    };
+
+    CacheSweepRow readCacheSweep (const tree::TreeSnapshot&);
+
+    /*  THE SENTENCE A SWEEP SOMEBODY ASKED FOR IS WORTH, once as it starts and
+        once as it ends - what it removed and freed, or why it stopped. The one
+        at launch is the machine's housekeeping and says nothing. */
+    std::string cacheSweepNews (const CacheSweepRow& before, const CacheSweepRow& now);
 }

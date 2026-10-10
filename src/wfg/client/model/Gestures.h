@@ -420,6 +420,9 @@ namespace wfg::client::gesture
     Event convertMovie (const std::string& file, const std::string& scope, const std::string& format, bool sound);
     Event cancelConversion (const std::string& file);
 
+    /** The analysis of files no longer in the media folder taken away, now (namespace draft §52). */
+    Event cleanAnalysisCache();
+
     /*  FFmpeg downloaded into Go.dot's own folder (namespace draft 37.5, WN). */
     Event installFfmpeg();
 

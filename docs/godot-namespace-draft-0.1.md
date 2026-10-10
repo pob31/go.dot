@@ -23804,3 +23804,71 @@ made before it may hold one, and a patch cannot fire that cue by its id.
   firing a memo under the patch's own origin, Esc ending the run so that a later report is answered
   by nothing, and the session's log replayed record for record. M56, M58 and M59 measured (§51.6). The
   driver found the heard rule unpublished until the show's first edit, fixed in PC.11.
+
+## 52. The analysis cache swept
+
+Written 2026-10-10. The author asked: *"Is there a clean up routine to remove the .timbre files if a
+media file is removed from the project?"* There was none: the analyser only ever added to `.timbre`, so
+it kept the colours and levels of every sound it had ever read - a sound deleted, and every earlier
+version of one replaced under the same name, since a changed file is a new hash - and the strip of every
+movie. Offered automatic or asked for, they chose both: *"Autosweep at launch sound like the best option
+with a manual command in the show menu."*
+
+### 52.1 What it does
+
+A **sweep** looks at a media folder and its `.timbre`, and takes away the analysis that no file in the
+folder has any more. Presence is the rule, never use: a sound no cue names keeps its colours while it is
+in the folder, so a cue deleted and undone, a sound put back, or one another show in the same folder
+plays, is never analysed twice. A cache file is named by its key and not by its file, so the sweep works
+from the files' side: it hashes every sound in the folder (a format this build reads, by extension), and
+keys every movie as its strip is keyed (§47.10: its size, its first and last megabyte and the strip's
+format); then, in `.timbre` alone, a `.tpy` or `.tpk` whose hash no sound has, a `.tms` whose key no movie
+has, and the temporaries an interrupted write left (`.tpy.tmp-*`, `.tpk.tmp-*`, `.tms.part`) are removed.
+Anything else in `.timbre` is left alone.
+
+It sweeps the show's own `media/` and the one around it (`<show>/../media`, where the sounds a Show's
+performances share are found and analysed), each by the files in that folder. A folder with no `.timbre`
+is not read at all.
+
+### 52.2 Decisions
+
+- **ACV** (the author's) **Swept by itself when a show opens, and on demand from the Show menu.** At
+  launch, once the files the show names are analysed - their colours are what somebody is waiting to see
+  - the analyser sweeps, and says nothing. *Show > Clean up the analysis cache* asks for one now
+  (`media.cleanCache`); the transport's line says it is cleaning up, then what it removed and freed, or
+  why it did not. The menu's words are mine.
+- **ACW** (mine, proposed in the conversation and not objected to) **Presence, not use, and nothing on a
+  doubt.** As 52.1. A file that cannot be read - its key unknown - stops the sweep of its folder before
+  anything is removed, and so does a stop: guessing would cost a long movie its strip. Only what was
+  written before the sweep began is removed (an hour before, for a temporary), so what another process is
+  writing into the same folder is never touched.
+- **ACX** (mine) **The sounds' hashes kept between sessions**, in `.timbre/sounds.index`: a line a sound,
+  its size, when it was last written, its hash and its path in the folder. A sound whose size and time are
+  what the index says is not read again; without it every sound in the folder, a cue naming it or not,
+  would be read whole at every launch. The first sweep of a folder reads every sound once. An index that
+  does not read costs a reading, never a wrong removal of anything but the analysis of a sound changed
+  without its size or time changing - which is rebuilt when it is next wanted.
+- **ACY** (mine) **Not offered under the lock, nor while a sweep runs**: a sweep may read every new sound
+  in the folder, and a show running wants the disk. The launch sweep runs whatever the lock says, and
+  after the first is cheap (ACX).
+
+### 52.3 The rows and the command
+
+- `media.cleanCache` - no arguments; asks for a sweep now. Taken and ignored where nothing analyses (a
+  replay, a rig), so a log that holds it replays. Two asks before a sweep starts are one sweep.
+- `/godot/engine/mediaCacheSweep` (s, r) - the last sweep this session: its number, `sweeping`, `done`
+  or `skipped`, `asked` or `auto`, files removed, bytes freed and the problem, a tab between each; empty
+  before any. A readout of the machine, never stored and never logged.
+
+### 52.4 Built
+
+`audio::sweepAnalysisCache` (one folder, std and JUCE files only), `audio::movieStripKey` (the strip's key,
+shared with the analyser), and the analyser's `sweep` / `sweepStatus`, run on its own thread after the
+files queued before it. Tests: a sweep of a scratch folder keeps a used sound's, an unused sound's and a
+movie's analysis, a note and a file written after the sweep began, and removes the rest; an unreadable
+movie and a stop remove nothing; the index is believed while size and time match; the analyser sweeps
+after its queue and reports it; the window's sentences, once at the start and once at the end, never for
+the launch sweep. `tests/blackbox/cache_sweep.py`, as `blackbox.cache-sweep.C` and `.fr_FR`, opens a show
+whose `.timbre` holds the analysis of two sounds still in `media/`, of one that is gone and a note: the
+launch sweep removes the gone one's two files and says `auto`; a sound taken out and `media.cleanCache`
+sent over OSC removes its two and says `asked`; and the session's log replays record for record.

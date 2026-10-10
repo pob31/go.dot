@@ -2890,7 +2890,9 @@ a **cache beside the media, keyed by content hash**, like a peak file — §3.20
 derived state, never in the show — built by a **background job at import**,
 off the audio thread (§4.2) and off the GO path (§4.1) the way plugin scanning
 is off the show. Show load never waits for it; a clip whose cache is missing
-draws grey until it arrives. Stored as a **pyramid** — one window per hop at
+draws grey until it arrives. The analysis of files no longer in the media folder is swept away by
+itself when a show opens, and on demand from the Show menu (namespace draft §52,
+*added 2026-10-10 at the author's direction*). Stored as a **pyramid** — one window per hop at
 the finest level, then halvings — so the editor at any zoom and a forty-pixel
 Gogo bar both read one level and nothing recomputes. PR 4.1's `MediaInfo`
 side table, keyed by path and already holding a file's duration, is where the

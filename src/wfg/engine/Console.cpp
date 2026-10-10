@@ -381,6 +381,7 @@ namespace
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
+        wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
         wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
 
@@ -679,6 +680,7 @@ namespace
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
+        wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
         wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
 
@@ -1300,6 +1302,7 @@ namespace
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
+        wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
         wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
 
@@ -4273,6 +4276,9 @@ namespace
                                                                wfg::osc::Value::int32 (std::max (1, request.soundChannels)) });
                                           } };
         wfg::video::registerConversionCommands (engine.commands(), document, &converter);
+
+        /*  AND THE ANALYSIS CACHE SWEPT when somebody asks (namespace draft §52). */
+        wfg::audio::registerAnalyserCommands (engine.commands(), &analyser);
         parameters.setConverter (&converter);
 
         /*  AND FFMPEG ITSELF, downloaded on first use when nothing has it
@@ -4290,6 +4296,7 @@ namespace
         wfg::process::editor::Installer pdInstaller;
         wfg::process::editor::registerCommands (engine.commands(), document, &patchEditing, &pdInstaller);
         std::string patchEditorFound;
+        std::uint32_t mediaCacheSweepSeen = 0;
         std::string serialPortsFound;
         videoHost.configure (document);
 
@@ -4428,6 +4435,11 @@ namespace
         //  And every file a video cue names: a movie's length and size, a picture's size (§47, AAG).
         for (const auto& named : wfg::audio::pictureFilesNamedBy (document))
             analyser.queue (named);
+
+        /*  AND THEN THE ANALYSIS OF FILES THAT ARE GONE TAKEN AWAY (namespace
+            draft §52, the author's, 2026-10-10: "Autosweep at launch"), once
+            those files are done, saying nothing. */
+        analyser.sweep (false);
 
         if (! udp.start (requestedOsc,
                          [&engine, &nameSpace, &senders, &refusedDatagrams]
@@ -5461,6 +5473,14 @@ namespace
                                 }
                                 state.serialPorts = serialPortsFound;
                                 state.patchEditor = patchEditorFound;
+
+                                /*  THE ANALYSIS CACHE'S LAST SWEEP (§52), looked at
+                                    under the analyser's lock only when it moved. */
+                                if (const auto moved = analyser.sweepChanges(); moved != mediaCacheSweepSeen)
+                                {
+                                    mediaCacheSweepSeen = moved;
+                                    state.mediaCacheSweep = wfg::audio::MediaAnalyser::sweepText (analyser.sweepStatus());
+                                }
                                 if (const auto install = pdInstaller.status(); ! install.state.empty())
                                     state.patchEditorInstall = install.state + "\t" + std::to_string (install.percent)
                                                              + "\t" + install.problem + "\t"

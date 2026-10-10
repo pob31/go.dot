@@ -1209,3 +1209,164 @@ TEST_CASE ("media analyser: a stop with work still queued returns, and forgets i
     CHECK (idle.queue ("tone.wav"));
     CHECK (! idle.isRunning());
 }
+
+//==============================================================================
+TEST_CASE ("timbre cache: a sweep keeps the analysis of every file still in the folder and takes away the rest (§52)")
+{
+    /*  The author, 2026-10-10: "Autosweep at launch ... with a manual command".
+        Presence is the rule, never use: a sound no cue names keeps its colours
+        while it is in the folder. What is removed is only what no file there
+        has, only in `.timbre`, only `.tpy`, `.tpk`, `.tms` and their
+        temporaries, and only what was written before the sweep began. */
+    ScratchFolder scratch;
+    const auto media = scratch.folder.getChildFile ("media");
+    const auto root = media.getFullPathName().toStdString();
+    const auto cache = media.getChildFile (".timbre");
+
+    REQUIRE (media.getChildFile ("sub").createDirectory());
+    REQUIRE (writeWav (media.getChildFile ("tone.wav"), sineAt (1000.0, 1.0, 48000.0, 0.5f), 48000));
+    REQUIRE (writeWav (media.getChildFile ("sub").getChildFile ("unused.wav"), sineAt (500.0, 0.5, 48000.0, 0.5f), 48000));
+
+    const auto tone = audio::analyseMediaFile (root, "tone.wav", false);
+    const auto unused = audio::analyseMediaFile (root, "sub/unused.wav", false);
+    REQUIRE (tone.outcome == audio::MediaAnalysis::Outcome::built);
+    REQUIRE (unused.outcome == audio::MediaAnalysis::Outcome::built);
+
+    //  A movie, keyed as the analyser keys its strip.
+    const auto movie = media.getChildFile ("clip.mov");
+    REQUIRE (movie.replaceWithText ("the bytes of a movie, as far as a key is concerned"));
+    const auto movieKey = audio::movieStripKey (movie.getFullPathName().toStdString());
+    REQUIRE (movieKey.size() == 64u);
+    REQUIRE (cache.getChildFile (juce::String (movieKey) + ".tms").replaceWithText ("strip"));
+
+    //  The analysis of files that are gone, a temporary, and somebody's note.
+    const std::string goneHash (64, 'a'), goneKey (64, 'b'), freshHash (64, 'c');
+
+    for (const auto& name : { goneHash + ".tpy", goneHash + ".tpk", goneKey + ".tms",
+                              goneHash + ".tpy.tmp-42", std::string ("notes.txt") })
+        REQUIRE (cache.getChildFile (juce::String (name)).replaceWithText ("x"));
+
+    //  All of it an hour and a half old; one more gone file written after the sweep begins.
+    const auto now = juce::Time::getCurrentTime();
+
+    for (const auto& entry : juce::RangedDirectoryIterator (cache, false, "*", juce::File::findFiles))
+        REQUIRE (entry.getFile().setLastModificationTime (now - juce::RelativeTime::minutes (90)));
+
+    const auto fresh = cache.getChildFile (juce::String (freshHash) + ".tpy");
+    REQUIRE (fresh.replaceWithText ("x"));
+    REQUIRE (fresh.setLastModificationTime (now + juce::RelativeTime::minutes (1)));
+
+    audio::KnownHashes known;
+    const auto swept = audio::sweepAnalysisCache (root, known, now.toMilliseconds());
+
+    REQUIRE (swept.swept);
+    CHECK (swept.problem.empty());
+    CHECK (swept.removed == 4);
+    CHECK (swept.bytes == 4);
+
+    CHECK_FALSE (cache.getChildFile (juce::String (goneHash) + ".tpy").exists());
+    CHECK_FALSE (cache.getChildFile (juce::String (goneHash) + ".tpk").exists());
+    CHECK_FALSE (cache.getChildFile (juce::String (goneKey) + ".tms").exists());
+    CHECK_FALSE (cache.getChildFile (juce::String (goneHash) + ".tpy.tmp-42").exists());
+
+    CHECK (cacheFileFor (media, tone.contentHash).existsAsFile());
+    CHECK (peaksFileFor (media, tone.contentHash).existsAsFile());
+    CHECK (cacheFileFor (media, unused.contentHash).existsAsFile());     // no cue names it: still there
+    CHECK (peaksFileFor (media, unused.contentHash).existsAsFile());
+    CHECK (cache.getChildFile (juce::String (movieKey) + ".tms").existsAsFile());
+    CHECK (cache.getChildFile ("notes.txt").existsAsFile());
+    CHECK (fresh.existsAsFile());
+
+    //  Both sounds hashed, and the index written for the next session.
+    CHECK (known.size() == 2u);
+    const auto index = cache.getChildFile ("sounds.index").loadFileAsString();
+    CHECK (index.contains ("sub/unused.wav"));
+    CHECK (index.contains (juce::String (tone.contentHash)));
+
+    /*  A FILE THAT CANNOT BE READ stops the sweep before anything goes: an
+        empty movie has no key. */
+    const auto gone = cache.getChildFile (juce::String (goneHash) + ".tpy");
+    REQUIRE (gone.replaceWithText ("x"));
+    REQUIRE (gone.setLastModificationTime (now - juce::RelativeTime::minutes (90)));
+    REQUIRE (media.getChildFile ("empty.mov").create());
+
+    const auto refused = audio::sweepAnalysisCache (root, known, now.toMilliseconds());
+    CHECK_FALSE (refused.swept);
+    CHECK (refused.removed == 0);
+    CHECK (refused.problem == "could not read empty.mov");
+    CHECK (gone.existsAsFile());
+
+    //  And a stop already raised removes nothing either.
+    REQUIRE (media.getChildFile ("empty.mov").deleteFile());
+    const std::atomic<bool> stop { true };
+    const auto stopped = audio::sweepAnalysisCache (root, known, now.toMilliseconds(), &stop);
+    CHECK_FALSE (stopped.swept);
+    CHECK (gone.existsAsFile());
+
+    /*  THE INDEX IS BELIEVED while a sound's size and time are what it says:
+        told tone.wav is another sound, a fresh sweep - nothing known in
+        memory - does not read it, and takes its analysis away. */
+    REQUIRE (cache.getChildFile ("sounds.index")
+                 .replaceWithText (index.replace (juce::String (tone.contentHash), juce::String (std::string (64, 'd')))));
+
+    audio::KnownHashes nothingKnown;
+    const auto believed = audio::sweepAnalysisCache (root, nothingKnown, now.toMilliseconds());
+    REQUIRE (believed.swept);
+    CHECK_FALSE (cacheFileFor (media, tone.contentHash).exists());
+    CHECK (cacheFileFor (media, unused.contentHash).existsAsFile());
+}
+
+TEST_CASE ("media analyser: a sweep runs after the files queued, and says what it removed (§52)")
+{
+    TwoSounds show;
+    REQUIRE (show.built);
+
+    audio::MediaInfo info { show.document, show.mediaFolder() };
+    audio::MediaAnalyser analyser { info, show.mediaFolder() };
+
+    CHECK (analyser.sweepStatus().number == 0);
+    CHECK (audio::MediaAnalyser::sweepText (analyser.sweepStatus()).empty());
+
+    for (const auto& path : audio::mediaFilesNamedBy (show.document))
+        analyser.queue (path);
+
+    REQUIRE (analyser.start());
+    REQUIRE (waitUntilIdle (analyser));
+
+    const auto records = info.snapshot();
+    const auto hiss = records->find ("hiss.wav");
+    const auto tone = records->find ("tone.wav");
+    REQUIRE (hiss != records->end());
+    REQUIRE (tone != records->end());
+    const auto hissHash = hiss->second.contentHash;
+    REQUIRE (cacheFileFor (show.media, hissHash).existsAsFile());
+
+    //  The hiss taken out of the folder, its analysis left an hour old.
+    const auto anHourAgo = juce::Time::getCurrentTime() - juce::RelativeTime::hours (1);
+    REQUIRE (show.media.getChildFile ("hiss.wav").deleteFile());
+    REQUIRE (cacheFileFor (show.media, hissHash).setLastModificationTime (anHourAgo));
+    REQUIRE (peaksFileFor (show.media, hissHash).setLastModificationTime (anHourAgo));
+
+    const auto changesBefore = analyser.sweepChanges();
+    analyser.sweep (true);
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds (60);
+
+    while (analyser.sweepStatus().state != "done" && analyser.sweepStatus().state != "skipped"
+             && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+
+    const auto status = analyser.sweepStatus();
+    CHECK (status.number == 1);
+    CHECK (status.state == "done");
+    CHECK (status.asked);
+    CHECK (status.removed == 2);
+    CHECK (status.bytes > 0);
+    CHECK (analyser.sweepChanges() != changesBefore);
+
+    CHECK_FALSE (cacheFileFor (show.media, hissHash).exists());
+    CHECK (cacheFileFor (show.media, tone->second.contentHash).existsAsFile());
+
+    CHECK (audio::MediaAnalyser::sweepText (status)
+             == "1\tdone\tasked\t2\t" + std::to_string (status.bytes) + "\t");
+}

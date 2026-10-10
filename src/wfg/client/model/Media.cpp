@@ -19,9 +19,13 @@
 
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
+#include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace wfg::client::model
 {
@@ -766,6 +770,77 @@ namespace wfg::client::model
 
             return "Copying " + asText (handed->file + 1) + " of " + asText (batch.files.size()) + ": " + file.name;
         }
+
+        return {};
+    }
+
+    CacheSweepRow readCacheSweep (const tree::TreeSnapshot& snapshot)
+    {
+        const auto all = text (snapshot, "/godot/engine/mediaCacheSweep");
+        std::vector<std::string> fields;
+        std::string::size_type from = 0;
+
+        while (! all.empty())
+        {
+            const auto tab = all.find ('	', from);
+            fields.push_back (all.substr (from, tab == std::string::npos ? std::string::npos : tab - from));
+
+            if (tab == std::string::npos)
+                break;
+
+            from = tab + 1;
+        }
+
+        CacheSweepRow row;
+
+        if (fields.size() < 6)
+            return row;
+
+        row.number = static_cast<int> (osc::parseDouble (fields[0]).value_or (0.0));
+        row.state = fields[1];
+        row.asked = fields[2] == "asked";
+        row.removed = static_cast<int> (osc::parseDouble (fields[3]).value_or (0.0));
+        row.bytes = static_cast<std::int64_t> (osc::parseDouble (fields[4]).value_or (0.0));
+        row.problem = fields[5];
+        return row;
+    }
+
+    namespace
+    {
+        /*  A size as somebody reads one: kilobytes under a megabyte, else
+            megabytes to a tenth - counted in integers, so no locale puts a
+            comma where the point is. */
+        std::string sizeWords (std::int64_t bytes)
+        {
+            constexpr std::int64_t kilo = 1024, mega = 1024 * 1024;
+
+            if (bytes < mega)
+                return std::to_string ((bytes + kilo - 1) / kilo) + " kB";
+
+            const auto tenths = (bytes * 10 + mega / 2) / mega;
+            return std::to_string (tenths / 10) + "." + std::to_string (tenths % 10) + " MB";
+        }
+    }
+
+    std::string cacheSweepNews (const CacheSweepRow& before, const CacheSweepRow& now)
+    {
+        if (! now.asked || now.number == 0 || (now.number == before.number && now.state == before.state))
+            return {};
+
+        if (now.state == "sweeping")
+            return "Cleaning up the analysis cache...";
+
+        const auto removed = now.removed == 0 ? std::string ("nothing to remove")
+                           : std::to_string (now.removed) + (now.removed == 1 ? " file" : " files") + " removed, "
+                               + sizeWords (now.bytes) + " freed";
+
+        if (now.state == "done")
+            return "Analysis cache cleaned up: " + removed + ".";
+
+        if (now.state == "skipped")
+            return "The analysis cache was not cleaned up"
+                 + (now.problem.empty() ? std::string {} : ": " + now.problem)
+                 + (now.removed > 0 ? " (" + removed + " elsewhere)." : std::string ("."));
 
         return {};
     }

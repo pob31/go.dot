@@ -11745,3 +11745,47 @@ TEST_CASE ("client: a device put on a serial port, and back on the network, as t
     REQUIRE (ports.size() == 1u);
     CHECK (ports[0].framing == "slip");
 }
+
+TEST_CASE ("client: a sweep of the analysis cache somebody asked for is said as it starts and ends, the one at launch never (§52)")
+{
+    using client::model::CacheSweepRow;
+    using client::model::cacheSweepNews;
+
+    const CacheSweepRow none;
+
+    CacheSweepRow launch;
+    launch.number = 1;
+    launch.state = "done";
+    launch.removed = 7;
+    launch.bytes = 3 * 1024 * 1024;
+
+    CHECK (cacheSweepNews (none, launch).empty());
+
+    CacheSweepRow asked;
+    asked.number = 2;
+    asked.state = "sweeping";
+    asked.asked = true;
+
+    CHECK (cacheSweepNews (launch, asked) == "Cleaning up the analysis cache...");
+    CHECK (cacheSweepNews (asked, asked).empty());
+
+    auto ended = asked;
+    ended.state = "done";
+    ended.removed = 12;
+    ended.bytes = 356515840;   // 340 MB to a tenth, in integers whatever the locale
+
+    CHECK (cacheSweepNews (asked, ended) == "Analysis cache cleaned up: 12 files removed, 340.0 MB freed.");
+
+    ended.removed = 1;
+    ended.bytes = 1500;
+    CHECK (cacheSweepNews (asked, ended) == "Analysis cache cleaned up: 1 file removed, 2 kB freed.");
+
+    ended.removed = 0;
+    ended.bytes = 0;
+    CHECK (cacheSweepNews (asked, ended) == "Analysis cache cleaned up: nothing to remove.");
+
+    auto skipped = asked;
+    skipped.state = "skipped";
+    skipped.problem = "could not read empty.mov";
+    CHECK (cacheSweepNews (asked, skipped) == "The analysis cache was not cleaned up: could not read empty.mov.");
+}

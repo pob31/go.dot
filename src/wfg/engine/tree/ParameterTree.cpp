@@ -3096,6 +3096,7 @@ namespace wfg::tree
             else if (name == "patchEditor")    text = state.patchEditor;
             else if (name == "patchEditorInstall") text = state.patchEditorInstall;
             else if (name == "serialPorts")    text = state.serialPorts;
+            else if (name == "mediaCacheSweep") text = state.mediaCacheSweep;
             else                               text = std::string (row->defaultText);
 
             engineValue (*row, "engine", text);

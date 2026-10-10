@@ -122,6 +122,10 @@ namespace wfg::tree
         std::string patchEditor;
         std::string patchEditorInstall;
 
+        /*  THE ANALYSIS CACHE'S LAST SWEEP (namespace draft §52), as
+            `MediaAnalyser::sweepText` writes it; empty before any. */
+        std::string mediaCacheSweep;
+
         /*  THE SERIAL PORTS THIS MACHINE HAS (namespace draft §51, ACR), a
             path, a tab and a few words a line; looked for by serve. */
         std::string serialPorts;

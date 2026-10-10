@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/audio/MediaAnalyser.h>
+#include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/video/Movie.h>
 #include <wfg/engine/video/StripAnalysis.h>
 #include <wfg/engine/video/Strip.h>
@@ -32,6 +33,7 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -57,37 +59,14 @@ namespace wfg::audio
                                                                       const std::string& path,
                                                                       const std::atomic<bool>& stopping)
         {
-            const juce::File file { juce::String (path) };
-            const auto size = file.getSize();
+            const auto key = movieStripKey (path);
 
-            if (size <= 0)
+            if (key.empty())
                 return nullptr;
 
-            juce::MemoryBlock keyed;
-            keyed.append (juce::String (size).toRawUTF8(), static_cast<std::size_t> (juce::String (size).getNumBytesAsUTF8()));
-
-            {
-                juce::FileInputStream in { file };
-
-                if (! in.openedOk())
-                    return nullptr;
-
-                constexpr juce::int64 mebibyte = 1 << 20;
-                in.readIntoMemoryBlock (keyed, std::min<juce::int64> (size, mebibyte));
-
-                if (size > 2 * mebibyte)
-                {
-                    in.setPosition (size - mebibyte);
-                    in.readIntoMemoryBlock (keyed, mebibyte);
-                }
-            }
-
-            keyed.append (&video::strip::formatVersion, sizeof (video::strip::formatVersion));
-
-            const auto key = juce::SHA256 (keyed).toHexString();
             const auto cacheFolder = timbreCacheFolder (mediaRootOf (folder, named));
             const auto cached = cacheFolder.empty() ? juce::File()
-                                                    : juce::File (juce::String (cacheFolder)).getChildFile (key + ".tms");
+                                                    : juce::File (juce::String (cacheFolder)).getChildFile (juce::String (key) + ".tms");
 
             if (cached.existsAsFile())
             {
@@ -473,6 +452,236 @@ namespace wfg::audio
         return analysis;
     }
 
+    std::string movieStripKey (const std::string& path)
+    {
+        const juce::File file { juce::String (path) };
+        const auto size = file.getSize();
+
+        if (size <= 0)
+            return {};
+
+        juce::MemoryBlock keyed;
+        keyed.append (juce::String (size).toRawUTF8(), static_cast<std::size_t> (juce::String (size).getNumBytesAsUTF8()));
+
+        {
+            juce::FileInputStream in { file };
+
+            if (! in.openedOk())
+                return {};
+
+            constexpr juce::int64 mebibyte = 1 << 20;
+            in.readIntoMemoryBlock (keyed, std::min<juce::int64> (size, mebibyte));
+
+            if (size > 2 * mebibyte)
+            {
+                in.setPosition (size - mebibyte);
+                in.readIntoMemoryBlock (keyed, mebibyte);
+            }
+        }
+
+        keyed.append (&video::strip::formatVersion, sizeof (video::strip::formatVersion));
+
+        return juce::SHA256 (keyed).toHexString().toStdString();
+    }
+
+    namespace
+    {
+        /*  THE SOUNDS' HASHES, KEPT BETWEEN SESSIONS in `.timbre/sounds.index`
+            (namespace draft §52): a line a sound - its size, when it was last
+            written, its hash and its path inside the media folder, a tab
+            between each - so a sweep reads again only a sound that is new or
+            has changed. Without it every sound in the folder, a cue naming it
+            or not, would be read whole at every launch. A line that does not
+            read is passed by: the sound is hashed again, which is all a lost
+            index ever costs. */
+        constexpr const char* indexName = "sounds.index";
+
+        void readIndex (const juce::File& folder, const juce::File& cache, KnownHashes& known)
+        {
+            juce::StringArray lines;
+            lines.addLines (cache.getChildFile (indexName).loadFileAsString());
+
+            for (const auto& line : lines)
+            {
+                const auto fields = juce::StringArray::fromTokens (line, "\t", "");
+
+                if (fields.size() != 4 || fields[2].length() != 64)
+                    continue;
+
+                const auto path = folder.getChildFile (fields[3]).getFullPathName().toStdString();
+
+                if (known.find (path) == known.end())
+                    known[path] = { fields[0].getLargeIntValue(), fields[1].getLargeIntValue(), fields[2].toStdString() };
+            }
+        }
+
+        void writeIndex (const juce::File& cache, const std::vector<std::pair<juce::String, KnownHash>>& sounds)
+        {
+            juce::String text;
+
+            for (const auto& [relative, hash] : sounds)
+                text << juce::String (hash.size) << "\t" << juce::String (hash.modified) << "\t"
+                     << juce::String (hash.hash) << "\t" << relative << "\n";
+
+            const auto bytes = text.toStdString();
+            writeCache (cache.getChildFile (indexName), std::vector<std::uint8_t> (bytes.begin(), bytes.end()));
+        }
+    }
+
+    CacheSweep sweepAnalysisCache (const std::string& root, KnownHashes& known, std::int64_t before,
+                                   const std::atomic<bool>* stop)
+    {
+        CacheSweep result;
+
+        const juce::File folder { juce::String (root) };
+        const auto cache = folder.getChildFile (".timbre");
+
+        /*  NO CACHE, NOTHING TO SWEEP - and no sound in the folder is read. */
+        if (root.empty() || ! cache.isDirectory())
+        {
+            result.swept = true;
+            return result;
+        }
+
+        try
+        {
+            readIndex (folder, cache, known);
+
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+
+            std::set<std::string> sounds, movies;
+            std::vector<std::pair<juce::String, KnownHash>> indexed;
+
+            const auto refuse = [&result] (const juce::String& relative)
+            {
+                result.problem = "could not read " + relative.toStdString();
+                return result;
+            };
+
+            //  EVERY FILE IN THE FOLDER, a cue naming it or not: presence is the rule.
+            for (const auto& entry : juce::RangedDirectoryIterator (folder, true, "*", juce::File::findFiles))
+            {
+                if (stopRequested (stop))
+                {
+                    result.problem = "stopped";
+                    return result;
+                }
+
+                const auto file = entry.getFile();
+                const auto relative = file.getRelativePathFrom (folder).replaceCharacter ('\\', '/');
+                const auto name = file.getFileName();
+
+                /*  The cache itself, and what is still being written - a take's
+                    hidden part, a save's or a conversion's temporary. */
+                if (relative.startsWith (".timbre/") || name.startsWith (".") || name.contains (".tmp-")
+                      || name.endsWith (".part"))
+                    continue;
+
+                const auto path = file.getFullPathName().toStdString();
+
+                //  A movie by its strip's key, as the analyser keys it: first.
+                if (video::movie::isMovieName (name.toStdString()))
+                {
+                    const auto key = movieStripKey (path);
+
+                    if (key.empty())
+                        return refuse (relative);
+
+                    movies.insert (key);
+                    continue;
+                }
+
+                //  A sound by its hash; anything no format reads has no analysis.
+                if (formats.findFormatForFileExtension (file.getFileExtension()) == nullptr)
+                    continue;
+
+                const auto size = file.getSize();
+                const auto modified = file.getLastModificationTime().toMilliseconds();
+                const auto found = known.find (path);
+
+                KnownHash memo;
+
+                if (found != known.end() && found->second.size == size && found->second.modified == modified
+                      && ! found->second.hash.empty())
+                {
+                    memo = found->second;
+                }
+                else
+                {
+                    auto hash = hashOf (file, stop);
+
+                    if (stopRequested (stop))
+                    {
+                        result.problem = "stopped";
+                        return result;
+                    }
+
+                    if (hash.empty())
+                        return refuse (relative);
+
+                    memo = { size, modified, std::move (hash) };
+                    known[path] = memo;
+                }
+
+                sounds.insert (memo.hash);
+                indexed.emplace_back (relative, memo);
+            }
+
+            /*  WHAT NO FILE HAS ANY MORE, in `.timbre` alone, written before
+                the sweep began - an hour before it for a temporary. Gathered
+                first and removed after, so the folder is not changed under
+                the walk of it. */
+            constexpr std::int64_t hour = 60 * 60 * 1000;
+            std::vector<juce::File> stale;
+
+            for (const auto& entry : juce::RangedDirectoryIterator (cache, false, "*", juce::File::findFiles))
+            {
+                const auto file = entry.getFile();
+                const auto name = file.getFileName();
+                const auto stem = name.upToFirstOccurrenceOf (".", false, false).toStdString();
+                const auto modified = file.getLastModificationTime().toMilliseconds();
+
+                if (name.contains (".tpy.tmp-") || name.contains (".tpk.tmp-") || name.endsWith (".tms.part"))
+                {
+                    if (modified < before - hour)
+                        stale.push_back (file);
+                }
+                else if (name.endsWith (".tpy") || name.endsWith (".tpk"))
+                {
+                    if (sounds.count (stem) == 0 && modified < before)
+                        stale.push_back (file);
+                }
+                else if (name.endsWith (".tms"))
+                {
+                    if (movies.count (stem) == 0 && modified < before)
+                        stale.push_back (file);
+                }
+            }
+
+            for (const auto& file : stale)
+            {
+                const auto bytes = file.getSize();
+
+                if (file.deleteFile())
+                {
+                    ++result.removed;
+                    result.bytes += bytes;
+                }
+            }
+
+            writeIndex (cache, indexed);
+            result.swept = true;
+        }
+        catch (const std::exception& failure)
+        {
+            result.swept = false;
+            result.problem = failure.what();
+        }
+
+        return result;
+    }
+
     //==============================================================================
     MediaAnalyser::MediaAnalyser (MediaInfo& mediaToPublishInto, std::string mediaFolder)
         : media (&mediaToPublishInto), folder (std::move (mediaFolder))
@@ -550,24 +759,128 @@ namespace wfg::audio
         return pending;
     }
 
+    void MediaAnalyser::sweep (bool asked)
+    {
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+            sweepWanted = true;
+            sweepAsked = sweepAsked || asked;
+        }
+
+        wake.notify_one();
+    }
+
+    MediaAnalyser::SweepStatus MediaAnalyser::sweepStatus() const
+    {
+        const std::lock_guard<std::mutex> lock { guard };
+        return swept;
+    }
+
+    std::string MediaAnalyser::sweepText (const SweepStatus& status)
+    {
+        if (status.number == 0)
+            return {};
+
+        return std::to_string (status.number) + "\t" + status.state + "\t" + (status.asked ? "asked" : "auto")
+             + "\t" + std::to_string (status.removed) + "\t" + std::to_string (status.bytes) + "\t" + status.problem;
+    }
+
+    /*  THE SHOW'S OWN `media/` AND THE ONE AROUND IT, each with the analysis
+        it holds (`mediaRootOf` puts a file's beside the file). Nothing is
+        said while it runs: a sweep nobody asked for is the machine's own
+        housekeeping, and the window says only the end of one somebody did. */
+    void MediaAnalyser::runSweep (bool asked)
+    {
+        const auto before = juce::Time::currentTimeMillis();
+
+        SweepStatus done;
+        done.asked = asked;
+        done.state = "done";
+
+        if (! folder.empty())
+        {
+            std::vector<std::string> roots { folder };
+            const auto around = mediaFolderAround (folder);
+
+            if (! around.empty() && juce::File (juce::String (around)) != juce::File (juce::String (folder))
+                  && juce::File (juce::String (around)).isDirectory())
+                roots.push_back (around);
+
+            for (const auto& root : roots)
+            {
+                const auto result = sweepAnalysisCache (root, hashed, before, &stopping);
+
+                if (stopping.load (std::memory_order_relaxed))
+                    return;
+
+                done.removed += result.removed;
+                done.bytes += result.bytes;
+
+                if (! result.swept)
+                {
+                    done.state = "skipped";
+
+                    if (done.problem.empty())
+                        done.problem = result.problem;
+                }
+            }
+        }
+
+        const std::lock_guard<std::mutex> lock { guard };
+        done.number = swept.number;
+        swept = done;
+        changes.fetch_add (1, std::memory_order_acq_rel);
+    }
+
     //==============================================================================
     void MediaAnalyser::run()
     {
         for (;;)
         {
             std::string named;
+            auto sweeping = false, asked = false;
 
             {
                 std::unique_lock<std::mutex> lock { guard };
 
                 wake.wait (lock, [this] { return stopping.load (std::memory_order_relaxed)
-                                                 || ! queued.empty(); });
+                                                 || ! queued.empty() || sweepWanted; });
 
                 if (stopping.load (std::memory_order_relaxed))
                     return;
 
-                named = std::move (queued.front());
-                queued.pop_front();
+                /*  THE FILES BEFORE A SWEEP (namespace draft §52): their
+                    colours are what somebody is waiting to see. */
+                if (! queued.empty())
+                {
+                    named = std::move (queued.front());
+                    queued.pop_front();
+                }
+                else
+                {
+                    sweeping = true;
+                    asked = sweepAsked;
+                    sweepWanted = sweepAsked = false;
+
+                    swept = SweepStatus {};
+                    swept.number = ++sweeps;
+                    swept.state = "sweeping";
+                    swept.asked = asked;
+                    changes.fetch_add (1, std::memory_order_acq_rel);
+                }
+            }
+
+            if (sweeping)
+            {
+                try
+                {
+                    runSweep (asked);
+                }
+                catch (const std::exception&)
+                {
+                }
+
+                continue;
             }
 
             /*  OUTSIDE THE LOCK, because this is the part that takes seconds,
@@ -661,6 +974,16 @@ namespace wfg::audio
             if (stopping.load (std::memory_order_relaxed))
                 return;
 
+            /*  THE HASH KEPT for the sweep (§52), which then need not read
+                this sound again. */
+            if (! analysis.contentHash.empty())
+            {
+                const juce::File file { juce::String (resolveMediaPath (folder, named)) };
+                hashed[file.getFullPathName().toStdString()] = { file.getSize(),
+                                                                 file.getLastModificationTime().toMilliseconds(),
+                                                                 analysis.contentHash };
+            }
+
             /*  NOTHING IS PUBLISHED FOR A FILE WITHOUT A PYRAMID, so a record
                 either has its hash and its pyramid or has neither - the one
                 state the tree must not have to read is a hash that a client
@@ -683,5 +1006,25 @@ namespace wfg::audio
             if (pending > 0)
                 --pending;
         }
+    }
+
+    //==============================================================================
+    void registerAnalyserCommands (CommandRegistry& registry, MediaAnalyser* analyser)
+    {
+        registry.add ({ "media.cleanCache",
+                        "Sweeps the analysis cache (namespace draft 52): in the media folder's .timbre, the"
+                        " colours, levels and movie strips of files no longer in the folder are removed - a"
+                        " file still there keeps its analysis whether a cue names it or not. Done by itself"
+                        " when a show opens; this asks for it now, and /godot/engine/mediaCacheSweep says"
+                        " what it removed. Taken and ignored where nothing analyses.",
+                        {},
+                        false,
+                        [analyser] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (analyser != nullptr)
+                                analyser->sweep (true);
+
+                            return Outcome::ok (args);
+                        } });
     }
 }

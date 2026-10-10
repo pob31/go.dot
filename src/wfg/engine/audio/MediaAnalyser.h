@@ -59,11 +59,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
 #include <thread>
+
+namespace wfg
+{
+    class CommandRegistry;
+}
 
 namespace wfg::audio
 {
@@ -136,6 +142,51 @@ namespace wfg::audio
     MediaAnalysis analyseMediaFile (const std::string& mediaFolder, const std::string& named,
                                     bool force, const std::atomic<bool>* stop = nullptr);
 
+    /*  THE KEY A MOVIE'S STRIP IS KEPT UNDER (namespace draft §47, AAI): a
+        hash of the file's size, its first and last megabyte and the strip's
+        format, in hex; empty when the file cannot be read. */
+    std::string movieStripKey (const std::string& path);
+
+    /*  A SOUND'S HASH ALREADY READ THIS SESSION, by full path, with the size
+        and the time it was read at - so a sweep does not read again a file
+        the analyser has just read whole. */
+    struct KnownHash
+    {
+        std::int64_t size = 0;
+        std::int64_t modified = 0;
+        std::string hash;
+    };
+
+    using KnownHashes = std::map<std::string, KnownHash>;
+
+    /*  WHAT A SWEEP OF ONE `.timbre` FOLDER CAME TO (namespace draft §52). */
+    struct CacheSweep
+    {
+        bool swept = false;          ///< false: nothing removed, `problem` says why
+        int removed = 0;
+        std::int64_t bytes = 0;
+        std::string problem;
+    };
+
+    /*  THE ANALYSIS OF FILES THAT ARE GONE, TAKEN AWAY (namespace draft §52,
+        the author's, 2026-10-10). `root` is a media folder - the show's own,
+        or the one around it - and its `.timbre` folder keeps the analysis of
+        EVERY file still in it, a cue naming it or not: a cue deleted and
+        undone, or a sound another show in the folder plays, keeps its colours.
+        So the rule is presence, never use. Each sound in `root` is hashed
+        (`known` first, filled as it goes) and each movie keyed; then, in
+        `.timbre` alone, a `.tpy`, `.tpk` or `.tms` whose key no file has is
+        removed, and a temporary an interrupted write left behind - but only
+        one last written before `before` (milliseconds since 1970, the sweep's
+        start, an hour earlier for a temporary), so what another process is
+        writing now is never touched. Anything else in `.timbre` is left alone.
+
+        A FILE THAT CANNOT BE READ STOPS IT before anything is removed: its
+        key is unknown, and a sweep that guessed would cost a long movie its
+        analysis. A raised `stop` does the same. Never throws. */
+    CacheSweep sweepAnalysisCache (const std::string& root, KnownHashes& known, std::int64_t before,
+                                   const std::atomic<bool>* stop = nullptr);
+
     //==============================================================================
     class MediaAnalyser
     {
@@ -173,8 +224,37 @@ namespace wfg::audio
             the snapshot sees every record it waited for. */
         std::size_t outstanding() const;
 
+        /*  ANY THREAD: sweep the analysis cache (namespace draft §52) once the
+            files queued are done - by itself when a show opens (`asked`
+            false), or because somebody asked (`media.cleanCache`). Two asks
+            before it starts are one sweep, asked if either was. */
+        void sweep (bool asked);
+
+        /*  THE LAST SWEEP, as `/godot/engine/mediaCacheSweep` says it: its
+            number this session (nought before any), "sweeping", "done" or
+            "skipped", whether somebody asked for it, what it removed and why
+            it stopped. `changes` moves whenever any of it does, so the tick
+            thread looks under the lock only then. */
+        struct SweepStatus
+        {
+            int number = 0;
+            std::string state;
+            bool asked = false;
+            int removed = 0;
+            std::int64_t bytes = 0;
+            std::string problem;
+        };
+
+        SweepStatus sweepStatus() const;
+        std::uint32_t sweepChanges() const noexcept { return changes.load (std::memory_order_acquire); }
+
+        /*  The readout's text: number, state, `asked` or `auto`, files removed,
+            bytes freed and the problem, a tab between each; empty before any. */
+        static std::string sweepText (const SweepStatus&);
+
     private:
         void run();
+        void runSweep (bool asked);
 
         MediaInfo* media = nullptr;
         const std::string folder;
@@ -189,9 +269,22 @@ namespace wfg::audio
         /*  Queued plus the one in hand. */
         std::size_t pending = 0;
 
+        bool sweepWanted = false, sweepAsked = false;
+        int sweeps = 0;
+        SweepStatus swept;
+        std::atomic<std::uint32_t> changes { 0 };
+
+        /*  The analyser thread's alone: every sound it hashed this session. */
+        KnownHashes hashed;
+
         std::atomic<bool> running { false };
         std::atomic<bool> stopping { false };
 
         std::thread thread;
     };
+
+    /*  `media.cleanCache` (namespace draft §52): the sweep, asked for. Taken
+        and ignored where there is no analyser - a replay, a test rig - so a
+        log that holds it replays. */
+    void registerAnalyserCommands (CommandRegistry&, MediaAnalyser*);
 }

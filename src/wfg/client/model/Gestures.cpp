@@ -561,6 +561,11 @@ namespace wfg::client::gesture
         return { origin::window, "video.hideProjectors", { osc::Value::boolean (on) } };
     }
 
+    Event cleanAnalysisCache()
+    {
+        return { origin::window, "media.cleanCache", {} };
+    }
+
     Event convertMovie (const std::string& file, const std::string& scope, const std::string& format, bool sound)
     {
         return { origin::window, "media.convert", { osc::Value::string (file), osc::Value::string (scope),

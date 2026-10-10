@@ -156,6 +156,10 @@ namespace wfg::audio
         performances share is analysed once, in the show's folder. */
     std::string mediaRootOf (const std::string& mediaFolder, const std::string& named);
 
+    /*  THE `media/` AROUND THE SHOW'S (`<show>/../media`), the second place a
+        name is looked for; empty when there is no folder to be around. */
+    std::string mediaFolderAround (const std::string& mediaFolder);
+
     /*  THE SOUNDS A COPY OF A SHOW WOULD NOT FIND STRAIGHT AWAY (namespace
         draft §32): the copy of the show in folder `source` saved as folder
         `destination`. Save as leaves `media/` behind, and a copy finds a sound
