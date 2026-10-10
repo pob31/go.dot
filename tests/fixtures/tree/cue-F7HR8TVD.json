@@ -116,7 +116,7 @@
     },
     "prepareError": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/prepareError",
-      "DESCRIPTION": "Why getting this cue ready failed, beside prepare reading partial, as a run's error word: media-missing when its file - a sound's, a still's or a movie's - is not in the show's media or cannot be read, no-track when every voice was busy. Empty otherwise (namespace draft 48).",
+      "DESCRIPTION": "Why getting this cue ready failed, beside prepare reading partial, as a run's error word: media-missing when its file - a sound's, a still's or a movie's - is not in the show's media or cannot be read, no-track when every voice was busy, rendering while a sound's open edit has no render yet (namespace draft 55). Empty otherwise (namespace draft 48).",
       "TYPE": "s",
       "ACCESS": 1,
       "VALUE": [""],
