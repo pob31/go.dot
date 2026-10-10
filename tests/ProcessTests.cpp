@@ -1678,15 +1678,29 @@ TEST_CASE ("M58: ten patches of fifty objects at once, each on its own thread, a
     };
     constexpr auto budget = std::chrono::microseconds (20000);
 
-    //  Made and opened, one step a tick at a quiet point.
-    int running = 0;
-    for (int tick = 0; tick < 200 && running < 10; ++tick)
+    /*  Made and opened, one step a tick at a quiet point. Ticked at the
+        engine's own rate and waited for by the clock, not by a count: a tick
+        returns at once while a step is out, so two hundred of them back to
+        back could end before a loaded machine had opened every patch - six of
+        ten on GitHub's Windows runner, more than once. A patch late on the
+        tick it is counted is open all the same. */
+    int opened = 0;
+    std::string states;
+    const auto giveUp = std::chrono::steady_clock::now() + std::chrono::seconds (30);
+    while (opened < 10 && std::chrono::steady_clock::now() < giveUp)
     {
-        running = 0;
+        const auto tickStart = std::chrono::steady_clock::now();
+        opened = 0;
+        states.clear();
         for (const auto& result : host.tick (wanted, inputs, budget, 50))
-            running += result.state == "running" ? 1 : 0;
+        {
+            opened += result.state == "running" || result.state == "late" ? 1 : 0;
+            states += result.run + " " + result.state + "; ";
+        }
+        std::this_thread::sleep_until (tickStart + std::chrono::milliseconds (20));
     }
-    REQUIRE (running == 10);
+    INFO ("after opening: " << states);
+    REQUIRE (opened == 10);
 
     constexpr int ticks = 250;
     double worst = 0.0, total = 0.0;
