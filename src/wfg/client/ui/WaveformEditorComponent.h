@@ -126,9 +126,9 @@ namespace wfg::client::ui
         juce::ToggleButton& sceneChangesButton() noexcept { return showCuts; }
         juce::ToggleButton& snapButton() noexcept         { return snapCuts; }
 
-        /*  THE SECTIONS ROW (namespace draft §55): which section is picked and
-            where the row is, for a test; its buttons are found by their
-            tooltips. Empty when the cue has no row - a movie, a memo. */
+        /*  THE SECTIONS ROW (namespace draft §55, 55.5): which section is picked
+            and where the row is, for a test; its buttons are found by their
+            tooltips. Empty when the cue has no row - a memo, a still. */
         std::size_t pickedSectionIndex() const noexcept { return pickedSection; }
         juce::Rectangle<int> sectionsRow() const        { return sectionsArea(); }
 
@@ -325,6 +325,11 @@ namespace wfg::client::ui
         std::map<std::size_t, juce::Image> stripImages;
         void paintStrip (juce::Graphics&, juce::Rectangle<int> pictures);
         void paintCuts (juce::Graphics&, juce::Rectangle<int> bar);
+
+        /*  THE CUTS AS THE BAR SHOWS THEM (namespace draft §55.5): the file's
+            own, or each laid where the section holding it now is while an
+            edit is open - what the marks are drawn from and the snap reads. */
+        std::vector<video::strip::Cut> cutsShown() const;
 
         /*  ITS CUTS SHOWN, AND SNAPPED TO (the author, 2026-10-10: "a toggle
             to show the scene changes and another toggle to snap the cursor to

@@ -5824,14 +5824,185 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
 
-    //  A movie has no row.
+    /*  A HAP MOVIE HAS THE ROW, live (§55.5); a preview has it greyed, its
+        buttons answering with the words to convert it; one not read yet says
+        so; a still has none. */
     model::FootReading movie;
     movie.subject = { model::Subject::Kind::waveform, "CUE00002" };
     movie.cueKind = "video";
     movie.movie = true;
     movie.file = "movie.mov";
     movie.fileLength = 60.0;
+    movie.codec = "Hap1";
+    movie.frameRate = 25.0;
+    movie.hapMovie = true;
+    movie.editable = true;
     editor.show (movie, nullptr);
+    CHECK_FALSE (editor.sectionsRow().isEmpty());
+    CHECK (split->isVisible());
+    CHECK (split->isEnabled());
+    CHECK (freeze->getButtonText() == "Freeze");
+
+    movie.codec = "avc1";
+    movie.hapMovie = false;
+    movie.editable = false;
+    movie.editWords = "Convert the movie to HAP to edit it (Show > Convert the movie to HAP)";
+    editor.show (movie, nullptr);
+    CHECK_FALSE (editor.sectionsRow().isEmpty());
+    CHECK (split->isVisible());
+    CHECK_FALSE (split->isEnabled());
+    CHECK_FALSE (freeze->isEnabled());
+    said.clear();
+    split->onClick();
+    CHECK (said == juce::String (movie.editWords));
+    CHECK (splitCue != "CUE00002");   // nothing sent for the movie
+
+    movie.codec.clear();
+    movie.editWords = "Reading the movie - the row wakes once Go.dot has read its frames";
+    editor.show (movie, nullptr);
+    said.clear();
+    split->onClick();
+    CHECK (said == juce::String (movie.editWords));
+
+    model::FootReading still;
+    still.subject = { model::Subject::Kind::waveform, "CUE00003" };
+    still.cueKind = "video";
+    still.notice = "Nothing to show here for a picture: only an audio cue or a movie has a waveform and ranges.";
+    editor.show (still, nullptr);
     CHECK (editor.sectionsRow().isEmpty());
     CHECK_FALSE (split->isVisible());
+}
+
+TEST_CASE ("waveform: a movie's strip and its cuts follow the edit - each slot the file's picture where its section is, each cut where the material went (§55.5)")
+{
+    /*  A thirty-second movie of three shots - red, green, blue, ten seconds
+        each - cut into [20,30] then [0,10]: the bar is twenty seconds long,
+        blue on the left and red on the right; the file's cut at 24 s, a
+        dissolve, is drawn at 4 s and the playhead snaps to it; the cut at 10 s
+        is an edge of neither section and is not on the bar. With
+        WFG_SNAPSHOT_DIR set, waveform-movie-edit.png as well. */
+    ui::WaveformEditorComponent editor (model::Theme {}, {});
+    editor.setRightColumn (360, 12);
+    editor.setSize (1000, 260);
+
+    auto strip = std::make_shared<wfg::video::strip::MovieStrip>();
+    strip->duration = 30.0;
+    strip->width = 1920;
+    strip->height = 1080;
+
+    const std::uint8_t colours[3][3] { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 } };
+
+    for (int n = 0; n < 3; ++n)
+    {
+        wfg::video::strip::Thumbnail picture;
+        picture.seconds = 10.0 * n;
+        picture.width = wfg::video::strip::thumbnailWidth;
+        picture.height = 45;
+
+        for (int pixel = 0; pixel < picture.width * picture.height; ++pixel)
+            picture.rgb.insert (picture.rgb.end(), { colours[n][0], colours[n][1], colours[n][2] });
+
+        strip->thumbnails.push_back (std::move (picture));
+    }
+
+    strip->cuts = { { 10.0, 0.5, false }, { 24.0, 0.4, true } };
+
+    auto records = std::make_shared<wfg::audio::MediaRecords>();
+    wfg::audio::MediaRecord record;
+    record.seconds = 30.0;
+    record.strip = strip;
+    (*records)["movie.mov"] = record;
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "Movie";
+    reading.cueKind = "video";
+    reading.movie = true;
+    reading.file = "movie.mov";
+    reading.fileLength = 20.0;   // the edit's length, as the tree's duration says it
+    reading.codec = "Hap1";
+    reading.frameRate = 25.0;
+    reading.hapMovie = true;
+    reading.editable = true;
+    reading.sections = { { "SEC00001", 0, 20.0, 30.0, 0.0, 0.01 },
+                         { "SEC00002", 1, 0.0, 10.0, 0.0, 0.4 } };
+    editor.show (reading, records);
+
+    juce::Image canvas (juce::Image::RGB, 1000, 260, true, juce::SoftwareImageType());
+    {
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, false);
+    }
+
+    /*  The pictures are laid a slot at a time, each the file's picture at the
+        second its slot's left edge maps to, so the switch from blue to red
+        lands on a slot's edge: blue begins in the left half and runs no
+        further than red begins, red reaches into the right half, and the
+        second shot - green - is nowhere, not being in the edit. */
+    auto leftmostBlue = canvas.getWidth(), rightmostBlue = -1, leftmostRed = canvas.getWidth(), rightmostRed = -1;
+    auto blue = 0, red = 0, green = 0;
+
+    for (int y = 0; y < canvas.getHeight(); ++y)
+        for (int x = 0; x < canvas.getWidth(); ++x)
+        {
+            const auto colour = canvas.getPixelAt (x, y);
+
+            if (colour.getBlue() > 240 && colour.getRed() < 20 && colour.getGreen() < 20)
+            {
+                ++blue;
+                leftmostBlue = std::min (leftmostBlue, x);
+                rightmostBlue = std::max (rightmostBlue, x);
+            }
+            else if (colour.getRed() > 240 && colour.getGreen() < 20 && colour.getBlue() < 20)
+            {
+                ++red;
+                leftmostRed = std::min (leftmostRed, x);
+                rightmostRed = std::max (rightmostRed, x);
+            }
+            else if (colour.getGreen() > 240 && colour.getRed() < 20 && colour.getBlue() < 20)
+                ++green;
+        }
+
+    const auto midBar = (1000 - 360 - 12) / 2;
+    INFO ("blue " << leftmostBlue << ".." << rightmostBlue << ", red " << leftmostRed << ".." << rightmostRed << ", green " << green);
+    CHECK (blue > 1000);
+    CHECK (red > 1000);
+    CHECK (leftmostBlue < midBar);
+    CHECK (rightmostBlue < leftmostRed);
+    CHECK (rightmostRed > midBar);
+    CHECK (green == 0);
+
+    //  THE PLAYHEAD SNAPS TO THE CUT WHERE THE EDIT PUT IT, and not to one that is not on the bar.
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+
+    const auto pressRuler = [&] (double seconds)
+    {
+        const auto at = juce::Point<float> (editor.pointPosition ({ seconds, 0.0 }).x + 4.0f,
+                                            static_cast<float> (editor.getHeight() - 3));
+        const auto now = juce::Time::getCurrentTime();
+        const juce::MouseEvent event (source, at, left, juce::MouseInputSource::defaultPressure,
+                                      0.0f, 0.0f, 0.0f, 0.0f, &editor, &editor, now, at, now, 1, false);
+        editor.mouseDown (event);
+        editor.mouseUp (event);
+        return editor.playhead();
+    };
+
+    CHECK (pressRuler (4.0) == doctest::Approx (4.0).epsilon (1.0e-9));
+    CHECK (pressRuler (10.0) != doctest::Approx (10.0).epsilon (1.0e-9));
+    CHECK (pressRuler (10.0) > 10.0);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const juce::File file { juce::File (dir).getChildFile ("waveform-movie-edit.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (canvas, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
 }

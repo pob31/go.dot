@@ -218,7 +218,7 @@ namespace wfg::client::ui
             plays. Every button says what it does (§4.8) and is greyed when
             the edit is not this panel's to make. */
         splitButton.setButtonText ("Split");
-        splitButton.setTooltip ("Splits the sound at the playhead into two sections");
+        splitButton.setTooltip ("Splits the sound - or the movie - at the playhead into two sections");
         removeButton.setButtonText ("Remove");
         removeButton.setTooltip ("Removes the picked section: what sat on it goes with it, the rest closes up");
         joinButton.setButtonText ("Join");
@@ -1018,7 +1018,7 @@ namespace wfg::client::ui
         {
             std::vector<double> cuts;
 
-            for (const auto& cut : strip->cuts)
+            for (const auto& cut : cutsShown())
                 cuts.push_back (cut.seconds);
 
             seconds = model::snapTo (seconds, cuts, toleranceSeconds());
@@ -1189,8 +1189,13 @@ namespace wfg::client::ui
             ran on past its edge - over the next, and past the bar onto the range
             table. Each is clipped to its slot, and the strip ends where the
             movie does. */
-        const auto movieEnd = strip->duration > 0.0 && view.span() > 0.0
-                                ? pictures.getX() + static_cast<int> (std::ceil (view.xForSeconds (strip->duration, pictures.getWidth())))
+        /*  THROUGH THE EDIT (namespace draft §55.5, ADV): the bar draws the
+            edited timeline, so the strip ends where the edit does and each slot
+            shows the file's picture at the second its section maps to. */
+        const auto edited = editShown() && ! reading.sections.empty();
+        const auto length = edited ? model::editedLength (reading.sections) : strip->duration;
+        const auto movieEnd = length > 0.0 && view.span() > 0.0
+                                ? pictures.getX() + static_cast<int> (std::ceil (view.xForSeconds (length, pictures.getWidth())))
                                 : pictures.getRight();
         const auto stripEnd = std::clamp (movieEnd, pictures.getX(), pictures.getRight());
 
@@ -1200,7 +1205,19 @@ namespace wfg::client::ui
 
         for (auto x = pictures.getX(); x < stripEnd; x += wide)
         {
-            const auto* thumbnail = strip->thumbnailAt (secondsAt (x));
+            auto fileSecond = secondsAt (x);
+
+            if (edited)
+            {
+                const auto place = model::placeOf (reading.sections, fileSecond);
+
+                if (! place.has_value())
+                    continue;
+
+                fileSecond = place->fileSecond;
+            }
+
+            const auto* thumbnail = strip->thumbnailAt (fileSecond);
 
             if (thumbnail == nullptr || thumbnail->width <= 0 || thumbnail->height <= 0)
                 continue;
@@ -1229,6 +1246,32 @@ namespace wfg::client::ui
         }
     }
 
+    std::vector<video::strip::Cut> WaveformEditorComponent::cutsShown() const
+    {
+        std::vector<video::strip::Cut> out;
+
+        if (strip == nullptr)
+            return out;
+
+        if (! editShown() || reading.sections.empty())
+            return strip->cuts;
+
+        /*  THROUGH THE EDIT (namespace draft §55.5): each cut of the file laid
+            where the section holding it now is - more than once when the
+            material is - and the model's rule says where. */
+        for (const auto& cut : strip->cuts)
+            for (const auto seconds : model::cutsOnTimeline (reading.sections, { cut.seconds }))
+            {
+                auto moved = cut;
+                moved.seconds = seconds;
+                out.push_back (moved);
+            }
+
+        std::sort (out.begin(), out.end(),
+                   [] (const video::strip::Cut& a, const video::strip::Cut& b) { return a.seconds < b.seconds; });
+        return out;
+    }
+
     void WaveformEditorComponent::paintCuts (juce::Graphics& g, juce::Rectangle<int> bar)
     {
         if (strip == nullptr || ! showCuts.getToggleState() || ! (view.span() > 0.0))
@@ -1238,7 +1281,7 @@ namespace wfg::client::ui
             and a triangle at its head - solid for a cut, dashed for a dissolve. */
         const auto ink = Look::colour (theme, "ink");
 
-        for (const auto& cut : strip->cuts)
+        for (const auto& cut : cutsShown())
         {
             if (cut.seconds < view.from || cut.seconds > view.to)
                 continue;
@@ -1676,7 +1719,8 @@ namespace wfg::client::ui
 
     bool WaveformEditorComponent::editShown() const
     {
-        return reading.cueKind == "media" && ! reading.movie && reading.notice.empty();
+        //  A sound's, and a movie's (§55.5) - every movie, greyed with its words when it is not HAP.
+        return (reading.cueKind == "media" || reading.movie) && reading.notice.empty();
     }
 
     juce::Rectangle<int> WaveformEditorComponent::buttonsArea() const
@@ -1724,6 +1768,8 @@ namespace wfg::client::ui
             tell ("The show is locked.");
         else if (reading.frozen)
             tell ("This edit is frozen - Unfreeze to change it.");
+        else if (! reading.editWords.empty())
+            tell (juce::String::fromUTF8 (reading.editWords.c_str()));   // a movie not read yet, or not HAP (§55.5)
         else if (reading.cueKind == "media")
             tell ("This sound follows its movie: edit the movie.");
     }
@@ -1745,9 +1791,12 @@ namespace wfg::client::ui
 
         freezeButton.setButtonText (reading.frozen ? "Unfreeze" : "Freeze");
         freezeButton.setTooltip (reading.frozen
-                                   ? "Unfreezes the edit: the cue plays its file again and the sections are live"
-                                   : "Freezes the edit: the render is bounced to a new file the cue plays");
-        freezeButton.setEnabled (shown && ! reading.locked
+                                   ? (reading.movie ? "Unfreezes the edit: the movie and its sound play their files again and the sections are live"
+                                                    : "Unfreezes the edit: the cue plays its file again and the sections are live")
+                                   : (reading.movie && ! reading.soundFile.empty()
+                                        ? "Freezes the edit: the render is bounced to a new file the cue plays, and its sound's with it"
+                                        : "Freezes the edit: the render is bounced to a new file the cue plays"));
+        freezeButton.setEnabled (shown && ! reading.locked && reading.editWords.empty()
                                    && (reading.frozen || (! reading.sections.empty() && reading.render.state == "done")));
 
         if (splitButton.isVisible() != shown)
@@ -1761,7 +1810,9 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::showPickedSection()
     {
-        const auto visible = editShown() && pickedSection < reading.sections.size();
+        //  A movie's trim is its locked sound's (55.5): no sound, no box.
+        const auto visible = editShown() && pickedSection < reading.sections.size()
+                               && (reading.cueKind == "media" || ! reading.soundFile.empty());
         trimBox.setVisible (visible);
 
         if (! visible)
@@ -1780,13 +1831,16 @@ namespace wfg::client::ui
 
         if (reading.sections.empty())
         {
-            /*  NO EDIT: one block, the whole file, and the words that start one. */
+            /*  NO EDIT: one block, the whole file, and the words that start one -
+                or, on a movie that is not HAP or not read yet, the words that
+                say what to do first (§55.5, ADX). */
             const auto whole = juce::Rectangle<float> (static_cast<float> (bar.getX()), static_cast<float> (row.getY() + 2),
                                                        static_cast<float> (bar.getWidth()), static_cast<float> (row.getHeight() - 4));
             g.setColour (Look::colour (theme, "rule"));
             g.drawRoundedRectangle (whole, 3.0f, 1.0f);
             g.setColour (Look::colour (theme, "ink-off"));
-            g.drawFittedText ("the whole file - Split at the playhead to start an edit",
+            g.drawFittedText (reading.editWords.empty() ? juce::String ("the whole file - Split at the playhead to start an edit")
+                                                        : juce::String::fromUTF8 (reading.editWords.c_str()),
                               whole.reduced (6.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1);
             return;
         }
@@ -2267,7 +2321,7 @@ namespace wfg::client::ui
             /*  AND A MOVIE'S CUTS (§47, AAI): an in point on a shot's first
                 frame - while they are shown and snapped to (§47.10). */
             if (cutsSnap())
-                for (const auto& cut : strip->cuts)
+                for (const auto& cut : cutsShown())
                     targets.push_back (cut.seconds);
 
             seconds = model::snapTo (seconds, targets, toleranceSeconds());
