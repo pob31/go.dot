@@ -22,6 +22,15 @@ namespace wfg::cue
     {
         const juce::Identifier idProperty { "id" };
 
+        /*  What may hold sections: a sound, or a Video whose source is a
+            movie (namespace draft §55.5) - a still has no time to cut. */
+        bool isSoundOrMovie (const juce::ValueTree& cue)
+        {
+            return cue.isValid()
+                && (cue.hasType ("Media")
+                    || (cue.hasType ("Video") && cue["source"].toString() == "movie"));
+        }
+
         std::optional<double> lengthNamed (const std::map<std::string, double>* durations, const std::string& name)
         {
             if (durations == nullptr || name.empty())
@@ -40,7 +49,7 @@ namespace wfg::cue
     {
         std::vector<doc::Section> sections;
 
-        if (! cue.isValid() || ! cue.hasType ("Media"))
+        if (! isSoundOrMovie (cue))
             return sections;
 
         for (const auto& child : cue)
@@ -67,7 +76,7 @@ namespace wfg::cue
 
     std::optional<double> editedLengthOf (const juce::ValueTree& cue)
     {
-        if (! cue.isValid() || ! cue.hasType ("Media") || ! cue["editSource"].toString().isEmpty())
+        if (! isSoundOrMovie (cue) || ! cue["editSource"].toString().isEmpty())
             return std::nullopt;
 
         const auto sections = sectionsIn (cue);
@@ -88,7 +97,7 @@ namespace wfg::cue
             return played;
 
         played.name = cue["file"].toString().toStdString();
-        played.frozen = cue.hasType ("Media") && ! cue["editSource"].toString().isEmpty();
+        played.frozen = isSoundOrMovie (cue) && ! cue["editSource"].toString().isEmpty();
 
         const auto fileLength = lengthNamed (durations, played.name);
         const auto sections = sectionsIn (cue);
@@ -121,6 +130,19 @@ namespace wfg::cue
         }
 
         return played;
+    }
+
+    double fileSecondOf (const juce::ValueTree& cue, double editedSecond)
+    {
+        if (! editedLengthOf (cue).has_value())
+            return editedSecond;
+
+        const auto sections = sectionsIn (cue);
+
+        if (const auto place = doc::placeOf (sections, editedSecond))
+            return place->fileSecond;
+
+        return editedSecond < 0.0 ? sections.front().in : sections.back().out;
     }
 
     std::optional<double> playedLengthOf (const juce::ValueTree& cue, const std::map<std::string, double>* durations)

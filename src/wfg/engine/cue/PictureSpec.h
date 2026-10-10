@@ -40,11 +40,20 @@ namespace wfg::doc { class ShowDocument; }
 
 namespace wfg::cue
 {
+    struct PlayedMedia;
+
     /*  The layer `cueId` would put up now, its file resolved against
         `mediaFolder` as a sound's is. An empty spec for a cue that is not
         there. */
     video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
                                     const std::string& mediaFolder);
+
+    /*  The same, with the file a movie PLAYS rather than the one it names
+        (namespace draft §55.5, ADV): the render of its open edit, or no file
+        at all while that render is not there yet. What GO brings up; the
+        form above is the tile's and the edit's, which show the source. */
+    video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
+                                    const std::string& mediaFolder, const PlayedMedia* played);
 
     /*  WHETHER TWO SPECS LOOK THE SAME, in what a playing layer is told when its
         cue is edited (`Sink::restate`): the blend, the colour, the fit, the

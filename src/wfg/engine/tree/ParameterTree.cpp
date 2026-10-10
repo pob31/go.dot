@@ -3590,8 +3590,8 @@ namespace wfg::tree
 
                 for (const auto& entry : lists->ahead())
                     if (entry.kind != "sound" && preparedness.count (entry.cue) == 0)
-                        preparedness[entry.cue] = cue::videoWordOf (entry.missing, renderer.renderer, renderer.heldCurrent,
-                                                                    renderer.heldOf (entry.path));
+                        preparedness[entry.cue] = cue::videoWordOf (entry.missing, entry.rendering, renderer.renderer,
+                                                                    renderer.heldCurrent, renderer.heldOf (entry.path));
             }
 
             const auto* row = rowNamed ("cue", "prepare");

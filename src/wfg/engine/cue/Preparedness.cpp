@@ -34,9 +34,13 @@ namespace wfg::cue
         return { run.prepare };
     }
 
-    PrepareWord videoWordOf (bool missing, const std::string& renderer, bool heldCurrent,
+    PrepareWord videoWordOf (bool missing, bool rendering, const std::string& renderer, bool heldCurrent,
                              const video::region::HeldReading* held)
     {
+        //  Nothing to read until the render is there (§55.5).
+        if (rendering)
+            return { preparedness::partial, runError::rendering };
+
         if (missing)
             return { preparedness::partial, runError::mediaMissing };
 

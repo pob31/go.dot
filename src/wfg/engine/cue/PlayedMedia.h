@@ -29,7 +29,8 @@
 /*  THE ONE ANSWER TO "WHICH FILE DOES THIS CUE PLAY, AND HOW LONG IS IT"
     (namespace draft §55, ADK, ADM).
 
-    A sound cue with no sections, or a frozen one, plays its `file`: the
+    A sound cue - or a HAP movie's, edited the same way (§55.5, ADS) - with
+    no sections, or a frozen one, plays its `file`: the
     bounce IS the file while frozen, so nothing here knows a frozen cue from a
     plain one. A cue whose edit is OPEN plays the render of its sections, once
     the renderer has made one of the edit as it now is, and is as long as its
@@ -44,7 +45,7 @@
 */
 namespace wfg::cue
 {
-    /** The sections a sound cue's node holds, in document order; none for anything else. */
+    /** The sections a sound cue's or a movie cue's node holds, in document order; none for anything else. */
     std::vector<doc::Section> sectionsIn (const juce::ValueTree& cue);
 
     /** The edit's text, as the render's key is made from; empty with no sections. */
@@ -53,6 +54,13 @@ namespace wfg::cue
     /*  The edit's length, when the cue's edit is OPEN - sections and no
         `editSource`; nothing otherwise, and the file's length is the answer. */
     std::optional<double> editedLengthOf (const juce::ValueTree& cue);
+
+    /*  THE SECOND IN THE FILE an edited second falls at (namespace draft
+        §55.5, ADV): the second itself for a cue with no open edit; past the
+        end, the last section's out; before the top, the first's in. What the
+        monitor's tile shows of a movie being edited, the file's frame at the
+        second the edit maps to. */
+    double fileSecondOf (const juce::ValueTree& cue, double editedSecond);
 
     struct PlayedMedia
     {

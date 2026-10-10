@@ -409,3 +409,76 @@ TEST_CASE ("edit playback: the tree's duration is the edit's while it is open, t
     parameters.setMediaDurations (&show.lengths);
     CHECK (duration() == doctest::Approx (10.0));
 }
+
+//==============================================================================
+/*  A MOVIE'S (namespace draft §55.5, ADV): the one resolver answers for a HAP
+    movie as for a sound, and maps an edited second back into the file for the
+    monitor's tile. */
+
+TEST_CASE ("played media: a movie being edited plays its render as a sound does, and its seconds map through the sections")
+{
+    doc::ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+    const auto movieId = document.createCue (listId, 0, "video", "Clip").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + movieId + "/source", "movie").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + movieId + "/file", "clip.mov").ok);
+    const std::map<std::string, double> lengths { { "clip.mov", 30.0 } };
+
+    auto movie = document.findById (movieId);
+    auto played = cue::playedMediaOf (movie, &lengths, nullptr);
+    CHECK (played.name == "clip.mov");
+    CHECK (played.lengthKnown);
+    CHECK (played.lengthSeconds == doctest::Approx (30.0));
+    CHECK_FALSE (played.openEdit);
+    CHECK (cue::fileSecondOf (movie, 7.5) == doctest::Approx (7.5));
+
+    /*  CUT IN THREE AND THE LAST PUT FIRST: [20,30] [0,10] [10,20]. */
+    REQUIRE (document.splitSection (movieId, 10.0, 30.0, {}).ok);
+    REQUIRE (document.splitSection (movieId, 20.0, 30.0, {}).ok);
+    const auto sections = cue::sectionsIn (movie);
+    REQUIRE (sections.size() == 3u);
+    REQUIRE (document.moveSection (sections[2].id, 0).ok);
+    movie = document.findById (movieId);
+
+    played = cue::playedMediaOf (movie, &lengths, nullptr);
+    CHECK (played.openEdit);
+    CHECK (played.name.empty());
+    CHECK (played.lengthKnown);
+    CHECK (played.lengthSeconds == doctest::Approx (30.0));
+
+    audio::EditRenders renders;
+    audio::EditRender render;
+    render.cue = movieId;
+    render.editText = cue::editTextOf (movie);
+    render.file = ".edits/clip-abc.mov";
+    render.state = audio::renderState::done;
+    render.seconds = 30.0;
+    renders[movieId] = render;
+
+    played = cue::playedMediaOf (movie, &lengths, &renders);
+    CHECK (played.openEdit);
+    CHECK (played.name == ".edits/clip-abc.mov");
+
+    /*  THE FILE'S SECOND: inside each section a shift; past the end the last
+        out, before the top the first in. */
+    CHECK (cue::fileSecondOf (movie, 2.5) == doctest::Approx (22.5));
+    CHECK (cue::fileSecondOf (movie, 12.5) == doctest::Approx (2.5));
+    CHECK (cue::fileSecondOf (movie, 29.0) == doctest::Approx (19.0));
+    CHECK (cue::fileSecondOf (movie, 30.0) == doctest::Approx (20.0));
+    CHECK (cue::fileSecondOf (movie, 31.0) == doctest::Approx (20.0));
+    CHECK (cue::fileSecondOf (movie, -1.0) == doctest::Approx (20.0));
+
+    /*  FROZEN: the bounce, on its own time. */
+    REQUIRE (document.freezeEdit (movieId, "clip.mov", "clip (edit).mov").ok);
+    movie = document.findById (movieId);
+    played = cue::playedMediaOf (movie, &lengths, &renders);
+    CHECK (played.frozen);
+    CHECK_FALSE (played.openEdit);
+    CHECK (played.name == "clip (edit).mov");
+    CHECK (cue::fileSecondOf (movie, 2.5) == doctest::Approx (2.5));
+
+    /*  A STILL has no edit, whatever it holds. */
+    const auto still = document.createCue (listId, 1, "video", "Title").id;
+    CHECK_FALSE (cue::playedMediaOf (document.findById (still), &lengths, nullptr).openEdit);
+    CHECK (cue::sectionsIn (document.findById (still)).empty());
+}

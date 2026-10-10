@@ -3230,6 +3230,10 @@ namespace wfg::cue
             if (const auto found = known->find (job->movieFile); found != known->end())
                 duration = found->second;
 
+        //  A render's length is the edit's, carried on the job (§55.5).
+        if (! (duration > 0.0))
+            duration = job->movieLength;
+
         /*  WHERE IT LANDS, by §30.4's rules as a sound's seek lands (seekMedia):
             the ranges are the movie's own, which its locked sounds carry copies
             of, so the picture and the sound land on the same second. */
@@ -4842,7 +4846,22 @@ namespace wfg::cue
                 AAE), and what the monitor shows of a cue not playing (AAH) -
                 its canvas, layer, source and file, its geometry as the cue is
                 written (§36.3), its grade with the curves baked, its mask. */
-            job.spec = pictureSpecOf (document, job.cue, mediaFolder);
+            /*  THE FILE IT PLAYS (namespace draft §55.5, ADV): a movie being
+                edited plays the render of its sections, as a sound does - none
+                yet is a run that fails as `rendering`, and the read-ahead names
+                the render once it lands. A replay, with no renderer, fails the
+                same. */
+            const auto played = playedMediaOf (cue, durations, renders);
+
+            if (played.openEdit && played.name.empty())
+            {
+                engine.submit (origin::engine, "run.failed",
+                               { osc::Value::string (runId),
+                                 osc::Value::string (runError::rendering) });
+                return;
+            }
+
+            job.spec = pictureSpecOf (document, job.cue, mediaFolder, &played);
             job.spec.id = runId;
             job.spec.order = ++videoOrder;
 
@@ -4854,7 +4873,8 @@ namespace wfg::cue
                 const auto start = movieStartOf (cue);
 
                 job.movie = true;
-                job.movieFile = textOf (cue, "file");
+                job.movieFile = played.name;
+                job.movieLength = played.lengthKnown ? played.lengthSeconds : 0.0;
                 job.moviePosition = start.seconds;
                 job.rate = start.rate;
                 job.pieceStart = start.pieceStart;
@@ -17399,8 +17419,26 @@ namespace wfg::cue
                 if (already.cue == cueId)
                     return;
 
+            /*  THE FILE A MOVIE PLAYS (namespace draft §55.5, ADV): the render
+                of its open edit, under its own name - not there yet, nothing
+                is read and the row says `rendering` until it is. */
+            auto playedName = named;
+
+            if (source == "movie")
+            {
+                const auto played = playedMediaOf (leaf, known, renders);
+
+                if (played.openEdit && played.name.empty())
+                {
+                    ahead.push_back ({ cueId, "movie", {}, false, true });
+                    return;
+                }
+
+                playedName = played.name;
+            }
+
             video::Preload item;
-            item.path = mediaPathOf (named);
+            item.path = mediaPathOf (playedName);
             item.movie = source == "movie";
 
             if (item.movie)
@@ -17896,6 +17934,10 @@ namespace wfg::cue
         if (const auto* known = handlerDurations())
             if (const auto found = known->find (job.movieFile); found != known->end())
                 duration = found->second;
+
+        //  A render's length is the edit's, carried on the job (§55.5).
+        if (! (duration > 0.0))
+            duration = job.movieLength;
 
         /*  THE WAY IT GOES (namespace draft §41): the speed's sign, turned
             again while a ping-pong range plays back from its out-point. */

@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/PictureSpec.h>
+#include <wfg/engine/cue/PlayedMedia.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -73,6 +74,12 @@ namespace wfg::cue
     video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
                                     const std::string& mediaFolder)
     {
+        return pictureSpecOf (document, cueId, mediaFolder, nullptr);
+    }
+
+    video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
+                                    const std::string& mediaFolder, const PlayedMedia* played)
+    {
         video::LayerSpec spec;
 
         if (cueId.empty())
@@ -101,9 +108,18 @@ namespace wfg::cue
         /*  A PICTURE'S FILE AS A WHOLE PATH, resolved as a sound's is (VX); a
             capture's video input and the insert it goes through, by identifier
             (§44, YC, YE). */
-        if (spec.source == "picture" || spec.source == "movie")
+        if (spec.source == "movie" && played != nullptr)
+        {
+            /*  A MOVIE BEING EDITED plays its render (§55.5): nothing while
+                the render is not there, which the caller has refused already. */
+            if (! played->name.empty())
+                spec.file = audio::resolveMediaPath (mediaFolder, played->name);
+        }
+        else if (spec.source == "picture" || spec.source == "movie")
+        {
             if (const auto named = textOf ("file"); ! named.empty())
                 spec.file = audio::resolveMediaPath (mediaFolder, named);
+        }
 
         if (spec.source == "capture")
             spec.input = textOf ("videoInput");

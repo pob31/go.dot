@@ -2593,6 +2593,7 @@ namespace wfg::cue
                 is found under. */
             bool movie = false;
             std::string movieFile;
+            double movieLength = 0.0;       // as the show knew it at GO: the edit's, or the file's (nought until read)
             double moviePosition = 0.0;
             std::int64_t movieAt = -1;
             double rate = 1.0;

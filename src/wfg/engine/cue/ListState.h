@@ -297,6 +297,7 @@ namespace wfg::cue
             std::string kind;           ///< "sound", "picture" or "movie"
             std::string path {};        ///< empty for a sound: its run says the rest
             bool missing = false;
+            bool rendering = false;     ///< a movie being edited whose render is not there yet (namespace draft §55.5)
         };
 
         void setAhead (std::vector<Ahead> now) { aheadNow = std::move (now); }

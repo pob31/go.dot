@@ -5100,7 +5100,13 @@ namespace
                                              spec.id = tileCue;
                                              const auto opacity = wfg::osc::parseDouble (document.getAttribute ("/godot/cue/" + tileCue + "/opacity")
                                                                                              .value_or (std::string {})).value_or (100.0);
-                                             videoHost.showTile (spec, tileSeconds, opacity / 100.0);
+
+                                             /*  A MOVIE BEING EDITED (namespace draft §55.5, ADV):
+                                                 the source's frame at the second the edit maps
+                                                 the window's to, so the window never knows. */
+                                             videoHost.showTile (spec,
+                                                                 wfg::cue::fileSecondOf (document.findById (tileCue), tileSeconds),
+                                                                 opacity / 100.0);
                                          }
                                      }
                                  }

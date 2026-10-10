@@ -51,10 +51,12 @@ namespace wfg::cue
     PrepareWord runWordOf (const Run& run);
 
     /*  A PICTURE'S OR A MOVIE'S, read ahead without a run: `partial` and
+        `rendering` for a movie being edited whose render is not there yet
+        (namespace draft §55.5), as a sound's arm says it; `partial` and
         `media-missing` for a file the show does not have, or one the renderer
         could not read; idle while no renderer runs, or when it was not named
         (past the region's room); `preparing` while it is read, or while the
         renderer's answer is to an older list; `armed` once it is held ready. */
-    PrepareWord videoWordOf (bool missing, const std::string& renderer, bool heldCurrent,
+    PrepareWord videoWordOf (bool missing, bool rendering, const std::string& renderer, bool heldCurrent,
                              const video::region::HeldReading* held);
 }

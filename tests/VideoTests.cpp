@@ -38,8 +38,10 @@
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/audio/EditRenderTable.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/Preparedness.h>
 #include <wfg/engine/cue/Run.h>
@@ -1097,16 +1099,21 @@ TEST_CASE ("prepare words: a sound's from its run, armed once its voice is confi
     const HeldReading reading { "/m/a.png", HeldState::reading };
     const HeldReading failed { "/m/a.png", HeldState::failed, "not found" };
 
-    CHECK (cue::videoWordOf (true, "running", true, &ready).word == "partial");
-    CHECK (cue::videoWordOf (true, "stopped", false, nullptr).error == "media-missing");
-    CHECK (cue::videoWordOf (false, "stopped", false, nullptr).word.empty());
-    CHECK (cue::videoWordOf (false, "starting", false, nullptr).word == "preparing");
-    CHECK (cue::videoWordOf (false, "running", false, &ready).word == "preparing");
-    CHECK (cue::videoWordOf (false, "running", true, nullptr).word.empty());
-    CHECK (cue::videoWordOf (false, "running", true, &reading).word == "preparing");
-    CHECK (cue::videoWordOf (false, "running", true, &ready).word == "armed");
-    CHECK (cue::videoWordOf (false, "running", true, &failed).word == "partial");
-    CHECK (cue::videoWordOf (false, "running", true, &failed).error == "media-missing");
+    CHECK (cue::videoWordOf (true, false, "running", true, &ready).word == "partial");
+    CHECK (cue::videoWordOf (true, false, "stopped", false, nullptr).error == "media-missing");
+    CHECK (cue::videoWordOf (false, false, "stopped", false, nullptr).word.empty());
+    CHECK (cue::videoWordOf (false, false, "starting", false, nullptr).word == "preparing");
+    CHECK (cue::videoWordOf (false, false, "running", false, &ready).word == "preparing");
+    CHECK (cue::videoWordOf (false, false, "running", true, nullptr).word.empty());
+    CHECK (cue::videoWordOf (false, false, "running", true, &reading).word == "preparing");
+    CHECK (cue::videoWordOf (false, false, "running", true, &ready).word == "armed");
+    CHECK (cue::videoWordOf (false, false, "running", true, &failed).word == "partial");
+    CHECK (cue::videoWordOf (false, false, "running", true, &failed).error == "media-missing");
+
+    /*  A movie being edited, its render not there yet (§55.5): partial and
+        rendering, before anything else is asked. */
+    CHECK (cue::videoWordOf (false, true, "running", true, &ready).word == "partial");
+    CHECK (cue::videoWordOf (true, true, "stopped", false, nullptr).error == "rendering");
 }
 
 namespace
@@ -2612,4 +2619,97 @@ TEST_CASE ("video: under the lock a playing picture is not edited, so nothing mo
     CHECK (refused.applied == 0);
     rig.ticks (3);
     CHECK (rig.sink.restated.empty());
+}
+
+//==============================================================================
+/*  A MOVIE BEING EDITED (namespace draft §55.5, ADV): what GO brings up is the
+    render of its sections, as a sound's arm plays its render; none yet and the
+    run fails as `rendering`, the read-ahead naming the render once it lands;
+    frozen, the bounce. */
+
+TEST_CASE ("video: a movie being edited is read ahead and shown from its render, fails as rendering without one, and plays its bounce frozen (§55.5)")
+{
+    VideoRig rig;
+
+    std::map<std::string, double> lengths { { "clip.mov", 30.0 } };
+    std::shared_ptr<const audio::EditRenders> renders;
+    rig.runner.setMediaDurations (&lengths);
+    rig.runner.setEditRenders ([&renders] { return renders; });
+
+    const auto timeline = groupIn (rig, 0, "timeline");
+    const auto movie = videoCueIn (rig, timeline, 0, "movie", "clip.mov");
+    REQUIRE (rig.document.splitSection (movie, 10.0, 30.0, {}).ok);
+    const auto sections = cue::sectionsIn (rig.document.findById (movie));
+    REQUIRE (sections.size() == 2u);
+    REQUIRE (rig.document.moveSection (sections[1].id, 0).ok);
+
+    /*  NO RENDER YET: nothing is read ahead, and the entry says so. */
+    standbyOn (rig, timeline);
+    CHECK (rig.sink.preloads.empty());
+    {
+        const auto& ahead = rig.runner.listState().ahead();
+        REQUIRE (ahead.size() == 1u);
+        CHECK (ahead[0].cue == movie);
+        CHECK (ahead[0].kind == "movie");
+        CHECK (ahead[0].rendering);
+        CHECK (ahead[0].path.empty());
+        CHECK_FALSE (ahead[0].missing);
+    }
+
+    /*  GO: no layer, and the run fails as rendering. */
+    rig.submitAndTick ("cue.fire", { osc::Value::string (movie) });
+    rig.ticks (3);
+    CHECK (rig.sink.shown.empty());
+    REQUIRE (rig.runOf (movie) != nullptr);
+    CHECK (rig.runOf (movie)->error == "rendering");
+
+    /*  THE RENDER LANDS: read ahead under its own name, as long as the edit. */
+    const auto landed = [&] (const std::string& file)
+    {
+        auto table = std::make_shared<audio::EditRenders>();
+        audio::EditRender render;
+        render.cue = movie;
+        render.editText = cue::editTextOf (rig.document.findById (movie));
+        render.file = file;
+        render.state = audio::renderState::done;
+        render.seconds = cue::editedLengthOf (rig.document.findById (movie)).value_or (0.0);
+        (*table)[movie] = render;
+        renders = table;
+    };
+
+    landed (".edits/clip-first.mov");
+    rig.ticks (2);
+    REQUIRE (namesOf (rig.sink.preloads) == std::vector<std::string> { "clip-first.mov" });
+    CHECK (rig.sink.preloads[0].movie);
+    CHECK_FALSE (rig.runner.listState().ahead()[0].rendering);
+
+    /*  GO: the layer's file is the render's, and the job knows the edit's length. */
+    rig.submitAndTick ("cue.fire", { osc::Value::string (movie) });
+    rig.ticks (3);
+    REQUIRE (rig.sink.shown.size() == 1u);
+    CHECK (rig.sink.shown.front().file.find (".edits") != std::string::npos);
+    CHECK (rig.sink.shown.front().file.find ("clip-first.mov") != std::string::npos);
+    CHECK (rig.runOf (movie)->error.empty());
+
+    /*  EDITED AGAIN: the old render is not the edit's any more, and the
+        read-ahead waits for the new one. */
+    REQUIRE (rig.document.splitSection (movie, 5.0, 30.0, {}).ok);
+    rig.ticks (2);
+    CHECK (rig.sink.preloads.empty());
+    CHECK (rig.runner.listState().ahead()[0].rendering);
+
+    landed (".edits/clip-second.mov");
+    rig.ticks (2);
+    REQUIRE (namesOf (rig.sink.preloads) == std::vector<std::string> { "clip-second.mov" });
+
+    /*  FROZEN: the bounce, named as the file is. */
+    REQUIRE (rig.document.freezeEdit (movie, "clip.mov", "clip (edit).mov").ok);
+    rig.ticks (2);
+    REQUIRE (namesOf (rig.sink.preloads) == std::vector<std::string> { "clip (edit).mov" });
+    CHECK_FALSE (rig.runner.listState().ahead()[0].rendering);
+
+    /*  UNFROZEN: the render it had, found again. */
+    REQUIRE (rig.document.unfreezeEdit (movie).ok);
+    rig.ticks (2);
+    REQUIRE (namesOf (rig.sink.preloads) == std::vector<std::string> { "clip-second.mov" });
 }
