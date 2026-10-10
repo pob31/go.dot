@@ -86,7 +86,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Fonction | Ce qu'elle fait | Où |
 | --- | --- | --- |
 | Cues média | Jouer un fichier vers des sorties nommées à des niveaux donnés, avec pre-wait, post-wait et enchaînement | Glisser un fichier sur la liste |
-| Points d'entrée et de sortie, boucles | Couper un fichier, boucler une zone, sortir de la boucle sur une cue *Advance* | Panneau *Waveform* ; *transport > Advance* |
+| Points d'entrée et de sortie, boucles | Couper un fichier, boucler une zone, sortir de la boucle sur une cue *Advance* ; quand le dernier point de sortie s'arrête avant la fin du fichier, un bouton sous la liste des zones fait du reste du fichier une nouvelle zone | Panneau *Waveform* ; *transport > Advance* |
 | Courbe de niveau | Dessiner une courbe de volume sur la forme d'onde, ou l'enregistrer depuis un fader | Panneau *Waveform* |
 | Vitesse | De 0 à 20×, en varispeed (la hauteur suit) ou en timestretch (la hauteur reste), fondus de vitesse, et lecture à l'envers ou en aller-retour entre les points d'entrée et de sortie | Inspecteur, *what it does* |
 | EQ | Quatre bandes et deux filtres sur chaque cue | Panneau *EQ* |

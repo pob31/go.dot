@@ -23947,3 +23947,38 @@ from the tree. The web console: `shownName` in `views/common.js`, the name box's
 default name following a file and a target while a typed one stays, one Undo step, the published row
 following a rename), a client case (the row, the name box and its placeholder), and the live recorder's
 case reading its start cue's automatic name.
+
+## 54. The rest of the file, made a range
+
+Written 2026-10-10. The author: *"Sometimes when working on loops the end of the media becomes
+unaccessible. Move the end marker and then you end up stuck having to split a previous section and shift
+all markers. Could we add a way to push back the end marker to the end of the file and place a section
+marker instead? This could be a button at the end of the list if the end marker is not at the end to make
+a new section from the position of the end until the end of the media file."*
+
+### 54.1 What it does
+
+Under the last row of the range table, a button - *+ range from 25 to the end of the file* - is there
+while the furthest out point of the cue's ranges stops short of the file's end. A press is one
+`range.create` from that out point to the end of the file: the old end becomes the join between the last
+range and the new one, which is the section marker asked for, and the file's end is reachable again. The
+new range is added at the end of the list and plays once, as a range made by the `+` does. Nothing new in
+the engine: `range.create` and `model::nextRange` (the span after the furthest out point, in file order,
+since §3.24 lets a list walk its file out of order) were already there.
+
+### 54.2 Decisions
+
+- **ADG** (the author's) **A button at the end of the list, making a new range from the end to the end of
+  the file.** Pushing the last range's out point to the file's end and cutting it there, the first way the
+  author put it, ends in the same two ranges; the button makes the second and leaves the first as it is.
+- **ADH** (mine) **The furthest out point, not the last row's**: in a list played out of file order the
+  last row may end anywhere, and the material that cannot be reached is what lies after the furthest out
+  point. Hidden while the cue has no ranges (it plays the whole file already) and when what is left is
+  under 0.05 s. The words on the button are mine.
+
+### 54.3 Built
+
+`ui::RangeTableComponent::rest`, laid out under the rows and kept up to date on every pass, its words
+saying the span. Test: no button with no ranges; with a loop listed first ending at 20 and an intro
+listed second ending at 8, the button says 20 and makes 20 to 30 on its cue; it follows an out point
+moved to 25 without the list being rebuilt; it goes once the rest is a range.

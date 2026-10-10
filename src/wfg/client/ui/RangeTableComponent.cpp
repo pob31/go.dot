@@ -141,6 +141,18 @@ namespace wfg::client::ui
 
         addAndMakeVisible (add);
 
+        rest.setWantsKeyboardFocus (false);
+        rest.onClick = [this]
+        {
+            if (reading.ranges.empty() || actions.createRange == nullptr)
+                return;
+
+            if (const auto span = model::nextRange (reading.ranges, reading.fileLength))
+                actions.createRange (reading.subject.objectId, span->first, span->second);
+        };
+
+        content.addChildComponent (rest);
+
         applyTheme (theme);
     }
 
@@ -230,6 +242,32 @@ namespace wfg::client::ui
             case model::RangeAdd::Kind::nothing:
                 add.setTooltip (juce::String (wanted.why));
                 break;
+        }
+    }
+
+    /*  THE REST OF THE FILE (§54): offered only when the cue has ranges and the
+        furthest of their out points stops short of the end - a cue with none
+        plays the whole file already, and its standing row says so. The words
+        say the span, so what a press makes is read before it is made (§4.8). */
+    void RangeTableComponent::sayWhatTheRestWouldDo()
+    {
+        const auto span = reading.ranges.empty() ? std::nullopt
+                                                 : model::nextRange (reading.ranges, reading.fileLength);
+
+        if (span.has_value())
+        {
+            rest.setButtonText ("+ range from " + juce::String (model::timeText (span->first))
+                                  + " to the end of the file");
+            rest.setTooltip ("Makes a range from the last out point, "
+                               + juce::String (model::timeText (span->first)) + ", to the end of the file, "
+                               + juce::String (model::timeText (span->second))
+                               + " - the end of the material, reachable again");
+        }
+
+        if (rest.isVisible() != span.has_value())
+        {
+            rest.setVisible (span.has_value());
+            layOut();
         }
     }
 
@@ -442,6 +480,9 @@ namespace wfg::client::ui
             rows.push_back (std::move (row));
         }
 
+        //  Taken out with the rows; the rest-of-the-file button goes back under them.
+        content.addChildComponent (rest);
+
         applyTheme (theme);
         refresh();
         layOut();
@@ -487,6 +528,7 @@ namespace wfg::client::ui
                 box->setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
 
             sayWhatThePlusWouldDo();
+            sayWhatTheRestWouldDo();
             return;
         }
 
@@ -546,6 +588,7 @@ namespace wfg::client::ui
         }
 
         sayWhatThePlusWouldDo();
+        sayWhatTheRestWouldDo();
     }
 
     void RangeTableComponent::resized()
@@ -568,7 +611,8 @@ namespace wfg::client::ui
         //  The plus sits in the head, in the column the crosses are in.
         add.setBounds (columnsOf (head.withWidth (inner), theme).drop.reduced (1, 2));
 
-        content.setSize (inner, juce::jmax (row, static_cast<int> (rows.size()) * row));
+        const auto lines = static_cast<int> (rows.size()) + (rest.isVisible() ? 1 : 0);
+        content.setSize (inner, juce::jmax (row, lines * row));
 
         auto y = 0;
 
@@ -587,6 +631,13 @@ namespace wfg::client::ui
             line->drop.setBounds (columns.drop.reduced (1, 2));
 
             y += row;
+        }
+
+        //  Under the last row, across the whole of it.
+        if (rest.isVisible())
+        {
+            const auto columns = columnsOf (juce::Rectangle<int> (0, y, inner, row), theme);
+            rest.setBounds (columns.name.getUnion (columns.drop).reduced (0, 2));
         }
     }
 

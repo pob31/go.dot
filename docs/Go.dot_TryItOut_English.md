@@ -84,7 +84,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Feature | What it does | Where |
 | --- | --- | --- |
 | Media cues | Play a file to named outputs at set levels, with pre-wait, post-wait and follow | Drag a file onto the list |
-| In and out points, loops | Trim a file, loop a region, leave the loop on cue with an *Advance* | *Waveform* panel; *transport > Advance* |
+| In and out points, loops | Trim a file, loop a region, leave the loop on cue with an *Advance*; when the last out point stops short of the end of the file, a button under the range list makes the rest of the file a new range | *Waveform* panel; *transport > Advance* |
 | Level lane | Draw a volume curve over the waveform, or record it from a fader | *Waveform* panel |
 | Speed | 0 to 20×, as varispeed (pitch follows) or timestretch (pitch held), fades of speed, and playback backwards or bouncing between its in and out points | Inspector, *what it does* |
 | EQ | Four bands and two filters on every cue | *EQ* panel |

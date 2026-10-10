@@ -1020,6 +1020,86 @@ TEST_CASE ("range table: every slice shows its times, and the arrow gives the ne
     CHECK (written.back().second != "0");
 }
 
+TEST_CASE ("range table: when the last out point stops short of the file's end, a button under the list makes the rest a range (§54)")
+{
+    /*  The author, 2026-10-10: "Sometimes when working on loops the end of the
+        media becomes unaccessible ... a button at the end of the list if the
+        end marker is not at the end to make a new section from the position of
+        the end until the end of the media file". Up only while there is a rest
+        to give back, saying its span, and a press is one range.create from the
+        furthest out point - in file order, not list order - to the end. */
+    struct Made
+    {
+        std::string cue;
+        double in = -1.0, out = -1.0;
+    };
+
+    std::vector<Made> made;
+
+    ui::RangeTableComponent::Actions actions;
+    actions.createRange = [&] (const std::string& cueId, double in, double out) { made.push_back ({ cueId, in, out }); };
+
+    ui::RangeTableComponent table (model::Theme {}, actions);
+    table.setSize (table.wantedWidth(), 200);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 30.0;
+
+    auto& rest = table.restButton();
+
+    //  NO RANGES: the whole file plays, and its standing row says so - nothing to give back.
+    table.show (reading);
+    CHECK_FALSE (rest.isVisible());
+
+    /*  TWO RANGES, the loop listed first and ending at 20, the intro listed
+        second and ending at 8: the rest starts at 20, the furthest out point. */
+    reading.ranges = { { "RNG00001", "loop", 8.0, 20.0, 0, false, 0 }, { "RNG00002", "intro", 0.0, 8.0, 1, false, 1 } };
+    table.show (reading);
+
+    REQUIRE (rest.isVisible());
+    CHECK (rest.getButtonText().contains ("20"));
+    CHECK (rest.getButtonText().contains ("end of the file"));
+    CHECK (rest.getBottom() <= table.getHeight());
+    CHECK (rest.getWidth() > 200);
+
+    rest.onClick();
+
+    REQUIRE (made.size() == 1u);
+    CHECK (made[0].cue == "CUE00001");
+    CHECK (made[0].in == doctest::Approx (20.0));
+    CHECK (made[0].out == doctest::Approx (30.0));
+
+    //  The out point dragged further on: the button follows it, with no rebuild of the list.
+    reading.ranges[0].out = 25.0;
+    table.show (reading);
+    REQUIRE (rest.isVisible());
+    CHECK (rest.getButtonText().contains ("25"));
+
+    //  With WFG_SNAPSHOT_DIR set, range-table-rest.png.
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto snapshot = table.createComponentSnapshot (table.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("range-table-rest.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (snapshot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    //  THE RANGE MADE: the material is spoken for to the end, and the button goes.
+    reading.ranges.push_back ({ "RNG00003", "tail", 25.0, 30.0, 1, false, 2 });
+    table.show (reading);
+    CHECK_FALSE (rest.isVisible());
+}
+
 TEST_CASE ("range table: a cue with no ranges shows the whole file, and looping it makes the range")
 {
     /*  The author, 2026-09-30: "Could we have the complete range already there
@@ -1083,7 +1163,9 @@ TEST_CASE ("range table: a cue with no ranges shows the whole file, and looping 
     unknown.fileLength = 0.0;
     table.show (unknown);
 
-    CHECK (buttonsUnder (table).size() == 1u);   // the plus in the head, and no row
+    //  The plus in the head, and no row - nor the rest-of-the-file button, there being no range (§54).
+    const auto showing = buttonsUnder (table);
+    CHECK (std::count_if (showing.begin(), showing.end(), [] (juce::Button* button) { return button->isVisible(); }) == 1);
 }
 
 TEST_CASE ("inspector: an opener is a button that asks the window to open the panel, not a field")

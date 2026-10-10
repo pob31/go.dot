@@ -92,12 +92,17 @@ namespace wfg::client::ui
             than the answer. */
         int wantedWidth() const;
 
+        /*  THE BUTTON AT THE FOOT OF THE LIST (namespace draft §54), public so
+            a test can find and press it. */
+        juce::TextButton& restButton() noexcept { return rest; }
+
     private:
         struct Row;
 
         void rebuild();
         void refresh();
         void sayWhatThePlusWouldDo();
+        void sayWhatTheRestWouldDo();
         void layOut();
 
         /** What the rows are, as one string: a different one is a different table. */
@@ -136,6 +141,17 @@ namespace wfg::client::ui
         juce::Component content;
         juce::Label heads;
         juce::TextButton add { "+ range" };
+
+        /*  THE REST OF THE FILE, GIVEN BACK (namespace draft §54, the author's,
+            2026-10-10: "Sometimes when working on loops the end of the media
+            becomes unaccessible ... a button at the end of the list if the end
+            marker is not at the end to make a new section from the position of
+            the end until the end of the media file"). Under the last row, and
+            there only while the furthest out point stops short of the file's
+            end: `range.create` from that out point to the end, so the old end
+            becomes the join between two ranges and the file's end is reachable
+            again. `model::nextRange` says where. */
+        juce::TextButton rest;
 
         std::vector<std::unique_ptr<Row>> rows;
 
