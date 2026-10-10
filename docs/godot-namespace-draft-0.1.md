@@ -24237,3 +24237,112 @@ monitor's tile shows the source's frame at the mapped second and never a dissolv
 movie as they did before this round; a sound longer than its movie is cut to the movie's length; the
 renderer child keeps a replaced render open until no layer names it, so a discard that fails on Windows
 waits for the next open's sweep.
+
+### 55.9 Handles on the waveform
+
+Written 2026-10-10, the movie's row an hour old. The author: *"For audio files, the crossfades need a
+little more liberty. We'll use some of the gestures from Samplitude. Each audio snippet has handles in
+the middle going up and down to adjust the volume. Each end has a handle at the bottom and one at the
+top. The bottom one moves the start of the fade (whether at the start or the end of the audio segment).
+The top handle adjusts the length of the fade by sliding towards the middle. It would be great to be
+able to have the incoming and outgoing fades temporarily unlocked when dragging the fade handles with
+shift. If we hover the pointer over the fade length and use the scroll wheel we could adjust the
+curvature of the fade, sometimes depending on the types of sounds some fades need a little boost or
+dip to sound smooth. Act on both segments at the fade unless shift is pressed while using the scroll
+wheel. For range selection use the top half of the waveform display and for range selection use the
+lower half. Keyboard shortcuts: 'x' splits a segment at the cursor position or range ends. 'Backspace'
+deletes the selected segment or range. Shift+'Backspace' deletes and moves the subsequent segments on
+the timeline to fill the gap, delete with ripple."*
+
+**A section is drawn on the waveform as an object with handles.** In its middle, a square at the height
+of its trim on the lane's own scale: dragged up or down it is the section's volume. At each end, a handle
+at the bottom of the bar and one at the top. The **bottom handle moves the edge with the material in
+place**: between two sections that touch it moves the cut between them - the one before longer, the
+one after shorter, nothing else moving - and at an edge beside silence it trims the section, the silence
+growing or shrinking, nothing else moving. The **top handle is the fade's length**, at the point where
+the fade has reached full level, dragged towards the middle to lengthen it. At a join the outgoing
+section's fade and the incoming one's move together; **with Shift held, the one dragged moves alone**.
+Over a fade, **the wheel bends its curve** - both sides of a join together, the side under the pointer
+alone with Shift - a notch a tenth, written once the wheel stops.
+
+**A section owns two fades and the silence before it.** Its fade in and its fade out each have a length
+and a curve, and a **gap** of silence may stand before it on the edited timeline. At a join - two
+sections touching - the two fades are centred on the join and take their material from beyond the edges,
+as the crossfade did (ADL); a join still one in the file plays plain. At a free edge - the cue's start,
+its end, or beside a gap - the fade lies inside the section, from silence or to it. A new join gets ten
+milliseconds each side; the first section, the whole file as recorded, starts with none.
+
+**The top half of the bar selects time, the lower half a section** (as Samplitude's universal mouse
+does). Dragged across the top half, a **selection** - shaded over the bar, its two ends marked; a press
+in the top half that does not drag puts the playhead there and clears it. A press in the lower half
+picks the section under it, a drag moves it into a new place as the row's block does, and over silence
+the press pans as a press on nothing used to. Once the panel has been clicked it takes the keys: **x**
+splits at the playhead, or at both ends of the selection in one step; **Backspace** (or Delete) deletes
+the selection if there is one, else the picked section, **leaving silence** where the material was and
+everything after it in place; **Shift+Backspace** deletes and closes up - **with ripple** - everything
+after moving earlier. The level lane's points, the cue's Ranges' edges and the playhead's ruler keep
+their places and win over the halves.
+
+A movie takes the same model: a gap is black, a fade at a free edge fades from black (from clear where
+the codec carries alpha), and a dissolve is the two sides' weights added - which is the linear dissolve
+when the two are equal; its edges and a selection's ends land on its frame grid.
+
+### 55.10 Decisions, handles
+
+- **ADY** (the author's) **Samplitude's gestures on the waveform**: a volume handle in each section's
+  middle; at each end a bottom handle for where the fade starts and a top handle for its length; Shift
+  unlocks a join's two fades for the drag; the wheel over a fade bends its curve, both sides unless
+  Shift; the top half selects time and the lower half a section; x splits at the playhead or the
+  selection's ends; Backspace deletes, Shift+Backspace with ripple. Their words above.
+- **ADZ** (mine) **Their message names the top half and the lower half both "range selection"; I read it
+  as Samplitude's universal mouse: the top half selects time, the lower half a section**, and the window
+  calls the time *the selection*, since a cue's *Ranges* - its loops and slices - are drawn on the same bar.
+- **AEA** (mine) **A section owns a fade in, a fade out, a curve for each and a gap of silence before it**
+  (`fadeIn`, `fadeOut`, `fadeInCurve`, `fadeOutCurve`, `gap`, the `crossfade` row gone). At a join the two
+  fades are centred on it from material beyond the edges (ADL kept), at a free edge inside the section from
+  silence; ten milliseconds each by default, the whole-file section with none; a join still one in the file
+  plays plain. A gap under a millisecond is none.
+- **AEB** (mine) **The curve is an exponent on the fade's shape**: a sound's gain is
+  sin(πp/2)^(2^-c), a picture's p^(2^-c), c from -1 to 1. Nought is equal power for a sound, as the
+  crossfade was, and linear for a picture, the author's dissolve (ADU); -1 on both sides of a sound's join
+  holds the sum of the two gains at one all the way through (sin² + cos²), for material that is alike;
+  +1 lifts the middle a dB and a half. A wheel notch is a tenth.
+- **AEC** (mine) **The bottom handle moves the edge with the material in place and never pushes a
+  neighbour**: at a join it moves the cut (a roll), at a free edge it trims into or out of the silence;
+  so a section can never be dragged into another. One `section.edge` on release.
+- **AED** (mine) **Locked fades move together, keeping any difference a Shift drag made; the lock is the
+  gesture's and is never stored.** The same for the wheel's curves.
+- **AEE** (mine) **Backspace leaves silence and Shift+Backspace closes up; the silence before a deleted
+  section stays; a deletion at the very end shortens the edit**, there being nothing after it to keep in
+  place; a selection that would leave nothing is refused. The Remove button keeps its words: it closes
+  up, as it did.
+- **AEF** (mine) **The panel takes the keyboard when it is clicked**; every key it does not use - Space
+  for GO, the arrows, Esc - goes on to the window as before. The left-press pan moves to the lower half
+  over silence; the right and middle buttons and the sideways wheel pan as before.
+- **AEG** (mine) **The movie takes the same model** (gaps black, free fades from black, the dissolve the
+  two weights added), and the new verbs' seconds on a movie - an edge, a selection's ends - land on its
+  frame grid and are written back on the record, as a split's are.
+- **AEH** (mine) **A show saved this morning with a `crossfade` reads it as the fade into its section and
+  the fade out of the one before**; nothing else of the old row survives.
+
+### 55.11 The rows and the commands, handles
+
+- `<Section>`: `fadeIn`, `fadeOut` (d, rw, seconds, 0.01, 0..), `fadeInCurve`, `fadeOutCurve` (d, rw,
+  -1..1, 0), `gap` (d, rw, seconds, 0, 0.. - silence before the section; a write shifts everything after
+  it and carries, as an edge does). `crossfade` is gone (AEH).
+- `section.edge <section> <in|out> <seconds> [frameRate]` - the edge to that second of the file, the
+  material in place: a roll at a join, a trim beside silence; refused where it would push a neighbour or
+  leave the section nothing.
+- `section.fade <section> <in|out> <seconds> [alone]` - the fade's length; its partner across a join
+  moves by as much unless `alone` is 1; both held to the material as a crossfade was.
+- `section.curve <section> <in|out> <curve> [alone]` - the same for the curve, -1..1.
+- `section.remove <section> [leaveGap]` - with `leaveGap` 1 the section's time stays as silence.
+- `section.splitSpan <cue> <from> <to> [id] [id] [length] [frameRate]` - splits at both ends, one step;
+  an end on a cut or in silence is passed over.
+- `section.deleteSpan <cue> <from> <to> [ripple] [id] [id] [length] [frameRate]` - the material between
+  the two seconds taken out, as silence or closed up with `ripple` 1; lanes, Ranges and the start offset
+  carried; refused when nothing would be left.
+
+### 55.12 Built, handles
+
+In progress: stages G.1 to G.4.

@@ -1202,6 +1202,32 @@ folder.
 
 ---
 
+### Handles on the waveform: fades, gaps, selection, keys · M
+
+*Added on 2026-10-10*, at the author's direction, the movie's row an hour old: Samplitude's gestures on
+the sections - a volume handle in the middle, an edge handle and a fade-length handle at each end, Shift
+to unlock a join's fades, the wheel to bend a fade's curve, the top half for a time selection and the
+lower half for a section, x to split, Backspace to delete leaving silence and Shift+Backspace with ripple
+(namespace draft §55.9-55.12; PRD §3.24). The author's decision is ADY; ADZ-AEH are the implementer's,
+the author's to overrule - ADZ reads a slip in their message.
+
+| Stage | What | Depends on |
+|---|---|---|
+| G.0 | Docs: namespace §55.9-55.12, the PRD's sentence, both guides, this | - |
+| G.1 | The model: two fades, their curves and a gap on every section, both renders, the legacy read | G.0 |
+| G.2 | The verbs: edge, fade, curve, remove leaving silence, split and delete a span | G.1 |
+| G.3 | The window: the handles on the bar, the two halves, the keys, the wheel | G.2 |
+| G.4 | The drivers, the close-out | all |
+
+**Done when:** a sound's join is lengthened with one side alone and its curve bent, a section deleted
+leaving silence and another with ripple, a selection split and deleted, each by the handles and the keys
+and each heard so in the render; a movie's gap is black; CI is green.
+
+**Needs from the author:** the handles' feel by hand; a bent crossfade by ear; whether ADZ read the slip
+right.
+
+---
+
 ## Phase 10 — Timecode, panic, hardening · M
 
 **Goal:** the stop levels and the sync sources that a touring show requires.
