@@ -22871,6 +22871,17 @@ found is marked over both - a line down the bar with a triangle at its head, das
 the mark is a shape and not a colour alone. **An in or out point dragged near a cut lands on it**, as on
 another range's edge; Alt lets go of the magnet.
 
+**Two ticks switch the cuts** (the author, 2026-10-10: "a toggle to show the scene changes and another
+toggle to snap the cursor to the scene changes markers"), at the right of the strip's head row, a
+movie's only. *Scene changes* draws the marks or hides them; *Snap to scene changes* makes the
+**playhead**, pressed or dragged in the ruler, land on a cut within seven pixels of the hand, as an in
+or out point does, and Alt lets go of either. Their words are taken from the author's request. Mine:
+the snap governs the edges as well as the playhead, so a tick that is off means nothing lands on a
+cut; it is greyed while the marks are hidden, nothing being pulled to a mark nobody can see, and keeps
+its tick for when they come back; both start on, which leaves the edges' magnet as it was; and like
+the zoom and the lane picker they are a way of looking at the panel - kept from cue to cue while the
+window is open, and nothing the show holds.
+
 How the cuts are found (`video/Strip`, `video/StripAnalysis`): every few frames of the movie - seven or
 eight a second - are decoded on the CPU, at the 2,304 points a frame's signature samples rather than its
 millions. A signature is the frame as sixteen by nine squares of colour and how its brightness is

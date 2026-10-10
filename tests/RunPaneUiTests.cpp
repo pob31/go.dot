@@ -52,6 +52,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -4979,6 +4980,191 @@ TEST_CASE ("waveform: a movie's pictures stay inside their strip and end where t
         CHECK (png.writeImageToStream (canvas, out));
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
+}
+
+TEST_CASE ("waveform: a movie's scene changes are shown or not, and the playhead and edges snap to them or not (§47.10)")
+{
+    /*  The author, 2026-10-10: "a toggle to show the scene changes and another
+        toggle to snap the cursor to the scene changes markers". A movie of
+        sixty seconds, a cut at 7.5 and a dissolve at 15, one range over 2 to
+        12: a press in the ruler four pixels past the cut puts the head on it,
+        Alt or either tick off leaves it where the hand is, the marks go when
+        their tick does, and a sound has neither tick. With WFG_SNAPSHOT_DIR
+        set, waveform-movie-cuts.png as well. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value)
+    { written.emplace_back (address, value); };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setRightColumn (360, 12);
+    editor.setSize (1000, 220);
+
+    auto strip = std::make_shared<wfg::video::strip::MovieStrip>();
+    strip->duration = 60.0;
+    strip->width = 1920;
+    strip->height = 1080;
+
+    for (int n = 0; n < 4; ++n)
+    {
+        wfg::video::strip::Thumbnail picture;
+        picture.seconds = 15.0 * n;
+        picture.width = wfg::video::strip::thumbnailWidth;
+        picture.height = 45;
+
+        for (int pixel = 0; pixel < picture.width * picture.height; ++pixel)
+            picture.rgb.insert (picture.rgb.end(), { 40, static_cast<std::uint8_t> (60 * n), 90 });
+
+        strip->thumbnails.push_back (std::move (picture));
+    }
+
+    strip->cuts = { { 7.5, 0.5, false }, { 15.0, 0.4, true } };
+
+    auto records = std::make_shared<wfg::audio::MediaRecords>();
+    wfg::audio::MediaRecord record;
+    record.seconds = 60.0;
+    record.strip = strip;
+    (*records)["movie.mov"] = record;
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "Movie";
+    reading.cueKind = "video";
+    reading.movie = true;
+    reading.file = "movie.mov";
+    reading.fileLength = 60.0;
+
+    model::RangeRow range;
+    range.id = "RNG00001";
+    range.in = 2.0;
+    range.out = 12.0;
+    reading.ranges = { range };
+
+    editor.show (reading, records);
+
+    auto& scenes = editor.sceneChangesButton();
+    auto& snap = editor.snapButton();
+
+    //  BOTH TICKS, ON, side by side at the right of the head row and clear of the range table.
+    REQUIRE (scenes.isVisible());
+    REQUIRE (snap.isVisible());
+    CHECK (scenes.getToggleState());
+    CHECK (snap.getToggleState());
+    CHECK (snap.isEnabled());
+    CHECK (scenes.getRight() <= snap.getX());
+    CHECK (snap.getRight() <= 1000 - 360 - 12);
+    CHECK (scenes.getY() < 40);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+
+    const auto mouse = [&] (juce::Point<float> at, bool dragged, juce::ModifierKeys mods)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, mods, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &editor, &editor, now, at, now,
+                                 1, dragged);
+    };
+
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+    const juce::ModifierKeys leftAlt { juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::altModifier };
+
+    const auto cutX = editor.pointPosition ({ 7.5, 0.0 }).x;
+    const auto nearCut = juce::Point<float> (cutX + 4.0f, static_cast<float> (editor.getHeight() - 3));
+
+    const auto pressRuler = [&] (juce::ModifierKeys mods)
+    {
+        editor.mouseDown (mouse (nearCut, false, mods));
+        editor.mouseUp (mouse (nearCut, false, mods));
+        return editor.playhead();
+    };
+
+    //  NEAR THE CUT, ONTO IT; with Alt, where the hand is.
+    CHECK (pressRuler (left) == doctest::Approx (7.5).epsilon (1.0e-9));
+    CHECK (pressRuler (leftAlt) > 7.6);
+
+    //  AN EDGE DRAGGED NEAR THE DISSOLVE LANDS ON IT while the snap is on.
+    const auto dragOut = [&]
+    {
+        written.clear();
+        const auto from = juce::Point<float> (editor.pointPosition ({ 12.0, 0.0 }).x, 100.0f);
+        const auto to = juce::Point<float> (editor.pointPosition ({ 15.0, 0.0 }).x - 4.0f, 100.0f);
+
+        editor.mouseDown (mouse (from, false, left));
+        editor.mouseDrag (mouse (to, true, left));
+        editor.mouseUp (mouse (to, true, left));
+
+        REQUIRE_FALSE (written.empty());
+        CHECK (written.back().first == "/godot/range/RNG00001/out");
+        return wfg::osc::parseDouble (written.back().second).value_or (-1.0);
+    };
+
+    CHECK (dragOut() == doctest::Approx (15.0).epsilon (1.0e-9));
+
+    //  THE SNAP OFF: the head and the edge stay where the hand put them.
+    snap.setToggleState (false, juce::sendNotificationSync);
+
+    CHECK (pressRuler (left) > 7.6);
+    CHECK (dragOut() < 14.9);
+
+    const auto render = [&]
+    {
+        juce::Image canvas (juce::Image::RGB, 1000, 220, true, juce::SoftwareImageType());
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, false);
+        return canvas;
+    };
+
+    snap.setToggleState (true, juce::sendNotificationSync);
+    const auto shown = render();
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const juce::File file { juce::File (dir).getChildFile ("waveform-movie-cuts.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (shown, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    /*  THE MARKS HIDDEN: gone from the bar, and the snap greyed and let go of
+        though its tick is kept for when they come back. */
+    scenes.setToggleState (false, juce::sendNotificationSync);
+
+    CHECK_FALSE (snap.isEnabled());
+    CHECK (snap.getToggleState());
+    CHECK (pressRuler (left) > 7.6);
+
+    const auto hidden = render();
+    const auto column = juce::roundToInt (cutX);
+    auto differ = 0;
+
+    for (int y = 40; y < 180; ++y)
+        if (shown.getPixelAt (column, y) != hidden.getPixelAt (column, y))
+            ++differ;
+
+    CHECK (differ > 20);
+
+    scenes.setToggleState (true, juce::sendNotificationSync);
+    CHECK (snap.isEnabled());
+    CHECK (pressRuler (left) == doctest::Approx (7.5).epsilon (1.0e-9));
+
+    //  A SOUND HAS NO CUTS, AND NO TICKS.
+    model::FootReading sound;
+    sound.subject = { model::Subject::Kind::waveform, "CUE00002" };
+    sound.cueKind = "media";
+    sound.file = "bed.wav";
+    sound.fileLength = 10.0;
+
+    editor.show (sound, records);
+
+    CHECK_FALSE (scenes.isVisible());
+    CHECK_FALSE (snap.isVisible());
 }
 
 TEST_CASE ("warps: the editor over Show settings goes from output to output on its bar, and back to the tab (§47.12)")

@@ -197,6 +197,21 @@ namespace wfg::client::ui
         lanePick.onClick = [this] { pickLane(); };
         addChildComponent (lanePick);
 
+        /*  A MOVIE'S CUTS, SHOWN AND SNAPPED TO (§47.10): ticks, so whether
+            each is on is a shape in the box and not a colour (§4.8). */
+        showCuts.setTooltip ("Mark where the movie changes shot: a line with a triangle at its head,"
+                             " dashed for a dissolve");
+        snapCuts.setTooltip ("The playhead, and an in or out point, dragged near a scene change land on it"
+                             " - Alt lets go. Only while the scene changes are shown");
+
+        for (auto* toggle : { &showCuts, &snapCuts })
+        {
+            toggle->setWantsKeyboardFocus (false);
+            toggle->setToggleState (true, juce::dontSendNotification);
+            toggle->onClick = [this] { sayCuts(); repaint(); };
+            addChildComponent (*toggle);
+        }
+
         /*  THE PICKED POINT, TYPED. A number that will not parse is put back
             to what the lane says rather than written as nought - a slip of the
             keyboard must not move a level - and a number that parses is held
@@ -410,6 +425,32 @@ namespace wfg::client::ui
         }
     }
 
+    /*  THE CUTS' TICKS ARE A MOVIE'S (§47.10), and the snap is greyed while
+        the marks are hidden - it would pull the hand to something unseen. */
+    void WaveformEditorComponent::sayCuts()
+    {
+        const auto offered = reading.movie && reading.notice.empty();
+
+        snapCuts.setEnabled (showCuts.getToggleState());
+
+        if (showCuts.isVisible() != offered)
+        {
+            showCuts.setVisible (offered);
+            snapCuts.setVisible (offered);
+            resized();
+        }
+    }
+
+    int WaveformEditorComponent::cutsWidth() const
+    {
+        return showCuts.isVisible() ? showCuts.getWidth() + snapCuts.getWidth() : 0;
+    }
+
+    bool WaveformEditorComponent::cutsSnap() const
+    {
+        return reading.movie && strip != nullptr && showCuts.getToggleState() && snapCuts.getToggleState();
+    }
+
     /*  WHAT THE LANE'S REC DOES NEXT, on the button in words (§4.8), the
         author's (2026-10-05, QY): "Level autom." to arm this cue's lane;
         "Touch a fader…" while it waits for one, a click cancelling; "● Rec
@@ -498,6 +539,13 @@ namespace wfg::client::ui
             label->setColour (juce::Label::backgroundColourId, Look::colour (theme, "panel-in"));
         }
 
+        for (auto* toggle : { &showCuts, &snapCuts })
+        {
+            toggle->setColour (juce::ToggleButton::textColourId, Look::colour (theme, "ink-dim"));
+            toggle->setColour (juce::ToggleButton::tickColourId, Look::colour (theme, "picked"));
+            toggle->setColour (juce::ToggleButton::tickDisabledColourId, Look::colour (theme, "ink-off"));
+        }
+
         repaint();
     }
 
@@ -551,6 +599,7 @@ namespace wfg::client::ui
         }
 
         sayWhichLane();
+        sayCuts();
 
         /*  THE HAND'S COPY OF THE LANE LETS GO once the reading moves from
             where it was when the write went - or after a second of passes,
@@ -824,11 +873,24 @@ namespace wfg::client::ui
         return reading.running ? reading.position : point;
     }
 
-    void WaveformEditorComponent::moveHeadTo (int x, bool letGo)
+    void WaveformEditorComponent::moveHeadTo (int x, bool letGo, bool snap)
     {
         const auto bar = barArea();
+        auto seconds = secondsAt (x);
 
-        point = std::min (std::max (secondsAt (x), 0.0),
+        /*  ONTO A MOVIE'S CUT when it is near one (§47.10), so the head sits
+            on a shot's first frame - the monitor shows it - as an edge does. */
+        if (snap && cutsSnap())
+        {
+            std::vector<double> cuts;
+
+            for (const auto& cut : strip->cuts)
+                cuts.push_back (cut.seconds);
+
+            seconds = model::snapTo (seconds, cuts, toleranceSeconds());
+        }
+
+        point = std::min (std::max (seconds, 0.0),
                           reading.fileLength > 0.0 ? reading.fileLength : secondsAt (bar.getRight()));
 
         if (table != nullptr)
@@ -989,7 +1051,7 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::paintCuts (juce::Graphics& g, juce::Rectangle<int> bar)
     {
-        if (strip == nullptr || ! (view.span() > 0.0))
+        if (strip == nullptr || ! showCuts.getToggleState() || ! (view.span() > 0.0))
             return;
 
         /*  A CUT AS A SHAPE, not a colour alone (§4.8): a line down the bar
@@ -1348,7 +1410,8 @@ namespace wfg::client::ui
         wants "exactly when". */
     void WaveformEditorComponent::paintHead (juce::Graphics& g, juce::Rectangle<int> head)
     {
-        auto area = head.withTrimmedLeft (head.getHeight() * 2 + recWidth() + pickWidth() + 8);
+        auto area = head.withTrimmedLeft (head.getHeight() * 2 + recWidth() + pickWidth() + 8)
+                        .withTrimmedRight (cutsWidth());
 
         g.setFont (Look::font (theme, 12.0f));
         g.setColour (Look::colour (theme, reading.running ? "ink" : "ink-dim"));
@@ -1497,6 +1560,16 @@ namespace wfg::client::ui
         if (lanePick.isVisible())
             lanePick.setBounds (head.removeFromLeft (pickWidth()).reduced (2, 1));
 
+        /*  A MOVIE'S TWO TICKS AT THE RIGHT, as wide as their words, from
+            what the buttons on the left have left over. */
+        if (showCuts.isVisible())
+            for (auto* toggle : { &snapCuts, &showCuts })
+            {
+                toggle->setSize (0, head.getHeight());
+                toggle->changeWidthToFitText();
+                toggle->setBounds (head.removeFromRight (juce::jmin (toggle->getWidth(), head.getWidth())));
+            }
+
         auto boxes = pointBoxes();
         pointLevel.setBounds (boxes.removeFromRight (64));
         boxes.removeFromRight (6);
@@ -1580,7 +1653,7 @@ namespace wfg::client::ui
         {
             onRuler = true;
             sentSeek = -1.0;
-            moveHeadTo (event.x, false);
+            moveHeadTo (event.x, false, ! event.mods.isAltDown());
             return;
         }
 
@@ -1625,7 +1698,7 @@ namespace wfg::client::ui
     {
         if (onRuler)
         {
-            moveHeadTo (event.x, false);
+            moveHeadTo (event.x, false, ! event.mods.isAltDown());
             return;
         }
 
@@ -1682,8 +1755,9 @@ namespace wfg::client::ui
         {
             auto targets = model::snapTargets (reading.ranges, grabbed.rangeId, reading.fileLength);
 
-            //  AND A MOVIE'S CUTS (§47, AAI): an in point on a shot's first frame.
-            if (reading.movie && strip != nullptr)
+            /*  AND A MOVIE'S CUTS (§47, AAI): an in point on a shot's first
+                frame - while they are shown and snapped to (§47.10). */
+            if (cutsSnap())
                 for (const auto& cut : strip->cuts)
                     targets.push_back (cut.seconds);
 
@@ -1756,7 +1830,7 @@ namespace wfg::client::ui
     {
         if (onRuler)
         {
-            moveHeadTo (event.x, true);
+            moveHeadTo (event.x, true, ! event.mods.isAltDown());
             onRuler = false;
         }
 

@@ -110,6 +110,12 @@ namespace wfg::client::ui
         std::string heldEdgeWord() const;
         double playhead() const noexcept                 { return point; }
 
+        /*  A MOVIE'S TWO SWITCHES FOR ITS CUTS (§47.10): whether they are
+            marked, and whether the playhead and the edges land on them. Public
+            so a test can click them, as `pickLaneAt` is. */
+        juce::ToggleButton& sceneChangesButton() noexcept { return showCuts; }
+        juce::ToggleButton& snapButton() noexcept         { return snapCuts; }
+
         void paint (juce::Graphics&) override;
         void resized() override;
 
@@ -147,7 +153,7 @@ namespace wfg::client::ui
         /** Where the head is: the run's position when one is sounding, else the point. */
         double headSeconds() const;
 
-        void moveHeadTo (int x, bool letGo);
+        void moveHeadTo (int x, bool letGo, bool snap);
         void sayWhichWayTheTransportGoes();
 
         double secondsAt (int x) const;
@@ -289,6 +295,19 @@ namespace wfg::client::ui
         std::map<std::size_t, juce::Image> stripImages;
         void paintStrip (juce::Graphics&, juce::Rectangle<int> pictures);
         void paintCuts (juce::Graphics&, juce::Rectangle<int> bar);
+
+        /*  ITS CUTS SHOWN, AND SNAPPED TO (the author, 2026-10-10: "a toggle
+            to show the scene changes and another toggle to snap the cursor to
+            the scene changes markers"). Two ticks at the right of the head
+            row, a movie's only, both on at first and kept from cue to cue
+            while the window is open: a way of looking at the panel, like its
+            zoom, and nothing the show holds. Nothing snaps to a mark that is
+            not drawn, so the second waits on the first. */
+        juce::ToggleButton showCuts { "Scene changes" };
+        juce::ToggleButton snapCuts { "Snap to scene changes" };
+        void sayCuts();
+        int cutsWidth() const;
+        bool cutsSnap() const;
 
         /*  THE LANE AS THE HAND HAS IT. A drag moves a copy and sends the
             whole list ONCE, on release (the fade editor's rule: a write per

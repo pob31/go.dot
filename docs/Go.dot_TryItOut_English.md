@@ -130,7 +130,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | --- | --- | --- |
 | Video cues | Show a movie, a still, a colour fill, a feathered mask or a live input on a canvas, with GO, Esc and Doh! as for sound | *Add > video*, then choose the canvas |
 | HAP playback | HAP, HAP Alpha and HAP Q play at full speed. Other movies play as a preview and convert to HAP in the background (FFmpeg is downloaded on first use) | Automatic; inspector |
-| Movie strip | Thumbnails along the strip with scene cuts marked; in and out points snap to a cut; a movie's locked sound is edited beside it | Top of the inspector |
+| Movie strip | Thumbnails along the strip with scene cuts marked; the playhead and the in and out points snap to a cut (Alt lets go); the *Scene changes* and *Snap to scene changes* ticks turn either off; a movie's locked sound is edited beside it | Top of the inspector |
 | Picture panel | Fit, fill or stretch; scale, move, turn, flip; contrast, saturation, gamma, hue and four curves; normal, add, screen and multiply blending | *Picture* panel |
 | Canvases and mapping | Several canvases on one output, each bent onto the wall with a mesh warp, and an ASC CDL per output to match projectors | *Show settings > Video*; warp editor |
 | NDI, Spout, Syphon | Send an output to another program, take a program's picture in as a live input, or pass a cue's picture through another program and back | *Show settings > Video* |

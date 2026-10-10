@@ -132,7 +132,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | --- | --- | --- |
 | Cues vidéo | Montrer un film, une image fixe, un aplat de couleur, un masque adouci ou une entrée live sur un canevas, avec GO, Échap et Doh! comme pour le son | *Add > video*, puis choisir le canevas |
 | Lecture HAP | HAP, HAP Alpha et HAP Q jouent à pleine vitesse. Les autres films jouent en aperçu et se convertissent en HAP en arrière-plan (FFmpeg est téléchargé à la première utilisation) | Automatique ; inspecteur |
-| Bande du film | Vignettes le long de la bande, changements de plan marqués ; les points d'entrée et de sortie s'accrochent à un changement de plan ; le son lié au film s'édite à côté | Haut de l'inspecteur |
+| Bande du film | Vignettes le long de la bande, changements de plan marqués ; la tête de lecture et les points d'entrée et de sortie s'accrochent à un changement de plan (Alt les libère) ; les cases *Scene changes* et *Snap to scene changes* désactivent l'un ou l'autre ; le son lié au film s'édite à côté | Haut de l'inspecteur |
 | Panneau image | Ajuster, remplir ou étirer ; échelle, déplacement, rotation, miroir ; contraste, saturation, gamma, teinte et quatre courbes ; fusion normale, addition, écran et produit | Panneau *Picture* |
 | Canevas et mapping | Plusieurs canevas sur une sortie, chacun déformé sur le mur par un maillage, et un ASC CDL par sortie pour accorder les projecteurs | *Show settings > Video* ; éditeur de déformation |
 | NDI, Spout, Syphon | Envoyer une sortie à un autre programme, recevoir l'image d'un programme comme entrée live, ou faire passer l'image d'une cue par un autre programme et retour | *Show settings > Video* |
