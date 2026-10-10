@@ -212,6 +212,10 @@ endif()
 if(WIN32)
     add_executable(wfg_audio_ui_tests TestMain.cpp ShowSettingsUiTests.cpp RunPaneUiTests.cpp MediaCopierUiTests.cpp)
     target_link_libraries(wfg_audio_ui_tests PRIVATE wfg::engine wfg::client_ui wfg::warnings)
+    # The repository root, for the one window test that reads the shipped
+    # presets (the Network tab's chooser, namespace draft 57, DP.4): the same
+    # definition wfg_tests carries, and the one the CI's whole build missed.
+    target_compile_definitions(wfg_audio_ui_tests PRIVATE WFG_REPO_ROOT="${CMAKE_SOURCE_DIR}")
     add_test(NAME ui.show-settings.C COMMAND wfg_audio_ui_tests --wfg-locale=C)
     add_test(NAME ui.show-settings.fr_FR COMMAND wfg_audio_ui_tests --wfg-locale=${WFG_LOCALE_FR})
     set_tests_properties(ui.show-settings.C ui.show-settings.fr_FR PROPERTIES
