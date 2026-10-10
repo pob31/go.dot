@@ -2536,6 +2536,17 @@ namespace wfg::client::ui
                     g.drawText (juce::String::fromUTF8 ("\xe2\x80\x93"), cells[3], juce::Justification::centredLeft);
                     g.setColour (Look::colour (theme, "ink-dim"));
                 }
+
+                /*  A DEVICE ON A MIDI PORT (DP.9) says which, by the port's
+                    name, and has no network port either. */
+                else if (entry.transport == "midi")
+                {
+                    g.drawText ("MIDI: " + juce::String (midiPortName (entry.midiPort)), cells[2],
+                                juce::Justification::centredLeft, true);
+                    g.setColour (Look::colour (theme, "ink-off"));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x80\x93"), cells[3], juce::Justification::centredLeft);
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                }
                 else
                 {
                     g.drawText (juce::String (entry.host), cells[2], juce::Justification::centredLeft, true);
@@ -2654,7 +2665,7 @@ namespace wfg::client::ui
                     case Cell::host:     chooseWay (row, width); return;
 
                     case Cell::port:
-                        if (entry.transport == "serial")
+                        if (entry.transport == "serial" || entry.transport == "midi")
                             return;
                         editAt (row, cellAt (event.x, width), width);
                         return;
@@ -2713,11 +2724,29 @@ namespace wfg::client::ui
                                     + (serials[at].path.empty() ? juce::String() : "  (" + juce::String (serials[at].path) + ")"),
                                   true, entry.transport == "serial" && entry.serial == serials[at].id);
 
+                /*  AND THE SHOW'S MIDI PORTS (DP.9), after the serial ones:
+                    a console on a cable, the midi wire only. */
+                const auto firstMidi = static_cast<int> (serials.size()) + 3;
+
+                for (std::size_t at = 0; at < midiPorts.size(); ++at)
+                    menu.addItem (firstMidi + static_cast<int> (at), "On MIDI port " + juce::String (midiPorts[at].name.empty()
+                                                                                                        ? midiPorts[at].id
+                                                                                                        : midiPorts[at].name),
+                                  true, entry.transport == "midi" && entry.midiPort == midiPorts[at].id);
+
                 const auto id = entry.id;
                 const auto ports = serials;
+                const auto cables = midiPorts;
                 menu.showMenuAsync (juce::PopupMenu::Options(),
-                                    [this, id, ports, row, width] (int chosen)
+                                    [this, id, ports, cables, row, width, firstMidi] (int chosen)
                                     {
+                                        if (chosen >= firstMidi && send)
+                                        {
+                                            const auto at = static_cast<std::size_t> (chosen - firstMidi);
+                                            if (at < cables.size())
+                                                send (gesture::setNodes (model::deviceOnMidiPort (id, cables[at].id)));
+                                            return;
+                                        }
                                         if (chosen <= 0 || ! send)
                                             return;
                                         if (chosen == 1 || chosen == 2)
@@ -2745,9 +2774,33 @@ namespace wfg::client::ui
                 return id.empty() ? std::string ("none") : id;
             }
 
+            std::string midiPortName (const std::string& id) const
+            {
+                for (const auto& port : midiPorts)
+                    if (port.id == id)
+                        return port.name.empty() ? port.id : port.name;
+                return id.empty() ? std::string ("none") : id;
+            }
+
         public:
             /*  The show's serial ports, for the Where menu and a serial device's
                 row (PC.11): read beside the devices every pass. */
+            /*  And the show's MIDI ports (DP.9), for the same menu and a
+                device on one's row. */
+            void showPorts (std::vector<model::PortRow> ports)
+            {
+                auto same = ports.size() == midiPorts.size();
+
+                for (std::size_t at = 0; same && at < ports.size(); ++at)
+                    same = ports[at].id == midiPorts[at].id && ports[at].name == midiPorts[at].name;
+
+                if (same)
+                    return;
+
+                midiPorts = std::move (ports);
+                list.repaint();
+            }
+
             void showSerials (std::vector<model::SerialRow> ports)
             {
                 if (ports == serials)
@@ -2758,6 +2811,7 @@ namespace wfg::client::ui
 
         private:
             std::vector<model::SerialRow> serials;
+            std::vector<model::PortRow> midiPorts;
 
             /*  EDITED IN PLACE, the output list's gesture exactly: one click
                 opens an editor over the cell, Return or clicking away commits,
@@ -7392,6 +7446,7 @@ namespace wfg::client::ui
                 hardware to reopen, so a retyped port reaches the socket on the
                 next tick through the engine's own re-read. */
             network->showSerials (model::readSerialPorts (snapshot));
+            network->showPorts (model::readPorts (snapshot));
             network->show (model::readDevices (snapshot),
                            model::isYes (model::flag (snapshot, "/godot/network/strictSenders")),
                            juce::String (model::text (snapshot, "/godot/network/refused")).getIntValue(),

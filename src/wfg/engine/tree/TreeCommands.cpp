@@ -115,6 +115,18 @@ namespace wfg::tree
         declaration.framing = document.getAttribute (base + "framing").value_or (std::string ("length"));
         declaration.wire = document.getAttribute (base + "wire").value_or (std::string ("osc"));
         declaration.login = document.getAttribute (base + "login").value_or (std::string {});
+        declaration.midiPort = document.getAttribute (base + "midiPort").value_or (std::string {});
+
+        const auto integer = [&document, &base] (const char* row, int otherwise)
+        {
+            if (const auto text = document.getAttribute (base + row))
+                if (const auto parsed = osc::parseDouble (*text))
+                    return static_cast<int> (*parsed);
+            return otherwise;
+        };
+        declaration.midiChannel = integer ("midiChannel", 1);
+        declaration.mscDevice = integer ("mscDevice", 127);
+        declaration.mscFormat = integer ("mscFormat", 127);
 
         if (const auto port = document.getAttribute (base + "port"))
             if (const auto parsed = osc::parseDouble (*port))
@@ -164,17 +176,35 @@ namespace wfg::tree
             return MountResult::failed (mountId + ": " + why);
         };
 
-        /*  THE WIRE, before the transport: a device that names bytes Go.dot
-            cannot render yet is refused in words, whatever carries them
-            (namespace draft §57, AFJ; the midi wire of DP.9). The rcp wire
-            (DP.7) and the line wire (DP.8) are lines of text on a connection
-            and nothing else can carry them. */
-        if (declaration->wire != "osc" && declaration->wire != "rcp" && declaration->wire != "line")
-            return refuse ("wire \"" + declaration->wire
-                           + "\" is declared but not built - Go.dot renders osc, rcp and line to a device today");
+        /*  THE WIRE, before the transport (namespace draft §57, AFJ): the
+            rcp wire (DP.7) and the line wire (DP.8) are lines of text on a
+            connection and nothing else can carry them; the midi wire (DP.9)
+            rides a MIDI port, a connection or a datagram, never a serial
+            line; a word the schema lacks never reaches here. */
+        if (declaration->wire != "osc" && declaration->wire != "rcp" && declaration->wire != "line"
+              && declaration->wire != "midi")
+            return refuse ("wire \"" + declaration->wire + "\" is not one Go.dot renders - osc, rcp, line or midi");
 
         if ((declaration->wire == "rcp" || declaration->wire == "line") && declaration->transport != "tcp")
             return refuse ("the " + declaration->wire + " wire is lines of text on a connection - set the transport to tcp");
+
+        if (declaration->wire == "midi" && declaration->transport == "serial")
+            return refuse ("the midi wire does not ride a serial port - a MIDI port, a connection or a datagram");
+
+        /*  A MIDI PORT (DP.9): one of the show's, bound or not - an unbound
+            port fails the cue as a MIDI cue's does, `no-port` - and nothing
+            but the midi wire goes down it. */
+        if (declaration->transport == "midi")
+        {
+            if (declaration->wire != "midi")
+                return refuse ("a MIDI port carries the midi wire only - set the wire to midi");
+
+            if (declaration->midiPort.empty())
+                return refuse ("it is reached over a MIDI port and names none");
+
+            if (! document.getAttribute ("/godot/port/" + declaration->midiPort + "/name").has_value())
+                return refuse ("it names MIDI port " + declaration->midiPort + ", which this show does not have");
+        }
 
         /*  OSC OVER SLIP ON A SERIAL PORT (namespace draft §51, PC.11): the port
             has to be one of the show's, and reading packets rather than lines -
@@ -209,10 +239,10 @@ namespace wfg::tree
             if (declaration->host.empty())
                 return refuse ("it is reached over a connection and names no host");
         }
-        else if (declaration->transport != "udp")
+        else if (declaration->transport != "udp" && declaration->transport != "midi")
             return refuse ("transport \"" + declaration->transport
                            + "\" is declared but not implemented -"
-                             " Go.dot speaks udp, tcp and serial to a mount today");
+                             " Go.dot speaks udp, tcp, serial and midi to a mount today");
 
         if ((declaration->transport == "udp" || declaration->transport == "tcp")
               && (declaration->port <= 0 || declaration->port > 65535))

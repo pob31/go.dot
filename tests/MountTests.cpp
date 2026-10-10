@@ -52,6 +52,7 @@
 #include <chrono>
 #include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/oscquery/OscQueryClient.h>
+#include <wfg/engine/midi/MidiSink.h>
 
 #include <juce_core/juce_core.h>
 
@@ -2049,11 +2050,12 @@ TEST_CASE ("mount: a device over a connection needs a host, a port and a framing
     CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
     CHECK (rig.mounts.problemOf (id).find ("names no host") != std::string::npos);
 
-    //  A wire not built yet is refused the same way, naming it (AFJ): midi until DP.9.
+    //  A wire Go.dot does not render - every word the schema has is rendered since DP.9, so one it lacks,
+    //  written as a hand-edited file would carry it - is refused the same way, naming it (AFJ).
     writeRaw ("host", "127.0.0.1");
-    writeRaw ("wire", "midi");
+    writeRaw ("wire", "ws");
     CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
-    CHECK (rig.mounts.problemOf (id).find ("wire \"midi\"") != std::string::npos);
+    CHECK (rig.mounts.problemOf (id).find ("wire \"ws\"") != std::string::npos);
     writeRaw ("wire", "osc");
 
     //  By datagram again, as it was: loaded, with its port, the framing kept and not read.
@@ -2137,9 +2139,13 @@ TEST_CASE ("mount: the rcp wire rides a connection and nothing else, and a wire 
     CHECK (rig.mounts.declarationOf (id)->wire == "rcp");
     CHECK (tree::MountSender::destinationFor (*rig.mounts.declarationOf (id)).wire == "rcp");
 
-    REQUIRE (rig.document.setAttribute (base + "wire", "midi").ok);
+    //  The row refuses a word the schema lacks; a file carrying one anyway is refused by the load, naming it.
+    CHECK_FALSE (rig.document.setAttribute (base + "wire", "ws").ok);
+    for (auto mount : rig.document.root().getChildWithName ("Mounts"))
+        if (mount[juce::Identifier ("id")].toString() == juce::String (id))
+            mount.setProperty (juce::Identifier ("wire"), juce::String ("ws"), nullptr);
     CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
-    CHECK (rig.mounts.problemOf (id).find ("wire \"midi\"") != std::string::npos);
+    CHECK (rig.mounts.problemOf (id).find ("wire \"ws\"") != std::string::npos);
 }
 
 TEST_CASE ("mount sender: a device on the rcp wire is sent lines spelled as its nodes say, one each whatever the bundles row says")
@@ -2260,4 +2266,175 @@ TEST_CASE ("mount: the line wire rides a connection with its login row, and the 
     CHECK (lines[0] == "Go+ Executor 1.2\r");
     CHECK (lines[1] == "Fader 1.2 At 50\r");
     CHECK (lines[2] == "Goto Cue 12\r");
+}
+
+//==============================================================================
+/*  DP.9: THE MIDI WIRE - a device on a declared MIDI port, over a connection
+    or in a datagram, its nodes' shapes rendered at the flush. */
+
+namespace
+{
+    struct RecordingMidi final : midi::MidiSink
+    {
+        std::vector<std::pair<std::string, std::vector<std::uint8_t>>> taken;   // the port, the bytes
+        std::vector<std::string> runs;
+        bool takes = true;
+
+        std::string send (const std::string& port, const midi::Bytes& bytes) override
+        {
+            if (! takes)
+                return "no-port";
+            taken.emplace_back (port, bytes);
+            return {};
+        }
+
+        std::string sendForRun (const std::string& runId, const std::string& port, const midi::Bytes& bytes) override
+        {
+            runs.push_back (runId);
+            return send (port, bytes);
+        }
+    };
+}
+
+TEST_CASE ("mount: a device on a MIDI port needs one of the show's and the midi wire; the midi wire rides a port, a connection or a datagram, never a serial line")
+{
+    Rig rig;
+    const auto made = rig.document.createMount ("/msc", {}, {});
+    REQUIRE (made.ok);
+    const auto id = made.id;
+    const auto base = "/godot/mount/" + id + "/";
+    REQUIRE (rig.document.setAttribute (base + "transport", "midi").ok);
+
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).find ("the midi wire only") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "wire", "midi").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id).find ("names none") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "midiPort", "NOPORT01").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id).find ("which this show does not have") != std::string::npos);
+
+    const auto port = rig.document.createPort ("Desk");
+    REQUIRE (port.ok);
+    REQUIRE (rig.document.setAttribute (base + "midiPort", port.id).ok);
+    REQUIRE (rig.document.setAttribute (base + "midiChannel", "12").ok);
+    REQUIRE (rig.document.setAttribute (base + "mscDevice", "5").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).empty());
+    REQUIRE (rig.mounts.declarationOf (id) != nullptr);
+    CHECK (rig.mounts.declarationOf (id)->midiPort == port.id);
+    CHECK (rig.mounts.declarationOf (id)->midiChannel == 12);
+    CHECK (rig.mounts.declarationOf (id)->mscDevice == 5);
+    CHECK (rig.mounts.declarationOf (id)->mscFormat == 127);
+
+    const auto to = tree::MountSender::destinationFor (*rig.mounts.declarationOf (id));
+    CHECK (to.wire == "midi");
+    CHECK (to.midiPort == port.id);
+    CHECK (to.midiChannel == 12);
+    CHECK (to.mscDevice == 5);
+    CHECK (to.link.empty());
+
+    //  In a datagram - MSC to an MA desk - it needs a port number, as any datagram does.
+    REQUIRE (rig.document.setAttribute (base + "transport", "udp").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id).find ("no usable port") != std::string::npos);
+    REQUIRE (rig.document.setAttribute (base + "port", "6004").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (tree::MountSender::destinationFor (*rig.mounts.declarationOf (id)).midiPort.empty());
+
+    //  Over a connection, raw bytes down the link; never on a serial line.
+    REQUIRE (rig.document.setAttribute (base + "transport", "tcp").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (tree::MountSender::destinationFor (*rig.mounts.declarationOf (id)).link == id);
+
+    REQUIRE (rig.document.setAttribute (base + "transport", "serial").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id).find ("does not ride a serial port") != std::string::npos);
+}
+
+TEST_CASE ("mount sender: a device on the midi wire is sent its nodes' shapes as messages, to the port in the run's name, down the link or in a datagram")
+{
+    tree::MountTable mounts;
+    tree::MountDeclaration desk;
+    desk.id = "DESK0001";
+    desk.prefix = "/scene /input";
+    desk.namespaceFile = "namespaces/desk.json";
+    desk.transport = "midi";
+    desk.wire = "midi";
+    desk.midiPort = "P0RT0001";
+    desk.midiChannel = 12;
+    REQUIRE (mounts.load (desk, R"JSON({"FULL_PATH": "/", "CONTENTS": {"scene": {"FULL_PATH": "/scene", "CONTENTS": {"recall": {"FULL_PATH": "/scene/recall", "TYPE": "i", "ACCESS": 2, "GODOT": {"MIDI": {"KIND": "pc", "BANKED": true, "START": 1}}}}}, "input": {"FULL_PATH": "/input", "CONTENTS": {"1": {"FULL_PATH": "/input/1", "CONTENTS": {"mute": {"FULL_PATH": "/input/1/mute", "TYPE": "T", "ACCESS": 3, "VALUE": [false], "GODOT": {"MIDI": {"KIND": "note", "NOTE": 0, "ON": 127, "OFF": 63, "RELEASE": true}}}, "plain": {"FULL_PATH": "/input/1/plain", "TYPE": "i", "ACCESS": 3, "VALUE": [0]}}}}}}})JSON").ok);
+
+    const auto* mute = mounts.nodeAt ("/input/1/mute");
+    REQUIRE (mute != nullptr);
+    CHECK (mute->midi.kind == "note");
+    CHECK (mute->midi.on == 127);
+    CHECK (mute->midi.off == 63);
+    CHECK (mute->midi.hasOnOff);
+    CHECK (mute->midi.release);
+    const auto* recall = mounts.nodeAt ("/scene/recall");
+    REQUIRE (recall != nullptr);
+    CHECK (recall->midi.kind == "pc");
+    CHECK (recall->midi.banked);
+    CHECK (recall->midi.start == 1);
+
+    tree::MountSender sender;
+    sender.setMounts (&mounts);
+    RecordingMidi sink;
+    sender.setMidiSink (&sink);
+
+    const auto to = tree::MountSender::destinationFor (desk);
+    REQUIRE (to.wire == "midi");
+    REQUIRE (to.midiPort == "P0RT0001");
+    const auto scene = sender.queue ("DESK0001", to, "/scene/recall", osc::Value::int32 (156), "RUN00001");
+    const auto muted = sender.queue ("DESK0001", to, "/input/1/mute", osc::Value::boolean (true), "RUN00001");
+    sender.flush();
+
+    //  Bank Select, Program Change, Note On, its release: four messages to the port, in order, in the run's name.
+    REQUIRE (sink.taken.size() == 4u);
+    CHECK (sink.taken[0].first == "P0RT0001");
+    CHECK (sink.taken[0].second == std::vector<std::uint8_t> { 0xBB, 0x00, 0x01 });
+    CHECK (sink.taken[1].second == std::vector<std::uint8_t> { 0xCB, 0x1B });
+    CHECK (sink.taken[2].second == std::vector<std::uint8_t> { 0x9B, 0x00, 0x7F });
+    CHECK (sink.taken[3].second == std::vector<std::uint8_t> { 0x9B, 0x00, 0x00 });
+    CHECK (sink.runs == std::vector<std::string> (4, "RUN00001"));
+    CHECK (sender.outcomeOf (scene) == tree::MountSender::Outcome::sent);
+    CHECK (sender.outcomeOf (muted) == tree::MountSender::Outcome::sent);
+    CHECK (sender.sentFor ("DESK0001") == 2u);
+
+    //  A node with no shape sends nothing and fails; a port that refuses fails.
+    const auto plain = sender.queue ("DESK0001", to, "/input/1/plain", osc::Value::int32 (1));
+    sender.flush();
+    CHECK (sender.outcomeOf (plain) == tree::MountSender::Outcome::failed);
+    CHECK (sink.taken.size() == 4u);
+    sink.takes = false;
+    const auto refused = sender.queue ("DESK0001", to, "/scene/recall", osc::Value::int32 (2));
+    sender.flush();
+    CHECK (sender.outcomeOf (refused) == tree::MountSender::Outcome::failed);
+
+    //  Over a connection the same bytes go down the link, each message its own packet; bundles never.
+    std::vector<std::vector<std::uint8_t>> linked;
+    sender.setLinkSink ([&linked] (const std::string&, const std::vector<std::uint8_t>& bytes)
+    {
+        linked.push_back (bytes);
+        return true;
+    });
+    desk.transport = "tcp";
+    desk.host = "10.0.0.3";
+    desk.port = 51325;
+    desk.bundles = true;
+    auto overLink = tree::MountSender::destinationFor (desk);
+    CHECK (overLink.midiPort.empty());
+    CHECK (overLink.link == "DESK0001");
+    sender.queue ("DESK0001", overLink, "/input/1/mute", osc::Value::boolean (false));
+    sender.flush();
+    REQUIRE (linked.size() == 2u);
+    CHECK (linked[0] == std::vector<std::uint8_t> { 0x9B, 0x00, 0x3F });
+    CHECK (linked[1] == std::vector<std::uint8_t> { 0x9B, 0x00, 0x00 });
 }

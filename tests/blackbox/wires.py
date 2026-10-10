@@ -41,7 +41,9 @@ reply, and a NOTIFY the console says on its own heard at the preset's node.
 Then (DP.8) a lighting desk from the grandMA2 preset against a mock that
 negotiates as a telnet server does: the login row the first line down the
 link, the desk's answer kept printable, the cue's node rendered as the
-console's own command line from its template.
+console's own command line from its template. Then (DP.9) a dLive from its
+preset against a mock reading raw bytes: a mute and a scene as the console's
+own MIDI messages, on its base channel.
 """
 import subprocess
 import sys
@@ -58,6 +60,7 @@ FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "bundles" / "dev
 DEVICE = "E0SW1RE1"        # the device this file makes, over a connection
 CONSOLE = "YAMAH4RC"       # the one it makes from the Yamaha RCP preset
 DESK = "GRANDMA2"          # and the one from the grandMA2 preset, over telnet
+DLIVE = "D7V3A001"         # and the one from the dLive preset, MIDI over TCP
 CUE = "B3N8R5TW"           # the fixture's /light/go, re-aimed at the console
 
 locale = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--wfg-locale=")), "C")
@@ -298,6 +301,42 @@ def run() -> int:
                 send("cue.fire", [CUE])
                 report.check(wait_for(lambda: ma.ask("received") >= 3), "fired again")
                 report.equal(last_line(), ["Fader 1.2 At 50", []], "the level in the line where the template puts it")
+
+            # --- a sound console on the midi wire over a connection (DP.9) ----
+            dlive = f"/godot/mount/{DLIVE}/"
+
+            with MockWire("raw", wire="midi") as ah:
+                def heard_bytes():
+                    chunks = common.http_json(ah.query_port, "/_mock/messages").get("VALUE", [])
+                    return " ".join(chunk[0] for chunk in chunks)
+
+                send("mount.createFromPreset", ["allenheath-dlive-midi", DLIVE])
+                report.check(settle(dlive + "wire", "midi"),
+                             "a device made from the dLive preset is on the midi wire",
+                             f"wire {read(dlive + 'wire')!r}, problem {read(dlive + 'problem')!r}")
+                report.equal(read(dlive + "port"), "51325", "at the console's MIDI over TCP port")
+
+                send("node.set", [dlive + "midiChannel", "12"])
+                send("node.set", [dlive + "port", str(ah.port)])
+                report.check(settle(dlive + "link", "open", tries=100),
+                             "pointed at the mock, the link opens, reading raw bytes",
+                             f"link {read(dlive + 'link')!r}, problem {read(dlive + 'linkProblem')!r}")
+
+                send("node.set", [f"/godot/cue/{CUE}/address", "/input/1/mute"])
+                send("node.set", [f"/godot/cue/{CUE}/value", "T"])
+                report.check(settle(f"/godot/cue/{CUE}/value", "T"), "the cue re-aimed at the first input's mute, on")
+                send("cue.fire", [CUE])
+                report.check(wait_for(lambda: "9B 00 7F 9B 00 00" in heard_bytes()),
+                             "fired, the console reads the mute as its document prints it: 9B 00 7F then 9B 00 00 on channel 12",
+                             f"heard {heard_bytes()!r}")
+
+                send("node.set", [f"/godot/cue/{CUE}/address", "/scene/recall"])
+                send("node.set", [f"/godot/cue/{CUE}/value", "i:156"])
+                report.check(settle(f"/godot/cue/{CUE}/value", "i:156"), "re-aimed at the scene recall")
+                send("cue.fire", [CUE])
+                report.check(wait_for(lambda: "BB 00 01 CB 1B" in heard_bytes()),
+                             "scene 156 leaves as Bank Select 1 then Program Change 1B on the base channel",
+                             f"heard {heard_bytes()!r}")
 
     return report.finish()
 

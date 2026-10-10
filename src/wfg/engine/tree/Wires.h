@@ -42,6 +42,9 @@
     numbers, two at most. */
 
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/tree/Node.h>
+
+#include <cstdint>
 
 #include <optional>
 #include <string>
@@ -110,4 +113,13 @@ namespace wfg::tree::wire
         control character are dropped rather than written into the show's
         record. */
     std::string printableLine (const std::string& line);
+
+    /*  THE MIDI WIRE (DP.9): a node's shape rendered to the messages it
+        takes, in order - a Bank Select before a Program Change, a Note On
+        then its release, the NRPN's three or four Control Changes, one
+        System Exclusive - from the message's atoms, the mount's base channel
+        (the shape's CHANNEL fixing it, its OFFSET added), and MSC's device
+        and format. A shape with no kind renders nothing. */
+    std::vector<std::vector<std::uint8_t>> renderMidi (const MidiShape& shape, const osc::Values& values,
+                                                        int baseChannel, int mscDevice, int mscFormat);
 }

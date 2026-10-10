@@ -24743,7 +24743,8 @@ Mine, the author's to overrule:
 | `mount/<id>/transport` | `s` | rw | gains `midi`: a declared `<Port>`, named by `port` |
 | `mount/<id>/wire` | `s` | rw | `osc` (default), `rcp`, `line`, `midi` |
 | `mount/<id>/framing` | `s` | rw | `length` (default), `slip`: OSC over TCP only |
-| `mount/<id>/port` | `s` | rw | the `<Port>` a `midi` transport sends on (refers port) |
+| `mount/<id>/midiPort` | `s` | rw | the `<Port>` a `midi` transport sends on (refers port); `port` stays the datagram's number |
+| `mount/<id>/midiChannel` | `i` | rw | 1..16, the channel a node's shape counts from (a console's base channel) |
 | `mount/<id>/login` | `s` | rw | the line sent when a `line` link opens; empty sends nothing |
 | `mount/<id>/mscDevice` | `i` | rw | 0..127, 127 is every device (default) |
 | `mount/<id>/mscFormat` | `i` | rw | 1 lighting, 16 sound, 127 all types (default) |
@@ -24879,3 +24880,28 @@ connection with no host.
   SerialTests (the greeting said on opening, again after the port comes back, a changed one reopening,
   none with tx off), MountTests (line over tcp with its login, the sender's lines from the templates
   and the atoms), AuthoringTests (the grandMA2 device and its nodes' templates), PresetTests.
+- **DP.9**: the midi wire (AFJ, AFP). `Node::midi`, a `MidiShape` from `GODOT.MIDI` with fixed keys -
+  pc (BANKED, START, PROGRAM, CHANNEL), note (NOTE, ON, OFF, RELEASE), cc, nrpn (MSB, LSB, BITS 7 or 14,
+  FINE, or ON and OFF as two codes on a switch), sysex (BYTES as hex and the tokens N, N+k, V, V14, S),
+  msc (COMMAND); OFFSET adds to the mount's channel. `tree::wire::renderMidi` renders a shape to the
+  messages it takes, in order, from the atoms, the mount's `midiChannel` and MSC's `mscDevice` and
+  `mscFormat`. `mount/transport` gains `midi` - the declared `<Port>` of `mount/midiPort`, the midi wire
+  only, refused with no port or one the show lacks - and the midi wire rides a connection as raw bytes
+  (Allen & Heath's MIDI over TCP) or a datagram (MSC to an MA desk), never a serial line; the sender
+  hands each message to the show's MIDI sender in the run's name on a port, or down the link or the
+  datagram. The Network tab's Where menu lists the show's MIDI ports after the serial ones and a device
+  on one says so. Presets from the vendors' documents: `allenheath-dlive-midi` (the V1.9 protocol: the
+  channel map, mutes as notes, faders and assignments as NRPNs, send levels, names and colours as SysEx,
+  scenes by bank and program) and `allenheath-avantis-midi` (the same format, the Avantis article
+  unread, unverified), `allenheath-sq-midi` (Issue 5: every parameter a 14-bit NRPN computed from the
+  reference tables), `allenheath-qu-midi` (V1.9: the note map, NRPN 17, 16, 18, 20, 40, 50, 55, 5C),
+  `msc` (the eleven commands), `behringer-x32-midi` (scenes, snippets and cues by Program Change on
+  channels 1 to 3), `yamaha-midi` (the Program Change table), `digico-midi` (the Snapshot MIDI List,
+  assumed filled in order), `midas-hd96-midi` and `ssl-live-midi` (unverified, the shapes the console's
+  own settings match). `mock_target.py --framing raw --wire midi` keeps every read as hex; `blackbox.wires`
+  gains the dLive: the mute and a scene as the document prints them, on channel 12. Owed: Behringer
+  Wing MIDI (no public chart read), the feedback of DP.10. Tests: WireTests (every kind against the
+  documents' own examples), MountTests (the load's refusals and the four transports, the sender to a
+  port in the run's name, down a link, a node without a shape), NetworkCueTests (a cue through the MIDI
+  sender), AuthoringTests (the dLive's shapes, MSC waiting for its port, every MIDI preset usable),
+  ClientTests (the gesture, the rows), PresetTests.

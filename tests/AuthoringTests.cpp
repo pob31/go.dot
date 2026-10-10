@@ -1001,3 +1001,81 @@ TEST_CASE ("preset command: a device from the grandMA2 preset is on the line wir
 
     folder.deleteRecursively();
 }
+
+TEST_CASE ("preset command: the MIDI presets - a dLive over a connection loads at once, MSC on a MIDI port waits for the port, and every node carries its shape")
+{
+    AuthoringRig rig;
+    tree::MountTable mounts;
+    const auto folder = freshBundleFolder ("wfg-presets-midi");
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &installedPresets());
+
+    const auto* dlive = installedPresets().find ("allenheath-dlive-midi");
+    REQUIRE (dlive != nullptr);
+    REQUIRE (dlive->usable());
+    CHECK (dlive->transport == "tcp");
+    CHECK (dlive->wire == "midi");
+    CHECK (dlive->port == 51325);
+
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("allenheath-dlive-midi") }).applied == 1u);
+    const auto desk = rig.lastRecord().args[1].getString();
+    CHECK (rig.attribute ("/godot/mount/" + desk + "/wire") == "midi");
+    CHECK (rig.attribute ("/godot/mount/" + desk + "/transport") == "tcp");
+    CHECK (mounts.isLoaded (desk));
+    CHECK (mounts.problemOf (desk).empty());
+
+    const auto* mute = mounts.nodeAt ("/input/1/mute");
+    REQUIRE (mute != nullptr);
+    CHECK (mute->midi.kind == "note");
+    CHECK (mute->midi.note == 0);
+    CHECK (mute->midi.on == 0x7F);
+    CHECK (mute->midi.off == 0x3F);
+    CHECK (mute->role == "strip.mute");
+    const auto* aux = mounts.nodeAt ("/aux/3/fader");
+    REQUIRE (aux != nullptr);
+    CHECK (aux->midi.kind == "nrpn");
+    CHECK (aux->midi.offset == 2);
+    CHECK (aux->midi.msb == 2);
+    CHECK (aux->midi.lsb == 0x17);
+    const auto* send = mounts.nodeAt ("/input/1/send/aux/3");
+    REQUIRE (send != nullptr);
+    CHECK (send->midi.kind == "sysex");
+    CHECK (send->midi.bytes.size() == 15u);
+    CHECK (send->midi.bytes[8] == "N");
+    CHECK (send->midi.bytes[11] == "N+2");
+    const auto* scene = mounts.nodeAt ("/scene/recall");
+    REQUIRE (scene != nullptr);
+    CHECK (scene->midi.kind == "pc");
+    CHECK (scene->midi.banked);
+
+    //  MSC is on a MIDI port, which the preset cannot know: refused until one is named, then loaded.
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("msc") }).applied == 1u);
+    const auto msc = rig.lastRecord().args[1].getString();
+    CHECK (rig.attribute ("/godot/mount/" + msc + "/transport") == "midi");
+    CHECK (rig.attribute ("/godot/mount/" + msc + "/wire") == "midi");
+    CHECK_FALSE (mounts.isLoaded (msc));
+    CHECK (mounts.problemOf (msc).find ("names none") != std::string::npos);
+
+    const auto port = rig.document.createPort ("Lighting");
+    REQUIRE (port.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + msc + "/midiPort", port.id).ok);
+    REQUIRE (tree::loadMountFromBundle (rig.document, mounts, folder, msc).ok);
+    CHECK (mounts.isLoaded (msc));
+    const auto* go = mounts.nodeAt ("/msc/go");
+    REQUIRE (go != nullptr);
+    CHECK (go->midi.kind == "msc");
+    CHECK (go->midi.command == 1);
+    CHECK (go->role == "go");
+
+    //  The X32's scenes fix their channel; the SQ's levels are 14-bit; the Qu's fader wants its data LSB.
+    for (const auto* slug : { "behringer-x32-midi", "allenheath-sq-midi", "allenheath-qu-midi", "allenheath-avantis-midi",
+                              "yamaha-midi", "digico-midi", "midas-hd96-midi", "ssl-live-midi" })
+    {
+        INFO ("preset: " << slug);
+        const auto* preset = installedPresets().find (slug);
+        REQUIRE (preset != nullptr);
+        CHECK (preset->usable());
+        CHECK (preset->wire == "midi");
+    }
+
+    folder.deleteRecursively();
+}

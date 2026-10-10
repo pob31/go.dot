@@ -3006,6 +3006,39 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="midiChannel">
+          <a:documentation>The MIDI channel a node-s shape counts from when the wire is midi (DP.9): a console-s base channel - an Allen &amp; Heath dLive-s N, the SQ-s own, a Yamaha-s - with each node adding its own offset where the console spreads its strips over several channels. A node whose shape fixes a channel ignores it.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">16</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="midiPort">
+          <a:documentation>The declared MIDI port this device sends on when its transport is midi (namespace draft 57, AFJ, DP.9): one of the show-s &lt;Port&gt; rows, bound to an output on this machine by the Midi tab. Empty, or a port the show does not have, and the device is refused when the show loads, in words; a port bound to nothing tonight fails each cue with no-port, as a MIDI cue-s does. Nothing but the midi wire goes down it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="mscDevice">
+          <a:documentation>The device number a MIDI Show Control message carries (DP.9): 0 to 111 one device, 112 to 126 a group, 127 every device, which is the default and what a desk set to all-call takes.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">127</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="mscFormat">
+          <a:documentation>The command format a MIDI Show Control message carries (DP.9): 1 lighting, 16 sound, 32 machinery, 48 video, 64 projection, 80 process control, 96 pyro, 127 all types, which is the default. A desk set to one format ignores the others.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">127</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>What the show calls this device - &apos;Lighting desk&apos;, &apos;The WFS&apos; - which is what a target menu shows and what somebody reads in a list. The prefix stays the address: a name is for people and renaming one must not move a single cue, which is the reason a MIDI port has both too. Empty shows the prefix instead, so a device is never a blank row.</a:documentation>
           <data type="string"/>
@@ -3090,12 +3123,13 @@
       </optional>
       <optional>
         <attribute name="transport">
-          <a:documentation>How the device is reached. udp, the ordinary kind, at its host and port. serial: OSC over SLIP on the serial port its serial row names, whose framing is slip - an Arduino running CNMAT-s OSC library on USB (namespace draft 51, ACR, PC.11) - heard, triggered, sent to and recorded from as any device; its host and port are then not read. tcp and ws are declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring either is refused when the show loads rather than going quiet during it.</a:documentation>
+          <a:documentation>How the device is reached. udp, the ordinary kind, at its host and port. tcp (namespace draft 57, AFJ, DP.6): a connection to its host and port kept open by Go.dot, the stream cut by its framing row. serial: OSC over SLIP on the serial port its serial row names, whose framing is slip - an Arduino running CNMAT-s OSC library on USB (namespace draft 51, ACR, PC.11) - heard, triggered, sent to and recorded from as any device; its host and port are then not read. midi (DP.9): the declared MIDI port its midiPort row names, the midi wire only, a console on a DIN or USB cable. ws is declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring it is refused when the show loads rather than going quiet during it.</a:documentation>
           <choice>
             <value>udp</value>
             <value>tcp</value>
             <value>ws</value>
             <value>serial</value>
+            <value>midi</value>
           </choice>
         </attribute>
       </optional>

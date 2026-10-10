@@ -2791,7 +2791,9 @@ namespace
                 And a device on the line wire says its login as the connection
                 opens. */
             const auto wire = reads ("wire", "osc");
-            wish.framing = wire == "rcp" || wire == "line" ? std::string ("lines") : reads ("framing", "length");
+            wish.framing = wire == "rcp" || wire == "line" ? std::string ("lines")
+                         : wire == "midi" ? std::string ("raw")
+                                          : reads ("framing", "length");
 
             if (wire == "line")
                 wish.greeting = reads ("login", "");
@@ -4312,6 +4314,10 @@ namespace
             the author on 2026-09-25: ports added in the MIDI tab stayed
             "unbound" until the next start). */
         wfg::midi::PortBinder portBinder { midiIn, midiOut };
+
+        /*  AND A DEVICE ON A MIDI PORT (namespace draft §57, DP.9) sends through
+            the same sender a MIDI cue does, in its run's name. */
+        sender.setMidiSink (&midiOut);
         parameters.setDcas (&dcas);
         parameters.setTakes (&takes);
         parameters.setPlugins (&pluginTable);

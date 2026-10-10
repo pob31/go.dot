@@ -19,6 +19,7 @@
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/tree/Wires.h>
+#include <wfg/engine/midi/MidiSink.h>
 
 #include <algorithm>
 #include <cmath>
@@ -189,6 +190,30 @@ namespace wfg::tree
 
             const auto line = wire::renderRcp (message.address, message.values, spec);
             ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));
+        }
+        else if (message.destination.wire == "midi")
+        {
+            /*  THE MIDI WIRE (DP.9): the node's shape rendered to as many
+                messages as it takes, in order, each to the declared port in
+                the run's name, or down the link or the datagram as bytes. A
+                node the table lacks has no shape and nothing leaves. */
+            const auto* node = mounts != nullptr ? mounts->nodeAt (message.address) : nullptr;
+
+            if (node != nullptr && ! node->midi.kind.empty())
+            {
+                const auto messages = wire::renderMidi (node->midi, message.values, message.destination.midiChannel,
+                                                        message.destination.mscDevice, message.destination.mscFormat);
+                ok = ! messages.empty();
+
+                for (const auto& bytes : messages)
+                {
+                    if (! message.destination.midiPort.empty())
+                        ok = ok && midiSink != nullptr
+                             && midiSink->sendForRun (message.owner, message.destination.midiPort, bytes).empty();
+                    else
+                        ok = ok && deliver (message.destination, bytes);
+                }
+            }
         }
         else if (message.destination.wire == "line")
         {
@@ -372,6 +397,10 @@ namespace wfg::tree
         destination.serial = declaration.transport == "serial" ? declaration.serial : std::string {};
         destination.link = declaration.transport == "tcp" ? declaration.id : std::string {};
         destination.wire = declaration.wire.empty() ? std::string ("osc") : declaration.wire;
+        destination.midiPort = declaration.transport == "midi" ? declaration.midiPort : std::string {};
+        destination.midiChannel = declaration.midiChannel;
+        destination.mscDevice = declaration.mscDevice;
+        destination.mscFormat = declaration.mscFormat;
         return destination;
     }
 

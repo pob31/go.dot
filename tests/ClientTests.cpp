@@ -12771,3 +12771,36 @@ TEST_CASE ("client: a device over a connection reads its link's word from the ta
     CHECK (row.linkProblem.empty());
     rig.parameters.setLinks (nullptr);
 }
+
+TEST_CASE ("client: a device put on a MIDI port, as the writes of one step, and read back with its port and channel")
+{
+    //  DP.9: the port, the midi wire - the only one a port carries - and the transport.
+    CHECK (model::deviceOnMidiPort ("DESK0001", "P0RT0001")
+             == std::vector<std::pair<std::string, std::string>> { { "/godot/mount/DESK0001/midiPort", "P0RT0001" },
+                                                                   { "/godot/mount/DESK0001/wire", "midi" },
+                                                                   { "/godot/mount/DESK0001/transport", "midi" } });
+
+    Rig rig;
+    rig.apply (5, "window", "port.create", { osc::Value::string ("Desk") });
+    const auto ports = model::readPorts (*rig.publish (6));
+    REQUIRE (ports.size() == 1u);
+    rig.apply (7, "window", "mount.create", { osc::Value::string ("/scene"), osc::Value::string ("") });
+    std::string deviceId;
+    for (const auto& device : model::readDevices (*rig.publish (8)))
+        if (device.prefix == "/scene")
+            deviceId = device.id;
+    REQUIRE (! deviceId.empty());
+
+    for (const auto& [address, value] : model::deviceOnMidiPort (deviceId, ports[0].id))
+        rig.apply (9, "window", "node.set", { osc::Value::string (address), osc::Value::string (value) });
+    rig.apply (10, "window", "node.set", { osc::Value::string ("/godot/mount/" + deviceId + "/midiChannel"), osc::Value::string ("12") });
+
+    for (const auto& device : model::readDevices (*rig.publish (11)))
+        if (device.id == deviceId)
+        {
+            CHECK (device.transport == "midi");
+            CHECK (device.midiPort == ports[0].id);
+            CHECK (device.midiChannel == 12);
+            CHECK (device.link == "off");
+        }
+}

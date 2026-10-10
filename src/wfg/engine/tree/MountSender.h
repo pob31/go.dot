@@ -81,6 +81,8 @@ namespace wfg::osc
     class UdpEndpoint;
 }
 
+namespace wfg::midi { struct MidiSink; }
+
 namespace wfg::tree
 {
     class MountSender
@@ -137,6 +139,15 @@ namespace wfg::tree
                 protocol, which never travels in a bundle. Copied at queue time
                 with the rest, for the same reason. */
             std::string wire = "osc";
+
+            /*  THE MIDI SIDE (DP.9), copied at queue time with the rest: the
+                declared port a `midi` transport sends on - empty, the bytes
+                go to the link or the datagram - the channel a node's shape
+                counts from, and MSC's device and format. */
+            std::string midiPort {};
+            int midiChannel = 1;
+            int mscDevice = 127;
+            int mscFormat = 127;
         };
         /*  THE DESTINATION A DECLARATION NAMES, made in one place (namespace
             draft §57, DP.1): host, port, rate cap, bundles, and the serial
@@ -194,6 +205,12 @@ namespace wfg::tree
             tick thread that owns both. Unset - a rig with no table - and the
             wire infers what it can from the address. */
         void setMounts (const MountTable* table) noexcept { mounts = table; }
+
+        /*  WHERE A DEVICE ON A MIDI PORT IS SENT (DP.9): the show's MIDI
+            sender, each rendered message through `sendForRun` in the run's
+            name, so a double Esc drops what has not left. Unset - a replay, a
+            rig - and such a message fails as one to nowhere does. */
+        void setMidiSink (midi::MidiSink* sink) noexcept { midiSink = sink; }
 
         //======================================================================
         /*  Queues one message. Tick thread.
@@ -283,6 +300,7 @@ namespace wfg::tree
         SerialSink serialSink;
         LinkSink linkSink;
         const MountTable* mounts = nullptr;
+        midi::MidiSink* midiSink = nullptr;
 
         /*  One datagram's bytes to where the destination says: its serial port,
             or its host and port. */

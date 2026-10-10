@@ -69,6 +69,12 @@ def command(path, description, types=None, role=None, ranges=None):
     return node
 
 
+def midi(node, **shape):
+    """The node's MIDI shape (namespace draft 57, AFJ; DP.9): KIND pc, note, cc, nrpn, sysex or msc and its keys."""
+    node.setdefault("GODOT", {})["MIDI"] = {key.upper(): value for key, value in shape.items()}
+    return node
+
+
 def container(path, description, contents):
     return {"FULL_PATH": path, "DESCRIPTION": description, "CONTENTS": contents}
 

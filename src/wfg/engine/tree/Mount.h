@@ -228,6 +228,16 @@ namespace wfg::tree
             grandMA2's `login <user> <password>`. Empty sends nothing. */
         std::string login;
 
+        /*  THE MIDI SIDE (namespace draft §57, AFJ; DP.9): the declared
+            `<Port>` a `midi` transport sends on, the MIDI channel a node's
+            shape counts from (a console's base channel, 1 to 16), and the
+            device and format bytes an MSC message carries - 127 is every
+            device and every format. */
+        std::string midiPort;
+        int midiChannel = 1;
+        int mscDevice = 127;
+        int mscFormat = 127;
+
         /*  WHETHER IT CAN BE ASKED, and where.
 
             `transport` says how to send and says nothing about the other

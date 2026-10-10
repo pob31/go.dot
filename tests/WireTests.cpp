@@ -182,3 +182,189 @@ TEST_CASE ("wire: with no template the atoms are the line, and a console's chatt
     CHECK (printableLine ("\x1B[2J").empty());
     CHECK (printableLine ("\x1B[32madmin@grandMA2>\x1B[0m ready") == "admin@grandMA2> ready");
 }
+
+//==============================================================================
+/*  DP.9: THE MIDI WIRE - a node's shape rendered to the console's own bytes,
+    held against the examples the consoles' documents print. */
+
+namespace
+{
+    using Bytes = std::vector<std::uint8_t>;
+
+    tree::MidiShape shapeOf (const char* kind)
+    {
+        tree::MidiShape shape;
+        shape.kind = kind;
+        return shape;
+    }
+}
+
+TEST_CASE ("wire: a mute as Allen & Heath's dLive takes it - a Note On at 7F or 3F then its release, on the base channel plus the block's offset")
+{
+    auto mute = shapeOf ("note");
+    mute.note = 0;
+    mute.on = 0x7F;
+    mute.off = 0x3F;
+    mute.release = true;
+
+    //  Input 1 on base channel 12: the document's own example, 9B 00 7F.
+    CHECK (renderMidi (mute, { osc::Value::boolean (true) }, 12, 127, 127)
+             == std::vector<Bytes> { { 0x9B, 0x00, 0x7F }, { 0x9B, 0x00, 0x00 } });
+    CHECK (renderMidi (mute, { osc::Value::boolean (false) }, 12, 127, 127)
+             == std::vector<Bytes> { { 0x9B, 0x00, 0x3F }, { 0x9B, 0x00, 0x00 } });
+
+    //  Aux 3 is on N+2, note 02.
+    mute.note = 2;
+    mute.offset = 2;
+    CHECK (renderMidi (mute, { osc::Value::int32 (1) }, 12, 127, 127)
+             == std::vector<Bytes> { { 0x9D, 0x02, 0x7F }, { 0x9D, 0x02, 0x00 } });
+
+    //  No atom is a press; no release where the shape says so; a channel never past 16.
+    mute.release = false;
+    CHECK (renderMidi (mute, {}, 15, 127, 127) == std::vector<Bytes> { { 0x9F, 0x02, 0x7F } });
+}
+
+TEST_CASE ("wire: a fader as the dLive and the Qu take it - NRPN 17 with the level, the Qu's data LSB after")
+{
+    auto fader = shapeOf ("nrpn");
+    fader.msb = 0;
+    fader.lsb = 0x17;
+    fader.bits = 7;
+    CHECK (renderMidi (fader, { osc::Value::int32 (0x62) }, 12, 127, 127)
+             == std::vector<Bytes> { { 0xBB, 0x63, 0x00 }, { 0xBB, 0x62, 0x17 }, { 0xBB, 0x06, 0x62 } });
+
+    //  The Qu's input 1 is note 20 and wants 07 as the data LSB; a float is rounded.
+    fader.msb = 0x20;
+    fader.fine = 0x07;
+    CHECK (renderMidi (fader, { osc::Value::float32 (98.4f) }, 1, 127, 127)
+             == std::vector<Bytes> { { 0xB0, 0x63, 0x20 }, { 0xB0, 0x62, 0x17 }, { 0xB0, 0x06, 0x62 }, { 0xB0, 0x26, 0x07 } });
+
+    //  A DCA assignment is two codes on a switch: Qu's DCA 2 on is 41, off 01.
+    auto assign = shapeOf ("nrpn");
+    assign.msb = 0x20;
+    assign.lsb = 0x40;
+    assign.fine = 0x07;
+    assign.hasOnOff = true;
+    assign.on = 0x41;
+    assign.off = 0x01;
+    CHECK (renderMidi (assign, { osc::Value::boolean (true) }, 1, 127, 127)
+             == std::vector<Bytes> { { 0xB0, 0x63, 0x20 }, { 0xB0, 0x62, 0x40 }, { 0xB0, 0x06, 0x41 }, { 0xB0, 0x26, 0x07 } });
+    CHECK (renderMidi (assign, { osc::Value::boolean (false) }, 1, 127, 127)[2] == Bytes { 0xB0, 0x06, 0x01 });
+}
+
+TEST_CASE ("wire: the SQ's 14-bit NRPNs - a level coarse and fine, a mute as 00 01, from the document's examples")
+{
+    //  Ip1 to LR at 0 dB on the linear taper: B0 63 40 B0 62 00 B0 06 76 B0 26 5C.
+    auto level = shapeOf ("nrpn");
+    level.msb = 0x40;
+    level.lsb = 0x00;
+    level.bits = 14;
+    CHECK (renderMidi (level, { osc::Value::int32 ((0x76 << 7) | 0x5C) }, 1, 127, 127)
+             == std::vector<Bytes> { { 0xB0, 0x63, 0x40 }, { 0xB0, 0x62, 0x00 }, { 0xB0, 0x06, 0x76 }, { 0xB0, 0x26, 0x5C } });
+
+    //  Ip40 to Aux5 at -12 dB on channel 4: B3 63 44 B3 62 1C B3 06 6B B3 26 06.
+    level.msb = 0x44;
+    level.lsb = 0x1C;
+    CHECK (renderMidi (level, { osc::Value::int32 ((0x6B << 7) | 0x06) }, 4, 127, 127)
+             == std::vector<Bytes> { { 0xB3, 0x63, 0x44 }, { 0xB3, 0x62, 0x1C }, { 0xB3, 0x06, 0x6B }, { 0xB3, 0x26, 0x06 } });
+
+    //  Ip1 mute on: B0 63 00 B0 62 00 B0 06 00 B0 26 01; Mute Grp 4 on channel 7: B6 63 04 B6 62 03 ...
+    auto mute = shapeOf ("nrpn");
+    mute.bits = 14;
+    mute.hasOnOff = true;
+    mute.on = 1;
+    mute.off = 0;
+    CHECK (renderMidi (mute, { osc::Value::boolean (true) }, 1, 127, 127)
+             == std::vector<Bytes> { { 0xB0, 0x63, 0x00 }, { 0xB0, 0x62, 0x00 }, { 0xB0, 0x06, 0x00 }, { 0xB0, 0x26, 0x01 } });
+    mute.msb = 0x04;
+    mute.lsb = 0x03;
+    CHECK (renderMidi (mute, { osc::Value::boolean (true) }, 7, 127, 127)[0] == Bytes { 0xB6, 0x63, 0x04 });
+    CHECK (renderMidi (mute, { osc::Value::boolean (false) }, 7, 127, 127)[3] == Bytes { 0xB6, 0x26, 0x00 });
+}
+
+TEST_CASE ("wire: a scene as a Program Change - banked for each 128 from where the preset counts, the node's own number or the atom's, a fixed channel")
+{
+    //  The SQ's examples: scene 7 on channel 1 is B0 00 00 C0 06; scene 156 is B0 00 01 C0 1B; on channel 3, B2 and C2.
+    auto scene = shapeOf ("pc");
+    scene.banked = true;
+    scene.start = 1;
+    CHECK (renderMidi (scene, { osc::Value::int32 (7) }, 1, 127, 127) == std::vector<Bytes> { { 0xB0, 0x00, 0x00 }, { 0xC0, 0x06 } });
+    CHECK (renderMidi (scene, { osc::Value::int32 (156) }, 1, 127, 127) == std::vector<Bytes> { { 0xB0, 0x00, 0x01 }, { 0xC0, 0x1B } });
+    CHECK (renderMidi (scene, { osc::Value::int32 (156) }, 3, 127, 127) == std::vector<Bytes> { { 0xB2, 0x00, 0x01 }, { 0xC2, 0x1B } });
+
+    //  The X32's scene 5: program 5 itself, from nought, on channel 1 whatever the mount says.
+    auto x32 = shapeOf ("pc");
+    x32.program = 5;
+    x32.start = 0;
+    x32.channel = 1;
+    CHECK (renderMidi (x32, {}, 12, 127, 127) == std::vector<Bytes> { { 0xC0, 0x05 } });
+
+    //  A Yamaha recall by atom, from one: scene 12 is program 11; below the start is clamped.
+    auto yamaha = shapeOf ("pc");
+    yamaha.start = 1;
+    CHECK (renderMidi (yamaha, { osc::Value::int32 (12) }, 1, 127, 127) == std::vector<Bytes> { { 0xC0, 0x0B } });
+    CHECK (renderMidi (yamaha, { osc::Value::int32 (0) }, 1, 127, 127) == std::vector<Bytes> { { 0xC0, 0x00 } });
+
+    //  And a Control Change with the atom.
+    auto cc = shapeOf ("cc");
+    cc.cc = 7;
+    CHECK (renderMidi (cc, { osc::Value::int32 (100) }, 1, 127, 127) == std::vector<Bytes> { { 0xB0, 0x07, 0x64 } });
+}
+
+TEST_CASE ("wire: a System Exclusive from the shape's bytes - hex, the channel tokens, the value, a string - the dLive's send level and name")
+{
+    //  SysEx Header, 0N, 0E, CH, SndN, SndCH, V, F7: input 1 to aux 3 on base channel 12 at 100.
+    auto send = shapeOf ("sysex");
+    send.bytes = { "F0", "00", "00", "1A", "50", "10", "01", "00", "N", "0E", "00", "N+2", "02", "V", "F7" };
+    CHECK (renderMidi (send, { osc::Value::int32 (100) }, 12, 127, 127)
+             == std::vector<Bytes> { { 0xF0, 0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00, 0x0B, 0x0E, 0x00, 0x0D, 0x02, 0x64, 0xF7 } });
+
+    //  SysEx Header, 0N, 03, CH, Name, F7.
+    auto name = shapeOf ("sysex");
+    name.bytes = { "F0", "00", "00", "1A", "50", "10", "01", "00", "N", "03", "05", "S", "F7" };
+    CHECK (renderMidi (name, { osc::Value::string ("Vox") }, 1, 127, 127)
+             == std::vector<Bytes> { { 0xF0, 0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00, 0x00, 0x03, 0x05, 0x56, 0x6F, 0x78, 0xF7 } });
+
+    //  A 14-bit value as two bytes; a token that is nothing is skipped; no bytes, no message.
+    auto wide = shapeOf ("sysex");
+    wide.bytes = { "F0", "V14", "??", "F7" };
+    CHECK (renderMidi (wide, { osc::Value::int32 (0x1234) }, 1, 127, 127) == std::vector<Bytes> { { 0xF0, 0x24, 0x34, 0xF7 } });
+    CHECK (renderMidi (shapeOf ("sysex"), {}, 1, 127, 127).empty());
+    CHECK (renderMidi (shapeOf (""), { osc::Value::int32 (1) }, 1, 127, 127).empty());
+}
+
+TEST_CASE ("wire: MIDI Show Control - the frame, the cue number as text with its list and path, Timed Go, Set, Fire and the bare commands")
+{
+    auto go = shapeOf ("msc");
+    go.command = 0x01;
+    CHECK (renderMidi (go, { osc::Value::string ("12.5"), osc::Value::string ("1") }, 1, 127, 127)
+             == std::vector<Bytes> { { 0xF0, 0x7F, 0x7F, 0x02, 0x7F, 0x01, '1', '2', '.', '5', 0x00, '1', 0xF7 } });
+    CHECK (renderMidi (go, { osc::Value::int32 (3) }, 1, 5, 1)
+             == std::vector<Bytes> { { 0xF0, 0x7F, 0x05, 0x02, 0x01, 0x01, '3', 0xF7 } });
+
+    //  Stop with no cue stops everything; letters in a cue number are not sent.
+    auto stop = shapeOf ("msc");
+    stop.command = 0x02;
+    CHECK (renderMidi (stop, {}, 1, 127, 127) == std::vector<Bytes> { { 0xF0, 0x7F, 0x7F, 0x02, 0x7F, 0x02, 0xF7 } });
+    CHECK (renderMidi (go, { osc::Value::string ("Q12a") }, 1, 127, 127)
+             == std::vector<Bytes> { { 0xF0, 0x7F, 0x7F, 0x02, 0x7F, 0x01, '1', '2', 0xF7 } });
+
+    auto timed = shapeOf ("msc");
+    timed.command = 0x04;
+    CHECK (renderMidi (timed, { osc::Value::int32 (0), osc::Value::int32 (1), osc::Value::int32 (30), osc::Value::int32 (0),
+                               osc::Value::int32 (0), osc::Value::string ("7") }, 1, 127, 127)
+             == std::vector<Bytes> { { 0xF0, 0x7F, 0x7F, 0x02, 0x7F, 0x04, 0x00, 0x01, 0x1E, 0x00, 0x00, '7', 0xF7 } });
+
+    auto set = shapeOf ("msc");
+    set.command = 0x06;
+    CHECK (renderMidi (set, { osc::Value::int32 (300), osc::Value::int32 (5) }, 1, 127, 127)
+             == std::vector<Bytes> { { 0xF0, 0x7F, 0x7F, 0x02, 0x7F, 0x06, 0x2C, 0x02, 0x05, 0x00, 0xF7 } });
+
+    auto fire = shapeOf ("msc");
+    fire.command = 0x07;
+    CHECK (renderMidi (fire, { osc::Value::int32 (3) }, 1, 127, 127) == std::vector<Bytes> { { 0xF0, 0x7F, 0x7F, 0x02, 0x7F, 0x07, 0x03, 0xF7 } });
+
+    auto allOff = shapeOf ("msc");
+    allOff.command = 0x08;
+    CHECK (renderMidi (allOff, { osc::Value::string ("ignored") }, 1, 127, 127) == std::vector<Bytes> { { 0xF0, 0x7F, 0x7F, 0x02, 0x7F, 0x08, 0xF7 } });
+}

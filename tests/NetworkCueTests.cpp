@@ -56,6 +56,7 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/TreeCommands.h>
+#include <wfg/engine/midi/MidiSink.h>
 
 #include "TestSupport.h"
 
@@ -4407,4 +4408,63 @@ TEST_CASE ("network cue: a cue and its curve aimed at a console on the rcp wire 
     //  What the console answered is the table's to keep (MountTests holds the command).
     rig.mounts.noteReply ("YAMA0001", "OK", "OK set MIXER:Current/InCh/Fader/Level 0 0 -32768");
     CHECK (rig.mounts.lastReplyOf ("YAMA0001") == "OK set MIXER:Current/InCh/Fader/Level 0 0 -32768");
+}
+
+//==============================================================================
+/*  DP.9: A CUE AIMED AT A CONSOLE ON A MIDI PORT leaves as the messages its
+    node's shape renders to, through the show's MIDI sender in the run's
+    name, and the network hears nothing (namespace draft §57, AFJ). */
+namespace
+{
+    struct CountingMidi final : midi::MidiSink
+    {
+        std::vector<std::pair<std::string, std::vector<std::uint8_t>>> taken;
+        std::vector<std::string> runs;
+
+        std::string send (const std::string& port, const midi::Bytes& bytes) override
+        {
+            taken.emplace_back (port, bytes);
+            return {};
+        }
+
+        std::string sendForRun (const std::string& runId, const std::string& port, const midi::Bytes& bytes) override
+        {
+            runs.push_back (runId);
+            return send (port, bytes);
+        }
+    };
+}
+
+TEST_CASE ("network cue: a cue aimed at a console on a MIDI port reaches the show's MIDI sender as its node's messages, in the run's name")
+{
+    NetworkRig rig;
+
+    const auto port = rig.document.createPort ("Desk");
+    REQUIRE (port.ok);
+
+    tree::MountDeclaration desk;
+    desk.id = "DESK0001";
+    desk.prefix = "/scene";
+    desk.namespaceFile = "namespaces/desk.json";
+    desk.transport = "midi";
+    desk.wire = "midi";
+    desk.midiPort = port.id;
+    desk.midiChannel = 1;
+    REQUIRE (rig.mounts.load (desk, R"JSON({"FULL_PATH": "/scene", "CONTENTS": {"recall": {"FULL_PATH": "/scene/recall", "TYPE": "i", "ACCESS": 2, "GODOT": {"MIDI": {"KIND": "pc", "BANKED": true, "START": 1}}}}})JSON").ok);
+    rig.sender.setMounts (&rig.mounts);
+    CountingMidi sink;
+    rig.sender.setMidiSink (&sink);
+
+    const auto cueId = rig.makeOsc ("/scene/recall", "i:156", "sent");
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    REQUIRE (sink.taken.size() == 2u);
+    CHECK (sink.taken[0].first == port.id);
+    CHECK (sink.taken[0].second == std::vector<std::uint8_t> { 0xB0, 0x00, 0x01 });
+    CHECK (sink.taken[1].second == std::vector<std::uint8_t> { 0xC0, 0x1B });
+    REQUIRE (rig.runOf (cueId) != nullptr);
+    CHECK (sink.runs[0] == rig.runOf (cueId)->id);
+    CHECK (rig.runOf (cueId)->state != cue::runState::failed);
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
 }

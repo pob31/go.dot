@@ -501,6 +501,44 @@ namespace wfg::tree
 
             //  And the command line it renders to on the line wire (DP.8).
             out.lineTemplate = stringProperty (*godot, "LINE");
+
+            //  And its shape on the MIDI wire (DP.9), fixed keys.
+            if (const auto* shape = property (*godot, "MIDI"); shape != nullptr)
+            {
+                auto& m = out.midi;
+                const auto number = [shape] (const char* key, int otherwise)
+                {
+                    const auto* found = property (*shape, key);
+                    return found != nullptr && found->isNumber() ? static_cast<int> (found->asNumber()) : otherwise;
+                };
+                const auto flag = [shape] (const char* key, bool otherwise)
+                {
+                    const auto* found = property (*shape, key);
+                    return found != nullptr && found->isBool() ? found->asBool() : otherwise;
+                };
+
+                m.kind = stringProperty (*shape, "KIND");
+                m.channel = number ("CHANNEL", 0);
+                m.offset = number ("OFFSET", 0);
+                m.program = number ("PROGRAM", -1);
+                m.start = number ("START", 0);
+                m.banked = flag ("BANKED", false);
+                m.note = number ("NOTE", 0);
+                m.hasOnOff = property (*shape, "ON") != nullptr;
+                m.on = number ("ON", 127);
+                m.off = number ("OFF", 0);
+                m.release = flag ("RELEASE", true);
+                m.cc = number ("CC", 0);
+                m.msb = number ("MSB", 0);
+                m.lsb = number ("LSB", 0);
+                m.bits = number ("BITS", 7);
+                m.fine = number ("FINE", -1);
+                m.command = number ("COMMAND", 0);
+
+                if (const auto* bytes = property (*shape, "BYTES"); bytes != nullptr && bytes->isArray())
+                    for (const auto& token : bytes->asArray())
+                        m.bytes.push_back (token.isString() ? token.asString() : std::string {});
+            }
         }
 
         /*  Container, state or event.

@@ -429,6 +429,15 @@ def listen_tcp(device: Device, port_out, framing: str, wire: str = "osc") -> soc
                     return
 
                 buffer += chunk
+
+                #  RAW (DP.9): every read is a message whose address is its
+                #  bytes in hex - a console on MIDI over TCP; the driver joins
+                #  them, since a stream cuts where it likes.
+                if framing == "raw":
+                    device.note(" ".join("%02X" % byte for byte in buffer), [], sender_ip=peer[0])
+                    buffer = b""
+                    continue
+
                 packets, buffer = cut_frames(framing, buffer)
 
                 for data in packets:
@@ -681,11 +690,11 @@ def main() -> int:
                         help="offer LISTEN on a WebSocket at the HTTP port, as WFS-DIY does")
     parser.add_argument("--transport", default="udp", choices=("udp", "tcp"),
                         help="udp, a socket for datagrams; tcp, a listener for connections (DP.6)")
-    parser.add_argument("--framing", default="length", choices=("length", "slip", "lines"),
-                        help="how a connection's stream is cut: a size before each packet, SLIP, or lines")
-    parser.add_argument("--wire", default="osc", choices=("osc", "rcp", "line"),
+    parser.add_argument("--framing", default="length", choices=("length", "slip", "lines", "raw"),
+                        help="how a connection's stream is cut: a size before each packet, SLIP, lines, or not at all")
+    parser.add_argument("--wire", default="osc", choices=("osc", "rcp", "line", "midi"),
                         help="what the bytes are: OSC; lines of Yamaha's RCP answered with OK (DP.7); "
-                             "a telnet console's command lines (DP.8)")
+                             "a telnet console's command lines (DP.8); MIDI bytes as they come (DP.9)")
     args = parser.parse_args()
 
     device = Device(args.behaviour, args.alter_to)

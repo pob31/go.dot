@@ -121,6 +121,8 @@ namespace wfg::client::model
             else if (name == "framing")    row.framing = text (node).empty() ? std::string ("length") : text (node);
             else if (name == "link")       row.link = text (node).empty() ? std::string ("off") : text (node);
             else if (name == "linkProblem") row.linkProblem = text (node);
+            else if (name == "midiPort")   row.midiPort = text (node);
+            else if (name == "midiChannel") row.midiChannel = number (text (node), 1);
 
             /*  FAIL-SAFE, as the engine reads it (PRD §3.32): only the exact
                 word takes back; anything else leaves to the operator. */
@@ -316,5 +318,13 @@ namespace wfg::client::model
     std::vector<std::pair<std::string, std::string>> deviceOnTcp (const std::string& deviceId)
     {
         return { { "/godot/mount/" + deviceId + "/transport", "tcp" } };
+    }
+
+    std::vector<std::pair<std::string, std::string>> deviceOnMidiPort (const std::string& deviceId,
+                                                                       const std::string& portId)
+    {
+        return { { "/godot/mount/" + deviceId + "/midiPort", portId },
+                 { "/godot/mount/" + deviceId + "/wire", "midi" },
+                 { "/godot/mount/" + deviceId + "/transport", "midi" } };
     }
 }

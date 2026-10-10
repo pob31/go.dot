@@ -156,7 +156,9 @@ TEST_CASE ("preset: every shipped preset loads, is named after its file, and nam
     for (const auto* expected : { "adm-osc", "dbaudio-ds100-osc", "digico-s-osc", "behringer-x32-osc", "behringer-wing-osc",
                                   "holophonix-osc", "lacoustics-lisa-osc", "flux-spat-osc", "malighting-grandma3-osc",
                                   "digico-sd-osc", "yamaha-osc", "etc-eos-osc", "yamaha-rcp",
-                                  "malighting-grandma2-line" })
+                                  "malighting-grandma2-line", "allenheath-dlive-midi", "allenheath-avantis-midi",
+                                  "allenheath-sq-midi", "allenheath-qu-midi", "msc", "behringer-x32-midi",
+                                  "yamaha-midi", "digico-midi", "midas-hd96-midi", "ssl-live-midi" })
     {
         INFO ("expected: " << expected);
         CHECK (table.find (expected) != nullptr);

@@ -146,6 +146,12 @@ namespace wfg::client::model
         std::string link = "off";
         std::string linkProblem;
 
+        /*  AND ON A MIDI PORT (namespace draft §57, DP.9): the declared port a
+            `midi` transport sends on, by identifier, and the channel its
+            nodes count from. */
+        std::string midiPort;
+        int midiChannel = 1;
+
         /*  What to put in a menu or a list: the name, or the prefix when there
             is none. A device is never a blank row - somebody has to be able to
             point at it before they have finished naming it. */
@@ -163,6 +169,11 @@ namespace wfg::client::model
         already has; the framing stays what the row says - length for a device
         typed by hand, what the preset said for one made from a preset. */
     std::vector<std::pair<std::string, std::string>> deviceOnTcp (const std::string& deviceId);
+
+    /*  AND ON A MIDI PORT (DP.9): its transport, the port, and the midi wire,
+        the only one a port carries. */
+    std::vector<std::pair<std::string, std::string>> deviceOnMidiPort (const std::string& deviceId,
+                                                                       const std::string& portId);
 
         /** Every declared device, in identifier order. */
     std::vector<DeviceRow> readDevices (const tree::TreeSnapshot&);

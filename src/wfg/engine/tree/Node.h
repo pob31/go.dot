@@ -63,6 +63,40 @@ namespace wfg::tree
         readWrite = 3
     };
 
+    /*  HOW A NODE IS SPELLED ON THE MIDI WIRE (namespace draft §57, AFJ;
+        DP.9), from `GODOT.MIDI`, with fixed keys and no expression strings:
+        KIND pc (a Program Change, Bank Select first when BANKED, the number
+        counted from START, PROGRAM the node's own or -1 for the atom's),
+        note (a Note On at ON when the atom is on and OFF when it is off, then
+        its release when RELEASE), cc (CC with the atom), nrpn (MSB and LSB
+        the parameter, the data in BITS - 7 with FINE as the data LSB where
+        given, 14 split - or ON and OFF as two codes when the atom is a
+        switch), sysex (BYTES as hex and the tokens N, N+k, V, V14, S) and
+        msc (COMMAND, the device and format from the mount). CHANNEL fixes
+        the MIDI channel; OFFSET adds to the mount's. Plain data, as the
+        node is. */
+    struct MidiShape
+    {
+        std::string kind;
+        int channel = 0;
+        int offset = 0;
+        int program = -1;
+        int start = 0;
+        bool banked = false;
+        int note = 0;
+        int on = 127;
+        int off = 0;
+        bool hasOnOff = false;
+        bool release = true;
+        int cc = 0;
+        int msb = 0;
+        int lsb = 0;
+        int bits = 7;
+        int fine = -1;
+        std::vector<std::string> bytes;
+        int command = 0;
+    };
+
     struct Node
     {
         /** The full OSC address. Unique, and the tree's only key. */
@@ -97,6 +131,9 @@ namespace wfg::tree
             whole-number segments, `{1}` to `{9}` the atoms; empty, the atoms
             are the line. */
         std::string lineTemplate;
+
+        /*  AND ON THE MIDI WIRE (DP.9), from `GODOT.MIDI`: empty kind, none. */
+        MidiShape midi;
 
         //======================================================================
         // The declared range, when the table gives one.

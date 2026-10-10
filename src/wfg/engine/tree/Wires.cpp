@@ -15,6 +15,7 @@
 #include <wfg/engine/tree/Wires.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 
@@ -375,6 +376,229 @@ namespace wfg::tree::wire
             }
 
             out.push_back (c);
+        }
+
+        return out;
+    }
+
+    namespace
+    {
+        using Bytes = std::vector<std::uint8_t>;
+
+        /*  Whether the message's first atom is on: a switch, a number that
+            is not nought, a string that is not empty, nought or false; no
+            atom at all is on, as a command with none is a press. */
+        bool switchedOn (const osc::Values& values)
+        {
+            if (values.empty())
+                return true;
+
+            const auto& v = values[0];
+
+            if (v.isBool())    return v.getBool();
+            if (v.isInt32())   return v.getInt32() != 0;
+            if (v.isInt64())   return v.getInt64() != 0;
+            if (v.isFloat32()) return v.getFloat32() != 0.0f;
+            if (v.isFloat64()) return v.getFloat64() != 0.0;
+            if (v.isString())  return ! v.getString().empty() && v.getString() != "0" && v.getString() != "false";
+            return true;
+        }
+
+        int numberAt (const osc::Values& values, std::size_t at, int otherwise)
+        {
+            if (at >= values.size())
+                return otherwise;
+
+            const auto& v = values[at];
+
+            if (v.isInt32())   return v.getInt32();
+            if (v.isInt64())   return static_cast<int> (v.getInt64());
+            if (v.isFloat32()) return static_cast<int> (std::lround (v.getFloat32()));
+            if (v.isFloat64()) return static_cast<int> (std::lround (v.getFloat64()));
+            if (v.isBool())    return v.getBool() ? 1 : 0;
+            if (v.isString())  return std::atoi (v.getString().c_str());
+            return otherwise;
+        }
+
+        std::string textAt (const osc::Values& values, std::size_t at)
+        {
+            if (at >= values.size())
+                return {};
+
+            const auto& v = values[at];
+
+            if (v.isString())  return v.getString();
+            if (v.isInt32())   return std::to_string (v.getInt32());
+            if (v.isInt64())   return std::to_string (v.getInt64());
+            if (v.isFloat32()) return osc::formatFloat (v.getFloat32());
+            if (v.isFloat64()) return osc::formatDouble (v.getFloat64());
+            return {};
+        }
+
+        std::uint8_t seven (int value)
+        {
+            return static_cast<std::uint8_t> (std::clamp (value, 0, 127));
+        }
+
+        std::optional<std::uint8_t> hexByte (const std::string& token)
+        {
+            if (token.size() != 2 || ! std::isxdigit (static_cast<unsigned char> (token[0]))
+                  || ! std::isxdigit (static_cast<unsigned char> (token[1])))
+                return std::nullopt;
+
+            return static_cast<std::uint8_t> (std::strtol (token.c_str(), nullptr, 16));
+        }
+
+        /*  A cue number as MSC spells it: the digits and the dots, ASCII. */
+        void appendCue (Bytes& out, const std::string& cue)
+        {
+            for (const char c : cue)
+                if ((c >= '0' && c <= '9') || c == '.')
+                    out.push_back (static_cast<std::uint8_t> (c));
+        }
+    }
+
+    std::vector<std::vector<std::uint8_t>> renderMidi (const MidiShape& shape, const osc::Values& values,
+                                                        int baseChannel, int mscDevice, int mscFormat)
+    {
+        std::vector<Bytes> out;
+        const auto channel = std::clamp (shape.channel > 0 ? shape.channel : baseChannel + shape.offset, 1, 16);
+        const auto nibble = static_cast<std::uint8_t> (channel - 1);
+        const auto status = [nibble] (int kind) { return static_cast<std::uint8_t> (kind | nibble); };
+
+        if (shape.kind == "pc")
+        {
+            const auto number = (shape.program >= 0 ? shape.program : numberAt (values, 0, shape.start)) - shape.start;
+            const auto counted = std::max (0, number);
+
+            if (shape.banked)
+                out.push_back ({ status (0xB0), 0x00, seven (counted / 128) });
+
+            out.push_back ({ status (0xC0), seven (shape.banked ? counted % 128 : counted) });
+        }
+        else if (shape.kind == "note")
+        {
+            out.push_back ({ status (0x90), seven (shape.note), seven (switchedOn (values) ? shape.on : shape.off) });
+
+            if (shape.release)
+                out.push_back ({ status (0x90), seven (shape.note), 0x00 });
+        }
+        else if (shape.kind == "cc")
+        {
+            out.push_back ({ status (0xB0), seven (shape.cc), seven (numberAt (values, 0, 0)) });
+        }
+        else if (shape.kind == "nrpn")
+        {
+            const auto data = shape.hasOnOff ? (switchedOn (values) ? shape.on : shape.off) : numberAt (values, 0, 0);
+            out.push_back ({ status (0xB0), 0x63, seven (shape.msb) });
+            out.push_back ({ status (0xB0), 0x62, seven (shape.lsb) });
+
+            if (shape.bits == 14)
+            {
+                const auto whole = std::clamp (data, 0, 16383);
+                out.push_back ({ status (0xB0), 0x06, static_cast<std::uint8_t> ((whole >> 7) & 0x7F) });
+                out.push_back ({ status (0xB0), 0x26, static_cast<std::uint8_t> (whole & 0x7F) });
+            }
+            else
+            {
+                out.push_back ({ status (0xB0), 0x06, seven (data) });
+
+                if (shape.fine >= 0)
+                    out.push_back ({ status (0xB0), 0x26, seven (shape.fine) });
+            }
+        }
+        else if (shape.kind == "sysex")
+        {
+            Bytes bytes;
+
+            for (const auto& token : shape.bytes)
+            {
+                if (const auto byte = hexByte (token))
+                {
+                    bytes.push_back (*byte);
+                }
+                else if (token == "N")
+                {
+                    bytes.push_back (nibble);
+                }
+                else if (token.rfind ("N+", 0) == 0)
+                {
+                    bytes.push_back (static_cast<std::uint8_t> ((nibble + std::atoi (token.c_str() + 2)) & 0x0F));
+                }
+                else if (token == "V")
+                {
+                    bytes.push_back (seven (numberAt (values, 0, 0)));
+                }
+                else if (token == "V14")
+                {
+                    const auto whole = std::clamp (numberAt (values, 0, 0), 0, 16383);
+                    bytes.push_back (static_cast<std::uint8_t> ((whole >> 7) & 0x7F));
+                    bytes.push_back (static_cast<std::uint8_t> (whole & 0x7F));
+                }
+                else if (token == "S")
+                {
+                    for (const char c : textAt (values, 0))
+                        bytes.push_back (static_cast<std::uint8_t> (c) & 0x7F);
+                }
+            }
+
+            if (! bytes.empty())
+                out.push_back (std::move (bytes));
+        }
+        else if (shape.kind == "msc")
+        {
+            Bytes bytes { 0xF0, 0x7F, seven (mscDevice), 0x02, seven (mscFormat), seven (shape.command) };
+            std::size_t cueAt = 0;
+
+            switch (shape.command)
+            {
+                case 0x04:      // Timed Go: hours, minutes, seconds, frames, fractions, then the cue
+                    for (std::size_t at = 0; at < 5; ++at)
+                        bytes.push_back (seven (numberAt (values, at, 0)));
+                    cueAt = 5;
+                    break;
+
+                case 0x06:      // Set: the control number and the value, each low byte first
+                {
+                    const auto control = std::clamp (numberAt (values, 0, 0), 0, 16383);
+                    const auto value = std::clamp (numberAt (values, 1, 0), 0, 16383);
+                    bytes.push_back (static_cast<std::uint8_t> (control & 0x7F));
+                    bytes.push_back (static_cast<std::uint8_t> ((control >> 7) & 0x7F));
+                    bytes.push_back (static_cast<std::uint8_t> (value & 0x7F));
+                    bytes.push_back (static_cast<std::uint8_t> ((value >> 7) & 0x7F));
+                    cueAt = values.size();
+                    break;
+                }
+
+                case 0x07:      // Fire: the macro
+                    bytes.push_back (seven (numberAt (values, 0, 0)));
+                    cueAt = values.size();
+                    break;
+
+                case 0x08:
+                case 0x09:
+                case 0x0A:      // All Off, Restore, Reset: nothing
+                    cueAt = values.size();
+                    break;
+
+                default:        // Go, Stop, Resume, Load, Go Off: the cue, the list, the path
+                    break;
+            }
+
+            if (cueAt < values.size())
+            {
+                appendCue (bytes, textAt (values, cueAt));
+
+                for (auto at = cueAt + 1; at < std::min (values.size(), cueAt + 3); ++at)
+                    if (const auto part = textAt (values, at); ! part.empty())
+                    {
+                        bytes.push_back (0x00);
+                        appendCue (bytes, part);
+                    }
+            }
+
+            bytes.push_back (0xF7);
+            out.push_back (std::move (bytes));
         }
 
         return out;
