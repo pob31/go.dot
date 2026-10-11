@@ -3099,10 +3099,15 @@
       </optional>
       <optional>
         <attribute name="readback">
-          <a:documentation>Whether this target can be ASKED what a value is, and how. Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. None is the default because it is true of most devices: OSCQuery was never standardised, and a mounted namespace is usually hand-written for a box that will never answer. A verified cue aimed at a none is refused when the show loads, which is the whole point of declaring it.</a:documentation>
+          <a:documentation>Whether this target can be ASKED what a value is, and how, or TELLS without being asked (namespace draft 57, AFL, DP.10). Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. oscquery: asked over HTTP at its query port. get: asked on the wire, the bare address with no atoms or the file-s GET line, answered at the same address - Holophonix, a DS100. notify: a Yamaha console-s get line answered with OK, and its NOTIFY lines heard on their own. xremote: an X32-s or M32-s /xremote sent every nine seconds while rx is on, after which it tells every change. subscribe: the file-s SUBSCRIBE line sent the same way - an Eos. midi: a console-s echoes on the midi wire, read by its nodes- shapes. The last three tell and are never asked; a verified cue aimed at one is refused as at a none. None is the default because it is true of most devices: a mounted namespace is usually hand-written for a box that will never answer.</a:documentation>
           <choice>
             <value>none</value>
             <value>oscquery</value>
+            <value>notify</value>
+            <value>xremote</value>
+            <value>subscribe</value>
+            <value>get</value>
+            <value>midi</value>
           </choice>
         </attribute>
       </optional>

@@ -227,6 +227,13 @@ namespace wfg::tree
                              const std::string& address, const osc::Values&,
                              const std::string& owner = {});
 
+        /*  Asks the device what a node holds (DP.10): a question in the queue
+            under its own key, so a write of the same address this tick is
+            neither replaced nor delayed by it. The answer comes back as the
+            device's own report, heard, and serve turns it into the read-back
+            the asker waits on. */
+        std::uint64_t queueQuery (const std::string& mountId, const Destination&, const std::string& address);
+
         /** One value: a node of one argument. */
         std::uint64_t queue (const std::string& mountId, const Destination& destination,
                              const std::string& address, const osc::Value& value,
@@ -289,6 +296,13 @@ namespace wfg::tree
             std::string address;
             osc::Values values;     // every argument of the message (§45)
             std::string owner;
+
+            /*  A QUESTION, NOT A WRITE (namespace draft §57, AFL; DP.10): the
+                address asked about, rendered as the device's wire asks - the
+                bare address or the file's GET template on the osc wire, a
+                `get` line on the rcp wire - and kept apart from a write of the
+                same address in the queue, the cap and the count. */
+            bool query = false;
         };
 
         /*  One message as a datagram of its own, and one device's messages of

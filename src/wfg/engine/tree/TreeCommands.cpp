@@ -191,6 +191,19 @@ namespace wfg::tree
         if (declaration->wire == "midi" && declaration->transport == "serial")
             return refuse ("the midi wire does not ride a serial port - a MIDI port, a connection or a datagram");
 
+        /*  HOW IT IS HEARD BACK (namespace draft §57, AFL; DP.10): each word
+            belongs to a wire, and a word on the wrong one would wait for an
+            answer that cannot come. */
+        if ((declaration->readback == "get" || declaration->readback == "xremote" || declaration->readback == "subscribe")
+              && declaration->wire != "osc")
+            return refuse ("readback " + declaration->readback + " is an OSC device's way - set the wire to osc");
+
+        if (declaration->readback == "notify" && declaration->wire != "rcp")
+            return refuse ("readback notify is a Yamaha console's NOTIFY on the rcp wire - set the wire to rcp");
+
+        if (declaration->readback == "midi" && declaration->wire != "midi")
+            return refuse ("readback midi is a console's echoes on the midi wire - set the wire to midi");
+
         /*  A MIDI PORT (DP.9): one of the show's, bound or not - an unbound
             port fails the cue as a MIDI cue's does, `no-port` - and nothing
             but the midi wire goes down it. */

@@ -47,6 +47,7 @@
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/serial/TcpLink.h>
 #include <wfg/engine/tree/Wires.h>
+#include <wfg/engine/tree/MidiEchoes.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -3636,6 +3637,15 @@ namespace
             are, and for the same reason. */
         wfg::serial::SerialTable links { wfg::serial::openTcpLink };
 
+        /*  AND WHAT A MIDI CONSOLE SAYS BACK (namespace draft §57, AFL; DP.10):
+            its echoes decoded by the shapes its nodes declared, learned again
+            whenever the mount table changes shape, fed from the link's raw
+            packets on the tick and from a MIDI port's input on its own thread. */
+        wfg::tree::MidiEchoes echoes;
+        std::uint64_t echoesLearnedAt = 0;
+        auto echoPorts = std::make_shared<const std::map<std::string, std::vector<std::string>>>();
+        std::mutex echoPortsGuard;
+
         /*  THE DEVICE PRESETS beside the binary (namespace draft §57, AFN), read
             once at start: what the Network tab's ADD menu offers, and what
             mount.createFromPreset copies into the show. Serve only: a replay
@@ -4685,11 +4695,26 @@ namespace
             And what the surfaces decline is kept for the process cues whose patch
             listens on that port (namespace draft §51, PC.3) - a copy, so the
             triggers still hear it. */
-        midiIn.setConsumer ([bridge = surfaceBridge, &processMidi] (const std::string& portId,
-                                                                    const wfg::midi::Bytes& message)
+        midiIn.setConsumer ([bridge = surfaceBridge, &processMidi, &echoes, &echoPorts, &echoPortsGuard, &heardBox]
+                            (const std::string& portId, const wfg::midi::Bytes& message)
                             {
                                 if (bridge->arrived (portId, message))
                                     return true;
+
+                                /*  A CONSOLE ON THIS PORT WITH RX ON (DP.10) is
+                                    heard: its echoes, by its shapes, kept as
+                                    its reports for the tick to log. */
+                                std::shared_ptr<const std::map<std::string, std::vector<std::string>>> ports;
+                                {
+                                    const std::lock_guard<std::mutex> held (echoPortsGuard);
+                                    ports = echoPorts;
+                                }
+
+                                if (const auto found = ports->find (portId); found != ports->end())
+                                    for (const auto& mountId : found->second)
+                                        for (const auto& heard : echoes.feed (mountId, message))
+                                            heardBox.takeFrom (mountId, heard.address, heard.values);
+
                                 processMidi.push (portId, message);
                                 return false;
                             });
@@ -5183,7 +5208,51 @@ namespace
                                          wfg::osc::Value::string (said.mountId),
                                          wfg::osc::Value::string (said.address) };
                                      heardArgs.insert (heardArgs.end(), said.values.begin(), said.values.end());
+
+                                     /*  AND THE ANSWER SOMEBODY WAITS FOR (namespace
+                                         draft §57, AFL; DP.10): a device asked on
+                                         the wire answers as a report of its own,
+                                         and the one a verified cue is waiting on is
+                                         the read-back too - both logged, so a
+                                         replay reaches the same verdict. */
+                                     if (runner.awaitsReadback (said.mountId, said.address))
+                                         engine.submit ("mount:" + said.mountId, "mount.readback", heardArgs);
+
                                      engine.submit ("mount:" + said.mountId, "mount.heard", std::move (heardArgs));
+                                 }
+
+                                 /*  WHAT THE DEVICES THAT TELL NEED TOLD (DP.10):
+                                     every nine seconds, an X32's /xremote, which
+                                     it keeps for ten, and a subscription the
+                                     file spells; a MIDI console's shapes learned
+                                     again when the table changed. */
+                                 if (tickIndex % 450 == 0)
+                                     for (const auto& mountId : wfg::tree::declaredMountIds (document))
+                                     {
+                                         const auto* declaration = mounts.declarationOf (mountId);
+
+                                         if (declaration == nullptr || ! declaration->rx || ! mounts.isLoaded (mountId))
+                                             continue;
+
+                                         if (declaration->readback == "xremote")
+                                             sender.queue (mountId, wfg::tree::MountSender::destinationFor (*declaration), "/xremote", wfg::osc::Values {});
+                                         else if (declaration->readback == "subscribe")
+                                             if (const auto line = mounts.subscribeTemplateOf (mountId); ! line.empty())
+                                                 if (const auto parsed = wfg::tree::wire::parseSubscribe (line))
+                                                     sender.queue (mountId, wfg::tree::MountSender::destinationFor (*declaration),
+                                                                   parsed->first, parsed->second);
+                                     }
+
+                                 if (echoesLearnedAt != mounts.revision())
+                                 {
+                                     echoesLearnedAt = mounts.revision();
+
+                                     for (const auto& mountId : wfg::tree::declaredMountIds (document))
+                                         if (const auto* declaration = mounts.declarationOf (mountId);
+                                             declaration != nullptr && declaration->wire == "midi" && mounts.isLoaded (mountId))
+                                             echoes.learn (mountId, mounts.nodesOf (mountId), declaration->midiChannel);
+                                         else
+                                             echoes.forget (mountId);
                                  }
 
                                  /*  WHAT TO LISTEN TO, from what is armed: the
@@ -5217,9 +5286,25 @@ namespace
                                      (namespace draft §57, DP.6), the same way,
                                      under the origin `link:<id>`. */
                                  for (auto& [mountId, packets] : links.takePackets (64))
+                                 {
+                                     /*  A MIDI CONSOLE'S ECHOES down its link (DP.10),
+                                         raw bytes, by its shapes; an OSC packet as
+                                         before. */
+                                     const auto* declaration = mounts.declarationOf (mountId);
+
+                                     if (declaration != nullptr && declaration->wire == "midi")
+                                     {
+                                         if (declaration->rx)
+                                             for (const auto& bytes : packets)
+                                                 for (const auto& heard : echoes.feed (mountId, bytes))
+                                                     heardBox.takeFrom (mountId, heard.address, heard.values);
+                                         continue;
+                                     }
+
                                      for (const auto& bytes : packets)
                                          if (const auto decoded = wfg::osc::decode (bytes.data(), bytes.size()); decoded.ok)
                                              nameSpace.write ("link:" + mountId, decoded.packet);
+                                 }
 
                                  /*  AND THE LINES A CONSOLE SAID DOWN ITS LINK (the
                                      rcp wire, namespace draft §57, DP.7): NOTIFY is
@@ -5250,7 +5335,11 @@ namespace
 
                                          if (const auto said = wfg::tree::wire::parseRcpLine (line))
                                          {
-                                             if (said->word == "NOTIFY")
+                                             /*  A NOTIFY is the console reporting; an
+                                                 OK to a get is its answer, the same
+                                                 report with the value after the
+                                                 indexes (DP.10). */
+                                             if (said->word == "NOTIFY" || (said->word == "OK" && said->verb == "get"))
                                              {
                                                  for (const auto& address : wfg::tree::wire::rcpAddressesOf (*said))
                                                      if (mounts.nodeAt (address) != nullptr)
@@ -5448,9 +5537,10 @@ namespace
             PC.11 found it (namespace draft §51): a show opened with a device
             whose rx is on heard nothing from it, and strict senders let
             everyone in, until somebody edited something. */
-        const auto publishHearing = [&document, &senders, &heardBox]
+        const auto publishHearing = [&document, &senders, &heardBox, &echoPorts, &echoPortsGuard]
         {
             auto rule = std::make_shared<wfg::osc::Allowed>();
+            auto portsOfEchoes = std::make_shared<std::map<std::string, std::vector<std::string>>>();
             rule->strict = document.getAttribute (
                                "/godot/network/strictSenders")
                              .value_or (std::string ("false")) == "true";
@@ -5491,6 +5581,16 @@ namespace
                     continue;
                 }
 
+                /*  AND ONE ON A MIDI PORT (DP.10) by its port: its
+                    echoes are its reports, the consumer's to keep. */
+                if (document.getAttribute (base + "transport").value_or (std::string ("udp")) == "midi")
+                {
+                    const auto port = document.getAttribute (base + "midiPort").value_or (std::string {});
+                    if (! port.empty())
+                        (*portsOfEchoes)[port].push_back (mountId);
+                    continue;
+                }
+
                 const auto host = document.getAttribute (base + "host")
                                     .value_or (std::string ("127.0.0.1"));
 
@@ -5505,6 +5605,10 @@ namespace
 
             senders.publish (std::move (rule));
             heardBox.publish (std::move (hearing));
+            {
+                const std::lock_guard<std::mutex> held (echoPortsGuard);
+                echoPorts = std::move (portsOfEchoes);
+            }
         };
         publishHearing();
 

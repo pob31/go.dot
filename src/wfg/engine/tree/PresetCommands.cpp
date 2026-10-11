@@ -93,7 +93,8 @@ namespace wfg::tree
                         " arguments are what it drew and decided, on the record for a replay.",
                         { { "slug", 's', false }, { "id", 's', true }, { "prefix", 's', true },
                           { "namespace", 's', true }, { "port", 'i', true }, { "transport", 's', true },
-                          { "version", 'i', true }, { "framing", 's', true }, { "wire", 's', true } },
+                          { "version", 'i', true }, { "framing", 's', true }, { "wire", 's', true },
+                          { "readback", 's', true } },
                         true,
                         [&document, &mounts, &bundleFolder, presets] (CommandContext&, const std::vector<osc::Value>& args)
                         {
@@ -108,7 +109,7 @@ namespace wfg::tree
                             /*  FROM THE RECORD WHEN IT HAS ONE, else from the
                                 installed preset: a replay has no table and its
                                 record says everything the live command decided. */
-                            std::string prefixRow, file, transport, framing = "length", wire = "osc";
+                            std::string prefixRow, file, transport, framing = "length", wire = "osc", readback;
                             int port = 0;
                             int version = 0;
 
@@ -125,6 +126,9 @@ namespace wfg::tree
 
                                 if (args.size() >= 9)
                                     wire = args[8].getString();
+
+                                if (args.size() >= 10)
+                                    readback = args[9].getString();
                             }
                             else if (preset != nullptr && preset->usable())
                             {
@@ -135,6 +139,7 @@ namespace wfg::tree
                                 transport = preset->transport;
                                 framing = preset->framing;
                                 wire = preset->wire;
+                                readback = preset->readback;
                             }
                             else
                             {
@@ -175,6 +180,10 @@ namespace wfg::tree
                             if (wire != "osc")
                                 writes.push_back ({ "wire", wire });
 
+                            //  And how the device is heard back, where the file says (DP.10).
+                            if (! readback.empty())
+                                writes.push_back ({ "readback", readback });
+
                             if (const auto written = writeRows (document, made.id, writes); ! written.applied)
                                 return written;
 
@@ -187,7 +196,7 @@ namespace wfg::tree
                                                   osc::Value::string (prefixRow), osc::Value::string (file),
                                                   osc::Value::int32 (port), osc::Value::string (transport),
                                                   osc::Value::int32 (version), osc::Value::string (framing),
-                                                  osc::Value::string (wire) });
+                                                  osc::Value::string (wire), osc::Value::string (readback) });
                         } });
 
         registry.add ({ "mount.refreshPreset",

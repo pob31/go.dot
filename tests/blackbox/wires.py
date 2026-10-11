@@ -43,7 +43,10 @@ negotiates as a telnet server does: the login row the first line down the
 link, the desk's answer kept printable, the cue's node rendered as the
 console's own command line from its template. Then (DP.9) a dLive from its
 preset against a mock reading raw bytes: a mute and a scene as the console's
-own MIDI messages, on its base channel.
+own MIDI messages, on its base channel. Then (DP.10) what comes back: a
+Holophonix from its preset, asked on the wire for a verified cue - the write,
+then /get with the node, the mock's answer heard and the cue ending verified -
+and the dLive mock saying a mute of its own, heard at the preset's node.
 """
 import subprocess
 import sys
@@ -61,6 +64,7 @@ DEVICE = "E0SW1RE1"        # the device this file makes, over a connection
 CONSOLE = "YAMAH4RC"       # the one it makes from the Yamaha RCP preset
 DESK = "GRANDMA2"          # and the one from the grandMA2 preset, over telnet
 DLIVE = "D7V3A001"         # and the one from the dLive preset, MIDI over TCP
+HOLO = "H7P3X001"          # and the one from the Holophonix preset, asked on the wire
 CUE = "B3N8R5TW"           # the fixture's /light/go, re-aimed at the console
 
 locale = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--wfg-locale=")), "C")
@@ -69,9 +73,9 @@ locale = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--wfg
 class MockWire:
     """`mock_target.py --transport tcp`, on ports it chose, in a process of its own."""
 
-    def __init__(self, framing: str, wire: str = "osc"):
+    def __init__(self, framing: str, wire: str = "osc", transport: str = "tcp"):
         self.process = subprocess.Popen(
-            [sys.executable, str(MOCK), "--transport=tcp", f"--framing={framing}", f"--wire={wire}"],
+            [sys.executable, str(MOCK), f"--transport={transport}", f"--framing={framing}", f"--wire={wire}"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
         line = self.process.stdout.readline().split()
@@ -337,6 +341,44 @@ def run() -> int:
                 report.check(wait_for(lambda: "BB 00 01 CB 1B" in heard_bytes()),
                              "scene 156 leaves as Bank Select 1 then Program Change 1B on the base channel",
                              f"heard {heard_bytes()!r}")
+
+                # --- and what the console says of its own (DP.10) ----------
+                send("node.set", [dlive + "rx", "true"])
+                report.check(settle(dlive + "rx", "true"), "the console's rx on, its echoes are heard")
+                heard_before = read(dlive + "heard")
+                common.http_get(ah.query_port, "/_mock/say?%9B%01%7F%9B%01%00")
+                report.check(wait_for(lambda: read(dlive + "heard") != heard_before),
+                             "a mute the console presses on its own surface is heard at the preset's node",
+                             f"heard {heard_before} -> {read(dlive + 'heard')}")
+
+            # --- a processor asked on the wire (DP.10) --------------------------
+            holo = f"/godot/mount/{HOLO}/"
+
+            with MockWire("length", transport="udp") as hx:
+                send("mount.createFromPreset", ["holophonix-osc", HOLO])
+                report.check(settle(holo + "readback", "get"),
+                             "a device made from the Holophonix preset is asked on the wire",
+                             f"readback {read(holo + 'readback')!r}, problem {read(holo + 'problem')!r}")
+                send("node.set", [holo + "port", str(hx.port)])
+                send("node.set", [holo + "rx", "true"])
+                report.check(settle(holo + "port", str(hx.port)), "pointed at the mock")
+
+                send("node.set", [f"/godot/cue/{CUE}/address", "/track/1/gain"])
+                send("node.set", [f"/godot/cue/{CUE}/value", "f:-6"])
+                send("node.set", [f"/godot/cue/{CUE}/wait", "verified"])
+                report.check(settle(f"/godot/cue/{CUE}/wait", "verified"), "the cue re-aimed at a track's gain, verified")
+
+                heard_before = read(holo + "heard")
+                send("cue.fire", [CUE])
+                report.check(wait_for(lambda: hx.ask("received") >= 2),
+                             "fired, the write leaves and the question after it",
+                             f"received {hx.ask('received')}")
+                messages = common.http_json(hx.query_port, "/_mock/messages").get("VALUE", [])
+                report.check(any(m[0] == "/get" and m[1] == ["/track/1/gain"] for m in messages),
+                             "the question as the file spells it: /get with the node as its atom", f"{messages!r}")
+                report.check(wait_for(lambda: read(holo + "heard") != heard_before),
+                             "and the processor's answer is heard", f"heard {heard_before} -> {read(holo + 'heard')}")
+                send("node.set", [f"/godot/cue/{CUE}/wait", "none"])
 
     return report.finish()
 

@@ -22,6 +22,7 @@
 #include <wfg/engine/midi/MidiSink.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 namespace wfg::tree
@@ -62,7 +63,29 @@ namespace wfg::tree
         }
 
         queuedAt[address] = queued.size();
-        queued.push_back (Message { ticket, mountId, destination, address, values, owner });
+        queued.push_back (Message { ticket, mountId, destination, address, values, owner, false });
+        return ticket;
+    }
+
+    std::uint64_t MountSender::queueQuery (const std::string& mountId, const Destination& destination,
+                                           const std::string& address)
+    {
+        const auto ticket = nextTicket++;
+        const auto key = "?" + address;
+        const auto existing = queuedAt.find (key);
+
+        if (existing != queuedAt.end())
+        {
+            auto& message = queued[existing->second];
+            outcomes.push_back ({ message.ticket, Outcome::sent, false });
+            message.ticket = ticket;
+            message.mountId = mountId;
+            message.destination = destination;
+            return ticket;
+        }
+
+        queuedAt[key] = queued.size();
+        queued.push_back (Message { ticket, mountId, destination, address, {}, {}, true });
         return ticket;
     }
 
@@ -106,7 +129,8 @@ namespace wfg::tree
         for (const auto& message : queued)
         {
             const auto interval = intervalFor (message.destination.rateCap);
-            const auto last = lastSentAt.find (message.address);
+            const auto key = message.query ? "?" + message.address : message.address;
+            const auto last = lastSentAt.find (key);
 
             /*  A MESSAGE THE RATE CAP HOLDS STAYS OUT OF THE BUNDLE, in its
                 place in the queue: it goes in a later flush's. */
@@ -117,11 +141,11 @@ namespace wfg::tree
                 continue;
             }
 
-            lastSentAt[message.address] = flushes;
+            lastSentAt[key] = flushes;
 
             /*  AND ONLY THE OSC WIRE BUNDLES (AFJ): a line of text has no
                 bundle to travel in, whatever the device's row says. */
-            if (message.destination.bundles && message.destination.wire == "osc")
+            if (message.destination.bundles && message.destination.wire == "osc" && ! message.query)
             {
                 auto device = std::find_if (bundled.begin(), bundled.end(),
                                             [&message] (const auto& entry) { return entry.first == message.mountId; });
@@ -146,7 +170,7 @@ namespace wfg::tree
         queuedAt.clear();
 
         for (std::size_t index = 0; index < queued.size(); ++index)
-            queuedAt[queued[index].address] = index;
+            queuedAt[queued[index].query ? "?" + queued[index].address : queued[index].address] = index;
 
         forgetOldAnswers();
     }
@@ -162,10 +186,93 @@ namespace wfg::tree
         return udp != nullptr && to.port > 0 && udp->send (to.host, to.port, bytes);
     }
 
+    namespace
+    {
+        /*  A TEMPLATE'S ATOMS (DP.10): after the address, each word an atom -
+            `{address}` the node asked about, a whole number an int32, a number
+            with a dot a float32, anything else a string. */
+        osc::Values atomsOf (const std::vector<std::string>& words, const std::string& asked)
+        {
+            osc::Values out;
+
+            for (std::size_t at = 1; at < words.size(); ++at)
+            {
+                const auto& word = words[at];
+
+                if (word == "{address}")
+                    out.push_back (osc::Value::string (asked));
+                else if (! word.empty() && std::all_of (word.begin(), word.end(), [] (unsigned char c) { return std::isdigit (c) != 0; }))
+                    out.push_back (osc::Value::int32 (std::atoi (word.c_str())));
+                else if (word.find ('.') != std::string::npos && osc::parseDouble (word).has_value())
+                    out.push_back (osc::Value::float32 (static_cast<float> (*osc::parseDouble (word))));
+                else
+                    out.push_back (osc::Value::string (word));
+            }
+
+            return out;
+        }
+
+        std::vector<std::string> wordsOf (const std::string& text)
+        {
+            std::vector<std::string> out;
+            std::string current;
+
+            for (const char c : text)
+            {
+                if (c == ' ' || c == '\t')
+                {
+                    if (! current.empty())
+                        out.push_back (current);
+                    current.clear();
+                }
+                else
+                {
+                    current.push_back (c);
+                }
+            }
+
+            if (! current.empty())
+                out.push_back (current);
+
+            return out;
+        }
+    }
+
     void MountSender::sendAlone (const Message& message)
     {
         auto ok = false;
         std::string error;
+
+        /*  A QUESTION (DP.10), by the wire: the rcp wire's `get` with the
+            node's indexes and no value; the osc wire's bare address, or the
+            file's GET template with the address as its atom. Other wires have
+            no question to ask. */
+        if (message.query)
+        {
+            if (message.destination.wire == "rcp")
+            {
+                wire::RcpSpec spec;
+                spec.verb = "get";
+
+                if (const auto* node = mounts != nullptr ? mounts->nodeAt (message.address) : nullptr; node != nullptr)
+                    spec.indexes = node->rcpIndexes;
+
+                const auto line = wire::renderRcp (message.address, {}, spec);
+                ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));
+            }
+            else if (message.destination.wire == "osc")
+            {
+                const auto words = wordsOf (mounts != nullptr ? mounts->getTemplateOf (message.mountId) : std::string {});
+                const auto address = words.empty() ? message.address : words[0];
+                const auto values = words.empty() ? osc::Values {} : atomsOf (words, message.address);
+
+                if (const auto bytes = osc::encode (osc::Packet::message (address, values), error))
+                    ok = deliver (message.destination, *bytes);
+            }
+
+            outcomes.push_back ({ message.ticket, ok ? Outcome::sent : Outcome::failed, false });
+            return;
+        }
 
         /*  Encoded here rather than at queue time, because a coalesced address
             is encoded once however many times it was written - which is the
@@ -334,7 +441,7 @@ namespace wfg::tree
         queuedAt.clear();
 
         for (std::size_t index = 0; index < queued.size(); ++index)
-            queuedAt[queued[index].address] = index;
+            queuedAt[queued[index].query ? "?" + queued[index].address : queued[index].address] = index;
 
         forgetOldAnswers();
         return dropped;

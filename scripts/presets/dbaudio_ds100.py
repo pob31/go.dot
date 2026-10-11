@@ -198,7 +198,7 @@ def main():
     tree = root("/dbaudio1", "d&b Soundscape: a DS100 or DS100M over OSC, %d sound objects and %d outputs, four mapping areas, En-Space, "
                              "the scenes, %s the matrix crosspoints. It listens on UDP 50010 and answers on 50011." % (objects, outputs, crosspoints),
                 "dbaudio-ds100-osc", "d&b audiotechnik", "DS100, DS100M (OSC)", SOURCES, "scripts/presets/dbaudio_ds100.py",
-                transport="udp", port=50010, version=2, contents=contents)
+                transport="udp", port=50010, version=2, contents=contents, readback="get")
     write(tree, "dbaudio-ds100-osc", args.out)
     return 0
 

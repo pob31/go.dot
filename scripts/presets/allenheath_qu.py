@@ -127,7 +127,7 @@ def main():
                      "DCA masters, the mute groups and the scene recall; the device's midiChannel row is the Qu's MIDI "
                      "channel. %d inputs." % args.inputs,
                 "allenheath-qu-midi", "Allen & Heath", "Qu (MIDI over TCP)", SOURCES, "scripts/presets/allenheath_qu.py",
-                transport="tcp", wire="midi", port=51325, contents=contents)
+                transport="tcp", wire="midi", port=51325, contents=contents, readback="midi")
     write(tree, "allenheath-qu-midi", args.out)
     return 0
 

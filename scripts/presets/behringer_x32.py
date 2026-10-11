@@ -107,7 +107,7 @@ def main():
     tree = root("/", "A Behringer X32 or Midas M32 over OSC on UDP 10023: every strip's mix and scribble, the sends, the mute "
                      "groups, the DCAs, and the scene, snippet and cue recalls. Faders are 0 to 1 on the console's own law.",
                 "behringer-x32-osc", "Behringer, Midas", "X32, M32 (OSC)", SOURCES, "scripts/presets/behringer_x32.py",
-                transport="udp", port=10023, contents=contents)
+                transport="udp", port=10023, contents=contents, readback="xremote")
     write(tree, "behringer-x32-osc", args.out)
     return 0
 

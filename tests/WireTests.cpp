@@ -23,7 +23,9 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/tree/Wires.h>
+#include <wfg/engine/tree/MountSender.h>
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -367,4 +369,225 @@ TEST_CASE ("wire: MIDI Show Control - the frame, the cue number as text with its
     auto allOff = shapeOf ("msc");
     allOff.command = 0x08;
     CHECK (renderMidi (allOff, { osc::Value::string ("ignored") }, 1, 127, 127) == std::vector<Bytes> { { 0xF0, 0x7F, 0x7F, 0x02, 0x7F, 0x08, 0xF7 } });
+}
+
+//==============================================================================
+/*  DP.10: WHAT COMES BACK - a console's echoes on the MIDI wire read by the
+    shapes its nodes declared, and a subscription line taken apart. */
+
+#include <wfg/engine/tree/MidiEchoes.h>
+
+namespace
+{
+    tree::Node echoNode (const char* address, const char* kind, int a, int b = 0, int c = 0, int d = 0)
+    {
+        tree::Node node;
+        node.address = address;
+        node.midi.kind = kind;
+
+        if (std::string (kind) == "note")
+        {
+            node.midi.note = a;
+            node.midi.offset = b;
+            node.midi.on = 0x7F;
+            node.midi.off = 0x3F;
+            node.midi.hasOnOff = true;
+        }
+        else if (std::string (kind) == "nrpn")
+        {
+            node.midi.msb = a;
+            node.midi.lsb = b;
+            node.midi.bits = c == 0 ? 7 : c;
+            node.midi.offset = d;
+        }
+        else if (std::string (kind) == "cc")
+        {
+            node.midi.cc = a;
+        }
+
+        return node;
+    }
+}
+
+TEST_CASE ("echo: a console's mute and fader come back as its nodes' values, through running status and any cut of the stream")
+{
+    const auto mute = echoNode ("/input/1/mute", "note", 0);
+    const auto aux = echoNode ("/aux/3/mute", "note", 2, 2);
+    const auto fader = echoNode ("/input/1/fader", "nrpn", 0, 0x17);
+    const auto dca = echoNode ("/dca/1/fader", "nrpn", 0x36, 0x17, 7, 4);
+
+    tree::MidiEchoes echoes;
+    echoes.learn ("DESK0001", { &mute, &aux, &fader, &dca }, 12);
+
+    //  The document's own strings: 9B 00 7F then its release, which says nothing.
+    auto heard = echoes.feed ("DESK0001", { 0x9B, 0x00, 0x7F, 0x9B, 0x00, 0x00 });
+    REQUIRE (heard.size() == 1u);
+    CHECK (heard[0].address == "/input/1/mute");
+    REQUIRE (heard[0].values.size() == 1u);
+    CHECK (heard[0].values[0].isBool());
+    CHECK (heard[0].values[0].getBool());
+
+    //  Running status: the next note on the same channel without its status byte; 3F is off.
+    heard = echoes.feed ("DESK0001", { 0x9B, 0x00, 0x3F, 0x00, 0x00 });
+    REQUIRE (heard.size() == 1u);
+    CHECK_FALSE (heard[0].values[0].getBool());
+
+    //  Aux 3 is on N+2, note 02; input 3 on N, note 02, is nobody's.
+    heard = echoes.feed ("DESK0001", { 0x9D, 0x02, 0x7F, 0x9B, 0x02, 0x7F });
+    REQUIRE (heard.size() == 1u);
+    CHECK (heard[0].address == "/aux/3/mute");
+
+    //  A fader as three Control Changes, cut anywhere.
+    heard = echoes.feed ("DESK0001", { 0xBB, 0x63, 0x00, 0xBB });
+    CHECK (heard.empty());
+    heard = echoes.feed ("DESK0001", { 0x62, 0x17, 0xBB, 0x06, 0x62 });
+    REQUIRE (heard.size() == 1u);
+    CHECK (heard[0].address == "/input/1/fader");
+    CHECK (heard[0].values[0].getInt32() == 0x62);
+
+    //  The DCA on N+4 at note 36; a System Exclusive in between is skipped whole.
+    heard = echoes.feed ("DESK0001", { 0xF0, 0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00, 0x0B, 0x03, 0x05, 0x56, 0xF7,
+                                       0xBF, 0x63, 0x36, 0x62, 0x17, 0x06, 0x50 });
+    REQUIRE (heard.size() == 1u);
+    CHECK (heard[0].address == "/dca/1/fader");
+    CHECK (heard[0].values[0].getInt32() == 0x50);
+
+    //  Forgotten, it hears nothing; a mount never learned hears nothing.
+    echoes.forget ("DESK0001");
+    CHECK (echoes.feed ("DESK0001", { 0x9B, 0x00, 0x7F }).empty());
+    CHECK (echoes.feed ("NOBODY01", { 0x9B, 0x00, 0x7F }).empty());
+}
+
+TEST_CASE ("echo: the SQ's 14-bit levels and switches wait for their fine byte; a Control Change is its own node")
+{
+    auto level = echoNode ("/input/1/lr/level", "nrpn", 0x40, 0x00, 14);
+    auto mute = echoNode ("/input/1/mute", "nrpn", 0x00, 0x00, 14);
+    mute.midi.hasOnOff = true;
+    mute.midi.on = 1;
+    mute.midi.off = 0;
+    const auto cc = echoNode ("/cc/7", "cc", 7);
+
+    tree::MidiEchoes echoes;
+    echoes.learn ("SQ000001", { &level, &mute, &cc }, 1);
+
+    auto heard = echoes.feed ("SQ000001", { 0xB0, 0x63, 0x40, 0xB0, 0x62, 0x00, 0xB0, 0x06, 0x76 });
+    CHECK (heard.empty());
+    heard = echoes.feed ("SQ000001", { 0xB0, 0x26, 0x5C });
+    REQUIRE (heard.size() == 1u);
+    CHECK (heard[0].address == "/input/1/lr/level");
+    CHECK (heard[0].values[0].getInt32() == ((0x76 << 7) | 0x5C));
+
+    heard = echoes.feed ("SQ000001", { 0xB0, 0x63, 0x00, 0xB0, 0x62, 0x00, 0xB0, 0x06, 0x00, 0xB0, 0x26, 0x01 });
+    REQUIRE (heard.size() == 1u);
+    CHECK (heard[0].address == "/input/1/mute");
+    CHECK (heard[0].values[0].getBool());
+
+    heard = echoes.feed ("SQ000001", { 0xB0, 0x07, 0x64 });
+    REQUIRE (heard.size() == 1u);
+    CHECK (heard[0].address == "/cc/7");
+    CHECK (heard[0].values[0].getInt32() == 100);
+
+    //  A Program Change names no node, and a note nobody declared is dropped.
+    CHECK (echoes.feed ("SQ000001", { 0xC0, 0x05, 0x90, 0x40, 0x7F }).empty());
+}
+
+TEST_CASE ("wire: a subscription line is an address and its atoms, and nothing when it is not one")
+{
+    const auto eos = parseSubscribe ("/eos/subscribe 1");
+    REQUIRE (eos.has_value());
+    CHECK (eos->first == "/eos/subscribe");
+    REQUIRE (eos->second.size() == 1u);
+    CHECK (eos->second[0].isInt32());
+    CHECK (eos->second[0].getInt32() == 1);
+
+    const auto bare = parseSubscribe ("/*s");
+    REQUIRE (bare.has_value());
+    CHECK (bare->first == "/*s");
+    CHECK (bare->second.empty());
+
+    const auto mixed = parseSubscribe ("/sub 0.5 name");
+    REQUIRE (mixed.has_value());
+    CHECK (mixed->second[0].isFloat32());
+    CHECK (mixed->second[1].getString() == "name");
+
+    CHECK_FALSE (parseSubscribe ("").has_value());
+    CHECK_FALSE (parseSubscribe ("subscribe 1").has_value());
+}
+
+//==============================================================================
+/*  M60 (namespace draft §57.6): the cost of a flush that renders thirty-two
+    NRPN faders and thirty-two RCP lines, on the tick thread - the wires'
+    rendering is the only new work a flush does since DP.7, and a tick is
+    twenty milliseconds. Reported, not asserted against a figure: the Debug
+    binary this runs in says what the ceiling is, not what Release costs. */
+TEST_CASE ("M60: a flush of thirty-two NRPN faders and thirty-two RCP lines, timed")
+{
+    tree::MountTable mounts;
+
+    tree::MountDeclaration desk;
+    desk.id = "DESK0001";
+    desk.prefix = "/input";
+    desk.namespaceFile = "namespaces/desk.json";
+    desk.transport = "tcp";
+    desk.wire = "midi";
+    desk.host = "10.0.0.3";
+    desk.port = 51325;
+    desk.midiChannel = 12;
+
+    std::string inputs = R"JSON({"FULL_PATH": "/input", "CONTENTS": {)JSON";
+    for (int n = 1; n <= 32; ++n)
+        inputs += (n > 1 ? "," : "") + std::string ("\"") + std::to_string (n) + R"JSON(": {"FULL_PATH": "/input/)JSON" + std::to_string (n)
+                  + R"JSON(", "CONTENTS": {"fader": {"FULL_PATH": "/input/)JSON" + std::to_string (n)
+                  + R"JSON(/fader", "TYPE": "i", "ACCESS": 3, "VALUE": [0], "GODOT": {"MIDI": {"KIND": "nrpn", "MSB": )JSON"
+                  + std::to_string (n - 1) + R"JSON(, "LSB": 23, "BITS": 7}}}}})JSON";
+    inputs += "}}";
+    REQUIRE (mounts.load (desk, inputs).ok);
+
+    tree::MountDeclaration yamaha;
+    yamaha.id = "YAMA0001";
+    yamaha.prefix = "/MIXER:Current";
+    yamaha.namespaceFile = "namespaces/yamaha.json";
+    yamaha.transport = "tcp";
+    yamaha.wire = "rcp";
+    yamaha.host = "10.0.0.9";
+    yamaha.port = 49280;
+
+    std::string levels = R"JSON({"FULL_PATH": "/MIXER:Current", "CONTENTS": {"InCh": {"FULL_PATH": "/MIXER:Current/InCh", "CONTENTS": {"Fader": {"FULL_PATH": "/MIXER:Current/InCh/Fader", "CONTENTS": {"Level": {"FULL_PATH": "/MIXER:Current/InCh/Fader/Level", "CONTENTS": {)JSON";
+    for (int n = 1; n <= 32; ++n)
+        levels += (n > 1 ? "," : "") + std::string ("\"") + std::to_string (n) + R"JSON(": {"FULL_PATH": "/MIXER:Current/InCh/Fader/Level/)JSON"
+                  + std::to_string (n) + R"JSON(", "TYPE": "i", "ACCESS": 3, "VALUE": [0], "GODOT": {"RCP": {"VERB": "set", "XY": 1}}})JSON";
+    levels += "}}}}}}}}";
+    REQUIRE (mounts.load (yamaha, levels).ok);
+
+    tree::MountSender sender;
+    sender.setMounts (&mounts);
+    std::size_t delivered = 0;
+    sender.setLinkSink ([&delivered] (const std::string&, const std::vector<std::uint8_t>&) { ++delivered; return true; });
+
+    const auto toDesk = tree::MountSender::destinationFor (desk);
+    const auto toYamaha = tree::MountSender::destinationFor (yamaha);
+
+    //  Warm once, then time the flush of sixty-four messages.
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        for (int n = 1; n <= 32; ++n)
+        {
+            sender.queue ("DESK0001", toDesk, "/input/" + std::to_string (n) + "/fader", osc::Value::int32 (64 + n));
+            sender.queue ("YAMA0001", toYamaha, "/MIXER:Current/InCh/Fader/Level/" + std::to_string (n), osc::Value::int32 (-1000 + n));
+        }
+
+        delivered = 0;
+        const auto started = std::chrono::steady_clock::now();
+        sender.flush();
+        const auto took = std::chrono::duration_cast<std::chrono::microseconds> (std::chrono::steady_clock::now() - started);
+
+        //  Three messages an NRPN fader, one line a level: 96 + 32.
+        CHECK (delivered == 128u);
+
+        if (pass == 1)
+        {
+            MESSAGE ("M60: a flush of 32 NRPN faders and 32 RCP lines took " << took.count() << " us (Debug; a tick is 20000)");
+            CHECK (took < std::chrono::milliseconds (20));
+        }
+    }
 }

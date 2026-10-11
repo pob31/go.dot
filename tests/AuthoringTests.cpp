@@ -713,7 +713,7 @@ TEST_CASE ("preset command: a device from a preset copies the file once, writes 
 
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("adm-osc") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 9u);
+    REQUIRE (record.args.size() == 10u);
     const auto deviceId = record.args[1].getString();
     REQUIRE (deviceId.size() == 8u);
     CHECK (record.args[2].getString() == "/adm");
@@ -883,7 +883,7 @@ TEST_CASE ("preset command: a device from the Eos preset is reached over a conne
 
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("etc-eos-osc") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 9u);
+    REQUIRE (record.args.size() == 10u);
     const auto deviceId = record.args[1].getString();
     CHECK (record.args[2].getString() == "/eos");
     CHECK (record.args[4].getInt32() == 3032);
@@ -928,7 +928,7 @@ TEST_CASE ("preset command: a device from the Yamaha RCP preset is reached over 
 
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("yamaha-rcp") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 9u);
+    REQUIRE (record.args.size() == 10u);
     const auto deviceId = record.args[1].getString();
     CHECK (record.args[5].getString() == "tcp");
     CHECK (record.args[8].getString() == "rcp");
@@ -1076,6 +1076,50 @@ TEST_CASE ("preset command: the MIDI presets - a dLive over a connection loads a
         CHECK (preset->usable());
         CHECK (preset->wire == "midi");
     }
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("preset command: a preset that says how it is heard back gives the device its readback row, and the record keeps it")
+{
+    //  DP.10: an X32 tells through /xremote; ADM-OSC says nothing and the row stays as it was.
+    AuthoringRig rig;
+    tree::MountTable mounts;
+    const auto folder = freshBundleFolder ("wfg-presets-readback");
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, mounts, folder, &installedPresets());
+
+    const auto* x32 = installedPresets().find ("behringer-x32-osc");
+    REQUIRE (x32 != nullptr);
+    CHECK (x32->readback == "xremote");
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("behringer-x32-osc") }).applied == 1u);
+    const auto record = rig.lastRecord();
+    REQUIRE (record.args.size() == 10u);
+    const auto deviceId = record.args[1].getString();
+    CHECK (record.args[9].getString() == "xremote");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/readback") == "xremote");
+    CHECK (mounts.isLoaded (deviceId));
+
+    const auto* holo = installedPresets().find ("holophonix-osc");
+    REQUIRE (holo != nullptr);
+    CHECK (holo->readback == "get");
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("holophonix-osc") }).applied == 1u);
+    const auto holoId = rig.lastRecord().args[1].getString();
+    CHECK (rig.attribute ("/godot/mount/" + holoId + "/readback") == "get");
+    CHECK (mounts.isLoaded (holoId));
+    CHECK (mounts.getTemplateOf (holoId) == "/get {address}");
+    REQUIRE (mounts.declarationOf (holoId) != nullptr);
+    CHECK (mounts.declarationOf (holoId)->canBeAsked());
+
+    const auto* eos = installedPresets().find ("etc-eos-osc");
+    REQUIRE (eos != nullptr);
+    CHECK (eos->readback == "subscribe");
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("etc-eos-osc") }).applied == 1u);
+    const auto eosId = rig.lastRecord().args[1].getString();
+    CHECK (mounts.subscribeTemplateOf (eosId) == "/eos/subscribe 1");
+
+    const auto* adm = installedPresets().find ("adm-osc");
+    REQUIRE (adm != nullptr);
+    CHECK (adm->readback.empty());
 
     folder.deleteRecursively();
 }

@@ -182,7 +182,7 @@ def main():
                      "sends, equalizer and dynamics. Stereo and multichannel sources, buses and the master are not described: "
                      "a cue to them is refused until a later version of this preset." % args.tracks,
                 "holophonix-osc", "HOLOPHONIX", "HOLOPHONIX processor (OSC)", SOURCES, "scripts/presets/holophonix.py",
-                transport="udp", port=4003,
+                transport="udp", port=4003, readback="get", get="/get {address}",
                 contents={"track": numbered("/track", "The mono sources.", args.tracks, track)})
     write(tree, "holophonix-osc", args.out)
     return 0

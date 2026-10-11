@@ -1444,7 +1444,7 @@ namespace wfg::cue
 
     void Runner::observeAfterStep (Engine& engine, std::int64_t tick)
     {
-        if (asker == nullptr || mounts == nullptr)
+        if (mounts == nullptr || (asker == nullptr && sender_ == nullptr))
             return;
 
         /*  ONE SWEEP PER STEP, noticed by counting rather than by being told.
@@ -1488,8 +1488,8 @@ namespace wfg::cue
                     held before it. Without the count it was kept as the desk's
                     first account since the write: a Doh read the desk as
                     already back, and put nothing back. */
-                if (asker->ask ({ mountId, declaration->host, declaration->queryPort,
-                                  address, typeTag, true, mounts->writesOf (address) }))
+                if (askTarget (mountId, declaration->host, declaration->queryPort,
+                               address, typeTag, true, mounts->writesOf (address)))
                     ++asked;
             }
         }
@@ -13858,8 +13858,51 @@ namespace wfg::cue
         }
     }
 
+    bool Runner::askTarget (const std::string& mountId, const std::string& host, int queryPort,
+                            const std::string& address, const std::string& typeTag,
+                            bool observation, std::int64_t writesWhenAsked)
+    {
+        const auto* declaration = mounts != nullptr ? mounts->declarationOf (mountId) : nullptr;
+
+        if (declaration != nullptr && (declaration->readback == "get" || declaration->readback == "notify"))
+        {
+            if (sender_ == nullptr)
+                return false;
+
+            auto& last = wireAskedAt[address];
+
+            if (last != 0 && askClock - last < 25)
+                return true;
+
+            last = askClock == 0 ? 1 : askClock;
+            sender_->queueQuery (mountId, tree::MountSender::destinationFor (*declaration), address);
+            return true;
+        }
+
+        return asker != nullptr && asker->ask ({ mountId, host, queryPort, address, typeTag, observation, writesWhenAsked });
+    }
+
+    bool Runner::awaitsReadback (const std::string& mountId, const std::string& address) const
+    {
+        for (const auto& job : sending)
+        {
+            if (job.finished || job.mountId != mountId)
+                continue;
+
+            if (job.address == address)
+                return true;
+
+            for (const auto& next : job.further)
+                if (next.address == address)
+                    return true;
+        }
+
+        return false;
+    }
+
     void Runner::advanceSends (Engine& engine)
     {
+        ++askClock;
         for (auto& job : sending)
         {
             /*  SETTLED ALREADY THIS TICK, by a revocation decided before this
@@ -13986,12 +14029,8 @@ namespace wfg::cue
                     continue;
                 }
 
-                if (asker != nullptr && ! job.asked)
-                {
+                if (! job.asked && askTarget (job.mountId, job.host, job.queryPort, job.address, job.typeTag, false, -1))
                     job.asked = true;
-                    asker->ask ({ job.mountId, job.host, job.queryPort,
-                                  job.address, job.typeTag });
-                }
 
                 continue;
             }
@@ -14128,17 +14167,12 @@ namespace wfg::cue
                     unless the last question has come back. "Keep one question
                     outstanding" rather than "ask fifty times a second" - one
                     for each address still to answer. */
-                if (asker != nullptr)
-                {
-                    if (mounts == nullptr || mounts->readbackOf (job.address) == nullptr)
-                        asker->ask ({ job.mountId, job.host, job.queryPort,
-                                      job.address, job.typeTag });
+                if (mounts == nullptr || mounts->readbackOf (job.address) == nullptr)
+                    askTarget (job.mountId, job.host, job.queryPort, job.address, job.typeTag, false, -1);
 
-                    for (const auto& next : job.further)
-                        if (mounts == nullptr || mounts->readbackOf (next.address) == nullptr)
-                            asker->ask ({ job.mountId, job.host, job.queryPort,
-                                          next.address, next.typeTag });
-                }
+                for (const auto& next : job.further)
+                    if (mounts == nullptr || mounts->readbackOf (next.address) == nullptr)
+                        askTarget (job.mountId, job.host, job.queryPort, next.address, next.typeTag, false, -1);
 
                 continue;
             }

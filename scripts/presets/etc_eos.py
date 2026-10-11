@@ -138,7 +138,8 @@ def main():
                         "number, the keys, submasters, macros, presets and palettes, channel and group levels, the command line, the OSC "
                         "user and faders. %d lists of %d cues, %d submasters, %d macros, %d channels." % (args.lists, args.cues, args.subs, args.macros, args.channels),
                 "etc-eos-osc", "ETC", "Eos family (OSC over TCP)", SOURCES, "scripts/presets/etc_eos.py",
-                transport="tcp", wire="osc", framing="length", port=3032, contents=contents)
+                transport="tcp", wire="osc", framing="length", port=3032, contents=contents,
+                readback="subscribe", subscribe="/eos/subscribe 1")
     write(tree, "etc-eos-osc", args.out)
     return 0
 

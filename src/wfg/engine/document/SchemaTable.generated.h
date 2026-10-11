@@ -71,7 +71,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_mount_framing[] = { "length", "slip" };
     inline constexpr std::string_view enum_mount_wire[] = { "osc", "rcp", "line", "midi" };
     inline constexpr std::string_view enum_mount_panic[] = { "park", "snap" };
-    inline constexpr std::string_view enum_mount_readback[] = { "none", "oscquery" };
+    inline constexpr std::string_view enum_mount_readback[] = { "none", "oscquery", "notify", "xremote", "subscribe", "get", "midi" };
     inline constexpr std::string_view enum_mount_listen[] = { "off", "connecting", "listening", "unsupported", "unreachable" };
     inline constexpr std::string_view enum_mount_doh[] = { "takeBack", "leave" };
     inline constexpr std::string_view enum_mount_link[] = { "off", "closed", "opening", "open", "retrying" };
@@ -2845,10 +2845,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "none",
           false, 0.0, false, 0.0,
-          enum_mount_readback, 2,
+          enum_mount_readback, 7,
           "", 1.0, false, "park",
           "",
-          "Whether this target can be ASKED what a value is, and how. Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. None is the default because it is true of most devices: OSCQuery was never standardised, and a mounted namespace is usually hand-written for a box that will never answer. A verified cue aimed at a none is refused when the show loads, which is the whole point of declaring it." },
+          "Whether this target can be ASKED what a value is, and how, or TELLS without being asked (namespace draft 57, AFL, DP.10). Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. oscquery: asked over HTTP at its query port. get: asked on the wire, the bare address with no atoms or the file-s GET line, answered at the same address - Holophonix, a DS100. notify: a Yamaha console-s get line answered with OK, and its NOTIFY lines heard on their own. xremote: an X32-s or M32-s /xremote sent every nine seconds while rx is on, after which it tells every change. subscribe: the file-s SUBSCRIBE line sent the same way - an Eos. midi: a console-s echoes on the midi wire, read by its nodes- shapes. The last three tell and are never asked; a verified cue aimed at one is refused as at a none. None is the default because it is true of most devices: a mounted namespace is usually hand-written for a box that will never answer." },
         { "mount", "sent",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
           true, "0",

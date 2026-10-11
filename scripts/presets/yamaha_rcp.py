@@ -82,7 +82,7 @@ def main():
                      "address's last segments, from one; the wire counts them from nought as the console does. "
                      "%d inputs, %d mixes, %d matrices, %d DCAs." % (args.inputs, args.mixes, args.matrices, args.dcas),
                 "yamaha-rcp", "Yamaha", "CL, QL, TF, DM3, DM7, RIVAGE PM (RCP)", SOURCES, "scripts/presets/yamaha_rcp.py",
-                transport="tcp", wire="rcp", port=49280)
+                transport="tcp", wire="rcp", port=49280, readback="notify")
 
     count = 0
     for strip, rows in STRIP_ROWS.items():

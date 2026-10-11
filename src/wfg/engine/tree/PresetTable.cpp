@@ -123,6 +123,8 @@ namespace wfg::tree
         if (const auto framing = stringOf (*godot, "FRAMING"); ! framing.empty())
             preset.framing = framing;
 
+        preset.readback = stringOf (*godot, "READBACK");
+
         if (! oneOf (preset.transport, { "udp", "tcp", "midi" }))
             return failed (slug + ": TRANSPORT is udp, tcp or midi, not \"" + preset.transport + "\"");
 
@@ -131,6 +133,10 @@ namespace wfg::tree
 
         if (! oneOf (preset.framing, { "length", "slip" }))
             return failed (slug + ": FRAMING is length or slip, not \"" + preset.framing + "\"");
+
+        if (! preset.readback.empty()
+              && ! oneOf (preset.readback, { "oscquery", "notify", "xremote", "subscribe", "get", "midi" }))
+            return failed (slug + ": READBACK is oscquery, notify, xremote, subscribe, get or midi, not \"" + preset.readback + "\"");
 
         if (! carries (preset.transport, preset.wire))
             return failed (slug + ": a " + preset.transport + " transport cannot carry the " + preset.wire + " wire");

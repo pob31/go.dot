@@ -4468,3 +4468,63 @@ TEST_CASE ("network cue: a cue aimed at a console on a MIDI port reaches the sho
     CHECK (rig.runOf (cueId)->state != cue::runState::failed);
     CHECK_FALSE (rig.listener.waitFor (1, 150));
 }
+
+//==============================================================================
+/*  DP.10: A VERIFIED CUE AT A DEVICE ASKED ON THE WIRE - the question leaves
+    as the device reads it, the cue waits, and the answer serve logs as the
+    read-back ends it; the Runner says whom it waits for meanwhile. */
+TEST_CASE ("network cue: a verified cue at a device asked on the wire sends its question after the write, waits, and the read-back ends it")
+{
+    NetworkRig rig;
+
+    tree::MountDeclaration holo;
+    holo.id = "HOLO0001";
+    holo.prefix = "/track";
+    holo.namespaceFile = "namespaces/holo.json";
+    holo.host = "127.0.0.1";
+    holo.port = rig.listener.port();
+    holo.readback = "get";
+    holo.rx = true;
+    REQUIRE (rig.mounts.load (holo, R"JSON({"FULL_PATH": "/track", "GODOT": {"GET": "/get {address}"}, "CONTENTS": {"1": {"FULL_PATH": "/track/1", "CONTENTS": {"gain": {"FULL_PATH": "/track/1/gain", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0]}}}}})JSON").ok);
+    rig.sender.setMounts (&rig.mounts);
+
+    const auto cueId = rig.makeOsc ("/track/1/gain", "f:-6", "verified");
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    //  The write, then the question as the file spells it.
+    REQUIRE (rig.listener.waitFor (2, 500));
+    const auto arrived = rig.listener.all();
+    REQUIRE (arrived.size() >= 2u);
+    const auto first = osc::decode (arrived[0].bytes.data(), arrived[0].bytes.size());
+    const auto second = osc::decode (arrived[1].bytes.data(), arrived[1].bytes.size());
+    REQUIRE (first.ok);
+    REQUIRE (second.ok);
+    CHECK (first.packet.address == "/track/1/gain");
+    CHECK (second.packet.address == "/get");
+    REQUIRE (second.packet.args.size() == 1u);
+    CHECK (second.packet.args[0].getString() == "/track/1/gain");
+
+    REQUIRE (rig.runOf (cueId) != nullptr);
+    CHECK (rig.runOf (cueId)->state == cue::runState::playing);
+    CHECK (rig.runner.awaitsReadback ("HOLO0001", "/track/1/gain"));
+    CHECK_FALSE (rig.runner.awaitsReadback ("HOLO0001", "/track/1/mute"));
+
+    //  Asked again no sooner than half a second later, not every tick.
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+    CHECK (rig.listener.all().size() == 2u);
+
+    /*  The answer ends the wait: what serve's bridge submits as mount.readback
+        from the device's report, applied here as the command's handler applies
+        it - this rig registers no mount commands; VerifiedCueTests holds the
+        handler and blackbox.wires the bridge. */
+    rig.mounts.noteReadback ("/track/1/gain", osc::Values { osc::Value::float32 (-6.0f) });
+
+    for (int n = 0; n < 25 && rig.runOf (cueId)->state == cue::runState::playing; ++n)
+        rig.tickOnce();
+
+    INFO ("state " << rig.runOf (cueId)->state << ", error " << rig.runOf (cueId)->error);
+    CHECK (rig.runOf (cueId)->state == cue::runState::done);
+    CHECK_FALSE (rig.runner.awaitsReadback ("HOLO0001", "/track/1/gain"));
+}

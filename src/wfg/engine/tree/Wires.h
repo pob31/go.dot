@@ -122,4 +122,9 @@ namespace wfg::tree::wire
         and format. A shape with no kind renders nothing. */
     std::vector<std::vector<std::uint8_t>> renderMidi (const MidiShape& shape, const osc::Values& values,
                                                         int baseChannel, int mscDevice, int mscFormat);
+
+    /*  A SUBSCRIPTION AS THE FILE SPELLS IT (DP.10): the address and its
+        atoms - "/eos/subscribe 1" - a whole number an int32, one with a dot a
+        float32, anything else a string; nothing for an empty line. */
+    std::optional<std::pair<std::string, osc::Values>> parseSubscribe (const std::string& line);
 }

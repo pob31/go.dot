@@ -167,7 +167,7 @@ def main():
                      "and the scene recall, each an NRPN of the console's reference tables; the device's midiChannel row is the "
                      "SQ's MIDI channel. %d inputs, %d groups, %d auxes, %d matrices." % (inputs, groups, auxes, matrices),
                 "allenheath-sq-midi", "Allen & Heath", "SQ (MIDI over TCP)", SOURCES, "scripts/presets/allenheath_sq.py",
-                transport="tcp", wire="midi", port=51325, contents=contents)
+                transport="tcp", wire="midi", port=51325, contents=contents, readback="midi")
     write(tree, "allenheath-sq-midi", args.out)
     return 0
 

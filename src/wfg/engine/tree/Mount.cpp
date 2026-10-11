@@ -781,27 +781,44 @@ namespace wfg::tree
             as it always did. */
         std::string mountAt = mount.prefix;
 
-        if (const auto prefixes = prefixesOf (mount.prefix); prefixes.size() > 1)
+        /*  AND A FILE ROOTED AT "/" WHOSE ONE ENTRY IS THE ONE PREFIX mounts it
+            at its own name too (found 2026-10-11 by the wires driver, DP.11):
+            read as one tree under the prefix, such a file published every
+            node twice under it - /track/track/1/gain - and the Holophonix,
+            DiGiCo SD and Yamaha OSC presets aimed every cue at nothing. A
+            capture of a whole namespace - "GET /" - mounted under a prefix of
+            its own keeps nesting as it always did: its entries are not the
+            prefix, and that is how the two are told apart. */
+        const auto prefixes = prefixesOf (mount.prefix);
+        auto fileRoots = rootPath == "/" ? rootsUnderJson (*parsed.value) : std::vector<std::string> {};
+        auto rowRoots = prefixes;
+        std::sort (fileRoots.begin(), fileRoots.end());
+        std::sort (rowRoots.begin(), rowRoots.end());
+
+        if (prefixes.size() > 1 || (rootPath == "/" && fileRoots == rowRoots))
         {
             if (rootPath != "/")
                 return MountResult::failed (mount.id + ": a device with several roots needs a description"
                                                        " whose root is \"/\" and whose entries are those"
                                                        " roots; this file's root is \"" + rootPath + "\"");
 
-            auto roots = rootsUnderJson (*parsed.value);
-            auto named = prefixes;
-            std::sort (roots.begin(), roots.end());
-            std::sort (named.begin(), named.end());
-
-            if (roots != named)
-                return MountResult::failed (mount.id + ": the description's roots are " + spaceJoined (roots)
-                                            + " and the prefix row says " + spaceJoined (named)
+            if (fileRoots != rowRoots)
+                return MountResult::failed (mount.id + ": the description's roots are " + spaceJoined (fileRoots)
+                                            + " and the prefix row says " + spaceJoined (rowRoots)
                                             + "; a device with several roots names exactly its file's");
 
             mountAt.clear();
         }
 
         MountResult result;
+        /*  HOW THE DEVICE IS ASKED AND SUBSCRIBED (namespace draft §57, AFL;
+            DP.10), the file's own words at its root. */
+        if (const auto* godot = property (*parsed.value, "GODOT"); godot != nullptr)
+        {
+            result.getTemplate = stringProperty (*godot, "GET");
+            result.subscribeTemplate = stringProperty (*godot, "SUBSCRIBE");
+        }
+
         collect (*parsed.value, {}, rootPath, mountAt, mount, result.nodes, result.problems, result.warnings);
 
         /*  Sorted by address, like every other part of the tree: lookup is a
@@ -839,7 +856,7 @@ namespace wfg::tree
             return result;
         }
 
-        mounts[mount.id] = Entry { mount, result.nodes, result.warnings };
+        mounts[mount.id] = Entry { mount, result.nodes, result.warnings, result.getTemplate, result.subscribeTemplate };
         bumpShape();
         return result;
     }
@@ -975,6 +992,34 @@ namespace wfg::tree
     {
         const auto found = replies.find (mountId);
         return found == replies.end() ? std::string {} : found->second;
+    }
+
+    std::string MountTable::getTemplateOf (const std::string& mountId) const
+    {
+        const auto found = mounts.find (mountId);
+        return found == mounts.end() ? std::string {} : found->second.getTemplate;
+    }
+
+    std::string MountTable::subscribeTemplateOf (const std::string& mountId) const
+    {
+        const auto found = mounts.find (mountId);
+        return found == mounts.end() ? std::string {} : found->second.subscribeTemplate;
+    }
+
+    std::vector<const Node*> MountTable::nodesOf (const std::string& mountId) const
+    {
+        std::vector<const Node*> out;
+        const auto found = mounts.find (mountId);
+
+        if (found == mounts.end())
+            return out;
+
+        out.reserve (found->second.nodes.size());
+
+        for (const auto& node : found->second.nodes)
+            out.push_back (&node);
+
+        return out;
     }
 
     const osc::Values* MountTable::readbackOf (const std::string& address) const

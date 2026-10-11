@@ -277,7 +277,27 @@ namespace wfg::tree
             for an answer that has nowhere to come from. */
         bool canBeAsked() const noexcept
         {
-            return ! opaque() && readback == "oscquery" && queryPort > 0;
+            /*  SINCE NAMESPACE DRAFT §57 (AFL; DP.10) THREE WAYS TO ASK: OSCQuery
+                over HTTP at its query port; `get`, a question on the wire the
+                device answers at the same address; `notify`, a Yamaha console's
+                `get` line answered with OK. `xremote`, `subscribe` and `midi`
+                are ways to be TOLD, not to ask: what they bring is heard, and a
+                verified cue aimed at such a device is refused as at a none. */
+            if (opaque())
+                return false;
+
+            if (readback == "oscquery")
+                return queryPort > 0;
+
+            return readback == "get" || readback == "notify";
+        }
+
+        /*  Whether the device tells Go.dot what it does without being asked
+            (AFL): an X32's `/xremote`, an Eos's `/eos/subscribe`, an RCP
+            console's NOTIFY, a MIDI console's echoes - all heard. */
+        bool isTelling() const noexcept
+        {
+            return readback == "xremote" || readback == "subscribe" || readback == "notify" || readback == "midi";
         }
 
         double rateCap = 50.0;
@@ -309,6 +329,14 @@ namespace wfg::tree
 
         /** The mounted nodes, sorted by address. Empty when it did not load. */
         std::vector<Node> nodes;
+
+        /*  HOW THE DEVICE IS ASKED AND SUBSCRIBED (namespace draft §57, AFL;
+            DP.10), from the file's root `GODOT.GET` and `GODOT.SUBSCRIBE`: a
+            line each, the address first and the atoms after, `{address}` in
+            a GET standing for the node asked about. Empty, a question is the
+            bare address with no atoms and there is nothing to subscribe with. */
+        std::string getTemplate;
+        std::string subscribeTemplate;
 
         static MountResult failed (std::string problem);
     };
@@ -481,6 +509,15 @@ namespace wfg::tree
         void noteReply (const std::string& mountId, const std::string& word, const std::string& line);
         std::string lastReplyOf (const std::string& mountId) const;
 
+        /*  The file's own templates for asking and subscribing (DP.10), empty
+            where it gave none. */
+        std::string getTemplateOf (const std::string& mountId) const;
+        std::string subscribeTemplateOf (const std::string& mountId) const;
+
+        /*  Every node of one mount, for a reader that indexes them - the MIDI
+            echoes' table (DP.10). Empty for a mount not loaded. */
+        std::vector<const Node*> nodesOf (const std::string& mountId) const;
+
         /*  WHAT THE TARGET SAID, which is a different question from what was
             written to it and is kept apart for exactly that reason.
 
@@ -616,6 +653,8 @@ namespace wfg::tree
             MountDeclaration declaration;
             std::vector<Node> nodes;      // sorted by address
             std::vector<std::string> warnings;
+            std::string getTemplate;
+            std::string subscribeTemplate;
         };
 
         Node* findNode (const std::string& address);

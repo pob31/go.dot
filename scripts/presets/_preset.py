@@ -97,7 +97,7 @@ def put(tree, path, node):
 
 
 def root(full_path, description, slug, vendor, model, sources, generated, transport="udp", wire="osc",
-         framing=None, port=0, version=1, contents=None):
+         framing=None, port=0, version=1, contents=None, readback=None, get=None, subscribe=None):
     godot = {
         "PRESET": slug,
         "VERSION": version,
@@ -108,6 +108,14 @@ def root(full_path, description, slug, vendor, model, sources, generated, transp
     }
     if framing:
         godot["FRAMING"] = framing
+    #  How the device is heard back (namespace draft 57, AFL; DP.10): the readback word a device made
+    #  from this file starts with, the line that asks it ({address} the node), the line that subscribes.
+    if readback:
+        godot["READBACK"] = readback
+    if get:
+        godot["GET"] = get
+    if subscribe:
+        godot["SUBSCRIBE"] = subscribe
     godot["PORT"] = port
     godot["SOURCES"] = sources
     godot["GENERATED"] = generated

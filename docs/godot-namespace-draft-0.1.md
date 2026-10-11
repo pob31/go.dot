@@ -24905,3 +24905,43 @@ connection with no host.
   port in the run's name, down a link, a node without a shape), NetworkCueTests (a cue through the MIDI
   sender), AuthoringTests (the dLive's shapes, MSC waiting for its port, every MIDI preset usable),
   ClientTests (the gesture, the rows), PresetTests.
+- **DP.10**: what comes back (AFL). `mount/readback` grows `get`, `notify`, `xremote`, `subscribe` and
+  `midi`: the first two ask - `canBeAsked` takes them beside `oscquery` - and the last three tell,
+  `isTelling`, never asked, a verified cue aimed at one refused as at a none; each word belongs to a
+  wire and the load refuses a mismatch in words. A question is `MountSender::queueQuery`, kept apart
+  from a write of the same address in the queue, the cap and the bundle: on the osc wire the bare
+  address with no atoms, or the file's root `GODOT.GET` line with `{address}` for the node asked
+  about (Holophonix's `/get`); on the rcp wire a `get` line with the node's indexes. The Runner's one
+  door, `askTarget`, sends it through the sender for a `get` or `notify` device - again no sooner than
+  half a second later per address - and through the probe for OSCQuery as before; `awaitsReadback`
+  says whom a cue waits for, and serve turns the device's report at that address into `mount.readback`
+  beside `mount.heard`, both logged. Every nine seconds serve sends an `xremote` device `/xremote` and
+  a `subscribe` device the file's root `GODOT.SUBSCRIBE` line (`parseSubscribe`); an rcp console's `OK
+  get` answer is heard as its NOTIFY is. `tree::MidiEchoes` learns a midi device's shapes whenever
+  the table changes shape and reads the console's echoes - a note by channel and number, an NRPN by
+  channel and parameter through the running status a console uses, a Control Change, 14-bit values
+  waiting for their fine byte, a System Exclusive skipped - from the link's raw packets and from a MIDI
+  port's input, each kept as the device's report. The presets say how they are heard back: the X32
+  `xremote`, the Eos `subscribe` with its line, Holophonix and the DS100 `get`, the Yamaha RCP `notify`,
+  the Allen & Heath MIDI files `midi`; `mount.createFromPreset` writes the readback row and records
+  it as its tenth argument. `mock_target.py` answers `/get` and a bare address with what it holds;
+  `blackbox.wires` gains the dLive's own mute heard and a Holophonix asked for a verified cue - the
+  write, the question as the file spells it, the answer heard. Tests: WireTests (the echoes through
+  running status, any cut, a SysEx, 14-bit values and switches, a subscription line), MountTests
+  (the words, the refusals, the templates, a question on each wire apart from a write), NetworkCueTests
+  (a verified cue asked on the wire, re-asked no sooner than half a second, ended by the read-back),
+  AuthoringTests (the readback row from the preset and the record's tenth argument).
+- **DP.11**: the close-out. `blackbox.wires` is the one driver for every wire (a datagram, a
+  length-framed and a SLIP-framed connection, RCP, telnet lines, MIDI over TCP, a question on the
+  wire), against `mock_target.py` in each of its modes - and it found a reader fault of DP.2: a file
+  rooted at `/` with ONE entry was read as one tree under the prefix and published every node twice
+  under it (`/track/track/1/gain`), so the Holophonix, DiGiCo SD and Yamaha OSC presets aimed every
+  cue at nothing; a file rooted at `/` whose entries are the prefix row's now mounts them at their own
+  names whether they are one or several (AFK), and a capture of a whole namespace under a prefix of its
+  own - whose entries are not the prefix - nests as it always did, with a case in MountTests; **M60**, a flush of thirty-two NRPN faders
+  (ninety-six messages) and thirty-two RCP lines: 734 microseconds in the Debug binary on the author's
+  box, against a tick of twenty thousand - the rendering is not where a tick goes. The devplan's
+  Built line, both guides and the README; `build/device-presets-2026-10.md` the tour for the author.
+  Owed: WFS-DIY and S21_HiJack adopting ROLE, PRESET and VERSION in their own repositories (AFF);
+  a Wing MIDI preset; the Network tab's login editor; every preset unverified until a console has
+  answered, the Avantis file above all.

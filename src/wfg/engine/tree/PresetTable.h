@@ -44,6 +44,7 @@ namespace wfg::tree
         std::string transport = "udp";    ///< GODOT.TRANSPORT: udp, tcp or midi
         std::string wire = "osc";         ///< GODOT.WIRE: osc, rcp, line or midi
         std::string framing = "length";   ///< GODOT.FRAMING, OSC over TCP only: length or slip
+        std::string readback;             ///< GODOT.READBACK (DP.10): how the device is heard back, empty for none
         int port = 0;                     ///< GODOT.PORT, the device's usual one; nought when it has none
         std::vector<std::string> roots;   ///< what a device made from it answers at (`rootsOfNamespace`)
         std::vector<std::string> sources; ///< GODOT.SOURCES: the documents it was written from, one line each

@@ -1578,6 +1578,12 @@ namespace wfg::cue
         /** Every network cue in flight. Diagnostics and tests. */
         const std::vector<OscJob>& sends() const noexcept { return sending; }
 
+        /*  WHETHER A CUE WAITS FOR THIS NODE TO BE READ BACK (namespace draft
+            §57, AFL; DP.10): serve asks it of every report a device makes, and
+            turns the one somebody waits on into the read-back as well as the
+            observation. Tick thread. */
+        bool awaitsReadback (const std::string& mountId, const std::string& address) const;
+
     private:
         std::string armInternal (Engine& engine, std::int64_t tick,
                                  const std::string& cueId,
@@ -2729,6 +2735,17 @@ namespace wfg::cue
 
         tree::MountTable* mounts = nullptr;
         tree::MountSender* sender_ = nullptr;
+
+        /*  ONE DOOR FOR A QUESTION (DP.10): OSCQuery through the probe's
+            thread, or on the wire through the sender for a device that
+            answers at its own address - asked again no sooner than half a
+            second after the last time, per address, since the wire has no
+            thread dropping duplicates. */
+        bool askTarget (const std::string& mountId, const std::string& host, int queryPort,
+                        const std::string& address, const std::string& typeTag,
+                        bool observation, std::int64_t writesWhenAsked);
+        std::map<std::string, std::uint64_t> wireAskedAt;
+        std::uint64_t askClock = 0;
         midi::MidiSink* midiOut = nullptr;
         std::function<bool()> outage;
         DcaTable* dcas = nullptr;

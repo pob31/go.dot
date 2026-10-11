@@ -2438,3 +2438,195 @@ TEST_CASE ("mount sender: a device on the midi wire is sent its nodes' shapes as
     CHECK (linked[0] == std::vector<std::uint8_t> { 0x9B, 0x00, 0x3F });
     CHECK (linked[1] == std::vector<std::uint8_t> { 0x9B, 0x00, 0x00 });
 }
+
+//==============================================================================
+/*  DP.10: WHAT COMES BACK (namespace draft §57, AFL) - the words of
+    mount/readback, each a wire's; a question on the wire; the file's own lines
+    for asking and subscribing. */
+
+TEST_CASE ("mount: the readback words - three ask, three tell, each on its own wire, and the file says how")
+{
+    tree::MountDeclaration device;
+    device.namespaceFile = "namespaces/x.json";
+
+    device.readback = "oscquery";
+    CHECK_FALSE (device.canBeAsked());
+    device.queryPort = 5005;
+    CHECK (device.canBeAsked());
+    CHECK_FALSE (device.isTelling());
+
+    for (const auto* word : { "get", "notify" })
+    {
+        device.readback = word;
+        device.queryPort = 0;
+        INFO (word);
+        CHECK (device.canBeAsked());
+    }
+
+    for (const auto* word : { "xremote", "subscribe", "midi" })
+    {
+        device.readback = word;
+        INFO (word);
+        CHECK_FALSE (device.canBeAsked());
+        CHECK (device.isTelling());
+    }
+
+    device.readback = "none";
+    CHECK_FALSE (device.canBeAsked());
+    CHECK_FALSE (device.isTelling());
+
+    //  An opaque device is never asked, whatever it says.
+    device.readback = "get";
+    device.namespaceFile.clear();
+    CHECK_FALSE (device.canBeAsked());
+
+    //  The load refuses a word on the wrong wire, in words.
+    Rig rig;
+    const auto made = rig.document.createMount ("/x32", {}, {});
+    REQUIRE (made.ok);
+    const auto id = made.id;
+    const auto base = "/godot/mount/" + id + "/";
+    REQUIRE (rig.document.setAttribute (base + "port", "10023").ok);
+    REQUIRE (rig.document.setAttribute (base + "readback", "xremote").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+
+    REQUIRE (rig.document.setAttribute (base + "readback", "notify").ok);
+    CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.problemOf (id).find ("set the wire to rcp") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "readback", "midi").ok);
+    CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.problemOf (id).find ("set the wire to midi") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "readback", "get").ok);
+    REQUIRE (rig.document.setAttribute (base + "wire", "midi").ok);
+    REQUIRE (rig.document.setAttribute (base + "transport", "tcp").ok);
+    CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.problemOf (id).find ("set the wire to osc") != std::string::npos);
+
+    //  The file's lines for asking and subscribing, read at the root.
+    tree::MountTable mounts;
+    tree::MountDeclaration holo;
+    holo.id = "HOLO0001";
+    holo.prefix = "/track";
+    holo.namespaceFile = "namespaces/holo.json";
+    holo.port = 4003;
+    holo.readback = "get";
+    REQUIRE (mounts.load (holo, R"JSON({"FULL_PATH": "/track", "GODOT": {"GET": "/get {address}", "SUBSCRIBE": "/sub 1"}, "CONTENTS": {"1": {"FULL_PATH": "/track/1", "CONTENTS": {"gain": {"FULL_PATH": "/track/1/gain", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0]}}}}})JSON").ok);
+    CHECK (mounts.getTemplateOf ("HOLO0001") == "/get {address}");
+    CHECK (mounts.subscribeTemplateOf ("HOLO0001") == "/sub 1");
+    CHECK (mounts.getTemplateOf ("NOBODY01").empty());
+    REQUIRE (mounts.nodesOf ("HOLO0001").size() >= 1u);
+    CHECK (mounts.nodesOf ("HOLO0001").back()->address == "/track/1/gain");
+    CHECK (mounts.nodesOf ("NOBODY01").empty());
+}
+
+TEST_CASE ("mount sender: a question on the wire - the bare address, the file's GET line, a Yamaha get - apart from a write of the same address")
+{
+    tree::MountTable mounts;
+    tree::MountDeclaration holo;
+    holo.id = "HOLO0001";
+    holo.prefix = "/track";
+    holo.namespaceFile = "namespaces/holo.json";
+    holo.host = "10.0.0.7";
+    holo.port = 4003;
+    holo.readback = "get";
+    REQUIRE (mounts.load (holo, R"JSON({"FULL_PATH": "/track", "GODOT": {"GET": "/get {address}"}, "CONTENTS": {"1": {"FULL_PATH": "/track/1", "CONTENTS": {"gain": {"FULL_PATH": "/track/1/gain", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0]}}}}})JSON").ok);
+
+    tree::MountDeclaration ds;
+    ds.id = "DS100001";
+    ds.prefix = "/dbaudio1";
+    ds.namespaceFile = "namespaces/ds.json";
+    ds.host = "10.0.0.8";
+    ds.port = 50010;
+    ds.readback = "get";
+    REQUIRE (mounts.load (ds, R"JSON({"FULL_PATH": "/dbaudio1", "CONTENTS": {"gain": {"FULL_PATH": "/dbaudio1/gain", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0]}}})JSON").ok);
+
+    tree::MountSender sender;
+    sender.setMounts (&mounts);
+    std::vector<std::pair<std::string, osc::Values>> linked;   // the address, the atoms, through the link sink for want of a socket
+    sender.setLinkSink ([&linked] (const std::string&, const std::vector<std::uint8_t>& bytes)
+    {
+        const auto decoded = osc::decode (bytes.data(), bytes.size());
+        linked.emplace_back (decoded.ok ? decoded.packet.address : "?", decoded.ok ? decoded.packet.args : osc::Values {});
+        return true;
+    });
+
+    //  With the file's line: /get and the node as its one atom.
+    auto to = tree::MountSender::destinationFor (holo);
+    to.link = "HOLO0001";
+    const auto write = sender.queue ("HOLO0001", to, "/track/1/gain", osc::Value::float32 (-6.0f));
+    const auto ask = sender.queueQuery ("HOLO0001", to, "/track/1/gain");
+    sender.flush();
+
+    REQUIRE (linked.size() == 2u);
+    CHECK (linked[0].first == "/track/1/gain");
+    CHECK (linked[1].first == "/get");
+    REQUIRE (linked[1].second.size() == 1u);
+    CHECK (linked[1].second[0].getString() == "/track/1/gain");
+    CHECK (sender.outcomeOf (write) == tree::MountSender::Outcome::sent);
+    CHECK (sender.outcomeOf (ask) == tree::MountSender::Outcome::sent);
+
+    //  Without one: the bare address, no atoms.
+    auto bare = tree::MountSender::destinationFor (ds);
+    bare.link = "DS100001";
+    sender.queueQuery ("DS100001", bare, "/dbaudio1/gain");
+    sender.flush();
+    REQUIRE (linked.size() == 3u);
+    CHECK (linked[2].first == "/dbaudio1/gain");
+    CHECK (linked[2].second.empty());
+
+    //  A Yamaha console is asked with a get line, the node's indexes and no value.
+    tree::MountDeclaration yamaha;
+    yamaha.id = "YAMA0001";
+    yamaha.prefix = "/MIXER:Current";
+    yamaha.namespaceFile = "namespaces/y.json";
+    yamaha.transport = "tcp";
+    yamaha.wire = "rcp";
+    yamaha.host = "10.0.0.9";
+    yamaha.port = 49280;
+    yamaha.readback = "notify";
+    REQUIRE (mounts.load (yamaha, R"JSON({"FULL_PATH": "/MIXER:Current", "CONTENTS": {"InCh": {"FULL_PATH": "/MIXER:Current/InCh", "CONTENTS": {"Fader": {"FULL_PATH": "/MIXER:Current/InCh/Fader", "CONTENTS": {"Level": {"FULL_PATH": "/MIXER:Current/InCh/Fader/Level", "CONTENTS": {"1": {"FULL_PATH": "/MIXER:Current/InCh/Fader/Level/1", "TYPE": "i", "ACCESS": 3, "VALUE": [0], "GODOT": {"RCP": {"VERB": "set", "XY": 1}}}}}}}}}}})JSON").ok);
+    std::vector<std::string> lines;
+    sender.setLinkSink ([&lines] (const std::string&, const std::vector<std::uint8_t>& bytes)
+    {
+        lines.emplace_back (bytes.begin(), bytes.end());
+        return true;
+    });
+    sender.queueQuery ("YAMA0001", tree::MountSender::destinationFor (yamaha), "/MIXER:Current/InCh/Fader/Level/1");
+    sender.flush();
+    REQUIRE (lines.size() == 1u);
+    CHECK (lines[0] == "get MIXER:Current/InCh/Fader/Level 0 0");
+
+    //  Two questions of one address in one tick are one question.
+    sender.queueQuery ("YAMA0001", tree::MountSender::destinationFor (yamaha), "/MIXER:Current/InCh/Fader/Level/1");
+    sender.queueQuery ("YAMA0001", tree::MountSender::destinationFor (yamaha), "/MIXER:Current/InCh/Fader/Level/1");
+    sender.flush();
+    CHECK (lines.size() == 2u);
+}
+
+TEST_CASE ("mount: a description rooted at / with one entry mounts that entry at its own name, once, and the prefix row has to be it")
+{
+    /*  Found by the wires driver (DP.11): the Holophonix preset, rooted at "/"
+        with "track" its one entry, was read as one tree under /track and
+        published /track/track/1/gain. A file rooted at "/" mounts its entries
+        at their own names whatever their number (AFK). */
+    tree::MountTable mounts;
+    tree::MountDeclaration holo;
+    holo.id = "HOLO0001";
+    holo.prefix = "/track";
+    holo.namespaceFile = "namespaces/holo.json";
+    holo.port = 4003;
+    const auto text = R"JSON({"FULL_PATH": "/", "CONTENTS": {"track": {"FULL_PATH": "/track", "CONTENTS": {"1": {"FULL_PATH": "/track/1", "CONTENTS": {"gain": {"FULL_PATH": "/track/1/gain", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0]}}}}}}})JSON";
+    REQUIRE (mounts.load (holo, text).ok);
+    CHECK (mounts.nodeAt ("/track/1/gain") != nullptr);
+    CHECK (mounts.nodeAt ("/track/track/1/gain") == nullptr);
+    CHECK (mounts.mountOf ("/track/1/gain") == "HOLO0001");
+
+    //  Under another name the file is a capture of a whole namespace, and nests as it always did.
+    holo.prefix = "/holo";
+    REQUIRE (mounts.load (holo, text).ok);
+    CHECK (mounts.nodeAt ("/holo/track/1/gain") != nullptr);
+    CHECK (mounts.nodeAt ("/track/1/gain") == nullptr);
+}

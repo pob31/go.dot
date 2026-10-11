@@ -604,6 +604,48 @@ namespace wfg::tree::wire
         return out;
     }
 
+    std::optional<std::pair<std::string, osc::Values>> parseSubscribe (const std::string& line)
+    {
+        std::vector<std::string> words;
+        std::string current;
+
+        for (const char c : line)
+        {
+            if (c == ' ' || c == '\t')
+            {
+                if (! current.empty())
+                    words.push_back (current);
+                current.clear();
+            }
+            else
+            {
+                current.push_back (c);
+            }
+        }
+
+        if (! current.empty())
+            words.push_back (current);
+
+        if (words.empty() || words[0].empty() || words[0][0] != '/')
+            return std::nullopt;
+
+        osc::Values values;
+
+        for (std::size_t at = 1; at < words.size(); ++at)
+        {
+            const auto& word = words[at];
+
+            if (integerText (word))
+                values.push_back (osc::Value::int32 (static_cast<std::int32_t> (std::atol (word.c_str()))));
+            else if (word.find ('.') != std::string::npos && osc::parseDouble (word).has_value())
+                values.push_back (osc::Value::float32 (static_cast<float> (*osc::parseDouble (word))));
+            else
+                values.push_back (osc::Value::string (word));
+        }
+
+        return std::make_pair (words[0], values);
+    }
+
     std::string printableLine (const std::string& line)
     {
         std::string out;

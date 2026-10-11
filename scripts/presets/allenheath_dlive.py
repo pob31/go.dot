@@ -148,7 +148,7 @@ def main():
                      "device's midiChannel row is the console's base channel N. %d inputs, %d groups, %d auxes, %d matrices, "
                      "%d DCAs." % (model, args.inputs, args.groups, args.auxes, args.matrices, args.dcas),
                 slug, "Allen & Heath", "%s (MIDI over TCP)" % model, SOURCES[args.model], "scripts/presets/allenheath_dlive.py",
-                transport="tcp", wire="midi", port=51325, contents=contents)
+                transport="tcp", wire="midi", port=51325, contents=contents, readback="midi")
     write(tree, slug, args.out)
     return 0
 

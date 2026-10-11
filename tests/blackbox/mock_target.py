@@ -339,6 +339,25 @@ def listen_udp(device: Device, port_out) -> socket.socket:
             bundle = device.count_bundle() if osc_unbundle(data, messages) else -1
 
             for address, args in messages:
+                #  A QUESTION (DP.10): /get with the node as its atom - Holophonix's
+                #  way - or the bare address with none - d&b's; answered at the
+                #  address asked about, to whoever asked, with what the box holds.
+                asked = None
+
+                if address == "/get" and args and isinstance(args[0], str):
+                    asked = args[0]
+                elif not args and device.value_of(address) is not None:
+                    asked = address
+
+                if asked is not None:
+                    device.note(address, args, sender_ip=sender[0], bundle=bundle)
+                    value = device.value_of(asked)
+
+                    if value is not None:
+                        sock.sendto(osc_encode(asked, [value]), sender)
+
+                    continue
+
                 device.note(address, args, sender_ip=sender[0], bundle=bundle)
 
     threading.Thread(target=run, daemon=True).start()
@@ -499,7 +518,7 @@ def listen_tcp(device: Device, port_out, framing: str, wire: str = "osc") -> soc
 
 
 # --------------------------------------------------------------------------- HTTP
-def make_handler(device: Device, listens: bool, osc_port_of):
+def make_handler(device: Device, listens: bool, osc_port_of, wire: str = "osc"):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass                                    # quiet: the driver owns stdout
@@ -544,9 +563,13 @@ def make_handler(device: Device, listens: bool, osc_port_of):
                 line = urllib.parse.unquote(query)
                 with device.lock:
                     sockets = list(device.open)
+                #  On the midi wire the query's characters ARE the bytes (DP.10),
+                #  %9B a byte of 9B, sent as they are; a console's line gets
+                #  its newline.
+                said = urllib.parse.unquote_to_bytes(query) if wire == "midi" else (line + "\n").encode("utf-8")
                 for conn in sockets:
                     try:
-                        conn.sendall((line + "\n").encode("utf-8"))
+                        conn.sendall(said)
                     except OSError:
                         pass
                 self.reply(200, {"VALUE": [len(sockets)]})
@@ -713,7 +736,7 @@ def main() -> int:
         #  Threaded with --listen: a WebSocket holds its request thread for as
         #  long as it is open, and the questions must still be answered.
         kind = ThreadingHTTPServer if args.listen else HTTPServer
-        server = kind((HOST, 0), make_handler(device, args.listen, lambda: ports[0]))
+        server = kind((HOST, 0), make_handler(device, args.listen, lambda: ports[0], args.wire))
         server.daemon_threads = True
         query_port = server.server_address[1]
 
