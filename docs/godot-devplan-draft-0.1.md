@@ -1548,17 +1548,40 @@ and a Go.dot warning taps the wrist.
 
 ## Phase 12 — Redundancy and replay · L
 
-- **Engine sync** from the tick-indexed log (Phase 1 pays off): intent +
-  position, never derived runtime state; asymmetric feedback; tablet as
-  failover surface.
-- **Deterministic replay** promoted from test harness to a tool: record a
-  rehearsal, replay it, diff the outputs.
+*Redundancy designed on 2026-10-11*, at the author's direction (PRD §3.15, §6.9; namespace draft
+§58): a main and a backup machine at performance time, each with its own copy of the show; the
+triggering kept in step, network and MIDI commands sent once - the backup holds them while the link
+is alive - and nothing that would stand in the way of the remote app driving both. The author's
+decisions are AFQ-AFU; AFV-AGK are the implementer's, the author's to overrule. Built ahead of
+Phases 10 and 11; no phase is renumbered.
 
-**Done when:** killing the primary mid-show leaves the backup running the same
-cue with the tablet controlling it.
+| Stage | What | Depends on |
+|---|---|---|
+| RD.0 | Docs: namespace §58, PRD §3.15/§6.9, this | - |
+| RD.1 | The hold switch: every byte to a device held, counted as sent; `--hold` | RD.0 |
+| RD.2 | Names the engine draws while a show runs, derived from their cause | RD.0 |
+| RD.3 | What belongs to the machine: a `scope` column, `machineLocal` commands, no undo step for them | RD.0 |
+| RD.4 | The pairing settings (`pairing.xml`, `--role`, `--peer`) and the `pair` nodes | RD.3 |
+| RD.5 | The stream and the link: `Engine::setAfterRecord`, `PeerLink`, the heartbeat | RD.4 |
+| RD.6 | Following: the fixed delay, commands passed on, device input ignored, held while following | RD.1, RD.2, RD.5 |
+| RD.7 | The link lost, taking over, both sending, handing over | RD.6 |
+| RD.8 | Catching up at the main's position, the summary, in step | RD.7 |
+| RD.9 | The same sample: the clock map, the extra lead, the launch placed on the mapped sample (M61) | RD.6 |
+| RD.10 | The same show: fingerprints, the main's show text copied to the backup | RD.5 |
+| RD.11 | The clients, the drivers, the close-out | all |
 
-**Needs from the author:** the redundancy design he said he'd imagine once the
-architecture settled (PRD §3.15).
+- **Deterministic replay** promoted from test harness to a tool: record a rehearsal, replay it,
+  diff the outputs. Not part of the RD stages.
+
+**Done when:** killing the main mid-show leaves the backup running the same cue, now sending to the
+devices, with a client (the page, the window or a surface on the backup) driving it; a mock device
+hears every command exactly once across the takeover; two `serve`s with dummy clocks launch a GO
+within one block of each other; two machines that both sent keep sending until one is picked; CI is
+green.
+
+**Needs from the author:** the words on screen beyond *main* and *backup* before they ship; a bench
+with the Windows box and the Mac mini on their own interfaces, the changeover on a console, with one
+word clock and then none.
 
 ---
 

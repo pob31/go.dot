@@ -1110,22 +1110,59 @@ written.
 
 ### 3.15 Redundancy
 
-Deferred until the cueing architecture settles — designing it first would be a
-guess about the wrong failure.
+*Added in 0.8, at the author's direction (2026-10-11); the mechanics are in the namespace draft
+§58.* A **main** machine and a **backup** machine, each holding its own copy of the show folder,
+copied ahead by hand: sound and movie files never travel between them. Each plays sound and
+picture to its own interfaces, and the changeover of sound and picture is the user's, on a console
+or a matrix. Go.dot's part is the triggering and the devices: the author's words, *"we need the
+triggering to stay in sync as best as possible between both computers. We need to mute network and
+MIDI commands while the connection is alive so the target devices don't get twice the commands."*
 
-Kept cheap in the meantime:
+- **The triggering stays in step.** The backup follows the main's stream - every command the main
+  applied that came from outside the engine, with its arguments as applied - a fixed number of
+  ticks after the main, so every gap between two commands is the main's own. What the engine
+  decides by itself (a follow-on, a group's members, a sound reported started), each machine
+  decides for itself from the same show and the same moment. The names the engine draws while a
+  show runs are derived from what caused them, so both machines name a run alike.
+- **The same sample.** While the two are linked, the main places every launch one tick further
+  ahead than it otherwise would (the link's delay: one tick on an ordinary network, and said on
+  screen if a network needs more), and the backup starts the sound on its own sample matching the
+  main's, from a measured map between the two sound clocks. Within a long sound two interfaces on
+  separate clocks drift apart; Go.dot measures and shows the drift, and one word clock for both
+  interfaces is the cure. Correcting it by speed is *(proposed)*.
+- **Network and MIDI commands go out once.** A backup that follows holds every byte meant for a
+  device - OSC, its TCP connections (left closed), serial lines, MIDI (a control surface's port
+  excepted: a surface is a client, not a device), the answers to a processor, the questions and
+  keep-alives, a patch's own `[netsend]` - and a held send counts as sent, so the two machines'
+  cues end alike. Video is never held: it is changed over downstream, as the sound is. The backup
+  sends only once the link is lost.
+- **The machine, not the show.** The role and the other machine's address are settings of the
+  machine, never of the show (§4.10), so copying a show never copies a role. Both machines publish
+  the pairing state as nodes, as everything else is published.
+- **A command reaching the backup is passed on to the main** - its keyboard, a surface plugged into
+  it, the web page, the remote app over the WebSocket - applied there, and comes back in the stream.
+  What devices send (OSC over UDP, MIDI, serial), and time-of-day and timecode triggers, are the
+  main's alone while the backup follows, so a trigger reaching both fires once.
+- **The link lost:** the main keeps sending; the backup takes over after a timeout (a machine
+  setting, one second unless changed) and sends from then on. A command it had passed on that the
+  main never confirmed: Esc and double Esc are applied, everything else dropped (the rule of §6.2).
+- **The link back.** A machine that has just started and runs nothing follows at once. Two machines
+  that have each been running the show on their own, and find each other again, **both keep
+  sending**, both say so in words, until an operator on either picks the one that keeps the show;
+  the other follows (*the author's choice, 2026-10-11*). Taking over and handing over by hand, at a
+  quiet moment, are commands.
+- **Catching up.** On joining, and on demand, the follower seats itself at the main's position with
+  load to time (§3.13): each list's standby, the running cues at their playheads, the live values. A
+  summary from the main ten times a second says whether the two are in step, and what differs.
+- **The same show.** At link-up the two compare a fingerprint of the show (leaving out each
+  machine's own interface and port names, and the state file) and of every sound and movie; a
+  difference is listed, and the main's show text, never its media, may be copied to the backup.
 
-- **All engine state mutation flows through one ordered, tick-indexed path.** A
-  sync link is then a second consumer of that stream, and so is deterministic
-  replay for regression tests. Without it, state changes scatter and there is
-  nothing coherent to mirror.
-- **Sync intent + position, never derived runtime state.** The first is a small
-  problem; the second is unbounded.
-
-Known constraints: feedback must be asymmetric (fan-in on control, single
-arbitrated source on feedback, or two engines fight over motorised faders); a
-USB surface is physically bound to one machine, so the tablet is the redundancy
-path.
+The rules that kept this cheap while it waited still hold, and are what it is built on: all engine
+state mutation flows through one ordered, tick-indexed path, and the link is its second consumer as
+replay is its third; sync intent and position, never derived runtime state; feedback is asymmetric:
+a surface is driven by the machine it is plugged into, so a USB surface dies with its machine and the
+tablet (or a surface on each machine) is the way through.
 
 ### 3.16 Control surfaces
 
@@ -3974,6 +4011,27 @@ What the work leaves out: a script object inside Pd; subpatches and arrays on th
 without opening the patch again; a patch drawn in the browser console; a MIDI message a patch heard, in
 the log; a way to stop a stuck patch short of starting Go.dot again - a helper process for the patches,
 the option the author did not take, would give it.
+
+Added 2026-10-11 *(proposed)*, with redundancy (§3.15, namespace draft §58). The implementer's calls
+AFV-AGK in §58.2 are the author's to overrule:
+
+- **One second of silence** loses the link, a machine setting; several addresses may be given for two
+  network paths, and the link is lost only when all are silent.
+- **TCP connections stay closed** on a backup that follows, opened when it takes over; a console's
+  login costs its time on the first cue after.
+- **What the engine writes into the show by itself** (a kept take, a converted or frozen sound, a
+  recorded lane) is written by each machine from the same cause, never sent down the link.
+- **The backup's undo history is cleared** at link-up and when it takes the main's show text; an undo
+  reaching further back marks the backup as differing.
+- **A mirrored command the backup refuses for a reason of its own** (its interface restarting) is not
+  forced: the backup says it differs and offers to catch up again.
+- **"Just started and running nothing"** is a machine that has applied no GO and run no cue since it
+  was launched.
+- **No secret on the link**: the WebSocket port already takes a GO from anyone on the network.
+
+What the work leaves out: correcting the drift between two sound clocks by speed; a backup's TCP
+connections open but silent, for consoles that take two sessions; a shared secret on the link; finding
+the other machine by itself on the network (mDNS), left for the remote app.
 
 ### 6.10 Protocol implementation order (§3.16)
 

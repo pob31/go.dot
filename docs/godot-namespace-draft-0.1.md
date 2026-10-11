@@ -24945,3 +24945,196 @@ connection with no host.
   Owed: WFS-DIY and S21_HiJack adopting ROLE, PRESET and VERSION in their own repositories (AFF);
   a Wing MIDI preset; the Network tab's login editor; every preset unverified until a console has
   answered, the Avantis file above all.
+
+## 58. Redundancy: a main machine and a backup machine
+
+### 58.1 What it does
+
+Written 2026-10-11. The author: *"Can we plan the redundency for the system? How to have a main
+computer and a backup one? No need to build the show through the network since it would involve
+copying large files over from one computer to the other. This is for performance time. The user will
+have to deal with the inputs and ouputs, but we need the triggering to stay in sync as best as possible
+between both computers. We need to mute network and MIDI commands while the connection is alive so the
+target devices don't get twice the commands. Only enable the network and MIDI if the connection is
+lost. For video and sound it will require a change over on a console or matrix. Next step will be a
+remote app and it will need to be able to control both instances, don't make choices that might
+complicate this when we come to the remote app."*
+
+This is PRD §3.15, which waited for the author's design since Phase 1 and was kept cheap meanwhile by
+two rules this section builds on: every change of engine state goes through one ordered, tick-indexed
+path (§7's log is that path written down), and a sync link carries intent and position, never derived
+runtime state. Replay already proves the first: a log fed back reproduces itself record for record,
+with the generated identifiers handed back rather than drawn again.
+
+**The shape.** Two `serve` processes on two computers, each with its own copy of the show folder and
+its own interfaces. The backup dials the main on the port every client uses (5010, the WebSocket,
+binary OSC). The main sends down the link every record it applies whose origin is not `engine` - the
+operator's commands and what the world told it - as its log writes them, arguments as applied, plus a
+heartbeat at the end of every tick. The backup applies them a fixed number of ticks after the main
+(AGF), makes the engine's own decisions itself (AGE), holds everything meant for a device (AGG), and
+passes on to the main whatever its own clients send it (AFT). When the heartbeat has been silent for
+the timeout, the backup takes over (AFV).
+
+**What travels and what does not.**
+
+| | Down the link | Decided on each machine |
+|---|---|---|
+| A GO, an Esc, Doh!, a standby move, a fader, an edit, an undo, the lock | yes, as the main applied it | - |
+| A trigger from a device, a device's answer (`mount.heard`, `mount.readback`, `mount.replied`, `serial.heard`), a time-of-day trigger | yes | the backup ignores its own copies while it follows |
+| A follow-on, a group's members, a sound reported started or ended, a fade's end | no | yes, from the same show and the same moment |
+| What the engine writes into the show itself: a kept take, a converted sound, a recorded lane | no | yes, with the same derived names (AFX) |
+| The machine's own settings: interfaces, ports, displays, rescans, where a show is saved as | never | the machine's alone (AGC) |
+| Sound and movie files | never | each machine has its own copy (AFU checks them) |
+
+### 58.2 Decisions
+
+The author's, 2026-10-11, each picked from options whose words were mine:
+
+- **AFQ** (the author's) **When the link comes back after a takeover, both machines keep sending
+  until an operator chooses.** Two machines that have each been running the show on their own and find
+  each other again both stay as they are; both say *both machines are sending*, in words; a command on
+  either picks the one that keeps the show, and the other follows. Offered as "Both send until you
+  choose"; the implementer had recommended that the machine sending keep the show.
+- **AFR** (the author's) **A machine that has just started and runs nothing follows straight away**,
+  when it finds the other already sending: it has nothing to choose between. Offered as "Follows
+  straight away".
+- **AFS** (the author's) **The same sample, one tick later.** While the two are linked the main places
+  every launch one tick further ahead than `launchLatencyTicks` asks, so the backup always has the GO
+  in time, and both start the sound on the same sample. Offered as "Same sample, 20 ms later".
+- **AFT** (the author's) **A command reaching the backup is passed on to the main**, applied there,
+  and comes back down the link; device triggers are the main's alone. Offered as "Passed on to the
+  main".
+- **AFU** (the author's) **The same show is checked, not assumed**: a fingerprint of the show and of
+  every sound compared at link-up, the difference said, and the main's show text offered to the backup.
+  Offered as "Compare, warn, offer the text".
+
+Mine, the author's to overrule:
+
+- **AFV** (mine) **One second of silence loses the link**, a machine setting. Several addresses may be
+  given, for two network paths; the link is lost only when all are silent, and the stream's own counter
+  drops a record that arrives twice.
+- **AFW** (mine) **A backup's TCP connections stay closed** while it follows and are opened when it
+  takes over. Some consoles take one session; a login costs its time on the first cue after.
+- **AFX** (mine) **What the engine writes into the show by itself is written by each machine**, from
+  the same cause and under the same derived names, never sent down the link: a kept take (each machine
+  recorded its own input), a converted or frozen sound, a recorded lane.
+- **AFY** (mine) **The backup's undo history starts at the link.** It is cleared at link-up and when
+  the backup takes the main's show text; a mirrored undo reaching further back marks the backup as
+  differing and offers the text.
+- **AFZ** (mine) **A mirrored command the backup refuses for a reason of its own is not forced** - its
+  interface restarting refuses a GO the main took. The backup says it differs and offers to catch up.
+- **AGA** (mine) **"Just started and running nothing"** (AFR) is a machine that has applied no GO and
+  run no cue since it was launched.
+- **AGB** (mine) **No secret on the link.** The WebSocket port already takes a GO from anyone on the
+  network; a secret for the link alone would lock one door of an open house. For the remote app.
+- **AGC** (mine) **The role is the machine's.** `pairing.xml` in Go.dot's own folder, beside
+  `last-show.txt` and following `--engine-folder`, holds the role, the addresses and the timeout;
+  `--role`, `--peer` and `--link-timeout` override it. Copying a show never copies a role (§4.10). The
+  rows that describe a machine rather than a show - its interfaces, its MIDI ports' devices, its serial
+  paths, its displays - are marked `machine` in the parameter table: never sent down the link, never
+  compared, never a step of undo. The commands that act on the machine alone are marked too.
+- **AGD** (mine) **OSC over UDP is a device.** A show controller sending `/godot/cmd/go` to both
+  machines would otherwise fire twice. Passed on to the main: `window`, `ws:`, `surface:`, `cli`, `pd`.
+  Ignored while following: `udp:`, `mount:`, `serial:`, `link:`, `midi:`, `clock`. Applied where they
+  arise: `engine`, and the machine's own commands. The remote app therefore speaks WebSocket, as the
+  page does. Commands passed on arrive at the main as `peer:<origin>`; the backup's applied copies
+  carry `main:<origin>` (`link:` is the TCP devices').
+- **AGE** (mine) **Names the engine draws while a show runs are derived from their cause** - the
+  session's salt, the run or cue that caused it, a count - and redrawn past a name taken or one Pd
+  would read as a number, the way `fireLockedSounds` already derives a movie's sound. Both machines
+  therefore name every run alike, which is what lets a later `run.stop` apply on both, and what lets
+  the backup's GO adopt the run its own look-ahead prepared under the name the main's GO carries. A
+  shuffled group's seed is derived from its run. The salt is drawn by `IdRegistry`, still the one place
+  the engine consumes randomness, and travels with the position (58.6, RD.8); replay is unchanged,
+  since every derived name is in the record as applied.
+- **AGF** (mine) **A fixed delay.** The backup applies the main's tick T at its own tick T + Δ, Δ set
+  at link-up from the measured round trip, so every gap between two records is the main's: the GO
+  debounce, Doh!'s window and undo's merging compare gaps, and a network's jitter would otherwise let
+  the backup refuse a GO the main took. A record that misses its slot is applied at once and counted
+  late. AFS's extra lead is Δ - one tick on an ordinary network, and shown, and put to the author, if a
+  network ever needs more.
+- **AGG** (mine) **Held means counted as sent.** On a backup that follows every byte meant for a device
+  is held, checked before anything that could refuse it (an unbound port, a closed one), so a backup
+  without the main's devices plugged in still ends its cues as the main does: OSC over UDP, serial
+  lines, MIDI cues and the MIDI wire, the answers to a processor, questions, keep-alives, OSCQuery
+  probes and LISTEN, a patch's own `[netsend]`. A cue waiting for a device's answer ends on the backup
+  when the main's copy of the answer arrives.
+- **AGH** (mine) **Not held: video and surfaces.** NDI, Spout and Syphon are changed over downstream
+  as the sound is; a control surface's MIDI port is a client's, and a surface on the backup is driven
+  by the backup.
+- **AGI** (mine) **The drift is measured and shown**, in parts per million and as the distance between
+  two running playheads; one word clock for both interfaces is the cure. Correcting it by nudging the
+  backup's speed is *(proposed)*.
+- **AGJ** (mine) **What the backup had passed on and the main never confirmed**, when it takes over:
+  Esc and double Esc are applied, everything else dropped - Doh! and a GO included. The list is PRD
+  §6.2's recovery list, kept in one place for both.
+- **AGK** (mine) **A backup that starts and has never seen its main holds**, says so, and offers to
+  take over; it sends nothing until the link is lost or an operator says. A main that starts alone
+  sends.
+
+### 58.3 Rows
+
+Owner `pair`, all runtime and read-only unless said; provisional names, settled by their stage.
+
+| Address | Type | Notes |
+|---|---|---|
+| `pair/role` | `s` | `main`, `backup` or `none`: the machine's (AGC) |
+| `pair/peers` | `s` | the other machine's addresses, `host:port`, space-separated |
+| `pair/timeout` | `f` | seconds of silence that lose the link (AFV) |
+| `pair/linked` | `T` | a heartbeat within the timeout |
+| `pair/sending` | `T` | this machine sends to devices; false while it holds |
+| `pair/state` | `s` | `alone`, `following`, `leading`, `bothSending`, `waiting` (AGK) |
+| `pair/delay` | `i` | Δ in ticks (AGF); the extra launch lead while linked |
+| `pair/late` | `i` | records applied after their slot, this link |
+| `pair/drift` | `f` | parts per million between the two sound clocks (AGI) |
+| `pair/inStep` | `T` | the last summary matched |
+| `pair/differs` | `s` | what did not, in one sentence |
+| `pair/showMatch` | `T` | the fingerprints agree (AFU) |
+| `pair/showDiffers` | `s` | what differs: cues, settings, sounds missing or changed |
+| `pair/alarm` | `s` | the sentence the window and the page put in front of the operator; empty when none |
+
+### 58.4 Commands
+
+| Command | Arguments | Does |
+|---|---|---|
+| `pair.setRole` | `s:role` | the machine's role, written to `pairing.xml` (machine) |
+| `pair.setPeers` | `s:addresses` | the other machine's addresses (machine) |
+| `pair.setTimeout` | `f:seconds` | AFV (machine) |
+| `pair.takeOver` | | on the backup: send from now on, and tell the main to hold if it can be reached |
+| `pair.handOver` | | from the machine sending: the other sends from now on, this one holds and follows |
+| `pair.keep` | | AFQ: keep the show here; the other machine holds and catches up |
+| `pair.realign` | | the follower seats itself at the main's position again |
+| `pair.adoptShow` | | the follower takes the main's show text (AFU); refused while anything runs |
+| `pair.lead`, `pair.hold` | | the engine's: this machine now sends, or holds; logged |
+| `pair.seat` | `s:position` | the engine's: one record seating the follower at the main's position |
+| `pair.launchAt` | `s:run h:sample` | the engine's: the main's launch sample, mapped onto this machine's clock |
+
+### 58.5 Refused
+
+`not-paired` for a pairing command on a machine with no role; `not-following` for `realign` or
+`adoptShow` on the machine that sends; `busy` for `adoptShow` while a cue runs; a command the backup
+passed on and the main refused comes back refused, with the main's reason.
+
+### 58.6 Stages
+
+| Stage | What |
+|---|---|
+| RD.0 | This section; PRD §3.15, §6.9; the devplan's Phase 12 |
+| RD.1 | `pair::Hold`: one machine-level switch checked first in `MountSender::deliver` and its MIDI branch, `RawSender::flush`, `MidiSender::enqueue` (surface ports through), `SerialTable::send`; links closed, keep-alives, questions, probe, listener and fetcher idle; Pd's `x_net` amended; `--hold` |
+| RD.2 | `cue::RunNames`: every name the Runner draws while a show runs, derived (AGE); the shuffle's seed |
+| RD.3 | The `scope` column, `Command::machineLocal`, no undo step for either (AGC) |
+| RD.4 | `pair::PairSettings`, `pairing.xml`, the options, the `pair` rows |
+| RD.5 | `Engine::setAfterRecord`; `pair::PeerLink` on both sides of the WebSocket; the heartbeat; the ring a reconnecting backup asks from |
+| RD.6 | Following: the fixed delay (AGF), the gate in `Engine::submit` (AGD), held while following |
+| RD.7 | The link lost, `pair.lead`, `takeOver`, `handOver`, `keep`, AFQ and AFR, AGJ, AGK; the alarm |
+| RD.8 | `pair.seat` and `realign` through `seatPlan`, `EphemeralState::read`, `seekMedia`; the summary and `inStep` |
+| RD.9 | `pair::ClockMap`, the block-start time from the audio callback, the extra lead, `pair.launchAt`; M61 |
+| RD.10 | `doc::ShowFingerprint`, the sounds' content hashes, `pair.adoptShow` |
+| RD.11 | The Redundancy tab, the window's banner and status, the page's buttons, both guides, the README |
+
+**M61** (planned): two `serve`s on dummy clocks, the distance between the samples a GO launches on, and
+Δ as the link measures it.
+
+### 58.7 Built so far
+
+- **RD.0**, 2026-10-11: this section, PRD §3.15 and §6.9, the devplan's Phase 12.
