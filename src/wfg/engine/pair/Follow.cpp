@@ -18,6 +18,7 @@
 
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/command/CommandRegistry.h>
+#include <wfg/engine/command/Recovery.h>
 #include <wfg/engine/pair/MachineLocal.h>
 
 #include <algorithm>
@@ -78,7 +79,7 @@ namespace wfg::pair
         return Gate::ignore;
     }
 
-    std::vector<std::uint8_t> relayOf (const Event& event)
+    std::vector<std::uint8_t> relayOf (const Event& event, std::uint64_t ticket)
     {
         /*  THE LOG'S OWN LINE, so the main reads a relay with the reader that
             already reads its stream and its logs: every atom - a blob, a
@@ -90,13 +91,95 @@ namespace wfg::pair
         line.command = event.command;
         line.args = event.args;
 
-        return wire::encode (wire::relay, { osc::Value::string (line.toLine()) });
+        std::vector<osc::Value> said { osc::Value::string (line.toLine()) };
+
+        //  THE TICKET, beside the line and never in it (RD.7, AGJ).
+        if (ticket != 0)
+            said.push_back (osc::Value::int64 (static_cast<std::int64_t> (ticket)));
+
+        return wire::encode (wire::relay, std::move (said));
+    }
+
+    Settled settle (std::vector<Event> unconfirmed)
+    {
+        Settled out;
+
+        for (auto& event : unconfirmed)
+        {
+            if (recovery::isStop (event.command))
+                out.applied.push_back (std::move (event));
+            else
+                ++out.dropped;
+        }
+
+        return out;
     }
 
     //==========================================================================
-    FollowGate::FollowGate (const CommandRegistry& commandsToRead, PassOn passOnToUse)
-        : commands (commandsToRead), passOn (std::move (passOnToUse))
+    FollowGate::FollowGate (const CommandRegistry& commandsToRead, PassOn passOnToUse, std::uint64_t firstTicket)
+        : commands (commandsToRead), passOn (std::move (passOnToUse)),
+          nextTicket (firstTicket == 0 ? 1 : firstTicket)
     {
+    }
+
+    void FollowGate::confirm (std::uint64_t ticket)
+    {
+        if (ticket == 0)
+            return;
+
+        const std::lock_guard<std::mutex> held { ledgerLock };
+
+        //  Nearly always the oldest: the leader answers in the order it was asked.
+        for (auto at = pending.begin(); at != pending.end(); ++at)
+        {
+            if (at->ticket == ticket)
+            {
+                pending.erase (at);
+                return;
+            }
+        }
+    }
+
+    std::vector<Event> FollowGate::takeUnconfirmed (LinkClock::time_point now, double maxAgeSeconds)
+    {
+        std::deque<Pending> taken;
+
+        {
+            const std::lock_guard<std::mutex> held { ledgerLock };
+            taken.swap (pending);
+        }
+
+        std::vector<Event> out;
+
+        for (auto& entry : taken)
+        {
+            if (std::chrono::duration<double> (now - entry.at).count() > maxAgeSeconds)
+            {
+                unconfirmedCount.fetch_add (1, std::memory_order_relaxed);
+                continue;
+            }
+
+            out.push_back (std::move (entry.event));
+        }
+
+        return out;
+    }
+
+    void FollowGate::expire (LinkClock::time_point now, double maxAgeSeconds)
+    {
+        const std::lock_guard<std::mutex> held { ledgerLock };
+
+        while (! pending.empty() && std::chrono::duration<double> (now - pending.front().at).count() > maxAgeSeconds)
+        {
+            pending.pop_front();
+            unconfirmedCount.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+
+    std::size_t FollowGate::unanswered() const
+    {
+        const std::lock_guard<std::mutex> held { ledgerLock };
+        return pending.size();
     }
 
     bool FollowGate::take (Event& event)
@@ -116,12 +199,25 @@ namespace wfg::pair
                 return true;
 
             case Gate::passOn:
-                if (passOn && passOn (relayOf (event)))
+            {
+                /*  A TICKET, AND A PLACE IN THE LEDGER BEFORE IT GOES (RD.7,
+                    AGJ): the leader's answer may come back before this returns.
+                    Kept whether or not it could be sent - see the ledger's
+                    note in Follow.h. */
+                const auto ticket = nextTicket.fetch_add (1, std::memory_order_relaxed);
+
+                {
+                    const std::lock_guard<std::mutex> held { ledgerLock };
+                    pending.push_back ({ ticket, event, LinkClock::now() });
+                }
+
+                if (passOn && passOn (relayOf (event, ticket)))
                     passedOnCount.fetch_add (1, std::memory_order_relaxed);
                 else
                     lostCount.fetch_add (1, std::memory_order_relaxed);
 
                 return true;
+            }
         }
 
         return false;

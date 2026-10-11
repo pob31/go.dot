@@ -115,6 +115,14 @@ namespace wfg
         std::string origin;
         std::string command;
         std::vector<osc::Value> args;
+
+        /*  A COMMAND A BACKUP PASSED ON, AND ITS TICKET (namespace draft §58,
+            RD.7, AGJ): the number the backup gave the relay, which the main
+            submits with it and the engine copies onto the record
+            (`LogRecord::ticket`), so the stream that carries the record back
+            can say which relay it answers. Nought for every other event - all
+            but a main's `peer:` ones - and never written to a log line. */
+        std::uint64_t ticket = 0;
     };
 
     /*  Something that arrived and never became an event: a malformed datagram,

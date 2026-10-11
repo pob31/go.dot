@@ -1776,4 +1776,17 @@ TEST_CASE ("follow: pair/state, delay, late, differs, relayed and dropped publis
     state.pairFollow.state = "leading";
     snapshot = rig.parameters.publish (3, state);
     CHECK (valueAt (snapshot, "/godot/pair/state", "s") == osc::Value::string ("leading"));
+
+    /*  RD.7: the alarm in front of the operator, empty when there is nothing
+        to act on, and the relays dropped unanswered (AGJ). */
+    CHECK (valueAt (snapshot, "/godot/pair/alarm", "s") == osc::Value::string (""));
+    CHECK (valueAt (snapshot, "/godot/pair/unconfirmed", "h") == osc::Value::int64 (0));
+
+    state.pairFollow.state = "bothSending";
+    state.pairFollow.alarm = "Both machines are sending: every command reaches the devices from both.";
+    state.pairFollow.unconfirmed = 2;
+    snapshot = rig.parameters.publish (4, state);
+    CHECK (valueAt (snapshot, "/godot/pair/state", "s") == osc::Value::string ("bothSending"));
+    CHECK (valueAt (snapshot, "/godot/pair/alarm", "s") == osc::Value::string (state.pairFollow.alarm));
+    CHECK (valueAt (snapshot, "/godot/pair/unconfirmed", "h") == osc::Value::int64 (2));
 }

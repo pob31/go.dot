@@ -313,6 +313,21 @@ namespace wfg
             business to say, not this word's. */
         inline constexpr const char* writeFailed     = "write-failed";
 
+        /*  WHO SENDS TO THE DEVICES, ASKED OF A MACHINE THAT CANNOT SAY (namespace
+            draft §58.5, RD.7): an operator's `pair.takeOver`, `pair.handOver`
+            or `pair.keep` on a machine whose seat makes it meaningless.
+            `not-paired` - the machine has no role; `not-holding` - take over
+            what already sends; `not-sending` - hand over, from a machine that
+            holds; `not-linked` - hand over to a machine that is not there;
+            `not-both-sending` - keep the show, outside two machines both
+            sending (AFQ). Each a fact about the moment, and each says what
+            would make the command mean something. */
+        inline constexpr const char* notPaired       = "not-paired";
+        inline constexpr const char* notHolding      = "not-holding";
+        inline constexpr const char* notSending      = "not-sending";
+        inline constexpr const char* notLinked       = "not-linked";
+        inline constexpr const char* notBothSending  = "not-both-sending";
+
         /*  Show mode is on, and the command would have changed the show half
             of the document: a create, a delete, a move, or a write to a value
             that persists in show.xml.

@@ -22,12 +22,15 @@
 
     A machine whose role is `backup` and whose link to its main is up FOLLOWS:
     it applies what the main applied, a fixed number of ticks later; it holds
-    every send meant for a device (RD.1's hold, switched on here and never off
-    - RD.7 decides when a backup sends); it passes on to the main whatever its
-    own clients ask of it; and it ignores what devices tell it, since the
-    main heard them too and the main's copy arrives in the stream. Losing the
-    link, taking over and catching up are RD.7 and RD.8: here a backup whose
-    link is lost stays holding and stops following.
+    every send meant for a device (RD.1's hold); it passes on to the main
+    whatever its own clients ask of it; and it ignores what devices tell it,
+    since the main heard them too and the main's copy arrives in the stream.
+    From RD.7 who follows whom is pair/Leadership.h's to decide - a main
+    started again follows the backup that took over, and two machines both
+    sending each follow the other's operators - and a follower whose stream
+    falls silent takes over: its hold let go, its gate opened, and what it
+    passed on and never saw answered settled (`settle`, AGJ). Catching up is
+    RD.8's.
 
     TWO PIECES, FOR TWO THREADS.
 
@@ -75,6 +78,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -116,9 +120,25 @@ namespace wfg::pair
 
     Gate gateFor (std::string_view origin, const Command* command, const std::vector<osc::Value>& args);
 
-    /*  `/godot/pair/relay s:line`: the event as the line of an applied record,
-        origin and all (PeerLink.h). */
-    std::vector<std::uint8_t> relayOf (const Event& event);
+    /*  `/godot/pair/relay s:line h:ticket`: the event as the line of an applied
+        record, origin and all (PeerLink.h), and the ticket the leader carries
+        back on the record that answers it (RD.7, AGJ); none when nought. */
+    std::vector<std::uint8_t> relayOf (const Event& event, std::uint64_t ticket = 0);
+
+    //==========================================================================
+    /*  WHAT A FOLLOWER THAT TAKES OVER DOES WITH WHAT IT PASSED ON AND NEVER
+        SAW ANSWERED (namespace draft §58, RD.7, decision AGJ): Esc and double
+        Esc - the operator's stops, PRD §6.2's list (command/Recovery.h) - are
+        applied here; everything else is dropped and counted: a GO, Doh!, a
+        fader, a standby move. A command never seen to land cannot be known to
+        have landed, and of all of them only a stop is safe to make twice. */
+    struct Settled
+    {
+        std::vector<Event> applied;     // to submit here, in the order they were given
+        std::int64_t dropped = 0;
+    };
+
+    Settled settle (std::vector<Event> unconfirmed);
 
     //==========================================================================
     /*  THE DOOR (`Engine::setGate`'s), any thread. `take` answers whether it
@@ -130,7 +150,10 @@ namespace wfg::pair
             and the command is then lost, and counted. Must never block. */
         using PassOn = std::function<bool (std::vector<std::uint8_t> bytes)>;
 
-        FollowGate (const CommandRegistry& commandsToRead, PassOn passOnToUse);
+        /*  `firstTicket` is where this session's relay tickets start: serve
+            draws it, so a ring the main replays to a backup started again
+            never answers a ticket of the new session (RD.7). */
+        FollowGate (const CommandRegistry& commandsToRead, PassOn passOnToUse, std::uint64_t firstTicket = 1);
 
         FollowGate (const FollowGate&) = delete;
         FollowGate& operator= (const FollowGate&) = delete;
@@ -142,11 +165,57 @@ namespace wfg::pair
         std::int64_t ignored() const noexcept  { return ignoredCount.load (std::memory_order_relaxed); }
         std::int64_t lost() const noexcept     { return lostCount.load (std::memory_order_relaxed); }
 
+        //======================================================================
+        /*  THE LEDGER OF RELAYS NOT YET ANSWERED (RD.7, AGJ). Every command
+            passed on is kept here with its ticket until the record that answers
+            it - applied or refused on the leader - comes back down the stream
+            (`confirm`, the tick thread's, as the receiver hands each record
+            on). One that could not even be sent - no path open, which is the
+            moment the leader has just gone - is kept too: an Esc pressed in
+            the second before a takeover is the Esc most needed after it. */
+
+        /** The record answering this ticket has arrived. Tick thread. */
+        void confirm (std::uint64_t ticket);
+
+        /*  Those not answered, oldest first, every one forgotten: what a
+            follower that stops following settles (`settle`). One passed on more
+            than `maxAgeSeconds` ago is not among them - with the link up all
+            that time, the leader never had it to answer (a path that dropped
+            and was dialled again) and it is not this takeover's to settle.
+            Tick thread. */
+        std::vector<Event> takeUnconfirmed (LinkClock::time_point now, double maxAgeSeconds);
+
+        /*  Forgets those passed on more than `maxAgeSeconds` ago, counting each
+            as unconfirmed: called once a tick while following, so the ledger
+            holds a few seconds at most. Tick thread; one lock, and nothing to
+            do on nearly every tick. */
+        void expire (LinkClock::time_point now, double maxAgeSeconds);
+
+        /** Relays waiting for their answer. Any thread. */
+        std::size_t unanswered() const;
+
+        /** Relays forgotten unanswered - expired, or dropped by a takeover. Any thread. */
+        std::int64_t unconfirmed() const noexcept { return unconfirmedCount.load (std::memory_order_relaxed); }
+
+        /** Counts relays a takeover dropped (`settle`'s). Tick thread. */
+        void countDropped (std::int64_t count) noexcept { unconfirmedCount.fetch_add (count, std::memory_order_relaxed); }
+
     private:
+        struct Pending
+        {
+            std::uint64_t ticket = 0;
+            Event event;
+            LinkClock::time_point at {};
+        };
+
         const CommandRegistry& commands;
         PassOn passOn;
 
-        std::atomic<std::int64_t> passedOnCount { 0 }, ignoredCount { 0 }, lostCount { 0 };
+        std::atomic<std::uint64_t> nextTicket;
+        mutable std::mutex ledgerLock;
+        std::deque<Pending> pending;
+
+        std::atomic<std::int64_t> passedOnCount { 0 }, ignoredCount { 0 }, lostCount { 0 }, unconfirmedCount { 0 };
     };
 
     //==========================================================================

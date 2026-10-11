@@ -202,11 +202,27 @@ namespace wfg::oscquery
         PeerDoor* door = nullptr;
 
         /*  Whether raw OSC bytes are a message under the door's prefix, read
-            before decoding: an OSC message begins with its address. */
+            before decoding: an OSC message begins with its address. And from
+            RD.7 a bundle whose first message is one - a tick's stream from a
+            leader at the other end of a connection it dialled: `#bundle`, its
+            time tag, the first element's size, then that element (20 bytes in). */
         bool forTheDoor (const std::uint8_t* bytes, std::size_t size) const noexcept
         {
-            return ! doorPrefix.empty() && bytes != nullptr && size > doorPrefix.size()
-                     && std::memcmp (bytes, doorPrefix.data(), doorPrefix.size()) == 0;
+            if (doorPrefix.empty() || bytes == nullptr)
+                return false;
+
+            const auto under = [this] (const std::uint8_t* at, std::size_t left)
+            {
+                return left > doorPrefix.size() && std::memcmp (at, doorPrefix.data(), doorPrefix.size()) == 0;
+            };
+
+            static constexpr char bundleHead[8] = { '#', 'b', 'u', 'n', 'd', 'l', 'e', 0 };
+            constexpr std::size_t firstElement = 20;
+
+            if (size > firstElement && std::memcmp (bytes, bundleHead, sizeof (bundleHead)) == 0)
+                return under (bytes + firstElement, size - firstElement);
+
+            return under (bytes, size);
         }
 
         Impl() { server.addWebSocketListener (this); }
@@ -597,9 +613,9 @@ namespace wfg::oscquery
             /*  THE SIDE DOOR (RD.5): a message under its prefix is the link's -
                 a hello, a ping - and never a write. It does not become an event
                 and is in no log; with no door it is dropped, for the same
-                reason. A bundle is a client's and goes the ordinary way: the
-                link never bundles. */
-            if (forDoor && ! decoded.packet.isBundle())
+                reason. From RD.7 a bundle that opens with one is the link's too:
+                a tick's stream from a leader that dialled this machine. */
+            if (forDoor)
             {
                 if (door != nullptr)
                     door->peerMessage (originOf (id), decoded.packet);

@@ -3742,6 +3742,8 @@ namespace wfg::tree
             else if (name == "differs")   text = state.pairFollow.differs;
             else if (name == "relayed")   text = std::to_string (state.pairFollow.relayed);
             else if (name == "dropped")   text = std::to_string (state.pairFollow.dropped);
+            else if (name == "alarm")     text = state.pairFollow.alarm;
+            else if (name == "unconfirmed") text = std::to_string (state.pairFollow.unconfirmed);
             else                          text = std::string (row->defaultText);
 
             engineValue (*row, "pair", text);

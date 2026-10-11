@@ -73,6 +73,7 @@ namespace wfg::pair
             out.reason = record.reason;
             out.command = record.command;
             out.detail = record.detail;
+            out.ticket = record.ticket;
             out.args.reserve (record.args.size());
 
             for (std::size_t at = 0; at + 1 < record.args.size(); at += 2)
@@ -184,7 +185,8 @@ namespace wfg::pair
             return bytes.has_value() ? std::move (*bytes) : std::vector<std::uint8_t> {};
         }
 
-        bool writeRecord (std::vector<std::uint8_t>& out, std::uint64_t counter, std::string_view line)
+        bool writeRecord (std::vector<std::uint8_t>& out, std::uint64_t counter, std::string_view line,
+                          std::uint64_t ticket)
         {
             /*  A string holding a NUL cannot be one OSC string - it would end
                 there - and the codec refuses one rather than cut it. A log line
@@ -193,30 +195,106 @@ namespace wfg::pair
                 return false;
 
             constexpr std::string_view address = record;
-            constexpr std::string_view tags = ",hs";
 
-            out.assign (padded (address.size() + 1) + padded (tags.size() + 1) + 8 + padded (line.size() + 1), 0);
+            //  The relay's ticket after the line, when there is one (RD.7); RD.5's message otherwise.
+            const std::string_view tags = ticket != 0 ? std::string_view (",hsh") : std::string_view (",hs");
+
+            out.assign (padded (address.size() + 1) + padded (tags.size() + 1) + 8 + padded (line.size() + 1)
+                          + (ticket != 0 ? 8 : 0),
+                        0);
 
             auto* at = out.data();
             putString (at, address);
             putString (at, tags);
             putInt64 (at, static_cast<std::int64_t> (counter));
             putString (at, line);
+
+            if (ticket != 0)
+                putInt64 (at, static_cast<std::int64_t> (ticket));
+
             return true;
         }
 
-        void writeBeat (std::vector<std::uint8_t>& out, std::int64_t tick, std::uint64_t lastCounter)
+        void writeBeat (std::vector<std::uint8_t>& out, std::int64_t tick, std::uint64_t lastCounter,
+                        std::int64_t liveRuns)
         {
             constexpr std::string_view address = beat;
-            constexpr std::string_view tags = ",hh";
+            constexpr std::string_view tags = ",hhh";
 
-            out.assign (padded (address.size() + 1) + padded (tags.size() + 1) + 16, 0);
+            out.assign (padded (address.size() + 1) + padded (tags.size() + 1) + 24, 0);
 
             auto* at = out.data();
             putString (at, address);
             putString (at, tags);
             putInt64 (at, tick);
             putInt64 (at, static_cast<std::int64_t> (lastCounter));
+            putInt64 (at, liveRuns);
+        }
+
+        Bound boundFor (const osc::Packet& message) noexcept
+        {
+            //  A tick's stream comes as one bundle; nothing else of the link does.
+            if (message.isBundle())
+                return Bound::follower;
+
+            const auto& address = message.address;
+
+            if (address == hello || address == ping || address == relay)
+                return Bound::leader;
+
+            if (address == welcome || address == gap || address == record || address == beat || address == pong)
+                return Bound::follower;
+
+            return Bound::neither;
+        }
+
+        bool Hello::wantsStream() const noexcept
+        {
+            if (! described)
+                return role == "backup";
+
+            return state == "following" || state == "bothSending";
+        }
+
+        std::vector<std::uint8_t> helloBytes (const Hello& said)
+        {
+            return encode (hello, { osc::Value::string (said.machine), osc::Value::string (said.role),
+                                    osc::Value::int64 (static_cast<std::int64_t> (std::min (said.lastCounter, fromNow))),
+                                    osc::Value::string (said.stream), osc::Value::string (said.state),
+                                    osc::Value::string (said.ownStream), osc::Value::int32 (said.fresh ? 1 : 0),
+                                    osc::Value::int64 (said.liveRuns),
+                                    osc::Value::int64 (static_cast<std::int64_t> (said.salt)) });
+        }
+
+        std::optional<Hello> readHello (const osc::Packet& message)
+        {
+            const auto& a = message.args;
+
+            if (message.isBundle() || message.address != hello || (a.size() != 4 && a.size() != 9))
+                return std::nullopt;
+
+            if (! a[0].isString() || ! a[1].isString() || ! a[2].isInt64() || a[2].getInt64() < 0 || ! a[3].isString())
+                return std::nullopt;
+
+            Hello out;
+            out.machine = a[0].getString();
+            out.role = a[1].getString();
+            out.lastCounter = static_cast<std::uint64_t> (a[2].getInt64());
+            out.stream = a[3].getString();
+
+            if (a.size() == 4)
+                return out;
+
+            if (! a[4].isString() || ! a[5].isString() || ! a[6].isInt32() || ! a[7].isInt64() || ! a[8].isInt64())
+                return std::nullopt;
+
+            out.state = a[4].getString();
+            out.ownStream = a[5].getString();
+            out.fresh = a[6].getInt32() != 0;
+            out.liveRuns = a[7].getInt64();
+            out.salt = static_cast<std::uint64_t> (a[8].getInt64());
+            out.described = true;
+            return out;
         }
     }
 
@@ -232,6 +310,13 @@ namespace wfg::pair
             names, and a copy from the main would make each of them twice. A
             replay's are a replay's. */
         if (record.origin == origin::engine || record.origin == origin::replay)
+            return false;
+
+        /*  NOR WHAT THIS MACHINE APPLIED FROM THE OTHER'S STREAM (RD.7): a
+            follower that took over leads from its own records on, and two
+            machines both sending each apply the other's - sent back, every one
+            would come round again for ever. */
+        if (record.origin.rfind (origin::fromMain, 0) == 0)
             return false;
 
         /*  The pairing's own commands are the machine's (RD.4) and would be
@@ -281,7 +366,7 @@ namespace wfg::pair
             it cannot happen (`wire::writeRecord`), and if it ever did, a
             counter promised and never sent would be a backup told it lost
             something the main never had to give. */
-        if (! wire::writeRecord (slot, last + 1, line))
+        if (! wire::writeRecord (slot, last + 1, line, record.ticket))
             return;     // refused before it wrote: the slot still holds the record it held
 
         ++last;
@@ -307,9 +392,10 @@ namespace wfg::pair
     {
         const auto& a = message.args;
 
+        //  RD.7's third argument, the pinging machine's tick, is the presence's (pair/Presence.h).
         if (! message.isBundle() && message.address == wire::ping
-              && (a.size() == 1 || a.size() == 2) && a[0].isInt64()
-              && (a.size() == 1 || a[1].isNumber()))
+              && (a.size() >= 1 && a.size() <= 3) && a[0].isInt64()
+              && (a.size() == 1 || a[1].isNumber()) && (a.size() < 3 || a[2].isInt64()))
         {
             /*  ANSWERED HERE AND AT ONCE, on the server's thread, with what this
                 machine's tick is: the round trip is what a ping is for, and one
@@ -337,13 +423,20 @@ namespace wfg::pair
             pairing set up wrong somewhere, ignored and counted - and only a
             line that reads as an applied record: what a backup passes on is
             never a refusal or a drop. */
-        if (! message.isBundle() && message.address == wire::relay && a.size() == 1 && a[0].isString())
+        if (! message.isBundle() && message.address == wire::relay && (a.size() == 1 || a.size() == 2)
+              && a[0].isString() && (a.size() == 1 || counterOf (a[1]).has_value()))
         {
-            const auto parsed = LogRecord::fromLine (a[0].getString());
+            auto parsed = LogRecord::fromLine (a[0].getString());
 
             if (isLeading() && relayed && parsed.has_value() && parsed->kind == LogRecord::Kind::applied
                   && ! parsed->command.empty())
             {
+                /*  ITS TICKET, beside the line as the record that answers it
+                    will carry it back (RD.7, AGJ): the backup counts a relay
+                    confirmed when that record reaches it. */
+                if (a.size() == 2)
+                    parsed->ticket = *counterOf (a[1]);
+
                 relayCount.fetch_add (1, std::memory_order_relaxed);
                 relayed (*parsed);
                 return;
@@ -353,16 +446,17 @@ namespace wfg::pair
             return;
         }
 
-        if (! message.isBundle() && message.address == wire::hello && a.size() == 4
-              && a[0].isString() && a[1].isString() && counterOf (a[2]).has_value() && a[3].isString())
+        if (const auto said = wire::readHello (message))
         {
             Arrival hello;
             hello.kind = Arrival::Kind::hello;
             hello.origin = origin;
-            hello.machine = a[0].getString();
-            hello.role = a[1].getString();
-            hello.lastCounter = *counterOf (a[2]);
-            hello.stream = a[3].getString();
+            hello.machine = said->machine;
+            hello.role = said->role;
+            hello.lastCounter = said->lastCounter;
+            hello.stream = said->stream;
+            hello.wants = said->wantsStream();
+            hello.described = said->described;
             hello.at = arrival;
 
             const std::lock_guard<std::mutex> held { inboxLock };
@@ -415,12 +509,27 @@ namespace wfg::pair
 
             case Arrival::Kind::hello:
             {
-                /*  ONLY A MAIN TAKES FOLLOWERS, and only a backup follows: a
-                    hello to a machine that is not a main, or from one that does
-                    not say it is a backup, is a pairing set up wrong on one of
-                    the two machines - ignored, and counted, until RD.7 decides
-                    what two mains finding each other do. */
-                if (! isLeading() || arrival.role != "backup")
+                /*  ONLY A MACHINE THAT LEADS TAKES FOLLOWERS, and only one that
+                    asks follows (RD.7): a machine that says it follows, or that
+                    both send and so each applies the other's. One that says it
+                    is anything else is telling this one what it is - pair/
+                    Presence.h reads that - and follows nothing of it from here:
+                    a follower on that connection that took over, say, is
+                    forgotten. RD.5's hello, of four, follows when it says
+                    `backup`; one that says anything else is a pairing set up
+                    wrong, and like a follower's hello to a machine that does
+                    not lead, it is ignored and counted. */
+                if (! arrival.wants)
+                {
+                    if (arrival.described)
+                        followers.erase (arrival.origin);
+                    else
+                        ignoredCount.fetch_add (1, std::memory_order_relaxed);
+
+                    return;
+                }
+
+                if (! isLeading())
                 {
                     ignoredCount.fetch_add (1, std::memory_order_relaxed);
                     return;
@@ -486,14 +595,16 @@ namespace wfg::pair
 
         arrivals.clear();
 
-        //  A machine that stopped being a main stops streaming (RD.7 decides what happens next).
+        /*  A machine that no longer leads streams to nobody: its followers are
+            forgotten, and if it leads again it takes them from their next hello
+            (RD.7). */
         if (! isLeading())
             followers.clear();
 
         if (followers.empty())
             return;
 
-        wire::writeBeat (beatBytes, tick, last);
+        wire::writeBeat (beatBytes, tick, last, liveRuns);
 
         for (auto at = followers.begin(); at != followers.end();)
         {
@@ -605,7 +716,8 @@ namespace wfg::pair
 
         const auto is = [&message] (const char* address) { return ! message.isBundle() && message.address == address; };
 
-        if (is (wire::record) && a.size() == 2 && counterOf (a[0]).has_value() && a[1].isString())
+        if (is (wire::record) && (a.size() == 2 || a.size() == 3) && counterOf (a[0]).has_value() && a[1].isString()
+              && (a.size() == 2 || counterOf (a[2]).has_value()))
         {
             /*  READ BACK HERE, on the path's own thread, so the tick thread is
                 handed a record and never a line to parse. A line that does not
@@ -622,12 +734,18 @@ namespace wfg::pair
             item.kind = Item::Kind::record;
             item.first = a[0].getInt64();
             item.record = std::move (*parsed);
+
+            //  The relay it answers, beside the line (RD.7, AGJ).
+            if (a.size() == 3)
+                item.record.ticket = *counterOf (a[2]);
         }
-        else if (is (wire::beat) && a.size() == 2 && a[0].isInt64() && counterOf (a[1]).has_value())
+        else if (is (wire::beat) && (a.size() == 2 || a.size() == 3) && a[0].isInt64() && counterOf (a[1]).has_value()
+                   && (a.size() == 2 || a[2].isInt64()))
         {
             item.kind = Item::Kind::beat;
             item.first = a[0].getInt64();
             item.second = a[1].getInt64();
+            item.third = a.size() == 3 ? a[2].getInt64() : 0;
         }
         else if (is (wire::welcome) && a.size() == 2 && a[0].isString() && counterOf (a[1]).has_value())
         {
@@ -660,6 +778,34 @@ namespace wfg::pair
     {
         const std::lock_guard<std::mutex> held { lock };
         return streamShared;
+    }
+
+    std::pair<std::uint64_t, std::string> Receiver::resumePoint() const
+    {
+        const std::lock_guard<std::mutex> held { lock };
+
+        if (afreshShared)
+            return { wire::fromNow, afreshStream };
+
+        return { lastSeen.load (std::memory_order_relaxed), streamShared };
+    }
+
+    void Receiver::startAfresh (const std::string& leaderStream)
+    {
+        /*  NOTHING HELD OF ANY STREAM: the counter and the stream forgotten
+            here, so a path dialled again before the welcome comes asks from
+            now as the first hello did, and never resumes the stream this
+            machine followed before - which, after a takeover and back, is a
+            stream it stopped applying long ago. */
+        afresh = true;
+        stream.clear();
+        last = 0;
+        lastSeen.store (0, std::memory_order_relaxed);
+
+        const std::lock_guard<std::mutex> held { lock };
+        afreshShared = true;
+        afreshStream = leaderStream;
+        streamShared.clear();
     }
 
     void Receiver::drain (LinkClock::time_point now, double timeoutSeconds)
@@ -714,19 +860,35 @@ namespace wfg::pair
                     new one; a second path's welcome joins the link that is up. */
                 const auto changed = item.stream != stream;
 
-                if (changed || ! heardAny || ! within (lastHeard, item.at, timeoutSeconds))
+                if (changed || afresh || ! heardAny || ! within (lastHeard, item.at, timeoutSeconds))
                 {
                     receivedThisLink = 0;
                     gapsThisLink = 0;
                 }
 
-                if (changed)
+                if (changed || afresh)
                 {
                     stream = item.stream;
-                    last = 0;
+
+                    /*  A FOLLOW THAT STARTED NOW starts where the welcome says
+                        (RD.7): the records before it were never asked for, and
+                        are no gap. Any other new stream holds nothing yet. */
+                    last = afresh && item.first > 0 ? static_cast<std::uint64_t> (item.first) - 1 : 0;
+                    afresh = false;
+
+                    /*  AND ITS TICKS ARE ITS OWN: a leader started again counts
+                        from nought, and a beat is handed on only when its tick
+                        passes the last one's - measured against the old
+                        leader's, the new one's would wait an evening. */
+                    beaten = false;
+                    beatTick = 0;
+                    beatLast = 0;
+                    beatRuns = 0;
 
                     const std::lock_guard<std::mutex> held { lock };
                     streamShared = stream;
+                    afreshShared = false;
+                    afreshStream.clear();
                 }
 
                 heard (item.at);
@@ -786,6 +948,10 @@ namespace wfg::pair
                 beaten = true;
                 beatTick = std::max (beatTick, item.first);
                 beatLast = std::max (beatLast, static_cast<std::uint64_t> (item.second));
+
+                if (fresh)
+                    beatRuns = item.third;
+
                 heard (item.at);
 
                 //  Each of the main's ticks once, as it first arrived (RD.6).
@@ -964,16 +1130,38 @@ namespace wfg::pair
         Receiver& receiver;
         const std::string machine;
 
+        /*  Who reads what a path brings, and what a path opens with (RD.7):
+            set before `start`, read on the paths' threads. */
+        Route route;
+        HelloMaker makeHello;
+
+        //  This machine's tick, for the pings (RD.7); -1 until the tick thread says.
+        std::atomic<std::int64_t> tick { -1 };
+
         mutable std::mutex guard;
         std::condition_variable wake;
         std::vector<std::string> wanted;
         bool changed = false;
         bool stopping = false;
 
-        /*  WHAT WAITS TO BE PASSED ON (RD.6): relays, sent by the manager
-            thread down one open path, woken for at once. Under `guard`. */
-        std::vector<std::vector<std::uint8_t>> outbox;
-        std::vector<std::vector<std::uint8_t>> sending;     // the manager thread's, swapped with it
+        /*  WHAT WAITS TO BE SENT that is not the dialler's own: relays (RD.6),
+            down one open path; a leading backup's stream to the main at the end
+            of one path, and orders down every one (RD.7); and whether the hello
+            is to be said again. Sent by the manager thread, woken for at once.
+            Under `guard`. */
+        struct Outgoing
+        {
+            enum class To { onePath, thatPath, everyPath };
+
+            To to = To::onePath;
+            std::string path;
+            std::vector<std::uint8_t> bytes;
+        };
+
+        std::vector<Outgoing> outbox;
+        std::vector<Outgoing> sending;          // the manager thread's, swapped with it
+        bool announcing = false;
+        std::vector<std::string> openNames;     // the paths open at the last look, under `guard`
 
         std::atomic<bool> running { false };
         std::atomic<std::size_t> opened { 0 };
@@ -981,6 +1169,17 @@ namespace wfg::pair
 
         //  The manager thread's own.
         std::map<std::string, std::unique_ptr<Path>> paths;
+
+        std::vector<std::uint8_t> helloNow() const
+        {
+            if (makeHello)
+                return makeHello();
+
+            //  RD.5's: a backup's, with what the receiver holds.
+            return wire::encode (wire::hello, { osc::Value::string (machine), osc::Value::string ("backup"),
+                                                counterValue (receiver.lastCounter()),
+                                                osc::Value::string (receiver.streamId()) });
+        }
     };
 
     void Dialler::Impl::run()
@@ -988,10 +1187,11 @@ namespace wfg::pair
         for (;;)
         {
             std::vector<std::string> now;
+            auto sayHello = false;
 
             {
                 std::unique_lock<std::mutex> held { guard };
-                wake.wait_for (held, tendEvery, [this] { return stopping || changed || ! outbox.empty(); });
+                wake.wait_for (held, tendEvery, [this] { return stopping || changed || announcing || ! outbox.empty(); });
 
                 if (stopping)
                     break;
@@ -999,6 +1199,8 @@ namespace wfg::pair
                 changed = false;
                 now = wanted;
                 sending.swap (outbox);
+                sayHello = announcing;
+                announcing = false;
             }
 
             //  An address no longer wanted is hung up on.
@@ -1035,28 +1237,75 @@ namespace wfg::pair
 
             opened.store (openNow);
 
+            {
+                /*  READ AND KEPT UNDER ONE HOLD OF THE LOCK, which a path that
+                    opens takes too (on_open, below): read outside it, a path
+                    that opened between the read and the write was left out
+                    for a turn of this loop, and a leader's frame sent down it
+                    then (`sendTo`) was refused - its follower forgotten, the
+                    stream lost for the follower's timeout. */
+                const std::lock_guard<std::mutex> held { guard };
+                openNames.clear();
+
+                for (const auto& peer : now)
+                    if (const auto found = paths.find (peer);
+                        found != paths.end() && found->second != nullptr && found->second->open.load())
+                        openNames.push_back (peer);
+            }
+
+            //  WHAT THIS MACHINE IS, said again down every open path (RD.7).
+            if (sayHello)
+            {
+                const auto bytes = helloNow();
+
+                for (auto& entry : paths)
+                    if (entry.second != nullptr && entry.second->open.load())
+                        entry.second->send (bytes);
+            }
+
             /*  PASSED ON DOWN ONE PATH, the first open one in the order they
                 were given (RD.6): a relay sent down two would be two GOs on
                 the main, which has no counter to drop the second by. One that
                 finds no path open - the link fell between the gate's decision
                 and here - is lost, as a datagram to a machine switched off is;
-                RD.7 decides what a backup that takes over does with what it
-                passed on and never saw come back (AGJ). */
+                a backup that takes over settles what it passed on and never
+                saw come back (RD.7, AGJ). A stream's frame goes down the path
+                its follower is at the end of, and an order down every one, in
+                the order they were queued. */
             if (! sending.empty())
             {
-                Path* out = nullptr;
+                Path* first = nullptr;
 
                 for (const auto& peer : now)
                     if (const auto found = paths.find (peer);
                         found != paths.end() && found->second != nullptr && found->second->open.load())
                     {
-                        out = found->second.get();
+                        first = found->second.get();
                         break;
                     }
 
-                if (out != nullptr)
-                    for (const auto& bytes : sending)
-                        out->send (bytes);
+                for (const auto& out : sending)
+                {
+                    switch (out.to)
+                    {
+                        case Outgoing::To::onePath:
+                            if (first != nullptr)
+                                first->send (out.bytes);
+                            break;
+
+                        case Outgoing::To::thatPath:
+                            if (const auto found = paths.find (out.path);
+                                found != paths.end() && found->second != nullptr && found->second->open.load())
+                                found->second->send (out.bytes);
+                            break;
+
+                        case Outgoing::To::everyPath:
+                            for (auto& entry : paths)
+                                if (entry.second != nullptr && entry.second->open.load())
+                                    entry.second->send (out.bytes);
+                            break;
+                    }
+                }
 
                 sending.clear();
             }
@@ -1067,6 +1316,9 @@ namespace wfg::pair
 
         paths.clear();
         opened.store (0);
+
+        const std::lock_guard<std::mutex> held { guard };
+        openNames.clear();
     }
 
     void Dialler::Impl::failed (Path& path, LinkClock::time_point now)
@@ -1107,8 +1359,14 @@ namespace wfg::pair
         if (now - path.pingedAt >= pingEvery)
         {
             path.pingedAt = now;
-            path.send (wire::encode (wire::ping, { osc::Value::int64 (nanosecondsOf (LinkClock::now())),
-                                                   osc::Value::float32 (static_cast<float> (receiver.roundTripToSay())) }));
+            std::vector<osc::Value> said { osc::Value::int64 (nanosecondsOf (LinkClock::now())),
+                                           osc::Value::float32 (static_cast<float> (receiver.roundTripToSay())) };
+
+            //  AND THIS MACHINE'S TICK (RD.7): the main knows the engine is alive, not only the socket.
+            if (const auto ticking = tick.load (std::memory_order_relaxed); ticking >= 0)
+                said.push_back (osc::Value::int64 (ticking));
+
+            path.send (wire::encode (wire::ping, std::move (said)));
         }
     }
 
@@ -1143,9 +1401,16 @@ namespace wfg::pair
             }
 
             self->open.store (true);
-            self->send (wire::encode (wire::hello, { osc::Value::string (machine), osc::Value::string ("backup"),
-                                                     counterValue (receiver.lastCounter()),
-                                                     osc::Value::string (receiver.streamId()) }));
+
+            //  Open to `sendTo` at once, not at the manager's next look (RD.7).
+            {
+                const std::lock_guard<std::mutex> held { guard };
+
+                if (std::find (openNames.begin(), openNames.end(), self->peer) == openNames.end())
+                    openNames.push_back (self->peer);
+            }
+
+            self->send (helloNow());
         };
 
         path.client->on_message = [this, self] (std::shared_ptr<WsClient::Connection>,
@@ -1161,11 +1426,16 @@ namespace wfg::pair
             const auto bytes = message->string();
             const auto decoded = osc::decode (bytes);
 
-            //  A bundle is a tick's messages to this follower; a bare message, a pong.
+            /*  A bundle is a tick's messages to this follower; a bare message,
+                a pong - and from RD.7 whatever the main says as the other half:
+                its hello, an order, a relay when it follows this machine. */
             if (! decoded.ok || (! decoded.packet.isBundle() && ! wire::isPairAddress (decoded.packet.address)))
                 return;
 
-            receiver.deliver (self->peer, decoded.packet, LinkClock::now());
+            if (route)
+                route (self->peer, decoded.packet, LinkClock::now());
+            else
+                receiver.deliver (self->peer, decoded.packet, LinkClock::now());
         };
 
         path.client->on_close = [self] (std::shared_ptr<WsClient::Connection>, int, const std::string&)
@@ -1268,11 +1538,76 @@ namespace wfg::pair
             if (impl->stopping || ! impl->running.load())
                 return false;
 
-            impl->outbox.push_back (std::move (bytes));
+            impl->outbox.push_back ({ Impl::Outgoing::To::onePath, {}, std::move (bytes) });
         }
 
         impl->wake.notify_all();
         return true;
+    }
+
+    void Dialler::setRoute (Route routeToUse)
+    {
+        impl->route = std::move (routeToUse);
+    }
+
+    void Dialler::setHello (HelloMaker makeHello)
+    {
+        impl->makeHello = std::move (makeHello);
+    }
+
+    void Dialler::announce()
+    {
+        {
+            const std::lock_guard<std::mutex> held { impl->guard };
+
+            if (impl->stopping || ! impl->running.load())
+                return;
+
+            impl->announcing = true;
+        }
+
+        impl->wake.notify_all();
+    }
+
+    bool Dialler::sendTo (const std::string& path, std::vector<std::uint8_t> bytes)
+    {
+        if (bytes.empty())
+            return false;
+
+        {
+            const std::lock_guard<std::mutex> held { impl->guard };
+
+            if (impl->stopping || ! impl->running.load()
+                  || std::find (impl->openNames.begin(), impl->openNames.end(), path) == impl->openNames.end())
+                return false;
+
+            impl->outbox.push_back ({ Impl::Outgoing::To::thatPath, path, std::move (bytes) });
+        }
+
+        impl->wake.notify_all();
+        return true;
+    }
+
+    void Dialler::sendAll (std::vector<std::uint8_t> bytes)
+    {
+        if (bytes.empty())
+            return;
+
+        {
+            const std::lock_guard<std::mutex> held { impl->guard };
+
+            if (impl->stopping || ! impl->running.load())
+                return;
+
+            impl->outbox.push_back ({ Impl::Outgoing::To::everyPath, {}, std::move (bytes) });
+        }
+
+        impl->wake.notify_all();
+    }
+
+    void Dialler::setTick (std::int64_t ticking) noexcept
+    {
+        impl->tick.store (ticking, std::memory_order_relaxed);
     }
 
     std::optional<std::pair<std::string, int>> Dialler::hostAndPort (std::string_view peer)

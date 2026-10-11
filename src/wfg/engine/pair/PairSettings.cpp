@@ -411,5 +411,79 @@ namespace wfg::pair
 
                 return Outcome::ok (args);
             } }));
+
+        //======================================================================
+        /*  WHAT THIS MACHINE NOW IS, AND WHY (namespace draft §58.4, RD.7): the
+            engine's, submitted by serve when pair/Leadership.h answers a move
+            - `pair.lead` when the new seat sends, `pair.hold` when it holds -
+            and the seat is what they say from the moment they are applied, in
+            a session and in its replay alike: the log is where a machine's
+            seat lives, so a post-mortem reads every change, and a replay
+            refuses an operator's command where the session refused it.
+            Machine-local: never mirrored, no step of undo. */
+        const auto seat = [&pairing] (bool sending)
+        {
+            return [&pairing, sending] (CommandContext&, const std::vector<osc::Value>& args)
+            {
+                const auto& role = args[0].getString();
+                const auto taken = seatNamed (args[1].getString());
+
+                if (! isRole (role) || ! taken.has_value() || sends (*taken) != sending || args[2].getString().empty())
+                    return Outcome::rejected (reason::badValue);
+
+                pairing.seated = { roleNamed (role), *taken, args[2].getString() };
+                ++pairing.seatCount;
+                return Outcome::ok (args);
+            };
+        };
+
+        registry.add (machineLocal ({ "pair.lead",
+            "The engine's: this machine now sends to the devices - its role, its seat (alone, leading or"
+            " bothSending) and why: started, role, follower-linked, follower-lost, link-lost, leader-restarted,"
+            " take-over, keep, peer-hand-over, peer-lost, both-sending.",
+            { { "role", 's', false }, { "seat", 's', false }, { "reason", 's', false } }, false,
+            seat (true) }));
+
+        registry.add (machineLocal ({ "pair.hold",
+            "The engine's: this machine now holds every send meant for a device - its role, its seat"
+            " (following or waiting) and why: started, role, leader-found, main-found, hand-over,"
+            " peer-take-over, peer-keep.",
+            { { "role", 's', false }, { "seat", 's', false }, { "reason", 's', false } }, false,
+            seat (false) }));
+
+        /*  THE OPERATOR'S THREE (§58.4; the words on screen are RD.11's).
+            Accepted or refused here, from the seat the log last said and the
+            other machine's seat as this machine sees it - the argument as
+            applied, so a replay, which sees no other machine, decides alike -
+            and made a move by serve on its next tick. */
+        const auto ask = [&pairing] (Ask what)
+        {
+            return [&pairing, what] (CommandContext&, const std::vector<osc::Value>& args)
+            {
+                const auto peer = ! args.empty() ? args[0].getString()
+                                : pairing.peerNow ? pairing.peerNow() : std::string {};
+
+                if (auto refused = refusal (pairing.seated, what, peer); ! refused.empty())
+                    return Outcome::rejected (std::move (refused));
+
+                pairing.asked = what;
+                return Outcome::ok ({ osc::Value::string (peer) });
+            };
+        };
+
+        registry.add (machineLocal ({ "pair.takeOver",
+            "On a machine that holds - following its leader, or a backup waiting for its main - sends to the"
+            " devices from now on, and tells the other machine, if it is there, to hold and follow this one.",
+            { { "peer", 's', true } }, true, ask (Ask::takeOver) }));
+
+        registry.add (machineLocal ({ "pair.handOver",
+            "On the machine that sends, with the other one there: holds and follows from now on, and tells the"
+            " other machine to send.",
+            { { "peer", 's', true } }, true, ask (Ask::handOver) }));
+
+        registry.add (machineLocal ({ "pair.keep",
+            "While both machines are sending: keeps the show on this machine, and tells the other to hold and"
+            " follow it.",
+            { { "peer", 's', true } }, true, ask (Ask::keep) }));
     }
 }

@@ -121,7 +121,12 @@ namespace
         "document.saveAs", "document.autosave", "document.recover", "document.discardRecovery",
         "media.cleanCache", "ffmpeg.install", "pd.install", "process.edit",
         "videoOutput.identify", "video.hideProjectors", "spacemouse.closeDriver",
-        "pair.setRole", "pair.setPeers", "pair.setTimeout", "pair.saved"
+        "pair.setRole", "pair.setPeers", "pair.setTimeout", "pair.saved",
+
+        /*  And RD.7's: what the machine now is in its pair, and the operator's
+            three - each acts on this machine, and tells the other its own way,
+            never by being mirrored. */
+        "pair.lead", "pair.hold", "pair.takeOver", "pair.handOver", "pair.keep"
     };
 
     const std::string mainList  = "7K2QM9X4";

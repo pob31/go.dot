@@ -82,6 +82,48 @@
     came back from a main that went on without it: counters restart with a
     new main, and "the next after 500" means nothing to a stream that has
     sent three.
+
+    FROM RD.7 THE LINK IS SYMMETRIC OVER ONE CONNECTION. The backup still
+    dials and the main still listens - the socket's direction is the role's -
+    but either end may lead: a backup that took over keeps dialling its main,
+    and a main started again after a crash follows the backup that sends. So
+    "backup -> main" above reads "follower -> leader" and "main -> backup"
+    reads "leader -> follower": the leader's `Stream` sends down whichever
+    connection its follower is at the end of - the server's or the
+    dialler's - and the follower's `Receiver` reads from either. What RD.7
+    adds to the wire:
+
+      either way
+        /godot/pair/hello   s:machine s:role h:lastCounter s:stream
+                            s:state s:ownStream i:fresh h:liveRuns h:salt
+                            what a machine is, said by both ends on a
+                            connection's first message and whenever it
+                            changes: the first four are RD.5's - what it
+                            holds of the stream it follows - then its state
+                            (`following` and `bothSending` ask for the
+                            other's stream), its own stream's identity,
+                            whether it has applied no GO and run no cue since
+                            it started (AGA), how many cues it has running,
+                            and its run-name salt (RD.2), which a machine
+                            that starts following having run nothing adopts.
+                            A hello of RD.5's four is a follower's when its
+                            role is `backup`, and says nothing else.
+        /godot/pair/order   s:order s:reason
+                            an operator's choice on the other machine:
+                            `hold` (it took over, or kept the show - hold and
+                            follow it) or `lead` (it handed the show over).
+      follower -> leader
+        /godot/pair/ping    h:sent f:roundTrip h:tick     the pinging machine's
+                            tick, so the other end knows its engine is alive
+                            and not only its socket
+        /godot/pair/relay   s:line h:ticket               the ticket the
+                            leader carries back on the record (AGJ)
+      leader -> follower
+        /godot/pair/record  h:counter s:line h:ticket     the ticket of the
+                            relay it answers; left off when there is none
+        /godot/pair/beat    h:tick h:lastCounter h:liveRuns
+                            how many cues run on the leader, for a follower
+                            that joined while some did and is not in step
 */
 
 #include <wfg/engine/log/EventLog.h>
@@ -95,6 +137,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -128,6 +171,7 @@ namespace wfg::pair
         inline constexpr const char* beat    = "/godot/pair/beat";
         inline constexpr const char* pong    = "/godot/pair/pong";
         inline constexpr const char* relay   = "/godot/pair/relay";
+        inline constexpr const char* order   = "/godot/pair/order";
 
         /** Whether an address is the link's: `/godot/pair/` and something after it. */
         bool isPairAddress (std::string_view address) noexcept;
@@ -142,9 +186,52 @@ namespace wfg::pair
             is reused - the bytes `encode` would make, without its cost on the
             tick thread (PeerLink.cpp says what it measured). `writeRecord`
             refuses a line holding a NUL, which no log line does, and leaves
-            `out` as it was. */
-        bool writeRecord (std::vector<std::uint8_t>& out, std::uint64_t counter, std::string_view line);
-        void writeBeat (std::vector<std::uint8_t>& out, std::int64_t tick, std::uint64_t lastCounter);
+            `out` as it was; a ticket of nought is left off the message. */
+        bool writeRecord (std::vector<std::uint8_t>& out, std::uint64_t counter, std::string_view line,
+                          std::uint64_t ticket = 0);
+        void writeBeat (std::vector<std::uint8_t>& out, std::int64_t tick, std::uint64_t lastCounter,
+                        std::int64_t liveRuns = 0);
+
+        /*  WHERE A MESSAGE OF THE LINK GOES ON THE MACHINE IT REACHES (RD.7):
+            to the leader's half (`Stream`) - a hello, a ping, a relay - or to
+            the follower's (`Receiver`) - a bundle of a tick's stream, a
+            welcome, a gap, a record, a beat, a pong - whichever socket brought
+            it. A hello goes to the leader's half AND says what the other
+            machine is; an order is neither half's (pair/Presence.h). */
+        enum class Bound { leader, follower, neither };
+        Bound boundFor (const osc::Packet& message) noexcept;
+
+        //======================================================================
+        /*  WHAT A MACHINE SAYS IT IS (RD.7): the hello's nine arguments, read
+            and written in one place. The first four are RD.5's and a hello of
+            only those is still read - `described` false, its role saying
+            whether it follows. */
+        struct Hello
+        {
+            std::string machine;
+            std::string role;
+            std::uint64_t lastCounter = 0;      // what it holds of the stream it follows...
+            std::string stream;                 // ...and which stream that is
+            std::string state;                  // `pair/state`'s word
+            std::string ownStream;              // the identity of its own stream, which it leads with
+            bool fresh = false;                 // no GO applied, no cue run, since it started (AGA)
+            std::int64_t liveRuns = 0;          // cues running on it
+            std::uint64_t salt = 0;             // its run-name salt (RD.2)
+            bool described = false;             // all nine: an RD.7 machine's
+
+            /*  Whether it asks for the stream of the machine it says hello to:
+                following, or both sending (each applies the other's); RD.5's
+                hello, when it says `backup`. */
+            bool wantsStream() const noexcept;
+        };
+
+        std::vector<std::uint8_t> helloBytes (const Hello& hello);
+        std::optional<Hello> readHello (const osc::Packet& message);
+
+        /*  A follow that starts now asks for what the leader keeps from now
+            on, never what it kept before (RD.7): this counter, on the leader's
+            own stream, reads as "after your last". */
+        inline constexpr std::uint64_t fromNow = static_cast<std::uint64_t> (std::numeric_limits<std::int64_t>::max());
     }
 
     /*  HOW MANY RECORDS A MAIN KEEPS FOR A BACKUP THAT RECONNECTS. A backup
@@ -241,8 +328,14 @@ namespace wfg::pair
 
         /*  THE ENGINE'S AFTER-RECORD HOOK (Engine::setAfterRecord): every record,
             as written. One that travels is given the next counter and its
-            message is put in the ring - the one thing GO's path gains. */
+            message is put in the ring - the one thing GO's path gains. A
+            relay's record carries its ticket beside the line (RD.7, AGJ). */
         void keep (const LogRecord& record, const Command* command);
+
+        /*  HOW MANY CUES RUN HERE, said in every beat (RD.7): a machine that
+            starts following while some run is not in step with them until
+            RD.8 seats it, and says so. The tick thread's, before `afterTick`. */
+        void setLiveRuns (std::int64_t count) noexcept { liveRuns = count; }
 
         /*  THE HEARTBEAT, from serve's after-tick: what arrived since the last
             tick is read, then each follower is sent what it has not had - its
@@ -287,6 +380,8 @@ namespace wfg::pair
             std::string role;
             std::string stream;
             std::uint64_t lastCounter = 0;
+            bool wants = false;                 // a hello asking for this stream (RD.7)
+            bool described = false;             // an RD.7 hello, which says what the machine is
             double roundTrip = 0.0;
             LinkClock::time_point at {};
         };
@@ -327,6 +422,7 @@ namespace wfg::pair
         std::string lastPinger;
         std::uint64_t highestSent = 0;
         std::int64_t sentThisLink = 0, gapsThisLink = 0;
+        std::int64_t liveRuns = 0;
 
         //  Both.
         std::mutex inboxLock;
@@ -365,6 +461,12 @@ namespace wfg::pair
         /** What a hello says it has: the last counter drained, and the stream it belongs to. */
         std::uint64_t lastCounter() const noexcept { return lastSeen.load (std::memory_order_relaxed); }
         std::string streamId() const;
+
+        /*  WHERE A HELLO ASKS THE LEADER TO START (RD.7): after the last record
+            drained, on the stream it was of - a path dialled again resumes
+            exactly - or, once `startAfresh` has been called and until the
+            leader's welcome arrives, "from now" on the leader's own stream. */
+        std::pair<std::uint64_t, std::string> resumePoint() const;
 
         /** The round trip as it was last published, for a ping to tell the main. */
         double roundTripToSay() const noexcept { return roundTripSaid.load (std::memory_order_relaxed); }
@@ -406,6 +508,17 @@ namespace wfg::pair
         std::int64_t mainTick() const noexcept { return beatTick; }
         std::uint64_t mainLastCounter() const noexcept { return beatLast; }
 
+        /** How many cues ran on the leader, as its last heartbeat said (RD.7). */
+        std::int64_t leaderLiveRuns() const noexcept { return beatRuns; }
+
+        /*  A FOLLOW STARTS NOW, on the leader whose stream is `leaderStream`
+            (RD.7): what this receiver held of any stream is forgotten, the
+            next hello asks for what the leader keeps from now on
+            (`wire::fromNow`), and the welcome that answers is where it starts -
+            no gap for the records before it, which this machine never asked
+            for. Tick thread. */
+        void startAfresh (const std::string& leaderStream);
+
     private:
         struct Item
         {
@@ -414,7 +527,7 @@ namespace wfg::pair
             Kind kind = Kind::beat;
             std::string path;
             LinkClock::time_point at {};
-            std::int64_t first = 0, second = 0;
+            std::int64_t first = 0, second = 0, third = 0;
             std::string stream;
             LogRecord record;
         };
@@ -433,6 +546,8 @@ namespace wfg::pair
         LinkClock::time_point lastBeat {};
         std::int64_t beatTick = 0;
         std::uint64_t beatLast = 0;
+        std::int64_t beatRuns = 0;
+        bool afresh = false;                    // the next welcome is where this follow starts
         std::string peer;
         std::int64_t receivedThisLink = 0, gapsThisLink = 0, duplicateCount = 0;
         OnRecord onRecord;
@@ -454,6 +569,8 @@ namespace wfg::pair
         mutable std::mutex lock;
         std::vector<Item> inbox;
         std::string streamShared;
+        std::string afreshStream;               // the leader's stream a fresh follow asks of, under `lock`
+        bool afreshShared = false;              // `afresh`, under `lock`
         std::atomic<std::uint64_t> lastSeen { 0 };
         std::atomic<double> roundTripSaid { 0.0 };
         std::atomic<std::int64_t> ignoredCount { 0 };
@@ -499,6 +616,42 @@ namespace wfg::pair
             GO twice. False, and nothing queued, when no path is open. Any
             thread; never waits on the network. */
         bool relay (std::vector<std::uint8_t> bytes);
+
+        //======================================================================
+        /*  FROM RD.7 THE DIALLER CARRIES WHAT EITHER HALF SAYS. A backup that
+            took over leads down the connections it dialled, so its stream is
+            sent down a path (`sendTo`), what the main says back is handed to
+            whoever routes it (`setRoute` - the receiver by default, as RD.5
+            had it), and the hello a path opens with is what the machine is
+            now (`setHello`), said again down every open path when that changes
+            (`announce`). All set before `start`, except as said. */
+
+        /** Who reads what a path brings: by default `Receiver::deliver`. Any thread (the path's). */
+        using Route = std::function<void (const std::string& path, const osc::Packet& message,
+                                          LinkClock::time_point arrival)>;
+        void setRoute (Route routeToUse);
+
+        /*  The hello a path opens with, made at that moment (it says what the
+            receiver holds then); by default RD.5's, a backup's. Called on a
+            path's thread. */
+        using HelloMaker = std::function<std::vector<std::uint8_t>()>;
+        void setHello (HelloMaker makeHello);
+
+        /** The hello said again, made afresh, down every open path. Any thread. */
+        void announce();
+
+        /*  One message down one path - the stream of a backup that leads, to
+            the main that follows it at the end of that path. False when that
+            path is not open now. Any thread; queued, never waited on. */
+        bool sendTo (const std::string& path, std::vector<std::uint8_t> bytes);
+
+        /** One message down every open path: an order (RD.7). Any thread; queued. */
+        void sendAll (std::vector<std::uint8_t> bytes);
+
+        /*  THIS MACHINE'S TICK, carried in every ping so the main knows the
+            engine behind the socket is alive (RD.7). The tick thread's, every
+            tick; a relaxed store. */
+        void setTick (std::int64_t tick) noexcept;
 
         /** `host:port` read back into the two: an IPv6 host without its brackets. */
         static std::optional<std::pair<std::string, int>> hostAndPort (std::string_view peer);

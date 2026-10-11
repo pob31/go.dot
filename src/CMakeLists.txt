@@ -195,6 +195,10 @@ add_library(wfg_engine STATIC
     wfg/engine/pair/PeerLink.cpp
     wfg/engine/pair/Follow.h
     wfg/engine/pair/Follow.cpp
+    wfg/engine/pair/Leadership.h
+    wfg/engine/pair/Leadership.cpp
+    wfg/engine/pair/Presence.h
+    wfg/engine/pair/Presence.cpp
     wfg/engine/pair/SavePump.h
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp
@@ -347,6 +351,7 @@ add_library(wfg_engine STATIC
     wfg/engine/command/Event.h
     wfg/engine/command/EventQueue.cpp
     wfg/engine/command/EventQueue.h
+    wfg/engine/command/Recovery.h
     wfg/engine/json/JsonValue.cpp
     wfg/engine/json/JsonValue.h
     wfg/engine/import/AlsImport.cpp

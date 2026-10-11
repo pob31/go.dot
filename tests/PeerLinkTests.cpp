@@ -47,6 +47,7 @@
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/oscquery/OscQueryServer.h>
 #include <wfg/engine/pair/PeerLink.h>
+#include <wfg/engine/pair/Presence.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -251,6 +252,12 @@ TEST_CASE ("peer link: an operator's GO, a show edit and a refused GO travel; th
     CHECK_FALSE (pair::travels (applied (std::string (origin::engine), "run.ended", { s ("R8M2K4Q1") }), &ended));
     CHECK_FALSE (pair::travels (applied (std::string (origin::replay), "go", {}), &go));
 
+    /*  Nor what this machine applied from the other's stream (RD.7): a follower
+        that took over, or two machines both sending, would send it round again. */
+    CHECK_FALSE (pair::travels (applied ("main:udp:10.0.0.9:9000", "go", { s ("R8M2K4Q1") }), &go));
+    CHECK_FALSE (pair::travels (applied ("main:peer:ws:192.168.1.20:53211", "go", {}), &go));
+    CHECK (pair::travels (applied ("peer:ws:192.168.1.20:53211", "go", {}), &go));
+
     //  A command that acts on this machine alone (RD.3), whoever asked.
     CHECK_FALSE (pair::travels (applied ("ws:192.168.1.20:53211", "audio.configure", { s ("ASIO") }), &configure));
 
@@ -420,14 +427,167 @@ TEST_CASE ("peer link: a record and a beat written straight into their bytes are
         CHECK (written == pair::wire::encode (pair::wire::record, { h (4242), s (text) }));
     }
 
+    //  RD.7: a relay's ticket after the line, and the cues running in the beat.
+    std::vector<std::uint8_t> ticketed;
+    REQUIRE (pair::wire::writeRecord (ticketed, 4242, line, 0x2a00000007ull));
+    CHECK (ticketed == pair::wire::encode (pair::wire::record, { h (4242), s (line), h (0x2a00000007ll) }));
+
     std::vector<std::uint8_t> beat;
-    pair::wire::writeBeat (beat, -7, 123456789);
-    CHECK (beat == pair::wire::encode (pair::wire::beat, { h (-7), h (123456789) }));
+    pair::wire::writeBeat (beat, -7, 123456789, 3);
+    CHECK (beat == pair::wire::encode (pair::wire::beat, { h (-7), h (123456789), h (3) }));
 
     //  A NUL cannot be one OSC string, and the buffer is left as it was.
     std::vector<std::uint8_t> untouched { 1, 2, 3 };
     CHECK_FALSE (pair::wire::writeRecord (untouched, 1, std::string ("a\0b", 3)));
     CHECK (untouched == std::vector<std::uint8_t> { 1, 2, 3 });
+}
+
+//==============================================================================
+TEST_CASE ("peer link: RD.7's wire - a hello says what a machine is, both ways, and a message knows which half it is for")
+{
+    pair::wire::Hello said;
+    said.machine = "STAGE-LEFT";
+    said.role = "backup";
+    said.lastCounter = pair::wire::fromNow;
+    said.stream = "S-main";
+    said.state = "following";
+    said.ownStream = "S-backup";
+    said.fresh = true;
+    said.liveRuns = 3;
+    said.salt = 0xfedcba9876543210ull;
+    said.described = true;
+
+    const auto bytes = pair::wire::helloBytes (said);
+    const auto decoded = osc::decode (bytes.data(), bytes.size());
+    REQUIRE (decoded.ok);
+    CHECK (decoded.packet.args.size() == 9u);
+
+    const auto read = pair::wire::readHello (decoded.packet);
+    REQUIRE (read.has_value());
+    CHECK (read->machine == said.machine);
+    CHECK (read->role == said.role);
+    CHECK (read->lastCounter == said.lastCounter);
+    CHECK (read->stream == said.stream);
+    CHECK (read->state == said.state);
+    CHECK (read->ownStream == said.ownStream);
+    CHECK (read->fresh);
+    CHECK (read->liveRuns == 3);
+    CHECK (read->salt == said.salt);
+    CHECK (read->described);
+    CHECK (read->wantsStream());
+
+    //  What asks for the stream: following, both sending - and RD.5's backup.
+    auto other = said;
+    other.state = "bothSending";
+    CHECK (other.wantsStream());
+
+    for (const auto* state : { "leading", "alone", "waiting" })
+    {
+        other.state = state;
+        CHECK_FALSE (other.wantsStream());
+    }
+
+    const auto legacy = pair::wire::readHello (osc::Packet::message (pair::wire::hello,
+                                                                     { s ("b"), s ("backup"), h (4), s ("S1") }));
+    REQUIRE (legacy.has_value());
+    CHECK_FALSE (legacy->described);
+    CHECK (legacy->wantsStream());
+    CHECK_FALSE (pair::wire::readHello (osc::Packet::message (pair::wire::hello, { s ("b"), s ("backup"), h (4) })).has_value());
+
+    //  Which half a message is for.
+    using Bound = pair::wire::Bound;
+    CHECK (pair::wire::boundFor (decoded.packet) == Bound::leader);
+    CHECK (pair::wire::boundFor (osc::Packet::message (pair::wire::ping, { h (1) })) == Bound::leader);
+    CHECK (pair::wire::boundFor (osc::Packet::message (pair::wire::relay, { s ("x") })) == Bound::leader);
+    CHECK (pair::wire::boundFor (osc::Packet::message (pair::wire::pong, { h (1), h (2) })) == Bound::follower);
+    CHECK (pair::wire::boundFor (osc::Packet::message (pair::wire::beat, { h (1), h (2) })) == Bound::follower);
+    CHECK (pair::wire::boundFor (osc::Packet::bundle (osc::TimeTag {}, { osc::Packet::message (pair::wire::beat, { h (1), h (2) }) }))
+           == Bound::follower);
+    CHECK (pair::wire::boundFor (osc::Packet::message (pair::wire::order, { s ("hold"), s ("keep") })) == Bound::neither);
+}
+
+TEST_CASE ("peer link: a hello that follows asks from now; one that says it no longer follows is forgotten as a follower")
+{
+    Wire wire;
+    pair::Stream stream { "S-lead" };
+    stream.setSend (wire.send());
+    stream.setLeading (true);
+
+    const auto go = named ("go");
+
+    for (int i = 0; i < 5; ++i)
+        stream.keep (applied ("cli", "go", {}), &go);
+
+    //  A machine that starts following now asks for what comes from now on, never the five before.
+    pair::wire::Hello said;
+    said.machine = "FOLLOWER";
+    said.role = "main";
+    said.lastCounter = pair::wire::fromNow;
+    said.stream = "S-lead";
+    said.state = "following";
+    said.ownStream = "S-other";
+    said.described = true;
+
+    const auto hello = [&said]
+    {
+        const auto bytes = pair::wire::helloBytes (said);
+        return osc::decode (bytes.data(), bytes.size()).packet;
+    };
+
+    stream.received ("10.0.0.1:5010", hello(), t0);
+    stream.afterTick (1, 1.0);
+
+    auto got = wire.take ("10.0.0.1:5010");
+    REQUIRE (! got.empty());
+    CHECK (got[0].address == pair::wire::welcome);
+    CHECK (got[0].args[1] == h (6));
+    CHECK (countersIn (got).empty());
+    CHECK (stream.followerCount() == 1);
+
+    stream.keep (applied ("cli", "go", {}), &go);
+    stream.afterTick (2, 1.0);
+    CHECK (countersIn (wire.take ("10.0.0.1:5010")) == std::vector<std::int64_t> { 6 });
+
+    //  It took over: it says so, and is no follower any more. Not ignored - it said what it is.
+    said.state = "leading";
+    const auto ignoredBefore = stream.ignored();
+    stream.received ("10.0.0.1:5010", hello(), t0);
+    stream.afterTick (3, 1.0);
+    CHECK (stream.followerCount() == 0);
+    CHECK (stream.ignored() == ignoredBefore);
+
+    //  A relay's ticket rides back on the record that answers it.
+    LogRecord answered = applied ("peer:ws:10.0.0.7:5555", "go", {});
+    answered.ticket = 77;
+    said.state = "bothSending";
+    stream.received ("10.0.0.1:5010", hello(), t0);
+    stream.afterTick (4, 1.0);
+    stream.keep (answered, &go);
+    stream.afterTick (5, 1.0);
+
+    got = wire.take ("10.0.0.1:5010");
+    const auto record = std::find_if (got.begin(), got.end(), [] (const osc::Packet& p) { return p.address == pair::wire::record; });
+    REQUIRE (record != got.end());
+    REQUIRE (record->args.size() == 3u);
+    CHECK (record->args[2] == h (77));
+
+    pair::Receiver receiver;
+    std::vector<std::uint64_t> tickets;
+    receiver.setOnRecord ([&tickets] (std::uint64_t, const LogRecord& r) { tickets.push_back (r.ticket); });
+    receiver.startAfresh ("S-lead");
+    CHECK (receiver.resumePoint() == std::make_pair (pair::wire::fromNow, std::string ("S-lead")));
+
+    for (const auto& packet : got)
+        receiver.deliver ("10.0.0.1:5010", packet, t0);
+
+    receiver.drain (t0, 1.0);
+
+    /*  STARTED AFRESH: the welcome says where it starts, and what came before
+        it is no gap; the beat says the cues running there. */
+    CHECK (tickets == std::vector<std::uint64_t> { 77 });
+    CHECK (receiver.reading (t0, 1.0).gaps == 0);
+    CHECK (receiver.streamId() == "S-lead");
+    CHECK (receiver.resumePoint() == std::make_pair (std::uint64_t { 7 }, std::string ("S-lead")));
 }
 
 //==============================================================================
@@ -469,13 +629,13 @@ TEST_CASE ("peer link: the ring - counters continuous, a resume inside it exact,
     CHECK (got.front().args == std::vector<osc::Value> { s ("S1"), h (1) });
     CHECK (countersIn (got) == run (1, 10));
     CHECK (got.back().address == pair::wire::beat);
-    CHECK (got.back().args == std::vector<osc::Value> { h (tick), h (10) });
+    CHECK (got.back().args == std::vector<osc::Value> { h (tick), h (10), h (0) });
 
     //  The next tick, nothing new: a beat, and only a beat.
     beat();
     got = wire.take (followerA);
     REQUIRE (got.size() == 1);
-    CHECK (got.front().args == std::vector<osc::Value> { h (tick), h (10) });
+    CHECK (got.front().args == std::vector<osc::Value> { h (tick), h (10), h (0) });
 
     //  One that held this stream up to 7 hears 8, 9 and 10, exactly.
     stream.received (followerB, hello (7, "S1"), t0 + 10ms);
@@ -585,7 +745,7 @@ TEST_CASE ("peer link: a backlog goes a slice a tick, while the main goes on kee
     CHECK (wire.frames[followerA] == 2);
 
     //  The beat says how far the main has got, not how far this follower has.
-    CHECK (got.back().args == std::vector<osc::Value> { h (2), h (10) });
+    CHECK (got.back().args == std::vector<osc::Value> { h (2), h (10), h (0) });
 
     stream.keep (applied ("udp:10.0.0.9:9000", "standby.next", {}), &next);
     stream.afterTick (3, 1.0);
@@ -1127,6 +1287,225 @@ TEST_CASE ("peer link: a backup dials its main over a real WebSocket, is linked,
     CHECK (again.received == 1);
     CHECK (again.gaps == 0);
     CHECK (receiver.duplicates() == 0);
+
+    dialler.stop();
+    server.stop();
+}
+
+//==============================================================================
+/*  RD.7: THE LINK IS SYMMETRIC OVER ONE CONNECTION. The backup still dials and
+    the main still listens, but a backup that took over leads the main that
+    came back: its stream goes down the path it dialled, and the main's
+    receiver reads it from behind the server. Both ends hear the other's
+    engine - pings carry the dialler's tick, pongs the server's - whoever
+    leads. */
+namespace
+{
+    /*  WHAT THE SERVER'S END OF THE LINK HEARS, routed as serve routes it:
+        presence hears all of it, the follower's half the leader's stream. */
+    struct FollowerDoor final : public oscquery::PeerDoor
+    {
+        FollowerDoor (pair::Stream& leaderHalf, pair::Receiver& followerHalf, pair::Presence& presenceToTell)
+            : stream (leaderHalf), receiver (followerHalf), presence (presenceToTell) {}
+
+        void peerMessage (const std::string& origin, const osc::Packet& message) override
+        {
+            {
+                const std::lock_guard<std::mutex> held { lock };
+
+                /*  The connection the backup said hello on last: a path dialled
+                    again is a new one, and serve says its hello down every new
+                    one (presence's `opened`) - as the test does below. */
+                if (message.address == pair::wire::hello)
+                    first = origin;
+            }
+
+            presence.heard (origin, message, Clock::now());
+
+            switch (pair::wire::boundFor (message))
+            {
+                case pair::wire::Bound::leader:   stream.received (origin, message, Clock::now()); break;
+                case pair::wire::Bound::follower: receiver.deliver (origin, message, Clock::now()); break;
+                case pair::wire::Bound::neither:  break;
+            }
+        }
+
+        void peerClosed (const std::string& origin) override
+        {
+            stream.closed (origin);
+            presence.closed (origin);
+        }
+
+        std::string connection() const
+        {
+            const std::lock_guard<std::mutex> held { lock };
+            return first;
+        }
+
+        pair::Stream& stream;
+        pair::Receiver& receiver;
+        pair::Presence& presence;
+        mutable std::mutex lock;
+        std::string first;
+    };
+}
+
+TEST_CASE ("peer link: a backup that leads streams down the path it dialled, to a main that follows behind its server")
+{
+    //  THE MAIN, which came back after a crash and follows: its server, its receiver, its presence.
+    QuietNamespace nameSpace;
+    pair::Stream mainStream { "S-main" };
+    pair::Receiver mainReceiver;
+    pair::Presence mainPresence;
+    FollowerDoor door { mainStream, mainReceiver, mainPresence };
+
+    oscquery::OscQueryServer server;
+    server.setPeerDoor (std::string (pair::wire::prefix), &door);
+    mainStream.setSend ([&server] (const std::string& origin, const std::vector<std::uint8_t>& bytes)
+                        { return server.sendTo (origin, bytes.data(), bytes.size()); });
+    REQUIRE (server.start (0, nameSpace));
+    const auto address = "127.0.0.1:" + std::to_string (server.boundPort());
+
+    std::vector<LogRecord> arrived;
+    mainReceiver.setOnRecord ([&arrived] (std::uint64_t, const LogRecord& record) { arrived.push_back (record); });
+
+    //  THE BACKUP, which took over and leads: its stream goes down its dialler's path.
+    pair::Stream backupStream { "S-backup" };
+    pair::Receiver backupReceiver;
+    pair::Presence backupPresence;
+    backupStream.setLeading (true);
+
+    pair::Dialler dialler { backupReceiver, "backup-that-leads" };
+    dialler.setRoute ([&] (const std::string& path, const osc::Packet& message, Clock::time_point arrival)
+                      {
+                          backupPresence.heard (path, message, arrival);
+
+                          switch (pair::wire::boundFor (message))
+                          {
+                              case pair::wire::Bound::leader:   backupStream.received (path, message, arrival); break;
+                              case pair::wire::Bound::follower: backupReceiver.deliver (path, message, arrival); break;
+                              case pair::wire::Bound::neither:  break;
+                          }
+                      });
+    backupStream.setSend ([&dialler] (const std::string& path, const std::vector<std::uint8_t>& bytes)
+                          { return dialler.sendTo (path, bytes); });
+
+    pair::wire::Hello leads;
+    leads.machine = "backup-that-leads";
+    leads.role = "backup";
+    leads.state = "leading";
+    leads.ownStream = "S-backup";
+    leads.described = true;
+    dialler.setHello ([&leads] { return pair::wire::helloBytes (leads); });
+
+    REQUIRE (dialler.start());
+    dialler.want ({ address });
+
+    std::int64_t tick = 0;
+
+    const auto tickUntil = [&] (const std::function<bool()>& done, std::chrono::milliseconds limit)
+    {
+        const auto until = Clock::now() + limit;
+
+        while (Clock::now() < until)
+        {
+            ++tick;
+            dialler.setTick (tick);
+            mainStream.afterTick (tick, 1.0);
+            backupStream.afterTick (tick, 1.0);
+            mainReceiver.drain (Clock::now(), 1.0);
+            backupReceiver.drain (Clock::now(), 1.0);
+            mainPresence.drain();
+            backupPresence.drain();
+
+            if (done())
+                return true;
+
+            std::this_thread::sleep_for (10ms);
+        }
+
+        return done();
+    };
+
+    //  The main hears the backup say what it is, as the dialler opens.
+    REQUIRE (tickUntil ([&] { return mainPresence.peer().described && ! door.connection().empty(); }, 10000ms));
+    CHECK (mainPresence.peer().state == "leading");
+    CHECK (mainPresence.peer().ownStream == "S-backup");
+
+    //  And follows it: its hello down the connection the backup dialled, asking from now.
+    pair::wire::Hello follows;
+    follows.machine = "main-come-back";
+    follows.role = "main";
+    follows.lastCounter = pair::wire::fromNow;
+    follows.stream = "S-backup";
+    follows.state = "following";
+    follows.ownStream = "S-main";
+    follows.fresh = true;
+    follows.described = true;
+    mainReceiver.startAfresh ("S-backup");
+
+    const auto said = pair::wire::helloBytes (follows);
+    std::string saidOn;
+
+    const auto followIt = [&]
+    {
+        if (const auto latest = door.connection(); latest != saidOn)
+        {
+            saidOn = latest;
+            server.sendTo (latest, said.data(), said.size());
+        }
+
+        return backupStream.followerCount() == 1 && mainReceiver.isLinked (Clock::now(), 1.0);
+    };
+
+    const auto followed = tickUntil (followIt, 10000ms);
+    INFO ("followers " << backupStream.followerCount() << ", main linked " << mainReceiver.isLinked (Clock::now(), 1.0)
+          << ", open paths " << dialler.openPaths() << ", said on " << saidOn);
+    REQUIRE (followed);
+
+    //  BOTH ENDS HEAR THE OTHER, whoever leads: the main by the backup's pings, the backup by the main's pongs.
+    CHECK (mainPresence.linked (Clock::now(), 1.0));
+    CHECK (backupPresence.linked (Clock::now(), 1.0));
+    CHECK (backupPresence.peer().state == "following");
+    CHECK (backupPresence.latest() == address);
+    CHECK (mainPresence.latest().rfind ("ws:", 0) == 0);
+
+    //  What the backup applies reaches the main, as the backup's log wrote it, its ticket beside it.
+    const auto go = named ("go");
+    auto pressed = applied ("peer:ws:10.0.0.7:5555", "go", { s ("R8M2K4Q1") });
+    pressed.ticket = 41;
+    backupStream.keep (pressed, &go);
+    backupStream.keep (applied ("ws:10.0.0.8:6000", "standby.next", {}), &go);
+
+    REQUIRE (tickUntil ([&arrived] { return arrived.size() == 2; }, 5000ms));
+    checkSame (arrived[0], pressed);
+    CHECK (arrived[0].ticket == 41);
+    CHECK (arrived[1].command == "standby.next");
+    CHECK (mainReceiver.reading (Clock::now(), 1.0).gaps == 0);
+    CHECK (mainReceiver.streamId() == "S-backup");
+    CHECK (nameSpace.writes.load() == 0);
+
+    //  AND A COMMAND THE MAIN'S CLIENT GAVE IT, passed on up the same connection to the leader.
+    std::vector<LogRecord> relayed;
+    backupStream.setRelayed ([&relayed] (const LogRecord& record) { relayed.push_back (record); });
+
+    LogRecord line;
+    line.kind = LogRecord::Kind::applied;
+    line.origin = "ws:10.0.0.9:7000";
+    line.command = "go";
+    const auto relay = pair::wire::encode (pair::wire::relay, { s (line.toLine()), h (9) });
+    REQUIRE (server.sendTo (door.connection(), relay.data(), relay.size()));
+
+    REQUIRE (tickUntil ([&relayed] { return relayed.size() == 1; }, 5000ms));
+    CHECK (relayed[0].origin == "ws:10.0.0.9:7000");
+    CHECK (relayed[0].ticket == 9);
+
+    //  An order down every path: the presence at the other end hears it.
+    dialler.sendAll (pair::orderBytes (pair::Order::hold, "keep"));
+    std::vector<pair::Ordered> orders;
+    REQUIRE (tickUntil ([&] { for (auto& o : mainPresence.takeOrders()) orders.push_back (o); return ! orders.empty(); }, 5000ms));
+    CHECK (orders[0].order == pair::Order::hold);
+    CHECK (orders[0].reason == "keep");
 
     dialler.stop();
     server.stop();

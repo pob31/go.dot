@@ -156,6 +156,7 @@ add_executable(wfg_tests
     PairSettingsTests.cpp
     PeerLinkTests.cpp
     FollowTests.cpp
+    LeadershipTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
     ClientTests.cpp)
@@ -1184,6 +1185,23 @@ add_test(NAME blackbox.pair-follow.C
 add_test(NAME blackbox.pair-follow.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_follow.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.pair-follow.C blackbox.pair-follow.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
+# -----------------------------------------------------------------------------
+# THE LINK LOST, TAKING OVER, BOTH SENDING (namespace draft §58, RD.7): a main
+# and its backup on copies of the devices fixture, mock_target.py over UDP
+# aimed at by both. GOs at the main heard once; the main killed, the backup
+# leads and sends within the timeout, and GOs at its WebSocket are heard once;
+# the main started again on its port follows the backup (AFR) and the device
+# still hears each GO once. Then a TCP relay between a second backup's dialler
+# and its main, paused past the timeout: both lead, one GO at each heard once;
+# resumed, both read bothSending and say so, a GO at either is sent by both and
+# heard twice (AFQ); `pair.keep` at the main and the next GO is heard once.
+add_test(NAME blackbox.redundancy-failover.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/redundancy_failover.py" --wfg-locale=C)
+add_test(NAME blackbox.redundancy-failover.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/redundancy_failover.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.redundancy-failover.C blackbox.redundancy-failover.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------

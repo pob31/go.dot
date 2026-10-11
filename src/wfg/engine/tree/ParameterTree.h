@@ -162,8 +162,9 @@ namespace wfg::tree
 
         /*  AND WHAT FOLLOWING SAYS (RD.6): `pair/state`, `pair/delay`,
             `pair/late`, `pair/differs`, `pair/relayed` and `pair/dropped`, as
-            serve reads them off its follower and its gate every tick. Alone,
-            and nought, wherever nothing follows or leads. */
+            serve reads them off its follower and its gate every tick - and
+            RD.7's `pair/alarm` and `pair/unconfirmed`. Alone, and nought,
+            wherever nothing follows or leads. */
         pair::FollowReading pairFollow;
 
         //======================================================================

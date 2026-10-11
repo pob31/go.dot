@@ -232,15 +232,20 @@ TEST_CASE ("follow: the gate in front of the engine - taken while following, and
 
         /*  EACH RELAY READS BACK AS THE EVENT IT WAS: one message to
             /godot/pair/relay carrying the line of an applied record, the
-            client's origin and its arguments, as the main's stream reads it. */
+            client's origin and its arguments, as the main's stream reads it -
+            and, from RD.7, its ticket, a new one each (AGJ). */
         REQUIRE (passed.size() == clients.size());
+        std::set<std::int64_t> tickets;
 
         for (std::size_t i = 0; i < clients.size(); ++i)
         {
             const auto decoded = osc::decode (passed[i].data(), passed[i].size());
             REQUIRE (decoded.ok);
             REQUIRE (decoded.packet.address == pair::wire::relay);
-            REQUIRE (decoded.packet.args.size() == 1u);
+            REQUIRE (decoded.packet.args.size() == 2u);
+            REQUIRE (decoded.packet.args[1].isInt64());
+            CHECK (decoded.packet.args[1].getInt64() > 0);
+            tickets.insert (decoded.packet.args[1].getInt64());
 
             const auto line = LogRecord::fromLine (decoded.packet.args[0].getString());
             REQUIRE (line.has_value());
@@ -249,6 +254,9 @@ TEST_CASE ("follow: the gate in front of the engine - taken while following, and
             CHECK (line->command == "go");
             CHECK (line->args == std::vector<osc::Value> { s (clients[i]) });
         }
+
+        CHECK (tickets.size() == clients.size());
+        CHECK (gate.unanswered() == clients.size());
 
         SUBCASE ("and with no path to the main, a client's command is lost and counted, never applied here")
         {

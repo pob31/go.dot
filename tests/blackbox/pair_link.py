@@ -24,7 +24,9 @@ port every client uses, that both say they are linked, that what an operator
 sends the main reaches the backup - and only that, the engine's own records
 staying home - that the round trip is measured, that a main killed is a link
 lost within the timeout, and that a new main started on the same port is
-found again.
+found again: from RD.7 the backup has taken over by then, and the new main,
+which has run nothing, follows it - so what is sent to the backup reaches the
+new main, down the connection the backup dialled.
 
 TWO SERVES ON ONE MACHINE, each on its own COPY of one fixture and its own
 temporary engine folder, so neither reads the developer's pairing.xml nor
@@ -220,7 +222,7 @@ def run() -> int:
             # --- and a new main on the same port is found again ------------------
             second_main = start_main(main_bundle, main_engine, port=port, attempts_for=10.0)
             again = time.monotonic()
-            read_second, send_second = reader(second_main), sender(second_main)
+            read_second = reader(second_main)
             report.check(wait_for(lambda: read_backup("/godot/pair/linked") == "true", 10.0),
                          "a new main started on the same port is found again",
                          f"linked {read_backup('/godot/pair/linked')!r} after {time.monotonic() - again:.2f} s")
@@ -228,13 +230,21 @@ def run() -> int:
                          "and links back", f"linked {read_second('/godot/pair/linked')!r}")
             print(f"  note found again {time.monotonic() - again:.2f} s after the new main had started")
 
-            base_again = as_int(settled(read_backup, "/godot/pair/received"))
-            report.equal(as_int(read_backup("/godot/pair/gaps")), 0,
-                         "a new main is a new stream: nothing of the old one is a gap")
-            send_second("standby.next")
-            report.check(wait_for(lambda: as_int(read_backup("/godot/pair/received")) == base_again + 1, 3.0),
-                         "and what is sent to it reaches the backup, counted on the new link",
-                         f"received {read_backup('/godot/pair/received')!r}, from {base_again}")
+            # FROM RD.7 THE BACKUP TOOK OVER when its main was killed, and the new
+            # main, which has run nothing, follows it (AFR): the stream now runs
+            # from the machine that dials to the machine it dialled, over the same
+            # connection. What is sent to the backup reaches the new main.
+            report.check(wait_for(lambda: read_second("/godot/pair/state") == "following"
+                                  and read_backup("/godot/pair/state") == "leading", 5.0),
+                         "the backup took over and leads; the new main, fresh, follows it",
+                         f"new main {read_second('/godot/pair/state')!r}, backup {read_backup('/godot/pair/state')!r}")
+            base_again = as_int(settled(read_second, "/godot/pair/received"))
+            report.equal(as_int(read_second("/godot/pair/gaps")), 0,
+                         "a follow that starts now starts from now: nothing before it is a gap")
+            sender(backup)("standby.next")
+            report.check(wait_for(lambda: as_int(read_second("/godot/pair/received")) == base_again + 1, 3.0),
+                         "and what is sent to the backup reaches the new main, counted on the new link",
+                         f"received {read_second('/godot/pair/received')!r}, from {base_again}")
         finally:
             for server in (second_main, backup, main):
                 if server is not None:

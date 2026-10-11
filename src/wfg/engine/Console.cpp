@@ -45,9 +45,11 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/pair/Follow.h>
 #include <wfg/engine/pair/Hold.h>
+#include <wfg/engine/pair/Leadership.h>
 #include <wfg/engine/pair/MachineLocal.h>
 #include <wfg/engine/pair/PairSettings.h>
 #include <wfg/engine/pair/PeerLink.h>
+#include <wfg/engine/pair/Presence.h>
 #include <wfg/engine/pair/SavePump.h>
 #include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/PdInstance.h>
@@ -3330,13 +3332,12 @@ namespace
             keyboard, and a backup that came up unpaired because of a typo
             would be found out at the moment it was needed.
 
-            THE LINK READS THEM (RD.5, below beside the server): a main streams,
+            THE LINK READS THEM (RD.5, below beside the server): a main listens,
             a backup dials its peers, and both report whether they are linked.
-            And `--role=backup` alone does not hold - `pair/sending` stays true
-            and the devices are sent to - because when a backup holds is the
-            link's to decide: RD.6 holds it from the tick it follows (the
-            before-tick hook, below), RD.7 lets go when the main is lost and
-            decides what a backup that never found its main does (AGK). */
+            What the machine then is - alone, leading, following, waiting, both
+            sending - is pair/Leadership.h's (RD.7), decided at the head of every
+            tick and logged; a backup holds from the moment it starts, since
+            one that has never found its main sends nothing (AGK). */
         wfg::pair::Pairing pairing;
         {
             const auto loaded = wfg::pair::load (pairingFile().getFullPathName().toStdString());
@@ -3722,12 +3723,17 @@ namespace
         /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; pair/Hold.h): while it
             is on nothing leaves for a device and every held send counts as
             sent. `--hold` turns it on at start - a spare that runs the show
-            beside a rehearsal and says nothing to anybody; from RD.6 the link
-            turns it on and off. FIRST, so it outlives everything handed a
-            pointer to it below; and Pd's [netsend] hook pointed at it for as
-            long as this verb runs, declared before the patches' host so the
-            patches have stopped before the hook lets go. */
-        wfg::pair::Hold machineHold { args.containsOption ("--hold") };
+            beside a rehearsal and says nothing to anybody - and holds whatever
+            the pair decides; otherwise the pair's seat turns it on and off
+            (RD.6, RD.7). A BACKUP STARTS HOLDING (AGK): it waits for its main,
+            and the connections to devices a console may allow one of are never
+            opened by a machine that has not been told it sends. FIRST, so it
+            outlives everything handed a pointer to it below; and Pd's
+            [netsend] hook pointed at it for as long as this verb runs, declared
+            before the patches' host so the patches have stopped before the
+            hook lets go. */
+        const auto forcedHold = args.containsOption ("--hold");
+        wfg::pair::Hold machineHold { forcedHold || pairing.inForce.role == "backup" };
         const wfg::process::NetsendHold netsendHold { machineHold };
 
         if (machineHold.held())
@@ -5053,61 +5059,143 @@ namespace
                                      ? args.getValueForOption ("--http-port").getIntValue()
                                      : 5010;
 
-        /*  THE REDUNDANCY LINK (namespace draft §58, RD.5): this machine's
-            stream, if it is a main - every record it writes that its backup
-            will one day apply, kept as the log writes it, and a heartbeat at
-            the end of every tick - and, if it is a backup, the dialler and
-            what it receives. Both exist on every serve and idle unless the
-            role in force asks for them; a pairing command moves them on the
-            tick it is applied. REPORT ONLY in RD.5: nothing received is
-            applied (RD.6), nothing is held or let go because of the link.
+        /*  THE REDUNDANCY LINK (namespace draft §58, RD.5-RD.7): this machine's
+            stream - every record it writes that a follower will apply, kept
+            as the log writes it, and a heartbeat at the end of every tick -
+            the receiver of the other machine's, the dialler a backup reaches
+            its main with, and the presence that says whether the other
+            machine is there and what it is. All exist on every serve and idle
+            unless the role in force and the seat ask for them.
 
-            Declared before the server, which hands the stream what a backup
-            says on its own thread and is stopped before either goes; the
-            stream's identity is drawn here, once a session - not by the
-            engine, whose one source of randomness is for the show (AGE), and
-            not from the show, which the two machines share: it is what tells
-            a backup that the main it finds is not the one it followed. */
+            Declared before the server, which hands them what the other machine
+            says on its own thread and is stopped before any goes; the stream's
+            identity is drawn here, once a session - not by the engine, whose
+            one source of randomness is for the show (AGE), and not from the
+            show, which the two machines share: it is what tells a follower
+            that the leader it finds is not the one it followed. */
         wfg::pair::Stream linkStream { juce::Uuid().toString().toStdString() };
         wfg::pair::Receiver linkReceiver;
-        wfg::pair::Dialler dialler { linkReceiver, juce::SystemStats::getComputerName().toStdString() };
+        wfg::pair::Presence presence;
+        const auto machineName = juce::SystemStats::getComputerName().toStdString();
+        wfg::pair::Dialler dialler { linkReceiver, machineName };
 
-        /*  Which half is awake, from the role in force; read again on the tick a
-            pairing command moved it. */
-        enum class LinkRole { none, main, backup };
-        const auto linkRoleOf = [] (const wfg::pair::PairSettings& settings)
+        //  The server, once it exists: what a follower at the server's end relays and says hello down (RD.7).
+        wfg::oscquery::OscQueryServer* linkServer = nullptr;
+
+        /*  The role in force, read again on the tick a pairing command moved it:
+            a backup dials its peers, a main listens, a machine not paired does
+            neither. */
+        auto pairRole = wfg::pair::roleNamed (pairing.inForce.role);
+        dialler.want (pairRole == wfg::pair::Role::backup ? pairing.inForce.peers : std::vector<std::string> {});
+
+        /*  WHAT THIS MACHINE SAYS IT IS (RD.7), the hello's nine arguments: kept
+            under a lock because the dialler makes the hello a path opens with
+            on that path's thread; the tick thread changes it when the seat, the
+            role, freshness, the cues running or the salt change, and says it
+            again. What the receiver holds of the stream it follows is read as
+            the hello is made, so a path dialled again resumes exactly. */
+        std::mutex selfLock;
+        wfg::pair::wire::Hello self;
+        self.machine = machineName;
+        self.role = wfg::pair::wordOf (pairRole);
+        self.state = wfg::pair::wordOf (pairing.seated.seat);
+        self.ownStream = linkStream.id();
+        self.fresh = true;
+        self.salt = runner.runNames().salt();
+        self.described = true;
+
+        const auto helloNow = [&selfLock, &self, &linkReceiver]
         {
-            return settings.role == "main"   ? LinkRole::main
-                 : settings.role == "backup" ? LinkRole::backup
-                                             : LinkRole::none;
+            wfg::pair::wire::Hello hello;
+
+            {
+                const std::lock_guard<std::mutex> held { selfLock };
+                hello = self;
+            }
+
+            const auto [counter, followed] = linkReceiver.resumePoint();
+            hello.lastCounter = counter;
+            hello.stream = followed;
+            return wfg::pair::wire::helloBytes (hello);
         };
-        auto linkRole = linkRoleOf (pairing.inForce);
-        linkStream.setLeading (linkRole == LinkRole::main);
-        dialler.want (linkRole == LinkRole::backup ? pairing.inForce.peers : std::vector<std::string> {});
+
+        /*  WHERE WHAT THE OTHER MACHINE SAYS GOES, whichever socket brought it:
+            presence hears all of it, the leader's half takes a hello, a ping, a
+            relay, the follower's half a tick's stream and a pong (PeerLink.h). */
+        const auto routeLink = [&linkStream, &linkReceiver, &presence]
+            (const std::string& channel, const wfg::osc::Packet& message, wfg::pair::LinkClock::time_point arrival)
+        {
+            presence.heard (channel, message, arrival);
+
+            switch (wfg::pair::wire::boundFor (message))
+            {
+                case wfg::pair::wire::Bound::leader:   linkStream.received (channel, message, arrival); break;
+                case wfg::pair::wire::Bound::follower: linkReceiver.deliver (channel, message, arrival); break;
+                case wfg::pair::wire::Bound::neither:  break;
+            }
+        };
+
+        dialler.setRoute (routeLink);
+        dialler.setHello (helloNow);
         dialler.start();
 
-        /*  A BACKUP THAT FOLLOWS (namespace draft §58, RD.6; pair/Follow.h): the
-            follower holds the main's records to their slot and submits them at
-            the head of the tick; the gate in front of the engine's queue passes
-            this machine's clients' commands on to the main down the dialler,
-            and ignores what its devices say. Both idle until the link to a
-            main is up - the gate behind one acquire load in `Engine::submit`,
-            the follower behind a test on the tick. */
+        /*  A MACHINE THAT FOLLOWS (namespace draft §58, RD.6, RD.7; pair/Follow.h):
+            the follower holds the leader's records to their slot and submits
+            them at the head of the tick; the gate in front of the engine's
+            queue passes this machine's clients' commands on to the leader -
+            down the dialler on a backup, down the connection the leader dialled
+            on a main that follows a backup that took over - with a ticket each
+            (AGJ), and ignores what its devices say. All idle while the seat
+            does not follow: the gate behind one acquire load in
+            `Engine::submit`, the follower behind a test on the tick. Tickets
+            start where nothing of an earlier session could answer them. */
         wfg::pair::Follower follower { [&engine] (wfg::Event event) { return engine.submit (std::move (event)); } };
-        wfg::pair::FollowGate followGate { engine.commands(),
-                                           [&dialler] (std::vector<std::uint8_t> bytes)
-                                           { return dialler.relay (std::move (bytes)); } };
+        wfg::pair::FollowGate followGate {
+            engine.commands(),
+            [&dialler, &presence, &linkServer] (std::vector<std::uint8_t> bytes)
+            {
+                if (dialler.openPaths() > 0)
+                    return dialler.relay (std::move (bytes));
+
+                const auto via = presence.relayChannel();
+                return linkServer != nullptr && via.rfind ("ws:", 0) == 0
+                         && linkServer->sendTo (via, bytes.data(), bytes.size());
+            },
+            (static_cast<std::uint64_t> (juce::Time::getHighResolutionTicks()) & 0x3fffffffu) << 32 | 1u };
         engine.setGate ([&followGate] (wfg::Event& event) { return followGate.take (event); });
 
-        linkReceiver.setOnRecord ([&follower] (std::uint64_t, const wfg::LogRecord& mainRecord)
-                                  { follower.record (mainRecord); });
-        linkReceiver.setOnBeat ([&follower] (std::int64_t mainTick, wfg::pair::LinkClock::time_point arrival)
-                                { follower.beat (mainTick, arrival); });
+        /*  EACH RECORD THE OTHER MACHINE STREAMS, once: an answer to a relay of
+            this machine's is an answer whatever this machine does with it now
+            (AGJ); a stream this machine no longer applies - it took over, and
+            what was on the wire meanwhile still comes - is let go; and two
+            machines both sending apply only each other's operators' commands,
+            since each heard its own devices (AFQ, AGD). */
+        linkReceiver.setOnRecord ([&followGate, &follower, &pairing] (std::uint64_t, const wfg::LogRecord& leaderRecord)
+        {
+            followGate.confirm (leaderRecord.ticket);
 
-        /*  AND ON A MAIN, A COMMAND ITS BACKUP PASSED ON (AFT), applied as
-            `peer:<origin>` - submitted from the server's thread as a client's
-            own is, so it lands on the main's next tick - and streamed back
-            down like anything else the main applies. */
+            const auto seat = pairing.seated.seat;
+
+            if (! wfg::pair::follows (seat))
+                return;
+
+            if (seat == wfg::pair::Seat::bothSending
+                  && wfg::pair::gateFor (leaderRecord.origin, nullptr, {}) != wfg::pair::Gate::passOn)
+                return;
+
+            follower.record (leaderRecord);
+        });
+        linkReceiver.setOnBeat ([&follower] (std::int64_t leaderTick, wfg::pair::LinkClock::time_point arrival)
+                                {
+                                    if (follower.isFollowing())
+                                        follower.beat (leaderTick, arrival);
+                                });
+
+        /*  AND ON THE MACHINE THAT LEADS, A COMMAND ITS FOLLOWER PASSED ON (AFT),
+            applied as `peer:<origin>` with the follower's ticket - submitted
+            from the thread it arrived on, as a client's own is, so it lands on
+            the next tick - and streamed back down like anything else applied
+            here, the ticket beside it. */
         linkStream.setRelayed ([&engine] (const wfg::LogRecord& passedOn)
         {
             wfg::Event event;
@@ -5116,42 +5204,143 @@ namespace
             event.origin.append (passedOn.origin);
             event.command = passedOn.command;
             event.args = passedOn.args;
+            event.ticket = passedOn.ticket;
             engine.submit (std::move (event));
         });
 
+        /*  WHETHER THIS MACHINE HAS RUN ANYTHING SINCE IT STARTED (AGA): a GO
+            applied, or a cue run (counted at the end of every tick, below) - a
+            machine that has not follows straight away the one it finds sending
+            (AFR). And whether a waiting backup's own clients changed it
+            meanwhile, which leaves it out of step when it follows (RD.8 seats it). */
+        auto ranNothing = true;
+        auto changedWhileWaiting = false;
+
         /*  EVERY RECORD, AS THE LOG WROTE IT, on the tick thread: the stream
             keeps the ones that travel and nothing else (pair::travels), and a
-            following backup compares each of the main's it applied with what
-            the main made of it (RD.6). */
-        engine.setAfterRecord ([&linkStream, &follower] (const wfg::LogRecord& written, const wfg::Command* writtenBy)
+            follower compares each of the leader's it applied with what the
+            leader made of it (RD.6). */
+        engine.setAfterRecord ([&linkStream, &follower, &ranNothing, &changedWhileWaiting, &pairing]
+                               (const wfg::LogRecord& written, const wfg::Command* writtenBy)
                                {
                                    linkStream.keep (written, writtenBy);
                                    follower.applied (written);
+
+                                   if (written.kind != wfg::LogRecord::Kind::applied)
+                                       return;
+
+                                   if (ranNothing && written.command == "go")
+                                       ranNothing = false;
+
+                                   if (pairing.seated.seat == wfg::pair::Seat::waiting && writtenBy != nullptr
+                                         && wfg::pair::gateFor (written.origin, writtenBy, written.args)
+                                              == wfg::pair::Gate::passOn)
+                                       changedWhileWaiting = true;
                                });
 
-        /*  What a backup says on the server's thread - a hello, a ping - goes to
-            the stream and never to the namespace: no event, no record. */
+        /*  What the other machine says on the server's thread - a hello, a
+            ping, a relay, a tick's stream when it leads - goes to the link and
+            never to the namespace: no event, no record. */
         struct LinkDoor final : public wfg::oscquery::PeerDoor
         {
-            explicit LinkDoor (wfg::pair::Stream& streamToTell) : stream (streamToTell) {}
+            using Route = std::function<void (const std::string&, const wfg::osc::Packet&, wfg::pair::LinkClock::time_point)>;
+
+            LinkDoor (Route routeToUse, wfg::pair::Stream& streamToTell, wfg::pair::Presence& presenceToTell)
+                : route (std::move (routeToUse)), stream (streamToTell), presence (presenceToTell) {}
 
             void peerMessage (const std::string& origin, const wfg::osc::Packet& message) override
             {
-                stream.received (origin, message, wfg::pair::LinkClock::now());
+                route (origin, message, wfg::pair::LinkClock::now());
             }
 
-            void peerClosed (const std::string& origin) override { stream.closed (origin); }
+            void peerClosed (const std::string& origin) override
+            {
+                stream.closed (origin);
+                presence.closed (origin);
+            }
 
+            Route route;
             wfg::pair::Stream& stream;
+            wfg::pair::Presence& presence;
         };
 
-        LinkDoor linkDoor { linkStream };
+        LinkDoor linkDoor { routeLink, linkStream, presence };
 
         wfg::oscquery::OscQueryServer server;
         server.setTap (&traffic);
         server.setPeerDoor (std::string (wfg::pair::wire::prefix), &linkDoor);
-        linkStream.setSend ([&server] (const std::string& origin, const std::vector<std::uint8_t>& bytes)
-                            { return server.sendTo (origin, bytes.data(), bytes.size()); });
+        linkServer = &server;
+
+        /*  A LEADER'S STREAM GOES DOWN WHICHEVER CONNECTION ITS FOLLOWER IS AT
+            THE END OF (RD.7): one the server took - `ws:` - or a path this
+            machine dialled, a backup that took over leading the main it dials. */
+        linkStream.setSend ([&server, &dialler] (const std::string& origin, const std::vector<std::uint8_t>& bytes)
+                            {
+                                if (origin.rfind ("ws:", 0) == 0)
+                                    return server.sendTo (origin, bytes.data(), bytes.size());
+
+                                return dialler.sendTo (origin, bytes);
+                            });
+
+        /*  WHAT THIS MACHINE IS, SAID TO THE OTHER (RD.7): down one connection
+            the server took from it, or down all of them and every dialled path
+            when it changes. And an operator's choice told to it, the same way. */
+        const auto sayHelloTo = [&server, &helloNow] (const std::string& channel)
+        {
+            if (channel.rfind ("ws:", 0) == 0)
+            {
+                const auto bytes = helloNow();
+                server.sendTo (channel, bytes.data(), bytes.size());
+            }
+        };
+
+        const auto announce = [&presence, &dialler, &sayHelloTo]
+        {
+            for (const auto& channel : presence.channels())
+                sayHelloTo (channel);
+
+            dialler.announce();
+        };
+
+        const auto tellOther = [&presence, &dialler, &server] (wfg::pair::Order order, const std::string& reason)
+        {
+            const auto bytes = wfg::pair::orderBytes (order, reason);
+
+            for (const auto& channel : presence.channels())
+                if (channel.rfind ("ws:", 0) == 0)
+                    server.sendTo (channel, bytes.data(), bytes.size());
+
+            dialler.sendAll (bytes);
+        };
+
+        /*  WHAT THE PAIR'S SEAT HAS SEEN AND DONE, the tick thread's (RD.7): the
+            situation as last read, the move recorded and not yet acted on, the
+            seat acted on last, and what a follow that began is not in step with. */
+        wfg::pair::Situation situation;
+        situation.role = pairRole;
+        situation.stream = linkStream.id();
+        std::uint64_t peerSaidSeen = 0;
+        std::optional<wfg::pair::Move> inFlight;
+        std::uint64_t seatActedOn = pairing.seatCount;
+        auto actedSeat = pairing.seated.seat;
+        std::string followedStream;
+        wfg::pair::LinkClock::time_point followSince {};
+        wfg::pair::NotInStep behind;
+        std::int64_t liveRunsSaid = 0;
+        auto freshSaid = true;
+
+        /*  The stream keeps records while this machine sends, and a machine not
+            paired keeps none (RD.5's one test per record). */
+        linkStream.setLeading (pairRole != wfg::pair::Role::none && wfg::pair::sends (pairing.seated.seat));
+
+        /*  THE OTHER MACHINE'S SEAT AS THIS ONE SEES IT, for an operator's
+            `pair.takeOver`, `pair.handOver` or `pair.keep` to be applied with -
+            its argument as applied, so a replay refuses where this did. */
+        pairing.peerNow = [&situation]
+        {
+            return situation.linked && situation.peerSeat.has_value() ? std::string (wfg::pair::wordOf (*situation.peerSeat))
+                                                                      : std::string {};
+        };
 
         if (clientDirectory != juce::File())
             server.serveClientFrom (clientDirectory);
@@ -5498,50 +5687,48 @@ namespace
 
         ticks.setBeforeTick ([&] (std::int64_t tickIndex)
                              {
-                                 /*  THE MAIN'S RECORDS BEFORE ANYTHING (namespace
-                                     draft §58, RD.6; AGF). What the main sent
+                                 /*  THE PAIR BEFORE ANYTHING (namespace draft §58,
+                                     RD.6, RD.7; AGF). What the other machine sent
                                      since the last tick is read here rather than
                                      after the tick, so a record that arrived a
-                                     moment ago can make this tick's slot; the
-                                     link is linked or not by its heartbeat; and
-                                     a backup whose link is up FOLLOWS - holds
-                                     (RD.1's hold, on from here; RD.7 lets it go),
-                                     waits for the main's answers rather than
-                                     taking its held writes for them, and closes
-                                     the engine's gate - while one whose link
-                                     fell stops following and stays holding. Then
-                                     every record whose slot is this tick goes in,
-                                     at the head of the queue this tick drains,
-                                     ahead of the hands and the Runner's own -
-                                     as `wfg replay` puts a log's tick back. */
+                                     moment ago can make this tick's slot. A
+                                     machine whose seat follows starts following
+                                     once the leader's heartbeat comes, and every
+                                     record whose slot is this tick goes in, at
+                                     the head of the queue this tick drains, ahead
+                                     of the hands and the Runner's own - as `wfg
+                                     replay` puts a log's tick back. Then the seat:
+                                     an operator's command applied last tick, else
+                                     the other machine's operator's, else what the
+                                     situation calls for (pair/Leadership.h) - one
+                                     move a tick, recorded as `pair.lead` or
+                                     `pair.hold` and acted on once applied, at the
+                                     end of this tick. */
                                  {
                                      const auto now = wfg::pair::LinkClock::now();
-                                     linkReceiver.drain (now, pairing.inForce.timeout);
+                                     const auto timeout = pairing.inForce.timeout;
+                                     linkReceiver.drain (now, timeout);
+                                     presence.drain();
+                                     dialler.setTick (tickIndex);
 
-                                     const auto shouldFollow = linkRole == LinkRole::backup
-                                                                 && linkReceiver.isLinked (now, pairing.inForce.timeout);
+                                     //  What this machine is, said down a connection the other machine just opened.
+                                     for (const auto& channel : presence.opened())
+                                         sayHelloTo (channel);
 
-                                     if (shouldFollow != follower.isFollowing())
+                                     const auto& seated = pairing.seated;
+
+                                     if (wfg::pair::follows (seated.seat) && ! follower.isFollowing()
+                                           && linkReceiver.isLinked (now, timeout))
                                      {
-                                         if (shouldFollow)
-                                         {
-                                             machineHold.set (true);
-                                             machineHold.setAnswersFromElsewhere (true);
+                                         if (ticks.sampleRate() > 0)
+                                             follower.setTickSeconds (static_cast<double> (ticks.samplesPerTick())
+                                                                        / static_cast<double> (ticks.sampleRate()));
 
-                                             if (ticks.sampleRate() > 0)
-                                                 follower.setTickSeconds (static_cast<double> (ticks.samplesPerTick())
-                                                                            / static_cast<double> (ticks.sampleRate()));
-
-                                             follower.start();
-                                             engine.setGated (true);
-                                         }
-                                         else
-                                         {
-                                             engine.setGated (false);
-                                             machineHold.setAnswersFromElsewhere (false);
-                                             follower.stop();
-                                         }
+                                         follower.start();
                                      }
+
+                                     const auto roundTrip = std::max (linkReceiver.roundTripToSay(),
+                                                                      presence.roundTrip (now, timeout));
 
                                      if (follower.isFollowing())
                                      {
@@ -5556,7 +5743,71 @@ namespace
                                          follower.beforeTick (tickIndex,
                                                               now - std::chrono::duration_cast<wfg::pair::LinkClock::duration> (
                                                                         std::chrono::duration<double> (lateBy)),
-                                                              linkReceiver.roundTripToSay());
+                                                              roundTrip);
+
+                                         /*  A cleared ledger: relays the leader never
+                                             answered while the link stayed up are no
+                                             takeover's to settle (AGJ). */
+                                         if (seated.seat == wfg::pair::Seat::following)
+                                             followGate.expire (now, 2.0 * timeout);
+                                     }
+
+                                     //  WHAT THIS MACHINE KNOWS THIS TICK.
+                                     situation.role = pairRole;
+                                     situation.linked = pairRole != wfg::pair::Role::none && presence.linked (now, timeout);
+                                     situation.fresh = ranNothing;
+
+                                     if (presence.saidCount() != peerSaidSeen)
+                                     {
+                                         peerSaidSeen = presence.saidCount();
+                                         const auto& peer = presence.peer();
+
+                                         situation.peerSeat = peer.described ? wfg::pair::seatNamed (peer.state)
+                                                                             : std::optional<wfg::pair::Seat> {};
+                                         situation.peerFresh = peer.fresh;
+                                         situation.peerRole = wfg::pair::roleNamed (peer.role);
+                                         situation.peerStream = peer.ownStream;
+                                     }
+
+                                     situation.streamLive = linkReceiver.isLinked (now, timeout)
+                                                              || std::chrono::duration<double> (now - followSince).count() <= timeout;
+                                     situation.leaderChanged = ! followedStream.empty() && ! situation.peerStream.empty()
+                                                                 && situation.peerStream != followedStream;
+
+                                     /*  ONE MOVE AT A TIME: none while the last one's
+                                         record is on its way (it is applied this
+                                         very tick, and acted on at its end). */
+                                     auto orders = presence.takeOrders();
+
+                                     if (pairing.seatCount == seatActedOn && ! inFlight.has_value())
+                                     {
+                                         std::optional<wfg::pair::Move> move;
+
+                                         if (pairing.asked.has_value())
+                                             move = wfg::pair::asked (seated, *pairing.asked, situation);
+                                         else if (! orders.empty())
+                                             move = wfg::pair::ordered (seated, orders.back(), situation);
+                                         else
+                                             move = wfg::pair::decide (seated, situation);
+
+                                         pairing.asked.reset();
+
+                                         if (move.has_value())
+                                         {
+                                             /*  A FOLLOWER THAT STOPS FOLLOWING applies
+                                                 what it holds of the leader first, at
+                                                 once and still holding: the leader sent
+                                                 those to the devices before its stream
+                                                 carried them (RD.6). */
+                                             if (wfg::pair::follows (seated.seat) && ! wfg::pair::follows (move->to))
+                                                 follower.stop();
+
+                                             engine.submit (wfg::origin::engine, move->command(),
+                                                            { wfg::osc::Value::string (wfg::pair::wordOf (move->role)),
+                                                              wfg::osc::Value::string (wfg::pair::wordOf (move->to)),
+                                                              wfg::osc::Value::string (move->reason) });
+                                             inFlight = std::move (move);
+                                         }
                                      }
                                  }
 
@@ -6012,22 +6263,148 @@ namespace
                                     cue's first send, never before it. */
                                 answers.flush();
 
+                                /*  THE PAIR'S SEAT, ACTED ON (namespace draft
+                                    §58, RD.7) on the tick its record was
+                                    applied, and after this tick's sends have
+                                    left: what a machine taking over applied of
+                                    its leader's this tick stayed held, as the
+                                    leader had sent it already, and what a
+                                    machine that starts following did this tick
+                                    went out, as it was still the sender. */
+                                if (pairing.seatCount != seatActedOn)
+                                {
+                                    const auto seatBefore = actedSeat;
+                                    const auto& seated = pairing.seated;
+                                    seatActedOn = pairing.seatCount;
+                                    actedSeat = seated.seat;
+
+                                    machineHold.set (forcedHold || ! wfg::pair::sends (seated.seat));
+                                    machineHold.setAnswersFromElsewhere (seated.seat == wfg::pair::Seat::following);
+                                    engine.setGated (wfg::pair::gated (seated.seat));
+                                    linkStream.setLeading (seated.role != wfg::pair::Role::none
+                                                             && wfg::pair::sends (seated.seat));
+
+                                    if (wfg::pair::follows (seated.seat) && ! wfg::pair::follows (seatBefore))
+                                    {
+                                        /*  A FOLLOW BEGINS: from now on in the
+                                            leader's stream, never what it kept
+                                            before (RD.8 seats a position); the
+                                            leader's run-name salt adopted by a
+                                            machine that has run nothing, so the
+                                            runs the engine names by itself are
+                                            named alike from the first GO (RD.2);
+                                            and what this machine is not in step
+                                            with, said in the alarm. */
+                                        const auto& leader = presence.peer();
+                                        followedStream = leader.ownStream;
+                                        followSince = wfg::pair::LinkClock::now();
+                                        linkReceiver.startAfresh (followedStream);
+
+                                        if (ranNothing && leader.described)
+                                            runner.runNames().setSalt (leader.salt);
+
+                                        behind.leaderRuns = leader.described ? leader.liveRuns : 0;
+                                        behind.changedWhileWaiting = seatBefore == wfg::pair::Seat::waiting && changedWhileWaiting;
+                                    }
+
+                                    if (! wfg::pair::follows (seated.seat))
+                                    {
+                                        if (follower.isFollowing())
+                                            follower.stop();
+
+                                        followedStream.clear();
+                                        behind = {};
+                                    }
+
+                                    /*  AGJ: what a follower that now sends had
+                                        passed on and never saw answered - Esc and
+                                        double Esc applied here, through the gate
+                                        open now, the rest dropped and counted. */
+                                    if (seatBefore == wfg::pair::Seat::following && wfg::pair::sends (seated.seat))
+                                    {
+                                        auto settled = wfg::pair::settle (followGate.takeUnconfirmed (
+                                            wfg::pair::LinkClock::now(), 2.0 * pairing.inForce.timeout));
+
+                                        for (auto& stop : settled.applied)
+                                            engine.submit (std::move (stop));
+
+                                        followGate.countDropped (settled.dropped);
+                                    }
+
+                                    if (seated.seat != wfg::pair::Seat::waiting)
+                                        changedWhileWaiting = false;
+
+                                    //  What this machine now is, said to the other one, and its operator's choice told.
+                                    {
+                                        const std::lock_guard<std::mutex> held { selfLock };
+                                        self.role = wfg::pair::wordOf (seated.role);
+                                        self.state = wfg::pair::wordOf (seated.seat);
+                                        self.salt = runner.runNames().salt();
+                                    }
+
+                                    announce();
+
+                                    if (inFlight.has_value() && inFlight->tell.has_value())
+                                        tellOther (*inFlight->tell, inFlight->reason);
+                                }
+
+                                inFlight.reset();
+
+                                /*  THE CUES RUNNING HERE, said in every beat and
+                                    hello (RD.7) - a machine that has run one is
+                                    no longer fresh (AGA), and says so at once -
+                                    and a follower that joined while its leader
+                                    ran some is in step once they have ended. */
+                                {
+                                    std::int64_t live = 0;
+
+                                    for (const auto& run : runs.all())
+                                        if (! run.isFinished() && run.state != wfg::cue::runState::preparing
+                                              && run.prepare.empty())
+                                            ++live;
+
+                                    linkStream.setLiveRuns (live);
+
+                                    if (live > 0)
+                                        ranNothing = false;
+
+                                    if (behind.leaderRuns > 0 && follower.isFollowing() && linkReceiver.leaderLiveRuns() == 0)
+                                        behind.leaderRuns = 0;
+
+                                    if (live != liveRunsSaid || ranNothing != freshSaid)
+                                    {
+                                        const auto freshMoved = ranNothing != freshSaid;
+                                        liveRunsSaid = live;
+                                        freshSaid = ranNothing;
+
+                                        {
+                                            const std::lock_guard<std::mutex> held { selfLock };
+                                            self.liveRuns = live;
+                                            self.fresh = ranNothing;
+                                        }
+
+                                        if (freshMoved)
+                                            announce();
+                                    }
+                                }
+
                                 /*  THE LINK'S HEARTBEAT (namespace draft §58,
-                                    RD.5; AFV), next: on a main, what each
-                                    backup has not had of this tick's records,
-                                    then the beat that says this tick happened -
-                                    from here, so a main whose tick hangs falls
-                                    silent and is lost, and before the publish
-                                    below, which a backup does not wait behind.
-                                    It queues and returns: a send is the
-                                    server's to write, never the tick's to wait
-                                    for. A backup reads what its main sent at
-                                    the head of every tick (RD.6), and here as
-                                    well: a tick the audio settings suspended
-                                    runs no before-tick hook, and the link must
-                                    not read lost for an interface restarting.
-                                    What arrived waits in the follower for the
-                                    next tick that has one. */
+                                    RD.5; AFV), next: on a machine that leads,
+                                    what each follower has not had of this
+                                    tick's records, then the beat that says this
+                                    tick happened - from here, so a leader whose
+                                    tick hangs falls silent and is lost, and
+                                    before the publish below, which a follower
+                                    does not wait behind. It queues and returns:
+                                    a send is the server's or the dialler's to
+                                    write, never the tick's to wait for. A
+                                    follower reads what its leader sent at the
+                                    head of every tick (RD.6), and here as well:
+                                    a tick the audio settings suspended runs no
+                                    before-tick hook, and the link must not read
+                                    lost for an interface restarting. What
+                                    arrived waits in the follower for the next
+                                    tick that has one. */
                                 linkStream.afterTick (outcome.tick, pairing.inForce.timeout);
                                 linkReceiver.drain (wfg::pair::LinkClock::now(), pairing.inForce.timeout);
 
@@ -6097,49 +6474,66 @@ namespace
                                     pairingPublished = pairing.revision;
 
                                     /*  And the link follows the role and the
-                                        peers in force (RD.5): a main streams, a
-                                        backup dials, anything else does neither. */
-                                    linkRole = linkRoleOf (pairing.inForce);
-                                    linkStream.setLeading (linkRole == LinkRole::main);
-                                    dialler.want (linkRole == LinkRole::backup ? pairing.inForce.peers
-                                                                               : std::vector<std::string> {});
+                                        peers in force (RD.5): a backup dials, a
+                                        main listens; the seat follows the role
+                                        at the head of the next tick (RD.7). */
+                                    pairRole = wfg::pair::roleNamed (pairing.inForce.role);
+                                    dialler.want (pairRole == wfg::pair::Role::backup ? pairing.inForce.peers
+                                                                                      : std::vector<std::string> {});
                                 }
 
-                                /*  WHAT THE LINK SAYS (RD.5), read into the
-                                    reading kept in the state: five values and,
-                                    only when it moved, the peer's text. */
-                                switch (linkRole)
+                                /*  WHAT THE LINK SAYS (RD.5, RD.7), read into the
+                                    reading kept in the state: the records and
+                                    gaps off the half this seat uses - received
+                                    while following, sent while leading - and
+                                    whether the other machine is there, its
+                                    round trip and who it is off the presence,
+                                    which hears it whichever leads. */
                                 {
-                                    case LinkRole::main:
-                                        linkStream.readInto (state.pairLink, wfg::pair::LinkClock::now(),
-                                                             pairing.inForce.timeout);
-                                        break;
+                                    const auto now = wfg::pair::LinkClock::now();
+                                    const auto timeout = pairing.inForce.timeout;
+                                    const auto seat = pairing.seated.seat;
+                                    auto& link = state.pairLink;
 
-                                    case LinkRole::backup:
-                                        linkReceiver.readInto (state.pairLink, wfg::pair::LinkClock::now(),
-                                                               pairing.inForce.timeout);
-                                        break;
+                                    if (pairRole == wfg::pair::Role::none)
+                                    {
+                                        link.linked = false;
+                                        link.roundTrip = 0.0;
+                                    }
+                                    else
+                                    {
+                                        if (wfg::pair::follows (seat) || seat == wfg::pair::Seat::waiting)
+                                            linkReceiver.readInto (link, now, timeout);
+                                        else
+                                            linkStream.readInto (link, now, timeout);
 
-                                    case LinkRole::none:
-                                        state.pairLink.linked = false;
-                                        state.pairLink.roundTrip = 0.0;
-                                        break;
+                                        link.linked = presence.linked (now, timeout);
+                                        link.roundTrip = link.linked ? std::max (linkReceiver.roundTripToSay(),
+                                                                                 presence.roundTrip (now, timeout))
+                                                                     : 0.0;
+
+                                        if (! presence.latest().empty() && link.peer != presence.latest())
+                                            link.peer = presence.latest();
+                                    }
                                 }
 
-                                /*  AND WHAT FOLLOWING SAYS (RD.6): a main
-                                    linked leads, a backup that follows
-                                    follows, anything else is alone; the delay,
-                                    what came late and what came out otherwise,
-                                    and what the gate passed on and ignored.
-                                    Copied only when it moved. */
+                                /*  AND WHAT THE SEAT SAYS (RD.6, RD.7): the seat
+                                    the log last said, the alarm in front of the
+                                    operator, the delay, what came late and what
+                                    came out otherwise, what the gate passed on
+                                    and ignored, and what was passed on and never
+                                    answered. Copied only when it moved. */
                                 {
                                     auto& follow = state.pairFollow;
-                                    const auto* const word = linkRole == LinkRole::main
-                                                               ? (state.pairLink.linked ? "leading" : "alone")
-                                                               : (follower.isFollowing() ? "following" : "alone");
+                                    const auto* const word = wfg::pair::wordOf (pairing.seated.seat);
 
                                     if (follow.state != word)
                                         follow.state = word;
+
+                                    auto sentence = wfg::pair::alarm (pairing.seated, situation, behind);
+
+                                    if (follow.alarm != sentence)
+                                        follow.alarm = std::move (sentence);
 
                                     follow.delay = follower.delay();
                                     follow.late = follower.late();
@@ -6149,6 +6543,7 @@ namespace
 
                                     follow.relayed = followGate.passedOn();
                                     follow.dropped = followGate.ignored();
+                                    follow.unconfirmed = followGate.unconfirmed();
                                 }
 
                                 /*  THE REFUSAL ITSELF, and not only the count

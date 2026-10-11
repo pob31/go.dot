@@ -95,6 +95,9 @@ namespace wfg
         r.origin = event.origin;
         r.command = event.command;
 
+        //  A relay's ticket, whatever comes of it: an `R` answers a relay as surely as an `A` (RD.7, AGJ).
+        r.ticket = event.ticket;
+
         const auto* command = registry.find (event.command);
         found = command;
 

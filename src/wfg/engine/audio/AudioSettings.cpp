@@ -3,6 +3,7 @@
 #include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/command/Recovery.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -168,22 +169,25 @@ namespace wfg::audio
             hook submits (2026-10-03, D3): a scene put back once it has ended,
             and the report, which a drain inside the outage must not refuse.
 
-            AND THE MACHINE'S PAIRING (namespace draft §58, RD.4), through both
-            gates: which machine is the main is a question about the computer
-            and never about its interface, an outage on the main is the very
-            moment somebody reaches for it, and `pair.saved` refused here would
-            say a file was not written when it was. */
+            AND THE MACHINE'S PAIRING (namespace draft §58, RD.4, RD.7), through
+            both gates, every `pair.` command: which machine is the main is a
+            question about the computer and never about its interface, an
+            outage on the main is the very moment somebody reaches for it - a
+            takeover above all - and `pair.saved` refused here would say a file
+            was not written when it was, `pair.lead` that a machine did not
+            change what it does when it did.
+
+            The operator's stops are the list PRD §6.2 keeps, in one place
+            (command/Recovery.h), since a backup taking over reads it too. */
         engine.setAdmissionCheck ([&state] (const std::string& command)
         {
-            if (command == "pair.setRole" || command == "pair.setPeers" || command == "pair.setTimeout"
-                || command == "pair.saved")
+            if (command.rfind ("pair.", 0) == 0)
                 return std::string {};
 
             if (state.status == "noClock" && command != "audio.connection" && command != "audio.reconnect"
                 && command != "audio.clockMoved" && command != "audio.settingsReady"
                 && command != "audio.editBuilt" && command != "audio.apply" && command != "audio.setup"
-                && command != "run.killAll" && command != "run.kill" && command != "run.stopAll"
-                && command != "run.stop" && command != "go.doh" && command != "go.dohRelaunch"
+                && ! recovery::isStop (command) && command != "go.doh" && command != "go.dohRelaunch"
                 && command != "list.dohReport" && command != "audio.testStop"
                 && command != "audio.armed" && command != "run.failed" && command != "take.closed"
                 && command != "take.kept"

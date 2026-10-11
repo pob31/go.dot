@@ -105,8 +105,12 @@ def run() -> int:
             report.equal(read("/godot/pair/role"), "backup", "the role on the command line is published")
             report.equal(read("/godot/pair/peers"), "127.0.0.1:5999", "and the peer")
             report.equal(read("/godot/pair/timeout"), 2.5, "and the link's timeout, 2.5 s")
-            report.equal(read("/godot/pair/sending"), "true",
-                         "a backup alone does not hold yet - only --hold does until RD.6")
+            report.equal(read("/godot/pair/sending"), "false",
+                         "a backup that has never found its main holds (RD.7, AGK)")
+            report.check(wait_for(lambda: read("/godot/pair/state") == "waiting"),
+                         "and waits for it, saying so", f"state {read('/godot/pair/state')!r}")
+            report.check(str(read("/godot/pair/alarm")).startswith("Waiting for the main"),
+                         "in the alarm in front of the operator", f"alarm {read('/godot/pair/alarm')!r}")
             report.check(any("paired as backup" in notice for notice in server.notices),
                          "serve says how it is paired as it starts", f"notices {server.notices}")
             report.check(not pairing.exists(), "the overrides are not written to pairing.xml")
@@ -120,6 +124,9 @@ def run() -> int:
             send("pair.setRole", ["main"])
             report.check(wait_for(lambda: read("/godot/pair/role") == "main"),
                          "pair.setRole main over OSC changes the role in force", f"role {read('/godot/pair/role')!r}")
+            report.check(wait_for(lambda: read("/godot/pair/state") == "alone" and read("/godot/pair/sending") == "true"),
+                         "and a main with no backup sends, alone (RD.7)",
+                         f"state {read('/godot/pair/state')!r}, sending {read('/godot/pair/sending')!r}")
             report.check(wait_for(lambda: (file_says(pairing) or {}).get("role") == "main"),
                          "and writes pairing.xml beside the engine folder", f"file {file_says(pairing)}")
 

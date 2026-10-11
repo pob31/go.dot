@@ -40,7 +40,10 @@ namespace wfg::pair
     struct LinkReading
     {
         /*  ON A BACKUP, a heartbeat arrived within the timeout on any path to the
-            main; ON A MAIN, a backup that said hello pinged within it (AFV). */
+            main; ON A MAIN, a backup that said hello pinged within it (AFV) -
+            as the stream and the receiver read it. Serve publishes the
+            presence's instead from RD.7 (pair/Presence.h): the other machine's
+            engine heard, whichever of the two leads. */
         bool linked = false;
 
         /*  WHO IS AT THE OTHER END: on a backup, the main's address that last
@@ -71,10 +74,18 @@ namespace wfg::pair
         beside the link's, for the link's reason: the tree carries one. */
     struct FollowReading
     {
-        /*  `alone`, `following` or `leading` (RD.6); `bothSending` and
-            `waiting` are RD.7's. A main linked to its backup leads; a backup
-            linked to its main follows; anything else is alone. */
+        /*  `alone`, `leading`, `following`, `waiting` or `bothSending`: the
+            seat the log last said (RD.7, pair/Leadership.h). */
         std::string state = "alone";
+
+        /*  THE SENTENCE IN FRONT OF THE OPERATOR (RD.7): both machines
+            sending, waiting for the main, the other machine lost and this one
+            sending in its place, a follower not yet in step. Empty otherwise. */
+        std::string alarm;
+
+        /*  Commands this machine passed on that its leader never answered, and
+            that were dropped: at a takeover, all but Esc and double Esc (AGJ). */
+        std::int64_t unconfirmed = 0;
 
         /*  Δ, IN TICKS (AGF): how far behind its main a following backup
             applies the main's records, as measured and fixed at link-up;

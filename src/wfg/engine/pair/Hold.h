@@ -26,9 +26,10 @@
     the author's words, "we need to mute network and MIDI commands while the
     connection is alive so the target devices don't get twice the commands".
     On its own - `wfg serve --hold` - it is a spare that runs the show beside a
-    rehearsal and says nothing to anybody. RD.6 switches it on when a backup
-    starts following its main (pair/Follow.h) and never off: RD.7 decides when
-    a backup whose main is lost sends.
+    rehearsal and says nothing to anybody. From RD.7 the pair's seat moves it
+    (pair/Leadership.h): on while a machine follows or a backup waits for its
+    main, off when it leads, is alone, or sends beside the other (AFQ) - and
+    `--hold` keeps it on whatever the seat.
 
     HELD MEANS COUNTED AS SENT (AGG). A held send is answered exactly as one
     that left, and it is answered BEFORE anything that could refuse it - an

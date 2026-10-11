@@ -25175,13 +25175,13 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair/role` | `s` | `main`, `backup` or `none`: the machine's (AGC) |
 | `pair/peers` | `s` | the other machine's addresses, `host:port`, space-separated |
 | `pair/timeout` | `f` | seconds of silence that lose the link (AFV) |
-| `pair/linked` | `T` | a heartbeat within the timeout |
-| `pair/peer` | `s` | who is at the other end: on a backup the main's `host:port` that last delivered first, on a main the backup's `ws:` origin that last pinged (RD.5) |
+| `pair/linked` | `T` | the other machine's engine heard within the timeout, whichever leads: its pings at the machine that listens, its pongs at the machine that dials, carrying its tick (RD.7) |
+| `pair/peer` | `s` | who is at the other end: on a backup the main's `host:port` that last delivered first, on a main the backup's `ws:` origin that last pinged (RD.5); from RD.7 the connection the other machine was heard on last, whichever leads |
 | `pair/roundTrip` | `f` | seconds there and back, the fastest of the last second's pings; 0 unlinked (RD.5) |
 | `pair/received` | `h` | records this link: received on a backup, sent on a main, each once (RD.5) |
 | `pair/gaps` | `h` | records missed this link, as gaps (RD.5) |
 | `pair/sending` | `T` | this machine sends to devices; false while it holds |
-| `pair/state` | `s` | `alone`, `following`, `leading`, `bothSending`, `waiting` (AGK) |
+| `pair/state` | `s` | `alone`, `following`, `leading`, `bothSending`, `waiting` (AGK): the seat the log last said, `pair.lead`/`pair.hold` (RD.7) |
 | `pair/delay` | `i` | Δ in ticks (AGF); the extra launch lead while linked |
 | `pair/late` | `i` | records applied after their slot, this link |
 | `pair/drift` | `f` | parts per million between the two sound clocks (AGI) |
@@ -25191,7 +25191,8 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair/dropped` | `h` | commands this backup's devices sent it that it ignored while following (RD.6) |
 | `pair/showMatch` | `T` | the fingerprints agree (AFU) |
 | `pair/showDiffers` | `s` | what differs: cues, settings, sounds missing or changed |
-| `pair/alarm` | `s` | the sentence the window and the page put in front of the operator; empty when none |
+| `pair/alarm` | `s` | the sentence the window and the page put in front of the operator - both sending, waiting for the main, the other lost and this one sending, a follower not in step; empty when none (RD.7) |
+| `pair/unconfirmed` | `h` | commands this machine passed on that its leader never answered, dropped: at a takeover all but Esc and double Esc (AGJ), and one left unanswered past twice the timeout (RD.7) |
 
 ### 58.4 Commands
 
@@ -25201,19 +25202,21 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair.setPeers` | `s:addresses` | the other machine's addresses (machine) |
 | `pair.setTimeout` | `f:seconds` | AFV (machine) |
 | `pair.saved` | `s:error` | the engine's: `pairing.xml` written, or refused `write-failed` with the reason (machine; RD.4) |
-| `pair.takeOver` | | on the backup: send from now on, and tell the main to hold if it can be reached |
-| `pair.handOver` | | from the machine sending: the other sends from now on, this one holds and follows |
-| `pair.keep` | | AFQ: keep the show here; the other machine holds and catches up |
+| `pair.takeOver` | `[s:peer]` | on a machine that holds - following, or a backup waiting: send from now on, and tell the other to hold and follow if it can be reached (machine) |
+| `pair.handOver` | `[s:peer]` | from the machine sending, the other there: the other sends from now on, this one holds and follows (machine) |
+| `pair.keep` | `[s:peer]` | AFQ, while both send: keep the show here; the other machine holds and follows (machine) |
 | `pair.realign` | | the follower seats itself at the main's position again |
 | `pair.adoptShow` | | the follower takes the main's show text (AFU); refused while anything runs |
-| `pair.lead`, `pair.hold` | | the engine's: this machine now sends, or holds; logged |
+| `pair.lead`, `pair.hold` | `s:role s:seat s:reason` | the engine's: this machine now sends (`alone`, `leading`, `bothSending`), or holds (`following`, `waiting`), and why; logged, and where the seat lives (machine; RD.7) |
 | `pair.seat` | `s:position` | the engine's: one record seating the follower at the main's position |
 | `pair.launchAt` | `s:run h:sample` | the engine's: the main's launch sample, mapped onto this machine's clock |
 
 ### 58.5 Refused
 
-`not-paired` for a pairing command on a machine with no role; `not-following` for `realign` or
-`adoptShow` on the machine that sends; `busy` for `adoptShow` while a cue runs; a command the backup
+`not-paired` for `takeOver`, `handOver` or `keep` on a machine with no role; `not-holding` for
+`takeOver` on a machine that sends; `not-sending` for `handOver` on one that holds; `not-linked` for
+`handOver` with the other machine not there; `not-both-sending` for `keep` outside AFQ (RD.7);
+`not-following` for `realign` or `adoptShow` on the machine that sends; `busy` for `adoptShow` while a cue runs; a command the backup
 passed on and the main refused comes back refused, with the main's reason.
 
 ### 58.6 Stages
@@ -25533,3 +25536,146 @@ passed on and the main refused comes back refused, with the main's reason.
   `run.stop` of one by name is refused on the backup and counted in `pair/differs`; a
   backup whose link fell applies its own clients' and devices' commands again, held
   (RD.7); `FollowGate::lost` is not published.
+- **RD.7**, 2026-10-11: who sends to the devices (AFQ, AFR, AFV, AGA, AGJ, AGK).
+  `pair::Leadership` (pair/Leadership.h) is the one place that decides, as PURE
+  functions of the seat the log last said and the situation this tick: `decide`
+  (no operator), `asked` (`pair.takeOver`, `pair.handOver`, `pair.keep`),
+  `ordered` (the other machine's operator's choice), `refusal` and `alarm`. FIVE
+  SEATS: `alone` sends - not paired, or a main with no backup linked; `leading`
+  sends, a follower linked or a backup that took over; `following` holds, applies
+  the leader's stream, gate closed; `waiting` holds, a backup that has not found
+  its main since it started (AGK), its own clients' commands applied here, held;
+  `bothSending` sends, and - the brief's reading of AFQ, which the driver asserts
+  - each of two machines found sending applies the OTHER's operators' commands
+  (its clients' origins only; each hears its own devices), so a GO at either
+  reaches the devices from both until an operator keeps the show on one. THE
+  TABLE: a paired machine's first tick seats it (`started`: a main `alone`, a
+  backup `waiting`), a role changed re-seats it (`role`); `alone` finding a
+  follower leads (`follower-linked`), finding a machine that sends follows it
+  if this one is fresh and the other is not (`leader-found`, AFR) and otherwise
+  both send (`both-sending`, AFQ) - unless the other is fresh, which will follow
+  and is waited for; two fresh machines: the backup follows, two of one role the
+  later stream identity follows, so they never both wait; `leading` likewise,
+  and a main whose follower went is `alone` again (`follower-lost`) while a
+  backup that leads goes on leading; `following` takes over when the leader's
+  heartbeat is silent for the timeout (`link-lost`, AFV - a main that loses the
+  backup it followed is then `alone`) or the leader says another stream
+  identity, a leader started again since (`leader-restarted`), as it might after
+  a crash and a restart inside the timeout; `waiting` follows a machine that
+  sends (`main-found`), whatever its own clients changed meanwhile; `bothSending`
+  changes only when the other goes (`peer-lost`) or follows (`follower-linked`).
+  The operator's: `takeOver` from `following` or `waiting` sends (`take-over`)
+  and tells the other `hold`; `handOver` from `leading` or `bothSending`, the
+  other there, follows (`hand-over`) and tells it `lead`; `keep` in
+  `bothSending` leads (`keep`) and tells the other `hold`. The orders: `hold`
+  follows (`peer-take-over`, `peer-keep`), `lead` sends (`peer-hand-over`).
+  RECORDED, AND WHERE THE SEAT LIVES: every move is submitted by serve as the
+  engine's `pair.lead s:role s:seat s:reason` (the new seat sends) or `pair.hold`
+  (it holds), machine-local, and the seat is what those say from the moment they
+  are applied (`Pairing::seated`, set by their own handlers) - in the session and
+  in its replay alike, so a replay, which sees no other machine, refuses an
+  operator's command exactly where the session did. The three operator commands
+  are machine-local too, accepted or refused (58.5) from the seat and the other
+  machine's seat as this one sees it, which becomes the command's argument as
+  applied (`[s:peer]`, empty when none is linked), and serve makes the move on
+  its next tick: one move a tick, an operator's first, then the other machine's
+  latest order, then `decide`. ACTED ON after the tick's sends have left, on the
+  tick the record was applied: the hold (`--hold` still holds whatever the
+  seat), answers from elsewhere while following, the gate, the stream keeping
+  records while the seat sends; a follow that begins asks the leader's stream
+  FROM NOW (`wire::fromNow`, the leader's identity: no ring replayed at once,
+  late, as RD.6's fresh backup had it), adopts the leader's run-name salt when
+  this machine has run nothing (RD.2; RD.8 carries the counts otherwise), and
+  says in the alarm what it is not in step with - the cues the leader had
+  running (from its hello, cleared once its beat says none run) or what a
+  waiting backup's own clients changed; a follower that stops following applies
+  what it holds of the leader at once, still holding (the leader sent those
+  already), then lets go. A BACKUP STARTS HOLDING (AGK), from the first line of
+  serve, so a console that takes one session is never dialled by a machine not
+  told it sends. FRESH (AGA): no applied `go` and no live run (unfinished, not a
+  preparation) since launch, said again as soon as it is no longer true. AGJ:
+  every relay gets a ticket (`Event::ticket`, copied by the engine onto
+  `LogRecord::ticket`, never on a line) - `relay s:line h:ticket`, the leader
+  submits it with the ticket, and the record that answers it, applied or
+  refused, goes back `record h:counter s:line h:ticket`; `FollowGate` keeps a
+  ledger, under a lock, of every relay until its answer arrives - one that could
+  not even be sent (no path open: the leader has just gone) is kept too - and
+  forgets, counting it, one unanswered past twice the timeout while the link
+  stayed up. A follower that starts sending settles the rest (`pair::settle`):
+  Esc and double Esc and their one-run forms - `recovery::isStop`, PRD §6.2's
+  stops, now one list (command/Recovery.h) the audio's admission gate reads too
+  - submitted here under their own origins, everything else dropped and counted
+  (`pair/unconfirmed`); a relay already answered is the leader's record, applied
+  once as such. THE LINK SYMMETRIC OVER ONE CONNECTION: the backup still dials
+  and the main still listens, but the leader's `Stream` sends down whichever
+  connection its follower is at - `ws:` through the server, a dialled
+  `host:port` through `Dialler::sendTo` - and the follower's `Receiver` reads
+  from either: serve routes every message of the link from both transports by
+  `wire::boundFor` (a hello, ping or relay to the leader's half; a tick's bundle
+  or a pong to the follower's) and through `pair::Presence`, which hears the
+  other machine whoever leads. The wire, beside RD.5's: `hello` gains five
+  arguments - `s:state s:ownStream i:fresh h:liveRuns h:salt` - and is said by
+  BOTH ends on a connection's first message and whenever the seat, the role or
+  freshness changes (a hello whose state is `following` or `bothSending` asks
+  for the stream; one that says anything else forgets a follower on that
+  connection; RD.5's four still follow when they say `backup`); `order s:order
+  s:reason`, new; `ping` gains `h:tick` (the pinging machine's tick), `beat`
+  `h:liveRuns`, `record` and `relay` `h:ticket`. The server's side door now
+  takes a bundle that opens with a `/godot/pair/` message too - a tick's stream
+  from a leader that dialled. `Dialler` gains `setRoute`, `setHello`,
+  `announce`, `sendTo`, `sendAll` and `setTick`. PRESENCE: alive means the other
+  ENGINE ticks - a ping's, pong's or beat's tick that moved on, or a hello or
+  an order - never only a socket answering, since pongs come from the server's
+  thread; `pair/linked` and `pair/roundTrip` are read from it on both ends, and
+  `pair/peer` is the channel heard last. A follower's own takeover still keys
+  on the leader's heartbeat (RD.6), with a timeout's grace from the moment a
+  follow begins. `travels` leaves out a record whose origin is `main:` - what a
+  machine applied of the other's - so a follower that took over, or two
+  machines both sending, never send one round again. Also found and mended: a
+  receiver kept the last leader's tick across a new stream, so a leader started
+  again counted from nought was never heard to beat until it passed the old
+  one's - it starts again with the stream; and the dialler said a path open only
+  at its manager's next look, so a leader's first frame down a path just opened
+  could be refused and its follower forgotten for a timeout - a path is open to
+  `sendTo` from `on_open` now, and the list is read and kept under one lock
+  (pair_link.py's last check failed once in a ctest run before it, after
+  eighteen that passed, and in none of six since - the cause is the likeliest
+  one found, not one caught in the act). Rows `pair/alarm` and
+  `pair/unconfirmed`; `pair/state` reads every seat. Cost: a tick where nothing
+  moves pays the presence's swap, a seat decided and an alarm said - 0.3 µs in the Debug build on this bench -
+  and a count of the live runs, one pass of the run table - 12 µs for a table of five hundred runs. Tests
+  under C and fr_FR: LeadershipTests (every seat of a main and a backup against
+  every event as a table, what each seat does, the start and a role changed,
+  two fresh machines, the refusals, the alarms, `pair.lead`/`pair.hold` as the
+  seat and a session replayed alike; AGJ - `settle`, the ledger, and two engines
+  joined by the real stream and receiver: an Esc and a double Esc never answered
+  applied once each at the takeover, a GO and a Doh! dropped and counted, a GO
+  and an Esc the leader answered applied once as its records; the link
+  symmetric - a leader that streams to a follower which applies, holds and
+  passes its client's GO up, a device hearing each GO once; both sending, a GO
+  at one heard from both; the cost), PeerLinkTests (RD.7's wire, a follow asked
+  from now, a follower forgotten when it says it took over, a ticket carried
+  back, and over a real WebSocket a backup that leads streaming down the path
+  it dialled to a main following behind its server, presence on both ends, a
+  relay up and an order down the same connection), FollowTests, TreeTests,
+  MachineScopeTests, and tests/blackbox/redundancy_failover.py: GO and GO at the
+  main heard once each; the main killed, the backup leading and sending
+  1.07 s later and saying why, GOs at its WebSocket heard once each; the
+  main started again on its port following the backup, which stays leading, the
+  device hearing once; then a second pair through a TCP relay, paused past the
+  timeout - the backup leading and the main alone 1.03 s later, one GO at
+  each heard once - resumed: both `bothSending` and saying so, a GO at either
+  page heard twice, `pair.keep` at the main, the backup following, the next GO
+  heard once. pair_link.py's last part now asserts RD.7's: the backup took over
+  when its main was killed, the new main follows it, and what is sent to the
+  backup reaches the new main; pairing.py's backup alone now waits, holding.
+  Left: a waiting backup's own changes, and the leader's runs a follower
+  joined, stay until RD.8 seats a position; a fresh machine whose leader's
+  stream never arrives takes over after the timeout and follows again, once a
+  timeout (a link that carries pings and not the stream); a relay lost on a
+  path that dropped and was dialled again inside the timeout is lost unless a
+  takeover follows (it expires unanswered); a GO the old leader applied after
+  an operator's `takeOver` or a `hand-over` crossed it is applied there and
+  dropped here; a hello's `liveRuns` is as of the hello (the beat carries it
+  while streaming); orders are sent once, down every path, and a machine that
+  missed one decides from the hellos; the words on screen are RD.11's.

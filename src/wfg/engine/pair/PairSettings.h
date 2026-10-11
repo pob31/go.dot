@@ -55,14 +55,15 @@
     by the same locale-proof pair the event log uses (`osc::formatDouble`,
     `osc::parseDouble`): 1.5 seconds is `1.5` on a French machine too.
 
-    THE LINK READS THEM (RD.5, pair/PeerLink.h): a `main` streams to whoever
-    dials it, a `backup` dials its peers, and both say whether they are linked
-    within the timeout. A backup holds from the moment it is linked and
-    follows (RD.6, pair/Follow.h), and stays holding if the link falls; RD.7
-    decides when it takes over. A machine started `--role=backup` that has
-    never been linked does not hold yet (RD.7, AGK), and `--hold` holds on
-    its own.
+    THE LINK READS THEM (RD.5, pair/PeerLink.h): a `main` listens, a `backup`
+    dials its peers, and both say whether they are linked within the timeout.
+    What each then IS - alone, leading, following, waiting, both sending - is
+    pair/Leadership.h's (RD.7): a backup started without its main waits,
+    holding (AGK), follows its main once it finds it (RD.6), and takes over
+    when the link is lost; `--hold` holds on its own, whatever the seat.
 */
+
+#include <wfg/engine/pair/Leadership.h>
 
 #include <cstdint>
 #include <functional>
@@ -177,11 +178,35 @@ namespace wfg::pair
             is no file to write - a replay, a listing, a test that only reads -
             and then a command changes the settings and nothing else. */
         std::function<void (const PairSettings&)> requestSave;
+
+        //======================================================================
+        /*  WHAT THIS MACHINE IS IN ITS PAIR, AS THE LOG LAST SAID IT (RD.7;
+            pair/Leadership.h): set by the engine's `pair.lead` and `pair.hold`
+            as they are applied - in serve and in a replay alike - and moved
+            with `seatCount`, so serve acts on a seat on the tick it changed. */
+        Seated seated;
+        std::uint64_t seatCount = 0;
+
+        /*  AN OPERATOR'S `pair.takeOver`, `pair.handOver` or `pair.keep`,
+            accepted and waiting for serve's next tick to make the move -
+            which is logged as `pair.lead` or `pair.hold` like any other. A
+            replay sets it and nothing reads it: its moves are in the log. */
+        std::optional<Ask> asked;
+
+        /*  THE OTHER MACHINE'S SEAT AS THIS ONE SEES IT NOW, `pair/state`'s
+            word, empty when it is not linked: what an operator's command is
+            applied with (its argument as applied), so a replay refuses alike.
+            Serve's; empty everywhere else. */
+        std::function<std::string()> peerNow;
     };
 
     /*  `pair.setRole`, `pair.setPeers`, `pair.setTimeout`, and the engine's
         `pair.saved` (namespace draft §58.4): all four this machine's alone,
         never mirrored and no step of undo (RD.3), and none refused for the
-        show's lock, which is about the show and not the machine it runs on. */
+        show's lock, which is about the show and not the machine it runs on.
+        And RD.7's: the engine's `pair.lead` and `pair.hold`, which say what
+        this machine now is and why, and the operator's `pair.takeOver`,
+        `pair.handOver` and `pair.keep` - machine-local too, since each acts on
+        this machine, though each also tells the other machine when it can. */
     void registerPairCommands (CommandRegistry& registry, Pairing& pairing);
 }

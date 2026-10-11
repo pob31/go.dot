@@ -69,6 +69,14 @@ namespace wfg
             so the log's format is what it was. */
         std::string detail;
 
+        /*  THE RELAY TICKET a command passed on by a backup carried (namespace
+            draft §58, RD.7, AGJ; `Event::ticket`), nought for every other
+            record. Like `detail`, NEVER on the line: the redundancy link
+            carries it beside the line, so a backup knows which of the commands
+            it passed on the main has applied or refused - and a log, and a
+            replay, are what they were. */
+        std::uint64_t ticket = 0;
+
         /** The line this record writes, without its newline. */
         std::string toLine() const;
 
