@@ -25106,6 +25106,7 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair.setRole` | `s:role` | the machine's role, written to `pairing.xml` (machine) |
 | `pair.setPeers` | `s:addresses` | the other machine's addresses (machine) |
 | `pair.setTimeout` | `f:seconds` | AFV (machine) |
+| `pair.saved` | `s:error` | the engine's: `pairing.xml` written, or refused `write-failed` with the reason (machine; RD.4) |
 | `pair.takeOver` | | on the backup: send from now on, and tell the main to hold if it can be reached |
 | `pair.handOver` | | from the machine sending: the other sends from now on, this one holds and follows |
 | `pair.keep` | | AFQ: keep the show here; the other machine holds and catches up |
@@ -25213,3 +25214,40 @@ passed on and the main refused comes back refused, with the main's reason.
   the lock, as every `persist=show` row is; a log from before RD.3 that undoes an audio settings
   edit no longer replays (no fixture has one); `midi.rescan`, which `ports/inputs` names, is not
   a command.
+- **RD.4**, 2026-10-11: the pairing settings (AGC, AFV). `pair::PairSettings` - the role
+  (`main`, `backup`, `none`), the peers (`host:port`, the port 5010 when left off, an IPv6
+  address in brackets, a repeat kept once) and the timeout (one second, a tenth to thirty) -
+  in `pairing.xml`, the sibling of the engine folder beside `last-show.txt`, following
+  `--engine-folder`. Read leniently: no file is `none` and says nothing; a file that is not
+  one is the defaults, a value that cannot be read is its default and one out of range is
+  brought into it, each said in one sentence on stderr as serve starts, never a refusal to
+  start. Written atomically, its number through `osc::formatDouble` and read through
+  `osc::parseDouble`, so 1.5 is `1.5` on a French machine. `wfg serve --role=`, `--peer=`
+  (repeatable, read from the raw arguments as `--midi-in` is, and a comma list within one)
+  and `--link-timeout=` override it for one run and are never written; a value typed wrong
+  stops the start, exit 2. `pair.setRole s:role`, `pair.setPeers s:addresses` (applied as
+  `host:port`) and `pair.setTimeout f:seconds` (the float read through its own shortest text,
+  so 0.1f is 0.1) refuse a bad value `bad-value`, change the settings on the tick thread and
+  ask `pair::SavePump` - the audio settings' shape, on the message thread, flushed as serve
+  ends - to write the file; it answers with the engine's `pair.saved s:error`, refused
+  `write-failed` with the reason when the write failed, so the sentence is at
+  `/godot/engine/lastError`. The implementer's call on an override in force: a session holds
+  `stored` (the file's) and `inForce` (with the overrides) and a command writes its one
+  setting into both, so the file is always written from the file's own values - setting the
+  peers on a machine started `--role=backup` leaves the file's role as it was - while a
+  command on the setting the command line overrode is the later word, in force and in the
+  file. All four are `machineLocal`, never refused for the lock, and let through both of the
+  audio's admission gates (an outage is when somebody reaches for the pairing, and
+  `pair.saved` refused there would say a written file was not); none is refused `not-paired`
+  (58.5), since they are how a machine becomes paired. Registered in serve, replay (a pairing
+  of its own, never written), `wfg tree` and `wfg commands`. Rows `pair/role` (`s`, its
+  range `none|main|backup`), `pair/peers` (`s`) and `pair/timeout` (`f`, s), read-only, in
+  `tree::EngineState::pairSettings`, copied on the tick a command moved them, and marked
+  `machine` in the table's `scope` column; `Schema::isMachineAddress` takes a machine row
+  on an owner no element holds as a container's, so `/godot/pair/role` answers machine from
+  the string. `pair/sending` stays unmarked, a readout as RD.3 left it. A machine started
+  `--role=backup` does NOT hold: `pair/sending` stays true until RD.6 holds a backup that
+  follows, and `--hold` is still the only switch. Found and left: every black-box serve not
+  given `--engine-folder` reads the developer's own `pairing.xml` - harmless while nothing
+  but the rows reads it, and a driver that starts a serve from RD.5 on should pass a
+  temporary engine folder, or a paired developer machine will dial its peer from a test.

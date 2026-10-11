@@ -492,7 +492,8 @@ class Server:
                  input_wav: "Path | None" = None,
                  env: "dict | None" = None,
                  recover: bool = False,
-                 hold: bool = False):
+                 hold: bool = False,
+                 extra_args: "list[str] | None" = None):
         argv = [str(find_binary()), "serve", str(bundle), "--http-port=0", "--osc-port=0"]
         if sample_rate is not None:
             argv.append(f"--sample-rate={sample_rate}")
@@ -563,6 +564,11 @@ class Server:
         # backup's half of redundancy, and a muted spare for a rehearsal.
         if hold:
             argv.append("--hold")
+
+        # Anything else a driver wants on the line, as given: the pairing's
+        # --role, --peer and --link-timeout (RD.4) are the first users.
+        if extra_args:
+            argv.extend(extra_args)
 
         if log is not None:
             argv.append(f"--log={log}")

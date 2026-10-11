@@ -166,9 +166,19 @@ namespace wfg::audio
             recovery as Esc is: the pointer goes back at once, and what its
             fades and arms need waits for the clock - with the two records its
             hook submits (2026-10-03, D3): a scene put back once it has ended,
-            and the report, which a drain inside the outage must not refuse. */
+            and the report, which a drain inside the outage must not refuse.
+
+            AND THE MACHINE'S PAIRING (namespace draft §58, RD.4), through both
+            gates: which machine is the main is a question about the computer
+            and never about its interface, an outage on the main is the very
+            moment somebody reaches for it, and `pair.saved` refused here would
+            say a file was not written when it was. */
         engine.setAdmissionCheck ([&state] (const std::string& command)
         {
+            if (command == "pair.setRole" || command == "pair.setPeers" || command == "pair.setTimeout"
+                || command == "pair.saved")
+                return std::string {};
+
             if (state.status == "noClock" && command != "audio.connection" && command != "audio.reconnect"
                 && command != "audio.clockMoved" && command != "audio.settingsReady"
                 && command != "audio.editBuilt" && command != "audio.apply" && command != "audio.setup"

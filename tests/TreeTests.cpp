@@ -39,6 +39,7 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/pair/PairSettings.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/tree/ParameterTree.h>
@@ -1621,4 +1622,56 @@ TEST_CASE ("hold: pair/sending reads false under hold, true otherwise, and is re
 
     state.pairSending = true;
     CHECK (sendingIn (rig.parameters.publish (3, state)) == osc::Value::boolean (true));
+}
+
+//==============================================================================
+/*  RD.4: the machine's pairing (namespace draft §58.3, AGC) - its role, the
+    other machine's addresses and the seconds of silence that lose the link,
+    published as `pair/role`, `pair/peers` and `pair/timeout`: read-only, the
+    machine's, and what the three commands left in force. */
+TEST_CASE ("pairing: pair/role, pair/peers and pair/timeout publish the settings in force, read-only")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+    pair::Pairing pairing;
+    pair::registerPairCommands (rig.engine.commands(), pairing);
+
+    const auto valueAt = [] (const std::shared_ptr<const TreeSnapshot>& snapshot, const std::string& address,
+                             const std::string& typeTags)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        CHECK (node->access == Access::read);
+        CHECK (node->typeTags == typeTags);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    //  A machine never paired.
+    EngineState state;
+    auto snapshot = rig.parameters.publish (1, state);
+
+    CHECK (valueAt (snapshot, "/godot/pair/role", "s") == osc::Value::string ("none"));
+    CHECK (valueAt (snapshot, "/godot/pair/peers", "s") == osc::Value::string (""));
+    CHECK (valueAt (snapshot, "/godot/pair/timeout", "f") == osc::Value::float32 (1.0f));
+
+    const auto* role = snapshot->find ("/godot/pair/role");
+    REQUIRE (role != nullptr);
+    CHECK (role->enumValues == std::vector<std::string> { "none", "main", "backup" });
+
+    //  What the commands applied is what serve copies into its state.
+    REQUIRE (rig.apply (2, "cli", "pair.setRole", { osc::Value::string ("backup") }).applied == 1);
+    REQUIRE (rig.apply (3, "cli", "pair.setPeers", { osc::Value::string ("10.0.0.2 10.1.0.2:6010") }).applied == 1);
+    REQUIRE (rig.apply (4, "cli", "pair.setTimeout", { osc::Value::float32 (2.5f) }).applied == 1);
+
+    state.pairSettings = pairing.inForce;
+    snapshot = rig.parameters.publish (5, state);
+
+    CHECK (valueAt (snapshot, "/godot/pair/role", "s") == osc::Value::string ("backup"));
+    CHECK (valueAt (snapshot, "/godot/pair/peers", "s") == osc::Value::string ("10.0.0.2:5010 10.1.0.2:6010"));
+    CHECK (valueAt (snapshot, "/godot/pair/timeout", "f") == osc::Value::float32 (2.5f));
+
+    //  And a backup in RD.4 does not hold: only `--hold` does, until RD.6.
+    CHECK (valueAt (snapshot, "/godot/pair/sending", "T") == osc::Value::boolean (true));
 }

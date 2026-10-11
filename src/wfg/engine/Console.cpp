@@ -44,6 +44,8 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/pair/MachineLocal.h>
+#include <wfg/engine/pair/PairSettings.h>
+#include <wfg/engine/pair/SavePump.h>
 #include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/ProcessHost.h>
@@ -423,6 +425,11 @@ namespace
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
 
+        /*  THE MACHINE'S PAIRING (namespace draft §58, RD.4): listed against a
+            machine that is not paired, with no file to write. */
+        wfg::pair::Pairing pairing;
+        wfg::pair::registerPairCommands (engine.commands(), pairing);
+
         for (const auto& command : engine.commands().all())
         {
             std::string signature;
@@ -691,6 +698,13 @@ namespace
             exactly the guarantee the event exists to provide. */
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
+
+        /*  THE MACHINE'S PAIRING (namespace draft §58, RD.4), applied to a
+            pairing of the replay's own and never written: a replay reproduces
+            what the session's records did, and `pairing.xml` belongs to the
+            machine that wrote it - its `pair.saved` is in the log as heard. */
+        wfg::pair::Pairing replayedPairing;
+        wfg::pair::registerPairCommands (engine.commands(), replayedPairing);
 
         /*  The run lifecycle, unconditionally and for the same reason. Only
             `audio.arm` reads the document, and it answers unknown-id against an
@@ -1437,6 +1451,10 @@ namespace
         wfg::tree::registerPresetCommands (engine.commands(), document, mounts, target, nullptr);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
+
+        //  The pairing's commands, so the tree lists them; a machine not paired (RD.4).
+        wfg::pair::Pairing pairing;
+        wfg::pair::registerPairCommands (engine.commands(), pairing);
 
         /*  The mounts are loaded before the first publish, so what this prints
             includes somebody else's namespace at its own prefix. A mount that
@@ -2456,6 +2474,16 @@ namespace
         return engineCacheFolder().getSiblingFile ("last-show.txt");
     }
 
+    /*  WHICH MACHINE THIS IS IN A PAIR (namespace draft §58, RD.4, AGC): its
+        role, the other machine's addresses and the link's timeout, beside the
+        show to reopen and following `--engine-folder` as it does - a fact
+        about this computer, so never in a show a folder copy would carry to
+        the other one (pair/PairSettings.h). */
+    juce::File pairingFile()
+    {
+        return engineCacheFolder().getSiblingFile ("pairing.xml");
+    }
+
     /*  The remembered show, when it is still a show this launch can open:
         there, not open in another window, and loading - checked by loading
         it, so a show that has gone bad sends the launch to the empty show
@@ -3295,6 +3323,121 @@ namespace
             midiOutputBindings.push_back ({ port, device });
         }
 
+        /*  WHICH MACHINE THIS IS IN A PAIR (namespace draft §58, RD.4, AGC):
+            `pairing.xml` in Go.dot's own folder, read leniently - a file that
+            cannot be read is a machine not paired, said once here, never a
+            refusal to start - and then, for this run only and never written,
+            `--role=main|backup|none`, `--peer=<host[:port]>` and
+            `--link-timeout=<seconds>`: a launcher's, and a test's, which must
+            not touch the real folder.
+
+            `--peer` IS REPEATABLE, read out of the raw arguments as
+            `--midi-in` is, since `getValueForOption` answers with the first of
+            a repeated option; one `--peer` may also hold several addresses
+            separated by commas. A value typed wrong stops the start with a
+            sentence, as a mistyped `--midi-out` does: somebody is at the
+            keyboard, and a backup that came up unpaired because of a typo
+            would be found out at the moment it was needed.
+
+            NOTHING USES THEM YET beyond publishing them: RD.5 dials the peers.
+            And `--role=backup` alone does NOT hold - `pair/sending` stays true
+            and the devices are sent to - because when a backup holds is the
+            link's to decide (RD.6 holds it while it follows, RD.7 lets go when
+            the main is lost); until then `--hold` is the only switch. */
+        wfg::pair::Pairing pairing;
+        {
+            const auto loaded = wfg::pair::load (pairingFile().getFullPathName().toStdString());
+
+            if (! loaded.problem.empty())
+                std::cerr << "wfg: " << loaded.problem << std::endl;
+
+            pairing.stored = loaded.settings;
+            pairing.inForce = loaded.settings;
+
+            std::vector<std::string> overridden;
+
+            if (args.containsOption ("--role"))
+            {
+                const auto role = args.getValueForOption ("--role").toStdString();
+
+                if (! wfg::pair::isRole (role))
+                {
+                    std::cerr << "wfg serve: --role wants main, backup or none, and \"" << role
+                              << "\" is none of them" << std::endl;
+                    return 2;
+                }
+
+                pairing.inForce.role = role;
+                overridden.push_back ("role");
+            }
+
+            std::string peersGiven;
+            auto anyPeer = false;
+
+            for (const auto& argument : args.arguments)
+            {
+                if (! argument.text.startsWith ("--peer="))
+                    continue;
+
+                peersGiven += ' ';
+                peersGiven += argument.text.fromFirstOccurrenceOf ("=", false, false).toStdString();
+                anyPeer = true;
+            }
+
+            if (anyPeer)
+            {
+                const auto peers = wfg::pair::peerAddresses (peersGiven);
+
+                if (! peers.has_value() || peers->empty())
+                {
+                    std::cerr << "wfg serve: --peer wants <host> or <host>:<port>, and \""
+                              << peersGiven.substr (1) << "\" is not that" << std::endl;
+                    return 2;
+                }
+
+                pairing.inForce.peers = *peers;
+                overridden.push_back ("peers");
+            }
+
+            if (args.containsOption ("--link-timeout"))
+            {
+                const auto given = args.getValueForOption ("--link-timeout").toStdString();
+                const auto seconds = wfg::osc::parseDouble (given);
+
+                if (! seconds.has_value() || ! wfg::pair::isTimeout (*seconds))
+                {
+                    std::cerr << "wfg serve: --link-timeout wants seconds from "
+                              << wfg::osc::formatDouble (wfg::pair::shortestTimeout) << " to "
+                              << wfg::osc::formatDouble (wfg::pair::longestTimeout) << ", written with a point, and \""
+                              << given << "\" is not that" << std::endl;
+                    return 2;
+                }
+
+                pairing.inForce.timeout = *seconds;
+                overridden.push_back ("timeout");
+            }
+
+            if (pairing.inForce.role != "none" || ! overridden.empty())
+            {
+                std::cout << "wfg: paired as " << pairing.inForce.role
+                          << ", peers " << (pairing.inForce.peers.empty() ? std::string ("none")
+                                                                           : wfg::pair::peersText (pairing.inForce.peers))
+                          << ", link lost after " << wfg::osc::formatDouble (pairing.inForce.timeout) << " s";
+
+                if (! overridden.empty())
+                {
+                    std::cout << " (";
+
+                    for (std::size_t i = 0; i < overridden.size(); ++i)
+                        std::cout << (i == 0 ? "" : ", ") << overridden[i];
+
+                    std::cout << " from the command line, for this run only)";
+                }
+
+                std::cout << std::endl;
+            }
+        }
+
         /*  `--ui=<directory>` serves a client from `/ui` on the OSCQuery port.
 
             A DIRECTORY RATHER THAN A COPY IN THE BINARY, while the layout is
@@ -3928,6 +4071,11 @@ namespace
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
 
+        /*  THE MACHINE'S PAIRING (RD.4): its three commands and the report of
+            its file, on the settings read at start; the file is written by the
+            pump made beside the audio settings' (below, `pairSaves`). */
+        wfg::pair::registerPairCommands (engine.commands(), pairing);
+
         /*  ONE APPLIED COMMAND, ONE UNDO TRANSACTION, opened here and nowhere
             else - so a command added next year is on the stack without knowing
             the stack exists (namespace draft §14.9).
@@ -4107,6 +4255,11 @@ namespace
 
         //  And whether this machine sends to devices, in the first snapshot too (RD.1).
         state.pairSending = ! machineHold.held();
+
+        /*  And which machine it is (RD.4), copied again only on a tick a
+            pairing command moved it - a string and a list, never every tick. */
+        state.pairSettings = pairing.inForce;
+        auto pairingPublished = pairing.revision;
 
         /*  THE CLOCK IS CHECKED AND THE TREE PUBLISHED BEFORE ANY SOCKET OPENS,
             and the order is load-bearing rather than tidy.
@@ -5784,6 +5937,12 @@ namespace
                                 if (machineHold.held() != linksReconciledHeld)
                                     reconcileLinks();
 
+                                if (pairing.revision != pairingPublished)
+                                {
+                                    state.pairSettings = pairing.inForce;
+                                    pairingPublished = pairing.revision;
+                                }
+
                                 /*  THE REFUSAL ITSELF, and not only the count
                                     of them.
 
@@ -6267,6 +6426,21 @@ namespace
         });
         audioState.requestSettings = [&settingsPump] (const wfg::audio::AudioSettings& settings, bool defaultsOnly)
         { settingsPump.post (settings, defaultsOnly); };
+
+        /*  AND `pairing.xml` (namespace draft §58, RD.4), the audio defaults'
+            shape: a pairing command asks on the tick thread, this writes on the
+            message thread, and `pair.saved` says what came of it - written, or
+            refused `write-failed` with the reason, which a client reads at
+            `/godot/engine/lastError`. What the command line overrode is never
+            in what is written: the commands write `stored`, the file's own
+            (pair/PairSettings.h). Before the ticks start, so no command can
+            ask before there is somebody to answer. */
+        wfg::pair::SavePump pairSaves ([&engine] (const wfg::pair::PairSettings& settings)
+        {
+            const auto error = wfg::pair::save (pairingFile().getFullPathName().toStdString(), settings);
+            engine.submit ("engine", "pair.saved", { wfg::osc::Value::string (error) });
+        });
+        pairing.requestSave = [&pairSaves] (const wfg::pair::PairSettings& settings) { pairSaves.post (settings); };
 
         /*  LOAD NOW (2026-09-26): the graph built again from the show as it
             stands - a plugin added to the set, taken out or moved - on exactly
@@ -7277,7 +7451,8 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
                       " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember]] [--engine-folder=<dir>]"
-                      " [--no-video-window] [--presets=<dir>] [--hold]",
+                      " [--no-video-window] [--presets=<dir>] [--hold]"
+                      " [--role=main|backup|none] [--peer=<host>[:<port>]]... [--link-timeout=<seconds>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [&makeClient] (const juce::ArgumentList& args)

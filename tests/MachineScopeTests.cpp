@@ -67,6 +67,7 @@
 #include <wfg/engine/document/SchemaTable.generated.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/pair/MachineLocal.h>
+#include <wfg/engine/pair/PairSettings.h>
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/process/PatchEditor.h>
@@ -94,19 +95,24 @@ namespace
         the show's outputs and inputs onto its channels, with the two flags
         that say the patch has stopped following the list - a MIDI port's
         device each way, by name and by this machine's identifier, a serial
-        port's path, and a video output's display, by name and identifier. */
+        port's path, and a video output's display, by name and identifier.
+        And since RD.4 the machine's pairing - its role, the other machine's
+        addresses, the seconds of silence that lose the link - runtime rows
+        kept in pairing.xml and never in a show (AGC). */
     const std::set<std::string> machineRows {
         "audio/enabled", "audio/deviceType", "audio/outputDevice", "audio/inputDevice",
         "audio/bufferSize", "audio/inputPatch", "audio/outputPatch",
         "audio/patchSettled", "audio/inputPatchSettled",
         "port/outputDevice", "port/outputDeviceId", "port/inputDevice", "port/inputDeviceId",
         "serial/path",
-        "videoOutput/display", "videoOutput/displayId"
+        "videoOutput/display", "videoOutput/displayId",
+        "pair/role", "pair/peers", "pair/timeout"
     };
 
     /*  THE COMMANDS THAT ACT ON THIS MACHINE ALONE, and the reports of what
         its own equipment did: choosing and testing its interface, its plugin
-        host, its files and its folder, its windows and its puck. */
+        host, its files and its folder, its windows and its puck - and its
+        pairing, and the report of its file written (RD.4). */
     const std::set<std::string> machineCommands {
         "audio.configure", "audio.setup", "audio.defaults", "audio.defaultsReady",
         "audio.settingsReady", "audio.clockMoved", "audio.reconnect", "audio.connection",
@@ -114,7 +120,8 @@ namespace
         "plugin.scan", "plugin.scanRetry", "plugin.scanned", "plugin.failed", "plugin.restart",
         "document.saveAs", "document.autosave", "document.recover", "document.discardRecovery",
         "media.cleanCache", "ffmpeg.install", "pd.install", "process.edit",
-        "videoOutput.identify", "video.hideProjectors", "spacemouse.closeDriver"
+        "videoOutput.identify", "video.hideProjectors", "spacemouse.closeDriver",
+        "pair.setRole", "pair.setPeers", "pair.setTimeout", "pair.saved"
     };
 
     const std::string mainList  = "7K2QM9X4";
@@ -175,6 +182,7 @@ namespace
             video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
             process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
             doc::registerBundleCommands (engine.commands(), document, session, writer);
+            pair::registerPairCommands (engine.commands(), pairing);
 
             {
                 plugin::PluginCommandHooks hooks;
@@ -251,6 +259,7 @@ namespace
         cue::CurveTable curves;
         audio::AudioState audioState;
         plugin::PluginTable plugins;
+        pair::Pairing pairing;
         doc::DocumentSession session { juce::File::getCurrentWorkingDirectory(), document.showRevision() };
         doc::DocumentWriter writer;
     };
@@ -327,12 +336,25 @@ TEST_CASE ("machine scope: every machine row is reached at the address its own o
 
         std::string address;
 
+        INFO ("row: " << keyOf (row));
+
+        /*  THE PAIRING'S ROWS (RD.4) are the engine's kind: published by the
+            tree at /godot/pair/<row>, held in pairing.xml and in no show, so
+            there is no document to resolve them through - the address alone
+            answers, and the schema puts the owner on no element. */
+        if (owner == "pair")
+        {
+            CHECK (row.persist == doc::Persist::none);
+            CHECK (doc::Schema::isMachineAddress ("/godot/pair/" + name));
+            CHECK_FALSE (doc::Schema::isMachineAddress ("/godot/pair/X1/" + name));
+            continue;
+        }
+
         if (owner == "audio")
             address = "/godot/audio/" + name;
         else if (const auto found = idOf.find (owner); found != idOf.end())
             address = "/godot/" + owner + "/" + found->second + "/" + name;
 
-        INFO ("row: " << keyOf (row));
         REQUIRE_MESSAGE (! address.empty(), "a machine row on an owner this test cannot address");
 
         const auto resolved = rig.document.resolve (address);
@@ -352,6 +374,8 @@ TEST_CASE ("machine scope: every machine row is reached at the address its own o
                                  std::string ("/godot/audio/outputDevice/more"),
                                  "/godot/port/" + thePort + "/x/outputDevice",
                                  std::string ("/wfs/audio/outputDevice"),
+                                 std::string ("/godot/pair/sending"),
+                                 std::string ("/godot/engine/clock"),
                                  std::string ("") })
         CHECK_MESSAGE (! doc::Schema::isMachineAddress (address), address);
 }

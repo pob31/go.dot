@@ -159,7 +159,9 @@ namespace wfg::doc
             the word its address is spelled with - the four owners that carry
             one, `audio`, `port`, `serial` and `videoOutput`, are addressed
             under their own names - and MachineScopeTests resolves every machine
-            row through the document's reader to hold it to that. */
+            row through the document's reader to hold it to that. The fifth,
+            `pair` (RD.4), is on no element and in no show: its rows are the
+            tree's, at `/godot/pair/<row>`, and are taken as a container's. */
         static bool isMachineAddress (std::string_view address);
 
         const Element* element (std::string_view name) const;

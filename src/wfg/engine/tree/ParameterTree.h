@@ -55,6 +55,7 @@
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/SamplerLayout.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
+#include <wfg/engine/pair/PairSettings.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/KnownList.h>
 #include <wfg/engine/plugin/ScanTable.h>
@@ -143,6 +144,13 @@ namespace wfg::tree
             machine's, so here and never in the show; true wherever nothing
             holds - a replay, a rig, a serve not told to. */
         bool pairSending = true;
+
+        /*  AND WHICH MACHINE THIS IS (RD.4): `pair/role`, `pair/peers` and
+            `pair/timeout`, the settings in force - `pairing.xml` with this
+            run's command-line overrides on top - as serve copies them from
+            its `pair::Pairing` on the tick they changed. Unpaired wherever
+            nobody set them: a replay, a rig, a serve with no file. */
+        pair::PairSettings pairSettings;
 
         //======================================================================
         /*  What the audio actually is right now, as against what the document

@@ -34,6 +34,7 @@ namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
     inline constexpr std::string_view enum_engine_spaceMouse[] = { "off", "searching", "connected", "driver" };
+    inline constexpr std::string_view enum_pair_role[] = { "none", "main", "backup" };
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
@@ -337,6 +338,30 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "Whether this machine sends to devices (namespace draft 58, RD.1; AGG): false while it holds - started with wfg serve --hold, and from RD.6 a backup following its main - when every OSC message, MIDI message, serial line, question and keep-alive meant for a device is held and counted as sent, the connections to devices are left closed, and a patch's own netsend sends nothing, so the machine's cues end as they would have where the sends left. Video and a control surface's port are never held. The machine's, never the show's: never stored and never logged." },
+        { "pair", "role",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::machine,
+          true, "none",
+          false, 0.0, false, 0.0,
+          enum_pair_role, 3,
+          "", 1.0, false, "park",
+          "",
+          "This machine's role in a pair of machines playing one show (namespace draft 58, RD.4; AGC): main, backup, or none for a machine that is not paired. Kept in pairing.xml in Go.dot's own folder - beside last-show.txt, and following --engine-folder - never in a show, so copying a show folder from one machine to the other never copies a role. Written by pair.setRole; wfg serve --role overrides it for one run without writing it. Until RD.6 a backup does not hold: only wfg serve --hold does." },
+        { "pair", "peers",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::machine,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "The other machine's addresses, host:port, space-separated (namespace draft 58, RD.4; AFV): two when there are two network paths between the machines, the link counting as lost only when every one is silent. A port left off is 5010, the port every client of a serve uses; an IPv6 address is written in brackets. Kept in pairing.xml with the role, written by pair.setPeers; wfg serve --peer, repeatable, overrides them for one run. Nothing dials them before RD.5." },
+        { "pair", "timeout",
+          ValueType::number, 'f', false, Access::read, Kind::state, Persist::none, Scope::machine,
+          true, "1",
+          true, 0.1, true, 30.0,
+          nullptr, 0,
+          "s", 1.0, false, "park",
+          "",
+          "Seconds of silence from the other machine that lose the link (namespace draft 58, RD.4; AFV): one by default, from a tenth to thirty. Kept in pairing.xml with the role, written by pair.setTimeout; wfg serve --link-timeout overrides it for one run." },
         { "document", "path",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",

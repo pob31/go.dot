@@ -152,6 +152,7 @@ add_executable(wfg_tests
     SpatcoreToolchainTests.cpp
     UndoTests.cpp
     MachineScopeTests.cpp
+    PairSettingsTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
     ClientTests.cpp)
@@ -1133,6 +1134,21 @@ add_test(NAME blackbox.hold.fr_FR
 # piped Python buffers its report and loses it to the kill - so the next run says
 # where it stood; the limit is the wires driver's, which macOS also outran.
 set_tests_properties(blackbox.hold.C blackbox.hold.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
+# -----------------------------------------------------------------------------
+# THE MACHINE'S PAIRING (namespace draft §58, RD.4): `serve --role=backup
+# --peer=... --link-timeout=2.5` publishes the three rows and writes nothing;
+# `pair.setRole main` over OSC writes pairing.xml beside the engine folder - a
+# temporary one, never the developer's - keeping the file's own values for what
+# the command line overrode; two more serves on that folder read it back, 1.5 s
+# exactly under either locale; and a value typed wrong stops the start. Three
+# serves one after another, unbuffered and with hold's limit, for hold's reason.
+add_test(NAME blackbox.pairing.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pairing.py" --wfg-locale=C)
+add_test(NAME blackbox.pairing.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pairing.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.pairing.C blackbox.pairing.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------

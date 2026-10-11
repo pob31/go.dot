@@ -584,7 +584,14 @@ namespace wfg::doc
             raw table so that the object-or-container answer is the schema's
             own `hasIdentity` and not a second list of owners kept here; the
             derived attributes too, so a runtime row marked `machine` would be
-            found as well as a stored one. */
+            found as well as a stored one.
+
+            AND A ROW ON AN OWNER NO ELEMENT TAKES (RD.4): the pairing's, which
+            the tree publishes as it does the engine's numbers, at
+            `/godot/pair/<row>` - one of it on a machine, so no identifier -
+            and which no show holds. Taken as a container's row. (`preset` is
+            the one such owner addressed through an identifier, and none of
+            its rows is the machine's.) */
         const std::vector<MachineRow>& machineRows()
         {
             static const auto rows = []
@@ -596,6 +603,20 @@ namespace wfg::doc
                         for (const auto& attribute : *attributes)
                             if (attribute.isMachine())
                                 found.push_back ({ attribute.row, element.hasIdentity });
+
+                const auto onAnElement = [] (std::string_view owner)
+                {
+                    for (const auto& containment : containmentTable())
+                        for (const auto& taken : containment.attributeOwners)
+                            if (taken == owner)
+                                return true;
+
+                    return false;
+                };
+
+                for (const auto& row : generated::attributes)
+                    if (row.scope == Scope::machine && ! onAnElement (row.owner))
+                        found.push_back ({ &row, false });
 
                 return found;
             }();
