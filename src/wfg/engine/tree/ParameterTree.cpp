@@ -2755,6 +2755,53 @@ namespace wfg::tree
         declaredMounts = std::move (mountOrder);
         declaredLaneKeys = cue::flippedLanes (document);
 
+        /*  THE INSTALLED DEVICE PRESETS (namespace draft §57, AFN): what the
+            Network tab's ADD menu offers, read once from the folder beside
+            the binary. IN THIS HALF SINCE DP.11, though runtime rows: the
+            table never changes after the start, and two hundred and forty
+            leaves copied on every publish cost the Windows Debug tick a
+            third of its budget - the first-sound driver's clock said so -
+            where a copy on each edit of the show costs nothing anyone sees.
+            Never stored: a show keeps the preset a device was made from as
+            that device's own namespace file. */
+        if (presets != nullptr)
+        {
+            if (presetLeavesOf != presets || presetLeavesStamp != presets->revision())
+            {
+                presetLeavesOf = presets;
+                presetLeavesStamp = presets->revision();
+                presetLeaves.clear();
+
+                for (const auto& preset : presets->all())
+                {
+                    const auto base = std::string (godot) + "/preset/" + preset.slug + "/";
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("preset"))
+                    {
+                        const auto name = std::string (row->name);
+                        std::string text;
+
+                        if (name == "vendor")          text = preset.vendor;
+                        else if (name == "model")      text = preset.model;
+                        else if (name == "version")    text = std::to_string (preset.version);
+                        else if (name == "transport")  text = preset.transport;
+                        else if (name == "wire")       text = preset.wire;
+                        else if (name == "framing")    text = preset.framing;
+                        else if (name == "port")       text = std::to_string (preset.port);
+                        else if (name == "roots")      text = preset.rootRow();
+                        else if (name == "nodeCount")  text = std::to_string (preset.nodeCount);
+                        else if (name == "problem")    text = preset.problem;
+                        else
+                            continue;
+
+                        presetLeaves.push_back (makeLeaf (base + name, *row, text));
+                    }
+                }
+            }
+
+            nodes.insert (nodes.end(), presetLeaves.begin(), presetLeaves.end());
+        }
+
         //----------------------------------------------------------------------
         /*  Commands, as write-only method nodes. `node.set` is deliberately
             absent: its signature is whatever the target node declares, so it
@@ -4142,38 +4189,6 @@ namespace wfg::tree
                 }
             }
 
-            /*  THE INSTALLED DEVICE PRESETS (namespace draft §57, AFN): what the
-                Network tab's ADD menu offers, read once from the folder beside
-                the binary. Runtime rows, never stored: a show keeps the preset
-                a device was made from as that device's own namespace file. */
-            if (presets != nullptr)
-            {
-                for (const auto& preset : presets->all())
-                {
-                    const auto base = std::string (godot) + "/preset/" + preset.slug + "/";
-
-                    for (const auto* row : doc::Schema::rowsForOwner ("preset"))
-                    {
-                        const auto name = std::string (row->name);
-                        std::string text;
-
-                        if (name == "vendor")          text = preset.vendor;
-                        else if (name == "model")      text = preset.model;
-                        else if (name == "version")    text = std::to_string (preset.version);
-                        else if (name == "transport")  text = preset.transport;
-                        else if (name == "wire")       text = preset.wire;
-                        else if (name == "framing")    text = preset.framing;
-                        else if (name == "port")       text = std::to_string (preset.port);
-                        else if (name == "roots")      text = preset.rootRow();
-                        else if (name == "nodeCount")  text = std::to_string (preset.nodeCount);
-                        else if (name == "problem")    text = preset.problem;
-                        else
-                            continue;
-
-                        runtime.push_back (makeLeaf (base + name, *row, text));
-                    }
-                }
-            }
 
             /*  AND EACH VIDEO INSERT (§44, YE, YH): what comes back, how often,
                 how long since the last, and why a cue shows black. */

@@ -323,7 +323,7 @@ class Device:
 
 
 # --------------------------------------------------------------------------- UDP
-def listen_udp(device: Device, port_out) -> socket.socket:
+def listen_udp(device: Device, port_out, answers_queries: bool = False) -> socket.socket:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((HOST, 0))
     port_out.append(sock.getsockname()[1])
@@ -346,7 +346,7 @@ def listen_udp(device: Device, port_out) -> socket.socket:
 
                 if address == "/get" and args and isinstance(args[0], str):
                     asked = args[0]
-                elif not args and device.value_of(address) is not None:
+                elif answers_queries and not args and device.value_of(address) is not None:
                     asked = address
 
                 if asked is not None:
@@ -715,6 +715,9 @@ def main() -> int:
                         help="udp, a socket for datagrams; tcp, a listener for connections (DP.6)")
     parser.add_argument("--framing", default="length", choices=("length", "slip", "lines", "raw"),
                         help="how a connection's stream is cut: a size before each packet, SLIP, lines, or not at all")
+    parser.add_argument("--queries", action="store_true",
+                        help="answer a bare address with no atoms with what the box holds, as a DS100 does (DP.10); "
+                             "off, such a message is a write of nothing, as every driver before DP.10 expects")
     parser.add_argument("--wire", default="osc", choices=("osc", "rcp", "line", "midi"),
                         help="what the bytes are: OSC; lines of Yamaha's RCP answered with OK (DP.7); "
                              "a telnet console's command lines (DP.8); MIDI bytes as they come (DP.9)")
@@ -727,7 +730,7 @@ def main() -> int:
     if args.transport == "tcp":
         listen_tcp(device, ports, args.framing, args.wire)
     else:
-        listen_udp(device, ports)
+        listen_udp(device, ports, args.queries)
 
     query_port = 0
     server = None

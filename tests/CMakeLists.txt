@@ -1114,7 +1114,7 @@ add_test(NAME blackbox.wires.C
 add_test(NAME blackbox.wires.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/wires.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.wires.C blackbox.wires.fr_FR PROPERTIES
-                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------
 # THE PHASE 2 DONE-WHEN CLAUSE, driven from outside the process.

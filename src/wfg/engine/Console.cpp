@@ -1163,7 +1163,12 @@ namespace
     {
         const auto folder = presetsFolder (args, "--folder");
         wfg::tree::PresetTable presets;
-        presets.scan (folder.getFullPathName().toStdString());
+
+        //  The gate reads every file whole; a listing reads the heads, as serve does (DP.11).
+        if (args.containsOption ("--check"))
+            presets.scan (folder.getFullPathName().toStdString());
+        else
+            presets.scanQuickly (folder.getFullPathName().toStdString());
 
         if (presets.all().empty())
         {
@@ -3651,7 +3656,14 @@ namespace
             mount.createFromPreset copies into the show. Serve only: a replay
             makes no device and a tree dump offers none. */
         wfg::tree::PresetTable presets;
-        presets.scan (presetsFolder (args, "--presets").getFullPathName().toStdString());
+
+        /*  THE QUICK READ (DP.11): twenty-four files, twenty megabytes of them,
+            took the Debug binary fifteen seconds to read whole into nodes, and
+            serve was that long coming up; read on a thread of its own instead,
+            the parsing starved the tick through the Debug heap's one lock. The
+            rows want the files' heads, which the quick read walks in a moment;
+            the whole read stays the gate's. */
+        presets.scanQuickly (presetsFolder (args, "--presets").getFullPathName().toStdString());
 
         wfg::tree::MountSender sender;
         sender.setSerialSink ([&serialPorts] (const std::string& port, const std::vector<std::uint8_t>& packet)

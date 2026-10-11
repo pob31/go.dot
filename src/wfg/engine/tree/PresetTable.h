@@ -16,6 +16,7 @@
 
 #include <wfg/engine/tree/Mount.h>
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -65,6 +66,17 @@ namespace wfg::tree
         a renamed file says so rather than answering to two names. */
     Preset readPreset (const std::string& slug, std::string_view json);
 
+    /*  THE SAME, WITHOUT READING THE DESCRIPTION WHOLE (DP.11): the root's
+        GODOT key, its FULL_PATH and the names under CONTENTS are found by
+        walking the text once, string-aware, and the nodes are counted by
+        their FULL_PATH keys. Twenty megabytes of preset parsed into nodes
+        cost the Debug binary fifteen seconds at every start of serve, for
+        rows that say what the file's head says; the whole read stays the
+        gate's (`wfg presets --check`) and the tests'. What the quick read
+        cannot see - a node the description would refuse - the device's own
+        load says when one is made. */
+    Preset readPresetQuickly (const std::string& slug, std::string_view json);
+
     /*  Every preset in a folder, by slug. Empty when the folder is not there,
         which a replay and a tree dump treat as the ordinary case: they offer
         no menu and make no device. */
@@ -73,12 +85,23 @@ namespace wfg::tree
     public:
         void scan (const std::string& folderPath);
 
+        /** The same folder through `readPresetQuickly`: serve's way in. */
+        void scanQuickly (const std::string& folderPath);
+
         const std::vector<Preset>& all() const noexcept { return presets; }
         const Preset* find (const std::string& slug) const noexcept;
         const std::string& folder() const noexcept { return folderPath; }
 
+        /*  Moved by every scan, so a reader that caches what it made of the
+            table - the tree's rows (DP.11) - knows when to make them again.
+            A table never scanned reads nought. */
+        std::uint64_t revision() const noexcept { return stamp; }
+
     private:
+        void scanWith (const std::string& folderPath, Preset (*reader) (const std::string&, std::string_view));
+
         std::vector<Preset> presets;
         std::string folderPath;
+        std::uint64_t stamp = 0;
     };
 }

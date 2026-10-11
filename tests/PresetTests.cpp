@@ -171,4 +171,44 @@ TEST_CASE ("preset: a folder that is not there is an empty table, not a failure"
     table.scan (std::string (WFG_REPO_ROOT) + "/presets/nowhere");
     CHECK (table.all().empty());
     CHECK (table.find ("adm-osc") == nullptr);
+    CHECK (table.revision() == 1u);
+}
+
+TEST_CASE ("preset: the quick read says of every shipped preset what the whole read says")
+{
+    /*  DP.11: serve reads the folder quickly - the files' heads walked, the
+        nodes counted by their FULL_PATH keys - and the Network tab's rows
+        must not differ from what `wfg presets --check` reads whole. */
+    PresetTable whole, quick;
+    whole.scan (std::string (WFG_REPO_ROOT) + "/presets/devices");
+    quick.scanQuickly (std::string (WFG_REPO_ROOT) + "/presets/devices");
+    REQUIRE (whole.all().size() == quick.all().size());
+    REQUIRE_FALSE (whole.all().empty());
+
+    for (std::size_t at = 0; at < whole.all().size(); ++at)
+    {
+        const auto& a = whole.all()[at];
+        const auto& b = quick.all()[at];
+        INFO ("preset: " << a.slug);
+        CHECK (b.slug == a.slug);
+        CHECK (b.usable() == a.usable());
+        CHECK (b.vendor == a.vendor);
+        CHECK (b.model == a.model);
+        CHECK (b.version == a.version);
+        CHECK (b.transport == a.transport);
+        CHECK (b.wire == a.wire);
+        CHECK (b.framing == a.framing);
+        CHECK (b.port == a.port);
+        CHECK (b.readback == a.readback);
+        CHECK (b.roots == a.roots);
+        CHECK (b.nodeCount == a.nodeCount);
+        CHECK (b.sources == a.sources);
+        CHECK (b.text == a.text);
+    }
+
+    //  And what is not a preset is said the same way.
+    const auto bad = readPresetQuickly ("x", "[1, 2]");
+    CHECK_FALSE (bad.usable());
+    const auto none = readPresetQuickly ("x", R"JSON({"FULL_PATH": "/x", "CONTENTS": {}})JSON");
+    CHECK (none.problem.find ("no GODOT key") != std::string::npos);
 }

@@ -878,7 +878,7 @@ namespace wfg::tree
         MountResult result;
         result.ok = true;
 
-        mounts[mount.id] = Entry { mount, {}, {} };
+        mounts[mount.id] = Entry { mount, {}, {}, {}, {} };
         bumpShape();
 
         return result;

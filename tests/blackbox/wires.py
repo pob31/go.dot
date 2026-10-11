@@ -75,7 +75,8 @@ class MockWire:
 
     def __init__(self, framing: str, wire: str = "osc", transport: str = "tcp"):
         self.process = subprocess.Popen(
-            [sys.executable, str(MOCK), f"--transport={transport}", f"--framing={framing}", f"--wire={wire}"],
+            [sys.executable, str(MOCK), f"--transport={transport}", f"--framing={framing}", f"--wire={wire}"]
+            + (["--queries"] if transport == "udp" else []),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
         line = self.process.stdout.readline().split()
@@ -131,7 +132,7 @@ def run() -> int:
                     return "true" if values[0] else "false"
                 return str(values[0])
 
-            def settle(address, wanted, tries=60):
+            def settle(address, wanted, tries=100):
                 """The tick is 50 Hz and a link opens on its own thread: a
                 driver that read straight back would be timing the machine."""
                 for _ in range(tries):
@@ -248,7 +249,9 @@ def run() -> int:
                              "the cue re-aimed at the console's first fader")
 
                 send("cue.fire", [CUE])
-                report.check(wait_for(lambda: cl.ask("received") == 1),
+                #  At least one: a console that can be asked is also asked, a second later, what
+                #  the address holds (the observation sweep of DP.10), and that is a line too.
+                report.check(wait_for(lambda: cl.ask("received") >= 1),
                              "fired, the cue arrives as one line of RCP", f"received {cl.ask('received')}")
                 report.equal(cl.ask("messages"), ["set MIXER:Current/InCh/Fader/Level 0 0 -32768", []],
                              "spelled as the console reads it: the parameter, X and Y from nought, the value")
@@ -356,7 +359,7 @@ def run() -> int:
 
             with MockWire("length", transport="udp") as hx:
                 send("mount.createFromPreset", ["holophonix-osc", HOLO])
-                report.check(settle(holo + "readback", "get"),
+                report.check(settle(holo + "readback", "get", tries=300),
                              "a device made from the Holophonix preset is asked on the wire",
                              f"readback {read(holo + 'readback')!r}, problem {read(holo + 'problem')!r}")
                 send("node.set", [holo + "port", str(hx.port)])

@@ -390,7 +390,11 @@ namespace wfg::tree
             §57, AFN): what the Network tab's ADD menu offers, published
             under /godot/preset/<slug>. Absent in a replay and a tree dump,
             which offer none and make no device. */
-        void setPresets (const PresetTable* table) noexcept { presets = table; }
+        void setPresets (const PresetTable* table) noexcept
+        {
+            presets = table;
+            stale = true;   // the rows live in the show half since DP.11
+        }
 
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
@@ -527,6 +531,16 @@ namespace wfg::tree
         const serial::HeardLines* serialHeard = nullptr;
         const serial::SerialTable* links = nullptr;
         const PresetTable* presets = nullptr;
+
+        /*  THE PRESET ROWS, MADE ONCE PER TABLE (DP.11): two hundred and forty
+            leaves built every publish - a dozen rows for each of twenty-four
+            presets - cost the Windows Debug build a tick's worth of string
+            work fifty times a second, and the first-sound driver saw the tick
+            fall a second behind its clock. Made when the table or its revision
+            changes, copied in otherwise. */
+        mutable std::vector<Node> presetLeaves;
+        mutable const PresetTable* presetLeavesOf = nullptr;
+        mutable std::uint64_t presetLeavesStamp = 0;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;

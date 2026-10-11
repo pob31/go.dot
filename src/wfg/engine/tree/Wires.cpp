@@ -398,8 +398,8 @@ namespace wfg::tree::wire
             if (v.isBool())    return v.getBool();
             if (v.isInt32())   return v.getInt32() != 0;
             if (v.isInt64())   return v.getInt64() != 0;
-            if (v.isFloat32()) return v.getFloat32() != 0.0f;
-            if (v.isFloat64()) return v.getFloat64() != 0.0;
+            if (v.isFloat32()) return v.getFloat32() > 0.0f || v.getFloat32() < 0.0f;
+            if (v.isFloat64()) return v.getFloat64() > 0.0 || v.getFloat64() < 0.0;
             if (v.isString())  return ! v.getString().empty() && v.getString() != "0" && v.getString() != "false";
             return true;
         }
