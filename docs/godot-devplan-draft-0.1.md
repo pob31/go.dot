@@ -1258,6 +1258,14 @@ overrule. Not a phase: it follows the handles round, and no later phase is renum
 | DP.10 | Feedback: `notify`, `xremote`, `subscribe`, `get`, `midi` read-back | DP.7-DP.9 |
 | DP.11 | The drivers, M60, the close-out | all |
 
+**Built**, 2026-10-10/11, DP.0 to DP.11 on `main`: twenty-four presets from the vendors' public
+documents (OSC over UDP and TCP, Yamaha's RCP, grandMA2's telnet lines, MIDI on a port, over TCP
+and in a datagram, MIDI Show Control), a device made from one in the Network tab, curves on every
+wire, what comes back on each (namespace draft §57.7 lists each stage; `build/device-presets-2026-10.md`
+is the tour). Owed to a bench: every preset is unverified until a console has answered; a Wing MIDI
+preset; the Network tab's login editor; WFS-DIY and S21_HiJack adopting the layout in their own
+repositories.
+
 **Done when:** a device made from a preset in the Network tab offers its tree as menus and its cue
 reaches a mock of each wire byte for byte - a datagram, a length-framed and a SLIP-framed packet, an
 RCP line, a telnet line after the login, an NRPN quad and a banked Program Change on a port and over

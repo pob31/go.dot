@@ -140,7 +140,7 @@ has stood in front of the thing.
   decided (PRD §3.6) and waiting for the client's layout to settle.
 - **Video latency offsets and DeckLink output** (Phase 8b).
 - **Integrations and redundancy** — Choufleur, authoring a cue from a processor,
-  device templates (being built as presets, namespace draft §57), and a backup
+  device templates (built as presets, namespace draft §57: twenty-four shipped, unverified until a console answers), and a backup
   engine that takes over from the primary
   (Phases 11 and 12).
 
