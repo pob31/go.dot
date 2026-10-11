@@ -4104,10 +4104,10 @@ TEST_CASE ("client: every line of the new-cue lists makes its cue, born with wha
     const auto stopId = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
     const auto* verbs = snapshot->find ("/godot/cue/" + stopId + "/verb");
     REQUIRE (verbs != nullptr);
-    REQUIRE_FALSE (verbs->enumValues.empty());
+    REQUIRE_FALSE (verbs->enumValues().empty());
 
     std::vector<std::string> shown;
-    for (const auto& verb : verbs->enumValues)
+    for (const auto& verb : verbs->enumValues())
     {
         CAPTURE (verb);
         const auto word = model::verbWord (verb);
@@ -12567,8 +12567,8 @@ TEST_CASE ("client: a node's role is published and named under the path, and a n
     REQUIRE (godot != nullptr);
     REQUIRE (godot->find ("ROLE") != nullptr);
     CHECK (godot->find ("ROLE")->asString() == "go");
-    CHECK (snapshot->find ("/ext/console/go")->role == "go");
-    CHECK (snapshot->find ("/ext/console/mode")->role.empty());
+    CHECK (snapshot->find ("/ext/console/go")->role() == "go");
+    CHECK (snapshot->find ("/ext/console/mode")->role().empty());
 
     const std::string cue = "R7T3G2QN";
     rig.apply (2, "window", "cue.create",

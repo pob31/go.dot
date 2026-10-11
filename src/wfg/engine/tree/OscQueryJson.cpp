@@ -169,8 +169,8 @@ namespace wfg::tree
             {
                 out += "\"KIND\": " + quoted (kindName (node.kind));
 
-                if (! node.role.empty())
-                    out += ", \"ROLE\": " + quoted (node.role);
+                if (! node.role().empty())
+                    out += ", \"ROLE\": " + quoted (node.role());
 
                 out += "}";
                 return;
@@ -178,18 +178,18 @@ namespace wfg::tree
 
             out += "\"KIND\": " + quoted (kindName (node.kind));
 
-            if (! node.role.empty())
-                out += ", \"ROLE\": " + quoted (node.role);
-            out += ", \"RATE_CAP\": " + osc::formatDouble (node.rateCap);
-            out += ", \"ANTICIPATABLE\": " + std::string (node.anticipatable ? "true" : "false");
+            if (! node.role().empty())
+                out += ", \"ROLE\": " + quoted (node.role());
+            out += ", \"RATE_CAP\": " + osc::formatDouble (node.rateCap());
+            out += ", \"ANTICIPATABLE\": " + std::string (node.anticipatable() ? "true" : "false");
 
             /*  A POLICY IS A WORD AND A SAFE VALUE IS AN ARRAY (namespace draft
                 §3): spelled as VALUE is, through the same formatter, so a
                 template that declared `[-60]` reads `[-60]` back from us. */
-            if (node.panic == "value" && ! node.panicValues.empty())
-                out += ", \"PANIC\": [" + valueList (node.panicValues) + "]";
+            if (node.panic() == "value" && ! node.panicValues().empty())
+                out += ", \"PANIC\": [" + valueList (node.panicValues()) + "]";
             else
-                out += ", \"PANIC\": " + quoted (node.panic);
+                out += ", \"PANIC\": " + quoted (node.panic());
 
             out += "}";
         }
@@ -219,27 +219,27 @@ namespace wfg::tree
 
         bool writeRange (const Node& node, int depth, std::string& out)
         {
-            const auto laterBounded = std::any_of (node.laterRanges.begin(), node.laterRanges.end(),
+            const auto laterBounded = std::any_of (node.laterRanges().begin(), node.laterRanges().end(),
                                                    [] (const Node::ArgumentRange& later)
                                                    {
                                                        return later.hasMinimum || later.hasMaximum;
                                                    });
 
-            if (node.enumValues.empty() && ! node.hasMinimum && ! node.hasMaximum && ! laterBounded)
+            if (node.enumValues().empty() && ! node.hasMinimum() && ! node.hasMaximum() && ! laterBounded)
                 return false;
 
             out += indent (depth) + "\"RANGE\": [{";
 
-            if (! node.enumValues.empty())
+            if (! node.enumValues().empty())
             {
                 out += "\"VALS\": [";
 
-                for (std::size_t i = 0; i < node.enumValues.size(); ++i)
+                for (std::size_t i = 0; i < node.enumValues().size(); ++i)
                 {
                     if (i > 0)
                         out += ", ";
 
-                    out += quoted (node.enumValues[i]);
+                    out += quoted (node.enumValues()[i]);
                 }
 
                 out += "]";
@@ -251,7 +251,7 @@ namespace wfg::tree
 
             out += "}";
 
-            for (const auto& later : node.laterRanges)
+            for (const auto& later : node.laterRanges())
             {
                 out += ", {";
                 writeBounds (later, out);
@@ -279,8 +279,8 @@ namespace wfg::tree
 
             lines.push_back (inner + "\"FULL_PATH\": " + quoted (node.address));
 
-            if (! node.description.empty())
-                lines.push_back (inner + "\"DESCRIPTION\": " + quoted (node.description));
+            if (! node.description().empty())
+                lines.push_back (inner + "\"DESCRIPTION\": " + quoted (node.description()));
 
             if (! node.typeTags.empty())
                 lines.push_back (inner + "\"TYPE\": " + quoted (node.typeTags));
@@ -297,8 +297,8 @@ namespace wfg::tree
                     lines.push_back (range);
             }
 
-            if (! node.unit.empty())
-                lines.push_back (inner + "\"UNIT\": [" + quoted (node.unit) + "]");
+            if (! node.unit().empty())
+                lines.push_back (inner + "\"UNIT\": [" + quoted (node.unit()) + "]");
 
             {
                 std::string godot;
@@ -438,23 +438,23 @@ namespace wfg::tree
         }
         else if (name == "DESCRIPTION")
         {
-            if (node->description.empty())
+            if (node->description().empty())
             {
                 out.result = AttributeResult::notPresent;
                 return out;
             }
 
-            body = "\"DESCRIPTION\": " + quoted (node->description);
+            body = "\"DESCRIPTION\": " + quoted (node->description());
         }
         else if (name == "UNIT")
         {
-            if (node->unit.empty())
+            if (node->unit().empty())
             {
                 out.result = AttributeResult::notPresent;
                 return out;
             }
 
-            body = "\"UNIT\": [" + quoted (node->unit) + "]";
+            body = "\"UNIT\": [" + quoted (node->unit()) + "]";
         }
         else if (name == "RANGE")
         {

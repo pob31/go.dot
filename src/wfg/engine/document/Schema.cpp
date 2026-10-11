@@ -22,6 +22,9 @@
 #include <cctype>
 #include <charconv>
 #include <cstring>
+#include <functional>
+#include <iterator>
+#include <map>
 
 namespace wfg::doc
 {
@@ -554,15 +557,49 @@ namespace wfg::doc
         return schema;
     }
 
-    std::vector<const AttributeRow*> Schema::rowsForOwner (std::string_view owner)
+    const std::vector<const AttributeRow*>& Schema::rowsForOwner (std::string_view owner)
     {
-        std::vector<const AttributeRow*> rows;
+        /*  Every owner's rows in table order, gathered on first use - a
+            function-local static, so built once whichever thread asks first,
+            and never written again. */
+        static const auto byOwner = []
+        {
+            std::map<std::string_view, std::vector<const AttributeRow*>, std::less<>> rows;
 
-        for (const auto& row : generated::attributes)
-            if (row.owner == owner)
-                rows.push_back (&row);
+            for (const auto& row : generated::attributes)
+                rows[row.owner].push_back (&row);
 
-        return rows;
+            return rows;
+        }();
+
+        static const std::vector<const AttributeRow*> none;
+
+        const auto found = byOwner.find (owner);
+        return found != byOwner.end() ? found->second : none;
+    }
+
+    std::size_t Schema::rowIndex (const AttributeRow& row) noexcept
+    {
+        /*  `std::less` and not `<`: two pointers that need not point into one
+            array are ordered by it, and by nothing else. */
+        const std::less<const AttributeRow*> before;
+        const auto* first = std::begin (generated::attributes);
+        const auto* last = std::end (generated::attributes);
+
+        if (before (&row, first) || ! before (&row, last))
+            return rowCount();
+
+        return static_cast<std::size_t> (&row - first);
+    }
+
+    std::size_t Schema::rowCount() noexcept
+    {
+        return std::size (generated::attributes);
+    }
+
+    const AttributeRow& Schema::rowAt (std::size_t index) noexcept
+    {
+        return generated::attributes[index];
     }
 
     //==============================================================================

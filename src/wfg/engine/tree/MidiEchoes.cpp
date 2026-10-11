@@ -54,7 +54,7 @@ namespace wfg::tree
             if (node == nullptr)
                 continue;
 
-            const auto& shape = node->midi;
+            const auto& shape = node->midi();
             const auto channel = channelOf (shape, baseChannel);
 
             if (shape.kind == "note")

@@ -22,7 +22,10 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <map>
+#include <string>
+#include <vector>
 
 namespace wfg::doc
 {
@@ -67,6 +70,33 @@ namespace wfg::doc
             return out;
         }
 
+        /*  THE NAME OF EVERY ROW AS JUCE KEYS A PROPERTY, made once for the
+            process (2026-10-11, §31.5). A juce::Identifier is interned in a pool
+            under a lock, and making one for every attribute the parameter tree
+            reads - every row of every cue, on every applied command - was a
+            fifth of its rebuild of the show in the Debug build CI runs. A
+            function-local static, so made whichever thread asks first, and
+            only ever read after. A row that is not the table's is named as
+            it comes. */
+        juce::Identifier propertyOf (const Attribute& attribute)
+        {
+            static const auto names = []
+            {
+                std::vector<juce::Identifier> made;
+                made.reserve (Schema::rowCount());
+
+                for (std::size_t at = 0; at < Schema::rowCount(); ++at)
+                    made.emplace_back (juce::String (std::string (Schema::rowAt (at).name)));
+
+                return made;
+            }();
+
+            const auto at = attribute.row != nullptr ? Schema::rowIndex (*attribute.row) : Schema::rowCount();
+
+            return at < names.size() ? names[at]
+                                     : juce::Identifier { juce::String (std::string (attribute.name())) };
+        }
+
         /*  The canonical text for one attribute, or nothing when it equals its
             default and can be left out.
 
@@ -76,7 +106,7 @@ namespace wfg::doc
         std::optional<std::string> attributeTextImpl (const Attribute& attribute,
                                                       const juce::ValueTree& node)
         {
-            const juce::Identifier property { juce::String (std::string (attribute.name())) };
+            const auto property = propertyOf (attribute);
 
             if (! node.hasProperty (property))
                 return std::nullopt;

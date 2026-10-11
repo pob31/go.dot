@@ -20085,6 +20085,94 @@ The ports stay bound and open, but nothing is painted and nothing is read (`Surf
 If the gaps go on, the device or its USB path is the cause. If they stop, Go.dot's traffic to the desk
 is, and the next measurement is how long `Output::sendNow` takes in `MidiSender::deliver`.
 
+### 31.5 What a publish costs the tick (M62)
+
+Written 2026-10-11. The tick thread publishes the whole tree once a tick (`ParameterTree::publish`,
+from serve's after-tick), and a publish that takes longer than a tick is a clock that never catches
+up. Windows CI was red three runs in a row on `blackbox.first-sound` (*"the tick clock did not
+stop"*, 1.8 to 2.2 s behind) and on `blackbox.doh` for exactly that, in the Debug build it runs.
+`ae496b3` made the sort cheaper that morning and left the margin thin. The author: *"fix it now"*.
+
+**M62** is what a publish costs, idle with five runs going and after `markStale` - the show half
+rebuilt, as every applied command rebuilds it, a GO among them. It is taken on the first-sound
+fixture (`tests/fixtures/bundles/phase2`, wired as `wfg tree` wires it, with the twenty-four
+installed presets: 1,154 nodes) and on M18's 500 cues over 20 slots (41,628 nodes).
+`PublishCostTests`, case "M62", reports the medians of a hundred idle publishes and twenty after
+`markStale`, and asserts nothing (M18's reason). Before and after were built from one checkout and
+measured minutes apart on the bench, in C and fr_FR, twice each:
+
+| | Debug before | Debug after | Release before | Release after |
+|---|---|---|---|---|
+| first-sound, idle | 8.9 to 10.0 ms | 1.7 to 2.0 ms | 0.29 to 0.30 ms | 0.054 to 0.059 ms |
+| first-sound, after `markStale` | 30 to 34 ms | 5.1 to 5.9 ms | 1.7 to 2.0 ms | 0.18 to 0.20 ms |
+| 500 cues, idle | 75 to 86 ms | 13 to 18 ms | 3.4 to 3.9 ms | 1.4 to 1.6 ms |
+| 500 cues, after `markStale` | 1.78 to 1.88 s | 0.38 to 0.48 s | 89 to 90 ms | 15 to 16 ms |
+
+**Where it went.** These figures are from temporary timers in the Debug build, since taken out.
+
+- An idle first-sound publish took 9.4 ms. The five runs' rows took 3.8 of it. The engine's,
+  pairing's, document's and audio's rows took 1.6. The containers and the sort took 2.6, and
+  freeing the last snapshot 0.6. Everything else came to under 1 ms.
+- Copying cost the most. `makeLeaf` copied each row's description, unit, enumeration and panic word
+  into every node it made, on every tick. Many descriptions run to hundreds of characters. A node
+  had grown to a dozen strings and vectors and a MIDI shape, so each move of one in the sort was
+  dear too.
+- `Schema::rowsForOwner` walked all six hundred rows and made a vector on every call. The publish
+  called it tens of times a tick.
+- Each of a run's forty-one rows went down a chain of forty string comparisons.
+- The show half's rebuild took 20 of the 32 ms after `markStale`: 7.9 making rows, 1.6 copying the
+  preset rows, 3.1 making the command nodes, 5.0 the containers and 3.0 the sort.
+- For the 500 cues, a fifth of making the rows was `CanonicalXml::attributeText` making a
+  `juce::Identifier` for every attribute it read. JUCE interns each one in a pool, under a lock.
+
+**What was done.**
+
+- **A node's unchanging part is shared, not copied.** `tree::NodeShape` holds what a node says
+  about itself: the description, the unit, the range and each later argument's, the enumeration,
+  the rate cap, whether it may be anticipated, the panic word and value, the role, and the RCP,
+  line and MIDI spellings. A node holds it by `std::shared_ptr<const NodeShape>`. Readers ask
+  `node.description()`, `node.rangeOf (n)`, `node.midi()` and so on.
+- **Each shape is made once.** A row's shape is made once for the process: every row at once on
+  first use, indexed by the row's place in the table (`Schema::rowIndex`), along with the value its
+  default text reads as. A device node's shape is made once, when its file is read (`Mount.cpp`).
+  The plugin scan's eight readings and the known list's five sentences are made once each.
+- **The address, kind, access, type tags and values stay on the node.** A list row's TYPE grows
+  with the value it holds, so it cannot be shared.
+- **`Schema::rowsForOwner`** is gathered once and handed out by reference.
+- **The runs' rows and a cue's rows** each decide their row once (`RunRow`, `CueRow`) and switch on
+  it. The chains of comparisons are gone.
+- **`CanonicalXml::attributeText`** keeps one `juce::Identifier` per row, made once.
+- **The command nodes** are made once per `CommandRegistry::revision()`, which `add` moves, and
+  copied in, as the preset rows already were.
+- **The sort works out the order once and moves each node once.** The containers are merged into
+  the order.
+- **A half whose addresses have not changed reuses its last sort** (`TreeSortMemo`). This applies
+  when the addresses are the ones that half's last sort was given, in the same order. A tick that
+  moved no address, and every command that left the show's shape as it was, then compares each
+  address with its twin instead of sorting.
+- **Both halves reserve their size up front**, at the size the last one had. The addresses
+  published for every cue on every tick are each made in one allocation.
+
+**The same tree, byte for byte.** The code before and the code after each wrote:
+
+- `wfg tree` over all thirty-nine fixture bundles;
+- the whole OSCQuery reply of both M62 trees, with their runs and presets, in C and in fr_FR.
+
+Every byte was the same. The golden (`cue-F7HR8TVD.json`), `wfg schema --check`,
+`generate-schema --check` and `client.boundary` pass unchanged. A second case reads published nodes
+against their rows: a cue's level, an OSC cue's `wait`, the tick, the pairing's role, and a run's
+state and position. It reads a device's fader and scene against its file, and the minimal bundle's
+console nodes that declare a GODOT key. It also checks that two runs' rows share one shape, and the
+next tick's too.
+
+**Left.**
+
+- **The show half is still rebuilt whole on every applied command**, a GO included: 0.4 s in Debug
+  and 15 ms in Release for 500 cues. Most of that is making every cue's rows again. Rebuilding only
+  what the command touched is the next step for a large show.
+- **A runtime row's value still goes to text and back**: `osc::formatDouble`, then the schema's
+  parser. That keeps the value the file would hold, at the cost of a parse a leaf.
+
 ## 32. A copy that would not find its sounds
 
 Written 2026-10-06, when the author asked: *"When saving outside the workfolder (show) warn the user

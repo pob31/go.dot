@@ -66,6 +66,7 @@
 #include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -293,6 +294,22 @@ namespace wfg::tree
             is arriving and being refused. Counted on the socket thread and
             read here once a tick, like everything else in this struct. */
         std::uint64_t refusedDatagrams = 0;
+    };
+
+    /*  WHAT THE LAST SORT OF ONE HALF OF THE TREE CAME TO (2026-10-11, §31.5):
+        the question - the addresses it was handed, in the order it was handed
+        them, what the other half owned and whether the root was wanted - and
+        the answer, the order it put them in and the containers it added.
+        ParameterTree's own, kept from one publish to the next; read by
+        `sortWithContainers` in ParameterTree.cpp. */
+    struct TreeSortMemo
+    {
+        bool valid = false;
+        bool root = false;
+        std::vector<std::string> made;
+        std::vector<std::string> elsewhere;
+        std::vector<std::size_t> order;
+        std::vector<std::string> containers;
     };
 
     class ParameterTree
@@ -562,6 +579,14 @@ namespace wfg::tree
         mutable std::vector<Node> presetLeaves;
         mutable const PresetTable* presetLeavesOf = nullptr;
         mutable std::uint64_t presetLeavesStamp = 0;
+
+        /*  THE COMMAND NODES, MADE ONCE PER REGISTRY REVISION (§31.5): the
+            registry does not move after the engine starts, and its two hundred
+            nodes were made again on every applied command. */
+        std::vector<Node> commandLeaves;
+        std::uint64_t commandLeavesStamp = 0;
+        bool commandLeavesMade = false;
+
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;
@@ -758,6 +783,16 @@ namespace wfg::tree
             was, that count is a hundred. */
         std::size_t mountRebuildCount = 0;
         bool stale = true;
+
+        /*  How many nodes the last runtime half held, and the last show half,
+            which the next of each is made room for at once (§31.5). */
+        std::size_t runtimeNodesSeen = 0;
+        std::size_t documentNodesSeen = 0;
+
+        /*  How the last show half and the last runtime half were sorted: a
+            tick or a command that moved no address sorts as they did (§31.5). */
+        TreeSortMemo documentSort;
+        TreeSortMemo runtimeSort;
 
         /*  A plain mutex rather than the RtSnapshot spin lock, and the
             difference is which threads are involved. Neither side here is the

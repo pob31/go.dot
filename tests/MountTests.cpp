@@ -274,7 +274,7 @@ TEST_CASE ("mount: a node's role is read from its GODOT key, and only a word is 
     {
         for (const auto& node : loaded.nodes)
             if (node.address == address)
-                return node.role;
+                return node.role();
         return std::string ("?");
     };
 
@@ -688,9 +688,9 @@ TEST_CASE ("mount: every mounted node carries the declaration's metadata")
     for (const auto& node : result.nodes)
     {
         INFO ("address: " << node.address);
-        CHECK (node.rateCap == doctest::Approx (12.5));
-        CHECK (node.anticipatable);
-        CHECK (node.panic == "snap");
+        CHECK (node.rateCap() == doctest::Approx (12.5));
+        CHECK (node.anticipatable());
+        CHECK (node.panic() == "snap");
     }
 }
 
@@ -738,19 +738,19 @@ TEST_CASE ("mount: a GODOT key overrides what inference would have said")
     const auto* master = snapshot->find ("/ext/console/masterLevel");
     REQUIRE (master != nullptr);
 
-    CHECK (master->rateCap == doctest::Approx (25.0));
-    CHECK (master->anticipatable);
-    CHECK (master->panic == "snap");
-    CHECK (master->unit == "dB");
+    CHECK (master->rateCap() == doctest::Approx (25.0));
+    CHECK (master->anticipatable());
+    CHECK (master->panic() == "snap");
+    CHECK (master->unit() == "dB");
 
     // A node without the key keeps the mount's defaults.
     const auto* mode = snapshot->find ("/ext/console/mode");
     REQUIRE (mode != nullptr);
 
-    CHECK (mode->rateCap == doctest::Approx (50.0));
-    CHECK_FALSE (mode->anticipatable);
-    CHECK (mode->panic == "park");
-    CHECK (mode->enumValues == std::vector<std::string> { "blind", "run", "program" });
+    CHECK (mode->rateCap() == doctest::Approx (50.0));
+    CHECK_FALSE (mode->anticipatable());
+    CHECK (mode->panic() == "park");
+    CHECK (mode->enumValues() == std::vector<std::string> { "blind", "run", "program" });
 }
 
 //==============================================================================
@@ -824,24 +824,24 @@ TEST_CASE ("mount: a PANIC array is the node's safe value, read as the node's ow
         node, an int on an `i` one, and one value per argument on a node that
         takes two. */
     const auto fader = mountedAt (result, "/desk/fader");
-    CHECK (fader.panic == "value");
-    CHECK (fader.panicValues == std::vector<osc::Value> { osc::Value::float32 (-60.0f) });
+    CHECK (fader.panic() == "value");
+    CHECK (fader.panicValues() == std::vector<osc::Value> { osc::Value::float32 (-60.0f) });
 
-    CHECK (mountedAt (result, "/desk/trim").panicValues == std::vector<osc::Value> { osc::Value::float64 (-0.5) });
-    CHECK (mountedAt (result, "/desk/scene").panicValues == std::vector<osc::Value> { osc::Value::int32 (0) });
-    CHECK (mountedAt (result, "/desk/mode").panicValues == std::vector<osc::Value> { osc::Value::string ("blind") });
-    CHECK (mountedAt (result, "/desk/mute").panicValues == std::vector<osc::Value> { osc::Value::boolean (true) });
-    CHECK (mountedAt (result, "/desk/eq").panicValues
+    CHECK (mountedAt (result, "/desk/trim").panicValues() == std::vector<osc::Value> { osc::Value::float64 (-0.5) });
+    CHECK (mountedAt (result, "/desk/scene").panicValues() == std::vector<osc::Value> { osc::Value::int32 (0) });
+    CHECK (mountedAt (result, "/desk/mode").panicValues() == std::vector<osc::Value> { osc::Value::string ("blind") });
+    CHECK (mountedAt (result, "/desk/mute").panicValues() == std::vector<osc::Value> { osc::Value::boolean (true) });
+    CHECK (mountedAt (result, "/desk/eq").panicValues()
              == std::vector<osc::Value> { osc::Value::int32 (2), osc::Value::float32 (-6.5f) });
 
     //  A policy is still a word, and a node that says nothing has the declaration's.
     const auto pan = mountedAt (result, "/desk/pan");
-    CHECK (pan.panic == "snap");
-    CHECK (pan.panicValues.empty());
+    CHECK (pan.panic() == "snap");
+    CHECK (pan.panicValues().empty());
 
     const auto gain = mountedAt (result, "/desk/gain");
-    CHECK (gain.panic == "park");
-    CHECK (gain.panicValues.empty());
+    CHECK (gain.panic() == "park");
+    CHECK (gain.panicValues().empty());
 
     /*  AND IT GOES BACK OUT AS THE ARRAY IT WAS, spelled as VALUE is - which is
         the one place a decimal could meet the French locale, so `-0.5` is
@@ -917,8 +917,8 @@ TEST_CASE ("mount: a PANIC the node could never hold is a warning, and the devic
             continue;
 
         const auto fader = mountedAt (result, "/desk/fader");
-        CHECK (fader.panic == "park");
-        CHECK (fader.panicValues.empty());
+        CHECK (fader.panic() == "park");
+        CHECK (fader.panicValues().empty());
 
         //  And said, once, naming where and what.
         CHECK (result.warnings.size() == 1);
@@ -938,7 +938,7 @@ TEST_CASE ("mount: a PANIC the node could never hold is a warning, and the devic
                                       oneNode (R"({ "TYPE": "f", "ACCESS": 3, "RANGE": [{ "MIN": -60, "MAX": 0 }], "GODOT": { "PANIC": [-6] } })"));
     REQUIRE (taken.ok);
     CHECK (taken.warnings.empty());
-    CHECK (mountedAt (taken, "/desk/fader").panic == "value");
+    CHECK (mountedAt (taken, "/desk/fader").panic() == "value");
 
     auto snapping = deskDeclaration();
     snapping.panic = "snap";
@@ -946,7 +946,7 @@ TEST_CASE ("mount: a PANIC the node could never hold is a warning, and the devic
     const auto mistaken = readNamespace (snapping, oneNode (R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": "snap-to" } })"));
     REQUIRE (mistaken.ok);
     CHECK (mistaken.warnings.size() == 1);
-    CHECK (mountedAt (mistaken, "/desk/fader").panic == "snap");
+    CHECK (mountedAt (mistaken, "/desk/fader").panic() == "snap");
 }
 
 TEST_CASE ("mount: a device's PANIC warning reaches the show's warnings, and the device is not a failed one")
@@ -991,7 +991,7 @@ TEST_CASE ("mount: a device's PANIC warning reaches the show's warnings, and the
 
         const auto* master = snapshot->find ("/ext/console/masterLevel");
         REQUIRE (master != nullptr);
-        CHECK (master->panic == "park");
+        CHECK (master->panic() == "park");
 
         const auto* warnings = snapshot->find ("/godot/document/warnings");
         REQUIRE (warnings != nullptr);
@@ -1044,8 +1044,8 @@ TEST_CASE ("mount: a PANIC on an event or a container is ignored, and the namesp
         const auto node = mountedAt (result, address);
 
         CHECK (node.kind != Kind::state);
-        CHECK (node.panic == "park");
-        CHECK (node.panicValues.empty());
+        CHECK (node.panic() == "park");
+        CHECK (node.panicValues().empty());
     }
 
     CHECK (mountedAt (result, "/desk/go").kind == Kind::event);
@@ -1069,10 +1069,10 @@ TEST_CASE ("mount: a multi-argument node keeps its types and its first argument'
     REQUIRE (eq != nullptr);
 
     CHECK (eq->typeTags == "if");
-    CHECK (eq->hasMinimum);
-    CHECK (eq->minimum == doctest::Approx (0.0));
-    CHECK (eq->hasMaximum);
-    CHECK (eq->maximum == doctest::Approx (5.0));       // bands 0-5, not the gain range
+    CHECK (eq->hasMinimum());
+    CHECK (eq->minimum() == doctest::Approx (0.0));
+    CHECK (eq->hasMaximum());
+    CHECK (eq->maximum() == doctest::Approx (5.0));       // bands 0-5, not the gain range
 }
 
 TEST_CASE ("mount: a range bound arrives exactly as the file spells it")
@@ -1086,9 +1086,9 @@ TEST_CASE ("mount: a range bound arrives exactly as the file spells it")
 
     const auto* ratio = snapshot->find ("/wfs/input/1/distanceRatio");
     REQUIRE (ratio != nullptr);
-    REQUIRE (ratio->hasMinimum);
+    REQUIRE (ratio->hasMinimum());
 
-    CHECK (osc::formatDouble (ratio->minimum) == "0.100000001490116");
+    CHECK (osc::formatDouble (ratio->minimum()) == "0.100000001490116");
 }
 
 //==============================================================================
@@ -1829,7 +1829,7 @@ TEST_CASE ("mount: a node of several arguments takes as many values as it has ta
     CHECK (node->typeTags == "fff");
 
     //  Every argument's bounds, the first where every reader of one value reads it.
-    REQUIRE (node->laterRanges.size() == 2u);
+    REQUIRE (node->laterRanges().size() == 2u);
     CHECK (node->rangeOf (0).minimum == doctest::Approx (-1.0));
     CHECK (node->rangeOf (1).maximum == doctest::Approx (20.0));
     CHECK (node->rangeOf (2).minimum == doctest::Approx (-5.0));
@@ -2373,16 +2373,16 @@ TEST_CASE ("mount sender: a device on the midi wire is sent its nodes' shapes as
 
     const auto* mute = mounts.nodeAt ("/input/1/mute");
     REQUIRE (mute != nullptr);
-    CHECK (mute->midi.kind == "note");
-    CHECK (mute->midi.on == 127);
-    CHECK (mute->midi.off == 63);
-    CHECK (mute->midi.hasOnOff);
-    CHECK (mute->midi.release);
+    CHECK (mute->midi().kind == "note");
+    CHECK (mute->midi().on == 127);
+    CHECK (mute->midi().off == 63);
+    CHECK (mute->midi().hasOnOff);
+    CHECK (mute->midi().release);
     const auto* recall = mounts.nodeAt ("/scene/recall");
     REQUIRE (recall != nullptr);
-    CHECK (recall->midi.kind == "pc");
-    CHECK (recall->midi.banked);
-    CHECK (recall->midi.start == 1);
+    CHECK (recall->midi().kind == "pc");
+    CHECK (recall->midi().banked);
+    CHECK (recall->midi().start == 1);
 
     tree::MountSender sender;
     sender.setMounts (&mounts);

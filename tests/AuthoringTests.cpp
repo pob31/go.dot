@@ -942,19 +942,19 @@ TEST_CASE ("preset command: a device from the Yamaha RCP preset is reached over 
     //  A parameter with X alone has one index segment; a send, with its mix, two.
     const auto* level = mounts.nodeAt ("/MIXER:Current/InCh/Fader/Level/1");
     REQUIRE (level != nullptr);
-    CHECK (level->rcpVerb == "set");
-    CHECK (level->rcpIndexes == 1);
-    CHECK (level->role == "strip.level");
+    CHECK (level->rcpVerb() == "set");
+    CHECK (level->rcpIndexes() == 1);
+    CHECK (level->role() == "strip.level");
 
     const auto* send = mounts.nodeAt ("/MIXER:Current/InCh/ToMix/Level/1/1");
     REQUIRE (send != nullptr);
-    CHECK (send->rcpIndexes == 2);
-    CHECK (send->role == "send.level");
+    CHECK (send->rcpIndexes() == 2);
+    CHECK (send->role() == "send.level");
 
     const auto* scene = mounts.nodeAt ("/MIXER:Lib/Scene");
     REQUIRE (scene != nullptr);
-    CHECK (scene->rcpVerb == "ssrecall_ex");
-    CHECK (scene->rcpIndexes == 0);
+    CHECK (scene->rcpVerb() == "ssrecall_ex");
+    CHECK (scene->rcpIndexes() == 0);
 
     const auto to = tree::MountSender::destinationFor (*mounts.declarationOf (deviceId));
     CHECK (to.link == deviceId);
@@ -988,16 +988,16 @@ TEST_CASE ("preset command: a device from the grandMA2 preset is on the line wir
 
     const auto* go = mounts.nodeAt ("/exec/1/1/go");
     REQUIRE (go != nullptr);
-    CHECK (go->lineTemplate == "Go+ Executor {x}.{y}");
-    CHECK (go->role == "go");
+    CHECK (go->lineTemplate() == "Go+ Executor {x}.{y}");
+    CHECK (go->role() == "go");
 
     const auto* fader = mounts.nodeAt ("/exec/2/90/fader");
     REQUIRE (fader != nullptr);
-    CHECK (fader->lineTemplate == "Fader {x}.{y} At {1}");
+    CHECK (fader->lineTemplate() == "Fader {x}.{y} At {1}");
 
     const auto* cmd = mounts.nodeAt ("/cmd");
     REQUIRE (cmd != nullptr);
-    CHECK (cmd->lineTemplate == "{1}");
+    CHECK (cmd->lineTemplate() == "{1}");
 
     folder.deleteRecursively();
 }
@@ -1025,27 +1025,27 @@ TEST_CASE ("preset command: the MIDI presets - a dLive over a connection loads a
 
     const auto* mute = mounts.nodeAt ("/input/1/mute");
     REQUIRE (mute != nullptr);
-    CHECK (mute->midi.kind == "note");
-    CHECK (mute->midi.note == 0);
-    CHECK (mute->midi.on == 0x7F);
-    CHECK (mute->midi.off == 0x3F);
-    CHECK (mute->role == "strip.mute");
+    CHECK (mute->midi().kind == "note");
+    CHECK (mute->midi().note == 0);
+    CHECK (mute->midi().on == 0x7F);
+    CHECK (mute->midi().off == 0x3F);
+    CHECK (mute->role() == "strip.mute");
     const auto* aux = mounts.nodeAt ("/aux/3/fader");
     REQUIRE (aux != nullptr);
-    CHECK (aux->midi.kind == "nrpn");
-    CHECK (aux->midi.offset == 2);
-    CHECK (aux->midi.msb == 2);
-    CHECK (aux->midi.lsb == 0x17);
+    CHECK (aux->midi().kind == "nrpn");
+    CHECK (aux->midi().offset == 2);
+    CHECK (aux->midi().msb == 2);
+    CHECK (aux->midi().lsb == 0x17);
     const auto* send = mounts.nodeAt ("/input/1/send/aux/3");
     REQUIRE (send != nullptr);
-    CHECK (send->midi.kind == "sysex");
-    CHECK (send->midi.bytes.size() == 15u);
-    CHECK (send->midi.bytes[8] == "N");
-    CHECK (send->midi.bytes[11] == "N+2");
+    CHECK (send->midi().kind == "sysex");
+    CHECK (send->midi().bytes.size() == 15u);
+    CHECK (send->midi().bytes[8] == "N");
+    CHECK (send->midi().bytes[11] == "N+2");
     const auto* scene = mounts.nodeAt ("/scene/recall");
     REQUIRE (scene != nullptr);
-    CHECK (scene->midi.kind == "pc");
-    CHECK (scene->midi.banked);
+    CHECK (scene->midi().kind == "pc");
+    CHECK (scene->midi().banked);
 
     //  MSC is on a MIDI port, which the preset cannot know: refused until one is named, then loaded.
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("msc") }).applied == 1u);
@@ -1062,9 +1062,9 @@ TEST_CASE ("preset command: the MIDI presets - a dLive over a connection loads a
     CHECK (mounts.isLoaded (msc));
     const auto* go = mounts.nodeAt ("/msc/go");
     REQUIRE (go != nullptr);
-    CHECK (go->midi.kind == "msc");
-    CHECK (go->midi.command == 1);
-    CHECK (go->role == "go");
+    CHECK (go->midi().kind == "msc");
+    CHECK (go->midi().command == 1);
+    CHECK (go->role() == "go");
 
     //  The X32's scenes fix their channel; the SQ's levels are 14-bit; the Qu's fader wants its data LSB.
     for (const auto* slug : { "behringer-x32-midi", "allenheath-sq-midi", "allenheath-qu-midi", "allenheath-avantis-midi",

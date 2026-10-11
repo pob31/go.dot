@@ -124,11 +124,20 @@ namespace
     {
         auto nodes = std::make_shared<std::vector<tree::Node>>();
 
-        auto container = [] (std::string address, std::string description)
+        /*  A shape that says one sentence and nothing else (a node's shape
+            is shared and immutable once made; here, one each). */
+        const auto described = [] (std::string text)
+        {
+            auto shape = std::make_shared<tree::NodeShape>();
+            shape->description = std::move (text);
+            return std::shared_ptr<const tree::NodeShape> (std::move (shape));
+        };
+
+        auto container = [&described] (std::string address, std::string description)
         {
             tree::Node n;
             n.address = std::move (address);
-            n.description = std::move (description);
+            n.shape = described (std::move (description));
             n.kind = tree::Kind::container;
             n.access = tree::Access::none;
             return n;
@@ -143,7 +152,7 @@ namespace
         {
             tree::Node n;
             n.address = "/godot/engine/tick";
-            n.description = "The current tick index";
+            n.shape = described ("The current tick index");
             n.kind = tree::Kind::state;
             n.access = tree::Access::read;
             n.typeTags = "h";
@@ -158,18 +167,21 @@ namespace
             n.access = tree::Access::readWrite;
             n.typeTags = "f";
             n.values = { osc::Value::float32 (0.25f) };
-            n.hasMinimum = true;
-            n.minimum = 0.0;
-            n.hasMaximum = true;
-            n.maximum = 1.0;
-            n.unit = "linear";
+
+            auto shape = std::make_shared<tree::NodeShape>();
+            shape->hasMinimum = true;
+            shape->minimum = 0.0;
+            shape->hasMaximum = true;
+            shape->maximum = 1.0;
+            shape->unit = "linear";
+            n.shape = std::move (shape);
             nodes->push_back (n);
         }
 
         {
             tree::Node n;
             n.address = "/godot/cmd/standby/next";
-            n.description = "Move standby to the next cue";
+            n.shape = described ("Move standby to the next cue");
             n.kind = tree::Kind::event;
             n.access = tree::Access::write;
             nodes->push_back (n);

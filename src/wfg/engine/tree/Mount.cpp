@@ -206,7 +206,7 @@ namespace wfg::tree
             }
         }
 
-        void applyRange (const json::Value& node, Node& out)
+        void applyRange (const json::Value& node, NodeShape& out)
         {
             const auto* range = property (node, "RANGE");
 
@@ -222,7 +222,7 @@ namespace wfg::tree
                 description this has met. */
             for (std::size_t i = 1; i < range->size(); ++i)
             {
-                Node::ArgumentRange later;
+                ArgumentRange later;
                 const auto& entry = *range->at (i);
 
                 if (const auto* minimum = property (entry, "MIN"); minimum != nullptr)
@@ -261,7 +261,7 @@ namespace wfg::tree
             }
         }
 
-        void applyUnit (const json::Value& node, Node& out)
+        void applyUnit (const json::Value& node, NodeShape& out)
         {
             const auto* unit = property (node, "UNIT");
 
@@ -341,14 +341,16 @@ namespace wfg::tree
 
             Nothing APPLIES the value yet (devplan Phase 10). It is read, so the
             tree can publish it back as the array it was. */
-        void applyPanic (const json::Value& panic, Node& out, std::vector<std::string>& warnings)
+        void applyPanic (const json::Value& panic, const Node& built, NodeShape& out,
+                         std::vector<std::string>& warnings)
         {
             /*  `out.panic` is the mount's policy already (`applyGodot`), and
-                stays it: nothing below changes the node until every element
-                has been read. */
-            const auto ignore = [&out, &warnings] (const std::string& why)
+                stays it: nothing below changes the shape until every element
+                has been read. The node itself - its address, kind and types -
+                is read and never written. */
+            const auto ignore = [&built, &out, &warnings] (const std::string& why)
             {
-                warnings.push_back (out.address + ": PANIC " + why + " - ignored; the node rests as the"
+                warnings.push_back (built.address + ": PANIC " + why + " - ignored; the node rests as the"
                                     " device does (" + out.panic + ")");
             };
 
@@ -358,7 +360,7 @@ namespace wfg::tree
                 return;
             }
 
-            if (out.kind != Kind::state)
+            if (built.kind != Kind::state)
                 return;
 
             if (panic.isString())
@@ -374,10 +376,10 @@ namespace wfg::tree
                 return;
             }
 
-            if (out.typeTags.empty() || panic.size() != out.typeTags.size())
+            if (built.typeTags.empty() || panic.size() != built.typeTags.size())
             {
                 ignore ("holds " + std::to_string (panic.size()) + " value(s) for a node that takes "
-                        + std::to_string (out.typeTags.size()) + " (TYPE \"" + out.typeTags + "\")");
+                        + std::to_string (built.typeTags.size()) + " (TYPE \"" + built.typeTags + "\")");
                 return;
             }
 
@@ -386,7 +388,7 @@ namespace wfg::tree
             for (std::size_t i = 0; i < panic.size(); ++i)
             {
                 const auto& element = *panic.at (i);
-                const auto tag = out.typeTags[i];
+                const auto tag = built.typeTags[i];
                 const auto where = "element " + std::to_string (i) + " ";
 
                 const auto raw = literalOf (element);
@@ -464,8 +466,8 @@ namespace wfg::tree
 
             After `applyRange` and the kind, which a PANIC holding a value is
             checked against. */
-        void applyGodot (const json::Value& node, const MountDeclaration& mount, Node& out,
-                         std::vector<std::string>& warnings)
+        void applyGodot (const json::Value& node, const MountDeclaration& mount, const Node& built,
+                         NodeShape& out, std::vector<std::string>& warnings)
         {
             out.rateCap = mount.rateCap;
             out.anticipatable = mount.anticipatable;
@@ -485,7 +487,7 @@ namespace wfg::tree
             /*  Until 2026-10-02 (H5) this took the key's text, whatever it was,
                 so an array read as "" and was published as `"PANIC": ""`. */
             if (const auto* panic = property (*godot, "PANIC"); panic != nullptr)
-                applyPanic (*panic, out, warnings);
+                applyPanic (*panic, built, out, warnings);
 
             //  The role, a word; anything else there is not one (AFM).
             out.role = stringProperty (*godot, "ROLE");
@@ -642,11 +644,19 @@ namespace wfg::tree
             built.typeTags = typeTags;
             built.kind = kindFrom (node, typeTags, hasChildren);
             built.access = accessFrom (node, built.kind == Kind::container);
-            built.description = stringProperty (node, "DESCRIPTION");
 
-            applyRange (node, built);
-            applyUnit (node, built);
-            applyGodot (node, mount, built, warnings);
+            /*  WHAT IT SAYS ABOUT ITSELF, read once, here, when the file is
+                (2026-10-11, §31.5): every copy of the node from now on - the
+                mounted half of each snapshot, a written node laid over it -
+                shares it rather than copying its sentence and its spellings. */
+            NodeShape shape;
+            shape.description = stringProperty (node, "DESCRIPTION");
+
+            applyRange (node, shape);
+            applyUnit (node, shape);
+            applyGodot (node, mount, built, shape, warnings);
+
+            built.shape = std::make_shared<const NodeShape> (std::move (shape));
 
             /*  VALUE is read for the kind inference above and then dropped.
                 A captured description says what the target happened to be doing

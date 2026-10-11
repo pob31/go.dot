@@ -29,7 +29,9 @@
     PLAIN DATA ON PURPOSE. No juce::var, no ValueTree handle, no pointer into
     the document. Snapshots are read from server threads while the tick thread
     is already building the next one, so a Node that referred to anything the
-    tick thread owns would be a data race dressed as a struct.
+    tick thread owns would be a data race dressed as a struct. The one pointer
+    it holds, to its `NodeShape`, is to something nobody writes after it is
+    made: the shape is shared by every node of one row, and never changed.
 
     THE FOUR THINGS PRD §3.3 SAYS A NODE DECLARES are `kind`, `rateCap`,
     `anticipatable` and `panic`. They travel to a client in one vendor key,
@@ -41,6 +43,7 @@
 #include <wfg/engine/osc/OscValue.h>
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -97,20 +100,39 @@ namespace wfg::tree
         int command = 0;
     };
 
-    struct Node
+    /*  The bounds of one argument of a node, from the table or a device's
+        file: unbounded where none were given. */
+    struct ArgumentRange
     {
-        /** The full OSC address. Unique, and the tree's only key. */
-        std::string address;
+        bool hasMinimum = false;
+        double minimum = 0.0;
+        bool hasMaximum = false;
+        double maximum = 0.0;
+    };
 
-        Kind kind = Kind::container;
-        Access access = Access::none;
+    /*  WHAT A NODE SAYS ABOUT ITSELF, as against what it says NOW
+        (2026-10-11, §31.5): everything a client is told about a node that is the
+        same for every node made from one row of the parameter table, or from
+        one node of a device's file - its sentence, its unit, its range and
+        enumeration, PRD §3.3's declarations and the wires' spellings. The
+        address and the value are the node's own and stay on it.
 
-        /*  OSC type tags, one per argument: "s", "d", "T", or a command's whole
-            signature like "sis". Empty for a container. */
-        std::string typeTags;
-
+        SHARED, NEVER COPIED. The tree publishes every tick, and it used to
+        copy all of this into every leaf it made: a run's forty-odd rows, each
+        carrying a description of up to hundreds of characters, for every run,
+        fifty times a second - most of an idle tick in the Debug build CI
+        runs, and on a runner slower than the bench a tick that outlasted a
+        tick (blackbox.first-sound, 2026-10-11). A row's shape is made once
+        for the process (ParameterTree.cpp, `rowLeaves`), a device node's once
+        when its file is read (Mount.cpp), and a node holds it by a pointer to
+        something nobody writes again, which is as safe to read from a server
+        thread as the rest of a published snapshot. Plain data otherwise, as
+        the node is. */
+    struct NodeShape
+    {
         /** One sentence, from the parameter table. What a client shows at 2 a.m. */
         std::string description;
+
         /*  WHAT THE NODE IS FOR, in the vocabulary every preset shares
             (namespace draft §57, AFM): `scene.recall`, `strip.level`,
             `object.position`... from the description's `GODOT.ROLE`; empty for
@@ -152,14 +174,6 @@ namespace wfg::tree
             this is empty for a node of one argument, and holds one entry per
             later type tag where a description gave them. `rangeOf` reads
             either. */
-        struct ArgumentRange
-        {
-            bool hasMinimum = false;
-            double minimum = 0.0;
-            bool hasMaximum = false;
-            double maximum = 0.0;
-        };
-
         std::vector<ArgumentRange> laterRanges;
 
         /** The bounds of one argument, from nought: unbounded where none were given. */
@@ -174,7 +188,7 @@ namespace wfg::tree
             return {};
         }
 
-        /** `s`, `Hz`, `dB`, `samples`, … Empty when the value is not a quantity. */
+        /** `s`, `Hz`, `dB`, `samples`, ... Empty when the value is not a quantity. */
         std::string unit;
 
         //======================================================================
@@ -192,10 +206,41 @@ namespace wfg::tree
         std::string panic = "park";
 
         /*  THE DECLARED SAFE VALUE, when `panic` is "value", and empty
-            otherwise: one element per type tag, as `values` is, so it is
-            written out exactly as VALUE is - an array in OSCQuery's PANIC
+            otherwise: one element per type tag, as a node's `values` is, so it
+            is written out exactly as VALUE is - an array in OSCQuery's PANIC
             (namespace draft §3). */
         std::vector<osc::Value> panicValues;
+
+        /*  THE SHAPE OF A NODE THAT SAYS NOTHING ABOUT ITSELF - a container's,
+            and any node never given one: no sentence, no range, the GODOT
+            key's defaults. One for the process. */
+        static const NodeShape& none() noexcept
+        {
+            static const NodeShape nothing;
+            return nothing;
+        }
+    };
+
+    struct Node
+    {
+        /** The full OSC address. Unique, and the tree's only key. */
+        std::string address;
+
+        /*  The kind, the access and the type tags are the node's own rather
+            than its shape's: two words of a byte each, and a list row's TYPE
+            grows with the value it holds (`ddd` for three gains) - so the
+            first two are no cheaper shared and the third is not shareable. */
+        Kind kind = Kind::container;
+        Access access = Access::none;
+
+        /*  OSC type tags, one per argument: "s", "d", "T", or a command's whole
+            signature like "sis". Empty for a container. */
+        std::string typeTags;
+
+        /*  What the node says about itself, shared with every node made from
+            the same row or the same node of a file. Null says nothing, and is
+            read through the accessors below as `NodeShape::none()`. */
+        std::shared_ptr<const NodeShape> shape;
 
         //======================================================================
         /*  The value, when the node has one. EMPTY for a container, and empty
@@ -214,6 +259,36 @@ namespace wfg::tree
             So `typeTags` and this stay the same length, and a node with one
             value has one of each. */
         std::vector<osc::Value> values;
+
+        //======================================================================
+        /*  What the node says about itself, through its shape: every reader
+            asks these, and a node with no shape answers as a container does -
+            no sentence, unbounded, the GODOT key's defaults. */
+        const NodeShape& about() const noexcept { return shape != nullptr ? *shape : NodeShape::none(); }
+
+        const std::string& description() const noexcept                { return about().description; }
+        const std::string& role() const noexcept                       { return about().role; }
+        const std::string& rcpVerb() const noexcept                    { return about().rcpVerb; }
+        int rcpIndexes() const noexcept                                { return about().rcpIndexes; }
+        const std::string& lineTemplate() const noexcept               { return about().lineTemplate; }
+        const MidiShape& midi() const noexcept                         { return about().midi; }
+        bool hasMinimum() const noexcept                               { return about().hasMinimum; }
+        double minimum() const noexcept                                { return about().minimum; }
+        bool hasMaximum() const noexcept                               { return about().hasMaximum; }
+        double maximum() const noexcept                                { return about().maximum; }
+        const std::vector<std::string>& enumValues() const noexcept    { return about().enumValues; }
+        const std::vector<ArgumentRange>& laterRanges() const noexcept { return about().laterRanges; }
+        const std::string& unit() const noexcept                       { return about().unit; }
+        double rateCap() const noexcept                                { return about().rateCap; }
+        bool anticipatable() const noexcept                            { return about().anticipatable; }
+        const std::string& panic() const noexcept                      { return about().panic; }
+        const std::vector<osc::Value>& panicValues() const noexcept    { return about().panicValues; }
+
+        /*  The bounds of one argument, from nought: unbounded where none were
+            given. `Node::ArgumentRange` is the name its readers already use. */
+        using ArgumentRange = tree::ArgumentRange;
+
+        ArgumentRange rangeOf (std::size_t argument) const { return about().rangeOf (argument); }
 
         bool isContainer() const noexcept { return kind == Kind::container; }
 

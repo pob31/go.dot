@@ -1056,7 +1056,7 @@ TEST_CASE ("tree: a run's timbre is the frame at its position, in three numbers 
     REQUIRE (node != nullptr);
     CHECK (node->access == Access::read);
     CHECK (node->typeTags == "s");
-    CHECK (node->rateCap == doctest::Approx (10.0));
+    CHECK (node->rateCap() == doctest::Approx (10.0));
 
     /*  0.3 s is 14 400 samples, 14.06 hops: frame 14, and another reading. */
     moveRun (rig, "R1", 0.3);
@@ -1211,7 +1211,7 @@ TEST_CASE ("tree: a media cue's hash is published by the runtime half, and arriv
     const auto* node = before->find (address);
     REQUIRE (node != nullptr);
     CHECK (node->access == Access::read);
-    CHECK (node->rateCap == doctest::Approx (1.0));
+    CHECK (node->rateCap() == doctest::Approx (1.0));
 
     /*  A media cue's alone: a memo and a group have no file to hash. */
     CHECK (before->find (announce + "/hash") == nullptr);
@@ -1658,7 +1658,7 @@ TEST_CASE ("pairing: pair/role, pair/peers and pair/timeout publish the settings
 
     const auto* role = snapshot->find ("/godot/pair/role");
     REQUIRE (role != nullptr);
-    CHECK (role->enumValues == std::vector<std::string> { "none", "main", "backup" });
+    CHECK (role->enumValues() == std::vector<std::string> { "none", "main", "backup" });
 
     //  What the commands applied is what serve copies into its state.
     REQUIRE (rig.apply (2, "cli", "pair.setRole", { osc::Value::string ("backup") }).applied == 1);

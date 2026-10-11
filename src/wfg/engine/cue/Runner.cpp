@@ -1067,7 +1067,7 @@ namespace wfg::cue
 
         const auto* node = mounts->nodeAt (address);
 
-        if (node == nullptr || ! node->anticipatable)
+        if (node == nullptr || ! node->anticipatable())
             return false;
 
         const auto* declaration = mounts->declarationOf (mounts->mountOf (address));

@@ -265,12 +265,12 @@ namespace wfg::client::model
     {
         const auto* node = snapshot.find (address);
 
-        if (node == nullptr || node->enumValues.empty() || node->typeTags.size() != 1)
+        if (node == nullptr || node->enumValues().empty() || node->typeTags.size() != 1)
             return {};
 
         std::vector<std::string> options;
 
-        for (const auto& value : node->enumValues)
+        for (const auto& value : node->enumValues())
             if (const auto atom = atomFor (node->typeTags.front(), value))
                 options.push_back (*atom);
 

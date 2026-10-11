@@ -84,6 +84,7 @@ namespace wfg::tree
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <numeric>
 #include <set>
 #include <sstream>
@@ -241,50 +242,71 @@ namespace wfg::tree
             return node;
         }
 
-        /*  A leaf built from one row of the parameter table, plus the text of
-            its current value. Everything a client is told about this node comes
-            from the row - the type, the access, the range, the unit, the
-            description and all four GODOT declarations - so there is no second
-            place for any of it to be wrong. */
-        Node makeLeaf (std::string address, const doc::AttributeRow& row,
-                       const std::string& valueText)
+        /*  THE SHAPE OF A NODE NO ROW DESCRIBES - a command, a plugin's
+            parameter, a scan's reading - which says one sentence and leaves
+            everything else as a container's. Made per call: the callers that
+            run every tick keep theirs in a function-local static. */
+        std::shared_ptr<const NodeShape> describedAs (std::string description)
         {
-            /*  The element label is the row's own owner word. Nothing in the
-                value path reads it - parseValue works entirely off the row -
-                and passing a document element name here would only invite
-                someone to believe otherwise. */
-            const doc::Attribute attribute { row.owner, &row };
+            auto shape = std::make_shared<NodeShape>();
+            shape->description = std::move (description);
+            return shape;
+        }
 
-            Node node;
-            node.address = std::move (address);
-            node.kind = kindFor (row.kind);
-            node.access = accessFor (row.access);
-            node.typeTags = std::string (1, row.oscTypeTag);   // widened below for a list
-            node.description = std::string (row.description);
+        /*  AN ADDRESS MADE FROM ITS PIECES IN ONE ALLOCATION, where a chain of
+            `+` makes a string a piece (§31.5): what the rows published for every
+            cue on every tick are addressed with. */
+        std::string pathOf (std::initializer_list<std::string_view> pieces)
+        {
+            std::size_t length = 0;
 
-            node.hasMinimum = row.hasMin;
-            node.minimum = row.minimum;
-            node.hasMaximum = row.hasMax;
-            node.maximum = row.maximum;
-            node.unit = std::string (row.unit);
+            for (const auto piece : pieces)
+                length += piece.size();
+
+            std::string path;
+            path.reserve (length);
+
+            for (const auto piece : pieces)
+                path.append (piece);
+
+            return path;
+        }
+
+        /*  WHAT A NODE MADE FROM ONE ROW SAYS ABOUT ITSELF: the description,
+            the range, the unit, the enumeration and all four GODOT
+            declarations, from the row and nowhere else - so there is no
+            second place for any of it to be wrong. */
+        std::shared_ptr<const NodeShape> makeShape (const doc::AttributeRow& row)
+        {
+            auto shape = std::make_shared<NodeShape>();
+            shape->description = std::string (row.description);
+
+            shape->hasMinimum = row.hasMin;
+            shape->minimum = row.minimum;
+            shape->hasMaximum = row.hasMax;
+            shape->maximum = row.maximum;
+            shape->unit = std::string (row.unit);
 
             for (std::size_t i = 0; i < row.numEnumValues; ++i)
-                node.enumValues.push_back (std::string (row.enumValues[i]));
+                shape->enumValues.push_back (std::string (row.enumValues[i]));
 
-            node.rateCap = row.rateCap;
-            node.anticipatable = row.anticipatable;
-            node.panic = std::string (row.panic);
+            shape->rateCap = row.rateCap;
+            shape->anticipatable = row.anticipatable;
+            shape->panic = std::string (row.panic);
 
             /*  A ROW THAT RESTS AT A VALUE says it in its own type's spelling,
                 which the generator has already checked parses (only a single,
                 state row may: lists and events take park or snap). Read here as
                 the value it is, so the tree publishes a number as a number and
                 never the word for one. Every row says `park` today. */
-            if (node.panic != "park" && node.panic != "snap" && ! row.isList && node.kind == Kind::state)
+            if (shape->panic != "park" && shape->panic != "snap" && ! row.isList
+                  && kindFor (row.kind) == Kind::state)
             {
-                node.panicValues = toOscValues (attribute, node.panic);
+                /*  The element label is the row's own owner word, as in
+                    `makeLeaf`, and for the same reason. */
+                shape->panicValues = toOscValues (doc::Attribute { row.owner, &row }, shape->panic);
 
-                if (node.panicValues.empty())
+                if (shape->panicValues.empty())
                 {
                     /*  CANNOT HAPPEN, AND LOUD IF IT DOES. `generate-schema.py`
                         refuses a literal the row's own type cannot read, and
@@ -293,13 +315,91 @@ namespace wfg::tree
                         It asserts, and publishes `park` - the policy that
                         claims least - rather than a value nobody declared. */
                     jassertfalse;
-                    node.panic = "park";
+                    shape->panic = "park";
                 }
                 else
                 {
-                    node.panic = "value";
+                    shape->panic = "value";
                 }
             }
+
+            return shape;
+        }
+
+        /*  The values a row's text reads as, one per element of a list: what
+            `makeLeaf` publishes. The element label is the row's own owner word.
+            Nothing in the value path reads it - parseValue works entirely off
+            the row - and passing a document element name here would only
+            invite someone to believe otherwise. */
+        std::vector<osc::Value> valuesOf (const doc::AttributeRow& row, const std::string& text)
+        {
+            return toOscValues (doc::Attribute { row.owner, &row }, text);
+        }
+
+        /*  WHAT A ROW MAKES OF EVERY NODE OF IT: its shape, and the value its
+            default text reads as - most of a show's rows sit at their default,
+            and so do most of what the runtime half publishes on a quiet tick,
+            so the text is read once rather than on every node of it. */
+        struct RowLeaf
+        {
+            std::shared_ptr<const NodeShape> shape;
+            std::vector<osc::Value> defaultValues;
+        };
+
+        RowLeaf makeRowLeaf (const doc::AttributeRow& row)
+        {
+            RowLeaf made;
+            made.shape = makeShape (row);
+
+            if (kindFor (row.kind) != Kind::event)
+                made.defaultValues = valuesOf (row, std::string (row.defaultText));
+
+            return made;
+        }
+
+        /*  EVERY ROW'S SHAPE, MADE ONCE FOR THE PROCESS (2026-10-11, §31.5) and
+            shared by every node made from the row from then on. A run's
+            forty-odd rows used to copy their descriptions, units, enumerations
+            and panic words into fresh strings for every run on every tick, and
+            the copying was most of an idle publish in the Debug build. All of
+            them at once, on first use, in a function-local static - so two
+            trees on two threads (a main and a backup in one test process) may
+            both ask, and nothing is written after it is made. */
+        const std::vector<RowLeaf>& rowLeaves()
+        {
+            static const auto made = []
+            {
+                std::vector<RowLeaf> leaves;
+                leaves.reserve (doc::Schema::rowCount());
+
+                for (std::size_t at = 0; at < doc::Schema::rowCount(); ++at)
+                    leaves.push_back (makeRowLeaf (doc::Schema::rowAt (at)));
+
+                return leaves;
+            }();
+
+            return made;
+        }
+
+        /*  A leaf built from one row of the parameter table, plus the text of
+            its current value: the address and the value its own, the rest the
+            row's shared shape. */
+        Node makeLeaf (std::string address, const doc::AttributeRow& row,
+                       const std::string& valueText)
+        {
+            const auto& leaves = rowLeaves();
+            const auto at = doc::Schema::rowIndex (row);
+
+            /*  A row that is not the table's - none is, today - is read as it
+                comes, with a shape of its own. */
+            const auto foreign = at < leaves.size() ? RowLeaf {} : makeRowLeaf (row);
+            const auto& leaf = at < leaves.size() ? leaves[at] : foreign;
+
+            Node node;
+            node.address = std::move (address);
+            node.kind = kindFor (row.kind);
+            node.access = accessFor (row.access);
+            node.shape = leaf.shape;
 
             /*  An event has no value at a given time (PRD §3.3), so it is given
                 none. A nil or a zero would be an answer to a question that has
@@ -315,8 +415,13 @@ namespace wfg::tree
                 so it changes only when the show does. */
             if (node.kind != Kind::event)
             {
-                node.values = toOscValues (attribute, valueText);
+                node.values = valueText == row.defaultText ? leaf.defaultValues
+                                                           : valuesOf (row, valueText);
                 node.typeTags = std::string (node.values.size(), row.oscTypeTag);
+            }
+            else
+            {
+                node.typeTags = std::string (1, row.oscTypeTag);
             }
 
             return node;
@@ -380,9 +485,9 @@ namespace wfg::tree
             return out;
         }
 
-        /*  Every container an address implies, added once, so nothing has to
-            emit `/godot/cue` by hand and then remember to keep it in step with
-            the leaves underneath it.
+        /*  The nodes in address order, with every container an address implies
+            added once, so nothing has to emit `/godot/cue` by hand and then
+            remember to keep it in step with the leaves underneath it.
 
             `ownedElsewhere` is the small set of containers the OTHER half of
             the snapshot is responsible for. The two halves must not both carry
@@ -390,94 +495,163 @@ namespace wfg::tree
             would mean the answer depended on which it happened to look at
             first.
 
-            VIEWS, SORTED ONCE, AND NOTHING COPIED BUT WHAT IS MISSING
-            (2026-10-11). It runs on every tick over the runtime half and on
-            every applied command over the show half, and it was two sets of
-            strings holding a copy of every parent of every address. With the
-            sort after it, it was twenty-nine milliseconds of a GO's forty-five
-            in the Debug build on a show of a thousand nodes, and five of an
-            idle tick's thirteen - enough, on a runner slower than the bench,
-            that a tick took longer than a tick and the clock never caught up
-            (blackbox.first-sound, two seconds behind on Windows CI). The sort
-            was most of it (`sortByAddress`, below); this was two milliseconds
-            of it. Every parent is a prefix of an address already held, so it
-            is a view into that string, sorted and made unique once, and
-            looked up among the addresses present - sorted views too - so the
-            only strings made are the containers that were missing. They are
-            copied before any is pushed, since a push may move the nodes and
-            with them the short strings the views look into. */
-        void addContainers (std::vector<Node>& nodes,
-                            const std::vector<std::string>& ownedElsewhere,
-                            bool includeRoot)
+            THE ORDER WORKED OUT ONCE, THEN EACH NODE MOVED ONCE (2026-10-11).
+            It runs on every tick over the runtime half and on every applied
+            command over the show half, and it was most of a millisecond of an
+            idle tick in the Debug build CI runs even once a node was cheap to
+            move (§31.5). The positions are sorted, by the addresses they point at
+            - a tie keeps the order the nodes were made in, so the answer never
+            depends on the sort. The parents are views into the addresses, and
+            a node whose parent is the one before it - most of them, sorted -
+            adds none, since its ancestors are already wanted; they are looked
+            up among the sorted addresses themselves, and the missing ones,
+            already in order, are merged into the order. Then one pass moves
+            every node into its place and makes every container there.
+
+            AND WHEN THE ADDRESSES ARE THE ONES THE LAST SORT OF THIS HALF WAS
+            HANDED, in the order it was handed them, the order is that sort's
+            (`memo`): the same addresses made in the same order sort to the same
+            place and imply the same containers, so a tick that changed no
+            address - most ticks, and every command that left the show's shape
+            as it was, a GO among them - pays a comparison of each address with
+            its twin rather than a sort. */
+        void sortWithContainers (std::vector<Node>& nodes,
+                                 const std::vector<std::string>& ownedElsewhere,
+                                 bool includeRoot,
+                                 TreeSortMemo* memo = nullptr)
         {
-            std::vector<std::string_view> present;
-            present.reserve (nodes.size() + ownedElsewhere.size());
+            const auto made = nodes.size();
 
-            for (const auto& node : nodes)
-                present.emplace_back (node.address);
+            const auto sameAsBefore = memo != nullptr && memo->valid && memo->root == includeRoot
+                                        && memo->made.size() == made && memo->elsewhere == ownedElsewhere
+                                        && std::equal (nodes.begin(), nodes.end(), memo->made.begin(),
+                                                       [] (const Node& node, const std::string& address)
+                                                       {
+                                                           return node.address == address;
+                                                       });
 
-            for (const auto& address : ownedElsewhere)
-                present.emplace_back (address);
+            std::vector<std::size_t> order;
+            std::vector<std::string> missing;
 
-            std::sort (present.begin(), present.end());
-
-            std::vector<std::string_view> wanted;
-            wanted.reserve (nodes.size() * 2);
-
-            for (const auto& node : nodes)
+            if (! sameAsBefore)
             {
-                std::string_view address { node.address };
+                order.resize (made);
+                std::iota (order.begin(), order.end(), std::size_t { 0 });
 
-                for (;;)
+                std::sort (order.begin(), order.end(),
+                           [&nodes] (std::size_t a, std::size_t b)
+                           {
+                               const auto compared = nodes[a].address.compare (nodes[b].address);
+                               return compared < 0 || (compared == 0 && a < b);
+                           });
+
+                std::vector<std::string_view> wanted;
+                std::string_view previous;
+
+                for (const auto at : order)
                 {
-                    const auto slash = address.rfind ('/');
+                    std::string_view address { nodes[at].address };
+                    auto slash = address.rfind ('/');
 
                     if (slash == std::string_view::npos || slash == 0)
-                        break;
+                        continue;
 
                     address = address.substr (0, slash);
-                    wanted.push_back (address);
+
+                    if (address == previous)
+                        continue;
+
+                    previous = address;
+
+                    for (;;)
+                    {
+                        wanted.push_back (address);
+                        slash = address.rfind ('/');
+
+                        if (slash == std::string_view::npos || slash == 0)
+                            break;
+
+                        address = address.substr (0, slash);
+                    }
+                }
+
+                if (includeRoot)
+                    wanted.push_back (rootAddress);
+
+                std::sort (wanted.begin(), wanted.end());
+                wanted.erase (std::unique (wanted.begin(), wanted.end()), wanted.end());
+
+                std::vector<std::string_view> elsewhere (ownedElsewhere.begin(), ownedElsewhere.end());
+                std::sort (elsewhere.begin(), elsewhere.end());
+
+                const auto held = [&nodes, &order] (std::string_view address)
+                {
+                    const auto at = std::lower_bound (order.begin(), order.end(), address,
+                                                      [&nodes] (std::size_t position, std::string_view target)
+                                                      {
+                                                          return std::string_view (nodes[position].address) < target;
+                                                      });
+
+                    return at != order.end() && nodes[*at].address == address;
+                };
+
+                for (const auto address : wanted)
+                    if (! held (address) && ! std::binary_search (elsewhere.begin(), elsewhere.end(), address))
+                        missing.emplace_back (address);
+
+                /*  Both in address order, so one pass puts each container -
+                    numbered after the nodes made - before the first node that
+                    sorts after it. */
+                if (! missing.empty())
+                {
+                    std::vector<std::size_t> merged;
+                    merged.reserve (made + missing.size());
+
+                    std::size_t container = 0;
+
+                    for (const auto at : order)
+                    {
+                        while (container < missing.size() && missing[container] < nodes[at].address)
+                            merged.push_back (made + container++);
+
+                        merged.push_back (at);
+                    }
+
+                    while (container < missing.size())
+                        merged.push_back (made + container++);
+
+                    order = std::move (merged);
+                }
+
+                if (memo != nullptr)
+                {
+                    memo->made.clear();
+                    memo->made.reserve (made);
+
+                    for (const auto& node : nodes)
+                        memo->made.push_back (node.address);
+
+                    memo->elsewhere = ownedElsewhere;
+                    memo->root = includeRoot;
+                    memo->order = order;
+                    memo->containers = missing;
+                    memo->valid = true;
                 }
             }
 
-            if (includeRoot)
-                wanted.push_back (rootAddress);
-
-            std::sort (wanted.begin(), wanted.end());
-            wanted.erase (std::unique (wanted.begin(), wanted.end()), wanted.end());
-
-            std::vector<std::string> missing;
-
-            for (const auto address : wanted)
-                if (! std::binary_search (present.begin(), present.end(), address))
-                    missing.emplace_back (address);
-
-            for (auto& address : missing)
-                nodes.push_back (makeContainer (std::move (address)));
-        }
-
-        /*  THE ORDER SORTED, THEN EACH NODE MOVED ONCE (2026-10-11). A node is a
-            dozen strings, vectors and a MIDI shape since the device presets
-            (§57), and a sort that swaps nodes moves each of them log n times.
-            The positions are what is sorted now, by the addresses they point
-            at, and the nodes are moved into place in one pass: in the Debug
-            build CI runs, with `addContainers` before it, a GO's rebuild of
-            the show half fell from forty-five milliseconds to twenty-seven and
-            an idle tick's runtime half from thirteen to nine, and
-            blackbox.first-sound's worst lateness from 256 ms to 93. */
-        void sortByAddress (std::vector<Node>& nodes)
-        {
-            std::vector<std::size_t> order (nodes.size());
-            std::iota (order.begin(), order.end(), std::size_t { 0 });
-
-            std::sort (order.begin(), order.end(),
-                       [&nodes] (std::size_t a, std::size_t b) { return nodes[a].address < nodes[b].address; });
+            const auto& placed = sameAsBefore ? memo->order : order;
+            const auto& containers = sameAsBefore ? memo->containers : missing;
 
             std::vector<Node> sorted;
-            sorted.reserve (nodes.size());
+            sorted.reserve (placed.size());
 
-            for (const auto at : order)
-                sorted.push_back (std::move (nodes[at]));
+            for (const auto at : placed)
+            {
+                if (at < made)
+                    sorted.push_back (std::move (nodes[at]));
+                else
+                    sorted.push_back (makeContainer (containers[at - made]));
+            }
 
             nodes = std::move (sorted);
         }
@@ -1066,6 +1240,74 @@ namespace wfg::tree
             return out;
         }
 
+        /*  WHAT A CUE'S ROW READS ITS TEXT FROM, decided once from the row's
+            name rather than asked of it again and again (2026-10-11, §31.5): the
+            walk below went through thirty comparisons for each of the eighty
+            or so rows of every cue, on every rebuild of the show half - which
+            every applied command brings, a GO among them. `stored` is the
+            row's own attribute; the rest are derived, or skipped (`prepare`,
+            and `hash`, `frameRate` and `codec` on the owners whose rows the
+            runtime half publishes), each named for the row it reads. */
+        enum class CueRow
+        {
+            stored, prepare, hash, frameRateOrCodec, kind, parent, autoName, index, role, fx,
+            chainChannels, insertLatency, duration, outsBusy, outsMaybe, stripNow, stripsBefore,
+            live, overrideWord, sends, sections, messages, curves, eq, dcaMark, headerDerived,
+            order, headerOrder, footerOrder, section
+        };
+
+        CueRow classifyCueRow (std::string_view name)
+        {
+            static constexpr std::pair<std::string_view, CueRow> names[] =
+            {
+                { "prepare", CueRow::prepare }, { "prepareError", CueRow::prepare },
+                { "hash", CueRow::hash }, { "frameRate", CueRow::frameRateOrCodec },
+                { "codec", CueRow::frameRateOrCodec }, { "kind", CueRow::kind },
+                { "parent", CueRow::parent }, { "autoName", CueRow::autoName },
+                { "index", CueRow::index }, { "role", CueRow::role }, { "fx", CueRow::fx },
+                { "chainChannels", CueRow::chainChannels }, { "insertLatency", CueRow::insertLatency },
+                { "duration", CueRow::duration }, { "outsBusy", CueRow::outsBusy },
+                { "outsMaybe", CueRow::outsMaybe }, { "stripNow", CueRow::stripNow },
+                { "stripsBefore", CueRow::stripsBefore }, { "live", CueRow::live },
+                { "override", CueRow::overrideWord }, { "sends", CueRow::sends },
+                { "sections", CueRow::sections }, { "messages", CueRow::messages },
+                { "curves", CueRow::curves }, { "dcaCurve", CueRow::dcaMark },
+                { "dcaOffset", CueRow::dcaMark }, { "headerDerived", CueRow::headerDerived },
+                { "order", CueRow::order }, { "headerOrder", CueRow::headerOrder },
+                { "footerOrder", CueRow::footerOrder }, { "header", CueRow::section },
+                { "footer", CueRow::section }
+            };
+
+            for (const auto& [word, which] : names)
+                if (name == word)
+                    return which;
+
+            //  An EQ row: what a locked show rides, where it rides one.
+            if (name.substr (0, 2) == "eq")
+                return CueRow::eq;
+
+            return CueRow::stored;
+        }
+
+        /*  Every row of the table classified once, on first use - a
+            function-local static, never written after it is made. */
+        CueRow cueRowOf (const doc::AttributeRow& row)
+        {
+            static const auto classified = []
+            {
+                std::vector<CueRow> made;
+                made.reserve (doc::Schema::rowCount());
+
+                for (std::size_t at = 0; at < doc::Schema::rowCount(); ++at)
+                    made.push_back (classifyCueRow (doc::Schema::rowAt (at).name));
+
+                return made;
+            }();
+
+            const auto at = doc::Schema::rowIndex (row);
+            return at < classified.size() ? classified[at] : classifyCueRow (row.name);
+        }
+
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
                          std::vector<Node>& out,
                          const std::map<std::string, double>* durations,
@@ -1188,202 +1430,247 @@ namespace wfg::tree
             for (const auto* row : rows)
             {
                 const doc::Attribute attribute { element, row };
-                const auto name = std::string (row->name);
-
-                /*  `prepare` is NOT emitted here. How far ahead a cue has been
-                    got ready changes as the pointer moves while nothing about
-                    the show does, and this half is a cache - published from
-                    here it would freeze at whatever it was when a cue was last
-                    edited. The runtime half emits it, against the roster this
-                    walk leaves behind. Same rule as a slot's `holder`. */
-                if (name == "prepare" || name == "prepareError")
-                    continue;
-
-                /*  NOR IS A MEDIA CUE'S `hash`, for the same reason with a
-                    different clock. It arrives when the analyser has read the
-                    file - seconds or minutes after the show opened, on a thread
-                    of its own - and nothing about the show moves when it does,
-                    so published from here it would read empty until somebody
-                    happened to edit a cue. The runtime half emits it against
-                    the media roster this walk leaves behind, and only there:
-                    both halves carrying the address would make the answer
-                    depend on which one `find` reached first (§14.5). */
-                if (row->owner == "media" && name == "hash")
-                    continue;
-
-                /*  AND A MOVIE'S FRAME RATE AND CODEC (namespace draft §55.5), for
-                    the same reason: read off the file by the analyser, after. */
-                if (row->owner == "video" && (name == "frameRate" || name == "codec"))
-                    continue;
-
+                const std::string_view name { row->name };
                 std::string text;
 
-                /*  Derived from the element, never stored - which is what makes
-                    it read-only in a way a client cannot argue with. */
-                if (name == "kind")        text = isGroup ? "group"
-                                                  : isMedia ? "media"
-                                                  : isMic   ? "mic"
-                                                  : isVideo ? "video"
-                                                  : isFade  ? "fade"
-                                                  : isStop  ? "transport"
-                                                  : isOsc   ? "osc"
-                                                  : isMidi  ? "midi"
-                                                  : isStart ? "start"
-                                                  : isProcess ? "process"
-                                                            : "memo";
-                else if (name == "parent") text = parentId;
-                /*  WHAT THE CUE IS CALLED WHILE ITS NAME IS EMPTY (namespace
-                    draft §53), from the show and never stored: a fade's follows
-                    its target's name, so it is worked out on every rebuild of
-                    this half, which any edit of the show brings. */
-                else if (name == "autoName") text = names.of (node);
-                else if (name == "index")  text = std::to_string (index);
-                else if (name == "role")   text = role;
-                else if (name == "fx" && (isMedia || isMic)) text = enabledFxInChainOrder (node);
-                else if (name == "chainChannels" && (isMedia || isMic))
-                    text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).channels);
-                else if (name == "insertLatency" && (isMedia || isMic))
-                    text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).latencySamples);
-                else if (name == "duration" && (isMedia || isVideo))
-                {
-                    /*  READ ONCE WHEN THE SHOW WAS OPENED, and nought when
-                        nobody read any: a replay, a tree dump of a bundle with
-                        no media folder, a test. Nought is the same answer a
-                        missing or unreadable file gives, and §3.13's solver
-                        reads it as "I do not know how long this is" rather than
-                        as "this has ended".
+                const auto which = cueRowOf (*row);
 
-                        A MEDIA CUE'S ONLY, and the guard is a fix (PR 5.8).
-                        `fade` and `stop` carry a `duration` row of their own -
-                        a length somebody DECIDED, rw and stored - and without
-                        it this branch answered theirs from the media table too,
-                        keyed by a `file` they do not have: every fade and stop
-                        published a duration of nought whatever the show said,
-                        since PR 4.1. Theirs falls through to the stored text. */
-                    /*  AS LONG AS THE CUE PLAYS (namespace draft §55): its edit's
-                        sections put together while the edit is open - a fact of
-                        the show, which this cached half may carry - else its
-                        file's, from the table. */
-                    text = osc::formatDouble (cue::playedLengthOf (node, durations).value_or (0.0));
-                }
-                else if (name == "outsBusy" && isMedia)
+                switch (which)
                 {
+                    /*  `prepare` is NOT emitted here. How far ahead a cue has
+                        been got ready changes as the pointer moves while nothing
+                        about the show does, and this half is a cache - published
+                        from here it would freeze at whatever it was when a cue
+                        was last edited. The runtime half emits it, against the
+                        roster this walk leaves behind. Same rule as a slot's
+                        `holder`. */
+                    case CueRow::prepare:
+                        continue;
+
+                    /*  NOR IS A MEDIA CUE'S `hash`, for the same reason with a
+                        different clock. It arrives when the analyser has read
+                        the file - seconds or minutes after the show opened, on a
+                        thread of its own - and nothing about the show moves when
+                        it does, so published from here it would read empty until
+                        somebody happened to edit a cue. The runtime half emits
+                        it against the media roster this walk leaves behind, and
+                        only there: both halves carrying the address would make
+                        the answer depend on which one `find` reached first
+                        (§14.5). */
+                    case CueRow::hash:
+                        if (row->owner == "media")
+                            continue;
+
+                        text = storedText (attribute, node);
+                        break;
+
+                    /*  AND A MOVIE'S FRAME RATE AND CODEC (namespace draft §55.5),
+                        for the same reason: read off the file by the analyser,
+                        after. */
+                    case CueRow::frameRateOrCodec:
+                        if (row->owner == "video")
+                            continue;
+
+                        text = storedText (attribute, node);
+                        break;
+
+                    /*  Derived from the element, never stored - which is what
+                        makes it read-only in a way a client cannot argue with. */
+                    case CueRow::kind:
+                        text = isGroup ? "group"
+                             : isMedia ? "media"
+                             : isMic   ? "mic"
+                             : isVideo ? "video"
+                             : isFade  ? "fade"
+                             : isStop  ? "transport"
+                             : isOsc   ? "osc"
+                             : isMidi  ? "midi"
+                             : isStart ? "start"
+                             : isProcess ? "process"
+                                         : "memo";
+                        break;
+
+                    case CueRow::parent: text = parentId; break;
+
+                    /*  WHAT THE CUE IS CALLED WHILE ITS NAME IS EMPTY (namespace
+                        draft §53), from the show and never stored: a fade's
+                        follows its target's name, so it is worked out on every
+                        rebuild of this half, which any edit of the show brings. */
+                    case CueRow::autoName: text = names.of (node); break;
+                    case CueRow::index:    text = std::to_string (index); break;
+                    case CueRow::role:     text = role; break;
+
+                    case CueRow::fx:
+                        text = isMedia || isMic ? enabledFxInChainOrder (node) : storedText (attribute, node);
+                        break;
+
+                    case CueRow::chainChannels:
+                        text = isMedia || isMic
+                                 ? std::to_string (cue::chainOfCue (node, walkPlugins().table,
+                                                                    walkPlugins().trackChannels).channels)
+                                 : storedText (attribute, node);
+                        break;
+
+                    case CueRow::insertLatency:
+                        text = isMedia || isMic
+                                 ? std::to_string (cue::chainOfCue (node, walkPlugins().table,
+                                                                    walkPlugins().trackChannels).latencySamples)
+                                 : storedText (attribute, node);
+                        break;
+
+                    case CueRow::duration:
+                        /*  READ ONCE WHEN THE SHOW WAS OPENED, and nought when
+                            nobody read any: a replay, a tree dump of a bundle with
+                            no media folder, a test. Nought is the same answer a
+                            missing or unreadable file gives, and §3.13's solver
+                            reads it as "I do not know how long this is" rather
+                            than as "this has ended".
+
+                            A MEDIA CUE'S ONLY, and the guard is a fix (PR 5.8).
+                            `fade` and `stop` carry a `duration` row of their own
+                            - a length somebody DECIDED, rw and stored - and
+                            without it this branch answered theirs from the media
+                            table too, keyed by a `file` they do not have: every
+                            fade and stop published a duration of nought whatever
+                            the show said, since PR 4.1. Theirs is the stored
+                            text. */
+                        /*  AS LONG AS THE CUE PLAYS (namespace draft §55): its
+                            edit's sections put together while the edit is open -
+                            a fact of the show, which this cached half may carry -
+                            else its file's, from the table. */
+                        text = isMedia || isVideo
+                                 ? osc::formatDouble (cue::playedLengthOf (node, durations).value_or (0.0))
+                                 : storedText (attribute, node);
+                        break;
+
                     /*  WHICH OUTPUTS ARE TAKEN WHERE THIS CUE PLAYS, from the
                         same revision-keyed cache the slot rows come from.
 
                         PUBLISHED PER CUE AND NOT PER BUS, and the asymmetry is
                         the question rather than a preference. `bus/usage`
-                        answers "who is on this output"; a menu asks "what is
-                        in the way of THIS cue", and a client cannot work the
+                        answers "who is on this output"; a menu asks "what is in
+                        the way of THIS cue", and a client cannot work the
                         second out of the first - it would have to reconstruct
-                        row order across nested groups, headers and footers,
-                        and it could not compute the seconds rule at all. That
-                        is re-implementing `ShowWalk` in a client, which is
-                        what the boundary check exists to prevent. */
-                    text = analysis.busyOutsOf (id);
-                }
-                else if (name == "outsMaybe" && isMedia)
-                {
-                    text = analysis.maybeOutsOf (id);
-                }
-                /*  AND WHICH STRIP A SAMPLER MEMBER IS PLAYED FROM, with what
-                    the list put on each strip before it (author, 2026-09-25),
-                    from a cache keyed like the analysis above - the menu's
-                    words, computed where the placement rule lives. */
-                else if (name == "stripNow" && (isMedia || isVideo))
-                {
-                    text = layout.stripOf (id);
-                }
-                else if (name == "stripsBefore" && (isMedia || isVideo))
-                {
-                    text = layout.stripsBeforeOf (id);
-                }
-                /*  WHAT A LOCKED SHOW IS RIDING on this cue (2026-09-25): the
-                    rows held live, and the value each is heard at in place of
-                    the saved one - at the same address, so a client reading a
-                    cue's EQ reads what plays. */
-                else if (name == "live" && isMedia)
-                {
-                    /*  THE EQ'S ROWS ONLY: what the EQ panel says is riding. A
-                        DCA mark held live (namespace draft §50) is the knob's,
-                        and the window's bar counts it. */
-                    if (live != nullptr)
+                        row order across nested groups, headers and footers, and
+                        it could not compute the seconds rule at all. That is
+                        re-implementing `ShowWalk` in a client, which is what the
+                        boundary check exists to prevent. */
+                    case CueRow::outsBusy:
+                        text = isMedia ? analysis.busyOutsOf (id) : storedText (attribute, node);
+                        break;
+
+                    case CueRow::outsMaybe:
+                        text = isMedia ? analysis.maybeOutsOf (id) : storedText (attribute, node);
+                        break;
+
+                    /*  AND WHICH STRIP A SAMPLER MEMBER IS PLAYED FROM, with what
+                        the list put on each strip before it (author,
+                        2026-09-25), from a cache keyed like the analysis above -
+                        the menu's words, computed where the placement rule
+                        lives. */
+                    case CueRow::stripNow:
+                        text = isMedia || isVideo ? layout.stripOf (id) : storedText (attribute, node);
+                        break;
+
+                    case CueRow::stripsBefore:
+                        text = isMedia || isVideo ? layout.stripsBeforeOf (id) : storedText (attribute, node);
+                        break;
+
+                    /*  WHAT A LOCKED SHOW IS RIDING on this cue (2026-09-25): the
+                        rows held live, and the value each is heard at in place
+                        of the saved one - at the same address, so a client
+                        reading a cue's EQ reads what plays. */
+                    case CueRow::live:
+                        if (! isMedia)
+                        {
+                            text = storedText (attribute, node);
+                            break;
+                        }
+
+                        /*  THE EQ'S ROWS ONLY: what the EQ panel says is riding.
+                            A DCA mark held live (namespace draft §50) is the
+                            knob's, and the window's bar counts it. */
+                        if (live != nullptr)
+                        {
+                            std::istringstream words (live->rowsOf (id));
+
+                            for (std::string word; words >> word;)
+                                if (word.rfind ("eq", 0) == 0)
+                                    text += (text.empty() ? "" : " ") + word;
+                        }
+
+                        break;
+
+                    /*  WHAT THIS RUN HAS SWITCHED (namespace draft §27): read off
+                        the node, where `setOverride` holds it. Safe in this
+                        cached half, because a mark that moves moves
+                        `revision()` and the cache with it. */
+                    case CueRow::overrideWord: text = cue::overrideWord (node); break;
+
+                    case CueRow::sends:
+                        text = isMedia ? sendsOf (node, id, live) : storedText (attribute, node);
+                        break;
+
+                    case CueRow::sections:
+                        text = isMedia || isVideo ? sectionsOf (node) : storedText (attribute, node);
+                        break;
+
+                    /*  AN OSC CUE'S FURTHER MESSAGES, in their order (namespace
+                        draft 45): the containment read back, as `zones` is. */
+                    case CueRow::messages:
+                        for (const auto& child : node)
+                            if (child.hasType ("Message") && child.hasProperty (idProperty))
+                                text += (text.empty() ? "" : " ") + child[idProperty].toString().toStdString();
+                        break;
+
+                    case CueRow::curves: text = curvesOf (node); break;
+
+                    /*  The EQ as a locked show is riding it, where it rides one;
+                        and what a DCA mark carries, held live, on every kind that
+                        has one (§50, ABQ). */
+                    case CueRow::eq:
+                    case CueRow::dcaMark:
                     {
-                        std::istringstream words (live->rowsOf (id));
-
-                        for (std::string word; words >> word;)
-                            if (word.rfind ("eq", 0) == 0)
-                                text += (text.empty() ? "" : " ") + word;
+                        const auto rides = which == CueRow::eq ? isMedia : (isMedia || isMic || isVideo || isGroup);
+                        const auto* riding = rides && live != nullptr ? live->rowOf (id, std::string (name)) : nullptr;
+                        text = riding != nullptr ? *riding : storedText (attribute, node);
+                        break;
                     }
-                }
-                /*  WHAT THIS RUN HAS SWITCHED (namespace draft §27): read off the
-                    node, where `setOverride` holds it. Safe in this cached half,
-                    because a mark that moves moves `revision()` and the cache
-                    with it. */
-                else if (name == "override")
-                {
-                    text = cue::overrideWord (node);
-                }
-                else if (name == "sends" && isMedia)
-                {
-                    text = sendsOf (node, id, live);
-                }
-                else if (name == "sections" && (isMedia || isVideo))
-                {
-                    text = sectionsOf (node);
-                }
-                /*  AN OSC CUE'S FURTHER MESSAGES, in their order (namespace
-                    draft 45): the containment read back, as `zones` is. */
-                else if (name == "messages")
-                {
-                    for (const auto& child : node)
-                        if (child.hasType ("Message") && child.hasProperty (idProperty))
-                            text += (text.empty() ? "" : " ") + child[idProperty].toString().toStdString();
-                }
-                else if (name == "curves")
-                {
-                    text = curvesOf (node);
-                }
-                else if (isMedia && live != nullptr && name.rfind ("eq", 0) == 0
-                           && live->rowOf (id, name) != nullptr)
-                {
-                    text = *live->rowOf (id, name);
-                }
-                //  And what a DCA mark carries, held live, on every kind that has one (§50, ABQ).
-                else if ((isMedia || isMic || isVideo || isGroup) && live != nullptr
-                           && (name == "dcaCurve" || name == "dcaOffset") && live->rowOf (id, name) != nullptr)
-                {
-                    text = *live->rowOf (id, name);
-                }
-                else if (name == "headerDerived")
-                {
-                    std::vector<std::string> derived;
-                    collectPresets (node, id, derived);
 
-                    for (const auto& derivedId : derived)
+                    case CueRow::headerDerived:
                     {
-                        if (! text.empty())
-                            text += ' ';
+                        std::vector<std::string> derived;
+                        collectPresets (node, id, derived);
 
-                        text += derivedId;
+                        for (const auto& derivedId : derived)
+                        {
+                            if (! text.empty())
+                                text += ' ';
+
+                            text += derivedId;
+                        }
+
+                        break;
                     }
-                }
-                else if (name == "order")  text = orderOf (node);
-                else if (name == "headerOrder")
-                    text = orderOf (node.getChildWithName ("Header"));
-                else if (name == "footerOrder")
-                    text = orderOf (node.getChildWithName ("Footer"));
-                /*  THE SECTIONS' OWN NAMES, as the list's `persistent` is: what
-                    a client hands `object.move` to put a cue in one. Empty
-                    until `group.role` has made the section. */
-                else if (name == "header" || name == "footer")
-                {
-                    const auto section = node.getChildWithName (name == "header" ? "Header" : "Footer");
-                    text = section.isValid() ? section[idProperty].toString().toStdString() : std::string {};
-                }
-                else                       text = storedText (attribute, node);
 
-                out.push_back (makeLeaf (base + "/" + name, *row, text));
+                    case CueRow::order:       text = orderOf (node); break;
+                    case CueRow::headerOrder: text = orderOf (node.getChildWithName ("Header")); break;
+                    case CueRow::footerOrder: text = orderOf (node.getChildWithName ("Footer")); break;
+
+                    /*  THE SECTIONS' OWN NAMES, as the list's `persistent` is:
+                        what a client hands `object.move` to put a cue in one.
+                        Empty until `group.role` has made the section. */
+                    case CueRow::section:
+                    {
+                        const auto found = node.getChildWithName (name == "header" ? "Header" : "Footer");
+                        text = found.isValid() ? found[idProperty].toString().toStdString() : std::string {};
+                        break;
+                    }
+
+                    case CueRow::stored: text = storedText (attribute, node); break;
+                }
+
+                out.push_back (makeLeaf (pathOf ({ base, "/", name }), *row, text));
             }
 
             int childIndex = 0;
@@ -1625,7 +1912,9 @@ namespace wfg::tree
         //  Every identified node indexed once, for every cue's automatic name.
         const cue::AutoNames autoNames { document.root() };
 
+        //  As many as the last rebuild made: an edit moves a node or two (§31.5).
         std::vector<Node> nodes;
+        nodes.reserve (documentNodesSeen);
 
         const auto showNode = document.root();
 
@@ -2678,7 +2967,7 @@ namespace wfg::tree
                                     node.kind = Kind::state;
                                     node.access = Access::read;
                                     node.typeTags = tags;
-                                    node.description = std::move (description);
+                                    node.shape = describedAs (std::move (description));
                                     node.values.push_back (std::move (value));
                                     nodes.push_back (std::move (node));
                                 };
@@ -2722,23 +3011,32 @@ namespace wfg::tree
             {
                 const auto at = std::string (godot) + "/plugin/known/" + std::to_string (n) + "/";
 
-                const auto leaf = [&nodes, &at] (const char* name, const char* description, const std::string& value)
+                const auto leaf = [&nodes, &at] (const char* name, const std::shared_ptr<const NodeShape>& shape,
+                                                 const std::string& value)
                 {
                     Node node;
                     node.address = at + name;
                     node.kind = Kind::state;
                     node.access = Access::read;
                     node.typeTags = "s";
-                    node.description = description;
+                    node.shape = shape;
                     node.values.push_back (osc::Value::string (value));
                     nodes.push_back (std::move (node));
                 };
 
-                leaf ("name", "A plugin this machine has, by the name its file gives", known[n].name);
-                leaf ("identifier", "The identifier plugin.create takes for it", known[n].identifier);
-                leaf ("format", "Its format: VST3, AU or LV2 - plugin.create's third word", known[n].format);
-                leaf ("manufacturer", "Who made it, as the file says", known[n].manufacturer);
-                leaf ("path", "Where its file is on this machine - plugin.create's fourth word", known[n].path);
+                /*  Five sentences for every plugin this machine has, which is
+                    hundreds on a studio's machine: made once, and shared. */
+                static const auto nameShape = describedAs ("A plugin this machine has, by the name its file gives");
+                static const auto identifierShape = describedAs ("The identifier plugin.create takes for it");
+                static const auto formatShape = describedAs ("Its format: VST3, AU or LV2 - plugin.create's third word");
+                static const auto manufacturerShape = describedAs ("Who made it, as the file says");
+                static const auto pathShape = describedAs ("Where its file is on this machine - plugin.create's fourth word");
+
+                leaf ("name", nameShape, known[n].name);
+                leaf ("identifier", identifierShape, known[n].identifier);
+                leaf ("format", formatShape, known[n].format);
+                leaf ("manufacturer", manufacturerShape, known[n].manufacturer);
+                leaf ("path", pathShape, known[n].path);
             }
 
             /*  THE FILES A SCAN GAVE UP ON, which every scan skips until one
@@ -2752,8 +3050,11 @@ namespace wfg::tree
                 node.kind = Kind::state;
                 node.access = Access::read;
                 node.typeTags = "s";
-                node.description = "A file a scan gave up on - it hung past the deadline or took the scan down"
-                                   " - skipped until plugin.scanRetry names it";
+
+                static const auto skippedShape = describedAs ("A file a scan gave up on - it hung past the deadline"
+                                                              " or took the scan down - skipped until"
+                                                              " plugin.scanRetry names it");
+                node.shape = skippedShape;
                 node.values.push_back (osc::Value::string (skipped[n]));
                 nodes.push_back (std::move (node));
             }
@@ -2857,25 +3158,40 @@ namespace wfg::tree
         /*  Commands, as write-only method nodes. `node.set` is deliberately
             absent: its signature is whatever the target node declares, so it
             has no fixed one to publish, and its address IS the target's. */
-        for (const auto& command : commands.all())
+        /*  MADE ONCE PER REGISTRY REVISION (2026-10-11, §31.5), as the preset
+            rows are: two hundred and more commands, each a sentence, were made
+            again on every applied command - a GO included - while the registry
+            had not moved since the engine started. Copied in otherwise, the
+            sentences shared. */
+        if (! commandLeavesMade || commands.revision() != commandLeavesStamp)
         {
-            if (command.name == "node.set")
-                continue;
+            commandLeaves.clear();
 
-            auto address = std::string (godot) + "/cmd/" + command.name;
-            std::replace (address.begin(), address.end(), '.', '/');
+            for (const auto& command : commands.all())
+            {
+                if (command.name == "node.set")
+                    continue;
 
-            Node node;
-            node.address = std::move (address);
-            node.kind = Kind::event;
-            node.access = Access::write;
-            node.description = command.description;
+                auto address = std::string (godot) + "/cmd/" + command.name;
+                std::replace (address.begin(), address.end(), '.', '/');
 
-            for (const auto& param : command.params)
-                node.typeTags += param.typeTag;
+                Node node;
+                node.address = std::move (address);
+                node.kind = Kind::event;
+                node.access = Access::write;
+                node.shape = describedAs (command.description);
 
-            nodes.push_back (std::move (node));
+                for (const auto& param : command.params)
+                    node.typeTags += param.typeTag;
+
+                commandLeaves.push_back (std::move (node));
+            }
+
+            commandLeavesMade = true;
+            commandLeavesStamp = commands.revision();
         }
+
+        nodes.insert (nodes.end(), commandLeaves.begin(), commandLeaves.end());
 
         /*  EVERY INSERT'S PARAMETER NODES (Phase 9a, PR 9a.8): for each Fx of
             each media cue, `p<n>` - a value a hand writes, one node a
@@ -2924,15 +3240,19 @@ namespace wfg::tree
                         p.kind = Kind::state;
                         p.access = Access::readWrite;
                         p.typeTags = "d";
-                        p.description = parameter.name.empty() ? "Parameter " + std::to_string (n) : parameter.name;
-                        p.unit = parameter.unit;
-                        p.hasMinimum = true;
-                        p.minimum = 0.0;
-                        p.hasMaximum = true;
-                        p.maximum = 1.0;
+
+                        auto shape = std::make_shared<NodeShape>();
+                        shape->description = parameter.name.empty() ? "Parameter " + std::to_string (n) : parameter.name;
+                        shape->unit = parameter.unit;
+                        shape->hasMinimum = true;
+                        shape->minimum = 0.0;
+                        shape->hasMaximum = true;
+                        shape->maximum = 1.0;
 
                         if (parameter.discrete)
-                            p.enumValues = parameter.stepText;
+                            shape->enumValues = parameter.stepText;
+
+                        p.shape = std::move (shape);
 
                         p.values.push_back (osc::Value::float64 (static_cast<double> (value)));
                         nodes.push_back (std::move (p));
@@ -2942,7 +3262,7 @@ namespace wfg::tree
                         t.kind = Kind::state;
                         t.access = Access::read;
                         t.typeTags = "s";
-                        t.description = "What the plugin calls the value of p" + std::to_string (n) + ", in its own words";
+                        t.shape = describedAs ("What the plugin calls the value of p" + std::to_string (n) + ", in its own words");
                         t.values.push_back (osc::Value::string (parameter.textFor (value)));
                         nodes.push_back (std::move (t));
                     }
@@ -2961,10 +3281,19 @@ namespace wfg::tree
                         p.kind = Kind::state;
                         p.access = Access::readWrite;
                         p.typeTags = "d";
-                        p.description = "A value written against a version of the plugin with more parameters than this one";
-                        p.hasMinimum = true;
-                        p.hasMaximum = true;
-                        p.maximum = 1.0;
+
+                        static const auto beyondShape = []
+                        {
+                            auto shape = std::make_shared<NodeShape>();
+                            shape->description = "A value written against a version of the plugin with more"
+                                                 " parameters than this one";
+                            shape->hasMinimum = true;
+                            shape->hasMaximum = true;
+                            shape->maximum = 1.0;
+                            return std::shared_ptr<const NodeShape> (std::move (shape));
+                        }();
+
+                        p.shape = beyondShape;
                         p.values.push_back (osc::Value::float64 (value));
                         nodes.push_back (std::move (p));
                     }
@@ -2979,9 +3308,9 @@ namespace wfg::tree
             walk (showNode.getChildWithName ("Lists"));
         }
 
-        addContainers (nodes, {}, true);
-        sortByAddress (nodes);
+        sortWithContainers (nodes, {}, true, &documentSort);
 
+        documentNodesSeen = nodes.size();
         documentPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
         pluginRevision = pluginRevisionSeen;
         catalogueRevision = catalogueRevisionSeen;
@@ -3014,8 +3343,7 @@ namespace wfg::tree
             /wfs/input are nobody's nodes until somebody mounts a processor
             there. Built here rather than in the document half so that
             unloading a mount takes its path with it. */
-        addContainers (nodes, {}, false);
-        sortByAddress (nodes);
+        sortWithContainers (nodes, {}, false);
 
         mountPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
         mountRevision = mounts.revision();
@@ -3152,6 +3480,82 @@ namespace wfg::tree
 
             return osc::formatDouble (std::max (-120.0, std::round (below * 10.0) / 10.0));
         }
+
+        /*  WHICH ROW OF A RUN, decided once from the row's name rather than
+            asked of it again and again (2026-10-11, §31.5): a chain of forty
+            string comparisons a row, for every row of every run on every tick,
+            was a measurable part of an idle publish in the Debug build. */
+        enum class RunRow
+        {
+            cue, kind, state, track, position, started, remaining, timbre, envelope, tint,
+            meter, level, rate, trim, late, parent, children, phase, claims, pending,
+            warning, asserted, seekable, roundFrom, roundLength, strip, held, solo, error,
+            processState, processLate, processDropped, said, ports, iteration, iterations,
+            round, pruned, seed, range, rangeIteration,
+
+            /*  A row this publish does not know, which reads its default - a
+                row added to the table before anybody wrote its reading. */
+            other
+        };
+
+        /*  A run's row, what it is, and the tail of its address - `/state` -
+            made once so a run's forty-odd addresses are one concatenation
+            each. */
+        struct RunRowEntry
+        {
+            const doc::AttributeRow* row = nullptr;
+            RunRow which = RunRow::other;
+            std::string suffix;
+        };
+
+        /*  The `run` owner's rows in table order, each read once - a
+            function-local static, so made on first use whichever thread asks
+            and never written again. */
+        const std::vector<RunRowEntry>& runRows()
+        {
+            static const auto rows = []
+            {
+                static constexpr std::pair<std::string_view, RunRow> names[] =
+                {
+                    { "cue", RunRow::cue }, { "kind", RunRow::kind }, { "state", RunRow::state },
+                    { "track", RunRow::track }, { "position", RunRow::position },
+                    { "started", RunRow::started }, { "remaining", RunRow::remaining },
+                    { "timbre", RunRow::timbre }, { "envelope", RunRow::envelope }, { "tint", RunRow::tint },
+                    { "meter", RunRow::meter }, { "level", RunRow::level }, { "rate", RunRow::rate },
+                    { "trim", RunRow::trim }, { "late", RunRow::late }, { "parent", RunRow::parent },
+                    { "children", RunRow::children }, { "phase", RunRow::phase }, { "claims", RunRow::claims },
+                    { "pending", RunRow::pending }, { "warning", RunRow::warning },
+                    { "asserted", RunRow::asserted }, { "seekable", RunRow::seekable },
+                    { "roundFrom", RunRow::roundFrom }, { "roundLength", RunRow::roundLength },
+                    { "strip", RunRow::strip }, { "held", RunRow::held }, { "solo", RunRow::solo },
+                    { "error", RunRow::error }, { "processState", RunRow::processState },
+                    { "processLate", RunRow::processLate }, { "processDropped", RunRow::processDropped },
+                    { "said", RunRow::said }, { "ports", RunRow::ports }, { "iteration", RunRow::iteration },
+                    { "iterations", RunRow::iterations }, { "round", RunRow::round },
+                    { "pruned", RunRow::pruned }, { "seed", RunRow::seed }, { "range", RunRow::range },
+                    { "rangeIteration", RunRow::rangeIteration }
+                };
+
+                std::vector<RunRowEntry> entries;
+
+                for (const auto* row : doc::Schema::rowsForOwner ("run"))
+                {
+                    RunRowEntry entry;
+                    entry.row = row;
+                    entry.suffix = "/" + std::string (row->name);
+
+                    for (const auto& [name, which] : names)
+                        if (row->name == name)
+                            entry.which = which;
+
+                    entries.push_back (std::move (entry));
+                }
+
+                return entries;
+            }();
+
+            return rows;
+        }
     }
 
     //==============================================================================
@@ -3201,7 +3605,11 @@ namespace wfg::tree
         else if (mounts.valueRevision() != mountValueRevision)
             copyMountWritten();
 
+        /*  As many as the last publish made, so the half is not moved again
+            and again as it grows: a run's rows and a cue's are the same tick
+            after tick. */
         std::vector<Node> runtime;
+        runtime.reserve (runtimeNodesSeen);
 
         /*  WHERE THE APP'S PLUGIN SCAN IS (2026-09-26): on this half, because
             it moves file by file while nothing in the show changes. Hand-built,
@@ -3210,31 +3618,37 @@ namespace wfg::tree
         {
             const auto scan = scans->reading();
 
-            const auto scanLeaf = [&runtime] (const char* name, const char* tags, const char* description,
-                                              osc::Value value)
+            const auto scanLeaf = [&runtime] (const char* name, const char* tags,
+                                              const std::shared_ptr<const NodeShape>& shape, osc::Value value)
             {
                 Node node;
                 node.address = std::string (godot) + "/plugin/scan/" + name;
                 node.kind = Kind::state;
                 node.access = Access::read;
                 node.typeTags = tags;
-                node.description = description;
+                node.shape = shape;
                 node.values.push_back (std::move (value));
                 runtime.push_back (std::move (node));
             };
 
-            scanLeaf ("state", "s", "The app's plugin scan: idle, scanning, finished or failed",
-                      osc::Value::string (scan.state));
-            scanLeaf ("format", "s", "The format asked for - vst3, au, lv2 - or empty for every format",
-                      osc::Value::string (scan.format));
-            scanLeaf ("file", "s", "The file under scan, empty between scans", osc::Value::string (scan.file));
-            scanLeaf ("done", "i", "Files looked at so far, of total", osc::Value::int32 (scan.done));
-            scanLeaf ("total", "i", "Files this scan will look at", osc::Value::int32 (scan.total));
-            scanLeaf ("found", "i", "Plugins this machine knows, so far or once the scan is over",
-                      osc::Value::int32 (scan.found));
-            scanLeaf ("skipped", "i", "Files this scan gave up on", osc::Value::int32 (scan.skipped));
-            scanLeaf ("problem", "s", "Why the scan failed, in one sentence; empty when it did not",
-                      osc::Value::string (scan.problem));
+            //  Eight sentences on every tick: made once, and shared (§31.5).
+            static const auto stateShape = describedAs ("The app's plugin scan: idle, scanning, finished or failed");
+            static const auto formatShape = describedAs ("The format asked for - vst3, au, lv2 - or empty for every format");
+            static const auto fileShape = describedAs ("The file under scan, empty between scans");
+            static const auto doneShape = describedAs ("Files looked at so far, of total");
+            static const auto totalShape = describedAs ("Files this scan will look at");
+            static const auto foundShape = describedAs ("Plugins this machine knows, so far or once the scan is over");
+            static const auto skippedShape = describedAs ("Files this scan gave up on");
+            static const auto problemShape = describedAs ("Why the scan failed, in one sentence; empty when it did not");
+
+            scanLeaf ("state", "s", stateShape, osc::Value::string (scan.state));
+            scanLeaf ("format", "s", formatShape, osc::Value::string (scan.format));
+            scanLeaf ("file", "s", fileShape, osc::Value::string (scan.file));
+            scanLeaf ("done", "i", doneShape, osc::Value::int32 (scan.done));
+            scanLeaf ("total", "i", totalShape, osc::Value::int32 (scan.total));
+            scanLeaf ("found", "i", foundShape, osc::Value::int32 (scan.found));
+            scanLeaf ("skipped", "i", skippedShape, osc::Value::int32 (scan.skipped));
+            scanLeaf ("problem", "s", problemShape, osc::Value::string (scan.problem));
         }
 
         /*  The engine's own numbers, and the three that say which bundle is
@@ -3245,9 +3659,7 @@ namespace wfg::tree
                                              std::string_view owner,
                                              const std::string& text)
         {
-            runtime.push_back (makeLeaf (std::string (godot) + "/" + std::string (owner) + "/"
-                                           + std::string (row.name),
-                                         row, text));
+            runtime.push_back (makeLeaf (pathOf ({ godot, "/", owner, "/", row.name }), row, text));
         };
 
         for (const auto* row : doc::Schema::rowsForOwner ("engine"))
@@ -3761,12 +4173,12 @@ namespace wfg::tree
                 const auto known = found != preparedness.end();
 
                 if (row != nullptr)
-                    runtime.push_back (makeLeaf (std::string (godot) + "/cue/" + cueId + "/prepare", *row,
+                    runtime.push_back (makeLeaf (pathOf ({ godot, "/cue/", cueId, "/prepare" }), *row,
                                                  known && ! found->second.word.empty() ? found->second.word
                                                                                        : std::string (row->defaultText)));
 
                 if (errorRow != nullptr)
-                    runtime.push_back (makeLeaf (std::string (godot) + "/cue/" + cueId + "/prepareError", *errorRow,
+                    runtime.push_back (makeLeaf (pathOf ({ godot, "/cue/", cueId, "/prepareError" }), *errorRow,
                                                  known ? found->second.error : std::string {}));
             }
         }
@@ -3801,16 +4213,16 @@ namespace wfg::tree
             const auto record = mediaRecords != nullptr ? mediaRecords->find (file)
                                                         : audio::MediaRecords::const_iterator {};
             const auto found = mediaRecords != nullptr && record != mediaRecords->end();
-            const auto base = std::string (godot) + "/cue/" + cueId + "/";
+            const auto base = pathOf ({ godot, "/cue/", cueId, "/" });
 
             if (video::movie::isMovieName (file))
             {
                 if (rateRow != nullptr)
-                    runtime.push_back (makeLeaf (base + "frameRate", *rateRow,
+                    runtime.push_back (makeLeaf (pathOf ({ base, "frameRate" }), *rateRow,
                                                  osc::formatDouble (found ? record->second.frameRate : 0.0)));
 
                 if (codecRow != nullptr)
-                    runtime.push_back (makeLeaf (base + "codec", *codecRow, found ? record->second.codec : std::string {}));
+                    runtime.push_back (makeLeaf (pathOf ({ base, "codec" }), *codecRow, found ? record->second.codec : std::string {}));
 
                 continue;
             }
@@ -3818,7 +4230,7 @@ namespace wfg::tree
             if (hashRow == nullptr)
                 continue;
 
-            runtime.push_back (makeLeaf (base + "hash", *hashRow,
+            runtime.push_back (makeLeaf (pathOf ({ base, "hash" }), *hashRow,
                                          found && record->second.pyramid != nullptr ? record->second.contentHash
                                                                                       : std::string {}));
         }
@@ -4334,90 +4746,90 @@ namespace wfg::tree
 
             const auto base = std::string (godot) + "/run/" + run.id;
 
-            for (const auto* row : doc::Schema::rowsForOwner ("run"))
+            for (const auto& entry : runRows())
             {
-                const auto name = std::string (row->name);
                 std::string text;
 
-                if (name == "cue")            text = run.cue;
-                else if (name == "kind")      text = run.kind;
-                else if (name == "state")     text = run.state;
-                else if (name == "track")     text = std::to_string (run.track);
-                else if (name == "position")  text = osc::formatDouble (run.position);
-
-                /*  WHEN IT STARTED, as the tick a GO was applied on - which is
-                    what the runner already keeps in order to measure lateness,
-                    handed out so a client can order a pane by it. */
-                else if (name == "started")   text = std::to_string (run.launchRequestedAtTick);
-
-                /*  HOW LONG UNTIL IT DOES THE NEXT THING, and nought whenever
-                    it is not in a wait - so a reader never has to ask the state
-                    node whether this one means anything.
-
-                    FROM THE DEADLINE AND NOT FROM A COUNTER. `dueTick` is an
-                    absolute tick a handler set from its own tick, so this is a
-                    subtraction rather than an accumulation: a client that
-                    missed twenty publishes reads the truth on the next one, and
-                    nothing here can drift. */
-                else if (name == "remaining") text = osc::formatDouble (remainingOf (run, tick));
-
-                /*  A table lookup at that same position, every tick: the 10 in
-                    the row is what a surface is told to draw it at, and nothing
-                    here throttles it (§14.5). */
-                else if (name == "timbre")    text = timbreText (run, mediaRecords.get());
-                else if (name == "envelope")  text = envelopeText (run, mediaRecords.get());
-
-                //  A picture's colour, from the renderer (namespace draft §38, WR).
-                else if (name == "tint")
+                switch (entry.which)
                 {
-                    for (const auto& [layerId, rgb] : pictureTints)
-                        if (layerId == run.id)
-                            text = video::tintText (rgb);
+                    case RunRow::cue:       text = run.cue; break;
+                    case RunRow::kind:      text = run.kind; break;
+                    case RunRow::state:     text = run.state; break;
+                    case RunRow::track:     text = std::to_string (run.track); break;
+                    case RunRow::position:  text = osc::formatDouble (run.position); break;
+
+                    /*  WHEN IT STARTED, as the tick a GO was applied on - which is
+                        what the runner already keeps in order to measure lateness,
+                        handed out so a client can order a pane by it. */
+                    case RunRow::started:   text = std::to_string (run.launchRequestedAtTick); break;
+
+                    /*  HOW LONG UNTIL IT DOES THE NEXT THING, and nought whenever
+                        it is not in a wait - so a reader never has to ask the state
+                        node whether this one means anything.
+
+                        FROM THE DEADLINE AND NOT FROM A COUNTER. `dueTick` is an
+                        absolute tick a handler set from its own tick, so this is a
+                        subtraction rather than an accumulation: a client that
+                        missed twenty publishes reads the truth on the next one, and
+                        nothing here can drift. */
+                    case RunRow::remaining: text = osc::formatDouble (remainingOf (run, tick)); break;
+
+                    /*  A table lookup at that same position, every tick: the 10 in
+                        the row is what a surface is told to draw it at, and nothing
+                        here throttles it (§14.5). */
+                    case RunRow::timbre:    text = timbreText (run, mediaRecords.get()); break;
+                    case RunRow::envelope:  text = envelopeText (run, mediaRecords.get()); break;
+
+                    //  A picture's colour, from the renderer (namespace draft §38, WR).
+                    case RunRow::tint:
+                        for (const auto& [layerId, rgb] : pictureTints)
+                            if (layerId == run.id)
+                                text = video::tintText (rgb);
+                        break;
+
+                    //  What left the track after the fader, to a tenth, as the envelope is.
+                    case RunRow::meter:     text = osc::formatDouble (std::round (run.meter * 10.0) / 10.0); break;
+                    case RunRow::level:     text = osc::formatDouble (run.level); break;
+                    //  The speed it plays at now (namespace draft §22), to a thousandth.
+                    case RunRow::rate:      text = osc::formatDouble (std::round (run.rateNow * 1000.0) / 1000.0); break;
+                    case RunRow::trim:      text = osc::formatDouble (run.trim); break;
+                    case RunRow::late:      text = std::to_string (run.late); break;
+                    case RunRow::parent:    text = run.parent; break;
+                    case RunRow::children:  text = joinIds (run.children); break;
+                    case RunRow::phase:     text = run.phase; break;
+                    case RunRow::claims:    text = joinIds (run.claims); break;
+                    case RunRow::pending:   text = joinIds (run.pending); break;
+                    case RunRow::warning:   text = run.warning; break;
+                    case RunRow::asserted:  text = run.asserted ? "true" : "false"; break;
+
+                    //  Whether a seek would move it, as the Runner keeps it (K9, namespace draft §23.18).
+                    case RunRow::seekable:  text = run.seekable && ! run.isFinished() ? "true" : "false"; break;
+
+                    /*  The round a scrub is held to, as the Runner solved it (namespace draft §30.6). */
+                    case RunRow::roundFrom:   text = osc::formatDouble (run.roundFrom); break;
+                    case RunRow::roundLength: text = osc::formatDouble (run.roundLength); break;
+                    case RunRow::strip:     text = run.strip; break;
+                    case RunRow::held:      text = run.held ? "true" : "false"; break;
+                    case RunRow::solo:      text = run.solo ? "true" : "false"; break;
+                    case RunRow::error:     text = run.error; break;
+
+                    //  A process cue's patch, as its host last saw it (namespace draft §51).
+                    case RunRow::processState:   text = run.processState; break;
+                    case RunRow::processLate:    text = std::to_string (run.processLate); break;
+                    case RunRow::processDropped: text = std::to_string (run.processDropped); break;
+                    case RunRow::said:           text = run.processSaid; break;
+                    case RunRow::ports:          text = run.processPorts; break;
+                    case RunRow::iteration:  text = std::to_string (run.iteration); break;
+                    case RunRow::iterations: text = std::to_string (run.iterations); break;
+                    case RunRow::round:      text = joinIds (run.round); break;
+                    case RunRow::pruned:     text = joinIds (run.pruned); break;
+                    case RunRow::seed:       text = std::to_string (run.seed); break;
+                    case RunRow::range:      text = std::to_string (run.range); break;
+                    case RunRow::rangeIteration: text = std::to_string (run.rangeIteration); break;
+                    case RunRow::other:      text = std::string (entry.row->defaultText); break;
                 }
 
-                //  What left the track after the fader, to a tenth, as the envelope is.
-                else if (name == "meter")     text = osc::formatDouble (std::round (run.meter * 10.0) / 10.0);
-                else if (name == "level")     text = osc::formatDouble (run.level);
-                //  The speed it plays at now (namespace draft §22), to a thousandth.
-                else if (name == "rate")      text = osc::formatDouble (std::round (run.rateNow * 1000.0) / 1000.0);
-                else if (name == "trim")      text = osc::formatDouble (run.trim);
-                else if (name == "late")      text = std::to_string (run.late);
-                else if (name == "parent")    text = run.parent;
-                else if (name == "children")  text = joinIds (run.children);
-                else if (name == "phase")     text = run.phase;
-                else if (name == "claims")    text = joinIds (run.claims);
-                else if (name == "pending")   text = joinIds (run.pending);
-                else if (name == "warning")   text = run.warning;
-                else if (name == "asserted")  text = run.asserted ? "true" : "false";
-
-                //  Whether a seek would move it, as the Runner keeps it (K9, namespace draft §23.18).
-                else if (name == "seekable")  text = run.seekable && ! run.isFinished() ? "true" : "false";
-
-                /*  The round a scrub is held to, as the Runner solved it (namespace draft §30.6). */
-                else if (name == "roundFrom")   text = osc::formatDouble (run.roundFrom);
-                else if (name == "roundLength") text = osc::formatDouble (run.roundLength);
-                else if (name == "strip")     text = run.strip;
-                else if (name == "held")      text = run.held ? "true" : "false";
-                else if (name == "solo")      text = run.solo ? "true" : "false";
-                else if (name == "error")     text = run.error;
-
-                //  A process cue's patch, as its host last saw it (namespace draft §51).
-                else if (name == "processState")   text = run.processState;
-                else if (name == "processLate")    text = std::to_string (run.processLate);
-                else if (name == "processDropped") text = std::to_string (run.processDropped);
-                else if (name == "said")           text = run.processSaid;
-                else if (name == "ports")          text = run.processPorts;
-                else if (name == "iteration")  text = std::to_string (run.iteration);
-                else if (name == "iterations") text = std::to_string (run.iterations);
-                else if (name == "round")      text = joinIds (run.round);
-                else if (name == "pruned")     text = joinIds (run.pruned);
-                else if (name == "seed")       text = std::to_string (run.seed);
-                else if (name == "range")      text = std::to_string (run.range);
-                else if (name == "rangeIteration")
-                                               text = std::to_string (run.rangeIteration);
-                else                          text = std::string (row->defaultText);
-
-                runtime.push_back (makeLeaf (base + "/" + name, *row, text));
+                runtime.push_back (makeLeaf (base + entry.suffix, *entry.row, text));
             }
         }
 
@@ -4544,8 +4956,9 @@ namespace wfg::tree
                 ownedByTheDocument.push_back (std::string (godot) + "/curve");
         }
 
-        addContainers (runtime, ownedByTheDocument, false);
-        sortByAddress (runtime);
+        sortWithContainers (runtime, ownedByTheDocument, false, &runtimeSort);
+
+        runtimeNodesSeen = runtime.size();
 
         auto result = std::make_shared<const TreeSnapshot> (tick, documentPart, mountPart,
                                                             std::move (runtime), mountWritten);

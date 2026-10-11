@@ -266,7 +266,7 @@ namespace wfg::tree
                 spec.verb = "get";
 
                 if (const auto* node = mounts != nullptr ? mounts->nodeAt (message.address) : nullptr; node != nullptr)
-                    spec.indexes = node->rcpIndexes;
+                    spec.indexes = node->rcpIndexes();
 
                 const auto line = wire::renderRcp (message.address, {}, spec);
                 ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));
@@ -300,10 +300,10 @@ namespace wfg::tree
 
             if (const auto* node = mounts != nullptr ? mounts->nodeAt (message.address) : nullptr; node != nullptr)
             {
-                if (! node->rcpVerb.empty())
-                    spec.verb = node->rcpVerb;
+                if (! node->rcpVerb().empty())
+                    spec.verb = node->rcpVerb();
 
-                spec.indexes = node->rcpIndexes;
+                spec.indexes = node->rcpIndexes();
             }
 
             const auto line = wire::renderRcp (message.address, message.values, spec);
@@ -317,9 +317,9 @@ namespace wfg::tree
                 node the table lacks has no shape and nothing leaves. */
             const auto* node = mounts != nullptr ? mounts->nodeAt (message.address) : nullptr;
 
-            if (node != nullptr && ! node->midi.kind.empty())
+            if (node != nullptr && ! node->midi().kind.empty())
             {
-                const auto messages = wire::renderMidi (node->midi, message.values, message.destination.midiChannel,
+                const auto messages = wire::renderMidi (node->midi(), message.values, message.destination.midiChannel,
                                                         message.destination.mscDevice, message.destination.mscFormat);
                 ok = ! messages.empty();
 
@@ -348,7 +348,7 @@ namespace wfg::tree
             std::string templateText;
 
             if (const auto* node = mounts != nullptr ? mounts->nodeAt (message.address) : nullptr; node != nullptr)
-                templateText = node->lineTemplate;
+                templateText = node->lineTemplate();
 
             const auto line = wire::renderLine (message.address, message.values, templateText) + "\r";
             ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));

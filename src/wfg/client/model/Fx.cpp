@@ -336,7 +336,7 @@ namespace wfg::client::model
                     p.text = text (snapshot, fxAddress (strip.fxId, "t" + std::to_string (n)));
 
                     if (const auto* node = snapshot.find (fxParameterAddress (strip.fxId, n)))
-                        p.steps = node->enumValues;
+                        p.steps = node->enumValues();
                 }
                 else
                 {

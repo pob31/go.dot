@@ -211,14 +211,14 @@ namespace wfg::client::model
             Field field;
             field.address = node.address;
             field.name = name;
-            field.description = node.description;
-            field.unit = node.unit;
+            field.description = node.description();
+            field.unit = node.unit();
             field.typeTags = node.typeTags;
-            field.options = node.enumValues;
-            field.hasMinimum = node.hasMinimum;
-            field.hasMaximum = node.hasMaximum;
-            field.minimum = node.minimum;
-            field.maximum = node.maximum;
+            field.options = node.enumValues();
+            field.hasMinimum = node.hasMinimum();
+            field.hasMaximum = node.hasMaximum();
+            field.minimum = node.minimum();
+            field.maximum = node.maximum();
 
             /*  ASKED OF THE NODE AND NEVER OF A LIST OF NAMES: `ACCESS & write`
                 is what makes a row a decision rather than a reading, so a row
@@ -246,7 +246,7 @@ namespace wfg::client::model
                 reads "0.3". The box still writes what is typed into it. */
             if (node.typeTags == "d")
                 if (const auto sole = node.soleValue(); sole.has_value() && sole->type() == osc::Value::Type::float64)
-                    field.value = shownNumber (sole->getFloat64(), node.unit);
+                    field.value = shownNumber (sole->getFloat64(), node.unit());
 
             if (const auto found = labels().find (name); found != labels().end())
                 field.label = found->second;
@@ -1130,14 +1130,14 @@ namespace wfg::client::model
                     draft §57, AFM): the role word, read only, under the path -
                     so a cue on "/digico/snapshots/fire" says "scene.recall"
                     in the vocabulary every preset shares. */
-                if (const auto* node = snapshot.find (field.value); node != nullptr && ! node->role.empty())
+                if (const auto* node = snapshot.find (field.value); node != nullptr && ! node->role().empty())
                 {
                     Field role;
                     role.address = field.address;
                     role.name = "role";
                     role.label = "role";
                     role.control = Control::text;
-                    role.value = node->role;
+                    role.value = node->role();
                     role.typeTags = "s";
                     role.writable = false;
                     role.description = "What this node is for, in the words every preset shares:"
@@ -1349,10 +1349,10 @@ namespace wfg::client::model
             auto value = text (node);
 
             if (const auto sole = node->soleValue(); sole.has_value() && sole->type() == osc::Value::Type::float64)
-                value = shownNumber (sole->getFloat64(), node->unit);
+                value = shownNumber (sole->getFloat64(), node->unit());
 
             if (! value.empty())
-                line += " " + value + (node->unit.empty() ? std::string {} : " " + node->unit);
+                line += " " + value + (node->unit().empty() ? std::string {} : " " + node->unit());
         }
 
         return line;

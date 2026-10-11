@@ -26,6 +26,7 @@
 #include <wfg/engine/tree/MountSender.h>
 
 #include <chrono>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -381,30 +382,33 @@ namespace
 {
     tree::Node echoNode (const char* address, const char* kind, int a, int b = 0, int c = 0, int d = 0)
     {
-        tree::Node node;
-        node.address = address;
-        node.midi.kind = kind;
+        auto shape = std::make_shared<tree::NodeShape>();
+        auto& midi = shape->midi;
+        midi.kind = kind;
 
         if (std::string (kind) == "note")
         {
-            node.midi.note = a;
-            node.midi.offset = b;
-            node.midi.on = 0x7F;
-            node.midi.off = 0x3F;
-            node.midi.hasOnOff = true;
+            midi.note = a;
+            midi.offset = b;
+            midi.on = 0x7F;
+            midi.off = 0x3F;
+            midi.hasOnOff = true;
         }
         else if (std::string (kind) == "nrpn")
         {
-            node.midi.msb = a;
-            node.midi.lsb = b;
-            node.midi.bits = c == 0 ? 7 : c;
-            node.midi.offset = d;
+            midi.msb = a;
+            midi.lsb = b;
+            midi.bits = c == 0 ? 7 : c;
+            midi.offset = d;
         }
         else if (std::string (kind) == "cc")
         {
-            node.midi.cc = a;
+            midi.cc = a;
         }
 
+        tree::Node node;
+        node.address = address;
+        node.shape = std::move (shape);
         return node;
     }
 }
@@ -462,9 +466,14 @@ TEST_CASE ("echo: the SQ's 14-bit levels and switches wait for their fine byte; 
 {
     auto level = echoNode ("/input/1/lr/level", "nrpn", 0x40, 0x00, 14);
     auto mute = echoNode ("/input/1/mute", "nrpn", 0x00, 0x00, 14);
-    mute.midi.hasOnOff = true;
-    mute.midi.on = 1;
-    mute.midi.off = 0;
+    {
+        //  A shape is shared and never changed once made: a switch is a new one.
+        auto switched = std::make_shared<tree::NodeShape> (mute.about());
+        switched->midi.hasOnOff = true;
+        switched->midi.on = 1;
+        switched->midi.off = 0;
+        mute.shape = std::move (switched);
+    }
     const auto cc = echoNode ("/cc/7", "cc", 7);
 
     tree::MidiEchoes echoes;

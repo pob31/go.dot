@@ -32,6 +32,7 @@
 #include <wfg/engine/command/Command.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -58,6 +59,12 @@ namespace wfg
         const std::vector<Command>& all() const noexcept { return commands; }
 
         std::size_t size() const noexcept { return commands.size(); }
+
+        /*  HOW MANY TIMES `add` HAS BEEN CALLED, a new command or a replaced
+            one: what lets a reader keep something made from the list and know
+            when to make it again - the parameter tree's command nodes, made
+            once rather than on every applied command (2026-10-11, §31.5). */
+        std::uint64_t revision() const noexcept { return changes; }
 
         /*  Checks an argument list against a signature and returns the list to
             hand the handler, or a reason code.
@@ -98,5 +105,6 @@ namespace wfg
     private:
         std::vector<Command> commands;
         std::map<std::string, std::size_t, std::less<>> byName;
+        std::uint64_t changes = 0;
     };
 }

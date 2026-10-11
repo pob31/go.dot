@@ -22,6 +22,8 @@ namespace wfg
 {
     void CommandRegistry::add (Command command)
     {
+        ++changes;
+
         const auto existing = byName.find (command.name);
 
         if (existing != byName.end())

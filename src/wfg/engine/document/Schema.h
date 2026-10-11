@@ -46,6 +46,7 @@
 
 #include <wfg/engine/document/SchemaTypes.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -132,8 +133,25 @@ namespace wfg::doc
             computed from the tree, so storing it would be a second copy that
             eventually disagrees. The PARAMETER TREE publishes them, which is
             the reason they are in the table at all, so it needs a way to ask
-            for the rows themselves rather than for an element's attributes. */
-        static std::vector<const AttributeRow*> rowsForOwner (std::string_view owner);
+            for the rows themselves rather than for an element's attributes.
+
+            GATHERED ONCE FOR THE PROCESS AND HANDED OUT BY REFERENCE
+            (2026-10-11, §31.5). It walked all six hundred rows and made a vector
+            on every call, and the tree calls it for every run, slot, strip and
+            input on every tick - tens of walks of the table fifty times a
+            second, in the Debug build that CI runs. An owner the table does
+            not have answers an empty list. */
+        static const std::vector<const AttributeRow*>& rowsForOwner (std::string_view owner);
+
+        /*  WHERE A ROW SITS IN THE TABLE, from nought, and how many rows the
+            table holds - so a reader can keep something per row in a plain
+            array, made once: the parameter tree's node shapes (2026-10-11,
+            §31.5). `rowCount()` for a row that is not the table's. */
+        static std::size_t rowIndex (const AttributeRow& row) noexcept;
+        static std::size_t rowCount() noexcept;
+
+        /** The row at that place in the table; `index` below `rowCount()`. */
+        static const AttributeRow& rowAt (std::size_t index) noexcept;
 
         /*  WHETHER A ROW IS THE MACHINE'S rather than the show's (namespace
             draft §58, RD.3, AGC): the table's `scope` column, asked by the
