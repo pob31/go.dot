@@ -25088,6 +25088,10 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair/peers` | `s` | the other machine's addresses, `host:port`, space-separated |
 | `pair/timeout` | `f` | seconds of silence that lose the link (AFV) |
 | `pair/linked` | `T` | a heartbeat within the timeout |
+| `pair/peer` | `s` | who is at the other end: on a backup the main's `host:port` that last delivered first, on a main the backup's `ws:` origin that last pinged (RD.5) |
+| `pair/roundTrip` | `f` | seconds there and back, the fastest of the last second's pings; 0 unlinked (RD.5) |
+| `pair/received` | `h` | records this link: received on a backup, sent on a main, each once (RD.5) |
+| `pair/gaps` | `h` | records missed this link, as gaps (RD.5) |
 | `pair/sending` | `T` | this machine sends to devices; false while it holds |
 | `pair/state` | `s` | `alone`, `following`, `leading`, `bothSending`, `waiting` (AGK) |
 | `pair/delay` | `i` | Δ in ticks (AGF); the extra launch lead while linked |
@@ -25251,3 +25255,58 @@ passed on and the main refused comes back refused, with the main's reason.
   given `--engine-folder` reads the developer's own `pairing.xml` - harmless while nothing
   but the rows reads it, and a driver that starts a serve from RD.5 on should pass a
   temporary engine folder, or a paired developer machine will dial its peer from a test.
+- **RD.5**, 2026-10-11: the stream and the link, REPORT ONLY (AFV, AGB, AGD) - nothing
+  received is applied, nothing held or let go because of the link. `Engine::setAfterRecord`
+  calls a hook on the tick thread after every record is written, with the registry's entry
+  for its command (null for an `X` and for a command nobody registered); null by default, in
+  a replay and in every rig. `pair::travels` and `keptForLink`: an `A` or an `R` whose origin
+  is not `engine` nor `replay`, not this machine's (`isMachineLocal`), not `pair.*`; a
+  `node.setMany` mixing machine and show rows travels without its machine pairs.
+  `pair::Stream`, the main's half, gives what travels a counter of its own from 1 (the log's
+  `seq` has gaps once the engine's records are left out) and keeps its message in a ring of
+  8192, made once into the slot's reused storage; serve draws the stream an identity per
+  session (`juce::Uuid` - not the engine's randomness, which is the show's, AGE), so a backup
+  tells a main that came back from one that went on. The wire, binary OSC on the WebSocket:
+  `hello s:machine s:role h:lastCounter s:stream` and `ping h:sent f:roundTrip` from the
+  backup; `welcome s:stream h:next`, `gap h:oldest`, `record h:counter s:line` (the log's
+  own line), `beat h:tick h:lastCounter` and `pong h:sent h:tick` from the main - the
+  stream's identity in the hello and the welcome, and the round trip in the ping so a main
+  can say it too, are the implementer's additions to the shape planned. A hello resumes
+  after its counter on the same stream and starts at 1 on another or none; a start the ring
+  no longer holds is answered `gap` and the ring's oldest (RD.8 seats the backup then), a
+  backlog 512 records a tick. What a tick sends one follower - its welcome, a gap, the
+  records, the beat last - is ONE OSC bundle, one frame: a frame a message cost the main's
+  tick 2.5 ms for 64 records in the Debug build, the bundle 0.2 ms; and the two messages a
+  tick makes are written straight into their bytes, since the codec's encoder took 10 µs a
+  message there (a test holds them equal). A ping is answered on the server's thread at
+  once. `OscQueryServer::setPeerDoor (prefix, door)`: a binary frame under `/godot/pair/`
+  is handed to the link and never to the namespace - no event, no record - and a closing
+  connection is told; over UDP the same address is an ordinary write, refused (AGD).
+  `OscQueryServer::sendTo (origin, bytes)` is the way out, any thread, queued, one lookup
+  under the connection map's lock - juce_simpleweb's own asks `contains` and `operator[]`
+  under two, and a connection closed between them is a null pointer called, which
+  `publishChanges` now avoids too. The server sets SO_REUSEADDR on Linux and macOS, so a
+  main restarted after a crash binds 5010 at once past its old connections' TIME_WAIT; not
+  on Windows, where the option would let a second process share a listening port and the
+  bind is not refused anyway. `pair::Receiver`, the backup's protocol: one inbox for every
+  path, each line read back on its path's own thread, a counter at or below the last a
+  duplicate dropped and one past the next a gap, a new stream counted from nought; linked is
+  a heartbeat within the timeout on any path; the round trip on its own steady clock, the
+  fastest of the last second's. `pair::Dialler`: a WebSocket client per address of the
+  main at `ws://host:port/` (the server's endpoint is `^/?$`), told its host and port
+  outright since SimpleWeb splits at an IPv6 address's first colon, a manager thread and an
+  io thread a path, hello on open, a ping every 100 ms, a redial after 0.25, 0.5, 1 and then
+  every 2 s, a socket not open in 2 s given up. Serve: `main` streams, `backup` dials the
+  peers in force, both following a pairing command on its tick; the heartbeat goes out
+  after the devices' traffic and before the publish. Rows `pair/linked`, `pair/peer`,
+  `pair/roundTrip`, `pair/received`, `pair/gaps` (58.3), counted again when a link comes up
+  after the timeout's silence or the stream changes. `common.Server` passes `--role=none`
+  unless a driver names a role; `role=None` reads the file (pairing.py's second and third
+  serves). Measured on the bench, Debug: 64 records kept 0.21 to 0.47 ms (median, a noisy
+  machine), handed to the server as one bundle 0.2 ms, an idle tick's beat 15 to 35 µs.
+  Found and left: a main formats each line twice, for its log and its ring - handing the
+  hook the log's own line would halve that; a backup that cannot keep up has its frames
+  queued without bound on the main by juce_simpleweb; a hello from a machine saying `main`,
+  or to one that is not, is ignored and counted (RD.7's to decide); a machine that stops
+  being a main drops its followers; `pair/peer` alternates between two paths equally fast;
+  the link's frames are not shown to the network monitor.

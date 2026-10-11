@@ -55,10 +55,11 @@
     by the same locale-proof pair the event log uses (`osc::formatDouble`,
     `osc::parseDouble`): 1.5 seconds is `1.5` on a French machine too.
 
-    NOTHING USES THEM YET. RD.5 dials the peers; RD.6 and RD.7 decide when a
-    backup holds and when it takes over. In RD.4 a machine started `--role=backup`
-    does NOT hold - `pair/sending` stays true - and `--hold` is still the only
-    thing that holds.
+    THE LINK READS THEM (RD.5, pair/PeerLink.h): a `main` streams to whoever
+    dials it, a `backup` dials its peers, and both say whether they are linked
+    within the timeout. RD.6 and RD.7 decide when a backup holds and when it
+    takes over; until then a machine started `--role=backup` does NOT hold -
+    `pair/sending` stays true - and `--hold` is still the only thing that holds.
 */
 
 #include <cstdint>

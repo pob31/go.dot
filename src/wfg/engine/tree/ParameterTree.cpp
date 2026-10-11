@@ -3305,19 +3305,25 @@ namespace wfg::tree
 
         /*  REDUNDANCY (namespace draft §58.3): the machine's, published as the
             engine's numbers are and stored in no show (AGC). Whether this
-            machine sends to devices, false while it holds (RD.1); and its
-            pairing as it is in force (RD.4) - the timeout written by the log's
-            own formatter, so a French machine publishes 1.5 and not 1,5. */
+            machine sends to devices, false while it holds (RD.1); its pairing
+            as it is in force (RD.4) - the timeout written by the log's own
+            formatter, so a French machine publishes 1.5 and not 1,5; and what
+            the link says about itself (RD.5), the round trip the same way. */
         for (const auto* row : doc::Schema::rowsForOwner ("pair"))
         {
             const auto name = std::string (row->name);
             std::string text;
 
-            if (name == "sending")      text = state.pairSending ? "true" : "false";
-            else if (name == "role")    text = state.pairSettings.role;
-            else if (name == "peers")   text = pair::peersText (state.pairSettings.peers);
-            else if (name == "timeout") text = osc::formatDouble (state.pairSettings.timeout);
-            else                        text = std::string (row->defaultText);
+            if (name == "sending")        text = state.pairSending ? "true" : "false";
+            else if (name == "role")      text = state.pairSettings.role;
+            else if (name == "peers")     text = pair::peersText (state.pairSettings.peers);
+            else if (name == "timeout")   text = osc::formatDouble (state.pairSettings.timeout);
+            else if (name == "linked")    text = state.pairLink.linked ? "true" : "false";
+            else if (name == "peer")      text = state.pairLink.peer;
+            else if (name == "roundTrip") text = osc::formatDouble (state.pairLink.roundTrip);
+            else if (name == "received")  text = std::to_string (state.pairLink.received);
+            else if (name == "gaps")      text = std::to_string (state.pairLink.gaps);
+            else                          text = std::string (row->defaultText);
 
             engineValue (*row, "pair", text);
         }

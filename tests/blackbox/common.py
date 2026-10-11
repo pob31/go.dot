@@ -493,8 +493,12 @@ class Server:
                  env: "dict | None" = None,
                  recover: bool = False,
                  hold: bool = False,
-                 extra_args: "list[str] | None" = None):
-        argv = [str(find_binary()), "serve", str(bundle), "--http-port=0", "--osc-port=0"]
+                 extra_args: "list[str] | None" = None,
+                 role: "str | None" = "none",
+                 http_port: int = 0):
+        # PORT 0 unless a driver names one: a new main started on the port its
+        # backup is dialling (pair_link.py) is the one that does.
+        argv = [str(find_binary()), "serve", str(bundle), f"--http-port={http_port}", "--osc-port=0"]
         if sample_rate is not None:
             argv.append(f"--sample-rate={sample_rate}")
         if buffer_size is not None:
@@ -564,6 +568,17 @@ class Server:
         # backup's half of redundancy, and a muted spare for a rehearsal.
         if hold:
             argv.append("--hold")
+
+        # EVERY DRIVER RUNS UNPAIRED UNLESS IT ASKS (namespace draft section 58,
+        # RD.5). A serve not given --engine-folder reads the developer's own
+        # pairing.xml, and from RD.5 a machine whose file says `backup` dials
+        # the peers in it - so a driver run on the author's paired machine
+        # would ring his other computer from a test. --role=none for this run,
+        # never written; `role="main"` or `role="backup"` for a driver that
+        # pairs, and `role=None` for one that wants the file read (pairing.py).
+        # A --role a driver puts in extra_args is its own word, and stands.
+        if role is not None and not any(arg.startswith("--role=") for arg in (extra_args or [])):
+            argv.append(f"--role={role}")
 
         # Anything else a driver wants on the line, as given: the pairing's
         # --role, --peer and --link-timeout (RD.4) are the first users.

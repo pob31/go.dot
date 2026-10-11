@@ -25,7 +25,9 @@
 #include <juce_simpleweb/juce_simpleweb.h>
 
 #include <algorithm>
+#include <cstring>
 #include <exception>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -193,6 +195,19 @@ namespace wfg::oscquery
         };
 
         std::vector<Route> routes;
+
+        /*  The side door and its prefix (`setPeerDoor`), set before the server
+            starts and read on its thread, as the routes are. */
+        std::string doorPrefix;
+        PeerDoor* door = nullptr;
+
+        /*  Whether raw OSC bytes are a message under the door's prefix, read
+            before decoding: an OSC message begins with its address. */
+        bool forTheDoor (const std::uint8_t* bytes, std::size_t size) const noexcept
+        {
+            return ! doorPrefix.empty() && bytes != nullptr && size > doorPrefix.size()
+                     && std::memcmp (bytes, doorPrefix.data(), doorPrefix.size()) == 0;
+        }
 
         Impl() { server.addWebSocketListener (this); }
 
@@ -505,6 +520,10 @@ namespace wfg::oscquery
                 the show (PRD 3.16). */
             if (target != nullptr)
                 target->forget (connection);
+
+            //  And the side door: a backup's connection gone is a follower gone (RD.5).
+            if (door != nullptr)
+                door->peerClosed (connection);
         }
 
         void connectionError (const juce::String& id, int, const juce::String&) override
@@ -548,20 +567,23 @@ namespace wfg::oscquery
             if (target == nullptr)
                 return;
 
+            const auto* const bytes = static_cast<const std::uint8_t*> (data.getData());
+            const auto forDoor = forTheDoor (bytes, data.getSize());
+
             if (owner != nullptr)
             {
                 owner->inbound.fetch_add (1, std::memory_order_relaxed);
 
-                //  Shown to the monitor as it arrived, a malformed frame included.
+                /*  Shown to the monitor as it arrived, a malformed frame included
+                    - but not the redundancy link's, ten pings a second that are
+                    no page's traffic. */
                 if (auto* watching = owner->tap.load (std::memory_order_acquire);
-                      watching != nullptr && watching->isListening())
+                      ! forDoor && watching != nullptr && watching->isListening())
                     watching->record (monitor::Direction::in, monitor::Medium::osc, monitor::Road::page,
-                                      id.toStdString(), static_cast<const std::uint8_t*> (data.getData()),
-                                      data.getSize());
+                                      id.toStdString(), bytes, data.getSize());
             }
 
-            const auto decoded = osc::decode (static_cast<const std::uint8_t*> (data.getData()),
-                                              data.getSize());
+            const auto decoded = osc::decode (bytes, data.getSize());
 
             /*  A malformed frame is dropped here and NOT forwarded. It never
                 became a command, so there is nothing to reject; the engine's
@@ -571,6 +593,19 @@ namespace wfg::oscquery
                 refuse. */
             if (! decoded.ok)
                 return;
+
+            /*  THE SIDE DOOR (RD.5): a message under its prefix is the link's -
+                a hello, a ping - and never a write. It does not become an event
+                and is in no log; with no door it is dropped, for the same
+                reason. A bundle is a client's and goes the ordinary way: the
+                link never bundles. */
+            if (forDoor && ! decoded.packet.isBundle())
+            {
+                if (door != nullptr)
+                    door->peerMessage (originOf (id), decoded.packet);
+
+                return;
+            }
 
             target->write (originOf (id), decoded.packet);
         }
@@ -611,6 +646,46 @@ namespace wfg::oscquery
         impl->routes.push_back ({ std::move (prefix), std::move (handler) });
     }
 
+    void OscQueryServer::setPeerDoor (std::string prefix, PeerDoor* door)
+    {
+        if (running.load (std::memory_order_relaxed))
+            return;
+
+        impl->doorPrefix = std::move (prefix);
+        impl->door = door;
+    }
+
+    bool OscQueryServer::sendTo (const std::string& origin, const std::uint8_t* data, std::size_t size)
+    {
+        if (! running.load (std::memory_order_relaxed) || origin.rfind ("ws:", 0) != 0)
+            return false;
+
+        if (! sendBinary (origin.substr (3), data, size))
+            return false;
+
+        outbound.fetch_add (1, std::memory_order_relaxed);
+        return true;
+    }
+
+    bool OscQueryServer::sendBinary (const std::string& connectionId, const std::uint8_t* data, std::size_t size)
+    {
+        /*  ONE LOOKUP UNDER THE MAP'S OWN LOCK, and a copy of the pointer that
+            keeps the connection alive while it is written to. juce_simpleweb's
+            own `sendTo` asks `contains` and then `operator[]` under two separate
+            locks, and a connection that closed between the two is a null
+            pointer called - on the tick thread, which is where pushes and the
+            link's records are sent from. */
+        const auto connection = impl->server.connectionMap[juce::String (connectionId)];
+
+        if (connection == nullptr)
+            return false;
+
+        auto message = std::make_shared<WsServer::OutMessage>();
+        message->write (reinterpret_cast<const char*> (data), static_cast<std::streamsize> (size));
+        connection->send (message, nullptr, 130);   // 130: one binary frame
+        return true;
+    }
+
     bool OscQueryServer::start (int portToBind, Namespace& nameSpace)
     {
         if (running.load (std::memory_order_relaxed))
@@ -621,7 +696,25 @@ namespace wfg::oscquery
 
         impl->target = &nameSpace;
         impl->server.addHTTPRequestHandler (impl.get());
-        impl->server.start (portToBind);
+
+        /*  THE SAME PORT AGAIN AT ONCE, on Linux and macOS (namespace draft §58,
+            RD.5): a main that went away and is started again must come back on
+            5010 straight away, where its backup is dialling, and not a minute
+            later. A server that stops closes its connections first, and each
+            one it closed lingers in TIME_WAIT on this port; without
+            SO_REUSEADDR a POSIX bind refuses the port while any does. With it,
+            the bind is let past those and still refused beside another server
+            listening on the port, so two serves on one machine still collide
+            as they should. NOT ON WINDOWS, where the same option lets a second
+            process listen on a port somebody already holds - and where a
+            lingering connection never stood in a listener's way. */
+       #if defined (_WIN32)
+        constexpr auto reuseAddress = false;
+       #else
+        constexpr auto reuseAddress = true;
+       #endif
+
+        impl->server.start (portToBind, {}, {}, reuseAddress);
 
         /*  isConnected is set from the server's own thread once asio has bound.
             Waited on rather than assumed: a caller that started making requests
@@ -716,8 +809,9 @@ namespace wfg::oscquery
                 if (! impl->target->shouldPush (connection, address, causedBy))
                     continue;
 
-                impl->server.sendTo (juce::MemoryBlock (encoded->data(), encoded->size()),
-                                     juce::String (connection.substr (3)));   // drop "ws:"
+                if (! sendBinary (connection.substr (3), encoded->data(), encoded->size()))   // drop "ws:"
+                    continue;
+
                 outbound.fetch_add (1, std::memory_order_relaxed);
 
                 if (auto* watching = tap.load (std::memory_order_acquire);

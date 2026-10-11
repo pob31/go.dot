@@ -188,6 +188,9 @@ add_library(wfg_engine STATIC
     wfg/engine/pair/MachineLocal.cpp
     wfg/engine/pair/PairSettings.h
     wfg/engine/pair/PairSettings.cpp
+    wfg/engine/pair/LinkReading.h
+    wfg/engine/pair/PeerLink.h
+    wfg/engine/pair/PeerLink.cpp
     wfg/engine/pair/SavePump.h
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp

@@ -88,7 +88,7 @@ namespace wfg
     }
 
     //==============================================================================
-    LogRecord Engine::applyEvent (std::int64_t tickIndex, const Event& event)
+    LogRecord Engine::applyEvent (std::int64_t tickIndex, const Event& event, const Command*& found)
     {
         LogRecord r;
         r.tick = tickIndex;
@@ -96,6 +96,7 @@ namespace wfg
         r.command = event.command;
 
         const auto* command = registry.find (event.command);
+        found = command;
 
         if (command == nullptr)
         {
@@ -175,10 +176,11 @@ namespace wfg
         for (auto& entry : draining)
         {
             LogRecord r;
+            const Command* command = nullptr;
 
             if (auto* event = std::get_if<Event> (&entry))
             {
-                r = applyEvent (tickIndex, *event);
+                r = applyEvent (tickIndex, *event, command);
             }
             else
             {
@@ -221,6 +223,11 @@ namespace wfg
             }
 
             record (r);
+
+            /*  After the log, so what the hook is shown is already the session's
+                history (Engine.h, `setAfterRecord`). */
+            if (afterRecord)
+                afterRecord (r, command);
         }
 
         draining.clear();

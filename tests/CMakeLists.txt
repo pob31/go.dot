@@ -153,6 +153,7 @@ add_executable(wfg_tests
     UndoTests.cpp
     MachineScopeTests.cpp
     PairSettingsTests.cpp
+    PeerLinkTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
     ClientTests.cpp)
@@ -1149,6 +1150,22 @@ add_test(NAME blackbox.pairing.C
 add_test(NAME blackbox.pairing.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pairing.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.pairing.C blackbox.pairing.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
+# -----------------------------------------------------------------------------
+# THE LINK BETWEEN A MAIN AND ITS BACKUP (namespace draft §58, RD.5): two serves
+# on one machine, each on a copy of one fixture and a temporary engine folder -
+# `--role=main`, then `--role=backup --peer=127.0.0.1:<the main's port>`. Both
+# linked within 3 s; a cue.fire, a standby.next and a go sent to the main raise
+# the backup's pair/received by exactly three; the round trip under a tenth of a
+# second; the main killed, the backup unlinked within the timeout and a half
+# second; a new main on the same port found again. Unbuffered, and hold's limit,
+# for hold's reason.
+add_test(NAME blackbox.pair-link.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_link.py" --wfg-locale=C)
+add_test(NAME blackbox.pair-link.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_link.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.pair-link.C blackbox.pair-link.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------

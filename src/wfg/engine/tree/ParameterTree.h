@@ -55,6 +55,7 @@
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/SamplerLayout.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
+#include <wfg/engine/pair/LinkReading.h>
 #include <wfg/engine/pair/PairSettings.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/KnownList.h>
@@ -151,6 +152,12 @@ namespace wfg::tree
             its `pair::Pairing` on the tick they changed. Unpaired wherever
             nobody set them: a replay, a rig, a serve with no file. */
         pair::PairSettings pairSettings;
+
+        /*  AND WHAT THE LINK SAYS ABOUT ITSELF (RD.5): `pair/linked`,
+            `pair/peer`, `pair/roundTrip`, `pair/received` and `pair/gaps`, as
+            serve reads them off its stream on a main and off its receiver on a
+            backup, every tick. Unlinked wherever there is no link. */
+        pair::LinkReading pairLink;
 
         //======================================================================
         /*  What the audio actually is right now, as against what the document

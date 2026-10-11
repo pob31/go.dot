@@ -1675,3 +1675,50 @@ TEST_CASE ("pairing: pair/role, pair/peers and pair/timeout publish the settings
     //  And a backup in RD.4 does not hold: only `--hold` does, until RD.6.
     CHECK (valueAt (snapshot, "/godot/pair/sending", "T") == osc::Value::boolean (true));
 }
+
+//==============================================================================
+/*  RD.5: what the link says about itself (namespace draft §58.3) - linked,
+    who is at the other end, the round trip, the records this link and its
+    gaps - published as serve reads them, read-only, the round trip by the
+    log's own formatter so a French machine reads it as a number. */
+TEST_CASE ("peer link: pair/linked, peer, roundTrip, received and gaps publish the link as read, read-only")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+
+    const auto valueAt = [] (const std::shared_ptr<const TreeSnapshot>& snapshot, const std::string& address,
+                             const std::string& typeTags)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        CHECK (node->access == Access::read);
+        CHECK (node->typeTags == typeTags);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    //  No link: unlinked, nobody, nothing.
+    EngineState state;
+    auto snapshot = rig.parameters.publish (1, state);
+
+    CHECK (valueAt (snapshot, "/godot/pair/linked", "T") == osc::Value::boolean (false));
+    CHECK (valueAt (snapshot, "/godot/pair/peer", "s") == osc::Value::string (""));
+    CHECK (valueAt (snapshot, "/godot/pair/roundTrip", "f") == osc::Value::float32 (0.0f));
+    CHECK (valueAt (snapshot, "/godot/pair/received", "h") == osc::Value::int64 (0));
+    CHECK (valueAt (snapshot, "/godot/pair/gaps", "h") == osc::Value::int64 (0));
+
+    //  A link as a backup reads it.
+    state.pairLink.linked = true;
+    state.pairLink.peer = "10.0.0.1:5010";
+    state.pairLink.roundTrip = 0.0042;
+    state.pairLink.received = 12;
+    state.pairLink.gaps = 1;
+    snapshot = rig.parameters.publish (2, state);
+
+    CHECK (valueAt (snapshot, "/godot/pair/linked", "T") == osc::Value::boolean (true));
+    CHECK (valueAt (snapshot, "/godot/pair/peer", "s") == osc::Value::string ("10.0.0.1:5010"));
+    CHECK (valueAt (snapshot, "/godot/pair/roundTrip", "f") == osc::Value::float32 (static_cast<float> (0.0042)));
+    CHECK (valueAt (snapshot, "/godot/pair/received", "h") == osc::Value::int64 (12));
+    CHECK (valueAt (snapshot, "/godot/pair/gaps", "h") == osc::Value::int64 (1));
+}

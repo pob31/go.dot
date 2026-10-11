@@ -134,6 +134,32 @@ namespace wfg::oscquery
     };
 
     //==========================================================================
+    /*  A SIDE DOOR FOR FRAMES THAT ARE NOT WRITES (namespace draft §58, RD.5).
+
+        The redundancy link rides on this port - a backup dials its main where
+        every client does - but what it says is not a write to the show: a
+        hello, a ping, never an event and never a record in the log. So a
+        binary frame whose address is under the door's prefix is handed here,
+        decoded, on the server's thread, and NEVER to `Namespace::write`; and a
+        connection closing is told here too, beside `forget`.
+
+        The server knows no more about it than that: a prefix and somebody to
+        hand the frames to. What the frames mean is the door's (pair/PeerLink.h).
+        Answered from memory - this is the thread every subscription push and
+        every poll on the port share. */
+    class PeerDoor
+    {
+    public:
+        virtual ~PeerDoor() = default;
+
+        /** A message under the door's prefix, from a WebSocket connection. */
+        virtual void peerMessage (const std::string& origin, const osc::Packet& message) = 0;
+
+        /** That connection closed. Every connection's close is told, a door's or not. */
+        virtual void peerClosed (const std::string& origin) = 0;
+    };
+
+    //==========================================================================
     /*  WHAT A ROUTE ANSWERS: an HTTP reply, and nothing the tree knows about.
 
         A route is a plain GET on this same port answered by a function rather
@@ -269,6 +295,22 @@ namespace wfg::oscquery
             `stop()` never returns. */
         void serveRoute (std::string prefix, RouteHandler handler);
 
+        /*  THE SIDE DOOR (above): every binary frame whose address starts with
+            `prefix` goes to `door` and nowhere else. BEFORE `start()`, as a
+            route is, and for the same reason: it is read on the server's thread
+            without a lock. Null takes the door away; a frame under the prefix
+            is then dropped, still never a write. Over the WebSocket only - the
+            UDP port is a device's (AGD), and nothing here sees it. */
+        void setPeerDoor (std::string prefix, PeerDoor* door);
+
+        /*  ONE BINARY FRAME TO ONE CONNECTION, named by its origin
+            (`ws:<ip>:<port>`); false when there is no such connection, or no
+            server. Any thread, and never waits on the network: the connection
+            queues it and its own thread writes it. The redundancy link's way
+            out; the frames are not shown to the traffic monitor, which is the
+            page's. */
+        bool sendTo (const std::string& origin, const std::uint8_t* data, std::size_t size);
+
         void stop();
 
         bool isRunning() const noexcept { return running.load (std::memory_order_relaxed); }
@@ -312,6 +354,9 @@ namespace wfg::oscquery
     private:
         /** One text frame to every open connection, for PATH_* notifications. */
         void broadcastText (const std::string& message);
+
+        /** One binary frame to a connection by its id (`<ip>:<port>`), found and held under the map's lock. */
+        bool sendBinary (const std::string& connectionId, const std::uint8_t* data, std::size_t size);
 
         struct Impl;
         std::unique_ptr<Impl> impl;

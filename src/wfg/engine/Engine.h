@@ -166,6 +166,23 @@ namespace wfg
 
         void setBeforeApply (BeforeApply hook) { beforeApply = std::move (hook); }
 
+        /*  RUN ON THE TICK THREAD AFTER EVERY RECORD IS WRITTEN (namespace draft
+            §58, RD.5): the record exactly as the log has it - its arguments as
+            applied, its refusal's reason - and the registry's entry for its
+            command, so whoever reads it can ask what kind of command it was
+            without looking it up a second time. Null for a packet that never
+            became a command (`X`) and for a command nobody registered.
+
+            Every record, applied, refused and dropped, in the order the log
+            has them, and AFTER the log write: what the hook sees is already
+            the session's history. It is the redundancy link's door - the main
+            sends what travels down to its backup from here - and it is null by
+            default, and stays null in a replay and in every rig: one test of a
+            function per record is all an engine without a link pays. */
+        using AfterRecord = std::function<void (const LogRecord& record, const Command* command)>;
+
+        void setAfterRecord (AfterRecord hook) { afterRecord = std::move (hook); }
+
         // A short asynchronous audio restart defers gestures until its logged
         // completion. The same predicate runs on replay; no hardware is consulted.
         void setAdmissionCheck (std::function<std::string (const std::string&)> check)
@@ -182,7 +199,7 @@ namespace wfg
         }
 
     private:
-        LogRecord applyEvent (std::int64_t tickIndex, const Event& event);
+        LogRecord applyEvent (std::int64_t tickIndex, const Event& event, const Command*& found);
         void record (const LogRecord& r);
 
         CommandRegistry registry;
@@ -191,6 +208,7 @@ namespace wfg
 
         std::vector<Entry> draining;          // reused; tick thread only
         BeforeApply beforeApply;
+        AfterRecord afterRecord;
         std::function<std::string (const std::string&)> admissionCheck;
 
         std::atomic<std::int64_t> tick { -1 };

@@ -143,8 +143,9 @@ def run() -> int:
                      (out + err).strip()[-2000:])
 
         # --- the same folder again, no overrides: the file is read ---------------
+        # role=None: no --role on the line, which a Server otherwise adds (RD.5).
         bundle = common.copy_bundle(FIXTURE, scratch / "second")
-        with Server(bundle, locale=locale, engine_folder=engine_folder) as server:
+        with Server(bundle, locale=locale, engine_folder=engine_folder, role=None) as server:
             read, send = reader(server), sender(server)
 
             report.equal(read("/godot/pair/role"), "main", "a second serve on the folder reads the role back")
@@ -161,7 +162,7 @@ def run() -> int:
 
         # --- and a third reads the fraction back ----------------------------------
         bundle = common.copy_bundle(FIXTURE, scratch / "third")
-        with Server(bundle, locale=locale, engine_folder=engine_folder) as server:
+        with Server(bundle, locale=locale, engine_folder=engine_folder, role=None) as server:
             read = reader(server)
             report.equal(read("/godot/pair/timeout"), 1.5, "a third serve reads 1.5 s back exactly")
             report.equal(read("/godot/pair/peers"), "10.0.0.2:5010 10.1.0.2:6010", "and both peers")

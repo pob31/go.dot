@@ -45,6 +45,7 @@
 #include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/pair/MachineLocal.h>
 #include <wfg/engine/pair/PairSettings.h>
+#include <wfg/engine/pair/PeerLink.h>
 #include <wfg/engine/pair/SavePump.h>
 #include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/PdInstance.h>
@@ -3339,7 +3340,8 @@ namespace
             keyboard, and a backup that came up unpaired because of a typo
             would be found out at the moment it was needed.
 
-            NOTHING USES THEM YET beyond publishing them: RD.5 dials the peers.
+            THE LINK READS THEM (RD.5, below beside the server): a main streams,
+            a backup dials its peers, and both report whether they are linked.
             And `--role=backup` alone does NOT hold - `pair/sending` stays true
             and the devices are sent to - because when a backup holds is the
             link's to decide (RD.6 holds it while it follows, RD.7 lets go when
@@ -5077,8 +5079,67 @@ namespace
                                      ? args.getValueForOption ("--http-port").getIntValue()
                                      : 5010;
 
+        /*  THE REDUNDANCY LINK (namespace draft §58, RD.5): this machine's
+            stream, if it is a main - every record it writes that its backup
+            will one day apply, kept as the log writes it, and a heartbeat at
+            the end of every tick - and, if it is a backup, the dialler and
+            what it receives. Both exist on every serve and idle unless the
+            role in force asks for them; a pairing command moves them on the
+            tick it is applied. REPORT ONLY in RD.5: nothing received is
+            applied (RD.6), nothing is held or let go because of the link.
+
+            Declared before the server, which hands the stream what a backup
+            says on its own thread and is stopped before either goes; the
+            stream's identity is drawn here, once a session - not by the
+            engine, whose one source of randomness is for the show (AGE), and
+            not from the show, which the two machines share: it is what tells
+            a backup that the main it finds is not the one it followed. */
+        wfg::pair::Stream linkStream { juce::Uuid().toString().toStdString() };
+        wfg::pair::Receiver linkReceiver;
+        wfg::pair::Dialler dialler { linkReceiver, juce::SystemStats::getComputerName().toStdString() };
+
+        /*  Which half is awake, from the role in force; read again on the tick a
+            pairing command moved it. */
+        enum class LinkRole { none, main, backup };
+        const auto linkRoleOf = [] (const wfg::pair::PairSettings& settings)
+        {
+            return settings.role == "main"   ? LinkRole::main
+                 : settings.role == "backup" ? LinkRole::backup
+                                             : LinkRole::none;
+        };
+        auto linkRole = linkRoleOf (pairing.inForce);
+        linkStream.setLeading (linkRole == LinkRole::main);
+        dialler.want (linkRole == LinkRole::backup ? pairing.inForce.peers : std::vector<std::string> {});
+        dialler.start();
+
+        /*  EVERY RECORD, AS THE LOG WROTE IT, on the tick thread: the stream
+            keeps the ones that travel and nothing else (pair::travels). */
+        engine.setAfterRecord ([&linkStream] (const wfg::LogRecord& written, const wfg::Command* writtenBy)
+                               { linkStream.keep (written, writtenBy); });
+
+        /*  What a backup says on the server's thread - a hello, a ping - goes to
+            the stream and never to the namespace: no event, no record. */
+        struct LinkDoor final : public wfg::oscquery::PeerDoor
+        {
+            explicit LinkDoor (wfg::pair::Stream& streamToTell) : stream (streamToTell) {}
+
+            void peerMessage (const std::string& origin, const wfg::osc::Packet& message) override
+            {
+                stream.received (origin, message, wfg::pair::LinkClock::now());
+            }
+
+            void peerClosed (const std::string& origin) override { stream.closed (origin); }
+
+            wfg::pair::Stream& stream;
+        };
+
+        LinkDoor linkDoor { linkStream };
+
         wfg::oscquery::OscQueryServer server;
         server.setTap (&traffic);
+        server.setPeerDoor (std::string (wfg::pair::wire::prefix), &linkDoor);
+        linkStream.setSend ([&server] (const std::string& origin, const std::vector<std::uint8_t>& bytes)
+                            { return server.sendTo (origin, bytes.data(), bytes.size()); });
 
         if (clientDirectory != juce::File())
             server.serveClientFrom (clientDirectory);
@@ -5877,6 +5938,20 @@ namespace
                                     cue's first send, never before it. */
                                 answers.flush();
 
+                                /*  THE LINK'S HEARTBEAT (namespace draft §58,
+                                    RD.5; AFV), next: on a main, what each
+                                    backup has not had of this tick's records,
+                                    then the beat that says this tick happened -
+                                    from here, so a main whose tick hangs falls
+                                    silent and is lost, and before the publish
+                                    below, which a backup does not wait behind.
+                                    On a backup, what its main sent since the
+                                    last tick, counted. Both queue and return:
+                                    a send is the server's to write, never the
+                                    tick's to wait for. */
+                                linkStream.afterTick (outcome.tick, pairing.inForce.timeout);
+                                linkReceiver.drain (wfg::pair::LinkClock::now(), pairing.inForce.timeout);
+
                                 /*  The runtime half of the state, refreshed
                                     before the publish that carries it. Left
                                     out, `/godot/engine/tick` reads 0 for the
@@ -5941,6 +6016,35 @@ namespace
                                 {
                                     state.pairSettings = pairing.inForce;
                                     pairingPublished = pairing.revision;
+
+                                    /*  And the link follows the role and the
+                                        peers in force (RD.5): a main streams, a
+                                        backup dials, anything else does neither. */
+                                    linkRole = linkRoleOf (pairing.inForce);
+                                    linkStream.setLeading (linkRole == LinkRole::main);
+                                    dialler.want (linkRole == LinkRole::backup ? pairing.inForce.peers
+                                                                               : std::vector<std::string> {});
+                                }
+
+                                /*  WHAT THE LINK SAYS (RD.5), read into the
+                                    reading kept in the state: five values and,
+                                    only when it moved, the peer's text. */
+                                switch (linkRole)
+                                {
+                                    case LinkRole::main:
+                                        linkStream.readInto (state.pairLink, wfg::pair::LinkClock::now(),
+                                                             pairing.inForce.timeout);
+                                        break;
+
+                                    case LinkRole::backup:
+                                        linkReceiver.readInto (state.pairLink, wfg::pair::LinkClock::now(),
+                                                               pairing.inForce.timeout);
+                                        break;
+
+                                    case LinkRole::none:
+                                        state.pairLink.linked = false;
+                                        state.pairLink.roundTrip = 0.0;
+                                        break;
                                 }
 
                                 /*  THE REFUSAL ITSELF, and not only the count
@@ -7227,6 +7331,7 @@ namespace
         fetcher.stop();
         probe.stop();
         listener.stop();
+        dialler.stop();
         spaceMouse.stop();
 
         /*  The renderer between two blocks, its part file left for the next
