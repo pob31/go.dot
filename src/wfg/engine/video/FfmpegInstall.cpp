@@ -306,7 +306,9 @@ namespace wfg::video::ffmpeg
 
     void registerInstallCommands (CommandRegistry& registry, Installer* installer)
     {
-        registry.add ({ "ffmpeg.install",
+        /*  INTO THIS MACHINE'S FOLDER (namespace draft §58, RD.3, AGC): never
+            sent to a backup, and no step of undo. */
+        registry.add (machineLocal ({ "ffmpeg.install",
                         "Downloads FFmpeg into Go.dot's own folder (namespace draft 37.5, WN): what converts and"
                         " previews a movie that is not HAP. Taken and ignored where nothing downloads.",
                         {},
@@ -317,6 +319,6 @@ namespace wfg::video::ffmpeg
                                 return Outcome::rejected (reason::badValue);
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
     }
 }

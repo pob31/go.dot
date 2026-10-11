@@ -130,8 +130,10 @@ namespace wfg::cue
     {
         /*  3DCONNEXION'S DRIVER CLOSED, ASKED BY THE OPERATOR (ZF): the reader
             kills it on a thread of its own and looks for the puck again. What
-            the machine does, so a replay - which has no puck - does nothing. */
-        registry.add ({ "spacemouse.closeDriver",
+            the machine does, so a replay - which has no puck - does nothing;
+            and the machine's alone (namespace draft §58, RD.3, AGC), never sent
+            to a backup, whose puck is its own. */
+        registry.add (machineLocal ({ "spacemouse.closeDriver",
                         "Closes 3Dconnexion's driver, which holds the SpaceMouse, so Go.dot can read it.",
                         {},
                         true,
@@ -141,7 +143,7 @@ namespace wfg::cue
                                 puck->closeDriver();
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
         registry.add ({ "curve.arm",
                         "Arms an OSC cue for recording its curves: its curves can then be armed and a pass"

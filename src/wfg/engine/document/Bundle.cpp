@@ -1477,8 +1477,12 @@ namespace wfg::doc
             the bytes would be a record of something nobody decided - the same
             argument `audio.editBuilt` makes, whose comment is the sentence to
             keep: the graph exists, and that is an event, not a variable being
-            set. A save that happened is an event. The bytes it wrote are not. */
-        registry.add ({ "document.autosave",
+            set. A save that happened is an event. The bytes it wrote are not.
+
+            AND THIS MACHINE'S (namespace draft §58, RD.3, AGC): a crash copy is
+            of this machine's session, in this machine's folder, on its own
+            clock. Never sent to a backup, and no step of undo. */
+        registry.add (machineLocal ({ "document.autosave",
                         "Writes the show to the bundle's recovery folder. The engine decides this.",
                         {},
                         true,
@@ -1559,7 +1563,7 @@ namespace wfg::doc
 
                             writer.submit (std::move (job));
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
         //----------------------------------------------------------------------
         /*  `document.recover` - THAT THE ABANDONED AFTERNOON WAS WORTH KEEPING,
@@ -1572,8 +1576,13 @@ namespace wfg::doc
             would decide for them that the afternoon was worth keeping, which is
             the one decision autosave exists to leave open; and `adopt` replaces
             the root wholesale, lock included, so a silent adopt could unlock a
-            locked show because a file on disk said so - during a performance. */
-        registry.add ({ "document.recover",
+            locked show because a file on disk said so - during a performance.
+
+            THIS MACHINE'S (RD.3), as `document.discardRecovery` is: what it
+            adopts is the trace of a session that crashed HERE, in this
+            machine's folder. A backup has its own folder and its own afternoon,
+            and a main recovering one says nothing about it. */
+        registry.add (machineLocal ({ "document.recover",
                         "Adopts the recovery an earlier session left, replacing the open show.",
                         {},
                         true,
@@ -1634,10 +1643,10 @@ namespace wfg::doc
                                 return Outcome::rejected (reason::noRecovery);
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
         //----------------------------------------------------------------------
-        registry.add ({ "document.discardRecovery",
+        registry.add (machineLocal ({ "document.discardRecovery",
                         "Deletes the recovery an earlier session left, wherever it now lives.",
                         {},
                         true,
@@ -1689,7 +1698,7 @@ namespace wfg::doc
 
                             writer.submit (std::move (job));
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
         //----------------------------------------------------------------------
         /*  `document.revert` - THAT THE BUNDLE ON DISK WINS.
@@ -1797,8 +1806,15 @@ namespace wfg::doc
             (`Bundle::carryMedia`). Never by default, for the reason `saveCopy`
             leaves media/ behind - a copy that silently duplicated gigabytes is
             a gesture nobody uses twice - so the window asks when the copy
-            leaves the show's folder, and a script says so. */
-        registry.add ({ "document.saveAs",
+            leaves the show's folder, and a script says so.
+
+            A PATH ON THIS MACHINE (namespace draft §58, RD.3, AGC), so this
+            machine's alone: a copy for the archive asked of the main is not a
+            copy the backup should write into a folder of the same name on its
+            own disk. Never sent down the link, and no step of undo. A save
+            is the show's: each machine keeps its own copy of the show as the
+            show now is. */
+        registry.add (machineLocal ({ "document.saveAs",
                         "Writes the show into another folder, as a copy. The session keeps its own. "
                         "With media, the copy carries the sounds it would not find there.",
                         { { "path", 's', false }, { "media", 'T', true } },
@@ -1872,6 +1888,6 @@ namespace wfg::doc
 
                             writer.submit (std::move (job));
                             return Outcome::ok (args);
-                        } });
+                        } }));
     }
 }

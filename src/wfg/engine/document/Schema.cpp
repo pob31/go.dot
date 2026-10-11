@@ -565,6 +565,87 @@ namespace wfg::doc
         return rows;
     }
 
+    //==============================================================================
+    namespace
+    {
+        /*  A MACHINE ROW, AND WHETHER IT HANGS ON AN OBJECT - a port, a serial
+            port, an output, addressed with an identifier between the owner and
+            the row - or on a container like <Audio>, addressed without one. */
+        struct MachineRow
+        {
+            const AttributeRow* row = nullptr;
+            bool onObject = false;
+        };
+
+        /*  GATHERED ONCE: sixteen rows out of six hundred, so the question costs
+            a few comparisons rather than a walk of the table, which matters
+            because the transaction hook asks it of every `node.set` - a fader
+            on a cue's level among them. Read off the elements rather than the
+            raw table so that the object-or-container answer is the schema's
+            own `hasIdentity` and not a second list of owners kept here; the
+            derived attributes too, so a runtime row marked `machine` would be
+            found as well as a stored one. */
+        const std::vector<MachineRow>& machineRows()
+        {
+            static const auto rows = []
+            {
+                std::vector<MachineRow> found;
+
+                for (const auto& element : Schema::instance().elements())
+                    for (const auto* attributes : { &element.attributes, &element.derivedAttributes })
+                        for (const auto& attribute : *attributes)
+                            if (attribute.isMachine())
+                                found.push_back ({ attribute.row, element.hasIdentity });
+
+                return found;
+            }();
+
+            return rows;
+        }
+    }
+
+    bool Schema::isMachine (std::string_view owner, std::string_view name)
+    {
+        //  The scope first: an enum compared six hundred times, a name sixteen.
+        for (const auto& row : generated::attributes)
+            if (row.scope == Scope::machine && row.owner == owner && row.name == name)
+                return true;
+
+        return false;
+    }
+
+    bool Schema::isMachineAddress (std::string_view address)
+    {
+        constexpr std::string_view godot = "/godot/";
+
+        if (address.substr (0, godot.size()) != godot)
+            return false;
+
+        //  owner / row, or owner / id / row, and nothing deeper.
+        const auto rest = address.substr (godot.size());
+        const auto first = rest.find ('/');
+
+        if (first == std::string_view::npos || first == 0)
+            return false;
+
+        const auto owner = rest.substr (0, first);
+        const auto tail = rest.substr (first + 1);
+        const auto second = tail.find ('/');
+
+        const auto onObject = second != std::string_view::npos;
+        const auto name = onObject ? tail.substr (second + 1) : tail;
+
+        if (name.empty() || name.find ('/') != std::string_view::npos
+              || (onObject && second == 0))
+            return false;
+
+        for (const auto& machine : machineRows())
+            if (machine.onObject == onObject && machine.row->owner == owner && machine.row->name == name)
+                return true;
+
+        return false;
+    }
+
     int Schema::formatVersion()
     {
         const auto* attribute = instance().attribute (rootElement, "formatVersion");

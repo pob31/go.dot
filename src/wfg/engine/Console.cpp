@@ -43,6 +43,7 @@
 #include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/pair/Hold.h>
+#include <wfg/engine/pair/MachineLocal.h>
 #include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/ProcessHost.h>
@@ -875,6 +876,14 @@ namespace
                                              || wfg::cue::isLiveEdit (appliedCommand.name, coerced,
                                                                       document, liveEdits))
                                            return;
+
+                                       /*  NOR IS WHAT IS THIS MACHINE'S (RD.3),
+                                           as `serve`'s hook says. */
+                                       if (wfg::pair::isMachineLocal (appliedCommand, coerced))
+                                       {
+                                           document.beginMachineEdit();
+                                           return;
+                                       }
 
                                        document.beginTransaction (appliedCommand.name, tickIndex,
                                                                   submitted.origin, coerced);
@@ -3942,6 +3951,21 @@ namespace
                                          || wfg::cue::isLiveEdit (appliedCommand.name, coerced,
                                                                   document, liveEdits))
                                        return;
+
+                                   /*  NOR IS WHAT IS THIS MACHINE'S (namespace
+                                       draft §58, RD.3, AGC): a command that
+                                       acts on this machine alone, or a value
+                                       set on its rows - the interface, a
+                                       port's device, a serial path, a display.
+                                       A backup is never sent those, so here
+                                       they open no step, end no drag, and land
+                                       on no step left open; the show file
+                                       still keeps the rows that are in it. */
+                                   if (wfg::pair::isMachineLocal (appliedCommand, coerced))
+                                   {
+                                       document.beginMachineEdit();
+                                       return;
+                                   }
 
                                    document.beginTransaction (appliedCommand.name, tickIndex,
                                                               submitted.origin, coerced);

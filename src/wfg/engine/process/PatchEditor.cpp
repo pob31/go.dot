@@ -399,7 +399,11 @@ namespace wfg::process::editor
     void registerCommands (CommandRegistry& registry, const doc::ShowDocument& document,
                            Watch* watch, Installer* installer)
     {
-        registry.add ({ "process.edit",
+        /*  BOTH THIS MACHINE'S (namespace draft §58, RD.3, AGC): a program
+            opened on its screen, a download into its folder. Never sent to a
+            backup, and no step of undo - what the patch's editor saves comes
+            back as an edit to the cue, which is the show's. */
+        registry.add (machineLocal ({ "process.edit",
                         "Opens a process cue's patch in plugdata or Pure Data, as a program of its own; each save"
                         " there comes back as the cue's patch (namespace draft 51, ACN). Refused while the show is"
                         " locked, and pd-missing on a machine with neither.",
@@ -428,9 +432,9 @@ namespace wfg::process::editor
                                 return Outcome::rejected ("pd-missing");
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
-        registry.add ({ "pd.install",
+        registry.add (machineLocal ({ "pd.install",
                         "Downloads Pure Data " + std::string (pdRelease) + " into Go.dot's own folder, to edit a"
                         " process cue's patch in (namespace draft 51, ACO). Taken and ignored where nothing downloads.",
                         {},
@@ -440,6 +444,6 @@ namespace wfg::process::editor
                             if (installer != nullptr && ! installer->start())
                                 return Outcome::rejected (reason::badValue);
                             return Outcome::ok (args);
-                        } });
+                        } }));
     }
 }

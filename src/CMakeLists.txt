@@ -184,6 +184,8 @@ add_library(wfg_engine STATIC
     wfg/engine/process/PatchEditor.h
     wfg/engine/process/PatchEditor.cpp
     wfg/engine/pair/Hold.h
+    wfg/engine/pair/MachineLocal.h
+    wfg/engine/pair/MachineLocal.cpp
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp
     wfg/engine/serial/Slip.cpp

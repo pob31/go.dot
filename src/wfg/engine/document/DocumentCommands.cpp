@@ -160,7 +160,10 @@ namespace wfg::doc
                                    ForeignWrite foreign, LiveWrite live, LiveCreate liveSend,
                                    LiveSide many)
     {
-        registry.add ({ "audio.configure", "Set the show's audio interface and channel patches as one edit.",
+        /*  THIS MACHINE'S INTERFACE (namespace draft §58, RD.3, AGC): every row
+            it writes is marked `machine`, so a backup is never sent it and it
+            is no step of undo. Saved in the show all the same (D3). */
+        registry.add (machineLocal ({ "audio.configure", "Set the show's audio interface and channel patches as one edit.",
                         { { "enabled", 'T', false }, { "deviceType", 's', false },
                           { "outputDevice", 's', false }, { "inputDevice", 's', false },
                           { "bufferSize", 'i', false }, { "inputPatch", 's', false },
@@ -176,7 +179,7 @@ namespace wfg::doc
                             settings.inputPatch = args[5].getString();
                             settings.outputPatch = args[6].getString();
                             return fromEdit (document.configureAudio (settings), args);
-                        } });
+                        } }));
         //----------------------------------------------------------------------
         registry.add ({ "list.create",
                         "Creates a cue list. Generates an identifier if none is given.",

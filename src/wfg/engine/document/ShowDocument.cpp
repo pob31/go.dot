@@ -344,13 +344,19 @@ namespace wfg::doc
             on: every first of a pair, sorted, one to a line - a newline being
             the one character no address the tree publishes holds. Whatever is
             not a string is left out; such a set is refused anyway, and the
-            key it leaves behind only has to differ from a drag's. */
+            key it leaves behind only has to differ from a drag's.
+
+            A MACHINE ROW IS NO PART OF THE KEY (namespace draft §58, RD.3): a
+            set that mixes the show's rows with the machine's reaches a backup
+            without its machine pairs, so the key there is the show's addresses
+            alone, and it has to be the same key here, or a write that joins on
+            one machine would open a step on the other. */
         std::string addressSetOf (const std::vector<osc::Value>& args)
         {
             std::vector<std::string> addresses;
 
             for (std::size_t at = 0; at < args.size(); at += 2)
-                if (args[at].isString())
+                if (args[at].isString() && ! Schema::isMachineAddress (args[at].getString()))
                     addresses.push_back (args[at].getString());
 
             std::sort (addresses.begin(), addresses.end());
@@ -658,6 +664,7 @@ namespace wfg::doc
         makeHistories();
         forgetCoalescing();
         undoSuppressions = 0;
+        machineEditing = false;
         keeping = nullptr;
 
         showNode.addListener (this);
@@ -957,6 +964,9 @@ namespace wfg::doc
                                          const std::string& writeOrigin,
                                          const std::vector<osc::Value>& args)
     {
+        //  Every command that is the show's ends a machine edit (RD.3).
+        machineEditing = false;
+
         /*  ONLY A `node.set` HAS AN ADDRESS TO COALESCE ON, and everything else
             leaves this empty - which is how a create, a delete, a move and an
             `undo` each break a run without needing a rule of their own.
@@ -1080,10 +1090,19 @@ namespace wfg::doc
 
     juce::UndoManager* ShowDocument::historyFor (const Attribute& attribute) noexcept
     {
-        if (attribute.persist() != Persist::show)
+        if (attribute.persist() != Persist::show || machineEditing)
             return nullptr;
 
         return structuralHistory();
+    }
+
+    void ShowDocument::beginMachineEdit() noexcept
+    {
+        /*  NOTHING ELSE: no transaction begun, so nothing is named and nothing
+            is split, and the last write's address, origin and tick left as
+            they were, so a drag on either side of this goes on joining exactly
+            as it does on a machine that never saw it. */
+        machineEditing = true;
     }
 
     void ShowDocument::rebuildRegistry()

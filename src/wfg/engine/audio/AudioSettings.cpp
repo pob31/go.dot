@@ -231,7 +231,14 @@ namespace wfg::audio
             "Rebuild the audio graph with the show's plugin set as it stands, while stopped.", {}, false,
             [apply] (CommandContext& context, const std::vector<osc::Value>& args)
             { return apply (context, args, nullptr, true); } });
-        engine.commands().add ({ "audio.setup", "Edit and apply audio settings while stopped.",
+        /*  THIS MACHINE'S, ALL FIVE (namespace draft §58, RD.3, AGC): choosing
+            its interface, writing its defaults file and the reports of its own
+            device - never sent to a backup, which has other hardware, and no
+            step of undo. Apply and Load are not: they realise the show's own
+            decisions, its track count and its plugin set, on each machine's
+            interface, and a backup that did not follow them would play a
+            different graph. */
+        engine.commands().add (machineLocal ({ "audio.setup", "Edit and apply audio settings while stopped.",
             { { "enabled", 'T', false }, { "deviceType", 's', false }, { "outputDevice", 's', false },
               { "inputDevice", 's', false }, { "bufferSize", 'i', false },
               { "inputPatch", 's', false }, { "outputPatch", 's', false } }, true,
@@ -243,24 +250,24 @@ namespace wfg::audio
                 changed.inputDevice = args[3].getString(); changed.bufferSize = args[4].getInt32();
                 changed.inputPatch = args[5].getString(); changed.outputPatch = args[6].getString();
                 return apply (context, args, &changed, false);
-            } });
+            } }));
         state.requestSettings = std::move (request);
-        engine.commands().add ({ "audio.defaultsReady", "The audio defaults write finished.",
+        engine.commands().add (machineLocal ({ "audio.defaultsReady", "The audio defaults write finished.",
             { { "error", 's', false } }, false,
             [&state] (CommandContext&, const std::vector<osc::Value>& args)
             {
                 if (! args[0].getString().empty())
                 { state.settingsError = args[0].getString(); state.settingsStatus = "error"; }
                 return Outcome::ok (args);
-            } });
-        engine.commands().add ({ "audio.defaults", "Use this show's audio settings for new shows.", {}, false,
+            } }));
+        engine.commands().add (machineLocal ({ "audio.defaults", "Use this show's audio settings for new shows.", {}, false,
             [&] (CommandContext&, const std::vector<osc::Value>& args)
             {
                 if (document.isLocked()) return Outcome::rejected (reason::locked);
                 if (state.requestSettings) state.requestSettings (audioSettingsOf (document), true);
                 return Outcome::ok (args);
-            } });
-        engine.commands().add ({ "audio.settingsReady", "The audio settings operation finished.",
+            } }));
+        engine.commands().add (machineLocal ({ "audio.settingsReady", "The audio settings operation finished.",
             { { "error", 's', false }, { "sampleRate", 'i', false }, { "bufferSize", 'i', false },
               { "inputs", 'i', false }, { "outputs", 'i', false }, { "bufferSizes", 's', true },
               /*  AFTER THE LAST ONE A SESSION ALWAYS SENT (Phase 9b), so a log
@@ -283,7 +290,7 @@ namespace wfg::audio
                 if (state.sampleRate > 0) runner.setSamplesPerTick (state.sampleRate / 50);
                 runner.resetAudioPreparation();
                 return Outcome::ok (args);
-            } });
+            } }));
 
         /*  THE INTERFACE'S CLOCK MOVED (PRD §6.2, built 2026-09-28): the same
             interface came back from an outage on another rate, block or
@@ -307,8 +314,11 @@ namespace wfg::audio
             (`followClock`), which ends with `audio.settingsReady`.
 
             Refused outside an outage: there is no moved clock to follow on an
-            interface that is running. */
-        engine.commands().add ({ "audio.clockMoved",
+            interface that is running.
+
+            THIS MACHINE'S INTERFACE, so this machine's alone (RD.3): the main's
+            clock moving stops the main, and the backup plays on. */
+        engine.commands().add (machineLocal ({ "audio.clockMoved",
             "The interface came back on another clock and will not give it up: stop what plays, and follow it.",
             { { "sampleRate", 'i', false }, { "bufferSize", 'i', false } }, false,
             [&] (CommandContext& context, const std::vector<osc::Value>& args)
@@ -370,6 +380,6 @@ namespace wfg::audio
                     state.followClock();
 
                 return Outcome::ok (args);
-            } });
+            } }));
     }
 }

@@ -25174,3 +25174,42 @@ passed on and the main refused comes back refused, with the main's reason.
   sampler member's `cue.fire` record drops its cause, so a replay's `noteFireOnList` reads nought
   where the session had the GO; a session log from before RD.2 that fires a movie with locked
   sounds no longer replays (no fixture has one).
+- **RD.3**, 2026-10-11: what belongs to the machine (AGC). The parameter table gains a last
+  column, `scope`: blank for the show's, `machine` for a row that names something on this
+  computer. It may be left off, so a row that stops at its description is the show's and six
+  hundred lines kept their history; the tail of a description whose comma was not quoted lands in
+  it and is refused, and the generator's self-test holds the scope's cases beside the literals'.
+  Sixteen rows are marked: the audio interface (`enabled`, `deviceType`, `outputDevice`,
+  `inputDevice`, `bufferSize`), its `inputPatch` and `outputPatch` and the two `Settled` flags that
+  say they stopped following the lists, a port's `outputDevice`, `outputDeviceId`, `inputDevice`
+  and `inputDeviceId`, `serial/path`, and a video output's `display` and `displayId`. Read as
+  `AttributeRow::scope`, `Attribute::isMachine`, `Schema::isMachine (owner, name)` and
+  `Schema::isMachineAddress`, which reads an address as a string and never the document, so the
+  main, the backup and a replay answer alike. `Command::machineLocal`, set by writing
+  `machineLocal ({ ... })` round a registration, marks twenty-seven commands: `audio.configure`,
+  `.setup`, `.defaults`, `.defaultsReady`, `.settingsReady`, `.clockMoved`, `.reconnect`,
+  `.connection`, `.testSignal`, `.testStop`, `.editBuilt`; `plugin.scan`, `.scanRetry`,
+  `.scanned`, `.failed`, `.restart`; `document.saveAs`, `.autosave`, `.recover`,
+  `.discardRecovery`; `media.cleanCache`, `ffmpeg.install`, `pd.install`, `process.edit`,
+  `videoOutput.identify`, `video.hideProjectors`, `spacemouse.closeDriver`. One predicate,
+  `pair::isMachineLocal (command, args)` - a marked command, or a `node.set` or `node.setMany`
+  whose every address is a machine row - is asked by both transaction hooks, and RD.5's link will
+  ask it. For such a record the hook calls `ShowDocument::beginMachineEdit` in place of a
+  transaction: none is opened, the coalescing key is left as it was, and every value written
+  until the next transaction goes on no history - all three, since a record the backup is never
+  sent may leave no step, may not end a drag the backup sees go on, and may not land on the step
+  still open. A machine row written by a show edit stays on that edit's step: a settled patch that
+  `bus.move` carries along goes back with the move, or the outputs would come back on the wrong
+  channels. A `node.setMany` mixing the two coalesces on its show addresses alone, the key the
+  backup will have. Machine rows still dirty the show and are saved in it (D3). Left on purpose:
+  `audio.apply` and `plugin.load`, which realise the show's track count and plugin set on each
+  machine's own interface; `document.save` and `.revert`; `media.convert` (AFX); the run's own
+  reports (`audio.armed`, `run.late`); and the runtime readouts of the machine (`ports/inputs`,
+  `videoOutputs/displays`, `pair/sending`), which nothing writes, mirrors or stores. Found and
+  left: every engine record still opens a transaction, so one whose moment is this machine's -
+  `audio.armed`, when its media is ready - ends an operator's coalescing window on one machine
+  and not the other (RD.6's to settle); a mirrored `fx.capture` names a plugin-state file only
+  the machine whose helper wrote it has; a machine row saved in show.xml is still refused under
+  the lock, as every `persist=show` row is; a log from before RD.3 that undoes an audio settings
+  edit no longer replays (no fixture has one); `midi.rescan`, which `ports/inputs` names, is not
+  a command.

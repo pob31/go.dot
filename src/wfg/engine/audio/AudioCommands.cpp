@@ -27,13 +27,19 @@ namespace wfg::audio
 
     void registerAudioCommands (CommandRegistry& registry, AudioState& state)
     {
-        registry.add ({ "audio.reconnect", "Reconnect the current interface while retaining paused cues.", {}, false,
+        /*  EVERY ONE OF THESE IS THIS MACHINE'S (namespace draft §58, RD.3,
+            AGC): its interface reconnected, lost or back, a test tone on one of
+            its outputs, the graph its audio side built. A backup has an
+            interface of its own, and the main's going quiet must not pause the
+            backup - which is the whole point of having one - so none is ever
+            sent down the link, and none is a step of undo. */
+        registry.add (machineLocal ({ "audio.reconnect", "Reconnect the current interface while retaining paused cues.", {}, false,
             [&state] (CommandContext&, const std::vector<osc::Value>& args)
             {
                 if (state.reconnect) state.reconnect();
                 return Outcome::ok (args);
-            } });
-        registry.add ({ "audio.connection", "Pause for a lost interface or resume after its clock returns.",
+            } }));
+        registry.add (machineLocal ({ "audio.connection", "Pause for a lost interface or resume after its clock returns.",
             { { "ready", 'T', false } }, false,
             [&state] (CommandContext&, const std::vector<osc::Value>& args)
             {
@@ -51,8 +57,8 @@ namespace wfg::audio
                     stopOutputTest (state);
                 }
                 return Outcome::ok (args);
-            } });
-        registry.add ({ "audio.testSignal", "Test one hardware output without changing cue routing.",
+            } }));
+        registry.add (machineLocal ({ "audio.testSignal", "Test one hardware output without changing cue routing.",
             { { "type", 'i', false }, { "channel", 'i', false }, { "frequency", 'i', false },
               { "level", 'd', false }, { "hold", 'T', false } }, false,
             [&state] (CommandContext&, const std::vector<osc::Value>& args)
@@ -66,12 +72,12 @@ namespace wfg::audio
                 state.test = next;
                 if (state.sendTest) state.sendTest (state.test);
                 return Outcome::ok (args);
-            } });
-        registry.add ({ "audio.testStop", "Stop and clear the output test signal.", {}, false,
+            } }));
+        registry.add (machineLocal ({ "audio.testStop", "Stop and clear the output test signal.", {}, false,
             [&state] (CommandContext&, const std::vector<osc::Value>& args)
-            { stopOutputTest (state); return Outcome::ok (args); } });
+            { stopOutputTest (state); return Outcome::ok (args); } }));
         //----------------------------------------------------------------------
-        registry.add ({ "audio.editBuilt",
+        registry.add (machineLocal ({ "audio.editBuilt",
                         "The playback graph exists, and this is its shape. Reported by the"
                         " audio side once, when the show loads.",
                         { { "device", 's', false },
@@ -106,6 +112,6 @@ namespace wfg::audio
                             state.status = "running";
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
     }
 }

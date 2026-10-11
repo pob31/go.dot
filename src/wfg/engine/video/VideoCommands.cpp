@@ -26,7 +26,12 @@ namespace wfg::video
 {
     void registerVideoCommands (CommandRegistry& registry, VideoHost* host)
     {
-        registry.add ({ "videoOutput.identify",
+        /*  BOTH THIS MACHINE'S (namespace draft §58, RD.3, AGC): what its own
+            displays show while somebody finds a projector or looks at the
+            desktop. A backup's outputs are its own and not on the screen while
+            the main's are, so neither is sent to it, and neither is a step of
+            undo - "tonight's, never saved" already said half of that. */
+        registry.add (machineLocal ({ "videoOutput.identify",
                         "Puts a video output's test pattern - a white frame and a cross - over what it shows,"
                         " or takes it away: to find which projector is which. Tonight's, never saved.",
                         { { "output", 's', false }, { "on", 'T', false } },
@@ -37,9 +42,9 @@ namespace wfg::video
                                 host->identify (args[0].getString(), args[1].isBool() && args[1].getBool());
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
-        registry.add ({ "video.hideProjectors",
+        registry.add (machineLocal ({ "video.hideProjectors",
                         "Puts every projector's window away, so its display shows the desktop again, or brings"
                         " them back - only while the show is unlocked: a locked show shows every projector"
                         " whatever this says. Tonight's, never saved.",
@@ -51,6 +56,6 @@ namespace wfg::video
                                 host->hideProjectors (args[0].isBool() && args[0].getBool());
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
     }
 }

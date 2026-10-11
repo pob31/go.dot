@@ -72,6 +72,24 @@ namespace wfg::doc
         writer and the reader refuse them without either having to know why. */
     enum class Persist { none, show, state };
 
+    /*  WHOSE THE VALUE IS (namespace draft §58, RD.3, decision AGC): the show's,
+        which is nearly every row, or the MACHINE's - a row that names
+        something on the computer the show runs on: the audio interface and
+        the patch onto its channels, a MIDI port's device, a serial port's
+        path, a video output's display.
+
+        A SECOND QUESTION FROM `persist`, and the two are independent. Decision
+        D3 put the machine's bindings in the show file, so `audio/outputDevice`
+        is `persist=show` - it is saved, and it lights the dot - while
+        `port/outputDeviceId` is `persist=state`. What `scope` adds is what a
+        second machine makes of them: a backup playing the same show has other
+        hardware, so a machine row is never sent down the redundancy link,
+        never compared when the two ask whether they hold the same show, and
+        never a step of undo - an operator who picked the backup's interface on
+        the backup would otherwise have a step the main does not, and a
+        mirrored undo would take back different things on each. */
+    enum class Scope { show, machine };
+
     /*  One row of the parameter table, flattened for a constexpr array.
 
         The enum values are a pointer and a count rather than a container so the
@@ -111,6 +129,7 @@ namespace wfg::doc
         Access access;
         Kind kind;
         Persist persist;
+        Scope scope;                   ///< the `scope` column; see Scope
 
         bool hasDefault;
         std::string_view defaultText;  ///< as written in the table, unparsed

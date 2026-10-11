@@ -1013,7 +1013,10 @@ namespace wfg::audio
     //==============================================================================
     void registerAnalyserCommands (CommandRegistry& registry, MediaAnalyser* analyser)
     {
-        registry.add ({ "media.cleanCache",
+        /*  THIS MACHINE'S CACHE (namespace draft §58, RD.3, AGC): each machine
+            has its own media folder and its own analysis of it, so a sweep
+            asked of one is never sent to the other, and is no step of undo. */
+        registry.add (machineLocal ({ "media.cleanCache",
                         "Sweeps the analysis cache (namespace draft 52): in the media folder's .timbre, the"
                         " colours, levels and movie strips of files no longer in the folder are removed - a"
                         " file still there keeps its analysis whether a cue names it or not. Done by itself"
@@ -1027,6 +1030,6 @@ namespace wfg::audio
                                 analyser->sweep (true);
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
     }
 }

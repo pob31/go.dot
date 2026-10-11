@@ -53,7 +53,12 @@ namespace wfg::plugin
             return knows ? knows (id) : table.holds (id);
         };
 
-        registry.add ({ "plugin.failed",
+        /*  ALL FIVE ARE THIS MACHINE'S (namespace draft §58, RD.3, AGC): its
+            plugin host - a child that died here, one restarted here - and its
+            scan of its own disk. A backup's children are its own, and the
+            main's plugin failing must not silence the backup's voices, so none
+            is ever sent down the link, and none is a step of undo. */
+        registry.add (machineLocal ({ "plugin.failed",
                         "The plugin's child died or stopped answering; every voice and channel"
                         " that has it switched in is silent until it is back.",
                         { { "id", 's', false }, { "problem", 's', false } },
@@ -74,9 +79,9 @@ namespace wfg::plugin
                             table.set (id, status);
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
-        registry.add ({ "plugin.restart",
+        registry.add (machineLocal ({ "plugin.restart",
                         "A fresh child for the plugin, from any state.",
                         { { "id", 's', false } },
                         true,
@@ -96,7 +101,7 @@ namespace wfg::plugin
                             }
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
         /*  THE SCAN'S STATE, the caller's or one of the commands' own - held
             by a shared pointer so the lambdas below can share it whichever. */
@@ -120,7 +125,7 @@ namespace wfg::plugin
             return {};
         };
 
-        registry.add ({ "plugin.scan",
+        registry.add (machineLocal ({ "plugin.scan",
                         "Scans this machine for plugins, out of process: every format, or vst3, au or lv2,"
                         " and a folder to search too. Refused while the show is locked and while a scan runs.",
                         { { "format", 's', true }, { "folder", 's', true } },
@@ -142,9 +147,9 @@ namespace wfg::plugin
                                 scan (word, {}, args.size() > 1 ? args[1].getString() : std::string {});
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
-        registry.add ({ "plugin.scanRetry",
+        registry.add (machineLocal ({ "plugin.scanRetry",
                         "Scans one file an earlier scan gave up on, alone, taking it off the skip list."
                         " Refused while the show is locked and while a scan runs.",
                         { { "file", 's', false } },
@@ -166,9 +171,9 @@ namespace wfg::plugin
                                 scan ({}, file, {});
 
                             return Outcome::ok (args);
-                        } });
+                        } }));
 
-        registry.add ({ "plugin.scanned",
+        registry.add (machineLocal ({ "plugin.scanned",
                         "The scan's child has gone: what the machine knows, how many files it gave up on,"
                         " and why it failed, empty when it did not.",
                         { { "found", 'i', false }, { "skipped", 'i', false }, { "problem", 's', false } },
@@ -178,6 +183,6 @@ namespace wfg::plugin
                             (void) ownScans;
                             scans->end (args[0].getInt32(), args[1].getInt32(), args[2].getString());
                             return Outcome::ok (args);
-                        } });
+                        } }));
     }
 }

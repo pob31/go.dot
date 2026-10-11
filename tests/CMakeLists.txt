@@ -151,6 +151,7 @@ add_executable(wfg_tests
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp
     UndoTests.cpp
+    MachineScopeTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
     ClientTests.cpp)

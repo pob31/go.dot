@@ -828,6 +828,29 @@ namespace wfg::doc
         /** Half a second at 50 Hz. See `beginTransaction`. */
         static constexpr std::int64_t coalescingWindowTicks = 25;
 
+        /*  THE MACHINE'S OWN EDIT (namespace draft §58, RD.3, decision AGC),
+            opened by the same hook IN PLACE OF a transaction, for a record
+            `pair::isMachineLocal` names: a command that acts on this machine
+            alone, or a value set on rows the parameter table marks `machine`
+            - the audio interface, a port's device, a serial path, a display.
+
+            It opens NO transaction and leaves the coalescing key exactly as
+            it was, and everything written until the next `beginTransaction`
+            goes on no history. All three are needed. A backup following its
+            main is never sent these records, and a mirrored undo has to take
+            back the same step on both machines, so on the main they may leave
+            no step, may not end a drag's window that the backup sees continue,
+            and may not land on the step that is still open - the edit before,
+            which is what a write with no new transaction would join.
+
+            STILL AN EDIT TO THE SHOW FILE: a machine row that persists in
+            show.xml (D3) moves `showRevision()` and is saved like any other;
+            only the history does not hear of it. And a machine row written by
+            a SHOW edit - the patch a settled layout carries along when an
+            output moves - is on that edit's step, as it must be, or undoing
+            the move would leave the outputs on the wrong channels. */
+        void beginMachineEdit() noexcept;
+
         /*  Two and a half seconds at 50 Hz: how long after a turn of an
             insert's parameters its captured state still joins the turn's
             step - the helper's quiet moment (a second and a half) and the
@@ -1184,7 +1207,15 @@ namespace wfg::doc
             backwards on Ctrl-Z would be the machine moving standby, which PRD
             §3.5 forbids for the same reason it forbids a trigger doing it. So a
             delete's standby repair and a move's standby clearing stay where they
-            went: the cue comes back, and the operator decides where to stand. */
+            went: the cue comes back, and the operator decides where to stand.
+
+            AND NONE WHILE A MACHINE EDIT IS OPEN (`beginMachineEdit`), for a
+            value only. A structural change keeps its history even then: undo
+            takes a child out again BY INDEX, so one change made on no history
+            beside undoable ones would have a later undo remove the wrong cue -
+            a far worse fault than an edit joined to the step before it. A
+            machine-local command makes no structural change, which is part of
+            what being one means (Command.h). */
         juce::UndoManager* historyFor (const Attribute& attribute) noexcept;
 
         /*  A SOUND LOCKED TO ITS MOVIE (namespace draft 37.5, WJ and WL).
@@ -1311,6 +1342,10 @@ namespace wfg::doc
 
         /** Nought means writes are recorded. See `ScopedUndoSuppression`. */
         int undoSuppressions = 0;
+
+        /*  Set by `beginMachineEdit`, cleared by `beginTransaction`: while it
+            is, every write goes on no history, as inside a suppression. */
+        bool machineEditing = false;
 
         /*  The innermost `ScopedKeep` open, or null: what the write door tells
             about a value before it changes it. */

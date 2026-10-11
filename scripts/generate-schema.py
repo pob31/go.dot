@@ -18,7 +18,7 @@ Produces: src/wfg/engine/document/SchemaTable.generated.h, from
           docs/parameters/godot-parameters.csv.
 Usage:    python3 scripts/generate-schema.py [--check] [--self-test] [--out PATH]
           --check writes nothing and exits 1 if the committed file has drifted,
-          or if the literal checker fails its own cases.
+          or if the literal or scope checker fails its own cases.
           --self-test runs those cases and nothing else.
 Build requirements: python3 and its standard library. Nothing else.
 
@@ -194,6 +194,16 @@ ACCESS = {"r": "read", "w": "write", "rw": "readWrite"}
 KINDS = {"state": "state", "event": "event"}
 PERSIST = {"none": "none", "show": "show", "state": "state"}
 
+# WHOSE THE VALUE IS (namespace draft §58, RD.3, decision AGC), the `scope`
+# column: blank for the show's, which is nearly every row, or `machine` for a
+# row that names something on the computer the show runs on - its audio
+# interface, a MIDI port's device, a serial path, a display. Two machines
+# playing one show have two sets of hardware, so a machine row is never sent
+# down the redundancy link, never compared between the two, and never a step of
+# undo. ONE SPELLING EACH: `show` written out is refused, so the table cannot
+# drift into two ways of saying the same thing.
+SCOPES = {"": "show", "machine": "machine"}
+
 # WHAT A PARAMETER RESTS AT (PRD 4.6), the `panic` column: one of these two
 # policies, or one literal value of the row's own type. The two words ALWAYS
 # mean the policy, so a string row cannot rest at the text "park" or "snap".
@@ -333,8 +343,45 @@ LITERAL_CASES = (
 )
 
 
+# AND THE SCOPE'S: (text as the field holds it, what it reads as, or None for a
+# refusal). The last is a description with an unquoted comma and nothing after
+# it, whose tail lands in `scope` - the one way the optional last column could
+# hide the truncation the field count exists to catch, and it does not.
+SCOPE_CASES = (
+    ("", "show"),
+    ("machine", "machine"),
+    (" machine", "machine"),
+    ("show", None),
+    ("Machine", None),
+    ("machines", None),
+    (" and the rest of the sentence.", None),
+)
+
+
+def parse_scope(text, row_label):
+    """The `scope` column: "show" for a blank one, "machine", or a refusal."""
+    scope = (text or "").strip()
+
+    if scope not in SCOPES:
+        fail("%s: scope %r is neither blank (the show's) nor machine.\n"
+             "    If it is the end of a sentence, the description holds a comma and must be\n"
+             "    double-quoted (RFC 4180)." % (row_label, text))
+
+    return SCOPES[scope]
+
+
 def self_test():
     wrong = []
+
+    for text, expected in SCOPE_CASES:
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                found = parse_scope(text, "self-test")
+        except SystemExit:
+            found = None
+
+        if found != expected:
+            wrong.append("scope %r: read as %r, should be %r" % (text, found, expected))
 
     for type_tag, range_text, text, accepted in LITERAL_CASES:
         has_min, low, has_max, high, enum_values = parse_range(range_text, "self-test")
@@ -353,7 +400,7 @@ def self_test():
                                               else "taken, should be refused"))
 
     if wrong:
-        print("generate-schema: the literal checker fails its own cases:\n    "
+        print("generate-schema: the literal and scope checkers fail their own cases:\n    "
               + "\n    ".join(wrong), file=sys.stderr)
         return 1
 
@@ -423,7 +470,7 @@ def read_rows():
         reader = csv.DictReader(handle, restkey=OVERFLOW, restval=None)
         expected = ["owner", "address", "type", "access", "default", "range",
                     "unit", "kind", "rate_cap", "anticipatable", "panic",
-                    "persist", "refers", "description"]
+                    "persist", "refers", "description", "scope"]
         if reader.fieldnames != expected:
             fail("the table's columns changed.\n    expected: %s\n    found:    %s"
                  % (",".join(expected), ",".join(reader.fieldnames or [])))
@@ -454,6 +501,16 @@ def read_rows():
                  % (label, len(reader.fieldnames) + len(row[OVERFLOW]),
                     len(reader.fieldnames), row["description"],
                     ",".join(row[OVERFLOW])))
+
+        # THE LAST COLUMN MAY BE LEFT OFF. `scope` was added last (RD.3) and
+        # nearly every row is the show's, so a row may stop at its description
+        # and reads as blank: six hundred lines of the table, and the history
+        # `git blame` keeps of each, stayed as they were. Nothing else may be
+        # missing, and a description whose unquoted comma pushes its tail into
+        # `scope` is refused there, by parse_scope, so the field count above
+        # still catches every truncation it was written for.
+        if row.get("scope") is None:
+            row["scope"] = ""
 
         short = [name for name, value in row.items() if value is None]
 
@@ -574,6 +631,8 @@ def build(rows):
 
             check_literal(label, "panic", panic, type_tag, has_min, low, has_max, high, enum_values)
 
+        scope = parse_scope(row["scope"], label)
+
         key = (owner, address)
         if key in seen:
             fail("%s: %s/%s is defined twice" % (label, owner, address))
@@ -597,6 +656,7 @@ def build(rows):
                 "anticipatable": anticipatable == "yes",
                 "panic": panic,
                 "persist": PERSIST[persist],
+                "scope": scope,
                 "refers": refers,
                 "description": (row["description"] or "").strip(),
         })
@@ -673,9 +733,9 @@ def render(entries):
     for e in entries:
         enum_literal = enum_arrays.get((e["owner"], e["name"]), "nullptr")
         add("        { %s, %s," % (cpp_string(e["owner"]), cpp_string(e["name"])))
-        add("          ValueType::%s, '%s', %s, Access::%s, Kind::%s, Persist::%s,"
+        add("          ValueType::%s, '%s', %s, Access::%s, Kind::%s, Persist::%s, Scope::%s,"
             % (e["type"], e["typeTag"], "true" if e["isList"] else "false",
-               e["access"], e["kind"], e["persist"]))
+               e["access"], e["kind"], e["persist"], e["scope"]))
         add("          %s, %s," % ("true" if e["hasDefault"] else "false", cpp_string(e["default"])))
         add("          %s, %s, %s, %s," % ("true" if e["hasMin"] else "false", number_literal(e["min"]),
                                            "true" if e["hasMax"] else "false", number_literal(e["max"])))
@@ -706,7 +766,8 @@ def main():
             return 1
 
         if args.self_test:
-            print("generate-schema: the literal checker passes its %d cases" % len(LITERAL_CASES))
+            print("generate-schema: the literal and scope checkers pass their %d and %d cases"
+                  % (len(LITERAL_CASES), len(SCOPE_CASES)))
             return 0
 
     entries = build(read_rows())

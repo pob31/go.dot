@@ -111,7 +111,42 @@ namespace wfg
         std::vector<CommandParam> params;
         bool mutates = true;               // false for pure queries; the log records both
         CommandHandler handler;
+
+        /*  WHETHER IT ACTS ON THIS MACHINE ALONE (namespace draft §58, RD.3,
+            decision AGC): it chooses, tests or reports this computer's own
+            equipment - its audio interface, its plugin host - or touches its
+            files, its folder or its windows. A backup playing the same show
+            beside a main has other hardware and a disk of its own, so such a
+            command is never sent down the redundancy link, whoever asked for
+            it, and is never a step of undo: the transaction hook opens none
+            for it (`pair::isMachineLocal`), so the two machines' histories
+            keep the same shape.
+
+            WHAT IT MAY WRITE TO THE SHOW is the machine's rows only (the
+            `scope` column), and no object made, deleted or moved: the hook
+            puts every value it writes on no history, so a show row written
+            here would be an edit no undo could reach and the other machine
+            would never see, and a structural change cannot be kept off one
+            safely (ShowDocument::historyFor says why).
+
+            Last, with a default, so every registration that does not say is
+            the show's; one that does says so with `machineLocal (...)`
+            below, beside its name. */
+        bool machineLocal = false;
     };
+
+    /*  A command marked as acting on this machine alone, written around the
+        braces of a registration:
+
+            registry.add (machineLocal ({ "plugin.scan", "Scans this machine...", ... }));
+
+        so that the mark sits at the top of the registration, where the name
+        is, rather than after a handler forty lines long. */
+    inline Command machineLocal (Command command)
+    {
+        command.machineLocal = true;
+        return command;
+    }
 
     /*  Reason codes are part of the log format and therefore a contract; keep
         them here, in one place, spelled exactly as the log spells them. */

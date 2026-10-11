@@ -65,6 +65,12 @@ namespace wfg::doc
         char oscTypeTag() const noexcept              { return row->oscTypeTag; }
         Access access() const noexcept                { return row->access; }
         Persist persist() const noexcept              { return row->persist; }
+
+        /*  The show's or the machine's (namespace draft §58, AGC). See Scope,
+            and `Schema::isMachine`. */
+        Scope scope() const noexcept                  { return row->scope; }
+        bool isMachine() const noexcept               { return row->scope == Scope::machine; }
+
         bool hasDefault() const noexcept              { return row->hasDefault; }
         std::string_view defaultText() const noexcept { return row->defaultText; }
         std::string_view description() const noexcept { return row->description; }
@@ -128,6 +134,33 @@ namespace wfg::doc
             the reason they are in the table at all, so it needs a way to ask
             for the rows themselves rather than for an element's attributes. */
         static std::vector<const AttributeRow*> rowsForOwner (std::string_view owner);
+
+        /*  WHETHER A ROW IS THE MACHINE'S rather than the show's (namespace
+            draft §58, RD.3, AGC): the table's `scope` column, asked by the
+            table's own owner word and row name - `audio`, `outputDevice`. A row
+            the table does not have is the show's: there is nothing to keep
+            apart. */
+        static bool isMachine (std::string_view owner, std::string_view name);
+
+        /*  THE SAME QUESTION OF AN ADDRESS, as a `node.set` carries one:
+            `/godot/<owner>/<row>` for a container's row - the audio
+            interface's, `/godot/audio/outputDevice` - or
+            `/godot/<owner>/<id>/<row>` for an object's, as
+            `/godot/port/<id>/outputDevice`, the shape each row's element
+            gives it. Anything else - a device's own node, a deeper address, a
+            malformed one, an object's row spelled without its identifier - is
+            not a machine row.
+
+            READ FROM THE STRING ALONE, AND NEVER FROM A DOCUMENT, which is the
+            point: the main, the backup and a replay must give the same answer
+            to the same record, whatever each one's show holds, and a test that
+            walked the tree for the identifier would also cost a walk per
+            fader move. It is right because every machine row's owner word is
+            the word its address is spelled with - the four owners that carry
+            one, `audio`, `port`, `serial` and `videoOutput`, are addressed
+            under their own names - and MachineScopeTests resolves every machine
+            row through the document's reader to hold it to that. */
+        static bool isMachineAddress (std::string_view address);
 
         const Element* element (std::string_view name) const;
         const std::vector<Element>& elements() const noexcept { return elementList; }
