@@ -34,6 +34,7 @@ silent. The desk's port is retyped at the main, which is an edit of the show,
 and so reaches the backup down the link: both aim at the mock, and only the
 main's datagram leaves.
 """
+import os
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,12 @@ from pathlib import Path
 
 import common
 from common import HarnessError, Report, Server, WSClient
+
+# ON A SHARED CI RUNNER THE BEATS ARRIVE LESS EVENLY (lane_level's rule): the delay a backup
+# fixes is the latest arrival it saw plus a tick, and macOS's Debug runner measured 3 on RD.6's
+# first run (38174899610) where this bench reads 1 or 2. Off CI the claim is held tight.
+ON_CI = os.environ.get("GITHUB_ACTIONS") == "true"
+MOST_DELAY = 4 if ON_CI else 2
 
 MOCK = Path(__file__).resolve().parent / "mock_target.py"
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "bundles" / "devices"
@@ -165,7 +172,8 @@ def run() -> int:
                          "the backup fixes its delay", f"delay {read_backup('/godot/pair/delay')!r}")
             delay = as_int(read_backup("/godot/pair/delay"))
             print(f"  note delay {delay} tick(s), round trip {read_backup('/godot/pair/roundTrip')} s")
-            report.check(1 <= delay <= 2, "the delay is a tick or two between two serves on one machine",
+            report.check(1 <= delay <= MOST_DELAY,
+                         f"the delay is between 1 and {MOST_DELAY} ticks between two serves on one machine",
                          f"delay {delay}")
             report.equal(read_main("/godot/pair/delay"), "0", "the main has no delay of its own")
 
