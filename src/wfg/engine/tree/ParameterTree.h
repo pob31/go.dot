@@ -160,6 +160,12 @@ namespace wfg::tree
             backup, every tick. Unlinked wherever there is no link. */
         pair::LinkReading pairLink;
 
+        /*  AND WHAT FOLLOWING SAYS (RD.6): `pair/state`, `pair/delay`,
+            `pair/late`, `pair/differs`, `pair/relayed` and `pair/dropped`, as
+            serve reads them off its follower and its gate every tick. Alone,
+            and nought, wherever nothing follows or leads. */
+        pair::FollowReading pairFollow;
+
         //======================================================================
         /*  What the audio actually is right now, as against what the document
             decided (PRD §4.10). `/godot/audio/tracks` and every bus node under

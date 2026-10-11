@@ -19,9 +19,11 @@
 #include <algorithm>
 #include <functional>
 
+#include <wfg/engine/command/Event.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <optional>
 #include <string>
 
 namespace wfg::tree
@@ -33,13 +35,20 @@ namespace wfg::tree
             An event with no origin at all is an engine-internal one, and those
             do not touch anything - so a touch without an origin is refused
             rather than filed under the empty string, where it would silence a
-            node for every client that also has no origin. */
-        const std::string* originOf (const CommandContext& context)
+            node for every client that also has no origin.
+
+            ON A BACKUP FOLLOWING ITS MAIN (namespace draft §58, RD.6), filed
+            under the client on THIS machine that gave it: a hand on a fader of
+            the backup's page is passed on to the main and comes back as
+            `main:peer:<its origin>`, and the touch is still that client's, so
+            the push it gates is the one the backup would have sent it
+            (`origin::localClientOf`; anything else is itself). */
+        std::optional<std::string> originOf (const CommandContext& context)
         {
             if (context.origin == nullptr || context.origin->empty())
-                return nullptr;
+                return std::nullopt;
 
-            return context.origin;
+            return std::string (origin::localClientOf (*context.origin));
         }
     }
 
@@ -507,9 +516,9 @@ namespace wfg::tree
                         true,
                         [&touches] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
-                            const auto* origin = originOf (context);
+                            const auto origin = originOf (context);
 
-                            if (origin == nullptr)
+                            if (! origin.has_value())
                                 return Outcome::rejected (reason::badAddress);
 
                             const auto& address = args[0].getString();
@@ -534,9 +543,9 @@ namespace wfg::tree
                         true,
                         [&touches] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
-                            const auto* origin = originOf (context);
+                            const auto origin = originOf (context);
 
-                            if (origin == nullptr)
+                            if (! origin.has_value())
                                 return Outcome::rejected (reason::badAddress);
 
                             const auto& address = args[0].getString();
@@ -582,9 +591,9 @@ namespace wfg::tree
                         true,
                         [&touches] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
-                            const auto* origin = originOf (context);
+                            const auto origin = originOf (context);
 
-                            if (origin == nullptr)
+                            if (! origin.has_value())
                                 return Outcome::rejected (reason::badAddress);
 
                             touches.releaseAll (*origin);

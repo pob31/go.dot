@@ -16,6 +16,7 @@
 
 #include <wfg/engine/tree/AuthoringCommands.h>
 
+#include <wfg/engine/command/Event.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -25,6 +26,7 @@
 #include <cstddef>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -266,21 +268,28 @@ namespace wfg::tree
     }
 
     //==========================================================================
-    std::string originHost (const std::string& origin)
+    std::string originHost (const std::string& stamped)
     {
-        const auto isUdp = origin.rfind ("udp:", 0) == 0;
-        const auto isWs = origin.rfind ("ws:", 0) == 0;
+        /*  AS THE MACHINE IT AROSE ON SPELLED IT (namespace draft §58, RD.6): a
+            following backup applies the main's `udp:10.0.0.7:9000` as
+            `main:udp:10.0.0.7:9000`, and one of its own clients' commands comes
+            back as `main:peer:ws:...` - and a processor that declared itself
+            must be found at the same host on both machines, or the two shows
+            part at the first `mount.declare`. */
+        const auto spelled = wfg::origin::firstOrigin (stamped);
+        const auto isUdp = spelled.substr (0, 4) == "udp:";
+        const auto isWs = spelled.substr (0, 3) == "ws:";
 
         if (! isUdp && ! isWs)
             return {};
 
-        const auto first = origin.find (':');
-        const auto last = origin.rfind (':');
+        const auto first = spelled.find (':');
+        const auto last = spelled.rfind (':');
 
         if (last == first)
-            return origin.substr (first + 1);
+            return std::string (spelled.substr (first + 1));
 
-        return origin.substr (first + 1, last - first - 1);
+        return std::string (spelled.substr (first + 1, last - first - 1));
     }
 
     std::optional<AnswerAddress> answerAddressOf (const doc::ShowDocument& document, const std::string& mountId)

@@ -24,9 +24,10 @@
     uses - the WebSocket, binary OSC - and the main sends down it every record
     it writes to its log that the backup will one day apply (RD.6), as its log
     writes it, and a heartbeat at the end of every tick. Both say whether they
-    are linked. In RD.5 that is ALL: nothing received is applied, nothing is
-    held or let go because of the link. This stage is the wire, and the
-    truthfulness of what it says.
+    are linked. RD.5 is the wire, and the truthfulness of what it says; what
+    a backup does with what it receives - holds it to a fixed delay and
+    applies it, holds its own sends, passes its own clients' commands on to
+    the main - is RD.6's (pair/Follow.h).
 
     THREE CLASSES, AND WHY THREE. `Stream` is the main's half: the filter, the
     ring a reconnecting backup asks from, the followers and what each has
@@ -50,6 +51,7 @@
       backup -> main
         /godot/pair/hello   s:machine s:role h:lastCounter s:stream
         /godot/pair/ping    h:sent f:roundTrip
+        /godot/pair/relay   s:line                          (RD.6)
       main -> backup
         /godot/pair/welcome s:stream h:next
         /godot/pair/gap     h:oldest
@@ -62,6 +64,11 @@
     bundle, one WebSocket frame: a frame a message cost the main's tick a
     send each, and a send is not cheap (PeerLink.cpp). A pong goes alone, at
     once.
+
+    A RELAY IS A COMMAND THE BACKUP'S OWN CLIENT GAVE IT (RD.6, AFT), passed on
+    rather than applied: the same line, its origin the client's on the backup
+    - `ws:...`, `window`, `cli`, `surface:...`, `pd` - which the main applies
+    as `peer:<origin>` and streams back like anything else it applies.
 
     A RECORD IS ITS LOG LINE (`LogRecord::toLine`), the grammar a replay has
     read back since Phase 1, carried as one OSC string - so what crosses the
@@ -120,6 +127,7 @@ namespace wfg::pair
         inline constexpr const char* record  = "/godot/pair/record";
         inline constexpr const char* beat    = "/godot/pair/beat";
         inline constexpr const char* pong    = "/godot/pair/pong";
+        inline constexpr const char* relay   = "/godot/pair/relay";
 
         /** Whether an address is the link's: `/godot/pair/` and something after it. */
         bool isPairAddress (std::string_view address) noexcept;
@@ -217,8 +225,19 @@ namespace wfg::pair
         //  The tick thread's.
 
         /** Whether this machine is a main: keeps records and takes followers. */
-        void setLeading (bool shouldLead) noexcept { leading = shouldLead; }
-        bool isLeading() const noexcept { return leading; }
+        void setLeading (bool shouldLead) noexcept { leading.store (shouldLead, std::memory_order_relaxed); }
+        bool isLeading() const noexcept { return leading.load (std::memory_order_relaxed); }
+
+        /*  WHAT A MAIN DOES WITH A COMMAND ITS BACKUP PASSED ON (RD.6, AFT): the
+            record read back from the relay's line, its origin the backup's
+            client's. Serve's submits it as `peer:<origin>`. Called on the
+            server's thread, at once - a GO passed on waits for no tick here -
+            and only while this machine leads; set before anything arrives. */
+        using Relayed = std::function<void (const LogRecord& record)>;
+        void setRelayed (Relayed callback) { relayed = std::move (callback); }
+
+        /** Commands passed on by a backup and handed to `setRelayed`'s callback. Any thread. */
+        std::int64_t relaysTaken() const noexcept { return relayCount.load (std::memory_order_relaxed); }
 
         /*  THE ENGINE'S AFTER-RECORD HOOK (Engine::setAfterRecord): every record,
             as written. One that travels is given the next counter and its
@@ -292,9 +311,12 @@ namespace wfg::pair
         const std::size_t capacity;
         const std::size_t backlog;
         Send send;
+        Relayed relayed;
+
+        //  Written on the tick thread, read on the server's too (a relay).
+        std::atomic<bool> leading { false };
 
         //  The tick thread's.
-        bool leading = false;
         std::vector<std::vector<std::uint8_t>> ring;
         std::vector<std::uint8_t> frame, beatBytes;    // a tick's bundle and its beat, reused
         std::uint64_t last = 0, oldest = 1;
@@ -311,6 +333,7 @@ namespace wfg::pair
         std::vector<Arrival> inbox;
         std::atomic<std::int64_t> tickNow { 0 };
         std::atomic<std::int64_t> ignoredCount { 0 };
+        std::atomic<std::int64_t> relayCount { 0 };
     };
 
     //==========================================================================
@@ -365,6 +388,17 @@ namespace wfg::pair
         using OnRecord = std::function<void (std::uint64_t counter, const LogRecord& record)>;
         void setOnRecord (OnRecord callback) { onRecord = std::move (callback); }
 
+        /*  EACH OF THE MAIN'S TICKS, once, as its heartbeat first arrived on any
+            path, with when it arrived: what a following backup measures the
+            fixed delay from (RD.6, AGF). A beat a second path brought later,
+            or one older than the last, is not handed on. Tick thread. */
+        using OnBeat = std::function<void (std::int64_t mainTick, LinkClock::time_point arrival)>;
+        void setOnBeat (OnBeat callback) { onBeat = std::move (callback); }
+
+        /*  `reading (now, timeout).linked`, without the reading: one comparison,
+            for the tick that decides whether this machine follows. */
+        bool isLinked (LinkClock::time_point now, double timeoutSeconds) const;
+
         /** Records a second path brought again, dropped. */
         std::int64_t duplicates() const noexcept { return duplicateCount; }
 
@@ -402,6 +436,7 @@ namespace wfg::pair
         std::string peer;
         std::int64_t receivedThisLink = 0, gapsThisLink = 0, duplicateCount = 0;
         OnRecord onRecord;
+        OnBeat onBeat;
 
         /*  THE LAST SECOND'S ROUND TRIPS, a few a path: their arrival and their
             length. A fixed ring - a ping a tenth of a second on each of a few
@@ -456,6 +491,14 @@ namespace wfg::pair
 
         /** Paths whose socket is open now. Any thread. */
         std::size_t openPaths() const;
+
+        /*  A MESSAGE FOR THE MAIN THAT IS NOT THE DIALLER'S OWN - a command one
+            of this machine's clients gave, passed on (RD.6, AFT). Queued, and
+            sent by the dialler's thread down ONE open path, never all of them:
+            the main has no counter to drop a second copy by, and would apply a
+            GO twice. False, and nothing queued, when no path is open. Any
+            thread; never waits on the network. */
+        bool relay (std::vector<std::uint8_t> bytes);
 
         /** `host:port` read back into the two: an IPv6 host without its brackets. */
         static std::optional<std::pair<std::string, int>> hostAndPort (std::string_view peer);

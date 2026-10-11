@@ -266,7 +266,7 @@ namespace wfg::pair
 
     void Stream::keep (const LogRecord& record, const Command* command)
     {
-        if (! leading || ! travels (record, command))
+        if (! isLeading() || ! travels (record, command))
             return;
 
         /*  THE MESSAGE IS MADE NOW, once, into the ring slot it will be sent
@@ -327,6 +327,29 @@ namespace wfg::pair
 
             const std::lock_guard<std::mutex> held { inboxLock };
             inbox.push_back (std::move (ping));
+            return;
+        }
+
+        /*  A COMMAND THE BACKUP'S CLIENT GAVE IT, PASSED ON (RD.6, AFT): read
+            back and handed on here, on the server's thread, so a GO passed on
+            is applied on the main's next tick like one sent to it directly.
+            Only by a machine that leads - a relay to one that does not is a
+            pairing set up wrong somewhere, ignored and counted - and only a
+            line that reads as an applied record: what a backup passes on is
+            never a refusal or a drop. */
+        if (! message.isBundle() && message.address == wire::relay && a.size() == 1 && a[0].isString())
+        {
+            const auto parsed = LogRecord::fromLine (a[0].getString());
+
+            if (isLeading() && relayed && parsed.has_value() && parsed->kind == LogRecord::Kind::applied
+                  && ! parsed->command.empty())
+            {
+                relayCount.fetch_add (1, std::memory_order_relaxed);
+                relayed (*parsed);
+                return;
+            }
+
+            ignoredCount.fetch_add (1, std::memory_order_relaxed);
             return;
         }
 
@@ -397,7 +420,7 @@ namespace wfg::pair
                     not say it is a backup, is a pairing set up wrong on one of
                     the two machines - ignored, and counted, until RD.7 decides
                     what two mains finding each other do. */
-                if (! leading || arrival.role != "backup")
+                if (! isLeading() || arrival.role != "backup")
                 {
                     ignoredCount.fetch_add (1, std::memory_order_relaxed);
                     return;
@@ -464,7 +487,7 @@ namespace wfg::pair
         arrivals.clear();
 
         //  A machine that stopped being a main stops streaming (RD.7 decides what happens next).
-        if (! leading)
+        if (! isLeading())
             followers.clear();
 
         if (followers.empty())
@@ -752,7 +775,9 @@ namespace wfg::pair
             case Item::Kind::beat:
             {
                 //  The path whose beat for a tick came first is the one delivering.
-                if (! beaten || item.first > beatTick)
+                const auto fresh = ! beaten || item.first > beatTick;
+
+                if (fresh)
                     peer = item.path;
 
                 if (! beaten || item.at > lastBeat)
@@ -762,6 +787,11 @@ namespace wfg::pair
                 beatTick = std::max (beatTick, item.first);
                 beatLast = std::max (beatLast, static_cast<std::uint64_t> (item.second));
                 heard (item.at);
+
+                //  Each of the main's ticks once, as it first arrived (RD.6).
+                if (fresh && onBeat)
+                    onBeat (item.first, item.at);
+
                 return;
             }
 
@@ -790,6 +820,11 @@ namespace wfg::pair
         LinkReading out;
         readInto (out, now, timeoutSeconds);
         return out;
+    }
+
+    bool Receiver::isLinked (LinkClock::time_point now, double timeoutSeconds) const
+    {
+        return beaten && within (lastBeat, now, timeoutSeconds);
     }
 
     void Receiver::readInto (LinkReading& out, LinkClock::time_point now, double timeoutSeconds) const
@@ -935,6 +970,11 @@ namespace wfg::pair
         bool changed = false;
         bool stopping = false;
 
+        /*  WHAT WAITS TO BE PASSED ON (RD.6): relays, sent by the manager
+            thread down one open path, woken for at once. Under `guard`. */
+        std::vector<std::vector<std::uint8_t>> outbox;
+        std::vector<std::vector<std::uint8_t>> sending;     // the manager thread's, swapped with it
+
         std::atomic<bool> running { false };
         std::atomic<std::size_t> opened { 0 };
         std::thread thread;
@@ -951,13 +991,14 @@ namespace wfg::pair
 
             {
                 std::unique_lock<std::mutex> held { guard };
-                wake.wait_for (held, tendEvery, [this] { return stopping || changed; });
+                wake.wait_for (held, tendEvery, [this] { return stopping || changed || ! outbox.empty(); });
 
                 if (stopping)
                     break;
 
                 changed = false;
                 now = wanted;
+                sending.swap (outbox);
             }
 
             //  An address no longer wanted is hung up on.
@@ -993,6 +1034,32 @@ namespace wfg::pair
             }
 
             opened.store (openNow);
+
+            /*  PASSED ON DOWN ONE PATH, the first open one in the order they
+                were given (RD.6): a relay sent down two would be two GOs on
+                the main, which has no counter to drop the second by. One that
+                finds no path open - the link fell between the gate's decision
+                and here - is lost, as a datagram to a machine switched off is;
+                RD.7 decides what a backup that takes over does with what it
+                passed on and never saw come back (AGJ). */
+            if (! sending.empty())
+            {
+                Path* out = nullptr;
+
+                for (const auto& peer : now)
+                    if (const auto found = paths.find (peer);
+                        found != paths.end() && found->second != nullptr && found->second->open.load())
+                    {
+                        out = found->second.get();
+                        break;
+                    }
+
+                if (out != nullptr)
+                    for (const auto& bytes : sending)
+                        out->send (bytes);
+
+                sending.clear();
+            }
         }
 
         for (auto& entry : paths)
@@ -1188,6 +1255,24 @@ namespace wfg::pair
     std::size_t Dialler::openPaths() const
     {
         return impl->opened.load();
+    }
+
+    bool Dialler::relay (std::vector<std::uint8_t> bytes)
+    {
+        if (bytes.empty() || impl->opened.load() == 0)
+            return false;
+
+        {
+            const std::lock_guard<std::mutex> held { impl->guard };
+
+            if (impl->stopping || ! impl->running.load())
+                return false;
+
+            impl->outbox.push_back (std::move (bytes));
+        }
+
+        impl->wake.notify_all();
+        return true;
     }
 
     std::optional<std::pair<std::string, int>> Dialler::hostAndPort (std::string_view peer)

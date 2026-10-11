@@ -851,6 +851,40 @@ namespace wfg::doc
             the move would leave the outputs on the wrong channels. */
         void beginMachineEdit() noexcept;
 
+        /*  THE ENGINE'S OWN RECORD (namespace draft §58, RD.6, settling RD.3's
+            debt), opened by the same hook in place of a transaction for every
+            record whose origin is `engine`: a sound reported ready or ended, a
+            member launched, a take kept, a lane written.
+
+            ITS STEP IS OPENED AT ITS FIRST WRITE TO THE SHOW'S HISTORY, AND
+            NOT BEFORE. Most of what the engine records changes no row of the
+            show at all - `audio.armed` says a voice is ready - and the moment
+            it lands is this machine's own: when ITS media was read, when ITS
+            interface answered. Opening a transaction for it, as every engine
+            record did until RD.6, ended an operator's drag on the machine
+            where it landed mid-drag and not on the other, after which a
+            mirrored `undo` took back a different step on each. Opened late,
+            a record that writes nothing to the show leaves the history, the
+            open step and the coalescing key exactly as they were, and the
+            drag goes on joining on both machines.
+
+            ONE THAT DOES WRITE THE SHOW - a kept take made a cue, a lane's
+            points, a converted sound - is still a step of its own, named after
+            itself, with the coalescing it always had (an engine write joins an
+            engine write to the same address within the window, never an
+            operator's), and it still ends an operator's drag where it lands:
+            the alternative, putting the engine's show edits on no history,
+            would make a kept take impossible to undo and would put structural
+            changes made off the history beside undoable ones, which undo
+            takes back BY INDEX (`structuralHistory`). The cost on a pair is
+            the one AFX already accepts - each machine makes these at its own
+            moment - so where such a step lands among the operator's can differ
+            between the two, and a mirrored `undo` near one is the record the
+            backup's comparison names (`pair/differs`, RD.6; RD.8 realigns). */
+        void beginEngineEdit (const std::string& commandName,
+                              std::int64_t tick,
+                              const std::vector<osc::Value>& args);
+
         /*  Two and a half seconds at 50 Hz: how long after a turn of an
             insert's parameters its captured state still joins the turn's
             step - the helper's quiet moment (a second and a half) and the
@@ -1187,6 +1221,17 @@ namespace wfg::doc
             an undo and a redo. */
         void forgetCoalescing() noexcept;
 
+        /*  `beginTransaction`'s decision, from the key it reads off a record:
+            join the step that is open, or begin a new one named after the
+            command. Shared with the engine's step opened late
+            (`beginEngineEdit`), so the two can never decide differently. */
+        void openStep (const std::string& commandName, std::int64_t tick, const std::string& writeOrigin,
+                       const std::string& address, const std::string& captured);
+
+        /*  The engine's step waiting for its first write (`beginEngineEdit`):
+            opened, and forgotten, by the first call for a history below. */
+        void openPendingEngineStep();
+
         /*  THE HISTORY A STRUCTURAL CHANGE GOES ON, or nullptr while a
             suppression is in scope.
 
@@ -1346,6 +1391,14 @@ namespace wfg::doc
         /*  Set by `beginMachineEdit`, cleared by `beginTransaction`: while it
             is, every write goes on no history, as inside a suppression. */
         bool machineEditing = false;
+
+        /*  THE ENGINE'S STEP NOT YET OPENED (`beginEngineEdit`): its command,
+            tick and key, held until the record first writes to the show's
+            history and dropped by the next record's hook if it never does. */
+        bool engineStepPending = false;
+        std::string pendingStepName;
+        std::int64_t pendingStepTick = 0;
+        std::string pendingStepAddress;
 
         /*  The innermost `ScopedKeep` open, or null: what the write door tells
             about a value before it changes it. */

@@ -4271,3 +4271,284 @@ TEST_CASE ("hold: a pre-send on a held machine writes at once, its restore what 
         CHECK (rig.probe.outstanding() == 0u);
     }
 }
+
+//==============================================================================
+/*  RD.6: A FOLLOWING BACKUP WAITS FOR THE MAIN'S ANSWER (namespace draft §58,
+    AGG). Held and following, `Runner::deviceAnswer` says `fromElsewhere`: a
+    verified cue keeps its wait, asks nobody, and ends when the main's
+    `mount.readback` arrives in the stream; a pre-send waits for the main's
+    read-back the same way and writes with it as the restore. */
+#include <wfg/engine/pair/Follow.h>
+
+#include <deque>
+#include <random>
+
+namespace
+{
+    void submitMainReadback (VerifiedRig& rig, const std::string& address, float value)
+    {
+        REQUIRE (rig.engine.submit ("main:mount:K3PV7WRB", "mount.readback",
+                                    { osc::Value::string ("K3PV7WRB"), osc::Value::string (address),
+                                      osc::Value::float32 (value) }));
+    }
+
+    void holdAndFollow (VerifiedRig& rig, pair::Hold& hold)
+    {
+        hold.set (true);
+        hold.setAnswersFromElsewhere (true);
+        rig.sender.setHold (&hold);
+        rig.runner.setHold (&hold);
+        rig.probe.setHold (&hold);
+    }
+}
+
+TEST_CASE ("follow: a verified cue on a following backup ends with the main's read-back, not before and not by timeout")
+{
+    VerifiedRig rig;
+    pair::Hold hold;
+    holdAndFollow (rig, hold);
+    CHECK (hold.answer() == pair::Hold::Answer::fromElsewhere);
+
+    //  A device that would answer, were it asked - it is not.
+    rig.device.target.says ({ osc::Value::float32 (0.75f) });
+
+    const auto cueId = rig.makeVerified ("f:0.75", "1");
+
+    SUBCASE ("the main's answer agrees: done, on the tick after it arrived")
+    {
+        rig.fire (cueId);
+
+        //  Forty ticks of a second's patience: still waiting, and nobody asked.
+        for (int n = 0; n < 40; ++n)
+            rig.tickOnce();
+
+        const auto* run = rig.runOf (cueId);
+        REQUIRE (run != nullptr);
+        CHECK_FALSE (run->isFinished());
+        CHECK (rig.probe.outstanding() == 0u);
+
+        submitMainReadback (rig, "/desk/fader", 0.75f);
+        rig.tickOnce();         // the read-back applied
+        rig.tickOnce();         // judged, `run.ended` submitted
+        rig.tickOnce();         // and applied
+
+        run = rig.runOf (cueId);
+        REQUIRE (run != nullptr);
+        INFO ("state " << run->state << ", error " << run->error);
+        CHECK (run->state == cue::runState::done);
+        CHECK (run->error.empty());
+        CHECK (run->warning.empty());
+    }
+
+    SUBCASE ("the main's answer disagrees: failed as the main's failed")
+    {
+        rig.fire (cueId);
+        rig.tickOnce();
+        submitMainReadback (rig, "/desk/fader", 0.2f);
+
+        const auto* run = rig.runUntilFinished (cueId, 10);
+        REQUIRE (run != nullptr);
+        CHECK (run->state == cue::runState::failed);
+        CHECK (run->error == cue::oscError::disagreed);
+    }
+
+    SUBCASE ("no answer from the main either: it times out, as the main's did")
+    {
+        rig.fire (cueId);
+
+        for (int n = 0; n < 55; ++n)
+            rig.tickOnce();
+
+        const auto* run = rig.runOf (cueId);
+        REQUIRE (run != nullptr);
+        CHECK (run->state == cue::runState::failed);
+        CHECK (run->error == cue::oscError::timeout);
+    }
+
+    SUBCASE ("an answer already there before the cue fired is not its answer: forgotten, as the main forgets one")
+    {
+        /*  What a read-back reaching the backup before its job exists would
+            meet. It cannot, on time: the main hears its device after it sent,
+            and the fixed delay keeps that order (the next case but one). The
+            main forgets a stale answer at its setup, and so does the backup. */
+        submitMainReadback (rig, "/desk/fader", 0.75f);
+        rig.tickOnce();
+        rig.fire (cueId);
+
+        for (int n = 0; n < 20; ++n)
+            rig.tickOnce();
+
+        const auto* run = rig.runOf (cueId);
+        REQUIRE (run != nullptr);
+        CHECK_FALSE (run->isFinished());
+    }
+}
+
+TEST_CASE ("follow: a pre-send on a following backup waits for the main's read-back, and puts it back as the restore")
+{
+    VerifiedRig rig;
+    rig.anticipate();
+
+    pair::Hold hold;
+    holdAndFollow (rig, hold);
+
+    //  What this machine last wrote there - which a lone spare would take (AGL), and a follower does not.
+    REQUIRE (rig.mounts.write ("/desk/fader", osc::Values { osc::Value::float32 (0.1f) }).ok);
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+    rig.setStandby (scene.group);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    //  Still asking - of nobody - and nothing written yet.
+    const auto* waiting = rig.mounts.valueOf ("/desk/fader");
+    REQUIRE (waiting != nullptr);
+    CHECK (*waiting == osc::Values { osc::Value::float32 (0.1f) });
+    CHECK (rig.probe.outstanding() == 0u);
+
+    submitMainReadback (rig, "/desk/fader", 0.3f);
+
+    for (int n = 0; n < 4; ++n)
+        rig.tickOnce();
+
+    const auto* run = rig.runOf (scene.cue);
+    REQUIRE (run != nullptr);
+    CHECK (run->state != cue::runState::failed);
+    CHECK (run->restoreAddress == "/desk/fader");
+
+    const auto restore = osc::Value::fromAtom (run->restoreAtom);
+    REQUIRE (restore.has_value());
+    CHECK (*restore == osc::Value::float32 (0.3f));
+
+    const auto* written = rig.mounts.valueOf ("/desk/fader");
+    REQUIRE (written != nullptr);
+    CHECK (*written == osc::Values { osc::Value::float32 (0.8f) });
+}
+
+TEST_CASE ("follow: the main's read-back reaches a following backup after the backup fired, and ends its cue as long after as on the main")
+{
+    /*  THE WORRY, PROVED THE OTHER WAY ROUND: the main fires at T and hears its
+        device a tick or more later; the backup fires at T + offset and hears
+        the main's read-back at (T + k) + offset, k ticks after its own fire,
+        whatever the link's jitter - the fixed delay keeps every gap. */
+    using Clock = pair::LinkClock;
+    using namespace std::chrono_literals;
+
+    VerifiedRig main;
+    main.device.target.says ({ osc::Value::float32 (0.75f) });
+    const auto cueId = main.makeVerified ("f:0.75");
+
+    /*  THE SAME SHOW ON THE BACKUP, made the same way under the same names:
+        the rig's device lives in its mount table, not in the show, so the
+        show's text would not read back on its own. */
+    VerifiedRig backup;
+    REQUIRE (backup.document.createList ("Cues", main.listId).ok);
+    REQUIRE (backup.document.createCue (main.listId, 0, "osc", "Desk", cueId).ok);
+
+    for (const auto* row : { "address", "value", "wait", "timeout" })
+    {
+        const auto address = "/godot/cue/" + cueId + "/" + row;
+        REQUIRE (backup.document.setAttribute (address, main.document.getAttribute (address).value_or ("")).ok);
+    }
+
+    backup.tick = 1000;
+
+    pair::Hold hold;
+    holdAndFollow (backup, hold);
+
+    std::vector<LogRecord> thisTick;
+    main.engine.setAfterRecord ([&thisTick] (const LogRecord& record, const Command* command)
+                                {
+                                    if (auto kept = pair::keptForLink (record, command))
+                                        thisTick.push_back (std::move (*kept));
+                                });
+
+    pair::Follower follower { [&backup] (Event event) { return backup.engine.submit (std::move (event)); } };
+    follower.start();
+
+    struct OnTheWire
+    {
+        Clock::time_point at;
+        std::optional<LogRecord> record;
+        std::int64_t beat = 0;
+    };
+
+    std::deque<OnTheWire> wire;
+    std::mt19937 random { 11 };
+    std::uniform_int_distribution<int> jitter { 0, 12000 };
+    Clock::time_point lastArrival {};
+
+    const Clock::time_point start = Clock::time_point {} + std::chrono::hours { 1000 };
+    const auto mainDue = [start] (std::int64_t tick) { return start + 20ms * tick; };
+    const auto backupDue = [start] (std::int64_t local) { return start + 20ms * (local - 1000) + 5ms; };
+
+    for (std::int64_t mainTick = 0; mainTick < 300; ++mainTick)
+    {
+        if (mainTick == 20)
+            REQUIRE (main.engine.submit ("cli", "cue.fire", { osc::Value::string (cueId) }));
+
+        main.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+
+        const auto arrival = std::max (lastArrival, mainDue (mainTick) + 2ms + std::chrono::microseconds (jitter (random)));
+        lastArrival = arrival;
+
+        for (auto& record : thisTick)
+            wire.push_back ({ arrival, std::move (record), 0 });
+
+        thisTick.clear();
+        wire.push_back ({ arrival, std::nullopt, mainTick });
+
+        while (backupDue (backup.tick) < mainDue (mainTick + 1))
+        {
+            while (! wire.empty() && wire.front().at <= backupDue (backup.tick))
+            {
+                if (wire.front().record.has_value())
+                    follower.record (*wire.front().record);
+                else
+                    follower.beat (wire.front().beat, wire.front().at);
+
+                wire.pop_front();
+            }
+
+            follower.beforeTick (backup.tick, backupDue (backup.tick), 0.001);
+            backup.tickOnce();
+        }
+
+        if (const auto* ran = backup.runOf (cueId); ran != nullptr && ran->isFinished())
+            break;
+    }
+
+    const auto* onMain = main.runOf (cueId);
+    const auto* onBackup = backup.runOf (cueId);
+    REQUIRE (onMain != nullptr);
+    REQUIRE (onBackup != nullptr);
+    INFO ("main " << onMain->state << " " << onMain->error << ", backup " << onBackup->state << " " << onBackup->error);
+    CHECK (onMain->state == cue::runState::done);
+    CHECK (onBackup->state == cue::runState::done);
+    CHECK (follower.late() == 0);
+
+    //  The read-back came to the backup after its fire, as long after as on the main.
+    const auto tickOf = [] (Engine& engine, const std::string& command, const std::string& prefix)
+    {
+        for (const auto& record : LogFile::parse (engine.log().contents()).records)
+            if (record.command == command && record.origin.rfind (prefix, 0) == 0
+                  && record.kind == LogRecord::Kind::applied)
+                return record.tick;
+
+        return std::int64_t { -1 };
+    };
+
+    const auto mainFired = tickOf (main.engine, "cue.fire", "cli");
+    const auto mainHeard = tickOf (main.engine, "mount.readback", "mount:");
+    const auto backupFired = tickOf (backup.engine, "cue.fire", "main:cli");
+    const auto backupHeard = tickOf (backup.engine, "mount.readback", "main:mount:");
+
+    REQUIRE (mainFired >= 0);
+    REQUIRE (mainHeard > mainFired);
+    REQUIRE (backupFired >= 0);
+    CHECK (backupHeard > backupFired);
+    CHECK (backupHeard - backupFired == mainHeard - mainFired);
+    CHECK (backupFired - mainFired == follower.offset());
+}

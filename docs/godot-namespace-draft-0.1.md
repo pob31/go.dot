@@ -25187,6 +25187,8 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair/drift` | `f` | parts per million between the two sound clocks (AGI) |
 | `pair/inStep` | `T` | the last summary matched |
 | `pair/differs` | `s` | what did not, in one sentence |
+| `pair/relayed` | `h` | commands this backup's clients gave it that it passed on to the main (RD.6) |
+| `pair/dropped` | `h` | commands this backup's devices sent it that it ignored while following (RD.6) |
 | `pair/showMatch` | `T` | the fingerprints agree (AFU) |
 | `pair/showDiffers` | `s` | what differs: cues, settings, sounds missing or changed |
 | `pair/alarm` | `s` | the sentence the window and the page put in front of the operator; empty when none |
@@ -25398,3 +25400,136 @@ passed on and the main refused comes back refused, with the main's reason.
   or to one that is not, is ignored and counted (RD.7's to decide); a machine that stops
   being a main drops its followers; `pair/peer` alternates between two paths equally fast;
   the link's frames are not shown to the network monitor.
+- **RD.6**, 2026-10-11: following (AFT, AGD, AGF, AGG). A machine whose role is `backup`
+  and whose link is up FOLLOWS: `pair/state` reads `following` (a main linked reads
+  `leading`, anything else `alone`), RD.1's hold goes on and stays on - RD.7 lets it go -
+  `Hold::setAnswersFromElsewhere` makes `Runner::deviceAnswer` say `fromElsewhere`, and the
+  engine's gate closes; a backup whose link falls stops following, its gate open again,
+  and stays holding. `pair::Follower` (pair/Follow.h) is the tick thread's half: the
+  receiver is now drained at the HEAD of the before-tick hook as well as after the tick
+  (a tick the audio settings suspend runs no before-tick hook, and the link must not read
+  lost meanwhile), so a record that arrived a moment ago can make this tick's slot, and
+  hands the follower
+  each record and each of the main's beats once (`Receiver::setOnBeat`). THE FIXED DELAY
+  (AGF): over the first ten beats after the link comes up, and a round trip, each beat's
+  arrival is read as a fractional tick of this machine's clock - the tick due before it and
+  how far in, from when the tick was due (now less its lateness) - less the main's tick:
+  e. The slot of a record of main tick T is T + offset, offset = ceil (largest e) + 1, a
+  whole tick of margin after the latest arrival seen; Δ (`pair/delay`) is offset less the
+  clocks' own offset - the smallest e less half the round trip - to the nearest tick and
+  never under one, and is what RD.9 adds to the launch lead. Measured between two Debug
+  serves on this bench: e spread 0.20 to 0.32 of a tick, a round trip of 0.3 to 0.6 ms,
+  Δ 1 in three probes of six and 2 in the other three (which side of the backup's tick
+  the main's beats land), 2 in all eight runs of the driver. Every record of one main tick
+  is submitted on ONE local tick, in counter order, first in the before-tick hook - ahead
+  of the surfaces' events and the Runner's own, as `wfg replay` puts a log's tick back; a
+  record that arrives after its slot goes in at once and is counted (`pair/late`), and so
+  does what the receiver held when the link fell. What arrives while the delay is measured
+  waits for it: a backup started fresh is sent the main's ring from its first counter, so
+  what the main applied before the link is applied at once, late (RD.8 seats it instead).
+  APPLYING: each record becomes an event with origin `main:<the main's origin>`, its
+  command and its arguments as applied - a GO naming the main's runs, an `undo` the step
+  the main took back - and a refused one is submitted too and must be refused again; with
+  `Engine::setAfterRecord`, each `main:` record the backup writes is compared with the
+  main's - kind, reason, arguments - and a difference counted in `pair/differs`, a sentence
+  naming the first (`3 records applied otherwise than on the main; the first, go.doh at
+  the main's tick 223: refused there (too-late), applied here`). THE GATE (AFT, AGD):
+  `Engine::setGate` and `setGated` - one acquire load in `Engine::submit` when no machine
+  follows, an acquire so a thread that sees the gate closed sees the gate that was set -
+  and `pair::FollowGate`, which decides from the event alone on the thread that submits
+  (`pair::gateFor`): `engine`, `main:`, `replay` and anything `pair::isMachineLocal`
+  names, whoever asked, are applied here; `window`, `ws:`, `surface:`, `cli` and `pd` are
+  passed on; `udp:`, `mount:`, `serial:`, `link:`, `midi:`, `clock` - and, the
+  implementer's addition, a process cue's `process:<run>`, since each machine runs its
+  patch on its own threads at its own moments, and any origin the table does not know -
+  are ignored and counted (`pair/dropped`). Passed on as `/godot/pair/relay s:line`, the
+  event as the line of an applied record (RD.5's codec), handed to `Dialler::relay`, which
+  queues it for the dialler's thread and sends it down ONE path, the first open in the
+  peers' order - two would be two GOs on the main, which has no counter to drop one by;
+  with no path open the command is lost and counted (`FollowGate::lost`, not published).
+  The main's stream hands a relay, read back on the server's thread, to
+  `Stream::setRelayed` only while it leads (otherwise ignored and counted); serve submits
+  it as `peer:<origin>`, from that thread, as a client's own command is, and it streams
+  back like anything else. A relayed command the main refuses comes back as an `R` record,
+  is refused again, and `/godot/engine/lastError` on the backup reads `… main:peer:ws:…
+  unknown-id cue.fire`. A DEVICE'S ANSWER FROM ELSEWHERE (AGG, RD.1's seam): a `verified`
+  cue on a following backup keeps its wait, asks nobody, and ends when the main's
+  `mount.readback` (origin `mount:`, so in the stream) is applied - disagreeing and timing
+  out as the main's did; a pre-send waits for the main's read-back likewise and puts it
+  back as the restore, not what this machine last wrote (AGL is the lone spare's). On
+  time, the main's read-back reaches the backup AFTER the backup fired - the main hears its
+  device a tick or more after it sent, and the delay keeps every gap - which a test proves
+  across a jittery link (the read-back the same number of ticks after the fire on both).
+  A read-back applied before its job exists is forgotten at the job's setup, as the main
+  forgets a stale answer, so the job does not find it: that order can only arise when
+  records arrive late and go in together ahead of a hook that makes the job (a group's
+  member, a pre-wait, the standby's prepare), and telling an early answer from a stale one
+  needs the main's tick on the record - left to RD.8. THE UNDO DEBT RD.3 LEFT: the
+  transaction hook is one function, `cue::beginUndoStep` (cue/UndoStep.h), which both
+  hooks - serve's and replay's - and the tests call; a record whose origin is `engine`
+  calls `ShowDocument::beginEngineEdit`, which opens NOTHING and keeps the step's key until
+  the record's first write to the show's history (`structuralHistory`, which values reach
+  through `historyFor`), and opens it there with the coalescing it always had. So an
+  engine record that changes no row of the show - `audio.armed`, `run.ended`, a member
+  launched, a refused report - leaves the history, the open step and the coalescing key as
+  they were, and ends nobody's drag on either machine. One that writes the show - a kept
+  take made a cue, a lane's points, a converted sound, an engine `node.set` on a show row -
+  is still a step of its own, named after itself, and still ends a drag where it lands:
+  the implementer's call, since the alternative, no history for the engine's show edits,
+  would make a kept take impossible to undo (TakeCommands: "one step to undo") and put
+  structural changes made off the history beside undoable ones, which undo takes back by
+  index. The cost on a pair is the one AFX already accepts: each machine makes those at
+  its own moment, so where such a step lands among the operator's may differ, and a
+  mirrored `undo` near one is named by `pair/differs` (its record carries the step's name)
+  - RD.8 realigns. ORIGINS, surveyed for `main:`: a record from the main is never
+  `engine`, exactly as its original was not, so the Runner's `origin::engine` tests (a
+  start cue's cause, a pressed member's parked fader, `noteFireOnList`, `markFire`)
+  decide alike; a held clip's owner (`strip.press`/`release`) is the same `main:` origin
+  on both press and release; undo's coalescing by origin sees `main:x` throughout a drag
+  as the main saw `x` (both-ways proved by the two-engine test); `isLiveWrite` and
+  `isLiveEdit` read no origin; EngineNamespace's `udp:`/`serial:`/`link:` rules and
+  `OscQueryServer::sendTo`'s `ws:` read the raw transports, which a `main:` record never
+  passes. Two needed changing: ECHO SUPPRESSION AND TOUCHES - a backup's client's command
+  comes back as `main:peer:<its origin>`, so the push withheld from the client that
+  caused a change and a hand's touch on a fader would have missed it and pulled its fader
+  back a link's delay late; `origin::localClientOf` takes `main:peer:` off for both
+  (serve's `publishChanges` and `node.touch`/`release`/`releaseAll`); and AUTHORING's
+  `originHost`, which read a host only from `udp:` and `ws:`, now reads it through
+  `origin::firstOrigin`, so a processor is found at the same host on both machines. Rows
+  `pair/state`, `pair/delay`, `pair/late`, `pair/differs`, and the implementer's
+  `pair/relayed` and `pair/dropped` (58.3). Cost on the tick, Debug, this bench: a tick
+  with nothing due 0.2 µs; sixty-four of the main's records submitted through the gate
+  0.40 to 0.43 ms, and the tick that applies and compares them 0.74 ms with the engine's
+  own work on them; a main pays one atomic load per submit more; blackbox.first-sound's
+  latenessMax 4 ms. Tests under C and fr_FR: FollowTests (the gate's table, the gate in
+  front of an engine following and not, a relay read back on a main as `peer:` and
+  ignored by one that does not lead, every record of a tick on one local tick with a late
+  one at once, Δ from the beats on quiet and jittery networks and with no round trip, a
+  difference counted and said, an engine record that writes nothing ending no drag and
+  one that writes the show a step of its own, what following costs, and TWO ENGINES ON
+  ONE SHOW joined by the real stream and receiver over a link that delivers in order 0 to
+  15 ms late - GOs a tick inside the debounce and at its edge, a Doh! inside its window,
+  inside its own debounce and a second too late, a 30-tick drag on a show row with an
+  engine record landing on the main's eleventh tick and the backup's eighteenth, an
+  undo: the backup refuses exactly the main's four refusals with the same reasons, its
+  run table is the main's on every tick a delay later, and its undo history is the
+  main's; with the fixed delay taken out, a Doh! the main refused is applied on the
+  backup, and with RD.6's undo rule taken out, the two histories part), VerifiedCueTests
+  (a verified cue waits for the main's read-back, agreeing, disagreeing and timing out as
+  the main's; a pre-send restores the main's answer; the read-back's order across a
+  jittery link), TreeTests for the rows, and tests/blackbox/pair_follow.py: two serves on
+  copies of the devices fixture and mock_target.py over UDP - `following`/`leading`, the
+  backup holding, Δ 1 or 2, the desk's port retyped at the main reaching the backup, a GO
+  at the main done on both and heard once, a GO to the backup's WebSocket passed on, done
+  on both and heard once, a refusal of what was passed on at the backup's lastError, a GO
+  to the backup over UDP ignored and fired by neither. Found and left: the offset is fixed
+  against two clocks that drift, so over an hour the delay moves by the drift (AGI, RD.9's
+  ClockMap); the main does not know Δ - the backup measures it - so RD.9's extra lead
+  needs it told, in the ping beside the round trip; a late record is compressed against
+  the records before it, so the gaps AGF keeps are kept only on time; the main's own
+  records within a tick may sit after a hook's submissions where the backup puts them
+  first; the two machines draw different salts until RD.8 seats one, so a run the engine
+  names by itself (a group's member) is named differently on each, and a later
+  `run.stop` of one by name is refused on the backup and counted in `pair/differs`; a
+  backup whose link fell applies its own clients' and devices' commands again, held
+  (RD.7); `FollowGate::lost` is not published.

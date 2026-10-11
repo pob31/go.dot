@@ -26,8 +26,9 @@
     the author's words, "we need to mute network and MIDI commands while the
     connection is alive so the target devices don't get twice the commands".
     On its own - `wfg serve --hold` - it is a spare that runs the show beside a
-    rehearsal and says nothing to anybody. RD.6 is what switches it on and off
-    from the link.
+    rehearsal and says nothing to anybody. RD.6 switches it on when a backup
+    starts following its main (pair/Follow.h) and never off: RD.7 decides when
+    a backup whose main is lost sends.
 
     HELD MEANS COUNTED AS SENT (AGG). A held send is answered exactly as one
     that left, and it is answered BEFORE anything that could refuse it - an
@@ -106,10 +107,27 @@ namespace wfg::pair
             that changes. */
         enum class Answer { fromDevice, fromElsewhere, none };
 
-        Answer answer() const noexcept { return held() ? Answer::none : Answer::fromDevice; }
+        Answer answer() const noexcept
+        {
+            if (! held())
+                return Answer::fromDevice;
+
+            return elsewhere.load (std::memory_order_relaxed) ? Answer::fromElsewhere : Answer::none;
+        }
+
+        /*  WHILE A BACKUP FOLLOWS ITS MAIN (RD.6), a device's answer to one of
+            its held sends comes from elsewhere: the main asked the device, and
+            its `mount.readback` arrives in the stream. Set by serve on the tick
+            the backup starts and stops following; it says nothing while the
+            machine does not hold. Any thread. */
+        void setAnswersFromElsewhere (bool fromMain) noexcept
+        {
+            elsewhere.store (fromMain, std::memory_order_relaxed);
+        }
 
     private:
         std::atomic<bool> on { false };
+        std::atomic<bool> elsewhere { false };
     };
 
     /** Whether a hold that may be absent holds: null never does. */

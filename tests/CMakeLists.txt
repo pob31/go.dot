@@ -155,6 +155,7 @@ add_executable(wfg_tests
     MachineScopeTests.cpp
     PairSettingsTests.cpp
     PeerLinkTests.cpp
+    FollowTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
     ClientTests.cpp)
@@ -1167,6 +1168,22 @@ add_test(NAME blackbox.pair-link.C
 add_test(NAME blackbox.pair-link.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_link.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.pair-link.C blackbox.pair-link.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
+# -----------------------------------------------------------------------------
+# A BACKUP FOLLOWING ITS MAIN (namespace draft §58, RD.6): the two serves above
+# on copies of the devices fixture, with mock_target.py over UDP aimed at by
+# both. The backup reads `following`, the main `leading`; the backup holds and
+# its delay is one or two ticks; a GO at the main plays on both and the mock
+# hears it once; a GO sent to the backup's WebSocket is passed on, plays on both
+# and is heard once; a refusal of what was passed on reaches the backup's
+# lastError as the main's; a GO sent to the backup over UDP is ignored and
+# neither machine fires. Unbuffered, and hold's limit, for hold's reason.
+add_test(NAME blackbox.pair-follow.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_follow.py" --wfg-locale=C)
+add_test(NAME blackbox.pair-follow.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_follow.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.pair-follow.C blackbox.pair-follow.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------

@@ -64,4 +64,39 @@ namespace wfg::pair
             with one, its ring no longer holding what the backup asked for. */
         std::int64_t gaps = 0;
     };
+
+    /*  WHAT FOLLOWING SAYS ABOUT ITSELF (namespace draft §58.3, RD.6): the rows
+        `pair/state`, `pair/delay`, `pair/late`, `pair/differs`, `pair/relayed`
+        and `pair/dropped`, as serve reads them on the tick it publishes. Here
+        beside the link's, for the link's reason: the tree carries one. */
+    struct FollowReading
+    {
+        /*  `alone`, `following` or `leading` (RD.6); `bothSending` and
+            `waiting` are RD.7's. A main linked to its backup leads; a backup
+            linked to its main follows; anything else is alone. */
+        std::string state = "alone";
+
+        /*  Δ, IN TICKS (AGF): how far behind its main a following backup
+            applies the main's records, as measured and fixed at link-up;
+            nought before it is fixed, and on a machine that does not follow.
+            The extra launch lead a main adds while linked is this (RD.9). */
+        int delay = 0;
+
+        /*  The main's records applied after their slot, this link: each one
+            arrived too late for the tick Δ gave it and went in at once. */
+        std::int64_t late = 0;
+
+        /*  THE FIRST RECORD THE BACKUP APPLIED OTHERWISE THAN ITS MAIN, in one
+            sentence with how many have, this link; empty while every one has
+            come out as the main's - applied with the same arguments, or
+            refused for the same reason. */
+        std::string differs;
+
+        /*  Commands this backup's clients gave it that it passed on to the
+            main (AFT), and commands its devices sent it that it ignored
+            because the main's copy arrives in the stream (AGD). Counted since
+            serve started, every link alike. */
+        std::int64_t relayed = 0;
+        std::int64_t dropped = 0;
+    };
 }

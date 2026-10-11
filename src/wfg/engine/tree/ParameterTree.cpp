@@ -3719,8 +3719,9 @@ namespace wfg::tree
             engine's numbers are and stored in no show (AGC). Whether this
             machine sends to devices, false while it holds (RD.1); its pairing
             as it is in force (RD.4) - the timeout written by the log's own
-            formatter, so a French machine publishes 1.5 and not 1,5; and what
-            the link says about itself (RD.5), the round trip the same way. */
+            formatter, so a French machine publishes 1.5 and not 1,5; what
+            the link says about itself (RD.5), the round trip the same way; and
+            what following says (RD.6). */
         for (const auto* row : doc::Schema::rowsForOwner ("pair"))
         {
             const auto name = std::string (row->name);
@@ -3735,6 +3736,12 @@ namespace wfg::tree
             else if (name == "roundTrip") text = osc::formatDouble (state.pairLink.roundTrip);
             else if (name == "received")  text = std::to_string (state.pairLink.received);
             else if (name == "gaps")      text = std::to_string (state.pairLink.gaps);
+            else if (name == "state")     text = state.pairFollow.state;
+            else if (name == "delay")     text = std::to_string (state.pairFollow.delay);
+            else if (name == "late")      text = std::to_string (state.pairFollow.late);
+            else if (name == "differs")   text = state.pairFollow.differs;
+            else if (name == "relayed")   text = std::to_string (state.pairFollow.relayed);
+            else if (name == "dropped")   text = std::to_string (state.pairFollow.dropped);
             else                          text = std::string (row->defaultText);
 
             engineValue (*row, "pair", text);

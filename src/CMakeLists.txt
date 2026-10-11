@@ -148,6 +148,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/RateStep.h
     wfg/engine/cue/LiveEdits.h
     wfg/engine/cue/LiveEdits.cpp
+    wfg/engine/cue/UndoStep.h
+    wfg/engine/cue/UndoStep.cpp
     wfg/engine/cue/FxValues.h
     wfg/engine/cue/FxValues.cpp
     wfg/engine/cue/FxRows.h
@@ -191,6 +193,8 @@ add_library(wfg_engine STATIC
     wfg/engine/pair/LinkReading.h
     wfg/engine/pair/PeerLink.h
     wfg/engine/pair/PeerLink.cpp
+    wfg/engine/pair/Follow.h
+    wfg/engine/pair/Follow.cpp
     wfg/engine/pair/SavePump.h
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp

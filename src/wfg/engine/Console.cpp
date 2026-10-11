@@ -41,7 +41,9 @@
 #include <wfg/engine/cue/FadeMoveRows.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/TakeCommands.h>
+#include <wfg/engine/cue/UndoStep.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/pair/Follow.h>
 #include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/pair/MachineLocal.h>
 #include <wfg/engine/pair/PairSettings.h>
@@ -879,29 +881,17 @@ namespace
                 week to find, because every existing fixture replays perfectly
                 without it - what a replay compares is records, and coalescing
                 shows up in the records of nothing anybody has recorded yet. */
+            /*  THE RULE IS ONE FUNCTION, the serve's (cue::beginUndoStep): a
+                ride opens nothing, what is this machine's opens nothing
+                (RD.3), the engine's own record opens a step only when it
+                writes the show (RD.6), everything else is a transaction. */
             engine.setBeforeApply ([&document, &liveEdits] (const wfg::Command& appliedCommand,
                                                 const wfg::Event& submitted,
                                                 const std::vector<wfg::osc::Value>& coerced,
                                                 std::int64_t tickIndex)
                                    {
-                                       /*  A RIDE IS NOT AN EDIT: hundreds of
-                                           writes a second, none of them a
-                                           decision (§14.9's reserved domain). */
-                                       if (wfg::cue::isLiveWrite (appliedCommand.name, coerced)
-                                             || wfg::cue::isLiveEdit (appliedCommand.name, coerced,
-                                                                      document, liveEdits))
-                                           return;
-
-                                       /*  NOR IS WHAT IS THIS MACHINE'S (RD.3),
-                                           as `serve`'s hook says. */
-                                       if (wfg::pair::isMachineLocal (appliedCommand, coerced))
-                                       {
-                                           document.beginMachineEdit();
-                                           return;
-                                       }
-
-                                       document.beginTransaction (appliedCommand.name, tickIndex,
-                                                                  submitted.origin, coerced);
+                                       wfg::cue::beginUndoStep (document, &liveEdits, appliedCommand,
+                                                                submitted, coerced, tickIndex);
                                    });
 
             /*  Saving goes to --out, never to the bundle that was handed in.
@@ -3342,10 +3332,11 @@ namespace
 
             THE LINK READS THEM (RD.5, below beside the server): a main streams,
             a backup dials its peers, and both report whether they are linked.
-            And `--role=backup` alone does NOT hold - `pair/sending` stays true
+            And `--role=backup` alone does not hold - `pair/sending` stays true
             and the devices are sent to - because when a backup holds is the
-            link's to decide (RD.6 holds it while it follows, RD.7 lets go when
-            the main is lost); until then `--hold` is the only switch. */
+            link's to decide: RD.6 holds it from the tick it follows (the
+            before-tick hook, below), RD.7 lets go when the main is lost and
+            decides what a backup that never found its main does (AGK). */
         wfg::pair::Pairing pairing;
         {
             const auto loaded = wfg::pair::load (pairingFile().getFullPathName().toStdString());
@@ -4087,38 +4078,21 @@ namespace
             fixture there is and diverges only where coalescing mattered: a log
             of thousands of drags, and a failure nobody would think to look for
             here. */
+        /*  The rule itself is one function, which the replay verb's hook and
+            every test that wants this undo call too (cue/UndoStep.h): a ride
+            opens nothing (§14.9's reserved domain); what is this machine's
+            opens nothing, ends no drag and lands on no open step (RD.3, AGC);
+            the engine's own record opens a step only at its first write to
+            the show, so a sound reported ready on one machine of a pair and a
+            tick later on the other ends nobody's drag (RD.6); everything else
+            is a transaction, or joins the one open. */
         engine.setBeforeApply ([&document, &liveEdits] (const wfg::Command& appliedCommand,
                                             const wfg::Event& submitted,
                                             const std::vector<wfg::osc::Value>& coerced,
                                             std::int64_t tickIndex)
                                {
-                                   /*  A RIDE IS NOT AN EDIT: a fader on a live
-                                       row writes fifty times a second and none
-                                       of it is a decision about the show, so it
-                                       opens no transaction and Undo never moves
-                                       a fader (§14.9's reserved domain). */
-                                   if (wfg::cue::isLiveWrite (appliedCommand.name, coerced)
-                                         || wfg::cue::isLiveEdit (appliedCommand.name, coerced,
-                                                                  document, liveEdits))
-                                       return;
-
-                                   /*  NOR IS WHAT IS THIS MACHINE'S (namespace
-                                       draft §58, RD.3, AGC): a command that
-                                       acts on this machine alone, or a value
-                                       set on its rows - the interface, a
-                                       port's device, a serial path, a display.
-                                       A backup is never sent those, so here
-                                       they open no step, end no drag, and land
-                                       on no step left open; the show file
-                                       still keeps the rows that are in it. */
-                                   if (wfg::pair::isMachineLocal (appliedCommand, coerced))
-                                   {
-                                       document.beginMachineEdit();
-                                       return;
-                                   }
-
-                                   document.beginTransaction (appliedCommand.name, tickIndex,
-                                                              submitted.origin, coerced);
+                                   wfg::cue::beginUndoStep (document, &liveEdits, appliedCommand,
+                                                            submitted, coerced, tickIndex);
                                });
 
         runner.setMounts (&mounts, &sender, &probe);
@@ -5112,10 +5086,48 @@ namespace
         dialler.want (linkRole == LinkRole::backup ? pairing.inForce.peers : std::vector<std::string> {});
         dialler.start();
 
+        /*  A BACKUP THAT FOLLOWS (namespace draft §58, RD.6; pair/Follow.h): the
+            follower holds the main's records to their slot and submits them at
+            the head of the tick; the gate in front of the engine's queue passes
+            this machine's clients' commands on to the main down the dialler,
+            and ignores what its devices say. Both idle until the link to a
+            main is up - the gate behind one acquire load in `Engine::submit`,
+            the follower behind a test on the tick. */
+        wfg::pair::Follower follower { [&engine] (wfg::Event event) { return engine.submit (std::move (event)); } };
+        wfg::pair::FollowGate followGate { engine.commands(),
+                                           [&dialler] (std::vector<std::uint8_t> bytes)
+                                           { return dialler.relay (std::move (bytes)); } };
+        engine.setGate ([&followGate] (wfg::Event& event) { return followGate.take (event); });
+
+        linkReceiver.setOnRecord ([&follower] (std::uint64_t, const wfg::LogRecord& mainRecord)
+                                  { follower.record (mainRecord); });
+        linkReceiver.setOnBeat ([&follower] (std::int64_t mainTick, wfg::pair::LinkClock::time_point arrival)
+                                { follower.beat (mainTick, arrival); });
+
+        /*  AND ON A MAIN, A COMMAND ITS BACKUP PASSED ON (AFT), applied as
+            `peer:<origin>` - submitted from the server's thread as a client's
+            own is, so it lands on the main's next tick - and streamed back
+            down like anything else the main applies. */
+        linkStream.setRelayed ([&engine] (const wfg::LogRecord& passedOn)
+        {
+            wfg::Event event;
+            event.origin.reserve (wfg::origin::fromPeer.size() + passedOn.origin.size());
+            event.origin.append (wfg::origin::fromPeer);
+            event.origin.append (passedOn.origin);
+            event.command = passedOn.command;
+            event.args = passedOn.args;
+            engine.submit (std::move (event));
+        });
+
         /*  EVERY RECORD, AS THE LOG WROTE IT, on the tick thread: the stream
-            keeps the ones that travel and nothing else (pair::travels). */
-        engine.setAfterRecord ([&linkStream] (const wfg::LogRecord& written, const wfg::Command* writtenBy)
-                               { linkStream.keep (written, writtenBy); });
+            keeps the ones that travel and nothing else (pair::travels), and a
+            following backup compares each of the main's it applied with what
+            the main made of it (RD.6). */
+        engine.setAfterRecord ([&linkStream, &follower] (const wfg::LogRecord& written, const wfg::Command* writtenBy)
+                               {
+                                   linkStream.keep (written, writtenBy);
+                                   follower.applied (written);
+                               });
 
         /*  What a backup says on the server's thread - a hello, a ping - goes to
             the stream and never to the namespace: no event, no record. */
@@ -5486,6 +5498,68 @@ namespace
 
         ticks.setBeforeTick ([&] (std::int64_t tickIndex)
                              {
+                                 /*  THE MAIN'S RECORDS BEFORE ANYTHING (namespace
+                                     draft §58, RD.6; AGF). What the main sent
+                                     since the last tick is read here rather than
+                                     after the tick, so a record that arrived a
+                                     moment ago can make this tick's slot; the
+                                     link is linked or not by its heartbeat; and
+                                     a backup whose link is up FOLLOWS - holds
+                                     (RD.1's hold, on from here; RD.7 lets it go),
+                                     waits for the main's answers rather than
+                                     taking its held writes for them, and closes
+                                     the engine's gate - while one whose link
+                                     fell stops following and stays holding. Then
+                                     every record whose slot is this tick goes in,
+                                     at the head of the queue this tick drains,
+                                     ahead of the hands and the Runner's own -
+                                     as `wfg replay` puts a log's tick back. */
+                                 {
+                                     const auto now = wfg::pair::LinkClock::now();
+                                     linkReceiver.drain (now, pairing.inForce.timeout);
+
+                                     const auto shouldFollow = linkRole == LinkRole::backup
+                                                                 && linkReceiver.isLinked (now, pairing.inForce.timeout);
+
+                                     if (shouldFollow != follower.isFollowing())
+                                     {
+                                         if (shouldFollow)
+                                         {
+                                             machineHold.set (true);
+                                             machineHold.setAnswersFromElsewhere (true);
+
+                                             if (ticks.sampleRate() > 0)
+                                                 follower.setTickSeconds (static_cast<double> (ticks.samplesPerTick())
+                                                                            / static_cast<double> (ticks.sampleRate()));
+
+                                             follower.start();
+                                             engine.setGated (true);
+                                         }
+                                         else
+                                         {
+                                             engine.setGated (false);
+                                             machineHold.setAnswersFromElsewhere (false);
+                                             follower.stop();
+                                         }
+                                     }
+
+                                     if (follower.isFollowing())
+                                     {
+                                         /*  WHEN THIS TICK WAS DUE, not when it ran: a
+                                             tick run late reads the beats against
+                                             the clock's own tick, not its lateness. */
+                                         const auto lateBy = ticks.sampleRate() > 0
+                                                               ? static_cast<double> (ticks.lateness())
+                                                                   / static_cast<double> (ticks.sampleRate())
+                                                               : 0.0;
+
+                                         follower.beforeTick (tickIndex,
+                                                              now - std::chrono::duration_cast<wfg::pair::LinkClock::duration> (
+                                                                        std::chrono::duration<double> (lateBy)),
+                                                              linkReceiver.roundTripToSay());
+                                     }
+                                 }
+
                                  /*  THE HANDS FIRST (plan decision 13): what the
                                      surfaces did since the last tick reaches the
                                      queue before the Runner's hook reads the
@@ -5945,10 +6019,15 @@ namespace
                                     from here, so a main whose tick hangs falls
                                     silent and is lost, and before the publish
                                     below, which a backup does not wait behind.
-                                    On a backup, what its main sent since the
-                                    last tick, counted. Both queue and return:
-                                    a send is the server's to write, never the
-                                    tick's to wait for. */
+                                    It queues and returns: a send is the
+                                    server's to write, never the tick's to wait
+                                    for. A backup reads what its main sent at
+                                    the head of every tick (RD.6), and here as
+                                    well: a tick the audio settings suspended
+                                    runs no before-tick hook, and the link must
+                                    not read lost for an interface restarting.
+                                    What arrived waits in the follower for the
+                                    next tick that has one. */
                                 linkStream.afterTick (outcome.tick, pairing.inForce.timeout);
                                 linkReceiver.drain (wfg::pair::LinkClock::now(), pairing.inForce.timeout);
 
@@ -6045,6 +6124,31 @@ namespace
                                         state.pairLink.linked = false;
                                         state.pairLink.roundTrip = 0.0;
                                         break;
+                                }
+
+                                /*  AND WHAT FOLLOWING SAYS (RD.6): a main
+                                    linked leads, a backup that follows
+                                    follows, anything else is alone; the delay,
+                                    what came late and what came out otherwise,
+                                    and what the gate passed on and ignored.
+                                    Copied only when it moved. */
+                                {
+                                    auto& follow = state.pairFollow;
+                                    const auto* const word = linkRole == LinkRole::main
+                                                               ? (state.pairLink.linked ? "leading" : "alone")
+                                                               : (follower.isFollowing() ? "following" : "alone");
+
+                                    if (follow.state != word)
+                                        follow.state = word;
+
+                                    follow.delay = follower.delay();
+                                    follow.late = follower.late();
+
+                                    if (follow.differs != follower.differs())
+                                        follow.differs = follower.differs();
+
+                                    follow.relayed = followGate.passedOn();
+                                    follow.dropped = followGate.ignored();
                                 }
 
                                 /*  THE REFUSAL ITSELF, and not only the count
@@ -6417,9 +6521,20 @@ namespace
                                     hears, read off it next tick (namespace draft §51). */
                                 runner.noteSnapshot (current);
 
+                                /*  THE CLIENT THAT CAUSED IT, ON THIS MACHINE:
+                                    on a following backup a client's command
+                                    comes back as `main:peer:<its origin>`, and
+                                    is still that client's - its own fader is
+                                    not pushed back at it a link's delay late
+                                    (RD.6, origin::localClientOf). */
                                 if (previous != nullptr && current != nullptr)
-                                    server.publishChanges (wfg::tree::diff (*previous, *current),
-                                                           *current, outcome.soleOrigin);
+                                {
+                                    const auto causedBy = wfg::origin::localClientOf (outcome.soleOrigin);
+                                    server.publishChanges (wfg::tree::diff (*previous, *current), *current,
+                                                           causedBy.size() == outcome.soleOrigin.size()
+                                                             ? outcome.soleOrigin
+                                                             : std::string (causedBy));
+                                }
 
                                 previous = std::move (current);
                             });
@@ -7326,6 +7441,12 @@ namespace
             driver->stop();
         if (dummy != nullptr)
             dummy->stop();
+
+        /*  THE GATE OPEN BEFORE ANYTHING IT PASSES TO GOES (RD.6): the tick
+            thread that closed it has stopped, and a datagram or a patch still
+            submitting while the dialler and the gate are taken down is then
+            queued for an engine that will not tick again, never handed to them. */
+        engine.setGated (false);
 
         server.stop();
         fetcher.stop();

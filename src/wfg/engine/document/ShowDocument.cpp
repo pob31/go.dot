@@ -20,6 +20,7 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/Override.h>
 #include <wfg/engine/command/Command.h>
+#include <wfg/engine/command/Event.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/FadePoints.h>
 #include <wfg/engine/document/LevelLane.h>
@@ -665,6 +666,7 @@ namespace wfg::doc
         forgetCoalescing();
         undoSuppressions = 0;
         machineEditing = false;
+        engineStepPending = false;
         keeping = nullptr;
 
         showNode.addListener (this);
@@ -964,8 +966,9 @@ namespace wfg::doc
                                          const std::string& writeOrigin,
                                          const std::vector<osc::Value>& args)
     {
-        //  Every command that is the show's ends a machine edit (RD.3).
+        //  Every command that is the show's ends a machine edit (RD.3), and an engine step never opened (RD.6).
         machineEditing = false;
+        engineStepPending = false;
 
         /*  ONLY A `node.set` HAS AN ADDRESS TO COALESCE ON, and everything else
             leaves this empty - which is how a create, a delete, a move and an
@@ -983,6 +986,16 @@ namespace wfg::doc
                                : commandName == "node.setMany" ? addressSetOf (args)
                                                                : std::string {};
 
+        const auto captured = (commandName == "fx.capture" && ! args.empty() && args[0].isString())
+                                ? args[0].getString()
+                                : std::string {};
+
+        openStep (commandName, tick, writeOrigin, address, captured);
+    }
+
+    void ShowDocument::openStep (const std::string& commandName, std::int64_t tick, const std::string& writeOrigin,
+                                 const std::string& address, const std::string& captured)
+    {
         /*  The address is tested FIRST and the arithmetic is behind it, so the
             tick difference is only ever computed against a tick a real write
             stamped. `tick >= lastWriteTick` is there for the caller that hands
@@ -1002,9 +1015,6 @@ namespace wfg::doc
             logged ticks and origins, so a replay splits exactly as the session
             did. A capture after anything else - an impulse response loaded,
             which moves no parameter - is a step of its own. */
-        const auto captured = (commandName == "fx.capture" && ! args.empty() && args[0].isString())
-                                ? args[0].getString()
-                                : std::string {};
         const auto turnPrefix = "/godot/fx/" + captured + "/p";
 
         const auto joinsTurn = ! captured.empty()
@@ -1030,6 +1040,35 @@ namespace wfg::doc
         lastWriteAddress = address;
         lastWriteOrigin = writeOrigin;
         lastWriteTick = tick;
+    }
+
+    void ShowDocument::beginEngineEdit (const std::string& commandName, std::int64_t tick,
+                                        const std::vector<osc::Value>& args)
+    {
+        /*  NOTHING IS BEGUN HERE: the key the step would open with is kept, and
+            the first write that asks for the show's history opens it
+            (`openPendingEngineStep`). A record that writes none leaves the open
+            step, the coalescing key and every flag JUCE holds as they were - an
+            UndoManager has no way to take back a `beginNewTransaction` it was
+            told, so the only way not to end a drag is never to say it. */
+        machineEditing = false;
+        engineStepPending = true;
+        pendingStepName = commandName;
+        pendingStepTick = tick;
+        pendingStepAddress = (commandName == "node.set" && ! args.empty() && args[0].isString())
+                               ? args[0].getString()
+                               : commandName == "node.setMany" ? addressSetOf (args)
+                                                               : std::string {};
+    }
+
+    void ShowDocument::openPendingEngineStep()
+    {
+        if (! engineStepPending)
+            return;
+
+        engineStepPending = false;
+        //  An engine record is never a plugin's captured state: that is the window's (`fx.capture`).
+        openStep (pendingStepName, pendingStepTick, std::string (origin::engine), pendingStepAddress, std::string {});
     }
 
     std::optional<std::string> ShowDocument::undo (UndoDomain domain)
@@ -1085,6 +1124,11 @@ namespace wfg::doc
         if (undoSuppressions > 0)
             return nullptr;
 
+        /*  THE ENGINE'S STEP, OPENED NOW (RD.6): this is the first write of an
+            engine record to the show's history, values and structure alike
+            (`historyFor` comes here), so it is where that record's step begins. */
+        openPendingEngineStep();
+
         return histories[static_cast<std::size_t> (UndoDomain::document)].get();
     }
 
@@ -1103,6 +1147,7 @@ namespace wfg::doc
             they were, so a drag on either side of this goes on joining exactly
             as it does on a machine that never saw it. */
         machineEditing = true;
+        engineStepPending = false;
     }
 
     void ShowDocument::rebuildRegistry()

@@ -1722,3 +1722,58 @@ TEST_CASE ("peer link: pair/linked, peer, roundTrip, received and gaps publish t
     CHECK (valueAt (snapshot, "/godot/pair/received", "h") == osc::Value::int64 (12));
     CHECK (valueAt (snapshot, "/godot/pair/gaps", "h") == osc::Value::int64 (1));
 }
+
+/*  RD.6: what following says (namespace draft §58.3) - the state, Δ, what came
+    late and what came out otherwise, what was passed on and what ignored -
+    published as serve reads them, read-only. */
+TEST_CASE ("follow: pair/state, delay, late, differs, relayed and dropped publish following as read, read-only")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+
+    const auto valueAt = [] (const std::shared_ptr<const TreeSnapshot>& snapshot, const std::string& address,
+                             const std::string& typeTags)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        CHECK (node->access == Access::read);
+        CHECK (node->typeTags == typeTags);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    //  Nothing paired: alone, and nought.
+    EngineState state;
+    auto snapshot = rig.parameters.publish (1, state);
+
+    CHECK (valueAt (snapshot, "/godot/pair/state", "s") == osc::Value::string ("alone"));
+    CHECK (valueAt (snapshot, "/godot/pair/delay", "i") == osc::Value::int32 (0));
+    CHECK (valueAt (snapshot, "/godot/pair/late", "i") == osc::Value::int32 (0));
+    CHECK (valueAt (snapshot, "/godot/pair/differs", "s") == osc::Value::string (""));
+    CHECK (valueAt (snapshot, "/godot/pair/relayed", "h") == osc::Value::int64 (0));
+    CHECK (valueAt (snapshot, "/godot/pair/dropped", "h") == osc::Value::int64 (0));
+
+    //  A backup following.
+    state.pairFollow.state = "following";
+    state.pairFollow.delay = 2;
+    state.pairFollow.late = 1;
+    state.pairFollow.differs = "1 record applied otherwise than on the main; the first, go at the main's tick 412:"
+                               " refused there (too-soon), applied here";
+    state.pairFollow.relayed = 7;
+    state.pairFollow.dropped = 3;
+    snapshot = rig.parameters.publish (2, state);
+
+    CHECK (valueAt (snapshot, "/godot/pair/state", "s") == osc::Value::string ("following"));
+    CHECK (valueAt (snapshot, "/godot/pair/delay", "i") == osc::Value::int32 (2));
+    CHECK (valueAt (snapshot, "/godot/pair/late", "i") == osc::Value::int32 (1));
+    CHECK (valueAt (snapshot, "/godot/pair/differs", "s") == osc::Value::string (state.pairFollow.differs));
+    CHECK (valueAt (snapshot, "/godot/pair/relayed", "h") == osc::Value::int64 (7));
+    CHECK (valueAt (snapshot, "/godot/pair/dropped", "h") == osc::Value::int64 (3));
+
+    //  And a main, leading.
+    state.pairFollow = {};
+    state.pairFollow.state = "leading";
+    snapshot = rig.parameters.publish (3, state);
+    CHECK (valueAt (snapshot, "/godot/pair/state", "s") == osc::Value::string ("leading"));
+}

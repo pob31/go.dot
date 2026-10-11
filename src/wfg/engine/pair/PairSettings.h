@@ -57,9 +57,11 @@
 
     THE LINK READS THEM (RD.5, pair/PeerLink.h): a `main` streams to whoever
     dials it, a `backup` dials its peers, and both say whether they are linked
-    within the timeout. RD.6 and RD.7 decide when a backup holds and when it
-    takes over; until then a machine started `--role=backup` does NOT hold -
-    `pair/sending` stays true - and `--hold` is still the only thing that holds.
+    within the timeout. A backup holds from the moment it is linked and
+    follows (RD.6, pair/Follow.h), and stays holding if the link falls; RD.7
+    decides when it takes over. A machine started `--role=backup` that has
+    never been linked does not hold yet (RD.7, AGK), and `--hold` holds on
+    its own.
 */
 
 #include <cstdint>

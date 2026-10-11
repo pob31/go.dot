@@ -71,11 +71,50 @@ namespace wfg
         //======================================================================
         /** Any thread. False when the queue was full and an older entry was
             dropped to make room. */
-        bool submit (Event event)  { return queue.submit (std::move (event)); }
+        bool submit (Event event)
+        {
+            /*  ONE LOAD for an engine that is not a following backup, which is
+                every engine but one (`setGate`) - an acquire, so a thread that
+                sees the gate closed sees the gate that was set before it was;
+                on x86 it is the same instruction as a relaxed one. */
+            if (gated.load (std::memory_order_acquire) && gate && gate (event))
+                return true;
+
+            return queue.submit (std::move (event));
+        }
+
         bool submit (Drop drop)    { return queue.submit (std::move (drop)); }
 
         /** Convenience for the CLI, tests and internal work. */
         bool submit (std::string origin, std::string command, std::vector<osc::Value> args = {});
+
+        /*  THE GATE A BACKUP FOLLOWING ITS MAIN PUTS IN FRONT OF THE QUEUE
+            (namespace draft §58, RD.6; AFT, AGD). While it is closed
+            (`setGated`), every event submitted is shown to it first, on the
+            thread that submits it, and an event it TAKES - true - never
+            reaches the queue: a command one of this machine's clients gave is
+            passed on to the main, which applies it and streams it back; one a
+            device sent is the main's, whose copy arrives in the stream. What
+            it leaves - the engine's own, the main's records, this machine's
+            own settings - is queued as ever.
+
+            Here and not at the transports, because there are six of them -
+            the WebSocket, UDP, the window, a surface, a serial port, a patch -
+            and every one already ends in `submit`; a transport added next
+            year is gated without knowing there is a gate. Drops are never
+            shown to it: a packet that never became a command changes nothing.
+
+            `setGate` once, before the gate is first closed - serve sets it as
+            it wires the link, and nothing else ever does; the switch is an
+            atomic, flipped on the tick the backup starts or stops following,
+            and released so a thread that reads it closed reads that gate.
+            The gate must never block: it decides from the event alone and
+            queues what it passes on (pair::FollowGate). */
+        using Gate = std::function<bool (Event& event)>;
+
+        void setGate (Gate gateToUse) { gate = std::move (gateToUse); }
+        void setGated (bool closed) noexcept { gated.store (closed, std::memory_order_release); }
+        bool isGated() const noexcept { return gated.load (std::memory_order_relaxed); }
 
         //======================================================================
         /*  What one tick did. Returned rather than logged-and-forgotten so a
@@ -210,6 +249,9 @@ namespace wfg
         BeforeApply beforeApply;
         AfterRecord afterRecord;
         std::function<std::string (const std::string&)> admissionCheck;
+
+        Gate gate;
+        std::atomic<bool> gated { false };
 
         std::atomic<std::int64_t> tick { -1 };
         std::atomic<std::uint64_t> seq { 0 };
