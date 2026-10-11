@@ -223,6 +223,12 @@ namespace wfg::tree
 
     struct Node
     {
+        /*  `Node::ArgumentRange` is the name its readers already use. Declared
+            FIRST: a class that uses a name and then declares it as an alias
+            changes what the name means inside the class, which GCC refuses
+            (-Wchanges-meaning, an error in the strict job) and MSVC lets by. */
+        using ArgumentRange = tree::ArgumentRange;
+
         /** The full OSC address. Unique, and the tree's only key. */
         std::string address;
 
@@ -285,9 +291,7 @@ namespace wfg::tree
         const std::vector<osc::Value>& panicValues() const noexcept    { return about().panicValues; }
 
         /*  The bounds of one argument, from nought: unbounded where none were
-            given. `Node::ArgumentRange` is the name its readers already use. */
-        using ArgumentRange = tree::ArgumentRange;
-
+            given. */
         ArgumentRange rangeOf (std::size_t argument) const { return about().rangeOf (argument); }
 
         bool isContainer() const noexcept { return kind == Kind::container; }
