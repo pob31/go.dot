@@ -84,8 +84,10 @@ namespace wfg::tree
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <set>
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace wfg::tree
@@ -386,49 +388,98 @@ namespace wfg::tree
             the snapshot is responsible for. The two halves must not both carry
             an address: `find` searches one and then the other, and a duplicate
             would mean the answer depended on which it happened to look at
-            first. */
+            first.
+
+            VIEWS, SORTED ONCE, AND NOTHING COPIED BUT WHAT IS MISSING
+            (2026-10-11). It runs on every tick over the runtime half and on
+            every applied command over the show half, and it was two sets of
+            strings holding a copy of every parent of every address. With the
+            sort after it, it was twenty-nine milliseconds of a GO's forty-five
+            in the Debug build on a show of a thousand nodes, and five of an
+            idle tick's thirteen - enough, on a runner slower than the bench,
+            that a tick took longer than a tick and the clock never caught up
+            (blackbox.first-sound, two seconds behind on Windows CI). The sort
+            was most of it (`sortByAddress`, below); this was two milliseconds
+            of it. Every parent is a prefix of an address already held, so it
+            is a view into that string, sorted and made unique once, and
+            looked up among the addresses present - sorted views too - so the
+            only strings made are the containers that were missing. They are
+            copied before any is pushed, since a push may move the nodes and
+            with them the short strings the views look into. */
         void addContainers (std::vector<Node>& nodes,
                             const std::vector<std::string>& ownedElsewhere,
                             bool includeRoot)
         {
-            std::set<std::string> present;
+            std::vector<std::string_view> present;
+            present.reserve (nodes.size() + ownedElsewhere.size());
 
             for (const auto& node : nodes)
-                present.insert (node.address);
+                present.emplace_back (node.address);
 
             for (const auto& address : ownedElsewhere)
-                present.insert (address);
+                present.emplace_back (address);
 
-            std::set<std::string> wanted;
+            std::sort (present.begin(), present.end());
+
+            std::vector<std::string_view> wanted;
+            wanted.reserve (nodes.size() * 2);
 
             for (const auto& node : nodes)
             {
-                auto address = node.address;
+                std::string_view address { node.address };
 
                 for (;;)
                 {
                     const auto slash = address.rfind ('/');
 
-                    if (slash == std::string::npos || slash == 0)
+                    if (slash == std::string_view::npos || slash == 0)
                         break;
 
                     address = address.substr (0, slash);
-                    wanted.insert (address);
+                    wanted.push_back (address);
                 }
             }
 
             if (includeRoot)
-                wanted.insert (std::string (rootAddress));
+                wanted.push_back (rootAddress);
 
-            for (const auto& address : wanted)
-                if (present.find (address) == present.end())
-                    nodes.push_back (makeContainer (address));
+            std::sort (wanted.begin(), wanted.end());
+            wanted.erase (std::unique (wanted.begin(), wanted.end()), wanted.end());
+
+            std::vector<std::string> missing;
+
+            for (const auto address : wanted)
+                if (! std::binary_search (present.begin(), present.end(), address))
+                    missing.emplace_back (address);
+
+            for (auto& address : missing)
+                nodes.push_back (makeContainer (std::move (address)));
         }
 
+        /*  THE ORDER SORTED, THEN EACH NODE MOVED ONCE (2026-10-11). A node is a
+            dozen strings, vectors and a MIDI shape since the device presets
+            (§57), and a sort that swaps nodes moves each of them log n times.
+            The positions are what is sorted now, by the addresses they point
+            at, and the nodes are moved into place in one pass: in the Debug
+            build CI runs, with `addContainers` before it, a GO's rebuild of
+            the show half fell from forty-five milliseconds to twenty-seven and
+            an idle tick's runtime half from thirteen to nine, and
+            blackbox.first-sound's worst lateness from 256 ms to 93. */
         void sortByAddress (std::vector<Node>& nodes)
         {
-            std::sort (nodes.begin(), nodes.end(),
-                       [] (const Node& a, const Node& b) { return a.address < b.address; });
+            std::vector<std::size_t> order (nodes.size());
+            std::iota (order.begin(), order.end(), std::size_t { 0 });
+
+            std::sort (order.begin(), order.end(),
+                       [&nodes] (std::size_t a, std::size_t b) { return nodes[a].address < nodes[b].address; });
+
+            std::vector<Node> sorted;
+            sorted.reserve (nodes.size());
+
+            for (const auto at : order)
+                sorted.push_back (std::move (nodes[at]));
+
+            nodes = std::move (sorted);
         }
 
         //======================================================================
