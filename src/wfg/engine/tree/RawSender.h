@@ -52,6 +52,8 @@ namespace wfg::osc
     class UdpEndpoint;
 }
 
+namespace wfg::pair { class Hold; }
+
 namespace wfg::tree
 {
     class RawSender
@@ -66,6 +68,15 @@ namespace wfg::tree
             builds its commands before it opens a port (MountSender::setSocket). */
         void setSocket (osc::UdpEndpoint& socket) noexcept { udp = &socket; }
 
+        /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; AGG): while it holds,
+            a flush sends nothing and lets go of what was queued, counted in
+            `heldCount` - neither sent nor dropped, since nothing went wrong
+            and nothing left. The answers are a processor's, and a processor
+            that wrote a cue into the main's show hears from the main. Queued
+            as ever, so `waiting` reads alike on both machines. Null is never
+            held. */
+        void setHold (const pair::Hold* holdToUse) noexcept { hold = holdToUse; }
+
         /*  Queues one packet for `host:port`. Tick thread. A port outside
             1..65535 or an empty host is dropped at once and counted: an answer
             to nowhere is not an error worth more than that. */
@@ -78,6 +89,7 @@ namespace wfg::tree
         std::size_t pending() const noexcept { return queued.size(); }
         std::size_t sentCount() const noexcept { return sent; }
         std::size_t droppedCount() const noexcept { return dropped; }
+        std::size_t heldCount() const noexcept { return held; }
 
         /** What was queued and not yet flushed, for tests. */
         struct Raw
@@ -91,8 +103,10 @@ namespace wfg::tree
 
     private:
         osc::UdpEndpoint* udp = nullptr;
+        const pair::Hold* hold = nullptr;
         std::vector<Raw> queued;
         std::size_t sent = 0;
         std::size_t dropped = 0;
+        std::size_t held = 0;
     };
 }

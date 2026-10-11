@@ -82,6 +82,7 @@ namespace wfg::osc
 }
 
 namespace wfg::midi { struct MidiSink; }
+namespace wfg::pair { class Hold; }
 
 namespace wfg::tree
 {
@@ -212,6 +213,17 @@ namespace wfg::tree
             rig - and such a message fails as one to nowhere does. */
         void setMidiSink (midi::MidiSink* sink) noexcept { midiSink = sink; }
 
+        /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; AGG): while it holds,
+            nothing queued here reaches a socket, a serial port, a connection or
+            a MIDI port, and every message is answered `sent` all the same - in
+            `deliver`, the one funnel, before a sink is even chosen, so a cue
+            aimed at a closed link or a port of nought still ends as it would
+            have where the bytes left. The queue, the coalescing, the rate cap,
+            the bundles and the tickets all run as ever: a held flush is a
+            flush whose last step did nothing. Null - every rig, a replay - is
+            never held. */
+        void setHold (const pair::Hold* holdToUse) noexcept { hold = holdToUse; }
+
         //======================================================================
         /*  Queues one message. Tick thread.
 
@@ -315,9 +327,11 @@ namespace wfg::tree
         LinkSink linkSink;
         const MountTable* mounts = nullptr;
         midi::MidiSink* midiSink = nullptr;
+        const pair::Hold* hold = nullptr;
 
         /*  One datagram's bytes to where the destination says: its serial port,
-            or its host and port. */
+            or its host and port - or nowhere, and true, while the machine
+            holds. */
         bool deliver (const Destination& to, const std::vector<std::uint8_t>& bytes);
 
         std::vector<Message> queued;          // in first-queued order

@@ -3252,6 +3252,20 @@ namespace wfg::tree
             engineValue (*row, "engine", text);
         }
 
+        /*  REDUNDANCY (namespace draft §58.3): the machine's, published as the
+            engine's numbers are and stored nowhere (AGC). RD.1 has the one row
+            - whether this machine sends to devices, false while it holds. */
+        for (const auto* row : doc::Schema::rowsForOwner ("pair"))
+        {
+            const auto name = std::string (row->name);
+            std::string text;
+
+            if (name == "sending") text = state.pairSending ? "true" : "false";
+            else                   text = std::string (row->defaultText);
+
+            engineValue (*row, "pair", text);
+        }
+
         for (const auto* row : doc::Schema::rowsForOwner ("document"))
         {
             if (row->persist != doc::Persist::none)

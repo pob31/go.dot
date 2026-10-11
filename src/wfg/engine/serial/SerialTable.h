@@ -53,6 +53,8 @@
 #include <utility>
 #include <vector>
 
+namespace wfg::pair { class Hold; }
+
 namespace wfg::serial
 {
     /*  What the show declares for one port - or, since namespace draft §57
@@ -117,9 +119,21 @@ namespace wfg::serial
 
         PortState stateOf (const std::string& id) const;
 
+        /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; AGG): while it holds,
+            `send` and `sendPacket` hand nothing to a port and answer true - at
+            their first line, before the port is looked up, because whether
+            this machine has the port at all, open or not, is the machine's and
+            not the show's: a backup without the main's Arduino still ends a
+            process cue's line as sent. The ports themselves stay open and
+            heard (AGH): they are this machine's hardware, and only what is
+            written to them is the show's. Set before the tick thread starts;
+            null is never held. */
+        void setHold (const pair::Hold* holdToUse) noexcept { hold = holdToUse; }
+
     private:
         struct Worker;
         Opener opener;
+        const pair::Hold* hold = nullptr;
         std::map<std::string, std::shared_ptr<Worker>> workers;
         std::vector<std::shared_ptr<Worker>> retired;
         mutable std::mutex lock;          // workers, against stateOf from another thread

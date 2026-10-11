@@ -4165,3 +4165,109 @@ TEST_CASE ("verified: a cue whose curve ends is done when the device holds its l
     INFO ("state " << run->state << ", error " << run->error);
     CHECK (run->state == cue::runState::done);
 }
+
+//==============================================================================
+/*  RD.1: A HELD MACHINE ASKS ITS DEVICES NOTHING (namespace draft §58, AGG).
+    With no main to hear an answer from (Runner::deviceAnswer: `none`), a cue
+    that would have waited for the device does not: a verified cue takes its
+    held write for the answer, and a pre-send takes what this machine last wrote
+    there for what the desk held. The probe refuses a question at its own door
+    too. RD.6's following backup waits for the main's answer instead. */
+#include <wfg/engine/pair/Hold.h>
+
+TEST_CASE ("hold: the probe takes no question while the machine holds")
+{
+    VerifiedRig rig;
+    pair::Hold hold { true };
+    rig.probe.setHold (&hold);
+
+    CHECK_FALSE (rig.probe.ask ({ "K3PV7WRB", "127.0.0.1", rig.device.port(), "/desk/fader", "f", false, -1 }));
+    CHECK (rig.probe.outstanding() == 0u);
+
+    hold.set (false);
+    CHECK (rig.probe.ask ({ "K3PV7WRB", "127.0.0.1", rig.device.port(), "/desk/fader", "f", false, -1 }));
+}
+
+TEST_CASE ("hold: a verified cue read back over OSCQuery ends done on the tick after its GO, and nobody is asked")
+{
+    VerifiedRig rig;
+    pair::Hold hold { true };
+    rig.sender.setHold (&hold);
+    rig.runner.setHold (&hold);
+    rig.probe.setHold (&hold);
+
+    //  A device that would disagree, were it asked.
+    rig.device.target.says ({ osc::Value::float32 (0.1f) });
+
+    const auto cueId = rig.makeVerified ("f:0.75");
+    rig.fire (cueId);
+    CHECK (rig.probe.outstanding() == 0u);
+
+    rig.tickOnce();
+
+    const auto* run = rig.runOf (cueId);
+    REQUIRE (run != nullptr);
+    INFO ("state " << run->state << ", error " << run->error);
+    CHECK (run->state == cue::runState::done);
+    CHECK (run->error.empty());
+    CHECK (run->warning.empty());
+    CHECK (rig.probe.outstanding() == 0u);
+}
+
+TEST_CASE ("hold: a pre-send on a held machine writes at once, its restore what this machine last wrote there")
+{
+    VerifiedRig rig;
+    rig.anticipate();
+
+    pair::Hold hold { true };
+    rig.sender.setHold (&hold);
+    rig.runner.setHold (&hold);
+    rig.probe.setHold (&hold);
+
+    //  What the desk would say, were it asked - it is not.
+    rig.device.target.says ({ osc::Value::float32 (0.5f) });
+
+    SUBCASE ("written before: that is the restore")
+    {
+        REQUIRE (rig.mounts.write ("/desk/fader", osc::Values { osc::Value::float32 (0.2f) }).ok);
+
+        const PreparedScene scene { rig, "f:0.8", "none" };
+        rig.setStandby (scene.group);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        const auto* run = rig.runOf (scene.cue);
+        REQUIRE (run != nullptr);
+        CHECK (run->state != cue::runState::failed);
+        CHECK (run->restoreAddress == "/desk/fader");
+
+        const auto restore = osc::Value::fromAtom (run->restoreAtom);
+        REQUIRE (restore.has_value());
+        CHECK (*restore == osc::Value::float32 (0.2f));
+
+        const auto* written = rig.mounts.valueOf ("/desk/fader");
+        REQUIRE (written != nullptr);
+        CHECK (*written == osc::Values { osc::Value::float32 (0.8f) });
+        CHECK (rig.probe.outstanding() == 0u);
+    }
+
+    SUBCASE ("never written: nothing to put back, and the write goes all the same")
+    {
+        const PreparedScene scene { rig, "f:0.8", "none" };
+        rig.setStandby (scene.group);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        const auto* run = rig.runOf (scene.cue);
+        REQUIRE (run != nullptr);
+        CHECK (run->state != cue::runState::failed);
+        CHECK (run->restoreAddress.empty());
+
+        const auto* written = rig.mounts.valueOf ("/desk/fader");
+        REQUIRE (written != nullptr);
+        CHECK (*written == osc::Values { osc::Value::float32 (0.8f) });
+        CHECK (rig.probe.outstanding() == 0u);
+    }
+}

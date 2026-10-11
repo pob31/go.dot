@@ -1117,6 +1117,19 @@ set_tests_properties(blackbox.wires.C blackbox.wires.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------
+# A MACHINE THAT HOLDS (namespace draft §58, RD.1): `serve --hold` against a
+# device over UDP and one over TCP - nothing reaches either, the connection is
+# never opened, a verified cue at a device that never answers ends at once, and
+# every cue ends done, unwarned - then the same without the hold, which reaches
+# both and times the verified cue out. A copy of the devices fixture each time.
+add_test(NAME blackbox.hold.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/hold.py" --wfg-locale=C)
+add_test(NAME blackbox.hold.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/hold.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.hold.C blackbox.hold.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
+
+# -----------------------------------------------------------------------------
 # THE PHASE 2 DONE-WHEN CLAUSE, driven from outside the process.
 #
 # The devplan's criterion word for word: `Rien à faire` -> load show -> GO ->

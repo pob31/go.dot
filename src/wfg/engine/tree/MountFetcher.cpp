@@ -18,6 +18,7 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/oscquery/OscQueryClient.h>
+#include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/tree/Mount.h>
 
 #include <algorithm>
@@ -69,6 +70,10 @@ namespace wfg::tree
     void MountFetcher::fetch (Request request)
     {
         if (request.mountId.empty() || request.host.empty() || request.queryPort <= 0 || request.prefix.empty())
+            return;
+
+        //  A held machine asks its devices nothing (RD.1, AGG).
+        if (pair::isHeld (hold))
             return;
 
         {

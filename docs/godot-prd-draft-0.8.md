@@ -4013,7 +4013,7 @@ the log; a way to stop a stuck patch short of starting Go.dot again - a helper p
 the option the author did not take, would give it.
 
 Added 2026-10-11 *(proposed)*, with redundancy (§3.15, namespace draft §58). The implementer's calls
-AFV-AGK in §58.2 are the author's to overrule:
+from AFV in §58.2 are the author's to overrule:
 
 - **One second of silence** loses the link, a machine setting; several addresses may be given for two
   network paths, and the link is lost only when all are silent.
@@ -4028,6 +4028,8 @@ AFV-AGK in §58.2 are the author's to overrule:
 - **"Just started and running nothing"** is a machine that has applied no GO and run no cue since it
   was launched.
 - **No secret on the link**: the WebSocket port already takes a GO from anyone on the network.
+- **A held pre-send** takes what the machine last wrote to the address for the device's answer, on a
+  spare with no main to hear from (RD.1).
 
 What the work leaves out: correcting the drift between two sound clocks by speed; a backup's TCP
 connections open but silent, for consoles that take two sessions; a shared secret on the link; finding

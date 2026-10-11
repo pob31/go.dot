@@ -17,6 +17,7 @@
 #include <wfg/engine/midi/MidiSender.h>
 
 #include <wfg/engine/monitor/TrafficTap.h>
+#include <wfg/engine/pair/Hold.h>
 
 #include <algorithm>
 #include <chrono>
@@ -193,6 +194,18 @@ namespace wfg::midi
         }
     }
 
+    void MidiSender::setSurfacePorts (std::vector<std::string> ports)
+    {
+        const std::lock_guard<std::mutex> lock { boundMutex };
+        surfacePorts = std::move (ports);
+    }
+
+    bool MidiSender::passesHold (const std::string& portId) const
+    {
+        const std::lock_guard<std::mutex> lock { boundMutex };
+        return std::find (surfacePorts.begin(), surfacePorts.end(), portId) != surfacePorts.end();
+    }
+
     bool MidiSender::isBound (const std::string& portId) const
     {
         const std::lock_guard<std::mutex> lock { boundMutex };
@@ -247,6 +260,14 @@ namespace wfg::midi
     {
         if (message.bytes.empty())
             return sendError::badMessage;
+
+        /*  HELD, AND TAKEN (namespace draft §58, RD.1; AGG): before the port is
+            asked whether it is bound, because a backup is the machine whose
+            cables are not plugged in and its MIDI cues must end as the main's
+            do - and before the queue, so the note record, which hears only of
+            what leaves, never hears of it. A surface's port passes (AGH). */
+        if (pair::isHeld (hold) && ! passesHold (message.port))
+            return {};
 
         /*  ASKED BEFORE IT IS QUEUED, so that a cue naming a port nobody bound
             fails on the tick it fired rather than silently going into a queue

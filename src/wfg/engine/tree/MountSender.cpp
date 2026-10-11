@@ -18,6 +18,7 @@
 
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
+#include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/tree/Wires.h>
 #include <wfg/engine/midi/MidiSink.h>
 
@@ -177,6 +178,16 @@ namespace wfg::tree
 
     bool MountSender::deliver (const Destination& to, const std::vector<std::uint8_t>& bytes)
     {
+        /*  HELD, AND SENT (namespace draft §58, RD.1; AGG): first, before a
+            sink is chosen, so a device whose serial port this machine has not
+            got, whose connection is closed - a backup's always are (AGW) - or
+            whose port is nought still answers its ticket sent, and a `sent`
+            wait ends `done` here as it does on the machine that sent. Every
+            write and every question of every wire passes this line but the
+            MIDI wire's own port, which `sendAlone` holds itself. */
+        if (pair::isHeld (hold))
+            return true;
+
         if (! to.serial.empty())
             return serialSink ? serialSink (to.serial, bytes) : false;
 
@@ -312,11 +323,17 @@ namespace wfg::tree
                                                         message.destination.mscDevice, message.destination.mscFormat);
                 ok = ! messages.empty();
 
+                /*  A DECLARED MIDI PORT skips `deliver`, so the hold is asked
+                    here too (RD.1): a held machine hands the port nothing and
+                    counts it sent, whether or not a sink or a cable is there -
+                    the MIDI sender would hold it as well, and this does not
+                    lean on it. */
                 for (const auto& bytes : messages)
                 {
                     if (! message.destination.midiPort.empty())
-                        ok = ok && midiSink != nullptr
-                             && midiSink->sendForRun (message.owner, message.destination.midiPort, bytes).empty();
+                        ok = ok && (pair::isHeld (hold)
+                                    || (midiSink != nullptr
+                                        && midiSink->sendForRun (message.owner, message.destination.midiPort, bytes).empty()));
                     else
                         ok = ok && deliver (message.destination, bytes);
                 }

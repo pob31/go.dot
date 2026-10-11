@@ -52,6 +52,8 @@ namespace wfg
     class Engine;
 }
 
+namespace wfg::pair { class Hold; }
+
 namespace wfg::tree
 {
     class MountFetcher
@@ -85,6 +87,11 @@ namespace wfg::tree
         /** How long one GET is given. */
         void setTimeout (int milliseconds) noexcept { timeoutMs = milliseconds; }
 
+        /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; AGG): while it holds,
+            `fetch` asks nobody - a GET is a question put to a device, and a
+            backup asks its devices nothing. Null is never held. */
+        void setHold (const pair::Hold* holdToUse) noexcept { hold = holdToUse; }
+
         /** The file a device's description is kept in, bundle-relative. */
         static std::string fileFor (const std::string& mountId) { return "namespaces/" + mountId + ".json"; }
 
@@ -103,6 +110,7 @@ namespace wfg::tree
         void run();
 
         Engine* engine = nullptr;
+        const pair::Hold* hold = nullptr;
 
         std::mutex guard;
         std::condition_variable wake;

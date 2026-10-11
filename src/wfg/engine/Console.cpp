@@ -42,7 +42,9 @@
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/process/PatchEditor.h>
+#include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/serial/TcpLink.h>
@@ -3572,10 +3574,25 @@ namespace
         }
 
         //  --- the engine and everything it needs --------------------------
+        /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; pair/Hold.h): while it
+            is on nothing leaves for a device and every held send counts as
+            sent. `--hold` turns it on at start - a spare that runs the show
+            beside a rehearsal and says nothing to anybody; from RD.6 the link
+            turns it on and off. FIRST, so it outlives everything handed a
+            pointer to it below; and Pd's [netsend] hook pointed at it for as
+            long as this verb runs, declared before the patches' host so the
+            patches have stopped before the hook lets go. */
+        wfg::pair::Hold machineHold { args.containsOption ("--hold") };
+        const wfg::process::NetsendHold netsendHold { machineHold };
+
+        if (machineHold.held())
+            std::cout << "wfg: holding - nothing is sent to devices, and every held send counts as sent" << std::endl;
+
         wfg::Engine engine;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
         wfg::tree::RawSender answers;   // a processor's answers (namespace draft §56); no socket but serve's
+        answers.setHold (&machineHold);
         wfg::cue::RunTable runs;
 
         /*  What each DCA is trimming by tonight (PRD §3.28): not the show's, so
@@ -3641,6 +3658,22 @@ namespace
             again as an Arduino's port is. Before the sender, as the ports
             are, and for the same reason. */
         wfg::serial::SerialTable links { wfg::serial::openTcpLink };
+        serialPorts.setHold (&machineHold);
+        links.setHold (&machineHold);
+
+        /*  WHAT THE CONNECTIONS ARE TOLD TO BE, AND WHETHER THE HOLD WAS ON
+            WHEN THEY WERE (RD.1, AGW): a held machine keeps them closed - a
+            console that takes one session gives it to the machine that sends,
+            and a login (the line wire's greeting) is a send - and opens them
+            again as the show declares them once the hold lets go. Serial ports
+            are this machine's own hardware and stay open; only what is written
+            to them is held. */
+        bool linksReconciledHeld = false;
+        const auto reconcileLinks = [&links, &document, &machineHold, &linksReconciledHeld]
+        {
+            linksReconciledHeld = machineHold.held();
+            links.reconcile (linksReconciledHeld ? std::vector<wfg::serial::Wanted> {} : linkWantedOf (document));
+        };
 
         /*  AND WHAT A MIDI CONSOLE SAYS BACK (namespace draft §57, AFL; DP.10):
             its echoes decoded by the shapes its nodes declared, learned again
@@ -3666,6 +3699,7 @@ namespace
         presets.scanQuickly (presetsFolder (args, "--presets").getFullPathName().toStdString());
 
         wfg::tree::MountSender sender;
+        sender.setHold (&machineHold);
         sender.setSerialSink ([&serialPorts] (const std::string& port, const std::vector<std::uint8_t>& packet)
                               {
                                   return serialPorts.sendPacket (port, packet);
@@ -3687,11 +3721,13 @@ namespace
             this thread and the answer comes back as a `mount.readback` command,
             applied and logged like everything else the machine learns. */
         wfg::tree::MountProbe probe { engine };
+        probe.setHold (&machineHold);
 
         /*  AND WHAT FETCHES A PROCESSOR'S DESCRIPTION when it declares itself
             (namespace draft §56, AEM): the probe's shape, a GET off the tick
             thread, the answer back as `mount.described`. Serve only. */
         wfg::tree::MountFetcher fetcher { engine };
+        fetcher.setHold (&machineHold);
 
         /*  THE MACHINE'S CATALOGUE CACHE, declared here because the FX door
             below asks it whether a parameter exists (Phase 9a); filled for
@@ -3912,6 +3948,7 @@ namespace
                                });
 
         runner.setMounts (&mounts, &sender, &probe);
+        runner.setHold (&machineHold);
 
         /*  THE PROCESS CUES' PATCHES (namespace draft §51): a Pure Data instance
             per running process cue, each on a thread of its own, its patch
@@ -3939,7 +3976,7 @@ namespace
 
         //  The serial ports, opened as the show declares them (declared above).
         serialPorts.reconcile (serialWantedOf (document));
-        links.reconcile (linkWantedOf (document));
+        reconcileLinks();
         runner.setSerialPorts (&serialPorts);
         sender.setMounts (&mounts);
 
@@ -4043,6 +4080,9 @@ namespace
             flicker rather than an answer. */
         state.documentRecovery = wfg::doc::hasRecoveryOffer (session);
         state.documentWriteError = session.writeError;
+
+        //  And whether this machine sends to devices, in the first snapshot too (RD.1).
+        state.pairSending = ! machineHold.held();
 
         /*  THE CLOCK IS CHECKED AND THE TREE PUBLISHED BEFORE ANY SOCKET OPENS,
             and the order is load-bearing rather than tidy.
@@ -4322,6 +4362,7 @@ namespace
             that has not been patched yet is a rehearsal. */
         wfg::midi::MidiSender midiOut;
         midiOut.setTap (&traffic);
+        midiOut.setHold (&machineHold);
 
         /*  WHAT EACH PORT TURNED OUT TO BE PLUGGED INTO, published from here
             and stored nowhere (§4.10). Declared before the bindings below so
@@ -4648,7 +4689,7 @@ namespace
         /*  WHAT THE SHOW DECLARES ABOUT ITS SURFACES, read off the document -
             at start and whenever the show changes - and what this machine has
             behind each port they name. */
-        const auto declareSurfaces = [&document, &midiPorts, &surfaceBridge]
+        const auto declareSurfaces = [&document, &midiPorts, &surfaceBridge, &midiOut]
         {
             std::vector<wfg::surface::SurfaceSpec> declared;
 
@@ -4682,6 +4723,17 @@ namespace
 
                 declared.push_back (std::move (surfaceSpec));
             }
+
+            /*  THE PORTS THE SURFACES ARE ON, which the hold lets by (namespace
+                draft §58, RD.1; AGH): a surface is a client, driven by the
+                machine it is plugged into whichever machine sends to the
+                devices. Every declared surface's, read again with the rest. */
+            std::vector<std::string> surfacePorts;
+
+            for (const auto& spec : declared)
+                surfacePorts.insert (surfacePorts.end(), spec.ports.begin(), spec.ports.end());
+
+            midiOut.setSurfacePorts (std::move (surfacePorts));
 
             return surfaceBridge->declare (std::move (declared),
                                            [&document, &midiPorts] (const std::string& portId)
@@ -5238,7 +5290,10 @@ namespace
                                      it keeps for ten, and a subscription the
                                      file spells; a MIDI console's shapes learned
                                      again when the table changed. */
-                                 if (tickIndex % 450 == 0)
+                                 /*  NONE WHILE THE MACHINE HOLDS (RD.1, AGG): a
+                                     keep-alive is a send, and the console keeps
+                                     its feedback for the machine that sends. */
+                                 if (tickIndex % 450 == 0 && ! machineHold.held())
                                      for (const auto& mountId : wfg::tree::declaredMountIds (document))
                                      {
                                          const auto* declaration = mounts.declarationOf (mountId);
@@ -5269,8 +5324,11 @@ namespace
 
                                  /*  WHAT TO LISTEN TO, from what is armed: the
                                      listener's thread connects and tells the
-                                     devices, and lets them go when nothing is. */
-                                 listener.want (runner.listenWanted());
+                                     devices, and lets them go when nothing is.
+                                     Nothing while the machine holds (RD.1, AGG):
+                                     a LISTEN is a request put to a device. */
+                                 listener.want (machineHold.held() ? wfg::tree::MountListener::Wanted {}
+                                                                   : runner.listenWanted());
 
                                  /*  WHAT THE SERIAL PORTS READ since the last tick
                                      (namespace draft §51, PC.10): a line a record,
@@ -5693,6 +5751,15 @@ namespace
                                 state.spaceMouse = spaceMouse.status();
                                 state.spaceMouseName = spaceMouse.name();
 
+                                /*  THE HOLD, AS IT IS NOW (RD.1): published, and
+                                    the device connections closed or opened again
+                                    on the tick it moved - a relaxed load and a
+                                    comparison on every other. */
+                                state.pairSending = ! machineHold.held();
+
+                                if (machineHold.held() != linksReconciledHeld)
+                                    reconcileLinks();
+
                                 /*  THE REFUSAL ITSELF, and not only the count
                                     of them.
 
@@ -5871,7 +5938,7 @@ namespace
                                         again, on its own thread; the tick
                                         never waits for one. */
                                     serialPorts.reconcile (serialWantedOf (document));
-                                    links.reconcile (linkWantedOf (document));
+                                    reconcileLinks();
 
                                     if (portBinder.want (portWishesOf (document)))
                                         juce::MessageManager::callAsync ([&portBinder]
@@ -7186,7 +7253,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
                       " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember]] [--engine-folder=<dir>]"
-                      " [--no-video-window] [--presets=<dir>]",
+                      " [--no-video-window] [--presets=<dir>] [--hold]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [&makeClient] (const juce::ArgumentList& args)

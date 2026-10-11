@@ -66,6 +66,7 @@
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/process/ProcessHost.h>
@@ -1575,6 +1576,16 @@ namespace wfg::cue
             asker = probe;
         }
 
+        /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; AGG). The sends
+            themselves are held where they leave - the device sender, the MIDI
+            sender, the serial table - and answered as sent there, so a cue's
+            run ends as it would have; what the Runner does with it is not ask:
+            `askTarget` puts no question to a device while it holds, and a cue
+            that would have waited for a device's answer asks `deviceAnswer`
+            where that answer will come from. Null - every rig, a replay - is
+            never held. */
+        void setHold (const pair::Hold* holdToUse) noexcept { machineHold = holdToUse; }
+
         /** Every network cue in flight. Diagnostics and tests. */
         const std::vector<OscJob>& sends() const noexcept { return sending; }
 
@@ -2818,6 +2829,22 @@ namespace wfg::cue
             a tree dump runs, and a verified cue there finishes on its own
             records rather than on an answer nobody went and got. */
         tree::MountProbe* asker = nullptr;
+
+        /*  The machine's hold (`setHold`), and the one question a cue waiting
+            for a device's answer asks of it: WHERE THAT ANSWER WILL COME FROM.
+
+            THE SEAM RD.6 CHANGES. In RD.1 a held machine has no main to hear
+            from, so the answer is `none`: a `verified` cue ends `done` once its
+            held write is answered sent, as a `sent` wait would - without the
+            `not-sent` warning a device switched off earns, because nothing was
+            switched off - and a pre-send asking what the desk held takes what
+            this machine last wrote there for the answer. RD.6's following
+            backup answers `fromElsewhere` instead, and its cues wait for the
+            main's streamed `mount.readback` exactly as the main's wait for the
+            device: `Hold::answer` is where that changes, and every place below
+            that reads `deviceAnswer` already says what to do with it. */
+        const pair::Hold* machineHold = nullptr;
+        pair::Hold::Answer deviceAnswer() const noexcept;
 
         /*  THE OBSERVATION SWEEP: what the world was, at each step.
 

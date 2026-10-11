@@ -73,6 +73,11 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # The installed device presets (namespace draft §57, AFN):
                 # runtime rows under /godot/preset/<slug>, never stored.
                 "preset",
+                # Redundancy (namespace draft §58): a CONTAINER token like
+                # `network`, addressed /godot/pair/sending with no identifier
+                # in the middle, since a machine has one of it. The machine's
+                # rows, runtime and never stored (AGC).
+                "pair",
                 "audio", "bus", "media", "route", "range", "section", "run", "runs",
                 # What a cue that sounds carries whatever its source - level,
                 # routing, the DCA, the EQ, the inserts, the sends (Phase 9b,

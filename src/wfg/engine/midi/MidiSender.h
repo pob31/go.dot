@@ -56,6 +56,7 @@
 #include <vector>
 
 namespace wfg::monitor { class TrafficTap; }
+namespace wfg::pair { class Hold; }
 
 namespace wfg::midi
 {
@@ -157,6 +158,28 @@ namespace wfg::midi
             nothing. */
         void setTap (monitor::TrafficTap* tapToUse) noexcept { tap.store (tapToUse, std::memory_order_release); }
 
+        /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; AGG): while it holds,
+            `send` and `sendForRun` answer as taken and queue nothing - checked
+            after a message that cannot be built is refused, which is the
+            cue's fault on every machine, and BEFORE the port is asked whether
+            it is bound, which is this machine's alone. So a MIDI cue, a
+            patch's [noteout], a device on the MIDI wire and Doh!'s rollback all
+            end on a backup with nothing plugged in as they end on the main. A
+            held message never reaches the queue, so the note record - fed only
+            by what leaves - never hears of it, and no note-off follows it at a
+            double Esc or the close. Set before the tick thread starts; null is
+            never held. */
+        void setHold (const pair::Hold* holdToUse) noexcept { hold = holdToUse; }
+
+        /*  THE PORTS A CONTROL SURFACE IS ON, whose traffic the hold lets by
+            (AGH): a surface is a client, not a device, and the one plugged into
+            this machine is driven by this machine - its LEDs, motor faders and
+            displays answer what this machine's show is doing, whichever machine
+            sends to the devices. Every byte to such a port passes, a cue's
+            included. Handed in whenever the show's surfaces are declared again,
+            on the tick thread; read under `boundMutex`. */
+        void setSurfacePorts (std::vector<std::string> ports);
+
     private:
         void run();
 
@@ -182,8 +205,15 @@ namespace wfg::midi
 
         std::shared_ptr<Output> deviceFor (const std::string& portId) const;
 
+        /*  Whether a message to this port goes on while the machine holds: a
+            surface's port, and nothing else. */
+        bool passesHold (const std::string& portId) const;
+
+        const pair::Hold* hold = nullptr;
+
         mutable std::mutex boundMutex;
         std::vector<Bound> bound;
+        std::vector<std::string> surfacePorts;      // under boundMutex
         std::vector<std::string> refusals;
 
         /*  THE ORDER THE TWO LOCKS ARE TAKEN IN, when one is held while the

@@ -1552,7 +1552,7 @@ and a Go.dot warning taps the wrist.
 §58): a main and a backup machine at performance time, each with its own copy of the show; the
 triggering kept in step, network and MIDI commands sent once - the backup holds them while the link
 is alive - and nothing that would stand in the way of the remote app driving both. The author's
-decisions are AFQ-AFU; AFV-AGK are the implementer's, the author's to overrule. Built ahead of
+decisions are AFQ-AFU; from AFV they are the implementer's, the author's to overrule. Built ahead of
 Phases 10 and 11; no phase is renumbered.
 
 | Stage | What | Depends on |

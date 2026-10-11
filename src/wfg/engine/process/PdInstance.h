@@ -57,6 +57,8 @@
 #include <string>
 #include <vector>
 
+namespace wfg::pair { class Hold; }
+
 namespace wfg::process
 {
     inline constexpr int pdSampleRate = 12800;
@@ -168,5 +170,35 @@ namespace wfg::process
         bool post (int kind, std::vector<Input> inputs, std::string text);
 
         std::shared_ptr<Shared> shared;
+    };
+
+    //==========================================================================
+    /*  A PATCH'S OWN [netsend], HELD WITH THE MACHINE (namespace draft §58,
+        RD.1; AGG). A patch can open a socket of its own - [netsend -u -b] to a
+        projector, [netsend] to a show controller - and those bytes leave by
+        Pd's own code, past every door Go.dot holds. So the build amends Pd's
+        x_net.c (cmake/WfgThirdParty.cmake): before a message or a list of bytes
+        goes out of a [netsend], or back down a [netreceive]'s connections, it
+        asks a hook, and while the hook says held it reports the send done and
+        sends nothing - the object stays connected and the patch reads no
+        failure, as every other held send is counted as sent.
+
+        THE ONE PROCESS-WIDE THING THE HOLD HAS, and it is Pd's doing: the hook
+        is a plain C function pointer with no room for which machine is asking.
+        One object of this class points it at a hold while it lives, and lets
+        go of the hold when it goes, the hook then reading none - so declare it
+        after the hold and before whatever runs patches, and the patches stop
+        before the hold does. A second one replaces the first. What the
+        patch's [netsend] CONNECTS is
+        not held: a datagram socket's connect sends nothing, and a stream's is a
+        session the patch opens itself, which RD.1 leaves to it. */
+    class NetsendHold
+    {
+    public:
+        explicit NetsendHold (const pair::Hold& hold) noexcept;
+        ~NetsendHold();
+
+        NetsendHold (const NetsendHold&) = delete;
+        NetsendHold& operator= (const NetsendHold&) = delete;
     };
 }

@@ -667,7 +667,9 @@ unset(_hidapi)
 #     both, in Pd's console's words;
 #   * nothing printed behind the show's back: Pd 0.56-5's [expr] still prints a
 #     debugging line to stdout whenever it makes a long expression, which the
-#     copy of x_vexp.c does not.
+#     copy of x_vexp.c does not;
+#   * a patch's own [netsend] holds with the machine (namespace draft §58, RD.1):
+#     the copy of x_net.c asks a hook of Go.dot's before it sends.
 # Each copy is made at configure time - line endings made LF first, so a checkout
 # with CRLF matches too - and the submodule is left as pinned. If a text the build
 # replaces ever moves, configure stops here rather than building a Pd without
@@ -685,7 +687,7 @@ foreach(_file d_arithmetic d_array d_ctl d_dac d_delay d_fft d_fft_fftsg d_filte
               g_traversal g_undo g_vumeter m_atom m_binbuf m_class m_conf m_glob m_memory
               m_obj m_pd m_sched s_audio s_audio_dummy s_inter_gui s_main s_net
               s_path s_print s_utf8 x_acoustics x_arithmetic x_array x_connective x_file
-              x_gui x_interface x_list x_midi x_misc x_net x_scalar x_text x_time
+              x_gui x_interface x_list x_midi x_misc x_scalar x_text x_time
               x_vexp_fun x_vexp_if)
     target_sources(wfg_pd PRIVATE "${_pd}/${_file}.c")
 endforeach()
@@ -722,7 +724,16 @@ _wfg_pd_amend(s_inter.c
 _wfg_pd_amend(x_vexp.c
     "    printf (\"realloc called with %zu bytes\\n\", size);\n"
     "")
-foreach(_file s_loader.c s_inter.c x_vexp.c)
+# A patch's own [netsend] held with the machine (namespace draft §58, RD.1, AGG):
+# netsend_dosend - what a [netsend] sends through, and a [netreceive] answering
+# its connections - asks the host's hook first, and while the hook says held it
+# reports the send done and sends nothing, so the object stays connected and the
+# patch reads no failure. The hook is null until Go.dot sets it, which is never
+# held (process/PdInstance.h, NetsendHold).
+_wfg_pd_amend(x_net.c
+    "static int netsend_dosend(t_netsend *x, int sockfd, int argc, t_atom *argv)\n{\n    char *buf, *bp;\n    int length, sent, fail = 0;\n    t_binbuf *b = 0;\n"
+    "int (*wfg_pd_netsend_held)(void) = 0;\n\nstatic int netsend_dosend(t_netsend *x, int sockfd, int argc, t_atom *argv)\n{\n    char *buf, *bp;\n    int length, sent, fail = 0;\n    t_binbuf *b = 0;\n    int (*wfg_held)(void) = wfg_pd_netsend_held;\n    if (wfg_held && wfg_held())\n        return (0);\n")
+foreach(_file s_loader.c s_inter.c x_vexp.c x_net.c)
     file(WRITE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${_wfg_pd_${_file}}")
     configure_file("${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${CMAKE_BINARY_DIR}/wfg_pd/${_file}" COPYONLY)
     target_sources(wfg_pd PRIVATE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}")

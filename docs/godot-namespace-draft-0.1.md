@@ -25071,6 +25071,12 @@ Mine, the author's to overrule:
 - **AGK** (mine) **A backup that starts and has never seen its main holds**, says so, and offers to
   take over; it sends nothing until the link is lost or an operator says. A main that starts alone
   sends.
+- **AGL** (mine, RD.1) **A held pre-send takes what this machine last wrote for the desk's answer.**
+  A pre-send asks a device what it holds before writing, so Doh! can put it back; a held machine
+  asks nothing, and with no main to hear from (RD.1's lone spare) it would fail `timeout` where the
+  main pre-sent. It takes the value it last wrote to that address as the restore - nothing, if it
+  never wrote there - and writes at once. A following backup (RD.6) waits for the main's read-back
+  instead.
 
 ### 58.3 Rows
 
@@ -25138,3 +25144,13 @@ passed on and the main refused comes back refused, with the main's reason.
 ### 58.7 Built so far
 
 - **RD.0**, 2026-10-11: this section, PRD §3.15 and §6.9, the devplan's Phase 12.
+- **RD.1**, 2026-10-11: `pair::Hold`, one atomic owned by serve and handed down by pointer (null is
+  never held), checked first - held is sent (AGG) - in `MountSender::deliver` and its MIDI wire,
+  `MidiSender::enqueue` (a surface's port passes, AGH), `SerialTable::send`/`sendPacket` and
+  `RawSender::flush` (counted held); `Runner::askTarget`, `MountProbe::ask` and `MountFetcher::fetch`
+  ask nothing; serve leaves the device connections closed (AGW), skips the keep-alives and LISTEN;
+  Pd's `x_net.c` amended so a patch's `[netsend]` asks a hook (`process::NetsendHold`). A cue that
+  waits for a device's answer asks `Runner::deviceAnswer`, the seam RD.6 changes: with no main
+  (`none`) a `verified` cue ends `done` once its held write is answered sent, unwarned, and a
+  pre-send takes what the machine last wrote to the address for the desk's answer (AGL). `wfg
+  serve --hold`; the first `pair` row, `pair/sending`.

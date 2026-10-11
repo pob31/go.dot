@@ -13159,6 +13159,18 @@ namespace wfg::cue
             return;
         }
 
+        /*  A VERIFIED CUE ON A HELD MACHINE THAT NOBODY WILL ANSWER (namespace
+            draft §58, RD.1; `deviceAnswer`): it waits as `sent` does, and its
+            held write - answered sent where it would have left - ends it
+            `done` on the next tick. Like the `tx` test above it comes before
+            the verify is set up, and unlike it carries no `not-sent`: nothing
+            was switched off, and the main's copy of this cue ends unwarned.
+            RD.6's following backup answers `fromElsewhere` and keeps the
+            verify, waiting for the main's read-back as the main waits for the
+            device's. */
+        if (job.wait == OscWait::verified && deviceAnswer() == pair::Hold::Answer::none)
+            job.wait = OscWait::sent;
+
         /*  Queued in the run's name, which is how a double Esc knows a
             pre-send of the standby it spares from what it drops (§23.10). */
         if (sender_ != nullptr && declaration != nullptr)
@@ -13835,6 +13847,11 @@ namespace wfg::cue
                     done.queryPort = declaration->queryPort;
                 }
 
+                /*  NOBODY TO ANSWER A HELD MACHINE (RD.1), as `writeOscNow`
+                    has it: the curve's last values wait as `sent` does. */
+                if (done.wait == OscWait::verified && deviceAnswer() == pair::Hold::Answer::none)
+                    done.wait = OscWait::sent;
+
                 /*  ASKED AFRESH, each forgotten first - the verify's own rule. */
                 if (done.wait == OscWait::verified && ! done.notSent)
                 {
@@ -13858,10 +13875,23 @@ namespace wfg::cue
         }
     }
 
+    pair::Hold::Answer Runner::deviceAnswer() const noexcept
+    {
+        return pair::answerOf (machineHold);
+    }
+
     bool Runner::askTarget (const std::string& mountId, const std::string& host, int queryPort,
                             const std::string& address, const std::string& typeTag,
                             bool observation, std::int64_t writesWhenAsked)
     {
+        /*  A HELD MACHINE ASKS ITS DEVICES NOTHING (namespace draft §58, RD.1;
+            AGG): no question on the wire, none through the probe - a verify's
+            and the observation sweep's alike. False, as for a question not
+            taken: nothing counts it asked. What a cue that waited for the
+            answer does instead is `deviceAnswer`'s to say. */
+        if (pair::isHeld (machineHold))
+            return false;
+
         const auto* declaration = mounts != nullptr ? mounts->declarationOf (mountId) : nullptr;
 
         if (declaration != nullptr && (declaration->readback == "get" || declaration->readback == "notify"))
@@ -13977,12 +14007,30 @@ namespace wfg::cue
             {
                 ++job.ticksWaited;
 
-                if (const auto* held = mounts != nullptr
-                                         ? mounts->readbackOf (job.address) : nullptr)
+                const auto* held = mounts != nullptr ? mounts->readbackOf (job.address) : nullptr;
+
+                /*  A HELD MACHINE THAT NOBODY WILL ANSWER (namespace draft §58,
+                    RD.1; `deviceAnswer`) does not wait out the timeout for a
+                    question it never asked: what it last wrote to the address
+                    is its best account of what the desk held, and is the
+                    restore - nothing, when it never wrote there, and the write
+                    still goes. On the main the device answered and the cue
+                    pre-sent; failing `timeout` here would be the backup's run
+                    table disagreeing with the main's over a question the hold
+                    kept it from asking. RD.6's following backup answers
+                    `fromElsewhere`, and waits for the main's read-back here as
+                    the main waits for the device's. */
+                const auto unanswered = held == nullptr && mounts != nullptr
+                                          && deviceAnswer() == pair::Hold::Answer::none;
+
+                if (unanswered)
+                    held = mounts->valueOf (job.address);
+
+                if (held != nullptr || unanswered)
                 {
                     /*  KEPT ON THE RUN, because the job will be gone long
                         before the pointer moves away and the restore is needed. */
-                    if (auto* run = runs.find (job.self))
+                    if (auto* run = runs.find (job.self); run != nullptr && held != nullptr)
                     {
                         run->restoreAddress = job.address;
                         run->restoreAtom = osc::atomsOf (*held);

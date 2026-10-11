@@ -491,7 +491,8 @@ class Server:
                  engine_folder: "Path | None" = None,
                  input_wav: "Path | None" = None,
                  env: "dict | None" = None,
-                 recover: bool = False):
+                 recover: bool = False,
+                 hold: bool = False):
         argv = [str(find_binary()), "serve", str(bundle), "--http-port=0", "--osc-port=0"]
         if sample_rate is not None:
             argv.append(f"--sample-rate={sample_rate}")
@@ -556,6 +557,12 @@ class Server:
         # serve's own sentence from stderr after it.
         if recover:
             argv.append("--recover")
+
+        # --hold starts the machine holding (namespace draft section 58, RD.1):
+        # nothing leaves for a device, and every held send counts as sent - the
+        # backup's half of redundancy, and a muted spare for a rehearsal.
+        if hold:
+            argv.append("--hold")
 
         if log is not None:
             argv.append(f"--log={log}")

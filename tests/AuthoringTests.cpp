@@ -1123,3 +1123,39 @@ TEST_CASE ("preset command: a preset that says how it is heard back gives the de
 
     folder.deleteRecursively();
 }
+
+//==============================================================================
+/*  RD.1: A HELD MACHINE ANSWERS NO PROCESSOR (namespace draft §58, AGG): the
+    answers are queued as ever and let go of at the flush, counted held -
+    neither sent nor dropped. */
+#include <wfg/engine/pair/Hold.h>
+
+TEST_CASE ("hold: a processor's answers are counted held and never sent")
+{
+    Socket to;
+    Socket from;
+    tree::RawSender answers { from.endpoint };
+
+    pair::Hold hold { true };
+    answers.setHold (&hold);
+
+    answers.queue ("127.0.0.1", to.port(), osc::Packet::message ("/godot/captured", { text ("ABCDEFGH"), text ("created") }));
+    answers.queue ("127.0.0.1", to.port(), osc::Packet::message ("/godot/declared", { text ("ABCDEFGH"), text ("ok") }));
+    CHECK (answers.pending() == 2u);
+
+    answers.flush();
+
+    CHECK (answers.pending() == 0u);
+    CHECK (answers.heldCount() == 2u);
+    CHECK (answers.sentCount() == 0u);
+    CHECK (answers.droppedCount() == 0u);
+    CHECK_FALSE (to.waitFor (1, 200));
+
+    //  Let go, the next answer leaves.
+    hold.set (false);
+    answers.queue ("127.0.0.1", to.port(), osc::Packet::message ("/godot/captured", { text ("ABCDEFGH"), text ("appended") }));
+    answers.flush();
+    REQUIRE (to.waitFor (1));
+    CHECK (answers.sentCount() == 1u);
+    CHECK (answers.heldCount() == 2u);
+}

@@ -17,6 +17,7 @@
 #include <wfg/engine/tree/RawSender.h>
 
 #include <wfg/engine/osc/UdpEndpoint.h>
+#include <wfg/engine/pair/Hold.h>
 
 #include <utility>
 
@@ -40,6 +41,15 @@ namespace wfg::tree
 
         auto batch = std::move (queued);
         queued.clear();
+
+        /*  HELD (namespace draft §58, RD.1; AGG): let go of, counted, and never
+            encoded - a processor that wrote into the main's show is answered by
+            the main. */
+        if (pair::isHeld (hold))
+        {
+            held += batch.size();
+            return;
+        }
 
         for (const auto& raw : batch)
         {

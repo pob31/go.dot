@@ -181,6 +181,7 @@ add_library(wfg_engine STATIC
     wfg/engine/process/ProcessHost.cpp
     wfg/engine/process/PatchEditor.h
     wfg/engine/process/PatchEditor.cpp
+    wfg/engine/pair/Hold.h
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp
     wfg/engine/serial/Slip.cpp

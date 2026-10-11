@@ -18,6 +18,7 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/oscquery/OscQueryClient.h>
+#include <wfg/engine/pair/Hold.h>
 
 #include <utility>
 #include <vector>
@@ -80,6 +81,10 @@ namespace wfg::tree
     bool MountProbe::ask (const Question& question)
     {
         if (question.host.empty() || question.queryPort <= 0 || question.address.empty())
+            return false;
+
+        //  A held machine asks its devices nothing (RD.1, AGG).
+        if (pair::isHeld (hold))
             return false;
 
         {

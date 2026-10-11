@@ -17,6 +17,7 @@
 #include <wfg/engine/serial/SerialTable.h>
 
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/pair/Hold.h>
 
 #include <algorithm>
 #include <deque>
@@ -371,6 +372,12 @@ namespace wfg::serial
 
     bool SerialTable::send (const std::string& id, const std::string& line)
     {
+        /*  HELD, AND SENT (namespace draft §58, RD.1; AGG): before the port is
+            looked up - this machine may not have it, or have it closed - and
+            without taking the table's lock. */
+        if (pair::isHeld (hold))
+            return true;
+
         const std::lock_guard<std::mutex> held (lock);
         const auto found = workers.find (id);
         if (found == workers.end() || ! found->second->tx)
@@ -412,6 +419,10 @@ namespace wfg::serial
 
     bool SerialTable::sendPacket (const std::string& id, const std::vector<std::uint8_t>& packet)
     {
+        //  Held, and sent, as `send` is.
+        if (pair::isHeld (hold))
+            return true;
+
         const std::lock_guard<std::mutex> held (lock);
         const auto found = workers.find (id);
         if (found == workers.end() || ! found->second->tx)

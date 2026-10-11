@@ -17,11 +17,13 @@
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/pair/Hold.h>
 
 #include <z_libpd.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <condition_variable>
 #include <cstdint>
@@ -33,6 +35,15 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+
+/*  PD'S HOOK FOR A HELD [netsend] (namespace draft §58, RD.1): defined in the
+    build's copy of x_net.c (cmake/WfgThirdParty.cmake), null until
+    `NetsendHold` points it somewhere. Asked on the patch's own thread before
+    every send; nonzero is held. */
+extern "C"
+{
+    extern int (*wfg_pd_netsend_held) (void);
+}
 
 #if defined (_WIN32)
  #include <locale.h>
@@ -581,5 +592,35 @@ namespace wfg::process
     {
         std::lock_guard<std::mutex> l (shared->lock);
         return shared->facts.receives;
+    }
+
+    //==========================================================================
+    namespace
+    {
+        /*  The hold Pd's hook reads, on whichever patch's thread is sending:
+            an atomic pointer, since the thread that sets it is not Pd's. */
+        std::atomic<const pair::Hold*> netsendHold { nullptr };
+
+        int netsendHeld()
+        {
+            return pair::isHeld (netsendHold.load (std::memory_order_acquire)) ? 1 : 0;
+        }
+    }
+
+    NetsendHold::NetsendHold (const pair::Hold& hold) noexcept
+    {
+        netsendHold.store (&hold, std::memory_order_release);
+        wfg_pd_netsend_held = netsendHeld;
+    }
+
+    NetsendHold::~NetsendHold()
+    {
+        /*  THE HOLD LET GO OF, THE HOOK LEFT IN PLACE: it reads no hold from
+            here on and says not held. Never put back to null, because a patch
+            abandoned stuck inside Pd may still be running on its own thread
+            (ACJ) and reading the hook - an atomic pointer cleared is safe to
+            find, a function pointer cleared between Pd's test and its call is
+            not. */
+        netsendHold.store (nullptr, std::memory_order_release);
     }
 }

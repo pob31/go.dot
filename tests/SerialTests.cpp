@@ -552,3 +552,41 @@ TEST_CASE ("serial: a port's greeting is said as it opens and again after it com
     std::this_thread::sleep_for (100ms);
     CHECK (desk->sent().empty());
 }
+
+//==============================================================================
+/*  RD.1: THE MACHINE'S HOLD (namespace draft §58, AGG): while it holds, a line
+    or a packet is handed to no port and answered true - at the first line,
+    before the port is looked up, because whether this machine has the port at
+    all is the machine's and not the show's. The ports stay open and heard. */
+#include <wfg/engine/pair/Hold.h>
+
+TEST_CASE ("hold: a held table writes to no port and answers true - open, framed for packets, or not here at all")
+{
+    Bench bench;
+    auto arduino = bench.plug ("COM3");
+    SerialTable table (bench.opener());
+
+    wfg::pair::Hold hold { true };
+    table.setHold (&hold);
+
+    table.reconcile ({ port ("SR000001", "COM3") });
+    REQUIRE (within (2s, [&] { return table.stateOf ("SR000001").state == "open"; }));
+
+    CHECK (table.send ("SR000001", "led 1"));                       // open: held
+    CHECK (table.send ("NOSUCHID", "led 1"));                       // not declared here: held all the same
+    CHECK (table.sendPacket ("SR000001", { 1, 2, 3 }));              // a lines port asked for a packet: held
+    CHECK (table.sendPacket ("NOSUCHID", { 1, 2, 3 }));
+
+    std::this_thread::sleep_for (60ms);
+    CHECK (arduino->sent().empty());
+
+    //  Still open, and still heard.
+    arduino->say ("512\n");
+    CHECK (collect (table, "SR000001", 1) == std::vector<std::string> { "512" });
+
+    //  Let go, the line leaves; and a port not here refuses as ever.
+    hold.set (false);
+    CHECK (table.send ("SR000001", "led 0"));
+    CHECK (within (2s, [&] { return arduino->sent() == "led 0\n"; }));
+    CHECK_FALSE (table.send ("NOSUCHID", "led 0"));
+}

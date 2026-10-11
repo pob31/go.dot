@@ -138,6 +138,12 @@ namespace wfg::tree
         /** `dummy` in Phase 1, `hosted` or `device` from Phase 2. */
         std::string clock = "dummy";
 
+        /*  WHETHER THIS MACHINE SENDS TO DEVICES (namespace draft §58, RD.1):
+            `pair/sending`, false while its hold is on (`pair::Hold`). The
+            machine's, so here and never in the show; true wherever nothing
+            holds - a replay, a rig, a serve not told to. */
+        bool pairSending = true;
+
         //======================================================================
         /*  What the audio actually is right now, as against what the document
             decided (PRD §4.10). `/godot/audio/tracks` and every bus node under

@@ -1593,3 +1593,32 @@ TEST_CASE ("tree: a movie's frame rate and codec come from the analyser's record
     CHECK (textAt (*snapshot, base + "codec") == "Hap5");
     CHECK (snapshot->find (base + "hash") == nullptr);
 }
+
+//==============================================================================
+/*  RD.1: `pair/sending` (namespace draft §58.3), the first row of the owner
+    `pair`: false while the machine holds, true otherwise - the machine's,
+    read-only, runtime and stored nowhere. */
+TEST_CASE ("hold: pair/sending reads false under hold, true otherwise, and is read-only")
+{
+    Rig rig;
+
+    EngineState state;
+
+    const auto sendingIn = [] (const std::shared_ptr<const TreeSnapshot>& snapshot)
+    {
+        const auto* node = snapshot->find ("/godot/pair/sending");
+        REQUIRE_MESSAGE (node != nullptr, "no node at /godot/pair/sending");
+        CHECK (node->access == Access::read);
+        CHECK (node->typeTags == "T");
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    CHECK (sendingIn (rig.parameters.publish (1, state)) == osc::Value::boolean (true));
+
+    state.pairSending = false;
+    CHECK (sendingIn (rig.parameters.publish (2, state)) == osc::Value::boolean (false));
+
+    state.pairSending = true;
+    CHECK (sendingIn (rig.parameters.publish (3, state)) == osc::Value::boolean (true));
+}

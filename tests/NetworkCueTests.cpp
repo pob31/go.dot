@@ -4528,3 +4528,186 @@ TEST_CASE ("network cue: a verified cue at a device asked on the wire sends its 
     CHECK (rig.runOf (cueId)->state == cue::runState::done);
     CHECK_FALSE (rig.runner.awaitsReadback ("HOLO0001", "/track/1/gain"));
 }
+
+//==============================================================================
+/*  RD.1: THE MACHINE'S HOLD (namespace draft §58, AGG). A held machine sends
+    nothing to a device and counts every held send as sent, checked before
+    anything that could refuse it - so its cues end as they would have where
+    the bytes left: `done`, no `not-sent` (nothing was switched off), never
+    `send-failed`. Each case holds the sender and the Runner as serve does. */
+#include <wfg/engine/pair/Hold.h>
+
+TEST_CASE ("hold: a held OSC cue over UDP - the socket hears nothing, and the run ends done, sent and unwarned")
+{
+    NetworkRig rig;
+    pair::Hold hold { true };
+    rig.sender.setHold (&hold);
+    rig.runner.setHold (&hold);
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0.75", "sent");
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    //  The tree took it, as it would have: the show is the same on both machines.
+    const auto* value = rig.mounts.valueOf ("/desk/fader");
+    REQUIRE (value != nullptr);
+    CHECK (*value == osc::Values { osc::Value::float32 (0.75f) });
+
+    //  The wire did not.
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
+
+    const auto* run = rig.runOf (cueId);
+    REQUIRE (run != nullptr);
+    INFO ("state " << run->state << ", error " << run->error << ", warning " << run->warning);
+    CHECK (run->state == cue::runState::done);
+    CHECK (run->error.empty());
+    CHECK (run->warning.empty());
+
+    //  And the hold let go, the next cue leaves: nothing was remembered meanwhile.
+    hold.set (false);
+    rig.fire (rig.makeOsc ("/desk/fader", "f:0.25", "sent"));
+    REQUIRE (rig.listener.waitFor (1));
+    CHECK (rig.listener.all().size() == 1u);
+}
+
+TEST_CASE ("hold: a device over a connection that is closed - held, the cue ends done rather than send-failed")
+{
+    NetworkRig rig;
+    pair::Hold hold { true };
+    rig.sender.setHold (&hold);
+    rig.runner.setHold (&hold);
+
+    tree::MountDeclaration eos;
+    eos.id = "EOS00001";
+    eos.prefix = "/eos";
+    eos.namespaceFile = "namespaces/eos.json";
+    eos.transport = "tcp";
+    eos.host = "127.0.0.1";
+    eos.port = 3032;
+    REQUIRE (rig.mounts.load (eos, R"JSON({ "FULL_PATH": "/eos", "CONTENTS": {
+        "key": { "FULL_PATH": "/eos/key", "CONTENTS": {
+            "go_0": { "FULL_PATH": "/eos/key/go_0", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0] } } } } })JSON").ok);
+
+    //  A link that cannot take anything: closed, as a backup's are (AGW).
+    std::size_t handed = 0;
+    rig.sender.setLinkSink ([&handed] (const std::string&, const std::vector<std::uint8_t>&)
+    {
+        ++handed;
+        return false;
+    });
+
+    const auto cueId = rig.makeOsc ("/eos/key/go_0", "f:1", "sent");
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    CHECK (handed == 0u);
+
+    const auto* run = rig.runOf (cueId);
+    REQUIRE (run != nullptr);
+    INFO ("state " << run->state << ", error " << run->error);
+    CHECK (run->state == cue::runState::done);
+    CHECK (run->error.empty());
+    CHECK (run->warning.empty());
+}
+
+TEST_CASE ("hold: a device on a serial port - nothing is handed to the port, and the cue ends done")
+{
+    NetworkRig rig;
+    pair::Hold hold { true };
+    rig.sender.setHold (&hold);
+    rig.runner.setHold (&hold);
+
+    tree::MountDeclaration onSerial;
+    onSerial.id = "ARDU0001";
+    onSerial.prefix = "/ardu";
+    onSerial.namespaceFile = "namespaces/ardu.json";
+    onSerial.transport = "serial";
+    onSerial.serial = "SR000001";
+    REQUIRE (rig.mounts.load (onSerial, R"JSON({ "FULL_PATH": "/ardu", "CONTENTS": {
+        "led": { "FULL_PATH": "/ardu/led", "TYPE": "i", "ACCESS": 3, "VALUE": [0] } } })JSON").ok);
+
+    std::size_t handed = 0;
+    rig.sender.setSerialSink ([&handed] (const std::string&, const std::vector<std::uint8_t>&)
+    {
+        ++handed;
+        return false;       // a port this machine has not got
+    });
+
+    const auto cueId = rig.makeOsc ("/ardu/led", "i:1", "sent");
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    CHECK (handed == 0u);
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
+
+    const auto* run = rig.runOf (cueId);
+    REQUIRE (run != nullptr);
+    INFO ("state " << run->state << ", error " << run->error);
+    CHECK (run->state == cue::runState::done);
+    CHECK (run->error.empty());
+    CHECK (run->warning.empty());
+}
+
+TEST_CASE ("hold: a verified cue on a held machine ends done at once, asking nothing")
+{
+    /*  RD.1 has no main to hear the answer from (Runner::deviceAnswer), so the
+        held write is taken for the answer - and no question goes to a device,
+        which is what the Runner's half of the hold is: shown here with the
+        sender NOT held, so the write leaves and only a question could follow it. */
+    NetworkRig rig;
+    pair::Hold hold { true };
+
+    tree::MountDeclaration holo;
+    holo.id = "HOLO0001";
+    holo.prefix = "/track";
+    holo.namespaceFile = "namespaces/holo.json";
+    holo.host = "127.0.0.1";
+    holo.port = rig.listener.port();
+    holo.readback = "get";
+    holo.rx = true;
+    REQUIRE (rig.mounts.load (holo, R"JSON({"FULL_PATH": "/track", "GODOT": {"GET": "/get {address}"}, "CONTENTS": {"1": {"FULL_PATH": "/track/1", "CONTENTS": {"gain": {"FULL_PATH": "/track/1/gain", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0]}}}}})JSON").ok);
+    rig.sender.setMounts (&rig.mounts);
+
+    SUBCASE ("the Runner held, the sender not: the write leaves, no question follows it")
+    {
+        rig.runner.setHold (&hold);
+
+        const auto cueId = rig.makeOsc ("/track/1/gain", "f:-6", "verified");
+        rig.fire (cueId);
+        rig.tickOnce();
+
+        REQUIRE (rig.listener.waitFor (1, 500));
+        CHECK_FALSE (rig.listener.waitFor (2, 200));
+
+        const auto arrived = rig.listener.all();
+        const auto first = osc::decode (arrived[0].bytes.data(), arrived[0].bytes.size());
+        REQUIRE (first.ok);
+        CHECK (first.packet.address == "/track/1/gain");
+
+        const auto* run = rig.runOf (cueId);
+        REQUIRE (run != nullptr);
+        INFO ("state " << run->state << ", error " << run->error);
+        CHECK (run->state == cue::runState::done);
+        CHECK (run->warning.empty());
+        CHECK_FALSE (rig.runner.awaitsReadback ("HOLO0001", "/track/1/gain"));
+    }
+
+    SUBCASE ("both held, as serve holds them: nothing on the wire, and done all the same")
+    {
+        rig.sender.setHold (&hold);
+        rig.runner.setHold (&hold);
+
+        const auto cueId = rig.makeOsc ("/track/1/gain", "f:-6", "verified");
+        rig.fire (cueId);
+        rig.tickOnce();
+
+        CHECK_FALSE (rig.listener.waitFor (1, 200));
+
+        const auto* run = rig.runOf (cueId);
+        REQUIRE (run != nullptr);
+        INFO ("state " << run->state << ", error " << run->error);
+        CHECK (run->state == cue::runState::done);
+        CHECK (run->error.empty());
+        CHECK (run->warning.empty());
+    }
+}

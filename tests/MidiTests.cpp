@@ -2507,3 +2507,124 @@ TEST_CASE ("go.doh: MIDI an act's footer sent, the act not brought back, is name
     CHECK (reportSays (rig, "Release: MIDI to Keys could not be taken back - sent again when Act ends again"));
     CHECK_FALSE (reportSays (rig, "Release: MIDI to Keys could not be taken back - the next GO sends it again"));
 }
+
+//==============================================================================
+/*  RD.1: THE MACHINE'S HOLD AND MIDI (namespace draft §58, AGG, AGH). A held
+    machine puts nothing on a cable and answers every send as taken, before the
+    port is asked whether anything is behind it - a backup with none of the
+    main's cables plugged in still ends its MIDI cues as the main does - except
+    on a control surface's port, which is a client's and passes. */
+#include <wfg/engine/pair/Hold.h>
+
+TEST_CASE ("hold: a MIDI cue on a port nothing is bound to ends done on a held machine - held, not no-port")
+{
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (47);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    midi::MidiSender outputs;               // nothing bound, and never started
+    pair::Hold hold { true };
+    outputs.setHold (&hold);
+    runner.setMidiSink (&outputs);
+    runner.setHold (&hold);
+
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    const auto listId = document.createList ("Show").id;
+    const auto cueId = document.createCue (listId, 0, "midi", "House lights").id;
+    const auto portId = declarePort (document, "Lights");
+
+    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/port", portId).ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/type", "programChange").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/data1", "12").ok);
+
+    REQUIRE (engine.submit (origin::cli, "cue.fire", { osc::Value::string (cueId) }));
+    engine.processTick (0);
+    runner.beforeTick (engine, 1);
+    engine.processTick (1);
+
+    REQUIRE (runs.all().size() == 1u);
+    const auto& run = runs.all().front();
+    INFO ("state " << run.state << ", error " << run.error);
+    CHECK (run.state == cue::runState::done);
+    CHECK (run.error.empty());
+    CHECK (run.warning.empty());
+    CHECK (outputs.sent() == 0u);
+
+    //  A message that cannot be built is the cue's fault, held or not.
+    CHECK (outputs.sendForRun ("RUN00001", portId, {}) == midi::sendError::badMessage);
+
+    //  And the hold let go, the same port refuses as it always did.
+    hold.set (false);
+    CHECK (outputs.sendForRun ("RUN00001", portId, { 0xc2, 0x0c }) == midi::sendError::noPort);
+}
+
+TEST_CASE ("hold: a surface's port passes while held; a cue's MIDI on another port does not, and leaves no note to end")
+{
+    midi::MidiSender outputs;
+    const auto surface = std::make_shared<FakePort>();
+    const auto synth = std::make_shared<FakePort>();
+    outputs.attach ("PRT00001", surface);
+    outputs.attach ("PRT00002", synth);
+    outputs.setSurfacePorts ({ "PRT00001" });
+
+    pair::Hold hold { true };
+    outputs.setHold (&hold);
+    outputs.start();
+
+    CHECK (outputs.send ("PRT00001", { 0x90, 0x5D, 0x7F }).empty());                 // the surface's LED: passes
+    CHECK (outputs.sendForRun ("RUN00001", "PRT00002", { 0x91, 60, 100 }).empty());  // a cue's note: held, taken
+    CHECK (outputs.send ("PRT00002", { 0xC1, 5 }).empty());                          // a rollback: held, taken
+    CHECK (outputs.sendForRun ("RUN00001", "PRT00009", { 0x91, 61, 100 }).empty());  // a port with nothing: held, taken
+
+    REQUIRE (waitForSent (outputs, 1));
+    std::this_thread::sleep_for (std::chrono::milliseconds (60));
+    CHECK (outputs.sent() == 1u);
+
+    //  A double Esc and the close find no note of the cue's to end: it never left.
+    CHECK (outputs.dropQueued() == 0u);
+    outputs.stop();
+
+    CHECK (surface->wire() == std::vector<midi::Bytes> { midi::Bytes { 0x90, 0x5D, 0x7F } });
+    CHECK (synth->wire().empty());
+}
+
+TEST_CASE ("hold: Doh! counts a held MIDI send as sent - a port left to its operator is not sent the cue again")
+{
+    /*  `Runner::countsAsSent`: the case above it, "a MIDI cue that found no
+        port sent nothing, so the corrected GO sends it", is the main's account
+        of a port with nothing behind it. A held machine's account is the
+        other: its send was held, held is sent, and a port left to its operator
+        is not sent the cue again by the corrected GO - as on the main, whose
+        cable was plugged in. */
+    MidiDohRig rig;
+    midi::MidiSender outputs;               // nothing bound: the backup's cable is not here
+    pair::Hold hold { true };
+    outputs.setHold (&hold);
+    rig.runner.setMidiSink (&outputs);
+    rig.runner.setHold (&hold);
+
+    const auto note = rig.midiCue (rig.listId, 0);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    rig.park (note);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.newestRunOf (note) != nullptr);
+    CHECK (rig.newestRunOf (note)->error.empty());
+    CHECK (rig.newestRunOf (note)->state == cue::runState::done);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (rig.newestRunOf (note)->warning == std::string (cue::runWarning::leftToOperator));
+    CHECK (outputs.sent() == 0u);
+}

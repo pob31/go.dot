@@ -1733,3 +1733,79 @@ TEST_CASE ("M58: ten patches of fifty objects at once, each on its own thread, a
     CHECK (answered >= ticks * 10 / 2);
     CHECK_FALSE (host.anyStuck());
 }
+
+//==============================================================================
+/*  RD.1: A PATCH'S OWN [netsend] HELD WITH THE MACHINE (namespace draft §58,
+    AGG). Pd's x_net.c is amended by the build to ask a hook before it sends;
+    `NetsendHold` points the hook at a hold while it lives. Held, the send is
+    reported done - the object stays connected, its outlet says nothing - and
+    nothing reaches the socket; let go, or the hook gone, it leaves. */
+#include <wfg/engine/pair/Hold.h>
+
+#include <cstdint>
+
+TEST_CASE ("hold: a patch's own [netsend] sends nothing while the machine holds, and stays connected")
+{
+    std::mutex guard;
+    std::vector<std::vector<std::uint8_t>> heard;
+    wfg::osc::UdpEndpoint listener;
+    REQUIRE (listener.start (0, [&guard, &heard] (wfg::osc::Datagram datagram)
+                                {
+                                    const std::lock_guard<std::mutex> lock { guard };
+                                    heard.push_back (std::move (datagram.bytes));
+                                }));
+
+    const auto heardCount = [&guard, &heard]
+    {
+        const std::lock_guard<std::mutex> lock { guard };
+        return heard.size();
+    };
+
+    const auto waitForHeard = [&heardCount] (std::size_t wanted, std::chrono::milliseconds limit)
+    {
+        const auto until = std::chrono::steady_clock::now() + limit;
+        while (heardCount() < wanted && std::chrono::steady_clock::now() < until)
+            std::this_thread::sleep_for (2ms);
+        return heardCount() >= wanted;
+    };
+
+    /*  [r /connect] -> connect 127.0.0.1 $1 -> [netsend -u -b] -> [s /state], and
+        [r /go] -> the eight bytes of the OSC message /a -> the same [netsend]. */
+    PdInstance pd (settingsFor ("netsend"));
+    makeAndOpen (pd, "#N canvas 0 0 450 300 12;\n"
+                     "#X obj 10 10 r /connect;\n"
+                     "#X msg 10 40 connect 127.0.0.1 \\$1;\n"
+                     "#X obj 10 120 netsend -u -b;\n"
+                     "#X obj 200 10 r /go;\n"
+                     "#X msg 200 40 send 47 97 0 0 44 0 0 0;\n"
+                     "#X obj 10 160 s /state;\n"
+                     "#X connect 0 0 1 0;\n"
+                     "#X connect 1 0 2 0;\n"
+                     "#X connect 3 0 4 0;\n"
+                     "#X connect 4 0 2 0;\n"
+                     "#X connect 2 0 5 0;\n");
+
+    const auto connected = tickOnce (pd, { { "/connect", { Atom::of (static_cast<double> (listener.boundPort())) } } });
+    REQUIRE (numbersSentTo (connected, "/state") == std::vector<double> { 1.0 });
+
+    wfg::pair::Hold hold { true };
+
+    {
+        const NetsendHold hook { hold };
+
+        const auto held = tickOnce (pd, { { "/go", {} } });
+        CHECK (numbersSentTo (held, "/state").empty());       // no failure, so no disconnect
+        CHECK_FALSE (waitForHeard (1, 200ms));
+
+        hold.set (false);
+        tickOnce (pd, { { "/go", {} } });
+        CHECK (waitForHeard (1, 2000ms));
+    }
+
+    //  The object that set the hook gone, the hold no longer reaches Pd.
+    hold.set (true);
+    tickOnce (pd, { { "/go", {} } });
+    CHECK (waitForHeard (2, 2000ms));
+
+    listener.stop();
+}

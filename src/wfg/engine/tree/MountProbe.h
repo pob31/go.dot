@@ -62,6 +62,8 @@ namespace wfg
     class Engine;
 }
 
+namespace wfg::pair { class Hold; }
+
 namespace wfg::tree
 {
     class MountProbe
@@ -128,10 +130,20 @@ namespace wfg::tree
         /** How long one exchange is given. */
         void setTimeout (int milliseconds) noexcept { timeoutMs = milliseconds; }
 
+        /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; AGG): while it holds,
+            `ask` takes no question and answers false, as for a duplicate - a
+            verify's question and the observation sweep's are both put to the
+            device, and a backup puts its devices nothing. The Runner asks
+            nothing while held already (Runner::askTarget); this is the same
+            rule at the door that does the asking, for whoever else reaches it.
+            Null is never held. */
+        void setHold (const pair::Hold* holdToUse) noexcept { hold = holdToUse; }
+
     private:
         void run();
 
         Engine* engine = nullptr;
+        const pair::Hold* hold = nullptr;
 
         mutable std::mutex guard;
         std::condition_variable wake;
