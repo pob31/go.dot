@@ -60,6 +60,7 @@
 #include <wfg/engine/tree/MountListener.h>
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/RunNames.h>
 #include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/cue/LaneRecording.h>
 #include <wfg/engine/cue/LaneTable.h>
@@ -1595,6 +1596,29 @@ namespace wfg::cue
             observation. Tick thread. */
         bool awaitsReadback (const std::string& mountId, const std::string& address) const;
 
+        /*  THE NAMES THIS RUNNER GIVES WHAT IT MAKES (namespace draft §58,
+            RD.2, AGE): derived from their cause, so two machines applying the
+            same records name every run alike. Its salt is drawn once, when the
+            Runner is made; RD.8 seats a backup's with the main's. Tick thread. */
+        RunNames& runNames() noexcept { return namer; }
+        const RunNames& runNames() const noexcept { return namer; }
+
+        /*  HANDS OUT THE NAME OF A RUN ABOUT TO BE MADE under `parentRun` (empty
+            for none) for `cueId`: the next one a record supplied, in the order
+            they were drawn, or one derived from that cause. Every site that
+            makes several runs in one handler - a GO's descent, a jump, a seek,
+            the horizon, a Doh's put-back - builds one over its own record.
+
+            THE CAUSE IS THE PARENT, at every site, and `root:<cue>` for a run
+            with none (RD.2, AGE): the run a new one is made under is the one
+            thing both machines share for certain - named alike by the same
+            rule one level up - and how many runs of a cue it has made is a fact
+            of the run table. A GO's serial was the other candidate and was not
+            taken: a GO makes runs at several depths at once, and a member a
+            group spawns minutes later belongs to that GO too, so counting by
+            serial would tie a name to when the hook happened to ask. */
+        using NameDraw = std::function<std::string (const std::string& parentRun, const std::string& cueId)>;
+
     private:
         std::string armInternal (Engine& engine, std::int64_t tick,
                                  const std::string& cueId,
@@ -1888,7 +1912,7 @@ namespace wfg::cue
             instead put those records in the log twice on a replay: once from
             the log and once from the handler re-running. */
         bool beginPreparation (Engine& engine, GroupJob& job, const juce::ValueTree& group,
-                               const std::function<std::string()>& drawId,
+                               const NameDraw& drawId,
                                std::vector<std::string>& used, std::int64_t tick,
                                const std::set<std::string>& leaveOut);
 
@@ -2019,7 +2043,7 @@ namespace wfg::cue
         void seatPlan (Engine& engine, std::int64_t tick,
                        const std::vector<PlannedRun>& wanted,
                        std::map<std::string, std::string>& runFor,
-                       const std::function<std::string()>& nextId,
+                       const NameDraw& nextId,
                        const SeatResume* resume = nullptr);
 
         /*  The slots a cue's `Feed` and `Insert` children name, claimed for its
@@ -2428,6 +2452,10 @@ namespace wfg::cue
         RunTable& runs;
         doc::IdRegistry& ids;
         Focus& focus;
+
+        /*  AFTER `runs` AND `ids`, which it reads and reserves in: members are
+            made in the order they are declared. */
+        RunNames namer { runs, ids };
 
         Player* audio = nullptr;
         video::Sink* videoSink = nullptr;
@@ -3503,7 +3531,7 @@ namespace wfg::cue
             std::string list;
             int fadeTicks = 0;
             double fadeSeconds = 0.0;
-            std::function<std::string()> nextId;
+            NameDraw nextId;
             std::vector<std::string> items;
             std::set<std::string> goRuns;
         };

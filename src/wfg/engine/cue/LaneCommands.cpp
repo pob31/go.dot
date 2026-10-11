@@ -220,7 +220,7 @@ namespace wfg::cue
                         " a mix the cue does not send to being given a send at nought.",
                         { { "cue", 's', false }, { "lanes", 's', false, true } },
                         true,
-                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&document, &runner] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             if (document.isLocked())
                                 return Outcome::rejected (reason::locked);
@@ -269,11 +269,25 @@ namespace wfg::cue
 
                                     if (sendId.empty())
                                     {
-                                        const auto made = document.createSend (cueId, key, args[at + 2].getString(), "0");
+                                        /*  THE SEND THE PASS IS GIVEN, named from the
+                                            cue and the mix when the record names none
+                                            (namespace draft §58, AFX, RD.2): the pass is
+                                            the hook's, which each machine of a pair rides
+                                            for itself, so the send must have one name on
+                                            both. Counted when made, as a run is. */
+                                        const auto cause = "lane:" + cueId + ":" + key;
+                                        auto& names = runner.runNames();
+                                        auto wanted = args[at + 2].getString();
+
+                                        if (wanted.empty())
+                                            wanted = names.nextIn (document.ids(), cause, "send");
+
+                                        const auto made = document.createSend (cueId, key, wanted, "0");
 
                                         if (! made.ok)
                                             return Outcome::rejected (made.reason);
 
+                                        names.count (cause, "send");
                                         sendId = made.id;
                                     }
 

@@ -2030,6 +2030,62 @@ TEST_CASE ("video: a conversion with its sound makes the movie's sound a locked 
     CHECK_FALSE (rig.applied ("media.convert", { text ("clip.mp4"), text ("whole"), text ("none"), osc::Value::boolean (false) }));
 }
 
+/*  WHAT A CONVERSION MAKES, NAMED FROM ITS CAUSE (namespace draft §58, AFX,
+    RD.2): each machine of a pair converts its own copy, so the sound's cue is
+    named from the movie under the session's salt, and its route - which no
+    record names - from the cue without the salt, so a replay handed the cue
+    makes the same route. */
+TEST_CASE ("video: a conversion's sound cue and route are named from the movie and the cue")
+{
+    /*  Names of their own, as serve's Runner has: they must outlive the
+        registry that holds the handler. */
+    auto ids = doc::IdRegistry::withSeed (7);
+    cue::RunTable noRuns;
+    std::vector<std::unique_ptr<cue::RunNames>> kept;
+
+    const auto convert = [&] (Rig& rig, std::uint64_t salt, std::vector<osc::Value> made)
+    {
+        kept.push_back (std::make_unique<cue::RunNames> (noRuns, ids));
+        kept.back()->setSalt (salt);
+        video::registerConversionCommands (rig.engine.commands(), rig.document, nullptr, kept.back().get());
+
+        REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/source"), text ("movie") }));
+        REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/file"), text ("clip.mp4") }));
+
+        std::vector<osc::Value> args { text ("clip.mp4"), text (""), osc::Value::float64 (0.0),
+                                       text ("clip (sound).wav"), osc::Value::int32 (2) };
+        args.insert (args.end(), made.begin(), made.end());
+        REQUIRE (rig.applied ("media.converted", args));
+
+        std::string sound, route;
+
+        for (const auto& child : rig.document.findById ("VD000001"))
+            if (child.hasType ("Media"))
+                sound = child["id"].toString().toStdString();
+
+        for (const auto& child : rig.document.findById (sound))
+            if (child.hasType ("Route"))
+                route = child["id"].toString().toStdString();
+
+        return std::pair<std::string, std::string> { sound, route };
+    };
+
+    Rig one, two, three;
+    const auto first = convert (one, 1234, {});
+    const auto second = convert (two, 1234, {});
+    const auto other = convert (three, 4321, {});
+
+    CHECK (first.first == cue::RunNames::candidate (1234, "sound:VD000002", "cue", 0, 0));
+    CHECK (first.second == cue::RunNames::candidate (0, first.first, "route", 0, 0));
+    CHECK (first == second);
+    CHECK (other.first != first.first);
+
+    //  A replay hands the cue in, under whatever salt: the same route.
+    Rig replayed;
+    const auto again = convert (replayed, 999, { text (first.first) });
+    CHECK (again == first);
+}
+
 /*  THE WINDOW'S SIDE (namespace draft 37.6, F.4): the conversions as the
     readout says them and the sentence each change is worth; a sound's lock as
     a menu of the show's movies, and the rows the movie leads drawn, not typed. */

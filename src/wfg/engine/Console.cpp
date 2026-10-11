@@ -392,12 +392,12 @@ namespace
         wfg::cue::LiveEdits liveEdits;  // what `live.keep` and `live.drop` act on; nothing rides here
         wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
-        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document, &runner.runNames());
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
-        wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
+        wfg::video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
         wfg::doc::registerSectionCommands (engine.commands(), document);
         wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
@@ -697,12 +697,12 @@ namespace
             machine reporting what happened to a run, and a log of a performance
             has to replay on a laptop with no show open. */
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
-        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document, &runner.runNames());
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
-        wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
+        wfg::video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
         wfg::doc::registerSectionCommands (engine.commands(), document);
         wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
@@ -1400,12 +1400,12 @@ namespace
         wfg::cue::LiveEdits liveEdits;  // what `live.keep` and `live.drop` act on; nothing rides here
         wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
-        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document, &runner.runNames());
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
-        wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
+        wfg::video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
         wfg::doc::registerSectionCommands (engine.commands(), document);
         wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
@@ -3812,7 +3812,7 @@ namespace
         wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         runner.setLiveEdits (&liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
-        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document, &runner.runNames());
 
         /*  THE SANDBOX'S TABLE AND ITS TWO COMMANDS (Phase 9a, §17.3). The
             restart reaches the audio host once there is one - the hook is
@@ -4566,7 +4566,7 @@ namespace
                                                                wfg::osc::Value::string (request.soundName),
                                                                wfg::osc::Value::int32 (std::max (1, request.soundChannels)) });
                                           } };
-        wfg::video::registerConversionCommands (engine.commands(), document, &converter);
+        wfg::video::registerConversionCommands (engine.commands(), document, &converter, &runner.runNames());
 
         /*  A BOUNCE THAT LANDED (namespace draft §55, ADN) becomes `media.frozen`,
             the swap of the cue's file, as a conversion that is done becomes

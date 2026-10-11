@@ -1126,8 +1126,13 @@ add_test(NAME blackbox.hold.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/hold.py" --wfg-locale=C)
 add_test(NAME blackbox.hold.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/hold.py" --wfg-locale=${WFG_LOCALE_FR})
+#
+# UNBUFFERED, AND FOUR HUNDRED SECONDS: on its first CI run (38123547592) macOS
+# timed both locales out at 120 s against 8.6 s here, and printed nothing - a
+# piped Python buffers its report and loses it to the kill - so the next run says
+# where it stood; the limit is the wires driver's, which macOS also outran.
 set_tests_properties(blackbox.hold.C blackbox.hold.fr_FR PROPERTIES
-                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------
 # THE PHASE 2 DONE-WHEN CLAUSE, driven from outside the process.

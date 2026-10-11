@@ -25154,3 +25154,23 @@ passed on and the main refused comes back refused, with the main's reason.
   (`none`) a `verified` cue ends `done` once its held write is answered sent, unwarned, and a
   pre-send takes what the machine last wrote to the address for the desk's answer (AGL). `wfg
   serve --hold`; the first `pair` row, `pair/sending`.
+- **RD.2**, 2026-10-11: `cue::RunNames` (AGE). A run's name is FNV-1a over the session's salt
+  (`IdRegistry::drawSalt`, still the one place the engine consumes randomness), its cause - the run
+  it is made under, or `root:<cue>` - its cue and how many runs of that cue the cause has made,
+  redrawn past a name a run or the registry holds and one Pd reads as a number. COUNTED WHEN A RUN
+  IS MADE, not when a name is asked for: `createRun` counts it whether its name was drawn or handed
+  in by a record, so a name drawn and not used (a GO that adopted the standby's arm) moves nothing.
+  The cause is the parent run rather than the GO's serial, since one GO makes runs at several depths
+  and members spawned minutes later would otherwise count by when the hook asked. Every draw site
+  takes it: `armInternal`, `seatPlan` (load to time, a group sought, a resume, Doh!'s put-back),
+  `prepareStandby`, `fireStandby`, `goDoh`, `dohRelaunch`, `spawnChild`, `fireLockedSounds`; a
+  shuffle's seed is `seedFor` its run. The show objects the engine makes by itself (AFX) too:
+  `take.kept`'s cue, range and route from `take:<channel>:<file>`, `lane.write`'s new send from
+  `lane:<cue>:<mix>`, `media.converted`'s sound cue from `sound:<movie>`. Nothing new in the log:
+  every salted name is in a record as applied, and the two no record carries - a movie's locked
+  sound, the route a converted sound is given - are derived without the salt from a cause whose
+  name is, which mends a replay defect on the way (the converted sound's route was random and in no
+  record). `RunNames::Position` (the salt and the counts) is what RD.8 will copy. Found and left: a
+  sampler member's `cue.fire` record drops its cause, so a replay's `noteFireOnList` reads nought
+  where the session had the GO; a session log from before RD.2 that fires a movie with locked
+  sounds no longer replays (no fixture has one).

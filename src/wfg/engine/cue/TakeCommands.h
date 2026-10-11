@@ -54,6 +54,7 @@
 
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/RunNames.h>
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/document/ShowDocument.h>
 
@@ -84,7 +85,14 @@ namespace wfg::cue
     bool takeVerbOf (const std::string& word, TakeVerb& verb);
 
     /*  Registers the five presses and `take.closed`. `takes`, `runs` and
-        `document` may not outlive the registry. */
+        `document` may not outlive the registry.
+
+        `names`, when given, names what a Keep as cue makes - the cue, its range
+        and its route - from the channel and the file, salted with the session's
+        salt (namespace draft §58, AFX): a backup keeps its own take, and its
+        cue must have the main's name for a later command to reach it on both.
+        Without it - a rig - the document draws them, as it always did; either
+        way the record carries them, and a replay is handed them. */
     void registerTakeCommands (CommandRegistry& registry, TakeTable& takes, RunTable& runs,
-                               doc::ShowDocument& document);
+                               doc::ShowDocument& document, RunNames* names = nullptr);
 }

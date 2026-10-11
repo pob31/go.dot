@@ -64,6 +64,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -846,6 +847,58 @@ TEST_CASE ("take: Keep as cue makes a media cue after the one sounding there, lo
     REQUIRE (rig.applied ("undo"));
     CHECK (rig.at ("/godot/cue/" + made + "/kind").empty());
     CHECK (rig.take().kept == "takes/Looper take 1.wav");
+}
+
+TEST_CASE ("take: Keep as cue names what it makes from the channel and the file, alike on two machines")
+{
+    /*  Namespace draft §58, AFX, RD.2: each machine of a pair records its own
+        take and keeps it itself, so the cue, range and route a Keep as cue
+        makes are named from the channel and the file under the session's salt
+        - the same on both, and another under another salt. With the Runner's
+        names given, as serve gives them. */
+    const auto keep = [] (Rig& rig, std::optional<std::uint64_t> salt)
+    {
+        if (salt.has_value())
+            rig.runner.runNames().setSalt (*salt);
+
+        cue::registerTakeCommands (rig.engine.commands(), rig.takes, rig.runs, rig.document,
+                                   &rig.runner.runNames());
+
+        REQUIRE (rig.fireAndLaunch ("TK000002") != nullptr);
+        REQUIRE (rig.applied ("take.record", { text (looper) }));
+        REQUIRE (rig.applied ("take.record", { text (looper) }));
+        rig.audio.reports.push_back ({ looper, "pressed", 2.5 });
+        rig.tickOnce();
+        rig.tickOnce();
+        REQUIRE (rig.applied ("take.keep", { text (looper), osc::Value::boolean (true) }));
+        rig.tickOnce();
+        rig.audio.kept.push_back ({ looper, "takes/Looper take 1.wav", "" });
+        rig.tickOnce();
+        rig.tickOnce();
+
+        const auto applied = rig.appliedWith ("take.kept");
+        REQUIRE (applied.size() == 6u);
+        return std::vector<std::string> { applied[3], applied[4], applied[5] };
+    };
+
+    Rig one, two, three;
+    const auto first = keep (one, std::nullopt);
+    const auto second = keep (two, std::nullopt);
+    const auto third = keep (three, one.runner.runNames().salt() ^ 0x99ull);
+
+    CHECK (first == second);
+
+    const auto cause = std::string ("take:") + looper + ":takes/Looper take 1.wav";
+    CHECK (first[0] == cue::RunNames::candidate (one.runner.runNames().salt(), cause, "cue", 0, 0));
+
+    for (std::size_t n = 0; n < 3; ++n)
+    {
+        CHECK (doc::Id::isValid (first[n]));
+        CHECK (first[n] != third[n]);
+    }
+
+    CHECK (one.at ("/godot/range/" + first[1] + "/cue") == first[0]);
+    CHECK_FALSE (one.at ("/godot/route/" + first[2] + "/bus").empty());
 }
 
 //==============================================================================

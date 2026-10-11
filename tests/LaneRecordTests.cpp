@@ -1467,6 +1467,12 @@ TEST_CASE ("lane record: a session of passes - a retake under a ringing stop, th
 
     REQUIRE_FALSE (rig.sendOf (loin).empty());
 
+    /*  NAMED FROM THE CUE AND THE MIX under the session's salt (namespace draft
+        §58, AFX, RD.2): each machine of a pair rides its own pass, and makes
+        this send under the same name. */
+    CHECK (rig.sendOf (loin) == cue::RunNames::candidate (rig.runner.runNames().salt(),
+                                                          "lane:" + rig.mediaId + ":" + loin, "send", 0, 0));
+
     rig.send ("lane.record", { osc::Value::float64 (0.5) });
     rig.land (runId);
     rig.play (20);

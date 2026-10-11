@@ -87,11 +87,20 @@ namespace wfg::doc
 
     /*  Draws identifiers and remembers which are taken.
 
-        `generate` is the only place in the engine that consumes randomness, and
-        the value it returns is written into the event log as the argument the
-        caller left out - so a replay re-supplies it rather than drawing again,
-        and nothing downstream has to be deterministic in order for replay to
-        be. */
+        This class is the only place in the engine that consumes randomness, and
+        what it draws is written into the event log as the argument the caller
+        left out - so a replay re-supplies it rather than drawing again, and
+        nothing downstream has to be deterministic in order for replay to be.
+
+        WHAT IT STILL DRAWS, AND WHAT IS DERIVED NOW (namespace draft §58, RD.2,
+        AGE). `generate` names what a PERSON makes - a cue, a list, a range made
+        by a command - and that name travels in the command's record. What the
+        ENGINE makes by itself while a show runs - every run, a shuffled run's
+        seed, the cue a kept take becomes - is named by `cue::RunNames` from
+        its cause instead, because a backup machine makes those itself rather
+        than being told, and must give them the names its main gave them. Those
+        names are a pure function of the session's salt, which is drawn here
+        once (`drawSalt`), and of what made them. */
     class IdRegistry
     {
     public:
@@ -128,6 +137,18 @@ namespace wfg::doc
 
             Reserves nothing: a seed is not an identity. */
         std::int32_t drawSeed();
+
+        /*  THE SESSION'S SALT (namespace draft §58, RD.2), drawn once by the
+            Runner when it is made: what `cue::RunNames` mixes into every name
+            it derives, so tonight's names are not last night's. From here for
+            the reason `drawSeed` is - one source of randomness in the engine,
+            and this is it.
+
+            NOT WRITTEN INTO THE LOG, unlike a seed: every name derived with it
+            is in a record as applied, and a replay is handed those rather than
+            deriving them (RunNames.h says which one name is derived without
+            it, and why). RD.8 hands a backup its main's salt with the position. */
+        std::uint64_t drawSalt();
 
         /** Reserves an identifier read from a file or replayed from a log.
             False if it was already taken, which is a duplicate in the document

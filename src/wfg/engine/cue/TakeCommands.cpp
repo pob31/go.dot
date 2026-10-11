@@ -64,7 +64,7 @@ namespace wfg::cue
     }
 
     void registerTakeCommands (CommandRegistry& registry, TakeTable& takes, RunTable& runs,
-                               doc::ShowDocument& document)
+                               doc::ShowDocument& document, RunNames* names)
     {
         struct Press
         {
@@ -195,7 +195,7 @@ namespace wfg::cue
                         { { "channel", 's', false }, { "file", 's', false }, { "error", 's', false },
                           { "cue", 's', true }, { "range", 's', true }, { "route", 's', true } },
                         true,
-                        [&takes, &document] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&takes, &document, names] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto channelId = args[0].getString();
 
@@ -243,9 +243,29 @@ namespace wfg::cue
                                     ++position;
                             }
 
-                            const auto given = [&args] (std::size_t index)
+                            /*  WHAT THE RECORD GAVE, or a name derived from the
+                                channel and the file it kept (namespace draft §58,
+                                AFX, RD.2): the engine makes this cue by itself,
+                                on each machine of a pair from its own recording,
+                                so both must call it alike - and a later edit of
+                                it then reaches the same cue on both. Counted when
+                                made, drawn or given, as a run is. */
+                            const auto cause = "take:" + channelId + ":" + file;
+
+                            const auto given = [&args, &document, &cause, names] (std::size_t index, const char* what)
                             {
-                                return args.size() > index ? args[index].getString() : std::string {};
+                                auto id = args.size() > index ? args[index].getString() : std::string {};
+
+                                if (id.empty() && names != nullptr)
+                                    id = names->nextIn (document.ids(), cause, what);
+
+                                return id;
+                            };
+
+                            const auto counted = [&cause, names] (const char* what)
+                            {
+                                if (names != nullptr)
+                                    names->count (cause, what);
                             };
 
                             auto name = file.substr (file.rfind ('/') == std::string::npos ? 0 : file.rfind ('/') + 1);
@@ -253,26 +273,32 @@ namespace wfg::cue
                             if (name.size() > 4 && name.compare (name.size() - 4, 4, ".wav") == 0)
                                 name.resize (name.size() - 4);
 
-                            const auto cue = document.createCue (parentId, position + 1, "media", name, given (3));
+                            const auto cue = document.createCue (parentId, position + 1, "media", name, given (3, "cue"));
 
                             if (! cue.ok)
                                 return Outcome::rejected (cue.reason);
 
+                            counted ("cue");
+
                             if (const auto set = document.setAttribute ("/godot/cue/" + cue.id + "/file", file); ! set.ok)
                                 return Outcome::rejected (set.reason);
 
-                            const auto range = document.createRange (cue.id, request->loopIn, request->loopOut, given (4));
+                            const auto range = document.createRange (cue.id, request->loopIn, request->loopOut, given (4, "range"));
 
                             if (! range.ok)
                                 return Outcome::rejected (range.reason);
 
+                            counted ("range");
+
                             if (const auto set = document.setAttribute ("/godot/range/" + range.id + "/loops", "0"); ! set.ok)
                                 return Outcome::rejected (set.reason);
 
-                            const auto route = document.defaultMediaRoute (cue.id, 2, given (5));
+                            const auto route = document.defaultMediaRoute (cue.id, 2, given (5, "route"));
 
                             if (! route.ok)
                                 return Outcome::rejected (route.reason);
+
+                            counted ("route");
 
                             //  THE IDENTIFIERS IT DREW, in the record, so a replay draws none.
                             auto applied = args;

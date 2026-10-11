@@ -119,6 +119,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/Preparedness.cpp
     wfg/engine/cue/RunCommands.h
     wfg/engine/cue/RunCommands.cpp
+    wfg/engine/cue/RunNames.h
+    wfg/engine/cue/RunNames.cpp
     wfg/engine/cue/Runner.h
     wfg/engine/cue/Runner.cpp
     wfg/engine/cue/PictureSpec.h

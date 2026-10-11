@@ -18,6 +18,7 @@
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/command/CommandRegistry.h>
+#include <wfg/engine/cue/RunNames.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/video/Ffmpeg.h>
@@ -494,7 +495,8 @@ namespace wfg::video
     }
 
     //==============================================================================
-    void registerConversionCommands (CommandRegistry& registry, doc::ShowDocument& document, Converter* converter)
+    void registerConversionCommands (CommandRegistry& registry, doc::ShowDocument& document, Converter* converter,
+                                     cue::RunNames* names)
     {
         registry.add ({ "media.convert",
                         "Converts a movie to HAP in the background (namespace draft 37.5, WF-WJ): the whole"
@@ -593,7 +595,7 @@ namespace wfg::video
                         { { "source", 's', false }, { "target", 's', false }, { "cut", 'd', false },
                           { "sound", 's', true }, { "channels", 'i', true }, { "made", 's', true } },
                         true,
-                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&document, names] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto source = args[0].getString();
                             const auto target = args[1].getString();
@@ -724,8 +726,17 @@ namespace wfg::video
                                             ++position;
                                     }
 
-                                    const auto wanted = taken < supplied.size() ? supplied[taken].toStdString() : std::string {};
+                                    auto wanted = taken < supplied.size() ? supplied[taken].toStdString() : std::string {};
                                     ++taken;
+
+                                    /*  NAMED FROM THE MOVIE IT FOLLOWS when the record
+                                        names none (namespace draft §58, AFX, RD.2):
+                                        the conversion is each machine's own, and its
+                                        sound's cue must be one cue on both. */
+                                    const auto cause = "sound:" + movieId;
+
+                                    if (wanted.empty() && names != nullptr)
+                                        wanted = names->nextIn (document.ids(), cause, "cue");
 
                                     const auto name = movie["name"].toString().toStdString() + " (sound)";
                                     const auto created = document.createCue (parent["id"].toString().toStdString(), position + 1,
@@ -733,6 +744,9 @@ namespace wfg::video
 
                                     if (! created.ok)
                                         return Outcome::rejected (created.reason);
+
+                                    if (names != nullptr)
+                                        names->count (cause, "cue");
 
                                     made.push_back (created.id);
 
@@ -746,7 +760,19 @@ namespace wfg::video
 
                                     /*  ROUTED AS AN IMPORTED SOUND IS, to the first
                                         bus; a show with none leaves it to be. */
-                                    document.defaultMediaRoute (created.id, channels);
+                                    /*  ITS ROUTE NAMED FROM ITS CUE, WITHOUT THE SALT
+                                        (RD.2): the record carries the cue and not the
+                                        route, so a replay - and the other machine of a
+                                        pair - derives the route's name again from the
+                                        cue's. Drawn, as it was before, the route was a
+                                        different object on the replay. */
+                                    const auto routeId = names != nullptr
+                                                           ? names->nextInUnsalted (document.ids(), created.id, "route")
+                                                           : std::string {};
+
+                                    if (const auto route = document.defaultMediaRoute (created.id, channels, routeId);
+                                        route.ok && names != nullptr)
+                                        names->count (created.id, "route");
                                 }
 
                             auto applied = args;

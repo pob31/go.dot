@@ -180,6 +180,11 @@ namespace wfg::doc
         return drawn == 0 ? 1 : drawn;
     }
 
+    std::uint64_t IdRegistry::drawSalt()
+    {
+        return nextRandom();
+    }
+
     bool IdRegistry::reserve (std::string_view id)
     {
         if (! Id::isValid (id))

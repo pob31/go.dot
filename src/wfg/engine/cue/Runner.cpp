@@ -224,6 +224,11 @@ namespace wfg::cue
                     doc::IdRegistry& runIds, Focus& focusToUse)
         : document (documentToRead), runs (runsToDrive), ids (runIds), focus (focusToUse)
     {
+        /*  THE SESSION'S SALT (namespace draft §58, RD.2): drawn once, here,
+            from the registry that is the engine's one source of randomness,
+            and mixed into every name `namer` derives from now on. */
+        namer.setSalt (ids.drawSalt());
+
         /*  A SAMPLING CHANNEL LET GO (Phase 9c): said by the run table's own
             release, which the handlers that end a run make live and on replay. */
         runs.onRelease = [this] (const std::string& slotId, const std::string&, const std::string& toRun)
@@ -662,8 +667,15 @@ namespace wfg::cue
 
         auto id = runId;
 
+        /*  A RUN WITH NO PARENT, named from `root:<cue>` and how many root runs
+            of the cue there have been (RD.2, AGE): whatever made it - a GO at
+            the top of a list, `cue.fire`, a start cue's fire, the standby's
+            `audio.arm`, the persistent section's `run.assert`, a trigger - is a
+            record both machines apply in the same order, and the name is in
+            that record as applied, so the backup is usually handed it; when it
+            is not, it derives the same one. */
         if (id.empty())
-            id = ids.generate();
+            id = namer.next (RunNames::causeOf ({}, cueId), cueId);
 
         createRun (id, cueId, kind, {});
         auto* run = runs.find (id);
@@ -1127,7 +1139,7 @@ namespace wfg::cue
     }
 
     bool Runner::beginPreparation (Engine& engine, GroupJob& job, const juce::ValueTree& group,
-                                   const std::function<std::string()>& drawId,
+                                   const NameDraw& drawId,
                                    std::vector<std::string>& used, std::int64_t tick,
                                    const std::set<std::string>& leaveOut)
     {
@@ -1167,7 +1179,7 @@ namespace wfg::cue
             one standing, because the sender coalesces by address inside a tick. */
         for (const auto& cueId : cues)
         {
-            const auto made = spawnChild (engine, job.run, cueId, drawId(), tick);
+            const auto made = spawnChild (engine, job.run, cueId, drawId (job.run, cueId), tick);
 
             if (made.empty())
             {
@@ -2142,13 +2154,13 @@ namespace wfg::cue
         std::vector<std::string> used;
         std::size_t taken = 0;
 
-        const auto nextId = [&]
+        const NameDraw nextId = [&] (const std::string& under, const std::string& ofCue)
         {
             auto id = taken < supplied.size() ? supplied[taken] : std::string {};
             ++taken;
 
             if (id.empty())
-                id = ids.generate();
+                id = namer.next (RunNames::causeOf (under, ofCue), ofCue);
 
             used.push_back (id);
             return id;
@@ -2384,7 +2396,7 @@ namespace wfg::cue
     void Runner::seatPlan (Engine& engine, std::int64_t tick,
                            const std::vector<PlannedRun>& wanted,
                            std::map<std::string, std::string>& runFor,
-                           const std::function<std::string()>& nextId,
+                           const NameDraw& nextId,
                            const SeatResume* resume)
     {
         /*  THE TREE, OUTERMOST FIRST.
@@ -2408,14 +2420,17 @@ namespace wfg::cue
 
             const auto standing = runFor.find (wants.cue);
             const auto madeHere = standing == runFor.end();
-            const auto id = madeHere ? nextId() : standing->second;
+            auto id = madeHere ? std::string {} : standing->second;
 
+            /*  NAMED UNDER THE PARENT IT IS MADE UNDER (RD.2), which is why the
+                parent is read first. */
             if (madeHere)
             {
                 const auto parent = wants.ancestors.empty()
                                       ? std::string {}
                                       : runFor[wants.ancestors.back()];
 
+                id = nextId (parent, wants.cue);
                 createRun (id, wants.cue, "group", parent);
                 runFor[wants.cue] = id;
             }
@@ -2573,10 +2588,10 @@ namespace wfg::cue
             if (runFor.count (wants.cue) > 0)
                 continue;
 
-            const auto id = nextId();
             const auto parent = wants.ancestors.empty()
                                   ? std::string {}
                                   : runFor[wants.ancestors.back()];
+            const auto id = nextId (parent, wants.cue);
 
             createRun (id, wants.cue, kindOfCue (cue), parent);
             runFor[wants.cue] = id;
@@ -3653,13 +3668,13 @@ namespace wfg::cue
         std::vector<std::string> used;
         std::size_t taken = 0;
 
-        const auto nextId = [&]
+        const NameDraw nextId = [&] (const std::string& under, const std::string& ofCue)
         {
             auto id = taken < supplied.size() ? supplied[taken] : std::string {};
             ++taken;
 
             if (id.empty())
-                id = ids.generate();
+                id = namer.next (RunNames::causeOf (under, ofCue), ofCue);
 
             used.push_back (id);
             return id;
@@ -4102,13 +4117,13 @@ namespace wfg::cue
         std::vector<std::string> used;
         std::size_t taken = 0;
 
-        const auto nextId = [&]
+        const NameDraw nextId = [&] (const std::string& under, const std::string& ofCue)
         {
             auto id = taken < supplied.size() ? supplied[taken] : std::string {};
             ++taken;
 
             if (id.empty())
-                id = ids.generate();
+                id = namer.next (RunNames::causeOf (under, ofCue), ofCue);
 
             used.push_back (id);
             return id;
@@ -4165,7 +4180,7 @@ namespace wfg::cue
                 continue;
             }
 
-            const auto id = nextId();
+            const auto id = nextId (parentRun, groupId);
 
             createRun (id, groupId, "group", parentRun);
 
@@ -4283,7 +4298,7 @@ namespace wfg::cue
                 continue;
 
             const auto made = spawnChild (engine, parentRun, id,
-                                          adoptable ? std::string {} : nextId(), tick);
+                                          adoptable ? std::string {} : nextId (parentRun, id), tick);
 
             /*  MARKED AS A PROMISE. A phase takes charge of the children of its
                 own cues and launches them, and this is a child of exactly that
@@ -4317,13 +4332,13 @@ namespace wfg::cue
             place so that "the next one" means the same thing on both roads. */
         std::size_t taken = 0;
 
-        const auto nextId = [&]
+        const NameDraw nextId = [&] (const std::string& under, const std::string& ofCue)
         {
             auto id = taken < supplied.size() ? supplied[taken] : std::string {};
             ++taken;
 
             if (id.empty())
-                id = ids.generate();
+                id = namer.next (RunNames::causeOf (under, ofCue), ofCue);
 
             used.push_back (id);
             return id;
@@ -4397,7 +4412,7 @@ namespace wfg::cue
                 continue;
             }
 
-            const auto id = nextId();
+            const auto id = nextId (parentRun, groupId);
 
             createRun (id, groupId, "group", parentRun);
 
@@ -4447,7 +4462,7 @@ namespace wfg::cue
 
         if (parentRun.empty())
         {
-            const auto id = fire (engine, tick, cueId, nextId());
+            const auto id = fire (engine, tick, cueId, nextId ({}, cueId));
 
             /*  THE RUN IT ACTED ON, which is not always the one it drew.
 
@@ -4562,7 +4577,7 @@ namespace wfg::cue
             tick, because one launcher is better than two: `run.launch` begins a
             pre-wait, and a member started from both here and there would begin
             its wait twice. */
-        const auto id = spawnChild (engine, parentRun, cueId, nextId(), tick);
+        const auto id = spawnChild (engine, parentRun, cueId, nextId (parentRun, cueId), tick);
 
         if (id.empty())
             used.pop_back();
@@ -8068,6 +8083,13 @@ namespace wfg::cue
     void Runner::createRun (const std::string& id, const std::string& cueId,
                             const std::string& kind, const std::string& parentRun)
     {
+        /*  COUNTED FOR ITS CAUSE, whether its name was derived or a record
+            handed it in (namespace draft §58, RD.2, AGE): every run the Runner
+            makes passes here, so the count `RunNames` derives the next name
+            from is how many runs of this cue that cause has MADE - the same on
+            a machine that drew the name and on one that was told it. */
+        namer.made (RunNames::causeOf (parentRun, cueId), cueId, id);
+
         runs.create (id, cueId, kind, parentRun);
 
         auto* run = runs.find (id);
@@ -9795,13 +9817,13 @@ namespace wfg::cue
 
         std::size_t taken = 0;
 
-        const auto nextId = [&]
+        const NameDraw nextId = [&] (const std::string& under, const std::string& ofCue)
         {
             auto id = taken < supplied.size() ? supplied[taken] : std::string {};
             ++taken;
 
             if (id.empty())
-                id = ids.generate();
+                id = namer.next (RunNames::causeOf (under, ofCue), ofCue);
 
             out.made.push_back (id);
             return id;
@@ -10018,7 +10040,7 @@ namespace wfg::cue
         {
             if (root.underRun.empty())
             {
-                const auto id = fire (engine, tick, root.cue, nextId());
+                const auto id = fire (engine, tick, root.cue, nextId ({}, root.cue));
 
                 if (id.empty())
                     out.made.pop_back();
@@ -10077,13 +10099,13 @@ namespace wfg::cue
             one of them on the applied record, as a jump's are. */
         std::size_t taken = 0;
 
-        const std::function<std::string()> nextId = [&]
+        const NameDraw nextId = [&] (const std::string& under, const std::string& ofCue)
         {
             auto id = taken < supplied.size() ? supplied[taken] : std::string {};
             ++taken;
 
             if (id.empty())
-                id = ids.generate();
+                id = namer.next (RunNames::causeOf (under, ofCue), ofCue);
 
             drawn.push_back (id);
             return id;
@@ -12132,7 +12154,7 @@ namespace wfg::cue
             const auto bankNode = document.findById (bankCue);
             const auto* above = runs.find (bank->parent);
             const auto parent = above != nullptr && ! above->isFinished() ? bank->parent : std::string {};
-            const auto id = back.nextId();
+            const auto id = back.nextId (parent, bankCue);
 
             if (! bankNode.isValid())
                 continue;
@@ -12208,13 +12230,13 @@ namespace wfg::cue
     {
         std::size_t taken = 0;
 
-        const std::function<std::string()> nextId = [&]
+        const NameDraw nextId = [&] (const std::string& under, const std::string& ofCue)
         {
             auto id = taken < supplied.size() ? supplied[taken] : std::string {};
             ++taken;
 
             if (id.empty())
-                id = ids.generate();
+                id = namer.next (RunNames::causeOf (under, ofCue), ofCue);
 
             drawn.push_back (id);
             return id;
@@ -14849,24 +14871,16 @@ namespace wfg::cue
             }
             else
             {
-                /*  MADE NOW: FNV-1a over the two identifiers, the same on
-                    every machine, salted until free. */
-                const auto joined = movieRun + "/" + soundCue;
-
-                for (std::uint64_t salt = 0; salt < 64 && id.empty(); ++salt)
-                {
-                    std::uint64_t hash = 14695981039346656037ull ^ (salt * 0x9e3779b97f4a7c15ull);
-
-                    for (const auto c : joined)
-                    {
-                        hash ^= static_cast<std::uint8_t> (c);
-                        hash *= 1099511628211ull;
-                    }
-
-                    if (const auto candidate = doc::Id::encode (hash);
-                        runs.find (candidate) == nullptr && ids.reserve (candidate))
-                        id = candidate;
-                }
+                /*  MADE NOW, under a name derived from the movie's run and the
+                    sound's cue - the same on every machine, and redrawn past
+                    one in use or one Pd reads as a number (RD.2, AGE; this
+                    was the precedent `RunNames` generalises). WITHOUT THE
+                    SESSION'S SALT, the one run so named (RunNames.h): no record
+                    carries this name - the movie's does, and the sound is made
+                    in the handler that fires the movie - so `wfg replay`
+                    names it again here, and a replay does not know the salt.
+                    The movie's run name is already this session's own. */
+                id = namer.nextUnsalted (movieRun, soundCue);
 
                 if (id.empty())
                     continue;
@@ -15040,8 +15054,12 @@ namespace wfg::cue
                      && (armed->parent.empty() || inAncestryOf (armed->parent, parentRun)))
                     id = armed->id;
 
+        /*  A MEMBER, named from the run it is made under (RD.2, AGE): a
+            group's job spawning it, the horizon arming it, a movie's bank
+            making its sound - on both machines the parent has one name, and
+            how many runs of this cue it has made is the same count. */
         if (id.empty())
-            id = ids.generate();
+            id = namer.next (RunNames::causeOf (parentRun, cueId), cueId);
 
         if (auto* existing = runs.find (id))
         {
@@ -15348,11 +15366,17 @@ namespace wfg::cue
             seed, which is nought for a shuffle nobody seeded. Read as its own,
             every round after the jump came from nought: the same order after
             every jump, from a seed the show never used. Nought is "no seed" -
-            `IdRegistry::drawSeed` never draws it - so it is drawn here, and the
+            `RunNames::seedFor` never derives it - so it is derived here, and the
             record below writes it into the log, as every seed is. */
+        /*  DERIVED FROM THE SALT AND THIS RUN, not drawn (namespace draft §58,
+            RD.2, AGE): this is the hook's decision, which a backup makes for
+            itself rather than being told, so both machines must shuffle a run
+            alike - and they name the run alike. Still a different order every
+            night, since the salt is the session's, and still in `run.round`
+            for a replay, which draws nothing. */
         const auto seed = run->iteration > 0 && (run->seed != 0 || ! shuffles)
                             ? run->seed
-                            : (authored != 0 ? authored : (shuffles ? ids.drawSeed() : 0));
+                            : (authored != 0 ? authored : (shuffles ? namer.seedFor (runId) : 0));
 
         auto state = static_cast<std::uint64_t> (seed)
                        ^ (static_cast<std::uint64_t> (run->iteration + 1) * goldenGamma);

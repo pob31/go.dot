@@ -59,6 +59,7 @@
 
 namespace wfg { class CommandRegistry; class Engine; }
 namespace wfg::doc { class ShowDocument; }
+namespace wfg::cue { class RunNames; }
 
 namespace wfg::video
 {
@@ -168,6 +169,14 @@ namespace wfg::video
         every video cue that names the movie, a media cue on the sound's file,
         locked to it, routed as an imported sound is - or, for a movie that
         has one already, that one pointed at the new file. The identifiers it
-        drew go on its record, which a replay re-supplies. */
-    void registerConversionCommands (CommandRegistry& registry, doc::ShowDocument& document, Converter* converter);
+        drew go on its record, which a replay re-supplies.
+
+        `names`, when given, names that cue from the movie it follows, salted
+        with the session's salt, and its route from the cue (namespace draft
+        §58, AFX): each machine of a pair converts its own copy, and both must
+        call what they made alike. The route's name is on no record, so it is
+        derived from the cue's without the salt, which a replay derives again;
+        without `names` - a rig - both are drawn, as they always were. */
+    void registerConversionCommands (CommandRegistry& registry, doc::ShowDocument& document, Converter* converter,
+                                     cue::RunNames* names = nullptr);
 }

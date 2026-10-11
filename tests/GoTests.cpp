@@ -65,6 +65,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -21294,4 +21295,483 @@ TEST_CASE ("jump: another list's cue is refused, and a jump-and-Go aimed at itse
 
         CHECK_FALSE (logged (rig, "standby.jump"));
     }
+}
+
+//==============================================================================
+/*  NAMES DERIVED FROM THEIR CAUSE (namespace draft §58, RD.2, AGE).
+
+    A backup follows its main by applying the main's operator records, and makes
+    everything the engine decides by itself - a group's members, the standby's
+    look-ahead, a Doh's put-back - for itself. Those runs must come out under
+    the main's names, or a later `run.stop` reaches one machine's run and not
+    the other's, and the backup's GO adopts a run whose name is not the one the
+    main's record carries. So: two engines on one show, one salt, the same
+    operator events and nothing else - and the same run table, name for name,
+    on every tick. */
+TEST_CASE ("run names: a name is derived from its cause, and only a run made counts")
+{
+    cue::RunTable runs;
+    auto ids = doc::IdRegistry::withSeed (5);
+    cue::RunNames names { runs, ids };
+    names.setSalt (0x1234abcdull);
+
+    const auto cause = cue::RunNames::causeOf ({}, "CUE00001");
+    CHECK (cause == "root:CUE00001");
+    CHECK (cue::RunNames::causeOf ("RUN00001", "CUE00001") == "RUN00001");
+
+    const auto first = names.next (cause, "CUE00001");
+    CHECK (doc::Id::isValid (first));
+    CHECK (first == cue::RunNames::candidate (0x1234abcdull, cause, "CUE00001", 0, 0));
+
+    //  Asking again is asking the same question: nothing was made.
+    CHECK (names.next (cause, "CUE00001") == first);
+
+    //  Another cause, another cue: another name.
+    CHECK (names.next ("RUN00001", "CUE00001") != first);
+    CHECK (names.next (cause, "CUE00002") != first);
+
+    SUBCASE ("a run made counts, and its name is reserved")
+    {
+        names.made (cause, "CUE00001", first);
+        CHECK (ids.isTaken (first));
+        CHECK (names.next (cause, "CUE00001") == cue::RunNames::candidate (0x1234abcdull, cause, "CUE00001", 1, 0));
+    }
+
+    SUBCASE ("a name a record handed in counts as one drawn would")
+    {
+        /*  The machine that was told the name and the one that drew it keep
+            counting alike: both made one run of the cue under that cause. */
+        names.made (cause, "CUE00001", "7K2QM9X4");
+        CHECK (ids.isTaken ("7K2QM9X4"));
+        CHECK (names.next (cause, "CUE00001") == cue::RunNames::candidate (0x1234abcdull, cause, "CUE00001", 1, 0));
+    }
+
+    SUBCASE ("a name the registry holds is passed over")
+    {
+        REQUIRE (ids.reserve (first));
+        CHECK (names.next (cause, "CUE00001") == cue::RunNames::candidate (0x1234abcdull, cause, "CUE00001", 0, 1));
+    }
+
+    SUBCASE ("a name a run already has is passed over")
+    {
+        runs.create (first, "CUE00009", "memo");
+        CHECK (names.next (cause, "CUE00001") == cue::RunNames::candidate (0x1234abcdull, cause, "CUE00001", 0, 1));
+    }
+
+    SUBCASE ("a name Pure Data would read as a number is passed over")
+    {
+        /*  About one salt in ten thousand makes the first attempt all digits,
+            or digits either side of an E - found by looking, not assumed. */
+        std::uint64_t salt = 0;
+
+        for (; salt < 2'000'000u; ++salt)
+            if (doc::IdRegistry::readAsNumberByPd (cue::RunNames::candidate (salt, cause, "CUE00001", 0, 0)))
+                break;
+
+        REQUIRE (salt < 2'000'000u);
+        names.setSalt (salt);
+
+        const auto drawn = names.next (cause, "CUE00001");
+        CHECK_FALSE (doc::IdRegistry::readAsNumberByPd (drawn));
+        CHECK (drawn != cue::RunNames::candidate (salt, cause, "CUE00001", 0, 0));
+        CHECK (drawn == cue::RunNames::candidate (salt, cause, "CUE00001", 0, 1));
+    }
+
+    SUBCASE ("the unsalted name does not move with the salt")
+    {
+        const auto before = names.nextUnsalted ("RUN00001", "CUE00001");
+        names.setSalt (99);
+        CHECK (names.nextUnsalted ("RUN00001", "CUE00001") == before);
+        CHECK (names.next ("RUN00001", "CUE00001") != before);
+    }
+
+    SUBCASE ("a seed: never nought, never negative, the salt's and the run's")
+    {
+        const auto seed = names.seedFor ("RUN00001");
+        CHECK (seed > 0);
+        CHECK (names.seedFor ("RUN00001") == seed);
+        CHECK (names.seedFor ("RUN00002") != seed);
+
+        names.setSalt (99);
+        CHECK (names.seedFor ("RUN00001") != seed);
+    }
+
+    SUBCASE ("the position: salt and counters, copied whole")
+    {
+        names.made (cause, "CUE00001", first);
+        names.count ("take:CH000001:media/takes/a.wav", "cue");
+
+        const auto position = names.position();
+        CHECK (position.salt == 0x1234abcdull);
+        CHECK (position.counts.size() == 2u);
+
+        cue::RunTable otherRuns;
+        auto otherIds = doc::IdRegistry::withSeed (6);
+        cue::RunNames other { otherRuns, otherIds };
+        other.seat (position);
+
+        CHECK (other.position() == position);
+        CHECK (other.next (cause, "CUE00001") == names.next (cause, "CUE00001"));
+
+        other.reset();
+        CHECK (other.salt() == 0x1234abcdull);
+        CHECK (other.next (cause, "CUE00001") == first);
+    }
+}
+
+TEST_CASE ("run names: the registry draws the session's salt, and a Runner takes it")
+{
+    auto one = doc::IdRegistry::withSeed (11);
+    auto two = doc::IdRegistry::withSeed (11);
+    auto three = doc::IdRegistry::withSeed (12);
+
+    CHECK (one.drawSalt() == two.drawSalt());
+    CHECK (one.drawSalt() != three.drawSalt());
+
+    Rig a, b;
+    CHECK (a.runner.runNames().salt() == b.runner.runNames().salt());
+}
+
+namespace
+{
+    /*  ONE SHOW FOR TWO MACHINES: made once, in a Rig of its own, and read by
+        each - so every cue has one identifier on both, as two copies of one
+        show folder have. A GO on a media cue at the top, an automatic
+        sequence, a timeline with a pre-wait and a sound, and a manual act with
+        a header, a sound, a memo and a footer, which the standby's look-ahead
+        prepares when the pointer lands inside it. */
+    struct TwinShow
+    {
+        TwinShow()
+        {
+            Rig maker;
+            auto& show = maker.document;
+            listId = maker.listId;
+            thunder = maker.mediaId;
+            memo = maker.memoId;
+
+            preshow = show.createCue (listId, 2, "group", "Preshow").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + preshow + "/advance", "auto").ok);
+
+            for (int n = 0; n < 3; ++n)
+                REQUIRE (show.createCue (preshow, n, "memo", "Pre " + std::to_string (n)).ok);
+
+            scene = show.createCue (listId, 3, "group", "Scene").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+            REQUIRE (show.createCue (scene, 0, "memo", "Cue A").ok);
+            const auto late = show.createCue (scene, 1, "memo", "Cue B").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + late + "/preWait", "0.2").ok);
+            const auto wind = show.createCue (scene, 2, "media", "Wind").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + wind + "/file", "wind.wav").ok);
+
+            act = show.createCue (listId, 4, "group", "Act").id;
+            const auto header = show.createRole (act, "header");
+            REQUIRE (header.ok);
+            REQUIRE (show.createCue (header.id, 0, "memo", "House to half").ok);
+            rain = show.createCue (act, 0, "media", "Rain").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav").ok);
+            lights = show.createCue (act, 1, "memo", "Lights").id;
+            const auto footer = show.createRole (act, "footer");
+            REQUIRE (footer.ok);
+            REQUIRE (show.createCue (footer.id, 0, "memo", "Release").ok);
+
+            after = show.createCue (listId, 5, "memo", "After").id;
+
+            text = doc::CanonicalXml::write (show);
+        }
+
+        std::string text;
+        std::string listId, thunder, memo, preshow, scene, act, rain, lights, after;
+    };
+
+    /*  TWO MACHINES, ticked in step: each its own engine, show, run table and
+        sound card, the same salt unless a case says otherwise. With `follow`,
+        the second is handed the first's operator records AS APPLIED - the
+        names its GO drew in the arguments - which is what a backup applies;
+        without, both are handed the same events and each draws its own. */
+    struct Twins
+    {
+        explicit Twins (const TwinShow& show)
+        {
+            for (auto* rig : { &a, &b })
+            {
+                REQUIRE (doc::CanonicalXml::read (show.text, rig->document).ok);
+                rig->clockRuns = true;
+            }
+
+            /*  THE SECOND MACHINE'S RANDOMNESS A DRAW AHEAD of the first's, as
+                two computers' are: the rigs seed their registries alike, and a
+                name drawn from either would agree by accident. Only a name
+                derived from its cause can agree now. The salt is the session's
+                and was drawn already. */
+            b.runIds.drawSeed();
+        }
+
+        void step (const std::vector<Event>& events = {})
+        {
+            for (const auto& event : events)
+                REQUIRE (a.engine.submit (event));
+
+            const auto tick = a.tick;
+            a.tickOnce();
+            a.audio.completeArms (a.engine);
+
+            std::vector<Event> forB = events;
+
+            if (follow)
+            {
+                forB.clear();
+
+                for (const auto& record : LogFile::parse (a.engine.log().contents()).records)
+                    if (record.tick == tick && record.origin == "cli"
+                          && record.kind != LogRecord::Kind::dropped)
+                        forB.push_back ({ record.origin, record.command, record.args });
+            }
+
+            for (const auto& event : forB)
+                REQUIRE (b.engine.submit (event));
+
+            b.tickOnce();
+            b.audio.completeArms (b.engine);
+        }
+
+        void idle (int ticks, const std::function<void()>& check)
+        {
+            for (int n = 0; n < ticks; ++n)
+            {
+                step();
+                check();
+            }
+        }
+
+        Rig a, b;
+        bool follow = false;
+    };
+
+    Event press (const std::string& command, std::vector<osc::Value> args = {})
+    {
+        return { "cli", command, std::move (args) };
+    }
+
+    /*  The first difference between two run tables, in words, or nothing.
+        `sameNames` false compares the shape alone: the cue, the state, and the
+        parent by its place in the table rather than by its name - and holds
+        that no run has the same name on both. */
+    std::string firstDifference (const cue::RunTable& one, const cue::RunTable& two, bool sameNames)
+    {
+        const auto& x = one.all();
+        const auto& y = two.all();
+
+        if (x.size() != y.size())
+            return std::to_string (x.size()) + " runs against " + std::to_string (y.size());
+
+        const auto placeOf = [] (const cue::RunTable& table, const std::string& id)
+        {
+            for (std::size_t i = 0; i < table.all().size(); ++i)
+                if (table.all()[i].id == id)
+                    return static_cast<std::ptrdiff_t> (i);
+
+            return std::ptrdiff_t { -1 };
+        };
+
+        for (std::size_t i = 0; i < x.size(); ++i)
+        {
+            const auto where = "run " + std::to_string (i) + " (" + x[i].cue + "): ";
+
+            if (x[i].cue != y[i].cue)
+                return where + "cue " + y[i].cue;
+
+            if (x[i].state != y[i].state)
+                return where + "state " + x[i].state + " against " + y[i].state;
+
+            if (sameNames && x[i].id != y[i].id)
+                return where + "named " + x[i].id + " and " + y[i].id;
+
+            if (! sameNames && x[i].id == y[i].id)
+                return where + "the same name " + x[i].id + " under two salts";
+
+            if (sameNames && x[i].parent != y[i].parent)
+                return where + "parent " + x[i].parent + " against " + y[i].parent;
+
+            if (placeOf (one, x[i].parent) != placeOf (two, y[i].parent))
+                return where + "a parent in another place";
+        }
+
+        return {};
+    }
+
+    /*  THE OPERATOR'S EVENING, and nothing else: standby moves, GOs, a cue
+        fired by name, a Doh!, an Esc. Everything else - members spawned and
+        launched, the act's look-ahead, the Doh's put-back, the ends of runs -
+        each machine decides for itself. Checked after every tick. */
+    void playTheEvening (Twins& twins, const TwinShow& show, const std::function<void()>& check)
+    {
+        const auto standby = [&] (const std::string& cueId)
+        {
+            return press ("node.set", { osc::Value::string (cue::standbyAddressOf (show.listId)),
+                                        osc::Value::string (cueId) });
+        };
+
+        twins.step ({ standby (show.thunder) });
+        twins.idle (3, check);
+
+        twins.step ({ press ("go") });                 // the sound at the top
+        twins.idle (5, check);
+        twins.step ({ press ("go") });                 // a memo
+        twins.idle (3, check);
+        twins.step ({ press ("go") });                 // the automatic sequence
+        twins.idle (20, check);
+        twins.step ({ press ("go") });                 // the timeline
+        twins.idle (30, check);
+
+        twins.step ({ standby (show.rain) });          // into the act: the look-ahead prepares it
+        twins.idle (6, check);
+        twins.step ({ press ("go") });                 // the act entered at its sound
+        twins.idle (8, check);
+        twins.step ({ press ("go.doh") });             // taken back
+        twins.idle (8, check);
+        twins.step ({ press ("go") });                 // and again
+        twins.idle (8, check);
+        twins.step ({ press ("go") });                 // the act's memo
+        twins.idle (8, check);
+        twins.step ({ press ("cue.fire", { osc::Value::string (show.after) }) });
+        twins.idle (8, check);
+        twins.step ({ press ("run.stopAll") });        // Esc: footers run
+        twins.idle (80, check);
+    }
+}
+
+TEST_CASE ("run names: two machines, one salt, the operator's events alone - the same runs on every tick")
+{
+    const TwinShow show;
+    Twins twins { show };
+
+    SUBCASE ("each handed the same events")                                       { twins.follow = false; }
+    SUBCASE ("the second handed the first's records as applied, as a backup is") { twins.follow = true; }
+
+    std::string differs;
+
+    const auto check = [&]
+    {
+        if (differs.empty())
+            if (const auto what = firstDifference (twins.a.runs, twins.b.runs, true); ! what.empty())
+                differs = "tick " + std::to_string (twins.a.tick - 1) + ": " + what;
+    };
+
+    playTheEvening (twins, show, check);
+
+    CHECK (differs == "");
+
+    /*  AND IT WAS AN EVENING: groups launched their members, the act was
+        prepared ahead and adopted, the Doh put something back. */
+    const auto made = twins.a.runs.all().size();
+    INFO ("runs made: " << made);
+    CHECK (made > 15u);
+
+    const auto count = [&] (const std::string& cueId)
+    {
+        return std::count_if (twins.a.runs.all().begin(), twins.a.runs.all().end(),
+                              [&cueId] (const cue::Run& run) { return run.cue == cueId; });
+    };
+
+    CHECK (count (show.preshow) == 1);
+    CHECK (count (show.scene) == 1);
+    CHECK (count (show.act) >= 1);
+    CHECK (count (show.after) == 1);
+
+    const auto log = LogFile::parse (twins.a.engine.log().contents());
+    const auto logged = [&log] (const std::string& command)
+    {
+        return std::any_of (log.records.begin(), log.records.end(),
+                            [&command] (const LogRecord& record)
+                            {
+                                return record.command == command && record.kind == LogRecord::Kind::applied;
+                            });
+    };
+
+    CHECK (logged ("run.prepare"));
+    CHECK (logged ("run.spawn"));
+    CHECK (logged ("audio.arm"));
+    CHECK (logged ("go.doh"));
+
+    /*  AND THE TWO LOGS ARE ONE LOG, record for record: the engine's own
+        records named the same runs on both. */
+    CHECK (twins.a.engine.log().contents() == twins.b.engine.log().contents());
+}
+
+TEST_CASE ("run names: two salts, the same evening - other names, the same shape")
+{
+    const TwinShow show;
+    Twins twins { show };
+    twins.b.runner.runNames().setSalt (twins.a.runner.runNames().salt() ^ 0x5a5a5a5a5a5aull);
+
+    std::string differs;
+
+    const auto check = [&]
+    {
+        if (differs.empty())
+            if (const auto what = firstDifference (twins.a.runs, twins.b.runs, false); ! what.empty())
+                differs = "tick " + std::to_string (twins.a.tick - 1) + ": " + what;
+    };
+
+    playTheEvening (twins, show, check);
+
+    CHECK (differs == "");
+    CHECK (twins.a.runs.all().size() > 15u);
+}
+
+TEST_CASE ("run names: a shuffled group draws the same rounds under one salt, others under another")
+{
+    /*  The seed of a shuffle nobody seeded is the hook's decision, which each
+        machine makes for itself: derived from the salt and the group's run, so
+        a pair shuffles alike - and the show still differs night to night. */
+    std::string text, listId, groupId;
+
+    {
+        RoundRig maker;
+        maker.setGroup ("selection", "shuffle");
+        maker.setGroup ("loops", "4");
+
+        for (int n = 3; n < 7; ++n)
+            REQUIRE (maker.document.createCue (maker.groupId, n, "memo", "More " + std::to_string (n)).ok);
+
+        text = doc::CanonicalXml::write (maker.document);
+        listId = maker.listId;
+        groupId = maker.groupId;
+    }
+
+    const auto evening = [&] (RoundRig& rig, std::optional<std::uint64_t> salt)
+    {
+        REQUIRE (doc::CanonicalXml::read (text, rig.document).ok);
+
+        if (salt.has_value())
+            rig.runner.runNames().setSalt (*salt);
+
+        REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string (cue::standbyAddressOf (listId)),
+                                                  osc::Value::string (groupId) }).rejected == 0);
+        rig.tickOnce();
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        for (int n = 0; n < 300; ++n)
+            rig.tickOnce();
+
+        return rig.rounds();
+    };
+
+    RoundRig one, two, three;
+    two.runIds.drawSeed();                  // another machine's randomness: see `Twins`
+    const auto first = evening (one, std::nullopt);
+    const auto second = evening (two, std::nullopt);
+    const auto third = evening (three, one.runner.runNames().salt() ^ 0x77ull);
+
+    REQUIRE (first.size() == 4u);
+    CHECK (first == second);
+
+    REQUIRE (third.size() == 4u);
+    CHECK (first != third);
+
+    //  Under one name: the group's run, named alike on the two machines.
+    REQUIRE_FALSE (one.runs.all().empty());
+    REQUIRE_FALSE (two.runs.all().empty());
+    CHECK (one.runs.all().front().id == two.runs.all().front().id);
 }
