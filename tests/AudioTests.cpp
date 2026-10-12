@@ -8265,8 +8265,14 @@ TEST_CASE ("audio host: a song and its LTC fired together in one group start on 
     runner.setSamplesPerTick (rate / 50);
     runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
 
+    /*  ROOM FOR THE SLOWEST DISK THE WAIT BELOW ALLOWS: up to four hundred
+        ticks for the cold tone to arm, then a hundred more, at seven blocks a
+        tick - about nine seconds. Four seconds was this machine's disk and not
+        a CI runner's: on macOS (run 38243301291) the tone armed 153 ticks in,
+        the recording filled 1.1 s into the code, and the decoder read 28
+        frames of the 35 played. */
     RecordingSink sink;
-    sink.prepare (settings.outputChannels, 4 * rate);
+    sink.prepare (settings.outputChannels, 12 * rate);
     rig.host.setBlockSink (&sink);
     const auto began = rig.host.clock().samplesElapsed();
 
@@ -8324,6 +8330,9 @@ TEST_CASE ("audio host: a song and its LTC fired together in one group start on 
     REQUIRE (stopPosted > 0);
 
     rig.host.setBlockSink (nullptr);
+
+    //  A recording that filled before the end is a test too short for its disk, not a code that stopped.
+    REQUIRE (sink.written < sink.buffer.getNumSamples());
 
     REQUIRE (codeOf()->isFinished());
     CHECK (rig.host.timecodeProgram() == 0);

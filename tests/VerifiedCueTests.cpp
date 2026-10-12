@@ -1898,11 +1898,26 @@ TEST_CASE ("go.doh: what the GO committed to a device left to its operator is ne
     CHECK (rig.runs.hasChildFor (again->id, scene.cue) == (takeBack || adopted));
 
     rig.engine.submit ("cli", "go", {});
-    ticksOf (rig, 10);
 
     /*  (2026-10-03, D3: and that put-back is one more datagram on a console
-        that takes back.) */
-    CHECK (rig.sender.sentFor ("K3PV7WRB") == (takeBack ? 3u : 1u));
+        that takes back.)
+
+        WAITED FOR, AS THE LOOP ABOVE WAITS: the loop's "two sent" can be the
+        GO's write and the put-back, with the horizon's pre-send still a
+        read-back round trip away - on a fast machine it lands inside the ten
+        ticks below, on a loaded CI runner it did not (Windows, run
+        38243301291: two of three). Bounded, then the same ten ticks, so a
+        datagram too many is still caught. */
+    const auto wanted = takeBack ? 3u : 1u;
+
+    for (int n = 0; n < 600 && rig.sender.sentFor ("K3PV7WRB") < wanted; ++n)
+    {
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    ticksOf (rig, 10);
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == wanted);
 }
 
 TEST_CASE ("go.doh: the next scene the horizon prepared inside the GO's own act is not the GO's - given back with its pre-send put back")
