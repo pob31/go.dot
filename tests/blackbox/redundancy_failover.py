@@ -286,6 +286,12 @@ def run() -> int:
                                   and read_main("/godot/pair/state") == "leading", 6.0),
                          "the backup follows its main, the main leads",
                          f"backup {read_backup('/godot/pair/state')!r}, main {read_main('/godot/pair/state')!r}")
+            # In step before an edit is asked to travel, as the second pair below waits (6cb7597):
+            # the same from-now gap opened here under the real-time sanitizer's slowness
+            # (38209202452, fr_FR), and the two port edits fell in it.
+            report.check(wait_for(lambda: read_backup("/godot/pair/inStep") == "true", 6.0),
+                         "and is seated in step before anything is asked of it",
+                         f"backup {pair_rows(read_backup)}")
             report.check(aim_at_the_device(send_main, read_backup),
                          "the two devices retyped at the main are retyped on the backup")
 
