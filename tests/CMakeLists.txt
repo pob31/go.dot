@@ -94,6 +94,7 @@ add_executable(wfg_tests
     AuthoringTests.cpp
     ProcessTests.cpp
     TimecodeTests.cpp
+    LtcReader.h
     TimecodeRunTests.cpp
     SerialTests.cpp
     WireTests.cpp

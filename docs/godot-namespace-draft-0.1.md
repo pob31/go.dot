@@ -26057,3 +26057,32 @@ clean over a ten-minute render.
   its sample, a full frame first, re-seated at the next cycle for a jump or the hold's release, the
   label of each cycle wrapped at midnight; 23.976 sent as 24 and 29.97 non-drop as 30 (AHG). Golden
   vectors by hand and readers of the tests' own, written from the standard's table.
+- **TC.3**, 2026-10-12: LTC drawn on the audio thread. `timecode::LtcGenerator`, vendor-free and
+  header-only: an inbox of 32 one way (RateVoice's shape) carries a start (program, zero, frame,
+  rate), a stop and a cut, drained each block into a short list kept in sample order and applied
+  each on its own sample, the block split there. A start replaces whatever program is drawing at
+  its sample (AHL); a stop ends its program on the first frame boundary at or after its sample, a
+  cut on its sample (AHK); a stop or a cut also takes back a start of its program posted before it
+  that has not begun - an Esc inside the launch horizon. A start or a placed stop that arrives for a
+  sample already drawn is counted (`lateCount`, for `sync/ltcLate`), a stop applied at the block's
+  start and a start at the first frame boundary of its own clock at or after it; a stop or a cut
+  for sample 0 or below is an Esc's "as soon as can be" and never late. Where the line is at the
+  start of each stretch comes from FrameClock's one rule afresh (`partAtSample`, 160 parts), each
+  next edge from `partStartSample`; labels through `labelOf`, the 80 bits from `ltcBits` once a
+  frame. Each edge is placed at its exact fraction of a sample (the sample holding it the
+  area-weighted mean of the two levels), then a one-pole low-pass of 40 / 2.197 µs (AHJ); a start
+  on a silent line resets it and rises from nought on its zero, a takeover keeps it and goes the
+  other way from where the line stands. `prepare` empties everything and moves a generation on
+  (AHU); a command posted under the generation before is dropped. `AudioHost` prepares it at
+  `start` and `stop` and renders it after the outputs' gains, before the sink (AHI: the channel is
+  replaced, silent between runs); `postTimecode`, `setTimecodeOutput`, `timecodeLate`,
+  `timecodeProgram`, `timecodeGeneration`. `cue::Player` gains `placeTimecode`, `stopTimecode`,
+  `setTimecodeOutput`, `timecodeGeneration`, `timecodeLate` with no-op defaults; `HostPlayer`
+  forwards them. No Runner calls yet (TC.4). Tests: `tests/LtcReader.h`, a decoder written from
+  the standard's description that shares no code with the encoder or the generator (zero
+  crossings with hysteresis, short and long against three quarters of a bit, the sync word in an
+  80-bit window); every rate at 44.1, 48 and 96 kHz in blocks of 64, 128, 480, 512, 1, 333 and 7;
+  through midnight at 29.97 drop-frame and from a day back at 192 kHz; the first sample at the
+  start's own; each edge's fraction and the rise recovered by inverting the low-pass; stops, cuts,
+  takeovers, late and as-soon-as-can-be commands; and through `AudioHost::processBlock`, the code
+  on its channel with a tone routed there replaced and the DCA down, and no allocation of Go.dot's.

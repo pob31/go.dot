@@ -335,6 +335,34 @@ namespace wfg::cue
             (void) gainDb;
         }
 
+        /*  LTC, DRAWN BY THE AUDIO SIDE (namespace draft §59, TC.3). Program
+            `program` - a number the Runner gives each run, never nought - has
+            frame `startFrame` of `rate` begin on Go.dot's sample `zeroSample`,
+            and replaces whatever program the line is drawing then: a takeover
+            or a jump, with the line never quiet between (AHL). Placed ahead,
+            as a launch is. False when nothing can play it - a replay, a test's
+            player, a host not running - which is every player's answer but
+            HostPlayer's. Tick thread, never blocking. */
+        virtual bool placeTimecode (std::uint64_t, std::int64_t, std::int64_t, timecode::Rate) { return false; }
+
+        /*  AND HOW IT ENDS (AHK): at the first frame boundary at or after
+            `atSample`, or exactly there with `cut` - a double Esc. An
+            `atSample` of nought or less is as soon as can be: an Esc is decided
+            on the tick and never placed ahead. A stop for a program whose start
+            has not come yet takes that start back. Tick thread. */
+        virtual void stopTimecode (std::uint64_t, std::int64_t, bool) {}
+
+        /*  Where LTC plays and how loud: a logical output channel, -1 for
+            none, and its peak in dBFS (AHH, AHI). Tick thread. */
+        virtual void setTimecodeOutput (int, double) {}
+
+        /*  A number that moves at every audio restart, which ends every
+            timecode run (AHU); and the starts, stops and cuts that reached the
+            audio side after their sample (`sync/ltcLate`). Nought for a player
+            with no audio side. */
+        virtual std::uint64_t timecodeGeneration() const { return 0; }
+        virtual std::uint32_t timecodeLate() const { return 0; }
+
         /*  A VOICE'S SPEED, placed ahead (namespace draft §22.4): from the last
             breakpoint the voice holds, its speed moves in a straight line to
             `rate` at `sample` - one is the file's own - and two at one sample

@@ -358,6 +358,39 @@ namespace wfg::audio
         audioHost.setOutputGainDb (firstChannel, width, gainDb);
     }
 
+    bool HostPlayer::placeTimecode (std::uint64_t program, std::int64_t zeroSample, std::int64_t startFrame,
+                                    timecode::Rate rate)
+    {
+        /*  The tick thread, at a timecode run's start or jump (namespace draft
+            §59): one command into the generator's queue, which the audio thread
+            drains every block. Nothing waits. */
+        return audioHost.postTimecode (timecode::LtcGenerator::Command::start (program, zeroSample, startFrame, rate));
+    }
+
+    void HostPlayer::stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut)
+    {
+        using Command = timecode::LtcGenerator::Command;
+
+        /*  A full queue drops it, and cannot be full unless the audio thread
+            has stopped draining it - when there is no line left to stop. */
+        audioHost.postTimecode (cut ? Command::cut (program, atSample) : Command::stop (program, atSample));
+    }
+
+    void HostPlayer::setTimecodeOutput (int channel, double levelDb)
+    {
+        audioHost.setTimecodeOutput (channel, levelDb);
+    }
+
+    std::uint64_t HostPlayer::timecodeGeneration() const
+    {
+        return audioHost.timecodeGeneration();
+    }
+
+    std::uint32_t HostPlayer::timecodeLate() const
+    {
+        return audioHost.timecodeLate();
+    }
+
     bool HostPlayer::placeRate (int track, std::int64_t sample, double rate)
     {
         /*  The tick thread, at a launch and at each change of speed (namespace

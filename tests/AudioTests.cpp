@@ -57,6 +57,7 @@
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
 
+#include "LtcReader.h"
 #include "TestSupport.h"
 
 #include <algorithm>
@@ -7990,6 +7991,193 @@ TEST_CASE ("audio host: an output's gain trims what leaves on its channels and n
     CHECK (sink[1] == doctest::Approx (sourceAmplitude (0)).epsilon (0.02));
 
     rig.host.setBlockSink (nullptr);
+}
+
+//==============================================================================
+TEST_CASE ("audio host: LTC replaces its channel from the sample it was placed at, after the output's gain")
+{
+    /*  Namespace draft §59 (TC.3, AHI): the code is drawn into one output
+        channel AFTER the output's trim and DCA, and replaces what the graph
+        mixed there. A steady tone is routed onto channel 0 and onto channel 2,
+        the LTC channel: channel 0 carries it throughout, channel 2 nothing but
+        the code - silence up to the start's own sample, then frames read back
+        from it - and the output's DCA pulled all the way down halfway through
+        leaves the code at its level. Through HostPlayer, the Player the Runner
+        holds, so the forwarding is what is tested. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 4;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 1, rate, 4);
+    REQUIRE (tone.existsAsFile());
+    REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
+
+    auto* matrix = rig.host.trackMatrix (0);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->setGain (0, 2, 1.0f);
+    matrix->snapToTargets();
+
+    Engine engine;
+    audio::HostPlayer player { rig.host, engine };
+    player.setTimecodeOutput (2, -18.0);
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+    REQUIRE (rig.host.launchTrack (0));
+
+    //  Past the launch, so the tone is sounding before anything is recorded.
+    for (int i = 0; i < 32; ++i)
+        rig.host.processBlock();
+
+    RecordingSink sink;
+    sink.prepare (settings.outputChannels, 2 * rate);
+    rig.host.setBlockSink (&sink);
+
+    const auto began = rig.host.clock().samplesElapsed();
+
+    //  Mid-block and a few blocks ahead, as the Runner places a launch.
+    const auto zero = began + 1000;
+    const auto rateOfCode = timecode::Rate::fps25;
+    const auto startFrame = timecode::frameOf (timecode::Label { 1, 0, 0, 0 }, rateOfCode);
+    REQUIRE (player.placeTimecode (11, zero, startFrame, rateOfCode));
+
+    const auto blocks = (2 * rate) / blockSize;
+
+    for (int i = 0; i < blocks; ++i)
+    {
+        if (i == blocks / 2)
+            player.setOutputGainDb (2, 1, -120.0);
+
+        rig.host.processBlock();
+    }
+
+    rig.host.setBlockSink (nullptr);
+
+    CHECK (rig.host.timecodeProgram() == 11);
+    CHECK (player.timecodeLate() == 0);
+
+    //  The tone sounds on channel 0 ...
+    CHECK (sink.firstSoundAt (0) == 0);
+    CHECK (sink.buffer.getMagnitude (0, 0, sink.written) == doctest::Approx (sourceAmplitude (0)).epsilon (0.02));
+
+    //  ... and not on channel 2, silent to the start's very sample.
+    const auto* line = sink.buffer.getReadPointer (2);
+    std::int64_t firstCode = -1;
+
+    for (int n = 0; n < sink.written && firstCode < 0; ++n)
+        if (std::abs (line[n]) > 0.0f)
+            firstCode = began + n;
+
+    CHECK (firstCode == zero);
+
+    //  From there, frames from 01:00:00:00, each on its own sample.
+    const auto frames = ltcreader::decode (line, static_cast<std::size_t> (sink.written), static_cast<double> (rate),
+                                           25.0, began);
+    REQUIRE (frames.size() >= 45u);
+
+    int wrong = 0;
+
+    for (std::size_t k = 0; k < frames.size(); ++k)
+    {
+        const auto& frame = frames[k];
+        const auto wanted = timecode::labelOf (startFrame + static_cast<std::int64_t> (k), rateOfCode);
+        const auto due = zero + 1920 * static_cast<std::int64_t> (k);
+
+        if (frame.hours != wanted.hours || frame.minutes != wanted.minutes || frame.seconds != wanted.seconds
+              || frame.frames != wanted.frames || ! frame.evenParity || frame.sample < due - 1 || frame.sample > due + 2)
+            ++wrong;
+    }
+
+    CHECK (wrong == 0);
+    CHECK (frames.front().sample == zero);
+
+    //  At -18 dBFS with the output's DCA up and down: the second half is the down half.
+    const auto level = juce::Decibels::decibelsToGain (-18.0f);
+    const auto lastHalf = sink.written / 2 + blockSize;
+
+    CHECK (sink.buffer.getMagnitude (2, 0, sink.written) <= level * 1.000001f);
+    CHECK (sink.buffer.getMagnitude (2, lastHalf, sink.written - lastHalf) >= level * 0.999f);
+
+    //  A host stopped plays no timecode, and its generation has moved: an audio restart (AHU).
+    const auto generation = player.timecodeGeneration();
+    rig.host.stop();
+
+    CHECK (rig.host.timecodeProgram() == 0);
+    CHECK (player.timecodeGeneration() != generation);
+    CHECK_FALSE (player.placeTimecode (12, zero, startFrame, rateOfCode));
+}
+
+TEST_CASE ("rt: LTC drawn on the audio thread allocates nothing of ours")
+{
+    /*  PRD §4.2 with the generator working: a run drawing, a takeover and a
+        stop posted from this thread while the blocks run - which is what the
+        tick thread will do - and the late path taken too. Go.dot's regions
+        allocate nothing. */
+    REQUIRE (rt::isCounting());
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 8;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    using Command = timecode::LtcGenerator::Command;
+    const auto rate = timecode::Rate::fps2997df;
+
+    rig.host.setTimecodeOutput (7, -18.0);
+    REQUIRE (rig.host.postTimecode (Command::start (1, rig.host.clock().samplesElapsed() + 500, 0, rate)));
+
+    for (int i = 0; i < 200; ++i)
+        rig.host.processBlock();
+
+    REQUIRE (rig.host.timecodeProgram() == 1);
+
+    rt::resetCounts();
+
+    for (int i = 0; i < 300; ++i)
+    {
+        const auto now = rig.host.clock().samplesElapsed();
+
+        if (i == 100)
+            REQUIRE (rig.host.postTimecode (Command::start (2, now + 300, timecode::frameOf ({ 10, 0, 0, 0 }, rate), rate)));
+
+        if (i == 150)
+            REQUIRE (rig.host.postTimecode (Command::start (3, now - 1000, 0, rate)));
+
+        if (i == 200)
+            REQUIRE (rig.host.postTimecode (Command::stop (3, 0)));
+
+        rig.host.processBlock();
+    }
+
+    INFO ("Go.dot's own regions allocated " << rt::violations() << " times while LTC was drawn");
+    CHECK (rt::violations() == 0);
+    CHECK (rig.host.timecodeProgram() == 0);
+    CHECK (rig.host.timecodeLate() == 1);
 }
 
 

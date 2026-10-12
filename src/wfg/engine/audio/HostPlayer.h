@@ -84,6 +84,16 @@ namespace wfg::audio
         bool stopAtSample (int track, int slot, std::int64_t sample) override;
         void setLevelDb (int track, double levelDb) override;
         void setOutputGainDb (int firstChannel, int width, double gainDb) override;
+
+        /*  LTC (namespace draft §59, TC.3): handed to AudioHost's generator,
+            a queue of thirty-two one way. */
+        bool placeTimecode (std::uint64_t program, std::int64_t zeroSample, std::int64_t startFrame,
+                            timecode::Rate rate) override;
+        void stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut) override;
+        void setTimecodeOutput (int channel, double levelDb) override;
+        std::uint64_t timecodeGeneration() const override;
+        std::uint32_t timecodeLate() const override;
+
         bool placeRate (int track, std::int64_t sample, double rate) override;
         std::uint64_t placeLoop (int track, int slot, const LoopMove& move) override;
         void endsOutside (int track, bool outside) override;

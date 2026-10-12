@@ -24,6 +24,7 @@
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/clock/SampleClock.h>
+#include <wfg/engine/timecode/LtcGenerator.h>
 
 #include <array>
 #include <cstdint>
@@ -543,6 +544,28 @@ namespace wfg::audio
             for had played, and were placed at the block instead - the horizon
             exists so that this stays nought. Any thread. */
         std::uint32_t trackRateLateCount (int trackIndex) const noexcept;
+
+        /*  LTC, DRAWN ON THE AUDIO THREAD (namespace draft §59, TC.3): a start,
+            a stop or a cut for the generator, which applies it on its sample -
+            LtcGenerator.h says exactly how. Tick thread, lock-free: a queue of
+            thirty-two one way, drained every block. False when the host is not
+            running or the queue is full, so nothing would play it. */
+        bool postTimecode (const timecode::LtcGenerator::Command& command) noexcept;
+
+        /*  WHERE LTC PLAYS AND HOW LOUD (AHH, AHI): a logical output channel,
+            -1 for none, and the code's peak in dBFS, -120 and below silence.
+            The code replaces whatever that channel carries, after the output's
+            trim and DCA. Any thread: two relaxed stores. */
+        void setTimecodeOutput (int channel, double levelDb) noexcept;
+
+        /*  Readouts, any thread: the starts, stops and cuts that reached the
+            audio side after their sample (`sync/ltcLate`); the program the line
+            is drawing, nought for none; and how many times the generator has
+            been prepared - at every start and stop of the host, so a change is
+            an audio restart, which ends every timecode run (AHU). */
+        std::uint32_t timecodeLate() const noexcept;
+        std::uint64_t timecodeProgram() const noexcept;
+        std::uint64_t timecodeGeneration() const noexcept;
 
         /*  A SLOT'S LOOP POINTS MOVED WHILE IT PLAYS (namespace draft §33): from
             the segment's reader position on, the slot's clip reads the file

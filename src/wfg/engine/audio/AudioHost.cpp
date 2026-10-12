@@ -413,6 +413,13 @@ namespace wfg::audio
                 outputRamps[channel].setCurrentAndTargetValue (1.0f);
             }
 
+            /*  LTC AT THE RATE IT WILL BE DRAWN AT (namespace draft §59): no
+                program, the line silent, the inbox empty, and its generation
+                moved on - an audio restart ends every timecode run, as it ends
+                sound (AHU), and the Runner reads that here. Where it goes and
+                how loud are the show's, set by the tick, and kept. */
+            ltc.prepare (requested.sampleRate);
+
             current = requested;
             sampleRate = static_cast<double> (requested.sampleRate);
             blocks.store (0, std::memory_order_relaxed);
@@ -1322,6 +1329,11 @@ namespace wfg::audio
             stretchLimit.store (0.0, std::memory_order_relaxed);
             context = nullptr;
 
+            /*  No sample rate, so nothing drawn and nothing taken: a stopped
+                host plays no timecode, and says so - its program reads nought
+                and its generation has moved (AHU). */
+            ltc.prepare (0);
+
             if (engine != nullptr)
             {
                 /*  Tearing the engine down touches the same flag that starting
@@ -1429,6 +1441,16 @@ namespace wfg::audio
 
                 ramp.applyGain (scratch.getWritePointer (channel), current.blockSize);
             }
+
+            /*  LTC (namespace draft §59, AHI), AFTER each output's gain and
+                before the block leaves: the generator replaces its channel with
+                the code - silence between runs - so no sound routed there leaks
+                onto the line and no DCA pulled down cuts it. Its commands are
+                placed on Go.dot's own count, which is where this block starts.
+                Ours, and allocation-free: a fixed inbox drained into a fixed
+                list, and arithmetic. */
+            ltc.render (scratch.getArrayOfWritePointers(), current.outputChannels, current.blockSize,
+                        tapView.blockStart);
 
             if (sink != nullptr)
                 sink->blockProduced (scratch.getArrayOfReadPointers(),
@@ -2501,6 +2523,11 @@ namespace wfg::audio
         std::vector<juce::SmoothedValue<float>> outputRamps;
         int outputChannels = 0;
 
+        /*  THE LTC GENERATOR (namespace draft §59, TC.3): prepared at `start`
+            and `stop`, rendered at the end of every block, posted to from the
+            tick thread. */
+        timecode::LtcGenerator ltc;
+
         AudioClockSource samples;
         std::atomic<std::int64_t> blocks { 0 };
 
@@ -3072,6 +3099,26 @@ namespace wfg::audio
         for (int channel = std::max (0, firstChannel); channel < firstChannel + width && channel < impl->outputChannels; ++channel)
             impl->outputGains[static_cast<std::size_t> (channel)].store (gain, std::memory_order_relaxed);
     }
+
+    bool AudioHost::postTimecode (const timecode::LtcGenerator::Command& command) noexcept
+    {
+        if (! impl->running)
+            return false;
+
+        return impl->ltc.post (command);
+    }
+
+    void AudioHost::setTimecodeOutput (int channel, double levelDb) noexcept
+    {
+        const auto gain = levelDb <= -120.0 ? 0.0f
+                                            : juce::Decibels::decibelsToGain (static_cast<float> (levelDb), -120.0f);
+
+        impl->ltc.setOutput (channel, gain);
+    }
+
+    std::uint32_t AudioHost::timecodeLate() const noexcept        { return impl->ltc.lateCount(); }
+    std::uint64_t AudioHost::timecodeProgram() const noexcept     { return impl->ltc.currentProgram(); }
+    std::uint64_t AudioHost::timecodeGeneration() const noexcept  { return impl->ltc.generation(); }
 
     int AudioHost::inputChannelCount() const noexcept
     {

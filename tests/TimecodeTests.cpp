@@ -32,16 +32,27 @@
     against the standard and not against itself. The due samples were computed
     in exact integers outside the code. Nothing here reads a clock or a locale;
     it runs in both locales because a label is text a show stores.
+
+    Last, TC.3's generator (AHJ, AHK, AHL): the sound the audio thread draws,
+    rendered block by block as AudioHost renders it and read back by
+    LtcReader.h - a reader written from the standard's description of the
+    signal that shares no code with the encoder or the generator, so the line
+    is judged by what a timecode reader would make of it.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include "LtcReader.h"
+
 #include <wfg/engine/timecode/FrameClock.h>
 #include <wfg/engine/timecode/LtcEncoder.h>
+#include <wfg/engine/timecode/LtcGenerator.h>
 #include <wfg/engine/timecode/MtcSchedule.h>
 #include <wfg/engine/timecode/Timecode.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -863,4 +874,904 @@ TEST_CASE ("timecode: an MTC cursor re-seated mid-cycle starts at the next piece
     CHECK (cursor.quarter() == 0);
     CHECK (cursor.fullFrameFirst());
     CHECK (cursor.next().dueSample == 5000);
+}
+
+//==============================================================================
+//  LTC drawn: the generator on the audio thread, read back (TC.3)
+
+namespace
+{
+    //  -18 dBFS, the show's default level (AHH), as the line's peak.
+    const float ltcGain = static_cast<float> (std::pow (10.0, -18.0 / 20.0));
+
+    /*  The one-pole low-pass every edge goes through (AHJ): a 10-90 % rise of
+        40 microseconds is a time constant of 40 / 2.197 of them. The step is
+        how far towards its input the line moves in one sample. */
+    double tauSamples (int sampleRate)
+    {
+        return static_cast<double> (sampleRate) * 40.0e-6 / 2.197;
+    }
+
+    double lowPassStep (int sampleRate)
+    {
+        return 1.0 - std::exp (-1.0 / tauSamples (sampleRate));
+    }
+
+    //  Eight time constants, in whole samples: the line is quiet by then.
+    std::int64_t fewTaus (int sampleRate)
+    {
+        return static_cast<std::int64_t> (std::ceil (8.0 * tauSamples (sampleRate)));
+    }
+
+    double framesPerSecondOf (Rate rate)
+    {
+        return static_cast<double> (numOf (rate)) / static_cast<double> (denOf (rate));
+    }
+
+    //  Block sizes as an interface might hand them, a block of one among them.
+    const std::vector<int> mixedBlocks { 64, 128, 480, 512, 1, 333, 7 };
+
+    //  What a cue routed onto the LTC channel would have put there.
+    constexpr float routedSound = 0.7f;
+
+    /*  WHAT THE LINE CARRIED from `from` for `count` samples, rendered the way
+        AudioHost renders it - a block at a time into one channel of a block
+        `width` wide - with every channel holding sound before each block, so
+        whatever the generator did not replace is seen. */
+    struct Line
+    {
+        std::int64_t from = 0;
+        std::vector<float> samples;
+
+        //  Samples of the other channels that no longer hold what they held.
+        std::int64_t othersTouched = 0;
+
+        float at (std::int64_t sample) const
+        {
+            return samples.at (static_cast<std::size_t> (sample - from));
+        }
+
+        std::int64_t end() const
+        {
+            return from + static_cast<std::int64_t> (samples.size());
+        }
+    };
+
+    Line render (LtcGenerator& generator, std::int64_t from, std::int64_t count,
+                 const std::vector<int>& sizes = mixedBlocks, int channel = 1, int width = 2)
+    {
+        Line line;
+        line.from = from;
+        line.samples.assign (static_cast<std::size_t> (count), 0.0f);
+
+        const auto largest = static_cast<std::size_t> (*std::max_element (sizes.begin(), sizes.end()));
+        std::vector<std::vector<float>> block (static_cast<std::size_t> (width), std::vector<float> (largest));
+        std::vector<float*> pointers;
+
+        for (auto& one : block)
+            pointers.push_back (one.data());
+
+        std::int64_t at = from;
+        std::size_t which = 0;
+
+        while (at < from + count)
+        {
+            const auto size = std::min<std::int64_t> (sizes[which++ % sizes.size()], from + count - at);
+
+            for (auto& one : block)
+                std::fill (one.begin(), one.end(), routedSound);
+
+            generator.render (pointers.data(), width, static_cast<int> (size), at);
+
+            for (std::size_t c = 0; c < block.size(); ++c)
+            {
+                for (std::size_t n = 0; n < static_cast<std::size_t> (size); ++n)
+                {
+                    const auto value = block[c][n];
+
+                    if (static_cast<int> (c) == channel)
+                        line.samples[static_cast<std::size_t> (at - from) + n] = value;
+                    else if (std::fabs (value - routedSound) > 0.0f)
+                        ++line.othersTouched;
+                }
+            }
+
+            at += size;
+        }
+
+        return line;
+    }
+
+    std::vector<ltcreader::Frame> read (const Line& line, int sampleRate, Rate rate)
+    {
+        return ltcreader::decode (line.samples.data(), line.samples.size(), static_cast<double> (sampleRate),
+                                  framesPerSecondOf (rate), line.from);
+    }
+
+    Label heardLabel (const ltcreader::Frame& frame)
+    {
+        return Label { frame.hours, frame.minutes, frame.seconds, frame.frames };
+    }
+
+    //  The first sample that is not nought, or -1.
+    std::int64_t firstNonZero (const Line& line)
+    {
+        for (std::size_t n = 0; n < line.samples.size(); ++n)
+            if (std::fabs (line.samples[n]) > 0.0f)
+                return line.from + static_cast<std::int64_t> (n);
+
+        return -1;
+    }
+
+    //  How many samples from `from` on are not below `level`.
+    std::int64_t aboveFrom (const Line& line, std::int64_t from, float level)
+    {
+        std::int64_t above = 0;
+
+        for (auto sample = std::max (from, line.from); sample < line.end(); ++sample)
+            if (! (std::fabs (line.at (sample)) < level))
+                ++above;
+
+        return above;
+    }
+
+    //  The longest run of samples in [from, to) whose magnitude is below `level`.
+    std::int64_t longestBelow (const Line& line, std::int64_t from, std::int64_t to, float level)
+    {
+        std::int64_t longest = 0, run = 0;
+
+        for (auto sample = from; sample < to; ++sample)
+        {
+            run = std::fabs (line.at (sample)) < level ? run + 1 : 0;
+            longest = std::max (longest, run);
+        }
+
+        return longest;
+    }
+
+    float peakOf (const Line& line)
+    {
+        float peak = 0.0f;
+
+        for (const auto value : line.samples)
+            peak = std::max (peak, std::fabs (value));
+
+        return peak;
+    }
+
+    /*  THAT A RUN READ BACK FRAME BY FRAME: frames `from` to `from + count` of
+        what was read are frames `first`, `first + 1`... of a program whose frame
+        nought began on `zero` and was called `startFrame` - each with the label
+        the rate gives it (the day wrapped), its ones even, the drop-frame flag
+        exactly at drop-frame, and its bit 0 within a sample before and four
+        after where the one rule puts the frame: the low-pass delays a zero
+        crossing by up to 2.4 samples at 192 kHz, and an edge placed early in a
+        sample can tip that sample over. */
+    struct RunCheck
+    {
+        int wrong = 0;
+        std::string firstWrong;
+    };
+
+    RunCheck checkRun (const std::vector<ltcreader::Frame>& frames, std::size_t from, std::size_t count,
+                       std::int64_t zero, std::int64_t startFrame, std::int64_t first, int sampleRate, Rate rate)
+    {
+        RunCheck result;
+
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            const auto& frame = frames.at (from + i);
+            const auto k = first + static_cast<std::int64_t> (i);
+            const auto wanted = labelOf (startFrame + k, rate);
+            const auto due = zero + frameStartSample (k, sampleRate, rate);
+            const auto off = frame.sample - due;
+
+            const auto right = heardLabel (frame) == wanted && frame.evenParity
+                                 && frame.dropFrame == dropsFrames (rate) && off >= -1 && off <= 4;
+
+            if (! right && result.wrong++ == 0)
+                result.firstWrong = "frame " + std::to_string (k) + ": heard " + formatLabel (heardLabel (frame), rate)
+                                      + " at " + std::to_string (frame.sample) + (frame.evenParity ? "" : " (odd)")
+                                      + (frame.dropFrame ? " (drop)" : "") + ", wanted " + formatLabel (wanted, rate)
+                                      + " at " + std::to_string (due);
+        }
+
+        return result;
+    }
+
+    using Command = LtcGenerator::Command;
+
+    struct RateAt
+    {
+        Rate rate;
+        int sampleRate;
+    };
+}
+
+TEST_CASE ("ltc generator: three seconds at every rate and 44.1, 48 and 96 kHz read back frame by frame from the start")
+{
+    /*  29.97 at 44.1 kHz is the fractional worst case: a half-bit is 9.197
+        samples and no edge after the first lands on a sample boundary. */
+    for (const auto rate : everyRate)
+    {
+        for (const int sampleRate : { 44100, 48000, 96000 })
+        {
+            INFO ("rate " << std::string (wordOf (rate)) << " at " << sampleRate << " Hz");
+
+            LtcGenerator generator;
+            generator.prepare (sampleRate);
+            generator.setOutput (1, ltcGain);
+
+            constexpr std::int64_t zero = 1000;
+            const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+            REQUIRE (generator.post (Command::start (7, zero, startFrame, rate)));
+
+            const auto line = render (generator, 0, zero + 3 * sampleRate);
+            const auto frames = read (line, sampleRate, rate);
+
+            //  Every frame the three seconds hold whole; the one the render
+            //  ends inside cannot be read.
+            const auto whole = static_cast<std::size_t> (frameAtSample (3 * sampleRate, sampleRate, rate));
+            REQUIRE (frames.size() + 1 >= whole);
+            CHECK (frames.size() <= whole);
+
+            CHECK (frames.front().sample == zero);
+            const auto run = checkRun (frames, 0, frames.size(), zero, startFrame, 0, sampleRate, rate);
+            INFO (run.firstWrong);
+            CHECK (run.wrong == 0);
+
+            CHECK (line.othersTouched == 0);
+            CHECK (generator.currentProgram() == 7);
+            CHECK (generator.lateCount() == 0);
+        }
+    }
+}
+
+TEST_CASE ("ltc generator: 29.97 drop-frame from 23:59:59;27 reads on through midnight")
+{
+    const auto rate = Rate::fps2997df;
+
+    for (const int sampleRate : { 44100, 48000, 96000 })
+    {
+        INFO ("at " << sampleRate << " Hz");
+
+        LtcGenerator generator;
+        generator.prepare (sampleRate);
+        generator.setOutput (1, ltcGain);
+
+        constexpr std::int64_t zero = 4321;
+        const auto startFrame = frameOf (label (23, 59, 59, 27), rate);
+        REQUIRE (generator.post (Command::start (1, zero, startFrame, rate)));
+
+        const auto line = render (generator, 0, zero + 3 * sampleRate);
+        const auto frames = read (line, sampleRate, rate);
+
+        REQUIRE (frames.size() > 80u);
+        CHECK (heardLabel (frames[0]) == label (23, 59, 59, 27));
+        CHECK (heardLabel (frames[2]) == label (23, 59, 59, 29));
+        CHECK (heardLabel (frames[3]) == label (0, 0, 0, 0));
+        CHECK (frames[3].dropFrame);
+
+        const auto run = checkRun (frames, 0, frames.size(), zero, startFrame, 0, sampleRate, rate);
+        INFO (run.firstWrong);
+        CHECK (run.wrong == 0);
+    }
+}
+
+TEST_CASE ("ltc generator: the first sample that is not nought is the start's own, mid-block and across a block edge")
+{
+    /*  Mid-block, a 128-sample block's first sample, its last, and the very
+        first sample drawn; in blocks of 128, of one, and mixed. The line holds
+        nought before, and its first edge goes up to the level. */
+    for (const int sampleRate : { 44100, 48000, 96000, 192000 })
+    {
+        for (const std::int64_t zero : { std::int64_t { 300 }, std::int64_t { 384 }, std::int64_t { 383 }, std::int64_t { 0 } })
+        {
+            for (const auto& sizes : { std::vector<int> { 128 }, std::vector<int> { 1 }, mixedBlocks })
+            {
+                INFO ("at " << sampleRate << " Hz, zero " << zero << ", blocks of " << sizes.front());
+
+                LtcGenerator generator;
+                generator.prepare (sampleRate);
+                generator.setOutput (1, ltcGain);
+                REQUIRE (generator.post (Command::start (1, zero, frameOf (label (1, 0, 0, 0), Rate::fps25), Rate::fps25)));
+
+                const auto line = render (generator, 0, zero + 4000, sizes);
+
+                CHECK (firstNonZero (line) == zero);
+                CHECK (line.at (zero) > 0.0f);
+            }
+        }
+    }
+}
+
+TEST_CASE ("ltc generator: each edge sits at its exact fraction of a sample, rounded by the standard's rise time")
+{
+    /*  THE LINE BEFORE ITS LOW-PASS, recovered: the low-pass is one pole,
+        `y[n] = y[n-1] + a * (x[n] - y[n-1])` with `a` from the 40 microsecond
+        rise (AHJ), so what went in is `(y[n] - (1 - a) * y[n-1]) / a`. If the
+        rise were wrong the levels below would not come out flat. Then every
+        cell's starting edge - every even half-bit `k`, whose exact moment is
+        `k * rate * den / (160 * num)` samples after zero, worked out here in
+        whole numbers - is checked where it falls: on a sample boundary, the
+        level simply changes there; inside a sample, that sample holds the two
+        levels in proportion to the time each held it. 29.97 at 44.1 kHz puts
+        almost every edge inside a sample. */
+    for (const auto& at : { RateAt { Rate::fps2997, 44100 }, RateAt { Rate::fps2997df, 48000 },
+                            RateAt { Rate::fps25, 48000 }, RateAt { Rate::fps23976, 192000 } })
+    {
+        const auto rate = at.rate;
+        const auto sampleRate = at.sampleRate;
+
+        INFO ("rate " << std::string (wordOf (rate)) << " at " << sampleRate << " Hz");
+
+        const auto step = lowPassStep (sampleRate);
+        constexpr std::int64_t zero = 700;
+
+        LtcGenerator generator;
+        generator.prepare (sampleRate);
+        generator.setOutput (1, ltcGain);
+        REQUIRE (generator.post (Command::start (1, zero, frameOf (label (1, 0, 0, 0), rate), rate)));
+
+        const auto line = render (generator, 0, zero + sampleRate / 4);
+        const auto input = [&] (std::int64_t sample)
+        {
+            return (static_cast<double> (line.at (sample)) - (1.0 - step) * static_cast<double> (line.at (sample - 1))) / step;
+        };
+
+        constexpr double tolerance = 1.0e-4;
+        const auto level = static_cast<double> (ltcGain);
+
+        //  Nought before zero, and the first edge from nought up to the level.
+        CHECK (std::fabs (input (zero - 1)) < tolerance);
+        CHECK (input (zero) == doctest::Approx (level).epsilon (tolerance));
+
+        const auto multiplier = static_cast<std::int64_t> (sampleRate) * denOf (rate);
+        const auto divisor = 160 * numOf (rate);
+
+        int edges = 0, inside = 0, wrong = 0;
+        std::string firstWrong;
+
+        for (std::int64_t k = 2; k < 3 * 160; k += 2)
+        {
+            const auto whole = k * multiplier / divisor;
+            const auto rest = k * multiplier % divisor;
+            const auto holding = zero + whole;
+
+            if (holding + 2 >= line.end())
+                break;
+
+            const auto before = input (holding - 1);
+            const auto after = input (holding + 1);
+            const auto here = input (holding);
+            auto right = std::fabs (std::fabs (before) - level) < tolerance && std::fabs (before + after) < tolerance;
+
+            if (rest == 0)
+            {
+                //  On the boundary: the sample `holding` is already the new level.
+                right = right && std::fabs (here - after) < tolerance;
+            }
+            else
+            {
+                const auto share = static_cast<double> (rest) / static_cast<double> (divisor);
+                right = right && std::fabs (here - (share * before + (1.0 - share) * after)) < tolerance;
+                ++inside;
+            }
+
+            ++edges;
+
+            if (! right && wrong++ == 0)
+                firstWrong = "half-bit " + std::to_string (k) + " at sample " + std::to_string (holding) + ": "
+                               + std::to_string (before) + " " + std::to_string (here) + " " + std::to_string (after);
+        }
+
+        INFO (firstWrong);
+        CHECK (wrong == 0);
+        CHECK (edges > 200);
+
+        if (rate == Rate::fps2997)
+            CHECK (inside > edges / 2);
+    }
+}
+
+TEST_CASE ("ltc generator: a stop ends the run on the first frame boundary at or after its sample, its last frame whole")
+{
+    for (const auto& at : { RateAt { Rate::fps25, 48000 }, RateAt { Rate::fps2997, 44100 },
+                            RateAt { Rate::fps2997df, 48000 }, RateAt { Rate::fps23976, 96000 } })
+    {
+        const auto rate = at.rate;
+        const auto sampleRate = at.sampleRate;
+
+        INFO ("rate " << std::string (wordOf (rate)) << " at " << sampleRate << " Hz");
+
+        const auto step = lowPassStep (sampleRate);
+        const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+        constexpr std::int64_t zero = 500;
+
+        //  Seven samples into frame 10: frame 10 is drawn to its end, and no more.
+        {
+            LtcGenerator generator;
+            generator.prepare (sampleRate);
+            generator.setOutput (1, ltcGain);
+
+            const auto stopAt = zero + frameStartSample (10, sampleRate, rate) + 7;
+            const auto end = zero + frameStartSample (11, sampleRate, rate);
+
+            REQUIRE (generator.post (Command::start (3, zero, startFrame, rate)));
+            REQUIRE (generator.post (Command::stop (3, stopAt)));
+
+            const auto line = render (generator, 0, end + sampleRate / 2);
+            const auto frames = read (line, sampleRate, rate);
+
+            REQUIRE (frames.size() == 11u);
+            const auto run = checkRun (frames, 0, frames.size(), zero, startFrame, 0, sampleRate, rate);
+            INFO (run.firstWrong);
+            CHECK (run.wrong == 0);
+
+            /*  Through its last half-bit at the level, and from the boundary
+                on nothing goes in: the low-pass empties, a step a sample. */
+            CHECK (std::fabs (line.at (end - 2)) > 0.9f * ltcGain);
+            CHECK (line.at (end) == doctest::Approx ((1.0 - step) * line.at (end - 1)).epsilon (1.0e-5));
+            CHECK (line.at (end + 1) == doctest::Approx ((1.0 - step) * line.at (end)).epsilon (1.0e-5));
+            CHECK (aboveFrom (line, end + fewTaus (sampleRate), 1.0e-4f) == 0);
+
+            CHECK (generator.currentProgram() == 0);
+            CHECK (generator.lateCount() == 0);
+        }
+
+        //  On a boundary itself: that boundary, so frame 9 is the last.
+        {
+            LtcGenerator generator;
+            generator.prepare (sampleRate);
+            generator.setOutput (1, ltcGain);
+
+            const auto end = zero + frameStartSample (10, sampleRate, rate);
+
+            REQUIRE (generator.post (Command::start (3, zero, startFrame, rate)));
+            REQUIRE (generator.post (Command::stop (3, end)));
+
+            const auto line = render (generator, 0, end + sampleRate / 2);
+            const auto frames = read (line, sampleRate, rate);
+
+            REQUIRE (frames.size() == 10u);
+            CHECK (heardLabel (frames.back()) == labelOf (startFrame + 9, rate));
+            CHECK (line.at (end) == doctest::Approx ((1.0 - step) * line.at (end - 1)).epsilon (1.0e-5));
+            CHECK (aboveFrom (line, end + fewTaus (sampleRate), 1.0e-4f) == 0);
+        }
+    }
+
+    /*  Where the frame boundaries are whole samples - 1920 of them a frame at
+        25 and 48 kHz, each half-bit 12 - the line is still at its level on the
+        sample before the boundary: it did not stop early. */
+    {
+        LtcGenerator generator;
+        generator.prepare (48000);
+        generator.setOutput (1, ltcGain);
+
+        REQUIRE (generator.post (Command::start (3, 500, 0, Rate::fps25)));
+        REQUIRE (generator.post (Command::stop (3, 500 + 1920 * 10 + 7)));
+
+        const auto line = render (generator, 0, 500 + 1920 * 12);
+        CHECK (std::fabs (line.at (500 + 1920 * 11 - 1)) > 0.9f * ltcGain);
+        CHECK (std::fabs (line.at (500 + 1920 * 11)) < 0.5f * ltcGain);
+    }
+}
+
+TEST_CASE ("ltc generator: a cut ends the run on its own sample, mid-frame")
+{
+    for (const auto& at : { RateAt { Rate::fps25, 48000 }, RateAt { Rate::fps2997, 44100 } })
+    {
+        const auto rate = at.rate;
+        const auto sampleRate = at.sampleRate;
+
+        INFO ("rate " << std::string (wordOf (rate)) << " at " << sampleRate << " Hz");
+
+        const auto step = lowPassStep (sampleRate);
+        const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+        constexpr std::int64_t zero = 500;
+        const auto cutAt = zero + frameStartSample (10, sampleRate, rate) + 700;
+
+        LtcGenerator generator;
+        generator.prepare (sampleRate);
+        generator.setOutput (1, ltcGain);
+
+        REQUIRE (generator.post (Command::start (3, zero, startFrame, rate)));
+        REQUIRE (generator.post (Command::cut (3, cutAt)));
+
+        const auto line = render (generator, 0, cutAt + sampleRate / 2);
+        const auto frames = read (line, sampleRate, rate);
+
+        //  Frames 0 to 9 whole; frame 10 cut short, so never read.
+        REQUIRE (frames.size() == 10u);
+        const auto run = checkRun (frames, 0, frames.size(), zero, startFrame, 0, sampleRate, rate);
+        INFO (run.firstWrong);
+        CHECK (run.wrong == 0);
+
+        //  From the cut's own sample on, nothing goes in.
+        CHECK (line.at (cutAt) == doctest::Approx ((1.0 - step) * line.at (cutAt - 1)).epsilon (1.0e-5));
+        CHECK (line.at (cutAt + 1) == doctest::Approx ((1.0 - step) * line.at (cutAt)).epsilon (1.0e-5));
+        CHECK (aboveFrom (line, cutAt + fewTaus (sampleRate), 1.0e-4f) == 0);
+        CHECK (generator.currentProgram() == 0);
+
+        /*  And on the sample before it, the code was still going in. At 25 and
+            48 kHz every edge is on a sample boundary, so what went in there
+            was the whole level, one way or the other. */
+        if (rate == Rate::fps25)
+            CHECK (std::fabs (line.at (cutAt - 1) - (1.0 - step) * line.at (cutAt - 2)) > 0.9 * step * ltcGain);
+    }
+}
+
+TEST_CASE ("ltc generator: a start takes the running program over on its sample, the line never quiet between")
+{
+    for (const auto& at : { RateAt { Rate::fps25, 48000 }, RateAt { Rate::fps2997, 44100 },
+                            RateAt { Rate::fps2997df, 96000 } })
+    {
+        const auto rate = at.rate;
+        const auto sampleRate = at.sampleRate;
+
+        INFO ("rate " << std::string (wordOf (rate)) << " at " << sampleRate << " Hz");
+
+        LtcGenerator generator;
+        generator.prepare (sampleRate);
+        generator.setOutput (1, ltcGain);
+
+        constexpr std::int64_t firstZero = 200;
+        const auto firstStart = frameOf (label (1, 0, 0, 0), rate);
+        const auto takeover = firstZero + frameStartSample (20, sampleRate, rate) + 333;
+        const auto secondStart = frameOf (label (10, 0, 0, 0), rate);
+
+        REQUIRE (generator.post (Command::start (1, firstZero, firstStart, rate)));
+        REQUIRE (generator.post (Command::start (2, takeover, secondStart, rate)));
+
+        const auto line = render (generator, 0, takeover + 2 * sampleRate);
+        const auto frames = read (line, sampleRate, rate);
+
+        const auto second = std::find_if (frames.begin(), frames.end(),
+                                          [] (const ltcreader::Frame& frame) { return frame.hours == 10; });
+        REQUIRE (second != frames.end());
+
+        //  The first run's twenty whole frames, then the second's from its start.
+        const auto firstCount = static_cast<std::size_t> (second - frames.begin());
+        CHECK (firstCount == 20u);
+
+        const auto before = checkRun (frames, 0, firstCount, firstZero, firstStart, 0, sampleRate, rate);
+        INFO ("before: " << before.firstWrong);
+        CHECK (before.wrong == 0);
+
+        const auto after = checkRun (frames, firstCount, frames.size() - firstCount, takeover, secondStart, 0,
+                                     sampleRate, rate);
+        INFO ("after: " << after.firstWrong);
+        CHECK (after.wrong == 0);
+        CHECK (frames.size() - firstCount + 2 >= static_cast<std::size_t> (2 * framesPerSecondOf (rate)));
+
+        //  Never quiet: below half the level only where the line crosses nought.
+        CHECK (longestBelow (line, firstZero + 1, line.end(), 0.5f * ltcGain) <= 3);
+
+        CHECK (generator.currentProgram() == 2);
+        CHECK (generator.lateCount() == 0);
+    }
+}
+
+TEST_CASE ("ltc generator: a run begun a day before at 192 kHz reads its labels through midnight")
+{
+    /*  THE ARITHMETIC OVER A DAY. The program's zero is ten seconds' worth of
+        frames short of a day before the block, at 192 kHz - 1.66e10 samples,
+        3.3e8 half-bits: a half-bit's place and its fraction of a sample are
+        computed exactly that far out, or the labels drift or the line breaks
+        up. Its start reaches the generator a day late, so it is counted, and
+        begins on the frame boundary that is the block's own first sample. */
+    constexpr int sampleRate = 192000;
+
+    for (const auto rate : { Rate::fps25, Rate::fps2997df, Rate::fps23976 })
+    {
+        INFO ("rate " << std::string (wordOf (rate)));
+
+        const auto tenSeconds = 10 * static_cast<std::int64_t> (nominalOf (rate));
+        const auto firstFrame = framesPerDay (rate) - tenSeconds;
+        constexpr std::int64_t zero = 4800;
+        const auto blockStart = zero + frameStartSample (firstFrame, sampleRate, rate);
+
+        LtcGenerator generator;
+        generator.prepare (sampleRate);
+        generator.setOutput (1, ltcGain);
+        REQUIRE (generator.post (Command::start (9, zero, 0, rate)));
+
+        const auto line = render (generator, blockStart, 12 * sampleRate);
+        const auto frames = read (line, sampleRate, rate);
+
+        CHECK (generator.lateCount() == 1);
+        CHECK (firstNonZero (line) == blockStart);
+
+        REQUIRE (frames.size() > static_cast<std::size_t> (tenSeconds + nominalOf (rate)));
+        CHECK (heardLabel (frames.front()) == label (23, 59, 50, 0));
+        CHECK (heardLabel (frames[static_cast<std::size_t> (tenSeconds)]) == label (0, 0, 0, 0));
+
+        const auto run = checkRun (frames, 0, frames.size(), zero, 0, firstFrame, sampleRate, rate);
+        INFO (run.firstWrong);
+        CHECK (run.wrong == 0);
+    }
+}
+
+TEST_CASE ("ltc generator: a command for a sample already drawn is counted late, and a late start waits for a frame boundary")
+{
+    constexpr int sampleRate = 48000;
+    const auto step = lowPassStep (sampleRate);
+    const auto startFrame = frameOf (label (1, 0, 0, 0), Rate::fps25);
+
+    LtcGenerator generator;
+    generator.prepare (sampleRate);
+    generator.setOutput (1, ltcGain);
+
+    CHECK (firstNonZero (render (generator, 0, 10000)) == -1);
+
+    /*  Its zero 5000 samples behind the block: begun on the next frame
+        boundary of its own clock - frame 3, sample 5000 + 3 * 1920 - never on
+        half a frame. */
+    REQUIRE (generator.post (Command::start (1, 5000, startFrame, Rate::fps25)));
+    const auto line = render (generator, 10000, 20000);
+    const auto frames = read (line, sampleRate, Rate::fps25);
+
+    CHECK (generator.lateCount() == 1);
+    CHECK (firstNonZero (line) == 10760);
+    REQUIRE_FALSE (frames.empty());
+    CHECK (heardLabel (frames.front()) == label (1, 0, 0, 3));
+    CHECK (frames.front().sample == 10760);
+
+    const auto run = checkRun (frames, 0, frames.size(), 5000, startFrame, 3, sampleRate, Rate::fps25);
+    INFO (run.firstWrong);
+    CHECK (run.wrong == 0);
+
+    /*  A stop placed for sample 20000, reaching a block that starts at 30000:
+        late as well, and on the first boundary at or after that block -
+        5000 + 14 * 1920. */
+    REQUIRE (generator.post (Command::stop (1, 20000)));
+    const auto after = render (generator, 30000, 4000);
+
+    CHECK (generator.lateCount() == 2);
+    CHECK (std::fabs (after.at (31878)) > 0.9f * ltcGain);
+    CHECK (after.at (31880) == doctest::Approx ((1.0 - step) * after.at (31879)).epsilon (1.0e-5));
+    CHECK (aboveFrom (after, 31880 + fewTaus (sampleRate), 1.0e-4f) == 0);
+    CHECK (generator.currentProgram() == 0);
+}
+
+TEST_CASE ("ltc generator: an Esc's stop and a double Esc's cut, sent as soon as can be, are never late")
+{
+    constexpr int sampleRate = 48000;
+    const auto step = lowPassStep (sampleRate);
+
+    //  The stop: at the first frame boundary at or after the block that drains it.
+    {
+        LtcGenerator generator;
+        generator.prepare (sampleRate);
+        generator.setOutput (1, ltcGain);
+        REQUIRE (generator.post (Command::start (1, 0, 0, Rate::fps25)));
+
+        const auto before = render (generator, 0, 9000);
+        REQUIRE (generator.post (Command::stop (1, 0)));
+        const auto after = render (generator, 9000, 4000, { 128 });
+
+        CHECK (generator.lateCount() == 0);
+        CHECK (std::fabs (after.at (9598)) > 0.9f * ltcGain);
+        CHECK (after.at (9600) == doctest::Approx ((1.0 - step) * after.at (9599)).epsilon (1.0e-5));
+        CHECK (aboveFrom (after, 9600 + fewTaus (sampleRate), 1.0e-4f) == 0);
+        CHECK (std::fabs (before.at (8999)) > 0.0f);
+    }
+
+    //  The cut: on the first sample of that block.
+    {
+        LtcGenerator generator;
+        generator.prepare (sampleRate);
+        generator.setOutput (1, ltcGain);
+        REQUIRE (generator.post (Command::start (1, 0, 0, Rate::fps25)));
+
+        const auto before = render (generator, 0, 9000);
+        REQUIRE (generator.post (Command::cut (1, 0)));
+        const auto after = render (generator, 9000, 4000, { 128 });
+
+        CHECK (generator.lateCount() == 0);
+        CHECK (after.at (9000) == doctest::Approx ((1.0 - step) * before.at (8999)).epsilon (1.0e-5));
+        CHECK (aboveFrom (after, 9000 + fewTaus (sampleRate), 1.0e-4f) == 0);
+        CHECK (generator.currentProgram() == 0);
+    }
+}
+
+TEST_CASE ("ltc generator: the line peaks at the level it is given, and an output of -1 writes nothing")
+{
+    for (const auto& at : { RateAt { Rate::fps25, 48000 }, RateAt { Rate::fps2997, 44100 },
+                            RateAt { Rate::fps30, 192000 } })
+    {
+        const auto rate = at.rate;
+        const auto sampleRate = at.sampleRate;
+
+        INFO ("rate " << std::string (wordOf (rate)) << " at " << sampleRate << " Hz");
+
+        for (const auto gain : { ltcGain, 1.0f })
+        {
+            LtcGenerator generator;
+            generator.prepare (sampleRate);
+            generator.setOutput (1, gain);
+            REQUIRE (generator.post (Command::start (1, 0, 0, rate)));
+
+            const auto peak = peakOf (render (generator, 0, sampleRate));
+
+            //  Within the low-pass's reach of the level, and never past it.
+            CHECK (peak <= gain * (1.0f + 1.0e-6f));
+            CHECK (peak >= gain * 0.999f);
+        }
+    }
+
+    LtcGenerator generator;
+    generator.prepare (48000);
+    generator.setOutput (-1, ltcGain);
+    REQUIRE (generator.post (Command::start (1, 0, 0, Rate::fps25)));
+
+    //  No output: the channel keeps the sound it held, and the run goes on.
+    const auto none = render (generator, 0, 4800);
+    CHECK (aboveFrom (none, 0, routedSound - 1.0e-6f) == 4800);
+    CHECK (none.othersTouched == 0);
+    CHECK (generator.currentProgram() == 1);
+
+    //  An output past the block's channels: nothing written anywhere.
+    generator.setOutput (5, ltcGain);
+    const auto past = render (generator, 4800, 4800);
+    CHECK (aboveFrom (past, 4800, routedSound - 1.0e-6f) == 4800);
+    CHECK (past.othersTouched == 0);
+
+    /*  Back on the channel, mid-run - at frame 5's first sample - and the code
+        is where the clock has got to: frame 5 or 6 the first read whole, and
+        every frame on its own sample. */
+    generator.setOutput (1, ltcGain);
+    const auto back = render (generator, 9600, 48000);
+    const auto frames = read (back, 48000, Rate::fps25);
+    REQUIRE (frames.size() > 10u);
+
+    const auto first = frameOf (heardLabel (frames.front()), Rate::fps25);
+    CHECK (first >= 5);
+    CHECK (first <= 6);
+
+    const auto run = checkRun (frames, 0, frames.size(), 0, 0, first, 48000, Rate::fps25);
+    INFO (run.firstWrong);
+    CHECK (run.wrong == 0);
+}
+
+TEST_CASE ("ltc generator: the channel is replaced - by silence while nothing runs - and no other is touched")
+{
+    LtcGenerator generator;
+    generator.prepare (48000);
+    generator.setOutput (1, ltcGain);
+
+    //  Nothing running: the sound routed there is gone, and nought is left.
+    const auto idle = render (generator, 0, 4800);
+    CHECK (firstNonZero (idle) == -1);
+    CHECK (idle.othersTouched == 0);
+
+    //  A run: only the code, which reads back.
+    REQUIRE (generator.post (Command::start (1, 4800, frameOf (label (1, 0, 0, 0), Rate::fps25), Rate::fps25)));
+    const auto running = render (generator, 4800, 48000);
+    CHECK (read (running, 48000, Rate::fps25).size() >= 23u);
+    CHECK (peakOf (running) <= ltcGain * (1.0f + 1.0e-6f));
+    CHECK (running.othersTouched == 0);
+
+    //  On a channel of an eight-wide block: that channel, and no other.
+    const auto wide = render (generator, 52800, 4800, mixedBlocks, 1, 8);
+    CHECK (wide.othersTouched == 0);
+    CHECK (peakOf (wide) <= ltcGain * (1.0f + 1.0e-6f));
+}
+
+TEST_CASE ("ltc generator: a stop for a run that has not begun takes its start back, and one for another run is passed over")
+{
+    const auto startFrame = frameOf (label (1, 0, 0, 0), Rate::fps25);
+
+    //  An Esc inside the launch horizon: the start placed ahead never sounds.
+    {
+        LtcGenerator generator;
+        generator.prepare (48000);
+        generator.setOutput (1, ltcGain);
+
+        REQUIRE (generator.post (Command::start (4, 20000, startFrame, Rate::fps25)));
+        CHECK (firstNonZero (render (generator, 0, 1000)) == -1);
+        REQUIRE (generator.post (Command::stop (4, 0)));
+        CHECK (firstNonZero (render (generator, 1000, 30000)) == -1);
+        CHECK (generator.currentProgram() == 0);
+        CHECK (generator.lateCount() == 0);
+    }
+
+    //  The same, both in the one block's inbox; and a cut does it too.
+    for (const auto cut : { false, true })
+    {
+        LtcGenerator generator;
+        generator.prepare (48000);
+        generator.setOutput (1, ltcGain);
+
+        REQUIRE (generator.post (Command::start (8, 100, startFrame, Rate::fps25)));
+        REQUIRE (generator.post (cut ? Command::cut (8, 0) : Command::stop (8, 0)));
+        CHECK (firstNonZero (render (generator, 0, 10000)) == -1);
+    }
+
+    //  A start posted after the stop is a new one, and plays.
+    {
+        LtcGenerator generator;
+        generator.prepare (48000);
+        generator.setOutput (1, ltcGain);
+
+        REQUIRE (generator.post (Command::stop (8, 0)));
+        REQUIRE (generator.post (Command::start (8, 100, startFrame, Rate::fps25)));
+        CHECK (firstNonZero (render (generator, 0, 10000)) == 100);
+        CHECK (generator.currentProgram() == 8);
+    }
+
+    //  A stop for a run that is not the one drawing changes nothing.
+    {
+        LtcGenerator generator;
+        generator.prepare (48000);
+        generator.setOutput (1, ltcGain);
+
+        REQUIRE (generator.post (Command::start (5, 100, startFrame, Rate::fps25)));
+        const auto first = render (generator, 0, 5000);
+        REQUIRE (generator.post (Command::stop (6, 0)));
+        REQUIRE (generator.post (Command::cut (7, 0)));
+        const auto second = render (generator, 5000, 48000);
+        const auto frames = read (second, 48000, Rate::fps25);
+
+        CHECK (generator.currentProgram() == 5);
+        REQUIRE (frames.size() > 20u);
+
+        //  The first frame begun after sample 5000 is frame 3, at 100 + 3 * 1920.
+        const auto firstHeard = frameOf (heardLabel (frames.front()), Rate::fps25) - startFrame;
+        CHECK (firstHeard == 3);
+
+        const auto run = checkRun (frames, 0, frames.size(), 100, startFrame, firstHeard, 48000, Rate::fps25);
+        INFO (run.firstWrong);
+        CHECK (run.wrong == 0);
+        CHECK (std::fabs (first.at (4999)) > 0.0f);
+    }
+}
+
+TEST_CASE ("ltc generator: prepare ends the run, forgets what was posted and counts an audio restart")
+{
+    LtcGenerator generator;
+    generator.prepare (48000);
+    generator.setOutput (1, ltcGain);
+    const auto first = generator.generation();
+
+    REQUIRE (generator.post (Command::start (1, 0, 0, Rate::fps25)));
+    render (generator, 0, 5000);
+    CHECK (generator.currentProgram() == 1);
+
+    //  An audio restart (AHU): the run is over, and the line silent.
+    generator.prepare (48000);
+    CHECK (generator.generation() == first + 1);
+    CHECK (generator.currentProgram() == 0);
+    CHECK (firstNonZero (render (generator, 5000, 5000)) == -1);
+
+    //  A start posted before a restart is not drawn after it.
+    REQUIRE (generator.post (Command::start (2, 20000, 0, Rate::fps25)));
+    generator.prepare (96000);
+    CHECK (generator.generation() == first + 2);
+    CHECK (firstNonZero (render (generator, 10000, 20000)) == -1);
+    CHECK (generator.currentProgram() == 0);
+
+    //  And one posted after it is.
+    REQUIRE (generator.post (Command::start (3, 40000, 0, Rate::fps25)));
+    CHECK (firstNonZero (render (generator, 30000, 20000)) == 40000);
+    CHECK (generator.currentProgram() == 3);
+}
+
+TEST_CASE ("ltc generator: the inbox holds thirty-two commands, and a program must have a number")
+{
+    LtcGenerator generator;
+    generator.prepare (48000);
+    generator.setOutput (1, ltcGain);
+
+    for (int n = 0; n < LtcGenerator::inboxSize; ++n)
+        CHECK (generator.post (Command::start (static_cast<std::uint64_t> (n + 1), 1000000 + n, 0, Rate::fps25)));
+
+    CHECK_FALSE (generator.post (Command::start (99, 2000000, 0, Rate::fps25)));
+
+    //  A block drains it, and there is room again.
+    render (generator, 0, 128, { 128 });
+    CHECK (generator.post (Command::start (99, 2000000, 0, Rate::fps25)));
+
+    //  Nought is no program: currentProgram's word for none.
+    CHECK_FALSE (generator.post (Command::start (0, 3000000, 0, Rate::fps25)));
 }
