@@ -201,6 +201,17 @@ def reader(server):
     return read
 
 
+PAIR_ROWS = ("state", "linked", "sending", "peer", "received", "relayed", "dropped", "gaps",
+             "delay", "late", "unconfirmed", "differs", "alarm")
+
+
+def pair_rows(read) -> str:
+    """One machine's pairing rows on one line, for a failure's detail: what each
+    side believed when a check did not hold (the Linux-only failure of RD.7's
+    first CI run, 38183715084, printed nothing to go on)."""
+    return ", ".join(f"{name}={read('/godot/pair/' + name)!r}" for name in PAIR_ROWS)
+
+
 def sender(server):
     def send(command, args=None):
         common.send_udp(server.osc_port,
@@ -369,7 +380,11 @@ def run() -> int:
                          "a second pair, the backup's dialler through a relay: it follows",
                          f"backup {read_backup('/godot/pair/state')!r}")
             report.check(aim_at_the_device(send_main, read_backup),
-                         "the devices retyped at the main, on both")
+                         "the devices retyped at the main, on both",
+                         f"main: {pair_rows(read_main)} | backup: {pair_rows(read_backup)}"
+                         f" | backup ports {read_backup(f'/godot/mount/{DESK}/port')!r}"
+                         f" {read_backup(f'/godot/mount/{S21}/port')!r}"
+                         f" against {device.port}")
 
             relay.pause()
             paused = time.monotonic()
