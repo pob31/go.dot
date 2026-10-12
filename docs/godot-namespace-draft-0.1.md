@@ -25852,3 +25852,11 @@ passed on and the main refused comes back refused, with the main's reason.
   waiting for its device's answer, a MIDI message and an advance seated mid-
   flight are made over here at once; a position that cannot be read is said
   and nothing is seated; Δ drifts with the two clocks (RD.9).
+- **Found 2026-10-12** (RD.7's Linux CI, 38183715084 and 38194905143): a follow starts from now, so a
+  show edit the leader applies between the follower's seat turning following and its request
+  reaching the leader is never streamed to it, and RD.8's position carries state, not the show: the
+  backup's show differs, silently. Through the failover driver's relay on Linux the gap held the two
+  port edits the driver made the moment the backup read following. The driver now waits for in step
+  first; the product's answer is RD.10, whose fingerprints are compared at link-up and which offers
+  the main's show text to the backup. 0cf2fc4's repair (a follower hearing no beat for half a second
+  from a live leader says its hello again) stays: a link must mend a lost stream whatever lost it.

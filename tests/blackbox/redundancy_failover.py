@@ -379,6 +379,15 @@ def run() -> int:
             report.check(wait_for(lambda: read_backup("/godot/pair/state") == "following", 6.0),
                          "a second pair, the backup's dialler through a relay: it follows",
                          f"backup {read_backup('/godot/pair/state')!r}")
+            # IN STEP BEFORE AN EDIT IS ASKED TO TRAVEL. A follow starts from now (RD.7): the main
+            # streams what comes after the backup's request reaches it, and the backup's seat reads
+            # following a moment before - through the relay, on Linux CI, long enough that the two
+            # port edits below landed in between and never reached the backup (38183715084,
+            # 38194905143). RD.8 seats the backup and says in step once it is; an edit made in that
+            # gap is a show difference, which RD.10 compares and offers to mend.
+            report.check(wait_for(lambda: read_backup("/godot/pair/inStep") == "true", 6.0),
+                         "and is seated in step before anything is asked of it",
+                         f"backup {pair_rows(read_backup)}")
             report.check(aim_at_the_device(send_main, read_backup),
                          "the devices retyped at the main, on both",
                          f"main: {pair_rows(read_main)} | backup: {pair_rows(read_backup)}"
