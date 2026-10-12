@@ -128,7 +128,8 @@ has stood in front of the thing.
 
 ### Not built yet
 
-- **Timecode** — chasing and generating LTC and MTC (devplan Phase 10).
+- **Timecode** — chasing LTC and MTC (devplan Phase 10); generating them, as
+  MTC and LTC cues, is being built (namespace draft §59).
 - **Panic values** — every parameter declares a resting state (PRD §3.3), but
   nothing yet puts a node back to it.
 - **Bindings** — a general way to bind any parameter to any control, with read,

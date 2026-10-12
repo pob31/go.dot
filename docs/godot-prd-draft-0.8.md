@@ -1108,6 +1108,28 @@ is clean when master. When chasing, tick indices must remain monotonic and the
 derivation re-anchored without discontinuity. Specify before the transport is
 written.
 
+**Generating** *(added in 0.8, at the author's direction, 2026-10-11; the mechanics are in the
+namespace draft §59)*. The author: *"We can start with the outgoing timecode modes. These can be
+cues for MTC, SMPTE LTC with their corresponding outputs in the show parameters (MIDI, Audio). These
+new types of cues can be a choice among the +Audio and +MIDI commands."* A **timecode cue** generates
+one or the other: MTC on a MIDI port, or LTC, a signal Go.dot draws itself, on an audio output. It is
+made from the + midi list (MTC) or the + audio list (LTC). Chasing, and the question above, are a
+later round.
+
+- **The show says where, and at what rate.** The frame rate - one for the whole show, since the desk
+  or the media server reading it is set to one - the MIDI port MTC leaves on and the output LTC plays
+  on are show settings, on a tab of their own. A cue says only where its timecode starts and how long
+  it runs (*the author's choice, 2026-10-11*).
+- **It runs until it is stopped** - by Esc, a stop cue, or its group ending - and an optional length
+  stops it by itself. Timecode locked to a song is a group that starts both: they start on the same
+  sample (*the author's choice, 2026-10-11*).
+- **A second timecode cue on the same output takes over.** The running one ends, and the receiver
+  sees the code jump, as it would at a locate (*the author's choice, 2026-10-11*).
+- **MTC is a device's, LTC is sound's** (§3.15): a backup that follows holds its MTC, and plays its
+  own LTC, changed over downstream with the rest of its sound.
+
+The implementer's calls, the author's to overrule, are listed in §6.9.
+
 ### 3.15 Redundancy
 
 *Added in 0.8, at the author's direction (2026-10-11); the mechanics are in the namespace draft
@@ -4035,6 +4057,32 @@ What the work leaves out: correcting the drift between two sound clocks by speed
 connections open but silent, for consoles that take two sessions; a shared secret on the link; finding
 the other machine by itself on the network (mDNS), left for the remote app.
 
+Added 2026-10-12 *(proposed)*, with outgoing timecode (§3.14, namespace draft §59). The implementer's
+calls from AHD in §59.2 are the author's to overrule:
+
+- **One kind of cue, `timecode`**, whose format (MTC or LTC) is set by the list that made it; the
+  show's settings in a `Sync` element at `/godot/sync/*`, always there, with room for the chase.
+- **A cue starts at 01:00:00:00 unless told otherwise**, and its length is rounded up to whole frames.
+- **25 frames a second by default**; 23.976, 24, 29.97 drop-frame, 29.97 and 30 offered beside it.
+- **LTC at -18 dBFS by default** (0 dBu in EBU alignment), on a one-channel output that carries only
+  timecode: the code replaces whatever the show sends there, after the output's trim and DCA, so a
+  sound cannot leak onto the line and a DCA pulled down cannot cut it; silence between runs.
+- **Esc stops timecode at the next frame boundary, with no fade**; footers run. A double Esc cuts it
+  at once.
+- **A takeover happens when the new cue starts**, so the line never goes quiet between the two.
+- **The same sample as the sounds**: a timecode cue started with sounds of its group starts on their
+  sample, waiting for one that is still loading.
+- **MTC leaves when it is heard**: delayed by the interface's output latency, so a desk chasing it
+  sees what the audience hears. One thread of its own sends it; a port shared with SysEx costs up to
+  a SysEx's length of jitter, and is warned about.
+- **Doh! treats timecode as Go.dot's own sound**: paused, and resumed by the corrected GO.
+- **A timecode cue in a Persistent section is ignored there**, with a warning; one cannot join a
+  sampler group.
+
+What the work leaves out: chasing (§3.14's open question); MTC on several ports or LTC on several
+outputs at once; user bits; a timecode that follows a sound's playhead rather than starting with it;
+MIDI clock and MMC.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -4181,6 +4229,10 @@ Mackie vs HUI first — first week with the D700.
   42 µs a tick; a device's report doubled and back at the device in two to three ticks, 33 to 67 ms;
   ten fifty-object patches at once 0.33 ms a tick on average and 0.81 at worst, none late; two hundred
   boxes drawn on the canvas in 15 ms.
+- **Timecode generated** (§3.14, 2026-10-12, namespace draft §59): **M63** - how late each MTC message
+  leaves against its moment, over ten minutes (the median, the 99th percentile, the worst), alone on
+  its port and then sharing it with a SysEx cue; and LTC decoded clean over a ten-minute render, every
+  frame where it should be. A real reader - a desk chasing, a timecode display - is owed to the bench.
 
 ---
 

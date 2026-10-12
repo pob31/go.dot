@@ -25860,3 +25860,165 @@ passed on and the main refused comes back refused, with the main's reason.
   first; the product's answer is RD.10, whose fingerprints are compared at link-up and which offers
   the main's show text to the backup. 0cf2fc4's repair (a follower hearing no beat for half a second
   from a live leader says its hello again) stays: a link must mend a lost stream whatever lost it.
+
+## 59. Timecode generated: MTC and LTC cues
+
+### 59.1 What it does
+
+Written 2026-10-12, from the author's request of 2026-10-11: *"We can start with the outgoing
+timecode modes. These can be cues for MTC, SMPTE LTC with their corresponding outputs in the show
+parameters (MIDI, Audio). These new types of cues can be a choice among the +Audio and +MIDI
+commands."* This is the generating half of PRD §3.14. Chasing, and §3.14's question of the tick
+re-anchored under it, are a later round; nothing here moves the tick.
+
+**A timecode cue** is one kind, `timecode`, made from the + midi list (a Timecode section, MTC) or the
++ audio list (LTC timecode, after the templates). It says where its code starts (`from`, a label such
+as `01:00:00:00`) and, if it is to stop by itself, for how long (`length`); the show says the rate and
+where the code goes (AHA). It counts up from its start until it is stopped (AHB). A second one on the
+same output takes over (AHC).
+
+**LTC is drawn by Go.dot**, sample by sample, on the audio thread, into the channel of a one-channel
+output the show names. It is written after the output's trim and DCA and replaces what the show sends
+there, so no sound leaks onto the line and no DCA cuts it; between runs the channel is silent (AHI).
+The bits are counted from the run's first sample in whole numbers, never accumulated, so the code
+cannot drift from the sound however long it runs: at sample `s` the half-bit is
+`floor ((s - zero) * 160 * num / (rate * den))`, the frame that over 160, the bit half of it modulo 80.
+Its edges take the standard's rise time (AHJ). The tick hands the audio side three things through a
+small inbox that never allocates: start frame F at sample S, stop at the next frame boundary, cut now.
+
+**MTC is sent by a thread of its own** inside the MIDI sender, at the tick thread's raised priority:
+quarter frames come every 8 to 10 ms and the tick is 20 ms. The thread turns a quarter frame's sample
+into a moment of the system's steady clock through the line video already keeps between the two
+(`clock::ClockEstimate`, moved from `video/`), delays it by the interface's output latency so the code
+leaves when its sample is heard (AHP), and sends on the device object the sender already owns - one
+owner per port, as Windows requires. A gate per port keeps a quarter frame out of a SysEx: F1 is a
+System Common message, and one arriving inside a SysEx would end it (AHQ).
+
+**The same sample as the sounds.** The Runner places a timecode cue in the same call, on the same
+target sample, as the sounds launched that tick; a sound of its group still being prepared is waited
+for, and the code starts on its sample (AHN). A song and its timecode in one group start together,
+and stay together, since both count the same samples.
+
+**What is held.** MTC is a device's: a backup that follows holds every quarter frame, counted as sent
+(§58, AGG), and sends a full frame on the tick its hold lets go, so a desk chasing it relocates at
+once. LTC is sound: each machine plays its own, changed over downstream (AGH).
+
+### 59.2 Decisions
+
+The author's, 2026-10-11, each picked from options whose words were mine:
+
+- **AHA** (the author's) **The show says where and at what rate.** A tab of Show settings holds the
+  frame rate - one for the whole show, since the desk or server reading it is set to one - the MIDI
+  port MTC leaves on and the output LTC plays on. A cue says only where its timecode starts and how
+  long it runs. Offered as "Show settings".
+- **AHB** (the author's) **A timecode cue runs until it is stopped** - Esc, a stop cue, its group
+  ending - and an optional length stops it by itself. Locked to a song: a group that starts both on
+  the same sample. Offered as "Until stopped".
+- **AHC** (the author's) **A second timecode cue on the same output takes over**: the running one ends,
+  the receiver sees the code jump, as at a locate. Offered as "New one takes over".
+
+Mine, the author's to overrule:
+
+- **AHD** (mine) **One kind, `timecode`**, element `Timecode`, with `format` `mtc` or `ltc` set by the
+  list that made it; the kind column says MTC or LTC.
+- **AHE** (mine) **The show's settings live in `<Sync>`**, at `/godot/sync/*`, always present and
+  last among the show's children, so `node.set` reaches them with no command of their own and every
+  saved show gains an empty `<Sync/>`. The cue and the container cannot share the name `Timecode`,
+  since the schema is keyed by element. The chase's rows will stand beside these (`chase`, `mtcIn`,
+  `ltcIn`).
+- **AHF** (mine) **A start is a label**, `HH:MM:SS:FF`, stored with colons whatever the rate - what
+  someone decided, readable at the next venue - `01:00:00:00` unless told otherwise; a label the
+  show's rate lacks (`00:01:00:00` at 29.97 drop-frame) is read as the next one there is. A length is
+  in seconds, `0` for until stopped, rounded up to whole frames.
+- **AHG** (mine) **25 frames a second by default**; 23.976, 24, 29.97 drop-frame, 29.97 and 30 beside
+  it. MTC has four rate codes: 23.976 is sent as 24, and 29.97 non-drop as 30, each at its own pace.
+- **AHH** (mine) **LTC at -18 dBFS by default** - 0 dBu in EBU alignment - from -60 to 0.
+- **AHI** (mine) **LTC replaces its channel**, after the output's trim and DCA; only a one-channel
+  output is offered for it; a cue routing sound onto it is warned about; between runs it is silent.
+- **AHJ** (mine) **Edges rise in 40 µs**, SMPTE 12M's 40 ± 10, each placed at its exact fractional
+  position.
+- **AHK** (mine) **Esc stops timecode at the next frame boundary, with no fade** - a fading LTC is a
+  reader losing lock - and footers run; a stop cue and a group's end do the same. A double Esc cuts at
+  once.
+- **AHL** (mine) **A takeover happens when the new run starts**, never at its GO or its pre-wait: the
+  old run ends on that tick and the line is never quiet between them. LTC carries on from the new
+  frame; MTC sends a full frame.
+- **AHM** (mine) **The rate is copied when the cue fires, the destination read when it starts**; a
+  change reaches the next run.
+- **AHN** (mine) **The same sample as the sounds**, waiting for a sound of its group still being
+  prepared (a cold arm).
+- **AHO** (mine) **MTC framing**: device 7F; a full frame at a start, a jump, the hold's release, tx
+  back on; each cycle of eight quarter frames starts with piece 0 on a frame's first sample and
+  encodes that frame, receivers adding the two the cycle took.
+- **AHP** (mine) **MTC leaves when its sample is heard**: delayed by the interface's output latency.
+- **AHQ** (mine) **One MTC thread inside the MIDI sender, a gate per port.** A port shared with a SysEx
+  cue costs up to that SysEx's length (about 32 ms for 100 bytes on Windows) and is warned about; a
+  quarter frame more than a quarter late is dropped, and the code picks up at the next cycle. The
+  network monitor shows the full frames, not a hundred quarter frames a second.
+- **AHR** (mine) **What a run reports**: tx off, `not-sent`, and the run still runs its course; no MTC
+  port or one not bound, `no-port`, unless held; no LTC output, a missing one or one wider than a
+  channel, `bad-route`; a start the rate cannot label, `bad-message`; LTC with no audio side,
+  `not-sent`.
+- **AHS** (mine) **Doh! treats timecode as Go.dot's own sound** (PRD §3.32): paused, and resumed by
+  the corrected GO from where it stopped.
+- **AHT** (mine) **Not in a Persistent section** - ignored there with a warning, since re-asserting it
+  would fight AHC - **nor in a sampler group**, where it is refused and placed after the group.
+- **AHU** (mine) **An audio restart ends timecode runs**, as it ends sound.
+- **AHV** (mine) **`wfg serve --midi-render=<port>=<file>`** writes what a port would have sent, with
+  when it left and when it was due, for the drivers.
+- **AHW** (mine) **A Timecode tab before Playback**; a drawn icon and an accent of its own.
+- **AHX** (mine) **An MTC port that is also a surface's is warned about**: a surface's port passes the
+  hold (AGH), so a backup would send its MTC twice.
+
+### 59.3 Rows
+
+| Address | Type | Notes |
+|---|---|---|
+| `cue/<id>/format` | `s` | `mtc` or `ltc` (AHD) |
+| `cue/<id>/from` | `s` | the start label, `HH:MM:SS:FF` (AHF) |
+| `cue/<id>/length` | `d` | seconds, `0` until stopped (AHB) |
+| `sync/frameRate` | `s` | `23.976`, `24`, `25`, `29.97df`, `29.97`, `30` (AHG) |
+| `sync/mtcOut` | `s` | the `<Port>` MTC leaves on; empty is none |
+| `sync/ltcOut` | `s` | the one-channel `<Bus>` LTC plays on; empty is none (AHI) |
+| `sync/ltcLevel` | `d` | dBFS (AHH) |
+| `sync/mtcLate` | `i` | read-only: MTC messages that left more than 2 ms after their moment |
+| `sync/mtcWorst` | `d` | read-only: the latest of them, ms |
+| `sync/ltcLate` | `i` | read-only: LTC starts, stops and jumps that reached the audio side after their sample |
+| `run/<id>/timecode` | `s` | read-only: where a timecode run has got to, `;` before the frames at drop-frame |
+
+### 59.4 Commands
+
+None of their own: a timecode cue is made by `cue.create … timecode` with `format` in its pairs, the
+settings are `node.set`, a jump is `run.seek`.
+
+### 59.5 Refused
+
+At the write door, `bad-value` for a label that does not read. At run time, as AHR: `no-port`,
+`bad-route`, `bad-message`; `not-sent` as a warning. Warnings in the show: sound routed onto the LTC
+output, an LTC output wider than one channel, an MTC port that is a surface's or carries SysEx cues, a
+timecode cue in a Persistent section, a start the rate lacks.
+
+### 59.6 Stages
+
+| Stage | What |
+|---|---|
+| TC.0 | This section; PRD §3.14, §6.9, §6.11; the devplan's Phase 10 |
+| TC.1 | The document: `Timecode`, `Sync`, the rows, the label judge; the run with no output - what a replay sees - its length, Esc, takeover and `run/timecode` |
+| TC.2 | `timecode::Rate` and labels, `LtcEncoder`, `MtcSchedule`: pure, with golden vectors |
+| TC.3 | `LtcGenerator` on the audio thread; `AudioHost`, `Player`, `HostPlayer`; a decoder of the tests' own |
+| TC.4 | The Runner to LTC: the second launch loop, the same sample, takeover, the stops, the warnings |
+| TC.5 | `clock::ClockEstimate`, the MTC lane and its gate, the hold, `--midi-render` |
+| TC.6 | The Runner to MTC: tx, no port, held, the tick's clock with no audio |
+| TC.7 | A jump, load to time, `seatPlan` (and with it `pair.seat`), Doh! |
+| TC.8 | The window: the Timecode tab, the two list lines, the inspector, the icon, the running pane |
+| TC.9 | `blackbox.timecode`; M63 |
+| TC.10 | Close-out: the guides, the README |
+
+**M63** (planned): how late each MTC message leaves against its moment over ten minutes - the median,
+the 99th percentile, the worst - alone on its port and then sharing it with a SysEx cue; LTC decoded
+clean over a ten-minute render.
+
+### 59.7 Built so far
+
+- **TC.0**, 2026-10-12: this section; PRD §3.14's paragraph on generating, §6.9, §6.11's M63; the
+  devplan's stages under Phase 10.

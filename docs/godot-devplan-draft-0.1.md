@@ -1498,6 +1498,37 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   `snap` was left for the author *(2026-10-02, K1: ruled - the PRD says `snap`
   now)*. Nothing applies a panic value yet.
 
+### Timecode generated: MTC and LTC cues · M
+
+*Designed 2026-10-11*, at the author's direction (PRD §3.14, §6.9, §6.11; namespace draft §59): the
+generating half of timecode, chase left for a later round. A timecode cue, made from the + midi list
+(MTC) or the + audio list (LTC), says where its code starts and how long it runs; the show's Timecode
+settings say the rate, the MIDI port and the output. The author's decisions are AHA-AHC; from AHD they
+are the implementer's, the author's to overrule. Built after redundancy's RD.8 (the author's start
+condition), before RD.9, which reuses TC.5's clock seam.
+
+| Stage | What | Depends on |
+|---|---|---|
+| TC.0 | Docs: namespace §59, PRD §3.14/§6.9/§6.11, this | - |
+| TC.1 | The document (`Timecode`, `Sync`, the rows), and the run with no output: length, Esc, takeover | TC.0 |
+| TC.2 | Rates and labels, the LTC encoder, the MTC schedule: pure, golden vectors | TC.0 |
+| TC.3 | The LTC generator on the audio thread, and a decoder of the tests' own | TC.2 |
+| TC.4 | The Runner to LTC: the same sample as the sounds, takeover, the stops | TC.1, TC.3 |
+| TC.5 | The clock line moved to `clock/`, the MTC lane, its gate, the hold, `--midi-render` | TC.2 |
+| TC.6 | The Runner to MTC | TC.4, TC.5 |
+| TC.7 | A jump, load to time, `seatPlan` (and `pair.seat`), Doh! | TC.6 |
+| TC.8 | The window: the Timecode tab, the list lines, the inspector, the running pane | TC.6 |
+| TC.9 | `blackbox.timecode`; M63 | TC.8 |
+| TC.10 | Close-out: the guides, the README | all |
+
+**Done when:** an LTC cue and a sound in one group start on the same sample and a decoder reads every
+frame of the code after them, on from the cue's start; an MTC cue's quarter frames leave within two
+milliseconds of their moment at the 99th percentile; a second cue takes the code over, Esc stops it on
+a frame boundary, a double Esc cuts it, a backup holds its MTC and plays its LTC; CI is green.
+
+**Needs from the author:** the words on screen (the tab, the list lines, the fields) before they ship;
+a bench with a reader - a desk chasing, a timecode display, a DAW - on LTC and on MTC.
+
 ---
 
 ## Phase 11 — Integrations · M
