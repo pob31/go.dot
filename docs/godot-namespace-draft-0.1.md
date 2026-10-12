@@ -26045,6 +26045,35 @@ timecode cue in a Persistent section, a start the rate lacks.
 the 99th percentile, the worst - alone on its port and then sharing it with a SysEx cue; LTC decoded
 clean over a ten-minute render.
 
+**M63**, measured 2026-10-12 (TC.9), by `tests/blackbox/m63_timecode.py`, run by hand and never by
+ctest: two sessions of `wfg serve --hosted --render --midi-render=TC=<file>` on the timecode fixture,
+the Debug binary on the author's Windows box (16 cores), 29.97 drop-frame at 48 kHz, an LTC cue and an
+MTC cue that run until stopped started together in one timeline group and left for ten minutes each -
+the second session with a 100-byte SysEx MIDI cue on the MTC's own port fired every second (600 of
+them). Lateness is `sent_ns - due_ns` off the render file, every message; "past 2 ms" is what
+`sync/mtcLate` counts, and it agreed with the file both times; "due wander" is how far the due times
+stray from the straight line through them - the lane's line between samples and moments, corrected
+each tick (TC.5):
+
+| MTC, ten minutes | messages | median | p99 | worst | past 2 ms | dropped | due wander |
+|---|---|---|---|---|---|---|---|
+| alone on its port | 71,933 | 0.018 ms | 1.19 ms | 1.82 ms | 0 | 0 | 1.20 ms |
+| beside a SysEx a second | 71,933 | 0.012 ms | 1.06 ms | 3.36 ms | 2 | 0 | 1.44 ms |
+
+| LTC, ten minutes | frames | bit errors | odd parity | labels skipped | drift | drop-frame minutes |
+|---|---|---|---|---|---|---|
+| each session | 17,983 of 17,983 played, 01:00:00;00 to 01:10:00;00 | 0 | 0 | 0 but drop-frame's | 0.145 samples | 9, each skipping ;00 and ;01 |
+
+The drift is how far apart every frame's first edge sits from `zero + k * frame` over the whole ten
+minutes: the edge filter's delay at the fraction each edge falls at, the same at minute ten as at the
+first frame - the code counted from its zero in whole numbers cannot drift from the sound. WHAT THE
+RENDER CANNOT SHOW: a line written to a file costs microseconds where a DIN port takes 320 µs a byte,
+so the second session shows what the lane does beside a SysEx on its gate and its thread - two
+messages past 2 ms in seventy-two thousand, none dropped - and not the 32 ms a 100-byte SysEx holds a
+real cable for (AHQ); that, a reader chasing the code, and the hour-long run are the bench's. Before
+TC.9 mended `RenderOutput` (59.7), every line waited for the disk and the render could not have been
+read for this at all.
+
 ### 59.7 Built so far
 
 - **TC.0**, 2026-10-12: this section; PRD §3.14's paragraph on generating, §6.9, §6.11's M63; the
@@ -26451,3 +26480,65 @@ clean over a ten-minute render.
   pixels going twice as far and the ghost moving under the hand; one the engine says will not move not
   taken). Twenty-four deliberate breakages, in seven rounds: twenty-three turned their own cases red;
   the inspector's order entry did not, `format`, `from`, `length` being alphabetical too.
+- **TC.9**, 2026-10-12: `blackbox.timecode` and M63 - the product, read from outside. THE FIXTURE,
+  `tests/fixtures/bundles/timecode` (a document fixture: the driver writes the tone into its own copy):
+  a stereo output Tone, a one-channel output LTC on channel 2, a port TC, `<Sync frameRate="25">`
+  naming both, `goDebounce="0"`; a timeline group of a steady tone and an LTC cue from 01:00:00:00, an
+  LTC cue from 02:00:00:00, and a timeline group of an MTC cue from 10:00:00:00 for two seconds whose
+  footer holds a memo cue; `wfg validate` and validate-show.py pass it. `common.Server` takes
+  `midi_render={port: file}` for `--midi-render`. THE DRIVER, `tests/blackbox/timecode.py`,
+  `blackbox.timecode.{C,fr_FR}` (unbuffered, 400 s), runs the show by GO - the song and its code, the
+  second code, Esc, the MTC - three times on copies: 25 fps at 48 kHz, the same with `--hold`, and
+  29.97 drop-frame at 44.1 kHz with the song's code from 01:00:59:00 so a minute turns. What came out
+  is read by a third implementation of the standards, in Python, sharing nothing with the encoder,
+  the generator, the lane or `tests/LtcReader.h`: a biphase decoder (crossings of half the level with
+  hysteresis, placed to the fraction of a sample; short and long against three quarters of a bit; the
+  sync word, BCD, the drop and colour flags, parity; a line quiet for longer than a transition takes
+  is the code's end, and completes its last bit) and an MTC reader (each quarter frame placed by its
+  due time in quarters from the full frame, cycles put together as a receiver does). 131 checks: the
+  tone and the code on one sample (AHN); the code at -18 dBFS (AHH); frames consecutive from their
+  label, each at `zero + k * frame` to within the edge filter's delay and alike to three quarters of a
+  sample, none lost, the sync word and even parity in every one, the drop flag as the rate says, and
+  at drop-frame 01:00:59;29 followed by 01:01:00;02; the takeover jumping to 02:00:00:00, the line never
+  quiet and no bit error but the takeover's own edge, the first run done (AHC, AHL); Esc ending the
+  code on a frame boundary, its last frame whole, within a frame of where the song began its panic
+  fade - the one place outside the process the press can be read - and the line digital silence 64
+  samples on (AHK); a full frame naming 10:00:00:00 at the rate's code, then quarter frames a quarter
+  apart in their due times, each the piece its moment makes it, cycles naming labels two frames apart,
+  200 (240 at 29.97 drop-frame) and nothing due after the length, each sent after its moment and near
+  it (AHO, AHP); the run done, unwarned, its readout on its last frame, the footer's memo run; held,
+  the file empty, the run still done and unwarned and the LTC in the WAV (AGG, AGH). On CI the timing
+  is the runner's, so what the engine owns up to is allowed for and nothing else: a quarter frame
+  missing only where the lane counted one late (`sync/mtcLate`) and picked up at a cycle's start, and a
+  start the lane found late opening at a later cycle; an LTC start the generator counted late
+  (`sync/ltcLate`) beginning frames into its count, which voids the one-sample check alone. Twenty
+  deliberate breakages of the render and the file at each rate - a quiet gap, a sample slipped in
+  either code, a flipped bit, a quiet takeover, a code cut inside a frame, a sample after the stop, the
+  tone a sample late, the level 0.9 dB down, a quarter frame missing or one too many, a nibble wrong,
+  an early send, no full frame, the wrong rate code, a due 5 ms off, a drop not counted or picked up
+  mid-cycle, a late start of either code not counted - each turned its own checks red; the drops and
+  late starts the engine counted did not. FOUND, AND MENDED: `RenderOutput` (TC.5) ended each line with
+  the stream's `flush`, which is `FlushFileBuffers` on Windows and `fsync` elsewhere - a wait for the
+  disk, a millisecond typically and seven on a new file's first line, made on the lane's thread under
+  the port's gate. The piece 0 due with each full frame left 7 to 8 ms late at every 25 fps start, and in one
+  29.97 drop-frame pass of ten here a quarter frame left more than a quarter late and was dropped: the
+  render measured the disk, not the lane. The stream now has no buffer of its own and each line is
+  handed to the system and not waited on (`MidiSender.cpp`); the piece 0 leaves within half a
+  millisecond and the worst message of forty passes 1.7 ms. M63 in 59.6: ten minutes of each code,
+  not a bit wrong, MTC a median of 18 µs late. Ran: the driver nineteen times in each locale here,
+  thirteen of them on the mended binary and all green there (the one red before it was the dropped
+  quarter frame above), with `blackbox.first-sound`, `blackbox.process`, `blackbox.hold`,
+  `schema.fixtures` and the MIDI and timecode unit files in C and fr_FR; MidiSender.cpp clean under
+  the strict job's clang-tidy stand-in. Esc read -0.002 to 0.93 frames after the fade began in sixty
+  passes, against the check's one frame and two blocks.
+- **TC.10**, 2026-10-12: the close-out. Both Try it out guides gain a *Timecode out* row in
+  "Talking to the rest of the rig" - where, what it does, and that no desk or reader has chased it
+  yet - and their "Coming next" keeps only the chase; the README's list says what is built and its
+  table gains the line; PRD §6.9 lists the calls made while building (a jump keeping its program, a
+  paused code back at its frame, an endless code planned at its start, a switched-off port asked
+  nothing, the Windows yield) and §6.11 M63 as measured; the devplan's round gains its Built line.
+  The tour for the author is `build/timecode-2026-10.md`, outside the repository. The words on the
+  screen were the implementer's and the author accepted them as offered on 2026-10-12 - all but the
+  Timecode tab's Getting started line, written at TC.8 and not yet read by the author. Owed to a bench:
+  a desk or a timecode display chasing LTC and MTC, the hour-long run, and MTC beside a SysEx on a real
+  cable.

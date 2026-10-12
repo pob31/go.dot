@@ -1624,6 +1624,26 @@ add_test(NAME blackbox.process.fr_FR
 set_tests_properties(blackbox.process.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# TIMECODE GENERATED END TO END (namespace draft 59, TC.9): serve --hosted
+# --render with --midi-render=TC=<file>, the show fired by GO, and what came out
+# read by a third implementation of the standards in Python - a biphase decoder
+# for the LTC, a quarter-frame reader for the MTC. The song and its code on one
+# sample, frames from 01:00:00:00, the takeover to 02:00:00:00 with no quiet,
+# Esc on a frame boundary, a full frame then quarters a quarter apart stopping
+# at the length; again held (no MTC, the LTC still drawn); again at 29.97
+# drop-frame and 44.1 kHz. Three serves one after another: unbuffered, and
+# hold's limit, for hold's reason.
+add_test(NAME blackbox.timecode.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timecode.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.timecode.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+add_test(NAME blackbox.timecode.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timecode.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.timecode.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
 # DOH! END TO END (namespace draft 24.15): the GO pressed too soon and taken back,
 # over a real Tracktion graph and two mock devices on real sockets - a console that
 # takes back and a lighting desk left to its operator. What each device received,

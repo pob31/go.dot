@@ -493,6 +493,7 @@ class Server:
                  env: "dict | None" = None,
                  recover: bool = False,
                  hold: bool = False,
+                 midi_render: "dict | None" = None,
                  extra_args: "list[str] | None" = None,
                  role: "str | None" = "none",
                  http_port: int = 0):
@@ -568,6 +569,15 @@ class Server:
         # backup's half of redundancy, and a muted spare for a rehearsal.
         if hold:
             argv.append("--hold")
+
+        # --midi-render=<port>=<file> puts a file behind a port the show
+        # declares, by the show's name for it (namespace draft section 59, TC.5,
+        # AHV): one line a message, `sent_ns due_ns` and the bytes in hex, so a
+        # runner with no MIDI port sees what MTC did and when. Repeatable, one
+        # entry here a port; the path is given whole, since serve resolves a
+        # relative one against where it was started.
+        for port, path in (midi_render or {}).items():
+            argv.append(f"--midi-render={port}={path}")
 
         # EVERY DRIVER RUNS UNPAIRED UNLESS IT ASKS (namespace draft section 58,
         # RD.5). A serve not given --engine-folder reads the developer's own

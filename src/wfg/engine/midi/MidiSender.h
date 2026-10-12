@@ -106,9 +106,10 @@ namespace wfg::midi
         are sent as soon as they are taken), and its bytes, two hex digits
         each, a space between. Handed to the system line by line, so a serve
         stopped by TerminateProcess - the black-box harness's way - still
-        leaves every line; `finish` at the sender's stop and the output's end
-        flushes once more. Each send is made under the port's gate, so two
-        threads never write at once. */
+        leaves every line, but never waited on to reach the disk, which would
+        hold the port's gate for the disk's time (TC.9); `finish` at the
+        sender's stop and the output's end flushes once more. Each send is
+        made under the port's gate, so two threads never write at once. */
     class RenderOutput final : public Output
     {
     public:

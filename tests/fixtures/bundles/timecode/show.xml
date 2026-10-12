@@ -1,0 +1,31 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="TC0A0001" name="Timecode">
+      <Group id="TC0G0001" mode="timeline" name="Song and its code" number="1">
+        <Media id="TC0M0001" file="tone.wav" name="Song" number="1.1">
+          <Route id="TC0R0001" bus="TC0B0001" gains="1 0 0 1"/>
+        </Media>
+        <Timecode id="TC0T0001" format="ltc" from="01:00:00:00" name="The song's code" number="1.2"/>
+      </Group>
+      <Timecode id="TC0T0002" format="ltc" from="02:00:00:00" name="The code taken over" number="2"/>
+      <Group id="TC0G0002" mode="timeline" name="Two seconds of MTC" number="3">
+        <Timecode id="TC0T0003" format="mtc" from="10:00:00:00" length="2" name="MTC for two seconds" number="3.1"/>
+        <Footer id="TC0F0001">
+          <Cue id="TC0F0002" name="After the code" number="3.f"/>
+        </Footer>
+      </Group>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="TC0B0001" name="Tone" width="2"/>
+    <Bus id="TC0B0002" firstChannel="2" name="LTC"/>
+  </Audio>
+  <MidiPorts>
+    <Port id="TC0P0001" name="TC"/>
+  </MidiPorts>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+  <Sync frameRate="25" ltcOut="TC0B0002" mtcOut="TC0P0001"/>
+</Show>

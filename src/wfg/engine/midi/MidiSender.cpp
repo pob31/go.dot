@@ -68,7 +68,9 @@ namespace wfg::midi
         if (file.existsAsFile() && ! file.deleteFile())
             return;
 
-        auto opened = std::make_unique<juce::FileOutputStream> (file);
+        /*  NO BUFFER OF THE STREAM'S OWN: a stream told nought writes each
+            line straight through to the system as it is given (see `write`). */
+        auto opened = std::make_unique<juce::FileOutputStream> (file, 0);
 
         if (opened->failedToOpen())
             return;
@@ -119,7 +121,6 @@ namespace wfg::midi
         }
 
         line += '\n';
-        stream->write (line.data(), line.size());
 
         /*  HANDED TO THE SYSTEM AT EACH LINE, not only at the stop. The
             black-box harness stops serve with terminate(), which on Windows
@@ -127,8 +128,22 @@ namespace wfg::midi
             WAV render rewrites its header every second (HostedAudioDriver) -
             and the last lines are the ones a driver reads a stop by. What the
             system holds survives the process; one write a message, a hundred
-            a second at most, is nothing beside a port. */
-        stream->flush();
+            a second at most, is nothing beside a port.
+
+            HANDED, NEVER FORCED TO THE DISK (found by TC.9's black box,
+            2026-10-12). This used to call the stream's `flush`, which after
+            the write is `FlushFileBuffers` on Windows and `fsync` elsewhere:
+            a wait for the disk, a millisecond typically and seven on a new
+            file's first line here, made on the MTC lane's own thread under
+            the port's gate. The next quarter frame waited behind it - the
+            piece 0 due with a full frame left seven or eight milliseconds
+            late at every start at 25 fps, and now and then one left more than
+            a quarter late and was dropped - so the render measured the disk
+            rather than the lane it is there to show; without the wait, the
+            worst message of forty runs left 1.7 ms late. The stream has no buffer (see the
+            constructor), so the write itself is the hand-over; `finish` still
+            flushes once, at the stop. */
+        stream->write (line.data(), line.size());
     }
 
     MidiSender::~MidiSender()
