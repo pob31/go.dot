@@ -26045,3 +26045,15 @@ clean over a ten-minute render.
   nothing to fade. Found and left for TC.4: a stop cue with the `fade` verb keeps the run for the
   fade's length after its code is let go; a start no judge let in (a file edited by hand) is kept as
   `bad-message` and reported when there is an output to refuse it.
+- **TC.2**, 2026-10-12: the code itself, pure. `timecode::FrameClock.h` is the one rule both outputs
+  place their code by: part `k` of a frame cut into `parts` (1 the frame, 4 MTC's quarters, 160 LTC's
+  half-bits) begins on the FIRST sample at or after its exact moment, `ceil (k * rate * den / (parts *
+  num))` - the inverse of the floor §59.1 reads a sample's half-bit with, so MTC's piece 0 leaves on
+  the very sample LTC's frame begins on (at 29.97 and 48 kHz the quarters fall on 0, 401, 801, 1202,
+  1602...); the products split into whole periods and a remainder first, exact for a day at 192 kHz.
+  `ltcBits` gives a frame's 80 bits as SMPTE 12M lays them - checked bit for bit against libltc's
+  `ltc.h` and the Wikipedia table - with the polarity bit (59 at 25, 27 at every other rate) making
+  the ones even. `fullFrame`, `quarterFrame` and `MtcCursor`, a value type yielding each message with
+  its sample, a full frame first, re-seated at the next cycle for a jump or the hold's release, the
+  label of each cycle wrapped at midnight; 23.976 sent as 24 and 29.97 non-drop as 30 (AHG). Golden
+  vectors by hand and readers of the tests' own, written from the standard's table.

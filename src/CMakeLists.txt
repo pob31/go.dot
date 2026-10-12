@@ -314,6 +314,11 @@ add_library(wfg_engine STATIC
     wfg/engine/clock/TickThread.h
     wfg/engine/timecode/Timecode.h
     wfg/engine/timecode/Timecode.cpp
+    wfg/engine/timecode/FrameClock.h
+    wfg/engine/timecode/LtcEncoder.h
+    wfg/engine/timecode/LtcEncoder.cpp
+    wfg/engine/timecode/MtcSchedule.h
+    wfg/engine/timecode/MtcSchedule.cpp
     wfg/engine/TemplateChanges.h
     wfg/engine/document/Template.cpp
     wfg/engine/document/Template.h
