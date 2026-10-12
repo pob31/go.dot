@@ -42,7 +42,9 @@
     WHAT IS HELD, each at its own last door: the device sender's one funnel to
     a datagram, a serial port and a connection (MountSender::deliver, and its
     MIDI wire); the MIDI sender's queue (MidiSender::enqueue - MIDI cues, a
-    patch's [noteout], the MIDI wire, Doh!'s rollback); a serial port's lines
+    patch's [noteout], the MIDI wire, Doh!'s rollback); MIDI Time Code, each
+    message at the lane's last door (MtcLane::pump, §59 TC.5), a full frame
+    leaving at the next cycle once the hold lets go; a serial port's lines
     and packets (SerialTable); the answers to a processor (RawSender); the
     questions a verified cue and the observation sweep ask (Runner::askTarget,
     MountProbe), a processor's description fetched (MountFetcher); and in

@@ -3318,6 +3318,33 @@ namespace
             midiOutputBindings.push_back ({ port, device });
         }
 
+        /*  `--midi-render=<port>=<file>`, repeatable (namespace draft §59,
+            AHV): what the port would have sent, one line a message - when it
+            left, when it was due, its bytes - written to a file in place of a
+            device. How a driver on a machine with no MIDI port, a CI runner,
+            sees what MTC did and when. The port is the show's name for it, as
+            `--midi-out`'s is. */
+        std::vector<std::pair<std::string, std::string>> midiRenderBindings;
+
+        for (const auto& argument : args.arguments)
+        {
+            if (! argument.text.startsWith ("--midi-render="))
+                continue;
+
+            const auto pair = argument.text.fromFirstOccurrenceOf ("=", false, false);
+            const auto port = pair.upToFirstOccurrenceOf ("=", false, false).toStdString();
+            const auto file = pair.fromFirstOccurrenceOf ("=", false, false).toStdString();
+
+            if (port.empty() || file.empty() || ! pair.contains ("="))
+            {
+                std::cerr << "wfg serve: --midi-render wants <port>=<file>, and \""
+                          << pair << "\" is not that" << std::endl;
+                return 2;
+            }
+
+            midiRenderBindings.push_back ({ port, file });
+        }
+
         /*  WHICH MACHINE THIS IS IN A PAIR (namespace draft §58, RD.4, AGC):
             `pairing.xml` in Go.dot's own folder, read leniently - a file that
             cannot be read is a machine not paired, said once here, never a
@@ -4654,6 +4681,43 @@ namespace
                 midiPorts.setBinding (portId, { true, {}, matched });
             else
                 midiPorts.setBinding (portId, { false, why, {} });
+        }
+
+        /*  AND A RENDER IN PLACE OF A DEVICE (AHV), last, so it is what the
+            port has whatever the show or `--midi-out` put behind it. A file
+            that cannot be written is the command line's mistake, and fatal as
+            a device it names and this machine lacks is. */
+        for (const auto& binding : midiRenderBindings)
+        {
+            std::string portId;
+
+            for (const auto& ports : document.root())
+            {
+                if (ports.getType().toString() != "MidiPorts")
+                    continue;
+
+                for (const auto& port : ports)
+                    if (port[juce::Identifier ("name")].toString().toStdString() == binding.first)
+                        portId = port[juce::Identifier ("id")].toString().toStdString();
+            }
+
+            if (portId.empty())
+            {
+                std::cerr << "wfg serve: this show declares no MIDI port called \""
+                          << binding.first << "\"" << std::endl;
+                return 2;
+            }
+
+            auto render = std::make_shared<wfg::midi::RenderOutput> (binding.second);
+
+            if (! render->isOpen())
+            {
+                std::cerr << "wfg serve: --midi-render could not write \"" << binding.second << "\"" << std::endl;
+                return 2;
+            }
+
+            midiOut.attach (portId, std::move (render));
+            midiPorts.setBinding (portId, { true, {}, "render" });
         }
 
         if (! midiOut.problems().empty())
@@ -6156,6 +6220,20 @@ namespace
                                      changed. Stores into the region; nothing
                                      waits. */
                                  videoHost.tick (runner.videoClockNow(), runner.videoSampleRate());
+
+                                 /*  AND MTC'S (namespace draft §59, TC.5): the
+                                     same pair - the audio's samples when there
+                                     is audio, the tick's count without, so MTC
+                                     runs on a machine with no interface - for
+                                     the MIDI sender's lane to draw its own line
+                                     from, and the interface's output latency it
+                                     holds the code back by (AHP). A store each;
+                                     nothing waits. */
+                                 midiOut.feedClock (runner.videoClockNow(),
+                                                    std::chrono::duration_cast<std::chrono::nanoseconds> (
+                                                        std::chrono::steady_clock::now().time_since_epoch()).count(),
+                                                    runner.videoSampleRate());
+                                 midiOut.setTimecodeOutputLatency (audioState.outputLatency);
 
                                  if (const auto revision = document.showRevision();
                                      revision != videoRevisionSeen || document.isLocked() != videoLockSeen)
@@ -8262,7 +8340,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
     app.addCommand ({ "serve",
                       "serve <bundle> --sample-rate=N --buffer=N [--proxy-deadline-us=N]"
                       " [--hosted [--render=<wav>] [--input-wav=<wav>] | --device[=<name>] [--device-type=<type>]]"
-                      " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
+                      " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>] [--midi-render=<port>=<file>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
                       " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember]] [--engine-folder=<dir>]"
                       " [--no-video-window] [--presets=<dir>] [--hold]"

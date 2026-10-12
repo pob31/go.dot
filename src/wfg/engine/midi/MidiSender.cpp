@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <string>
@@ -48,6 +49,86 @@ namespace wfg::midi
         private:
             std::unique_ptr<juce::MidiOutput> device;
         };
+
+        std::int64_t steadyNanosNow() noexcept
+        {
+            return std::chrono::duration_cast<std::chrono::nanoseconds> (
+                       std::chrono::steady_clock::now().time_since_epoch()).count();
+        }
+    }
+
+    //==============================================================================
+    RenderOutput::RenderOutput (const std::string& path)
+    {
+        /*  THE PATH AS THE COMMAND LINE GAVE IT, resolved against where serve
+            was started, and the file begun again: a render is of this run. */
+        const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (path.c_str()));
+        label = "render " + file.getFileName().toStdString();
+
+        if (file.existsAsFile() && ! file.deleteFile())
+            return;
+
+        auto opened = std::make_unique<juce::FileOutputStream> (file);
+
+        if (opened->failedToOpen())
+            return;
+
+        stream = std::move (opened);
+    }
+
+    RenderOutput::~RenderOutput()
+    {
+        finish();
+    }
+
+    void RenderOutput::sendNow (const Bytes& bytes)
+    {
+        write (bytes, 0);
+    }
+
+    void RenderOutput::sendWithDue (const Bytes& bytes, std::int64_t dueNanos)
+    {
+        write (bytes, dueNanos);
+    }
+
+    void RenderOutput::finish()
+    {
+        if (stream != nullptr)
+            stream->flush();
+    }
+
+    void RenderOutput::write (const Bytes& bytes, std::int64_t dueNanos)
+    {
+        if (stream == nullptr)
+            return;
+
+        /*  Integers and hex digits only, which no locale writes differently
+            (the fr_FR rule, README § Contributing). */
+        char head[48];
+        std::snprintf (head, sizeof (head), "%lld %lld",
+                       static_cast<long long> (steadyNanosNow()), static_cast<long long> (dueNanos));
+
+        std::string line { head };
+        line.reserve (line.size() + 3 * bytes.size() + 1);
+
+        for (const auto byte : bytes)
+        {
+            char hex[4];
+            std::snprintf (hex, sizeof (hex), " %02X", static_cast<unsigned int> (byte));
+            line += hex;
+        }
+
+        line += '\n';
+        stream->write (line.data(), line.size());
+
+        /*  HANDED TO THE SYSTEM AT EACH LINE, not only at the stop. The
+            black-box harness stops serve with terminate(), which on Windows
+            is TerminateProcess and runs no destructor - the reason the hosted
+            WAV render rewrites its header every second (HostedAudioDriver) -
+            and the last lines are the ones a driver reads a stop by. What the
+            system holds survives the process; one write a message, a hundred
+            a second at most, is nothing beside a port. */
+        stream->flush();
     }
 
     MidiSender::~MidiSender()
@@ -92,15 +173,32 @@ namespace wfg::midi
         }
     }
 
-    std::shared_ptr<Output> MidiSender::deviceFor (const std::string& portId) const
+    MtcLane::Wire::Door MidiSender::doorOf (const std::string& portId) const
     {
         const std::lock_guard<std::mutex> lock { boundMutex };
 
         for (const auto& entry : bound)
-            if (entry.port == portId)
-                return entry.device;
+            if (entry.port == portId && entry.device != nullptr)
+                return { entry.device, entry.gate };
 
         return {};
+    }
+
+    bool MidiSender::holdsBack (const std::string& portId) const
+    {
+        return pair::isHeld (hold) && ! passesHold (portId);
+    }
+
+    void MidiSender::noteLeft (Output& device, const Bytes& bytes, bool shown)
+    {
+        delivered.fetch_add (1, std::memory_order_relaxed);
+
+        if (! shown)
+            return;
+
+        if (auto* watching = tap.load (std::memory_order_acquire); watching != nullptr && watching->isListening())
+            watching->record (monitor::Direction::out, monitor::Medium::midi, monitor::Road::midi,
+                              device.name(), bytes.data(), bytes.size());
     }
 
     bool MidiSender::bind (const std::string& portId, const std::string& label,
@@ -179,6 +277,9 @@ namespace wfg::midi
                                                 [&portId] (const Bound& b)
                                                 { return b.port == portId; });
 
+            /*  THE GATE STAYS WITH THE NAME: a send still finishing on the
+                old device keeps the new one waiting the length of it, never
+                two sends to one port at once. */
             if (existing != bound.end())
             {
                 replaced = std::move (existing->device);
@@ -186,7 +287,7 @@ namespace wfg::midi
             }
             else
             {
-                bound.push_back ({ portId, std::move (output) });
+                bound.push_back ({ portId, std::move (output), std::make_shared<std::mutex>() });
             }
 
             if (replaced != nullptr)
@@ -221,10 +322,19 @@ namespace wfg::midi
             return;
 
         worker = std::thread ([this] { run(); });
+
+        //  And MTC's thread beside it (namespace draft §59, TC.5), asleep until a code runs.
+        lane.beginThread();
     }
 
     void MidiSender::stop()
     {
+        /*  THE MTC LANE FIRST (namespace draft §59, TC.5): its thread joined
+            before the queue's closing flush, so the note-offs at the close
+            share no port's gate with a quarter frame, and nothing it would
+            send outlives the sender's stop. Safe whether or not it ran. */
+        lane.endThread();
+
         /*  CLEARED UNDER THE QUEUE LOCK (2026-10-02, the review of K4). The
             sending thread reads `running` under that lock and then waits on
             it; cleared without the lock, the store and the notify could both
@@ -243,6 +353,21 @@ namespace wfg::midi
 
         if (worker.joinable())
             worker.join();
+
+        /*  EVERY OUTPUT TOLD THE LAST MESSAGE HAS GONE, after both threads that
+            send are joined: a render writes out what it buffered (AHV). */
+        std::vector<std::shared_ptr<Output>> outputs;
+
+        {
+            const std::lock_guard<std::mutex> lock { boundMutex };
+
+            for (const auto& entry : bound)
+                if (entry.device != nullptr)
+                    outputs.push_back (entry.device);
+        }
+
+        for (const auto& output : outputs)
+            output->finish();
     }
 
     std::string MidiSender::send (const std::string& port, const Bytes& bytes)
@@ -294,6 +419,8 @@ namespace wfg::midi
             dropped = outbox.dropQueued();
         }
 
+        //  The MTC lane is the Runner's to cut (TC.6): nothing of it is queued here.
+
         /*  The note-offs are new work for the sending thread, whatever was
             dropped to make room for them. */
         wakeUp.notify_one();
@@ -305,7 +432,7 @@ namespace wfg::midi
         while (running.load (std::memory_order_relaxed))
         {
             Outgoing next;
-            std::shared_ptr<Output> device;
+            Door door;
 
             {
                 std::unique_lock<std::mutex> lock { queueMutex };
@@ -328,21 +455,22 @@ namespace wfg::midi
                     device is not going anywhere, so the record never hears of
                     it. `queueMutex` then `boundMutex`, the order the header
                     gives. */
-                device = deviceFor (next.port);
+                door = doorOf (next.port);
 
-                if (device != nullptr)
+                if (door.device != nullptr)
                     outbox.markLeaving (next);
             }
 
-            if (device == nullptr)
+            if (door.device == nullptr)
                 continue;
 
             /*  THE BLOCKING CALL, on the thread this class exists to give it.
                 A hundred-byte dump holds this for about thirty milliseconds on
                 Windows and nothing above it notices - outside `boundMutex`,
                 which the tick thread's `isBound` also takes, and outside the
-                queue lock, which its `send` takes. */
-            deliver (*device, next.bytes);
+                queue lock, which its `send` takes. Under the port's gate, which
+                is how the MTC lane's quarter frame waits for it to end. */
+            deliver (door, next.bytes);
         }
 
         /*  WHAT A CUE STILL HAD QUEUED GOES, because a show that is closing
@@ -378,7 +506,7 @@ namespace wfg::midi
         {
             const std::lock_guard<std::mutex> lock { queueMutex };
             remaining = outbox.takeAllForClose ([this] (const std::string& portId)
-                                                { return deviceFor (portId) != nullptr; });
+                                                { return doorOf (portId).device != nullptr; });
         }
 
         constexpr auto budget = std::chrono::milliseconds (250);
@@ -391,24 +519,79 @@ namespace wfg::midi
             if (used >= budget)
                 continue;
 
-            const auto device = deviceFor (item.port);
+            const auto door = doorOf (item.port);
 
-            if (device == nullptr)
+            if (door.device == nullptr)
                 continue;
 
             const auto began = std::chrono::steady_clock::now();
-            deliver (*device, item.bytes);
+            deliver (door, item.bytes);
             used += std::chrono::steady_clock::now() - began;
         }
     }
 
-    void MidiSender::deliver (Output& device, const Bytes& bytes)
+    void MidiSender::deliver (const Door& door, const Bytes& bytes)
     {
-        device.sendNow (bytes);
-        delivered.fetch_add (1, std::memory_order_relaxed);
+        {
+            const std::lock_guard<std::mutex> gateLock { *door.gate };
+            door.device->sendNow (bytes);
+        }
 
-        if (auto* watching = tap.load (std::memory_order_acquire); watching != nullptr && watching->isListening())
-            watching->record (monitor::Direction::out, monitor::Medium::midi, monitor::Road::midi,
-                              device.name(), bytes.data(), bytes.size());
+        noteLeft (*door.device, bytes, true);
+    }
+
+    //==============================================================================
+    std::string MidiSender::startTimecode (const std::string& runId, const std::string& port, std::uint64_t program,
+                                           timecode::Rate rate, int sampleRate, std::int64_t startFrame,
+                                           std::int64_t zeroSample)
+    {
+        if (program == 0 || sampleRate <= 0)
+            return sendError::badMessage;
+
+        /*  HELD, AND TAKEN (§58, AGG), before the port is asked whether it is
+            bound - `enqueue`'s order, for `enqueue`'s reason: a backup's cables
+            are not plugged in, and its timecode run must end as the main's
+            does. The program runs held, so a full frame leaves the moment the
+            hold lets go. */
+        if (! holdsBack (port) && ! isBound (port))
+            return sendError::noPort;
+
+        lane.start (runId, port, program, rate, sampleRate, startFrame, zeroSample);
+        return {};
+    }
+
+    void MidiSender::stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut)
+    {
+        lane.stop (program, atSample, cut);
+    }
+
+    void MidiSender::muteTimecode (bool on)
+    {
+        lane.mute (on);
+    }
+
+    void MidiSender::feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate)
+    {
+        lane.feedClock (sample, nanos, sampleRate);
+    }
+
+    void MidiSender::setTimecodeOutputLatency (int samples)
+    {
+        lane.setOutputLatency (samples);
+    }
+
+    std::uint32_t MidiSender::timecodeLate() const
+    {
+        return lane.lateCount();
+    }
+
+    double MidiSender::timecodeWorstMs() const
+    {
+        return lane.worstMs();
+    }
+
+    std::uint64_t MidiSender::timecodeProgram() const
+    {
+        return lane.currentProgram();
     }
 }

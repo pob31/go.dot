@@ -33,6 +33,8 @@
 
 #pragma once
 
+#include <wfg/engine/timecode/Timecode.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -96,5 +98,59 @@ namespace wfg::midi
             and nothing to a synth Go.dot never played. Tick thread; never waits
             on a port. Answers how many were dropped. */
         virtual std::size_t dropQueued() { return 0; }
+
+        //======================================================================
+        /*  MIDI TIME CODE (namespace draft §59, TC.5): one program at a time,
+            sent by a thread of the sink's own at each message's moment rather
+            than queued at a tick's flush, since quarter frames come every 8 to
+            10 ms and the tick is 20 (AHQ). Every one of these does nothing by
+            default, so a recording sink, a null one and every fake is complete
+            without them, and a replay with no sender sends nothing.
+
+            START: program `program` - a number the Runner gives each run, never
+            nought - has frame `startFrame` of `rate` (counted from 00:00:00:00)
+            begin on Go.dot's sample `zeroSample`, at `sampleRate`, on `port`.
+            It replaces whatever program is sending from that sample on: a
+            takeover or a jump, with a full frame first (AHL, AHO). Tick
+            thread; never waits on a port.
+
+            ANSWERS EMPTY, OR `no-port` when the port has no device behind it
+            and this machine does not hold: a held machine answers as taken -
+            held means counted as sent (§58, AGG) - and runs the program held,
+            so a full frame leaves on the tick the hold lets go. */
+        virtual std::string startTimecode (const std::string&, const std::string&, std::uint64_t,
+                                           timecode::Rate, int, std::int64_t, std::int64_t)
+        {
+            return {};
+        }
+
+        /*  AND HOW IT ENDS (AHK): nothing due at or after the first frame
+            boundary at or after `atSample` leaves; with `cut`, nothing at or
+            after `atSample` itself - a double Esc. An `atSample` of nought or
+            less is as soon as can be, and is never counted late. A stop for a
+            program whose start has not come takes that start back. Tick
+            thread. */
+        virtual void stopTimecode (std::uint64_t, std::int64_t, bool) {}
+
+        /*  TX OFF ON THE MTC PORT (AHR): nothing leaves while muted, and the
+            code picks up again at the next cycle with a full frame (AHO). */
+        virtual void muteTimecode (bool) {}
+
+        /*  WHERE GO.DOT'S SAMPLES WERE AND WHEN, once a tick: the pairs the
+            sending thread draws its line between samples and moments from
+            (clock/ClockEstimate.h). `nanos` is the machine's steady clock. */
+        virtual void feedClock (std::int64_t, std::int64_t, int) {}
+
+        /*  The interface's output latency in samples, by which MTC is held
+            back so it leaves when its sample is heard (AHP). */
+        virtual void setTimecodeOutputLatency (int) {}
+
+        /*  The readouts (§59.3): messages that left more than 2 ms after their
+            moment or were dropped for lateness (`sync/mtcLate`), the latest of
+            any in milliseconds (`sync/mtcWorst`), and the program sending now,
+            nought for none. Any thread. */
+        virtual std::uint32_t timecodeLate() const { return 0; }
+        virtual double timecodeWorstMs() const { return 0.0; }
+        virtual std::uint64_t timecodeProgram() const { return 0; }
     };
 }

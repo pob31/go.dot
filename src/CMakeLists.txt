@@ -171,6 +171,8 @@ add_library(wfg_engine STATIC
     wfg/engine/midi/SendQueue.cpp
     wfg/engine/midi/PortBinder.h
     wfg/engine/midi/PortBinder.cpp
+    wfg/engine/midi/MtcLane.h
+    wfg/engine/midi/MtcLane.cpp
     wfg/engine/surface/McuCodec.h
     wfg/engine/surface/McuCodec.cpp
     wfg/engine/surface/FaderCurve.h
@@ -302,6 +304,7 @@ add_library(wfg_engine STATIC
     wfg/engine/rt/RtCounters.h
     wfg/engine/rt/RtAllocatorHook.cpp
     wfg/engine/clock/AudioClockSource.h
+    wfg/engine/clock/ClockEstimate.h
     wfg/engine/clock/DummyAudioClock.cpp
     wfg/engine/clock/DummyAudioClock.h
     wfg/engine/clock/RateClock.h

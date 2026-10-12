@@ -65,6 +65,7 @@
 #include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/RegionSink.h>
 #include <wfg/engine/video/Strip.h>
+#include <wfg/engine/clock/ClockEstimate.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoHost.h>
 #include <wfg/engine/video/VideoRamp.h>
@@ -76,11 +77,13 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <new>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 using namespace wfg;
@@ -335,6 +338,48 @@ TEST_CASE ("video clock: jitter averaged out, a drift followed, a jump taken as 
 
     /*  Before any pair, nothing. */
     CHECK (video::ClockEstimate {}.sampleAt (0) == -1);
+}
+
+TEST_CASE ("clock line: the moment a sample plays inverts the sample at a moment, to within a sample")
+{
+    /*  MOVED TO clock/ AND READ BACKWARDS (namespace draft §59, TC.5; AHP):
+        MTC is due on a sample and waited for as a moment. The video's name
+        for the line is the same class. */
+    static_assert (std::is_same_v<video::ClockEstimate, wfg::ClockEstimate>);
+
+    CHECK (wfg::ClockEstimate {}.nanosAt (0) == -1);
+
+    constexpr int rate = 48000;
+    const auto truth = [] (std::int64_t nanos, double ratio)
+    {
+        return static_cast<std::int64_t> (static_cast<double> (nanos) * 1.0e-9 * rate * ratio);
+    };
+
+    /*  A steady clock days into the machine's life, a drifting crystal and
+        jittered reads - the line the lane will keep - and every sample over
+        twenty seconds of it read back to its moment and forwards again. */
+    wfg::ClockEstimate estimate;
+    std::uint32_t seed = 4242;
+    const auto random = [&seed] { seed = seed * 1664525u + 1013904223u; return static_cast<double> (seed >> 8) / 16777216.0; };
+
+    const std::int64_t base = 3LL * 86'400'000'000'000LL;           // three days of uptime
+
+    for (std::int64_t at = 0; at < 20'000'000'000LL; at += 20'000'000)
+    {
+        const auto readAt = at + static_cast<std::int64_t> (random() * 2.0e6);
+        estimate.feed (truth (readAt, 1.00005) / 256 * 256, base + readAt, rate);
+    }
+
+    for (std::int64_t sample = 0; sample < 20 * rate; sample += 997)
+    {
+        const auto moment = estimate.nanosAt (sample);
+        REQUIRE (moment > 0);
+        CHECK (std::llabs (estimate.sampleAt (moment) - sample) <= 1);
+    }
+
+    //  And one sample on is one sample's worth of nanoseconds on, at the line's own slope.
+    const auto step = static_cast<double> (estimate.nanosAt (480'000) - estimate.nanosAt (432'000)) / 48'000.0;
+    CHECK (std::abs (step - 1.0e9 / estimate.samplesPerSecond()) < 1.0);
 }
 
 TEST_CASE ("video compositor: the stack in its order, each layer laid over in display space")

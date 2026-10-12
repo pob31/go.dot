@@ -25972,6 +25972,10 @@ Mine, the author's to overrule:
 - **AHY** (mine, TC.1) **A second GO on a running timecode cue starts it again from its start**: a
   new run, which takes the first one's output over as any other timecode cue would (AHC). A process
   cue's second GO does nothing; a code restarted is what an operator pressing GO again on it means.
+- **AHZ** (mine, TC.5) **On Windows the MTC thread yields rather than sleeps for the last 1.2 ms
+  before each message**, since a short sleep there lasts a millisecond: a median of 40 µs late
+  rather than 1 ms, for about a tenth of one core while an MTC cue runs. Elsewhere it yields for the
+  last 0.3 ms.
 
 ### 59.3 Rows
 
@@ -26129,3 +26133,73 @@ clean over a ten-minute render.
   a tone and its LTC in one timeline scene fired cold begin on the same sample, the code decoded
   by `tests/LtcReader.h` frame by frame from 01:00:00:00, and after Esc the line silent on the
   frame boundary after the stop. Nine deliberate breakages each turned their own case red.
+- **TC.5**, 2026-10-12: the MTC lane and the clock seam it times by; no Runner calls yet (TC.6).
+  The clock line moved: `ClockEstimate` is `wfg::ClockEstimate` in `clock/ClockEstimate.h` - the
+  folder's namespace is `wfg`, not the `clock::` 59.1 wrote - with `video::ClockEstimate` an alias
+  so the renderer and its tests read as they did, and gains `nanosAt (sample)`, the inverse of
+  `sampleAt` to within a sample, -1 before the first pair: sample to moment and back, nothing of
+  either reader in it, for RD.9 to build its map on. `midi::MtcLane`, the `MidiSender`'s last
+  member, reaching the sender's ports through `MtcLane::Wire` (the device and gate behind a port,
+  whether the hold holds it back, a message counted and shown). One program at a time (AHA):
+  `start` puts a program in a short list of waiting starts kept in the order of their zeros, and
+  each takes over on its own zero - what the one sending had due before that sample still leaves,
+  and the new one opens with a full frame (AHL, AHO); `stop` ends a program at the first frame
+  boundary at or after its sample (AHK), a `cut` on its sample, and an `atSample` of nought or less
+  is from the next message still to go, never late; a waiting start is given its end like a
+  running one - a length's stop can be posted with its start - and taken back when that end is its
+  zero, an Esc inside the launch horizon; a placed stop arriving after what it was placed for went
+  is counted late; `mute` for tx off (AHR). The tick thread's calls push into an inbox under a
+  mutex held for a push_back, store the newest clock pair under a second, or store an atomic (the
+  output latency), and notify; the programs, the cursors and the lane's OWN `ClockEstimate`, fed
+  from the newest pair, are the lane thread's alone. Its thread - started by `MidiSender::start`,
+  stopped first in `MidiSender::stop`, before the queue's closing flush, raised by
+  `elevateCurrentThreadForTicking` - sleeps on a condition variable while no program waits;
+  otherwise until 1.5 ms before the next message's moment, `nanosAt (due) + output latency` (AHP),
+  never longer than 20 ms at a time so a line the next pair corrected is read again; then 0.2 ms
+  sleeps and, for the last 0.3 ms (1.2 ms on Windows, where a short sleep lasts a millisecond),
+  yields; then `pump (now)`. `pump`, the testable core, takes each message due in order through
+  the last door: held and not a surface's port, counted as sent - nothing leaves, nothing is late,
+  the cursor runs on - and at the first message after the hold lets go, re-seated at the next
+  cycle with a full frame (AGG; what RD.7's takeover needs); muted, nothing, and tx back on
+  re-seats the same way; no device, dropped and counted (`unsentCount`), the code running on and
+  picked up where it has got to once the port is bound again; more than a quarter frame late,
+  dropped and re-seated at the next cycle after now without a full frame - with one when the
+  full frame itself was late or after a stall of 250 ms; otherwise sent under the port's gate,
+  and if a command arrived while it waited for the gate, let go unsent and looked at again.
+  Leaving more than 2 ms after its moment, or dropped for lateness, counts in `lateCount`
+  (`sync/mtcLate`); `worstMs` (`sync/mtcWorst`) keeps the latest of every message that left or
+  was dropped, not only of those counted. The network monitor is shown the full frames only
+  (AHQ). A clock of a test's own (`MidiSender::setTimecodeClock`) means the thread is never
+  started and the test pumps by hand. THE GATE (AHQ): `MidiSender::Bound` gains a
+  `shared_ptr<mutex>`, made with the binding and kept when another device is put behind the
+  name; the queue's `deliver` and its closing flush send under it, and so does the lane - a leaf,
+  in the lock-order note: taken with no other lock held, nothing asked for while it is held but
+  the send and an atomic; the lane's two mutexes are leaves too. `MidiSink` gains defaulted
+  `startTimecode` (empty, or `no-port` when the port has no device and the hold does not hold it
+  back - held answers as taken and runs the program held; `bad-message` for program nought),
+  `stopTimecode`, `muteTimecode`, `feedClock`, `setTimecodeOutputLatency`, `timecodeLate`,
+  `timecodeWorstMs`, `timecodeProgram`, which `MidiSender` forwards to its lane; `dropQueued`
+  leaves the lane to the Runner. `midi::Output` gains `sendWithDue (bytes, dueNanos)` - its own
+  name, an overload would be a hidden virtual in every fake - and `finish`, called on every bound
+  output once both sending threads are joined. `RenderOutput` writes one line a message, `sent_ns
+  due_ns` and the bytes in hex, handed to the system line by line - the harness stops serve with
+  TerminateProcess, which runs no destructor - and flushed again at `finish`: `wfg serve
+  --midi-render=<port>=<file>` (AHV), repeatable, the port by the show's name, put behind it last
+  and published as bound; the queue's messages have a due of 0. Console feeds the lane the same
+  pair `videoHost.tick` is given - the audio's samples, the tick's count with no audio - and
+  `audioState.outputLatency`, every tick. Tests under C and fr_FR, MidiTests, through
+  `MidiSender` with a hand clock and a timed fake port: the full frame then a quarter frame every
+  10 ms at 25, each at its sample's moment plus 10 ms of latency, the monitor shown the full frame
+  alone; every quarter's sample at 29.97 drop-frame, 29.97, 24 and 23.976 on FrameClock's rule,
+  through a dropped minute (00:00:59;28 then 00:01:00;02) and midnight, read back by a decoder of
+  the test's own; the takeover on its zero 4900, the first's last message at 4800; stops placed
+  inside a frame and on a boundary, as soon as can be, a cut, a stop before the zero, a placed stop
+  arriving late; tx off and back on; held, a lane 265 ms behind counting nothing late, the full
+  frame at frame 8 once let go, and a surface's port passing; 5 ms late sent and counted, 15 ms
+  dropped and resumed at piece 0 at 80 ms, a late full frame, a 380 ms stall; `no-port`, held,
+  a surface's port held; a port unbound part way and bound again; the gate, a quarter frame waiting
+  out a 30 ms SysEx sent by the queue's own thread and the byte runs never interleaved; the real
+  thread on the real clock for 400 ms (on this machine, Windows Debug: a median of 40 µs late, the
+  worst 0.8 ms; before the Windows yield, 1.0 ms and 1.8 ms); the render's lines. VideoHostTests:
+  `nanosAt` inverting `sampleAt` to a sample on a drifting, jittered line three days into the
+  machine's uptime. Twelve deliberate breakages each turned their own case red.

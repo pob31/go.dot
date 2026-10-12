@@ -41,6 +41,7 @@
 #pragma once
 
 #include <wfg/engine/midi/MidiSink.h>
+#include <wfg/engine/midi/MtcLane.h>
 #include <wfg/engine/midi/PortTable.h>
 #include <wfg/engine/midi/SendQueue.h>
 
@@ -48,6 +49,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -74,11 +76,64 @@ namespace wfg::midi
             has taken it, and a driver that is not ready is retried. */
         virtual void sendNow (const Bytes& bytes) = 0;
 
+        /*  THE SAME, FROM THE MTC LANE (namespace draft §59, TC.5), which
+            knows the moment the message was due - on the steady clock, in
+            nanoseconds. A device has no use for it and sends now; a render
+            writes it down beside when the message actually left (AHV). Its own
+            name and not an overload of `sendNow`, which the strict build would
+            take for a hidden virtual in every fake (-Woverloaded-virtual). */
+        virtual void sendWithDue (const Bytes& bytes, std::int64_t dueNanos)
+        {
+            (void) dueNanos;
+            sendNow (bytes);
+        }
+
+        /*  The sender has stopped, its last message gone: what an output
+            keeps buffered is written out. Nothing for a device. */
+        virtual void finish() {}
+
         /** The device's name, for the network monitor. */
         virtual std::string name() const = 0;
     };
 
-    class MidiSender final : public MidiSink
+    /*  WHAT A PORT WOULD HAVE SENT, WRITTEN TO A FILE (namespace draft §59,
+        AHV): `wfg serve --midi-render=<port>=<file>` puts one of these behind
+        a port, for a driver on a machine with no MIDI port at all - a CI
+        runner - to read what MTC did and when.
+
+        ONE LINE A MESSAGE, `sent_ns due_ns hex bytes`: when it left on the
+        steady clock, when it was due (nought for the queue's messages, which
+        are sent as soon as they are taken), and its bytes, two hex digits
+        each, a space between. Handed to the system line by line, so a serve
+        stopped by TerminateProcess - the black-box harness's way - still
+        leaves every line; `finish` at the sender's stop and the output's end
+        flushes once more. Each send is made under the port's gate, so two
+        threads never write at once. */
+    class RenderOutput final : public Output
+    {
+    public:
+        explicit RenderOutput (const std::string& path);
+        ~RenderOutput() override;
+
+        RenderOutput (const RenderOutput&) = delete;
+        RenderOutput& operator= (const RenderOutput&) = delete;
+
+        /** Whether the file could be opened for writing. */
+        bool isOpen() const noexcept { return stream != nullptr; }
+
+        void sendNow (const Bytes& bytes) override;
+        void sendWithDue (const Bytes& bytes, std::int64_t dueNanos) override;
+        void finish() override;
+        std::string name() const override { return label; }
+
+    private:
+        void write (const Bytes& bytes, std::int64_t dueNanos);
+
+        std::string label;
+        std::unique_ptr<juce::FileOutputStream> stream;
+    };
+
+    class MidiSender final : public MidiSink, private MtcLane::Wire
     {
     public:
         MidiSender() = default;
@@ -142,8 +197,33 @@ namespace wfg::midi
 
         /*  DOUBLE ESC: the queue's cue messages dropped and the note-offs put
             at its front (`SendQueue::dropQueued`), under the queue lock and
-            nothing else - a push_back's worth of waiting, never a port's. */
+            nothing else - a push_back's worth of waiting, never a port's.
+            The MTC lane is not touched: the Runner cuts its code (TC.6). */
         std::size_t dropQueued() override;
+
+        //==============================================================================
+        /*  MIDI TIME CODE (namespace draft §59, TC.5), sent by the lane this
+            sender owns (MtcLane.h) on the devices it owns. `startTimecode`
+            answers `no-port` when the port has no device and the machine does
+            not hold it back - held answers as taken (§58, AGG) and runs the
+            program held. The rest go to the lane as they are. Tick thread;
+            nothing here waits on a port. */
+        std::string startTimecode (const std::string& runId, const std::string& port, std::uint64_t program,
+                                   timecode::Rate rate, int sampleRate, std::int64_t startFrame,
+                                   std::int64_t zeroSample) override;
+        void stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut) override;
+        void muteTimecode (bool on) override;
+        void feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate) override;
+        void setTimecodeOutputLatency (int samples) override;
+        std::uint32_t timecodeLate() const override;
+        double timecodeWorstMs() const override;
+        std::uint64_t timecodeProgram() const override;
+
+        /*  A CLOCK OF A TEST'S OWN for the lane, before `start`: its thread is
+            then never started, and the test pumps it by hand through
+            `timecodeLane`. */
+        void setTimecodeClock (std::shared_ptr<const MtcLane::Clock> clockToUse) { lane.useClock (std::move (clockToUse)); }
+        MtcLane& timecodeLane() noexcept { return lane; }
 
         const std::vector<std::string>& problems() const noexcept { return refusals; }
 
@@ -187,23 +267,36 @@ namespace wfg::midi
             push_back under the queue lock. */
         std::string enqueue (Outgoing message);
 
-        /** What `run` sends, shown to the monitor on its way. */
-        void deliver (Output& device, const Bytes& bytes);
+        /*  What `run` sends: under the port's gate, then counted and shown to
+            the monitor on its way - outside the gate, which is held for the
+            send and nothing else. */
+        void deliver (const Door& door, const Bytes& bytes);
         std::atomic<monitor::TrafficTap*> tap { nullptr };
+
+        //  What the MTC lane asks of its owner (MtcLane::Wire).
+        Door doorOf (const std::string& portId) const override;
+        bool holdsBack (const std::string& portId) const override;
+        void noteLeft (Output& device, const Bytes& bytes, bool shown) override;
 
         /*  SHARED, SO A PORT CAN BE REBOUND WHILE THE SHOW RUNS (2026-09-25):
             the sending thread takes its own reference under `boundMutex` and
             sends outside it, so a device closed by a rebind in the middle of a
             thirty-millisecond dump is closed by whichever of the two lets go
             last - and never while the lock is held, which the tick thread's
-            `isBound` also takes. */
+            `isBound` also takes.
+
+            AND ITS GATE (namespace draft §59, AHQ), made with the binding and
+            kept when another device is put behind the same name: every send to
+            the port is made under it, the queue's and the MTC lane's alike, so
+            a quarter frame - F1, a System Common message - never lands inside
+            a SysEx, which it would end. Shared like the device, so a sender
+            holds it as long as it holds the device. */
         struct Bound
         {
             std::string port;
             std::shared_ptr<Output> device;
+            std::shared_ptr<std::mutex> gate;
         };
-
-        std::shared_ptr<Output> deviceFor (const std::string& portId) const;
 
         /*  Whether a message to this port goes on while the machine holds: a
             surface's port, and nothing else. */
@@ -216,14 +309,24 @@ namespace wfg::midi
         std::vector<std::string> surfacePorts;      // under boundMutex
         std::vector<std::string> refusals;
 
-        /*  THE ORDER THE TWO LOCKS ARE TAKEN IN, when one is held while the
-            other is asked for: `queueMutex`, then `boundMutex` - the sending
-            thread looks a message's device up before it lets the queue go, so
-            the note record hears of a note-on only once it is sure to leave.
+        /*  THE ORDER THE LOCKS ARE TAKEN IN, when one is held while another
+            is asked for: `queueMutex`, then `boundMutex` - the sending thread
+            looks a message's device up before it lets the queue go, so the
+            note record hears of a note-on only once it is sure to leave.
             `bind` takes both in that order around a device it puts behind a
             name, so a note the new device plays is never forgotten with the
             old one's. Never the other way round: `send` and `unbind` take the
-            two one after the other, never one inside the other. */
+            two one after the other, never one inside the other.
+
+            A PORT'S GATE IS A LEAF (namespace draft §59, TC.5): taken with no
+            other lock held - by the queue's thread after it has let both go,
+            by the MTC lane after `doorOf` has let `boundMutex` go - and while
+            it is held nothing is asked for but the device's send and an
+            atomic. So neither the tick thread, which never takes a gate, nor
+            the queue or the lane can wait on each other in a circle. The
+            lane's own two locks (MtcLane.h, its inbox and its clock pair) are
+            leaves too, held for a push_back or a copy and never around a gate
+            or a send. */
         mutable std::mutex queueMutex;
         std::condition_variable wakeUp;
         SendQueue outbox;
@@ -231,5 +334,10 @@ namespace wfg::midi
         std::atomic<bool> running { false };
         std::atomic<std::size_t> delivered { 0 };
         std::thread worker;
+
+        /*  THE MTC LANE, last: its thread calls back into everything above,
+            and is stopped in `stop` - the destructor's first - before any of
+            it goes. */
+        MtcLane lane { *this };
     };
 }

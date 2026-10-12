@@ -2628,3 +2628,796 @@ TEST_CASE ("hold: Doh! counts a held MIDI send as sent - a port left to its oper
     CHECK (rig.newestRunOf (note)->warning == std::string (cue::runWarning::leftToOperator));
     CHECK (outputs.sent() == 0u);
 }
+
+//==============================================================================
+/*  MIDI TIME CODE'S LANE (namespace draft §59, TC.5; AHO, AHP, AHQ, AHR, AHV):
+    the thread inside the MIDI sender that sends each MTC message at its moment.
+    Driven by hand on a clock of the test's own - `pump (now)` is everything the
+    thread does once it has woken - so what leaves, and when, is exact; one
+    case at the end runs the real thread on the real clock.
+
+    THE LINE IS FED 1:1 - sample `s` at `s / 48000` seconds - so a sample's
+    moment is arithmetic the test can do itself, and the output latency is
+    added on top of it (AHP). */
+#include <wfg/engine/midi/MtcLane.h>
+#include <wfg/engine/monitor/TrafficTap.h>
+#include <wfg/engine/timecode/FrameClock.h>
+#include <wfg/engine/timecode/MtcSchedule.h>
+#include <wfg/engine/timecode/Timecode.h>
+
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+
+namespace
+{
+    std::int64_t steadyNow()
+    {
+        return std::chrono::duration_cast<std::chrono::nanoseconds> (
+                   std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    //  A clock moved by hand: what `now` says is what the test last set.
+    struct HandClock final : midi::MtcLane::Clock
+    {
+        std::int64_t now() const noexcept override { return at.load (std::memory_order_relaxed); }
+        void sleepUntil (std::int64_t) const noexcept override {}
+
+        std::atomic<std::int64_t> at { 0 };
+    };
+
+    /*  A port that writes down each message with when it left (on the hand
+        clock, or the steady one) and when it was due, and the order in which
+        each send began and ended - so a quarter frame landing inside a SysEx
+        would show. A SysEx longer than a full frame can be made slow, as a
+        hundred bytes are on Windows. */
+    struct TimedPort final : midi::Output
+    {
+        struct Sent
+        {
+            std::int64_t at = 0;
+            std::int64_t due = 0;
+            midi::Bytes bytes;
+        };
+
+        explicit TimedPort (const HandClock* handToRead = nullptr) : hand (handToRead) {}
+
+        void sendNow (const midi::Bytes& bytes) override                            { record (bytes, 0); }
+        void sendWithDue (const midi::Bytes& bytes, std::int64_t dueNanos) override { record (bytes, dueNanos); }
+        std::string name() const override { return "Fake desk"; }
+
+        std::vector<Sent> wire() const
+        {
+            const std::lock_guard<std::mutex> lock { wireLock };
+            return sent;
+        }
+
+        std::vector<std::string> runs() const
+        {
+            const std::lock_guard<std::mutex> lock { wireLock };
+            return order;
+        }
+
+        std::atomic<int> sysexMs { 0 };
+        std::atomic<bool> inSysex { false };
+
+    private:
+        void record (const midi::Bytes& bytes, std::int64_t due)
+        {
+            const auto slow = bytes.size() > static_cast<std::size_t> (timecode::mtcFullFrameSize);
+            const auto tag = slow ? std::string ("SX") : hexOf ({ bytes.front() });
+
+            {
+                const std::lock_guard<std::mutex> lock { wireLock };
+                order.push_back ("<" + tag);
+            }
+
+            if (slow)
+            {
+                inSysex = true;
+                std::this_thread::sleep_for (std::chrono::milliseconds (sysexMs.load()));
+            }
+
+            const auto when = hand != nullptr ? hand->now() : steadyNow();
+
+            {
+                const std::lock_guard<std::mutex> lock { wireLock };
+                order.push_back (tag + ">");
+                sent.push_back ({ when, due, bytes });
+            }
+
+            inSysex = false;
+        }
+
+        const HandClock* hand = nullptr;
+        mutable std::mutex wireLock;
+        std::vector<Sent> sent;
+        std::vector<std::string> order;
+    };
+
+    /*  A sender with one port, PRT00001, a hand clock for its lane - whose
+        thread is then never started - and the line fed 1:1 from (0, 0). */
+    struct MtcRig
+    {
+        static constexpr int sampleRate = 48000;
+
+        explicit MtcRig (int latencySamples = 0)
+            : latencyNanos (static_cast<std::int64_t> (latencySamples) * 1'000'000'000LL / sampleRate)
+        {
+            outputs.setTimecodeClock (clock);
+            outputs.attach ("PRT00001", desk);
+            outputs.feedClock (0, 0, sampleRate);
+            outputs.setTimecodeOutputLatency (latencySamples);
+        }
+
+        //  The moment a sample is heard: on the line, and the latency after it.
+        std::int64_t momentOf (std::int64_t sample) const
+        {
+            return static_cast<std::int64_t> (std::llround (static_cast<double> (sample) * 1.0e9 / sampleRate)) + latencyNanos;
+        }
+
+        std::string start (std::uint64_t program, timecode::Rate frameRate, const timecode::Label& from,
+                           std::int64_t zero, const std::string& port = "PRT00001")
+        {
+            return outputs.startTimecode ("RUN0000" + std::to_string (program), port, program, frameRate, sampleRate,
+                                          timecode::frameOf (from, frameRate), zero);
+        }
+
+        void pumpAt (std::int64_t nanos)
+        {
+            clock->at = nanos;
+            outputs.timecodeLane().pump (nanos);
+        }
+
+        //  Every `step` from where the clock is to `until`, both included.
+        void runTo (std::int64_t until, std::int64_t step = 100'000)
+        {
+            for (auto t = clock->at.load(); t <= until; t += step)
+                pumpAt (t);
+        }
+
+        std::shared_ptr<HandClock> clock = std::make_shared<HandClock>();
+        std::shared_ptr<TimedPort> desk = std::make_shared<TimedPort> (clock.get());
+        std::int64_t latencyNanos = 0;
+        midi::MidiSender outputs;
+    };
+
+    //  What MtcSchedule says a run sends, up to a sample - the bytes the lane must send.
+    std::vector<timecode::MtcMessage> scheduleOf (timecode::Rate frameRate, const timecode::Label& from,
+                                                  std::int64_t zero, std::int64_t untilSample)
+    {
+        timecode::MtcCursor cursor { frameRate, MtcRig::sampleRate, timecode::frameOf (from, frameRate), zero };
+        std::vector<timecode::MtcMessage> out;
+
+        for (auto next = cursor.next(); next.dueSample <= untilSample; next = cursor.next())
+        {
+            out.push_back (next);
+            cursor.advance();
+        }
+
+        return out;
+    }
+
+    midi::Bytes bytesOf (const timecode::MtcMessage& message)
+    {
+        return { message.bytes.begin(), message.bytes.begin() + message.size };
+    }
+
+    midi::Bytes fullFrameOf (const timecode::Label& label, timecode::Rate frameRate)
+    {
+        const auto bytes = timecode::fullFrame (label, frameRate);
+        return { bytes.begin(), bytes.end() };
+    }
+
+    /*  THE LABELS THE QUARTER FRAMES CARRY, written from MTC's description and
+        sharing nothing with the schedule: each run of pieces 0 to 7, in order,
+        put together - frames, seconds, minutes, hours, low nibble first - and
+        the rate's code from the last. A run broken part way is not a label. */
+    struct Heard
+    {
+        timecode::Label label;
+        int code = -1;
+    };
+
+    std::vector<Heard> cyclesOf (const std::vector<TimedPort::Sent>& wire)
+    {
+        std::vector<Heard> heard;
+        std::array<int, 8> nibbles {};
+        int expected = 0;
+
+        for (const auto& message : wire)
+        {
+            if (message.bytes.size() != 2u || message.bytes[0] != 0xF1)
+                continue;
+
+            const auto piece = message.bytes[1] >> 4;
+
+            if (piece != expected)
+            {
+                expected = 0;
+
+                if (piece != 0)
+                    continue;
+            }
+
+            nibbles[static_cast<std::size_t> (piece)] = message.bytes[1] & 0x0F;
+            expected = piece + 1;
+
+            if (expected == 8)
+            {
+                heard.push_back ({ { nibbles[6] | ((nibbles[7] & 0x01) << 4),
+                                     nibbles[4] | ((nibbles[5] & 0x03) << 4),
+                                     nibbles[2] | ((nibbles[3] & 0x03) << 4),
+                                     nibbles[0] | ((nibbles[1] & 0x01) << 4) },
+                                   (nibbles[7] >> 1) & 0x03 });
+                expected = 0;
+            }
+        }
+
+        return heard;
+    }
+
+    timecode::Label labelOfFullFrame (const midi::Bytes& bytes)
+    {
+        REQUIRE (bytes.size() == 10u);
+        return { bytes[5] & 0x1F, bytes[6], bytes[7], bytes[8] };
+    }
+}
+
+TEST_CASE ("mtc lane: the full frame, then a quarter frame every 10 ms at 25, each sent at its sample's moment plus the output latency")
+{
+    monitor::TrafficTap tap;
+    tap.setListening (true);
+
+    MtcRig rig { 480 };                         // ten milliseconds of output latency
+    rig.outputs.setTap (&tap);
+    const timecode::Label from { 1, 0, 0, 0 };
+
+    REQUIRE (rig.start (1, timecode::Rate::fps25, from, 4800).empty());
+
+    //  The zero is 100 ms of samples in, heard 10 ms after that: nothing before.
+    rig.runTo (109'900'000);
+    CHECK (rig.desk->wire().empty());
+    CHECK (rig.outputs.timecodeProgram() == 0u);
+
+    rig.runTo (300'000'000);
+
+    const auto wire = rig.desk->wire();
+    const auto wanted = scheduleOf (timecode::Rate::fps25, from, 4800, (300'000'000 - rig.latencyNanos) * 48 / 1'000'000);
+
+    REQUIRE (wanted.size() == 21u);
+    REQUIRE (wire.size() == wanted.size());
+
+    for (std::size_t n = 0; n < wire.size(); ++n)
+    {
+        INFO ("message " << n << ": " << hexOf (wire[n].bytes));
+        CHECK (wire[n].bytes == bytesOf (wanted[n]));
+        CHECK (wire[n].due == rig.momentOf (wanted[n].dueSample));
+        CHECK (wire[n].at == wire[n].due);
+    }
+
+    CHECK (wire[0].bytes == midi::Bytes { 0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x21, 0x00, 0x00, 0x00, 0xF7 });
+    CHECK (wire[0].due == 110'000'000);
+    CHECK (wire[1].bytes == midi::Bytes { 0xF1, 0x00 });
+    CHECK (wire[1].due == 110'000'000);
+    CHECK (wire[2].due - wire[1].due == 10'000'000);
+    CHECK (wire.back().due == 300'000'000);
+
+    CHECK (rig.outputs.timecodeProgram() == 1u);
+    CHECK (rig.outputs.timecodeLate() == 0u);
+    CHECK (rig.outputs.sent() == wire.size());
+
+    //  THE MONITOR SEES THE FULL FRAME, not the quarters (AHQ).
+    std::vector<monitor::Capture> captures;
+    tap.drain (captures);
+    REQUIRE (captures.size() == 1u);
+    CHECK (captures[0].size == 10u);
+    CHECK (captures[0].bytes[0] == 0xF0);
+    CHECK (captures[0].road == monitor::Road::midi);
+}
+
+TEST_CASE ("mtc lane: each quarter frame on its own sample at 29.97 and 24, through a dropped minute and through midnight")
+{
+    struct Case
+    {
+        timecode::Rate frameRate;
+        timecode::Label from;
+        std::vector<timecode::Label> cycles;
+    };
+
+    const std::vector<Case> cases {
+        //  00:01:00;00 and ;01 are names 29.97 drop-frame leaves out: the second cycle says ;02.
+        { timecode::Rate::fps2997df, { 0, 0, 59, 28 }, { { 0, 0, 59, 28 }, { 0, 1, 0, 2 }, { 0, 1, 0, 4 } } },
+        { timecode::Rate::fps2997,   { 1, 0, 0, 0 },   { { 1, 0, 0, 0 }, { 1, 0, 0, 2 }, { 1, 0, 0, 4 } } },
+        { timecode::Rate::fps24,     { 2, 0, 0, 0 },   { { 2, 0, 0, 0 }, { 2, 0, 0, 2 }, { 2, 0, 0, 4 } } },
+        { timecode::Rate::fps23976,  { 2, 0, 0, 22 },  { { 2, 0, 0, 22 }, { 2, 0, 1, 0 }, { 2, 0, 1, 2 } } },
+        //  The frame after 23:59:59:24 at 25 is 00:00:00:00.
+        { timecode::Rate::fps25,     { 23, 59, 59, 24 }, { { 23, 59, 59, 24 }, { 0, 0, 0, 1 }, { 0, 0, 0, 3 } } },
+    };
+
+    for (const auto& c : cases)
+    {
+        INFO ("rate " << timecode::wordOf (c.frameRate));
+
+        MtcRig rig;
+        REQUIRE (rig.start (1, c.frameRate, c.from, 0).empty());
+        rig.runTo (260'000'000);
+
+        const auto wire = rig.desk->wire();
+        const auto wanted = scheduleOf (c.frameRate, c.from, 0, 260'000'000LL * 48 / 1'000'000);
+
+        REQUIRE (wire.size() == wanted.size());
+
+        for (std::size_t n = 0; n < wire.size(); ++n)
+        {
+            INFO ("message " << n << ": " << hexOf (wire[n].bytes));
+            CHECK (wire[n].bytes == bytesOf (wanted[n]));
+            CHECK (wire[n].due == rig.momentOf (wanted[n].dueSample));
+
+            //  Sent at the first look at or after its moment, a tenth of a millisecond apart.
+            CHECK (wire[n].at >= wire[n].due);
+            CHECK (wire[n].at - wire[n].due < 100'000);
+
+            //  And due on FrameClock's one rule, quarter by quarter.
+            if (n > 0)
+                CHECK (wanted[n].dueSample == timecode::quarterDueSample (static_cast<std::int64_t> (n - 1), 48000, c.frameRate));
+        }
+
+        CHECK (labelOfFullFrame (wire.front().bytes) == c.from);
+
+        const auto heard = cyclesOf (wire);
+        REQUIRE (heard.size() >= c.cycles.size());
+
+        for (std::size_t n = 0; n < c.cycles.size(); ++n)
+        {
+            INFO ("cycle " << n);
+            CHECK (heard[n].label == c.cycles[n]);
+            CHECK (heard[n].code == timecode::mtcCodeOf (c.frameRate));
+        }
+    }
+}
+
+TEST_CASE ("mtc lane: a second start takes over on its own zero sample with a full frame; what the first had due before it still leaves")
+{
+    MtcRig rig;
+    const timecode::Label first { 1, 0, 0, 0 };
+    const timecode::Label second { 2, 0, 0, 0 };
+
+    REQUIRE (rig.start (1, timecode::Rate::fps25, first, 0).empty());
+    rig.runTo (50'000'000);
+
+    //  Placed ahead, inside a frame of the first: 4900 samples, 102.08 ms.
+    REQUIRE (rig.start (2, timecode::Rate::fps25, second, 4900).empty());
+    rig.runTo (102'000'000);
+    CHECK (rig.outputs.timecodeProgram() == 1u);
+
+    rig.runTo (250'000'000);
+    CHECK (rig.outputs.timecodeProgram() == 2u);
+
+    const auto wire = rig.desk->wire();
+    const auto fromFirst = scheduleOf (timecode::Rate::fps25, first, 0, 4899);
+    const auto fromSecond = scheduleOf (timecode::Rate::fps25, second, 4900, 250'000'000LL * 48 / 1'000'000);
+
+    REQUIRE (wire.size() == fromFirst.size() + fromSecond.size());
+
+    for (std::size_t n = 0; n < fromFirst.size(); ++n)
+        CHECK (wire[n].bytes == bytesOf (fromFirst[n]));
+
+    //  The first's last: its piece at 4800, 100 ms. Nothing of it at or after 4900.
+    CHECK (wire[fromFirst.size() - 1].due == 100'000'000);
+
+    const auto& takeover = wire[fromFirst.size()];
+    CHECK (takeover.bytes == fullFrameOf (second, timecode::Rate::fps25));
+    CHECK (takeover.due == rig.momentOf (4900));
+
+    for (std::size_t n = 0; n < fromSecond.size(); ++n)
+    {
+        CHECK (wire[fromFirst.size() + n].bytes == bytesOf (fromSecond[n]));
+        CHECK (wire[fromFirst.size() + n].due == rig.momentOf (fromSecond[n].dueSample));
+    }
+}
+
+TEST_CASE ("mtc lane: a stop waits for the frame, a cut does not, and a stop before the zero takes the start back")
+{
+    //  Frames of 1920 samples at 25 and 48 kHz: frame 3 is 5760 to 7679.
+    const timecode::Label from { 1, 0, 0, 0 };
+
+    {
+        //  PLACED INSIDE FRAME 3: the code ends where frame 4 begins.
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.outputs.stopTimecode (1, 3 * 1920 + 100, false);
+        rig.runTo (300'000'000);
+
+        const auto wire = rig.desk->wire();
+        REQUIRE (wire.size() == 17u);                           // the full frame and quarters 0 to 15
+        CHECK (wire.back().due == rig.momentOf (15 * 480));
+        CHECK (rig.outputs.timecodeProgram() == 0u);
+        CHECK (rig.outputs.timecodeLate() == 0u);
+    }
+
+    {
+        //  PLACED ON A BOUNDARY: that boundary.
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.outputs.stopTimecode (1, 3 * 1920, false);
+        rig.runTo (300'000'000);
+        CHECK (rig.desk->wire().size() == 13u);                 // quarters 0 to 11
+    }
+
+    {
+        //  AS SOON AS CAN BE, mid-frame (an Esc): the frame finishes, and nothing is late.
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.runTo (50'000'000);
+        REQUIRE (rig.desk->wire().size() == 7u);                // the full frame and quarters 0 to 5
+
+        rig.outputs.stopTimecode (1, 0, false);
+        rig.runTo (300'000'000);
+
+        const auto wire = rig.desk->wire();
+        REQUIRE (wire.size() == 9u);                            // 6 and 7, frame 1's last two
+        CHECK (wire.back().due == rig.momentOf (7 * 480));
+        CHECK (rig.outputs.timecodeProgram() == 0u);
+        CHECK (rig.outputs.timecodeLate() == 0u);
+    }
+
+    {
+        //  A CUT (a double Esc): nothing more.
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.runTo (50'000'000);
+        rig.outputs.stopTimecode (1, 0, true);
+        rig.runTo (300'000'000);
+        CHECK (rig.desk->wire().size() == 7u);
+        CHECK (rig.outputs.timecodeProgram() == 0u);
+    }
+
+    {
+        //  BEFORE THE ZERO (an Esc inside the launch horizon): the start taken back.
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 4800).empty());
+        rig.runTo (50'000'000);
+        rig.outputs.stopTimecode (1, 0, false);
+        rig.runTo (300'000'000);
+        CHECK (rig.desk->wire().empty());
+        CHECK (rig.outputs.timecodeProgram() == 0u);
+    }
+
+    {
+        //  PLACED, AND ARRIVING AFTER ITS FRAME HAD GONE: late, and nothing more leaves.
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.runTo (100'000'000);
+        const auto before = rig.desk->wire().size();
+
+        rig.outputs.stopTimecode (1, 1920, false);
+        rig.runTo (300'000'000);
+        CHECK (rig.desk->wire().size() == before);
+        CHECK (rig.outputs.timecodeLate() == 1u);
+    }
+}
+
+TEST_CASE ("mtc lane: tx off sends nothing, and tx back on picks the code up at the next cycle with a full frame")
+{
+    MtcRig rig;
+    REQUIRE (rig.start (1, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0).empty());
+    rig.runTo (20'000'000);
+    REQUIRE (rig.desk->wire().size() == 4u);                    // the full frame and quarters 0 to 2
+
+    rig.outputs.muteTimecode (true);
+    rig.runTo (105'000'000);
+    CHECK (rig.desk->wire().size() == 4u);
+    CHECK (rig.outputs.timecodeProgram() == 1u);                // muted, still running
+
+    //  Back on at 105 ms: the next quarter, at 110, is part way through a cycle;
+    //  the next cycle begins on frame 4, 160 ms.
+    rig.outputs.muteTimecode (false);
+    rig.runTo (200'000'000);
+
+    const auto wire = rig.desk->wire();
+    REQUIRE (wire.size() > 6u);
+    CHECK (wire[4].bytes == fullFrameOf ({ 1, 0, 0, 4 }, timecode::Rate::fps25));
+    CHECK (wire[4].due == rig.momentOf (4 * 1920));
+    CHECK (wire[5].bytes == midi::Bytes { 0xF1, 0x04 });
+    CHECK (wire[5].due == rig.momentOf (4 * 1920));
+    CHECK (rig.outputs.timecodeLate() == 0u);
+}
+
+TEST_CASE ("mtc lane: held, nothing leaves and nothing is late; let go, a full frame at the next cycle; a surface's port passes")
+{
+    {
+        MtcRig rig;
+        pair::Hold hold { true };
+        rig.outputs.setHold (&hold);
+
+        REQUIRE (rig.start (1, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0).empty());
+        rig.runTo (35'000'000);
+        CHECK (rig.desk->wire().empty());
+        CHECK (rig.outputs.timecodeProgram() == 1u);            // held is sent (AGG): the code runs
+
+        //  A lane 265 ms behind, held: nothing it held was late, since nothing left.
+        rig.pumpAt (300'000'000);
+        CHECK (rig.desk->wire().empty());
+        CHECK (rig.outputs.timecodeLate() == 0u);
+
+        /*  LET GO at 300 ms: the next quarter, at 310, is part way through a
+            cycle; the next begins on frame 8, 320 ms, with a full frame. */
+        hold.set (false);
+        rig.runTo (400'000'000);
+
+        const auto wire = rig.desk->wire();
+        REQUIRE (wire.size() > 2u);
+        CHECK (wire[0].bytes == fullFrameOf ({ 1, 0, 0, 8 }, timecode::Rate::fps25));
+        CHECK (wire[0].due == rig.momentOf (8 * 1920));
+        CHECK (wire[1].bytes == midi::Bytes { 0xF1, 0x08 });
+        CHECK (rig.outputs.timecodeLate() == 0u);
+    }
+
+    {
+        //  A SURFACE'S PORT PASSES THE HOLD (AGH) - which is why §59 warns of an MTC port that is one (AHX).
+        MtcRig rig;
+        pair::Hold hold { true };
+        rig.outputs.setHold (&hold);
+        rig.outputs.setSurfacePorts ({ "PRT00001" });
+
+        REQUIRE (rig.start (1, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0).empty());
+        rig.runTo (35'000'000);
+        CHECK (rig.desk->wire().size() == 5u);
+    }
+}
+
+TEST_CASE ("mtc lane: a quarter more than a quarter late is dropped and the code resumes at the next piece 0; a late full frame or a stall brings a full frame")
+{
+    const timecode::Label from { 1, 0, 0, 0 };
+
+    {
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.pumpAt (0);
+        rig.pumpAt (10'000'000);
+        REQUIRE (rig.desk->wire().size() == 3u);
+
+        //  5 ms late: sent, and counted - more than 2 ms.
+        rig.pumpAt (25'000'000);
+        REQUIRE (rig.desk->wire().size() == 4u);
+        CHECK (rig.outputs.timecodeLate() == 1u);
+        CHECK (std::abs (rig.outputs.timecodeWorstMs() - 5.0) < 0.001);
+
+        /*  15 ms late, more than a quarter frame: dropped, and the code
+            resumes at the next cycle after now - frame 2, 80 ms - with no full
+            frame, the code simply picking up (AHQ). */
+        rig.pumpAt (45'000'000);
+        CHECK (rig.desk->wire().size() == 4u);
+        CHECK (rig.outputs.timecodeLate() == 2u);
+        CHECK (std::abs (rig.outputs.timecodeWorstMs() - 15.0) < 0.001);
+
+        rig.runTo (79'900'000);
+        CHECK (rig.desk->wire().size() == 4u);
+
+        rig.runTo (80'000'000);
+        const auto wire = rig.desk->wire();
+        REQUIRE (wire.size() == 5u);
+        CHECK (wire[4].bytes == midi::Bytes { 0xF1, 0x02 });    // piece 0 of the cycle on frame 2
+        CHECK (wire[4].due == 80'000'000);
+    }
+
+    {
+        //  THE FULL FRAME ITSELF LATE: the code still opens with one, a cycle on.
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.pumpAt (15'000'000);
+        CHECK (rig.desk->wire().empty());
+        CHECK (rig.outputs.timecodeLate() == 1u);
+
+        rig.runTo (80'000'000);
+        const auto wire = rig.desk->wire();
+        REQUIRE (wire.size() == 2u);
+        CHECK (wire[0].bytes == fullFrameOf ({ 1, 0, 0, 2 }, timecode::Rate::fps25));
+        CHECK (wire[0].due == 80'000'000);
+        CHECK (wire[1].bytes == midi::Bytes { 0xF1, 0x02 });
+    }
+
+    {
+        //  A STALL of more than a quarter of a second: a full frame, as a receiver that lost lock wants.
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.runTo (10'000'000);
+        REQUIRE (rig.desk->wire().size() == 3u);
+
+        rig.pumpAt (400'000'000);
+        const auto wire = rig.desk->wire();
+        REQUIRE (wire.size() == 5u);
+        CHECK (wire[3].bytes == fullFrameOf ({ 1, 0, 0, 10 }, timecode::Rate::fps25));
+        CHECK (wire[3].due == 400'000'000);
+        CHECK (wire[4].bytes == midi::Bytes { 0xF1, 0x0A });
+        CHECK (rig.outputs.timecodeLate() == 1u);
+        CHECK (std::abs (rig.outputs.timecodeWorstMs() - 380.0) < 0.001);
+    }
+}
+
+TEST_CASE ("mtc lane: a port with no device is no-port unless held; one unbound part way drops and counts, and the code runs on")
+{
+    {
+        MtcRig rig;
+        CHECK (rig.start (1, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0, "PRT00009") == midi::sendError::noPort);
+        CHECK (rig.start (2, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0, "") == midi::sendError::noPort);
+
+        //  HELD: taken - held is sent (AGG) - even with nothing behind the port.
+        pair::Hold hold { true };
+        rig.outputs.setHold (&hold);
+        CHECK (rig.start (3, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0, "PRT00009").empty());
+
+        //  A surface's port passes the hold, so with nothing behind it, it is still no-port.
+        rig.outputs.setSurfacePorts ({ "PRT00008" });
+        CHECK (rig.start (4, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0, "PRT00008") == midi::sendError::noPort);
+    }
+
+    {
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0).empty());
+        rig.runTo (20'000'000);
+        REQUIRE (rig.desk->wire().size() == 4u);
+
+        rig.outputs.unbind ("PRT00001");
+        rig.runTo (60'000'000);
+        CHECK (rig.desk->wire().size() == 4u);
+        CHECK (rig.outputs.timecodeLane().unsentCount() == 4u);    // quarters 3 to 6
+        CHECK (rig.outputs.timecodeProgram() == 1u);
+
+        //  Bound again: the code picks up where it has got to.
+        rig.outputs.attach ("PRT00001", rig.desk);
+        rig.runTo (100'000'000);
+        const auto wire = rig.desk->wire();
+        REQUIRE (wire.size() == 8u);
+        CHECK (wire[4].bytes == midi::Bytes { 0xF1, static_cast<std::uint8_t> (0x70 | timecode::quarterNibble ({ 1, 0, 0, 0 }, timecode::Rate::fps25, 7)) });
+        CHECK (wire[4].due == 70'000'000);
+    }
+}
+
+TEST_CASE ("mtc lane: a quarter frame waits for a SysEx on its port to end, and never lands inside it")
+{
+    /*  THE PORT'S GATE (AHQ): the queue's thread holds it for the whole of a
+        thirty-millisecond SysEx; the lane, its moment come, waits for it. F1
+        is a System Common message: sent inside a SysEx, it would end it. */
+    MtcRig rig;
+    rig.desk->sysexMs = 30;
+    rig.outputs.start();            // the queue's thread; the lane's is the test, on its hand clock
+
+    REQUIRE (rig.start (1, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0).empty());
+    rig.pumpAt (0);
+    REQUIRE (rig.desk->wire().size() == 2u);
+
+    midi::Bytes dump (100, 0x10);
+    dump.front() = 0xF0;
+    dump.back() = 0xF7;
+    REQUIRE (rig.outputs.sendForRun ("RUN00002", "PRT00001", dump).empty());
+
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (5);
+
+    while (! rig.desk->inSysex.load() && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for (std::chrono::microseconds (200));
+
+    REQUIRE (rig.desk->inSysex.load());
+
+    const auto began = std::chrono::steady_clock::now();
+    rig.pumpAt (10'000'000);                                    // quarter 1's moment, the dump on the port
+    const auto waited = std::chrono::steady_clock::now() - began;
+
+    rig.outputs.stop();
+
+    CHECK (waited >= std::chrono::milliseconds (15));
+    CHECK (rig.desk->runs() == std::vector<std::string> { "<F0", "F0>", "<F1", "F1>", "<SX", "SX>", "<F1", "F1>" });
+
+    const auto wire = rig.desk->wire();
+    REQUIRE (wire.size() == 4u);
+    CHECK (wire[2].bytes == dump);
+    CHECK (wire[3].bytes[0] == 0xF1);
+    CHECK ((wire[3].bytes[1] >> 4) == 1);
+}
+
+TEST_CASE ("mtc lane: its own thread on the real clock sends in order near each moment, and stops cleanly")
+{
+    /*  ~400 ms of real time. The bounds are loose and looser on CI, whose
+        runners share their cores: the order is the claim, the punctuality
+        only a sanity check (M63 measures it properly). */
+    const auto onCi = juce::SystemStats::getEnvironmentVariable ("GITHUB_ACTIONS", {}) == "true";
+
+    midi::MidiSender outputs;
+    const auto desk = std::make_shared<TimedPort>();
+    outputs.attach ("PRT00001", desk);
+    outputs.start();
+
+    const auto origin = steadyNow();
+
+    outputs.feedClock (0, origin, 48000);
+    REQUIRE (outputs.startTimecode ("RUN00001", "PRT00001", 7, timecode::Rate::fps25, 48000,
+                                    timecode::frameOf ({ 1, 0, 0, 0 }, timecode::Rate::fps25), 4800).empty());
+
+    for (int tick = 0; tick < 20; ++tick)
+    {
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+        const auto now = steadyNow();
+        outputs.feedClock ((now - origin) * 48 / 1'000'000, now, 48000);
+    }
+
+    outputs.stopTimecode (7, 0, false);
+    std::this_thread::sleep_for (std::chrono::milliseconds (100));
+    CHECK (outputs.timecodeProgram() == 0u);
+
+    outputs.stop();
+
+    const auto wire = desk->wire();
+    REQUIRE (wire.size() >= 10u);
+    CHECK (wire.front().bytes.size() == 10u);                   // a full frame first
+    CHECK (std::llabs (wire.front().due - (origin + 100'000'000)) < 2'000'000);
+
+    std::vector<std::int64_t> lateness;
+    int expected = 0;
+
+    for (std::size_t n = 1; n < wire.size(); ++n)
+    {
+        INFO ("message " << n << ": " << hexOf (wire[n].bytes));
+        CHECK (wire[n].due >= wire[n - 1].due);
+        CHECK (wire[n].at >= wire[n - 1].at);
+
+        //  Pieces in order; a late one dropped starts again at piece 0 (or a full frame).
+        if (wire[n].bytes.size() == 2u)
+        {
+            const auto piece = wire[n].bytes[1] >> 4;
+            CHECK ((piece == expected || piece == 0));
+            expected = (piece + 1) % 8;
+        }
+        else
+        {
+            expected = 0;
+        }
+
+        lateness.push_back (wire[n].at - wire[n].due);
+    }
+
+    std::sort (lateness.begin(), lateness.end());
+    const auto median = lateness[lateness.size() / 2];
+    INFO ("median " << median << " ns, worst " << lateness.back() << " ns");
+    CHECK (median < (onCi ? 20'000'000 : 3'000'000));
+    CHECK (lateness.back() < (onCi ? 200'000'000 : 30'000'000));
+}
+
+TEST_CASE ("midi render: a port's messages written one a line, when they left, when they were due, their bytes")
+{
+    const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("godot-midi-render-" + juce::String (juce::Random::getSystemRandom().nextInt64()) + ".txt");
+
+    {
+        midi::RenderOutput render { file.getFullPathName().toStdString() };
+        REQUIRE (render.isOpen());
+
+        render.sendNow ({ 0x90, 0x3C, 0x64 });
+        render.sendWithDue ({ 0xF1, 0x12 }, 123'456'789);
+        render.finish();
+    }
+
+    {
+        juce::StringArray lines;
+        lines.addLines (file.loadFileAsString());
+        lines.removeEmptyStrings();
+        REQUIRE (lines.size() == 2);
+
+        const auto first = juce::StringArray::fromTokens (lines[0], " ", "");
+        REQUIRE (first.size() == 5);
+        CHECK (first[0].getLargeIntValue() > 0);
+        CHECK (first[1] == "0");
+        CHECK (first[2] == "90");
+        CHECK (first[3] == "3C");
+        CHECK (first[4] == "64");
+
+        const auto second = juce::StringArray::fromTokens (lines[1], " ", "");
+        REQUIRE (second.size() == 4);
+        CHECK (second[1] == "123456789");
+        CHECK (second[2] == "F1");
+        CHECK (second[3] == "12");
+    }
+
+    file.deleteFile();
+}
