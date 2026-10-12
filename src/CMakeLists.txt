@@ -692,6 +692,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Text.cpp
     wfg/client/model/Theme.h
     wfg/client/model/Theme.cpp
+    wfg/client/model/Timecode.h
+    wfg/client/model/Timecode.cpp
     wfg/client/model/Transport.h
     wfg/client/model/Transport.cpp
     wfg/client/model/Video.h

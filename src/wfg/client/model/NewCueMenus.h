@@ -106,7 +106,7 @@ namespace wfg::client::model
 
     /*  THE "+ media" LIST (namespace draft §38): files chosen from the disk, as
         the button always did, then each media template - the files chosen
-        next, each cue born from it. */
+        next, each cue born from it - and last an LTC timecode cue (§59). */
     std::vector<Choice> mediaChoices (const tree::TreeSnapshot&);
 
     /** Whether the button for this kind opens a list rather than making a cue. */
@@ -173,10 +173,12 @@ namespace wfg::client::model
     std::vector<MenuLine> micMenu (const tree::TreeSnapshot&, const std::vector<Choice>& choices,
                                    const std::string& destination);
 
-    /*  And for `videoChoices`, saying where a canvas is made when the show
-        has none. */
+    /*  And for `mediaChoices`, with a word on how a template is made while no
+        line is one, where the templates would stand. */
     std::vector<MenuLine> mediaMenu (const std::vector<Choice>& choices, const std::string& destination);
 
+    /*  And for `videoChoices`, saying where a canvas is made when the show
+        has none. */
     std::vector<MenuLine> videoMenu (const tree::TreeSnapshot&, const std::vector<Choice>& choices,
                                      const std::string& destination);
 

@@ -610,7 +610,10 @@ namespace wfg::client::model
             case EditCell::name:     return "name";
             case EditCell::preWait:  return "preWait";
             case EditCell::postWait: return "postWait";
-            case EditCell::duration: return kind == "fade" || kind == "transport" ? "duration" : "";
+            /*  A TIMECODE CUE'S time is its `length` (namespace draft §59): the
+                column shows it, so the cell writes it. */
+            case EditCell::duration: return kind == "fade" || kind == "transport" ? "duration"
+                                          : kind == "timecode"                     ? "length" : "";
             case EditCell::none:     break;
         }
 

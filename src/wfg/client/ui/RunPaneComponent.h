@@ -92,6 +92,19 @@ namespace wfg::client::ui
         /** The rows' surface, where the mouse lands: so a test can press, drag and hover. */
         juce::Component& rowsSurface() noexcept { return canvas; }
 
+        /*  WHAT A ROW'S CLOCK CELL SAYS, and whether its strip draws a head -
+            the painter's own answers, public so a test reads what a hand would
+            see (namespace draft §59: a timecode run's label in place of the
+            seconds, and its bar only with a length). Rows in the order drawn;
+            empty and false past the end. */
+        juce::String clockOf (int index) const;
+        bool drawsHead (int index) const;
+
+        /*  WHAT THE GHOST HEAD'S BOX SAYS while a scrub is held - the clock of
+            the second a release sends, or a timecode run's label there (§59) -
+            and empty otherwise. Public so a test reads what a hand would see. */
+        juce::String ghostClock() const;
+
         /*  THE CURSOR OF A STRIP THAT WILL NOT SCRUB (2026-10-05, §30.6): a
             ring with a bar across it, drawn by the pane since the platform's
             set has none, so a strip says before the press that a drag will do
@@ -198,6 +211,19 @@ namespace wfg::client::ui
             with no solved round, which draws no head and scrubs on its old
             gearing (`extentOf`). */
         model::StripSpan spanOf (const model::RunRow& entry) const;
+
+        /*  Whether the cursor strip draws a head - a run let go over a known
+            stretch - and what the clock cell says: one answer each for the
+            painter and for `drawsHead` and `clockOf`. */
+        bool headFor (const model::RunRow& entry) const;
+        static juce::String clockFor (const model::RunRow& entry);
+
+        /*  How wide the clock cell is in `font`: the seconds' five units, or a
+            timecode label's width - the row and the ghost's box agree on it. */
+        int clockWidth (const model::RunRow& entry, const juce::Font& font) const;
+
+        /** The ghost box's words for `entry`: the clock, or a code's label, and the gearing. */
+        juce::String ghostWordsFor (const model::RunRow& entry) const;
         void sendScrub (bool letGo);
         void endScrub();
 

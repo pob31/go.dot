@@ -21,6 +21,7 @@
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/NewCueMenus.h>
+#include <wfg/client/model/Timecode.h>
 
 #include <wfg/client/ui/Icons.h>
 #include <wfg/client/ui/Look.h>
@@ -387,6 +388,7 @@ namespace wfg::client::ui
                        : attribute == "name"     ? entry.ownName
                        : attribute == "preWait"  ? entry.preWait
                        : attribute == "duration" ? entry.duration
+                       : attribute == "length"   ? entry.duration     // a timecode cue's time (§59)
                                                  : entry.postWait;
 
         if (text != was && actions.setValue)
@@ -796,12 +798,14 @@ namespace wfg::client::ui
 
         /*  WHAT THE ROW IS, IN A WORD: a group's mode, a transport cue's
             verb (2026-09-27: "stop", "round", "rec" - the list that made it
-            told them apart, so the row does too), else the kind. */
+            told them apart, so the row does too), a timecode cue's code - MTC
+            or LTC (namespace draft §59, AHD) - else the kind. */
         auto kindCell = area.removeFromRight (kindChars * unit);
         g.setColour (faint);
         g.drawText (entry.isGroup && ! entry.mode.empty() ? juce::String (entry.mode)
                       : ! entry.verb.empty()               ? juce::String (model::verbWord (entry.verb, entry.andGo))
                       : entry.followsMovie                 ? juce::String ("sound")
+                      : entry.kind == "timecode"           ? juce::String (model::formatWord (entry.format))
                                                            : juce::String (model::kindWord (entry.kind)),
                     kindCell, juce::Justification::centredRight, true);
 

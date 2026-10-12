@@ -329,6 +329,16 @@ namespace wfg::client::model
             && state != "armed" && state != "failed";
     }
 
+    std::string RunRow::clockWords() const
+    {
+        /*  THE CODE'S OWN LABEL, never its seconds: an operator reading a
+            timecode run is reading what the desk chasing it reads (§59). */
+        if (kind == "timecode" && ! timecode.empty() && launched())
+            return timecode;
+
+        return position;
+    }
+
     bool RunRow::isWaiting() const noexcept
     {
         /*  The two states a run can be counted down in. They are the same
@@ -489,6 +499,9 @@ namespace wfg::client::model
             if (row.kind == "process")
                 row.liveWords = processWords (snapshot, row);
 
+            if (row.kind == "timecode")
+                row.timecode = at (snapshot, id, "timecode");
+
             if (! row.cueId.empty())
                 row.scrubRefusal = refusalOf (snapshot, row);
 
@@ -532,6 +545,18 @@ namespace wfg::client::model
                     len.has_value())
                 {
                     row.length = *len;
+                }
+
+                /*  A TIMECODE CUE HAS NO `duration` BUT A `length` (§59): how
+                    long its code runs, counted from its start as the run's
+                    `position` is - so the bar is drawn against the same
+                    seconds, a jump's offset and all. Nought runs until it is
+                    stopped, and has no bar. */
+                if (row.kind == "timecode")
+                {
+                    row.length = std::max (0.0, osc::parseDouble (text (snapshot, cue + "length")).value_or (0.0));
+                    row.codeFrom = text (snapshot, cue + "from");
+                    row.codeRate = text (snapshot, "/godot/sync/frameRate");
                 }
 
                 /*  AND THE STRETCH OF THE FILE IT PLAYS. Ranges first, and

@@ -26367,3 +26367,87 @@ clean over a ten-minute render.
   the generator's start order, the length less the offset, the solver's code beside the target and
   its offset, the seat's branch, `pair.seat`'s kind, pass A, pass B, `heardUnder` and where the stop
   landed. unit.C and unit.fr_FR whole.
+- **TC.8**, 2026-10-12: the window. THE WORDS were worded by the implementer and accepted by the
+  author as offered (2026-10-12), and each is a constant in one place, `client/model/Timecode.h`
+  (`timecodeWords`), so a later change is one edit: + midi's part **Timecode** and its line **MTC**,
+  "MIDI Time Code, on the port Show settings > Timecode names"; + audio's **LTC timecode** after the
+  templates, "SMPTE linear timecode, on the output Show settings > Timecode names"; the tab
+  **Timecode** and its rows **Frame rate** (23.976, 24, 25, 29.97 drop-frame, 29.97, 30), **MTC leaves
+  on** and **LTC plays on** (each **None** first), **LTC level** in **dBFS**, the line under the LTC
+  row while an output is chosen, "This output carries timecode only: no sound is heard on it.", and
+  the quiet line "MTC late: N (worst X ms) · LTC late: N"; the inspector's **format** (**MTC (MIDI)**,
+  **LTC (audio)**), **starts at**, **runs for** - lower case, as every inspector label is, at the
+  coordinator's word - with "until stopped" for nought; **MTC** or **LTC** in
+  the kind column. One sentence was not among them and is the implementer's alone, for the author to
+  see: the tab's line on Getting started. `Timecode.{h,cpp}` (std only): `readSync` asks the six `/godot/sync` rows by name, the engine's defaults standing while
+  one is unpublished; `rateChoices`, `rateWord`, `rateStored` (only 29.97df is spelled otherwise);
+  `mtcPortChoices` (None, then every port by its name); `ltcOutputChoices` (None, then every output,
+  direct or mix, one wider than a channel there but DISABLED with its reason - marked rather than
+  filtered, as a busy direct out is, AHI); `lateLine`; `formatWord` (MTC, LTC, else the kind's own
+  word); `formatChoices`; `shownLabel`, a semicolon before the frames at 29.97 drop-frame, as the run's
+  readout has. THE LISTS: `midiChoices` ends with the Timecode part, `cue.create … timecode` with
+  `format mtc`; `mediaChoices` with the LTC line, `format ltc`; `mediaMenu`'s "No template yet" note
+  is asked of whether any line is a template rather than of the count, and stands where the templates
+  would, before the Timecode part. `createCue` needed nothing (only `media` opens the chooser),
+  `madeByCreate` finds a timecode cue by its kind, and `outsideASampler` already lands one after a
+  sampler group, its kind being neither media nor video (AHT) - checked, not changed. SHOW SETTINGS:
+  `TimecodePage`, the tab inserted just before Playback (AHW), so Playback stays the last that sets
+  anything: three menus and a box, each a `node.set` on its row when it differs from what the show
+  says - the rate's stored word, the port's identifier (empty for None), the output's, the level with
+  a comma read as a point; a menu refilled only when what it offers changes, so a pass never shuts
+  one under the hand; a value the menu does not offer kept at its end, marked "(not declared)" as the
+  Surfaces tab marks one; a disabled output never sent; the warning line's place kept while hidden;
+  all four disabled under the lock; fed each pass from `readSync`, the ports the MIDI tab reads and
+  `readOutputs`. Getting started gains its line, before Playback's. THE INSPECTOR: `kindOrder` gains
+  `{ format, from, length }`, and `wordTheCode` - for this kind only, `format` being a plugin's row too
+  - names the three, words the format menu from the node's own values, shows the start through
+  `shownLabel`, and shows a length of nought as an empty box standing in for "until stopped", as
+  Doh!'s rollback stands in: greyed, committed unchanged it writes nothing; over several cues a length
+  they disagree on is mixed. THE ICON AND ACCENT: `Icon::timecode`, drawn on the 24-grid as the
+  square wave LTC is, short and long bits over four frame ticks - not a clock face, which is the
+  inspector's "when" drawer; `kind-timecode` 0xFFBCD65E, a lime at about 72° between OSC's yellow
+  (48°) and video's green (109°), never red; Theme.cpp is the one theme file that holds the kinds'
+  accents (clients/desktop/theme.json carries none). THE KIND COLUMN: `Row::format`, read for a
+  timecode cue, and `CueListComponent` draws `formatWord`. THE RUNNING PANE: `RunRow::timecode` from
+  `run/<id>/timecode`, `RunRow::clockWords` - the label once the run is let go, the seconds for any
+  other kind - and a timecode run's `length` is its cue's `length`, against which `position` (the
+  code's seconds past its start, TC.7) draws the head; the clock cell widens to the label, and the
+  head is drawn only over a known stretch (`headFor`), so a code that runs until stopped is its label
+  alone; `clockOf` and `drawsHead` give a test the painter's own answers. THE PAGE: nothing built.
+  `KINDS` has had `timecode` since TC.1, its "+ timecode" makes one, and its generic inspector draws
+  the three rows from `TYPE`, `ACCESS` and `RANGE`, `format` a select; the `/godot/sync` rows have
+  no view there, as the Playback tab's `/godot/list` rows have none - the command, `node.set`, is the
+  page's own, the view is not (§14.16's fourth rule read as it was for Playback). THE LIST'S TIME
+  COLUMN: a timecode cue's is its `length`, written as a fade's duration is, and blank for nought -
+  until stopped has no time to put there (`codeTime`; its row is writable, so the column's own rule
+  would have said "0.0"); the cell writes `length` (`editAttributeFor`). THE SCRUB: the pane scrubs a
+  playing timecode run the engine says is `seekable` (TC.7's `run.seek` moves its code), geared over
+  its length when it has one and held to it, and a minute across the strip when it runs until it is
+  stopped, as a scene with no known length is (`unmeasuredSeconds`) - its ghost then drawn over the
+  minute around where it was taken, since a code an hour in would sit pinned at the edge of a minute
+  from nought; sent ONCE, ON RELEASE, as a scene is (my call): each seek relocates the code - a full
+  frame on MTC, a jump on the line - and a desk chasing it relocates with it, firing what it passes.
+  The ghost's box says the label a release lands on: `model::labelAt`, the cue's `from` plus the whole
+  frames the second falls in (the Runner's `framesInto`, mirrored, its millionth of a frame and all),
+  through the engine's own pure `timecode::` arithmetic, at the show's rate - the rate the run copied
+  is not published, and the two differ only when the rate was changed while the code ran; `RunRow`
+  carries `codeFrom` and `codeRate` for it, and the clock cell's width is one function for the row
+  and the box (`clockWidth`), so the box sits beside a label rather than over it. Tests under C and
+  fr_FR: ClientTests (the icon and the accent, a hue no other
+  kind's and not the failure's; both list lines made through `cue.create` and read back with their
+  format and their kind column's word; the media list's note with two lines and none with a
+  template; `readSync` from a show nobody set, then after each `node.set`, the readouts through
+  `EngineState`, the rates against the row's own range, the port and output menus with the stereo
+  outputs disabled; the inspector's order, labels, menu, "until stopped", a length and the
+  drop-frame start, two cues mixed; a timecode run's label, its start and rate and its bar's length;
+  the list's time column, blank, 90.0 and 2.5, and the cell's `length`; `labelAt` - whole frames, 1.16 s
+  at 25 being frame 29 and not 28, nothing before the start, the dropped minute, midnight, and nothing
+  for a start or a rate that does not read), ShowSettingsUiTests
+  (the tab between Templates and Playback, the words of its rows, each control's `node.set`, a
+  disabled output not sent, None sending the empty identifier, the warning line, the quiet line,
+  the lock), RunPaneUiTests (the label in the clock cell, a head only with a length, and the picture
+  differing both ways; a code scrubbed - taken where it is, its ghost's box the label, held to its
+  length, nothing sent while the hand moves and one seek on release; until stopped, the same hundred
+  pixels going twice as far and the ghost moving under the hand; one the engine says will not move not
+  taken). Twenty-four deliberate breakages, in seven rounds: twenty-three turned their own cases red;
+  the inspector's order entry did not, `format`, `from`, `length` being alphabetical too.

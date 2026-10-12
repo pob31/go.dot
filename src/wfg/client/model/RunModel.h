@@ -138,7 +138,26 @@ namespace wfg::client::model
             rather than sliding across a bar nobody has measured. */
         std::string file;
         double seconds = 0.0;      ///< `position`, as a number
-        double length = 0.0;       ///< the cue's `duration`, or 0 when unknown
+
+        /*  The cue's `duration`, or 0 when unknown - and a TIMECODE cue's
+            `length` (namespace draft §59), where nought is a code that runs
+            until it is stopped and draws no bar, since it has no end to be
+            part-way to. */
+        double length = 0.0;
+
+        /*  WHERE A TIMECODE RUN'S CODE HAS GOT TO (namespace draft §59), the
+            engine's own label - `01:00:12:04`, a semicolon before the frames
+            at 29.97 drop-frame - which the pane draws where a sound draws its
+            seconds. Empty for every other kind. */
+        std::string timecode;
+
+        /*  WHERE ITS CODE STARTS AND AT WHAT RATE, for a timecode run: its
+            cue's `from` and the show's `sync/frameRate`, so a scrub's ghost
+            can say the label a release would land on (§59, TC.8). The rate the
+            run copied when it fired is not published; the show's is the same
+            unless somebody changed it while the code ran. Empty otherwise. */
+        std::string codeFrom;
+        std::string codeRate;
 
         /*  WHICH STRETCH OF THE FILE THIS CUE ACTUALLY PLAYS (author,
             2026-09-21: *"in the running cues, the part of the waveform between
@@ -222,6 +241,10 @@ namespace wfg::client::model
 
         /** True once a launch has happened, which is when `position` means anything. */
         bool launched() const noexcept;
+
+        /*  WHAT THE ROW'S CLOCK SAYS: a timecode run's label once it has been
+            let go, else `position` - the seconds - as for every other run. */
+        std::string clockWords() const;
     };
 
     /*  Every run the engine is publishing, nested by parent and ordered the

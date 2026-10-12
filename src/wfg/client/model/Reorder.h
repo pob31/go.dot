@@ -160,7 +160,8 @@ namespace wfg::client::model
         prewait, duration and postwait right in the cue list by double
         clicking"). Which attribute a column writes, or nothing when that
         column is not the cue's to write: a media cue's duration is its
-        file's and a memo has none, so only a fade's or a stop's is a box. */
+        file's and a memo has none, so only a fade's or a stop's is a box -
+        and a timecode cue's, whose time is its `length` (namespace draft §59). */
     enum class EditCell { none, number, name, preWait, duration, postWait };
 
     std::string editAttributeFor (EditCell cell, const std::string& kind);

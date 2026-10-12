@@ -33,6 +33,7 @@
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Surfaces.h>
+#include <wfg/client/model/Timecode.h>
 #include <wfg/client/ui/CueListComponent.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
@@ -3761,6 +3762,206 @@ TEST_CASE ("run pane: a mic run says the channel it is on, that it waits for one
         CHECK (png.writeImageToStream (picture, out));
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
+}
+
+TEST_CASE ("run pane: a timecode run shows its code's label where a sound shows its seconds, and a bar only with a length")
+{
+    /*  Namespace draft §59 (TC.8): "01:00:12:04" in the clock cell, the
+        engine's own label; a code that runs until it is stopped has no end to
+        be part-way to and draws no bar, one with a length draws its head
+        across it. Painted too, and with WFG_SNAPSHOT_DIR set,
+        run-pane-timecode.png. */
+    const auto code = [] (const char* runId, const char* name, const char* label, double length)
+    {
+        model::RunRow row;
+        row.id = runId;
+        row.cueId = std::string ("CUE") + runId;
+        row.cueName = name;
+        row.kind = "timecode";
+        row.state = "playing";
+        row.position = "12.2";
+        row.seconds = 12.16;
+        row.timecode = label;
+        row.length = length;
+        return row;
+    };
+
+    model::RunRow sound;
+    sound.id = "RUNSOUND";
+    sound.cueId = "CUESOUND";
+    sound.cueName = "Song";
+    sound.kind = "media";
+    sound.state = "playing";
+    sound.position = "12.2";
+    sound.seconds = 12.16;
+
+    const std::vector<model::RunRow> rows { code ("RUNTC001", "Show code", "01:00:12:04", 0.0),
+                                            code ("RUNTC002", "Song code", "10:00:12;04", 30.0),
+                                            sound };
+
+    ui::RunPaneComponent pane (model::Theme {}, {});
+    pane.setSize (450, 200);
+    pane.show (rows, {});
+
+    //  The label, not the seconds - drop-frame's semicolon and all - and a sound's seconds as ever.
+    CHECK (pane.clockOf (0) == "01:00:12:04");
+    CHECK (pane.clockOf (1) == "10:00:12;04");
+    CHECK (pane.clockOf (2) == "12.2");
+    CHECK (pane.clockOf (3).isEmpty());
+
+    //  Until stopped, no bar; with a length, a head.
+    CHECK_FALSE (pane.drawsHead (0));
+    CHECK (pane.drawsHead (1));
+    CHECK_FALSE (pane.drawsHead (3));
+
+    /*  AND THE PICTURE AGREES: the same rows painted with and without the
+        length differ, and two labels paint two different clocks. */
+    const auto painted = [] (const std::vector<model::RunRow>& drawn)
+    {
+        ui::RunPaneComponent one (model::Theme {}, {});
+        one.setSize (450, 60);
+        one.show (drawn, {});
+
+        juce::Image canvas (juce::Image::ARGB, 450, 60, true);
+        juce::Graphics g (canvas);
+        one.paintEntireComponent (g, false);
+        return canvas;
+    };
+
+    const auto differ = [] (const juce::Image& a, const juce::Image& b)
+    {
+        for (int y = 0; y < a.getHeight(); ++y)
+            for (int x = 0; x < a.getWidth(); ++x)
+                if (a.getPixelAt (x, y) != b.getPixelAt (x, y))
+                    return true;
+
+        return false;
+    };
+
+    CHECK (differ (painted ({ code ("RUNTC003", "Code", "01:00:12:04", 0.0) }),
+                   painted ({ code ("RUNTC003", "Code", "01:00:12:04", 30.0) })));
+    CHECK (differ (painted ({ code ("RUNTC003", "Code", "01:00:12:04", 0.0) }),
+                   painted ({ code ("RUNTC003", "Code", "02:00:12:04", 0.0) })));
+
+    juce::Image canvas (juce::Image::ARGB, 450, 200, true);
+    juce::Graphics g (canvas);
+    pane.paintEntireComponent (g, false);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto picture = pane.createComponentSnapshot (pane.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("run-pane-timecode.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
+TEST_CASE ("run pane: a timecode run is scrubbed - geared over its length or a minute, its ghost saying the label, sought once on release")
+{
+    /*  Namespace draft §59 (TC.8): `run.seek` moves a running code since TC.7
+        and `run/seekable` says when. A code with a length is held to it; one
+        that runs until it is stopped is geared a minute across the strip, as a
+        scene with no known length is; the ghost's box says the label a release
+        would land on; and one seek is sent, when the hand lets go - each seek
+        relocates the code, and a desk chasing it with it. */
+    std::vector<std::pair<std::string, double>> sought;
+
+    ui::RunPaneComponent::Actions actions;
+    actions.seek = [&sought] (const std::string& runId, double seconds) { sought.emplace_back (runId, seconds); };
+
+    const auto code = [] (const char* runId, double seconds, double length)
+    {
+        model::RunRow row;
+        row.id = runId;
+        row.cueId = std::string ("CUE") + runId;
+        row.cueName = "Show code";
+        row.kind = "timecode";
+        row.state = "playing";
+        row.seekable = true;
+        row.seconds = seconds;
+        row.length = length;
+        row.codeFrom = "01:00:00:00";
+        row.codeRate = "25";
+        row.timecode = model::labelAt (row.codeFrom, row.codeRate, seconds);
+        return row;
+    };
+
+    const auto middle = static_cast<float> (juce::roundToInt (model::Theme {}.row * model::Theme {}.type)) / 2.0f;
+
+    //  A code with a length of 30 s, 10 s in.
+    ui::RunPaneComponent pane (model::Theme {}, actions);
+    pane.setSize (450, 300);
+    pane.show ({ code ("RUNTC010", 10.0, 30.0) }, {});
+
+    ScrubHand hand { pane.rowsSurface() };
+
+    hand.press (100.0f, middle);
+    REQUIRE (pane.ghostX() >= 0);
+    CHECK (pane.ghostSecond() == doctest::Approx (10.0));
+    CHECK (pane.ghostClock() == "01:00:10:00");
+
+    //  A hundred pixels to the right: how far that goes is the length's gearing.
+    hand.drag (200.0f, middle);
+    const auto overLength = pane.ghostSecond() - 10.0;
+    CHECK (overLength > 0.0);
+    CHECK (pane.ghostClock() == juce::String (model::labelAt ("01:00:00:00", "25", pane.ghostSecond())));
+
+    //  Held to its length at the right; nothing sent while the hand moves.
+    hand.drag (440.0f, middle);
+    CHECK (pane.ghostSecond() == doctest::Approx (30.0));
+    CHECK (sought.empty());
+
+    hand.drag (150.0f, middle);
+    const auto settled = pane.ghostSecond();
+    REQUIRE (settled > 0.0);
+    REQUIRE (settled < 30.0);
+
+    hand.release (150.0f, middle);
+    REQUIRE (sought.size() == 1u);
+    CHECK (sought[0].first == "RUNTC010");
+    CHECK (sought[0].second == doctest::Approx (settled));
+    CHECK (pane.ghostX() == -1);
+    CHECK (pane.ghostClock().isEmpty());
+
+    //  Until stopped, 125 s in: the same hundred pixels go twice as far - a minute across the strip, not thirty seconds.
+    sought.clear();
+    pane.show ({ code ("RUNTC011", 125.0, 0.0) }, {});
+
+    hand.press (100.0f, middle);
+    REQUIRE (pane.ghostX() >= 0);
+    CHECK (pane.ghostSecond() == doctest::Approx (125.0));
+    CHECK (pane.ghostClock() == "01:02:05:00");
+    const auto taken = pane.ghostX();
+
+    hand.drag (200.0f, middle);
+    const auto overMinute = pane.ghostSecond() - 125.0;
+    CHECK (overMinute == doctest::Approx (2.0 * overLength));
+
+    //  And its ghost moves under the hand, drawn over the minute around where it was taken.
+    CHECK (pane.ghostX() > taken);
+
+    hand.release (200.0f, middle);
+    REQUIRE (sought.size() == 1u);
+    CHECK (sought[0].second == doctest::Approx (125.0 + overMinute));
+
+    //  One the engine says will not move - over, taken back - is not taken at all.
+    sought.clear();
+    auto still = code ("RUNTC012", 5.0, 0.0);
+    still.seekable = false;
+    pane.show ({ still }, {});
+
+    hand.press (100.0f, middle);
+    CHECK (pane.ghostX() == -1);
+    hand.drag (200.0f, middle);
+    hand.release (200.0f, middle);
+    CHECK (sought.empty());
 }
 
 namespace

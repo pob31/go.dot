@@ -95,6 +95,7 @@
 #include <wfg/client/model/Take.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
+#include <wfg/client/model/Timecode.h>
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Waveform.h>
@@ -1658,6 +1659,24 @@ TEST_CASE ("client: every kind wears an icon and an accent the theme declares")
     CHECK (model::accentFor ("start") == "kind-transport");
     CHECK (model::iconFor ("somethingNew") == model::Icon::none);
     CHECK (model::accentFor ("somethingNew") == "ink-faint");
+
+    /*  A TIMECODE CUE (namespace draft §59, AHW) has no button of its own - it
+        is made from the + midi and + audio lists, as a start cue is from
+        + transport - so `cueKinds()` does not carry it; it wears a drawn icon
+        and an accent of its own all the same, a hue no other kind wears. */
+    CHECK (model::iconFor ("timecode") == model::Icon::timecode);
+    CHECK (model::accentFor ("timecode") == "kind-timecode");
+    CHECK (std::find (names.begin(), names.end(), "kind-timecode") != names.end());
+
+    for (const auto& name : names)
+        if (name.rfind ("kind-", 0) == 0 && name != "kind-timecode")
+        {
+            INFO ("accent " << name);
+            CHECK (theme.colour (name) != theme.colour ("kind-timecode"));
+        }
+
+    //  And never the failure's red.
+    CHECK (theme.colour ("failed") != theme.colour ("kind-timecode"));
 
     //  A group is known by its mode, a transport cue by its verb.
     CHECK (model::iconFor ("group", "timeline") == model::Icon::timeline);
@@ -3415,11 +3434,28 @@ TEST_CASE ("client: cue templates are offered in the Add lists, and a cue is bor
     REQUIRE (rig.apply (tick++, "window", "node.set",
                         { osc::Value::string ("/godot/cue/" + voice + "/level"), osc::Value::string ("-6") }).applied == 1);
 
-    //  No template yet: the files, and a word on how one is made.
+    /*  No template yet: the files, the LTC line after them (namespace draft
+        §59, TC.8), and a word on how a template is made - kept, though the
+        list has two lines now, and placed before the timecode part rather
+        than under it, where it would read as being about the code. */
     auto choices = model::mediaChoices (*rig.publish (tick));
-    REQUIRE (choices.size() == 1);
+    REQUIRE (choices.size() == 2);
     CHECK (choices[0].cueTemplate.empty());
-    CHECK (model::mediaMenu (choices, "at the end").back().text.find ("Save as template") != std::string::npos);
+    CHECK (choices[1].kind == "timecode");
+    CHECK (choices[1].cueTemplate.empty());
+
+    {
+        const auto lines = model::mediaMenu (choices, "at the end");
+        const auto note = std::find_if (lines.begin(), lines.end(), [] (const model::MenuLine& line)
+                                        { return line.text.find ("Save as template") != std::string::npos; });
+        const auto code = std::find_if (lines.begin(), lines.end(), [] (const model::MenuLine& line)
+                                        { return line.kind == model::MenuLine::Kind::header && line.text == "Timecode"; });
+
+        REQUIRE (note != lines.end());
+        CHECK (note->kind == model::MenuLine::Kind::note);
+        REQUIRE (code != lines.end());
+        CHECK (note < code);
+    }
 
     const auto save = gesture::createCueTemplate ("Voice", voice);
     REQUIRE (rig.apply (tick++, save.origin, save.command, save.args).applied == 1);
@@ -3433,9 +3469,14 @@ TEST_CASE ("client: cue templates are offered in the Add lists, and a cue is bor
     CHECK (templates[0].carriesWords().find ("level") != std::string::npos);
 
     choices = model::mediaChoices (*snapshot);
-    REQUIRE (choices.size() == 2);
+    REQUIRE (choices.size() == 3);
     CHECK (choices[1].cueTemplate == templates[0].id);
     CHECK (choices[1].section == "From a template");
+    CHECK (choices[2].kind == "timecode");
+
+    //  A template now, so no word on how one is made.
+    for (const auto& line : model::mediaMenu (choices, "at the end"))
+        CHECK (line.text.find ("Save as template") == std::string::npos);
 
     //  A picked media cue may take it; a picture may not.
     CHECK (model::templatesFor (templates, "media", "").size() == 1);
@@ -12805,4 +12846,358 @@ TEST_CASE ("client: a device put on a MIDI port, as the writes of one step, and 
             CHECK (device.midiChannel == 12);
             CHECK (device.link == "off");
         }
+}
+
+//==============================================================================
+/*  TC.8 (namespace draft §59): THE WINDOW'S TIMECODE. The words were the
+    implementer's and the author accepted them as offered (2026-10-12); they
+    are asserted here as they read, so a later change to one is a failing case
+    that says which. */
+TEST_CASE ("client: + midi offers an MTC line and + audio an LTC line, each made and read back with its format")
+{
+    //  + midi: a part of its own, Timecode, its one line MTC, born mtc.
+    const auto& midi = model::midiChoices();
+    const auto mtc = std::find_if (midi.begin(), midi.end(),
+                                   [] (const model::Choice& choice) { return choice.kind == "timecode"; });
+    REQUIRE (mtc != midi.end());
+    CHECK (mtc->label == "MTC");
+    CHECK (mtc->explanation == "MIDI Time Code, on the port Show settings > Timecode names");
+    CHECK (mtc->section == "Timecode");
+    CHECK (mtc->settings == model::Settings { { "format", "mtc" } });
+    CHECK_FALSE (mtc->aimed);
+    CHECK (mtc->cueTemplate.empty());
+
+    const auto midiLines = model::midiMenu ("at the end of the list");
+    CHECK (std::any_of (midiLines.begin(), midiLines.end(), [] (const model::MenuLine& line)
+                        { return line.kind == model::MenuLine::Kind::header && line.text == "Timecode"; }));
+
+    Rig rig;
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE_FALSE (listId.empty());
+    auto tick = std::int64_t { 1 };
+
+    //  + audio: after the files and the templates, LTC timecode, born ltc - and no file chosen for it.
+    const auto audio = model::mediaChoices (*rig.publish (tick));
+    REQUIRE_FALSE (audio.empty());
+    const auto ltc = audio.back();
+    CHECK (ltc.label == "LTC timecode");
+    CHECK (ltc.explanation == "SMPTE linear timecode, on the output Show settings > Timecode names");
+    CHECK (ltc.kind == "timecode");
+    CHECK (ltc.section == "Timecode");
+    CHECK (ltc.settings == model::Settings { { "format", "ltc" } });
+    CHECK (ltc.cueTemplate.empty());
+
+    //  Each made as its list makes it, and read back: the kind, the format, the kind column's word.
+    for (const auto& line : { *mtc, ltc })
+    {
+        CAPTURE (line.label);
+        const auto event = gesture::createCue (listId, 0, line.kind, "", line.settings);
+        REQUIRE (rig.apply (tick++, event.origin, event.command, event.args).applied == 1);
+
+        const auto snapshot = rig.publish (tick);
+        const auto made = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
+        REQUIRE (model::text (*snapshot, "/godot/cue/" + made + "/kind") == "timecode");
+
+        const auto format = line.settings.front().second;
+        CHECK (model::text (*snapshot, "/godot/cue/" + made + "/format") == format);
+
+        //  What the window looks for after its create: the kind, and no name of its own yet.
+        CHECK (model::madeByCreate ({ listId, 0, "timecode", 0, 0 }, "timecode",
+                                    model::text (*snapshot, "/godot/cue/" + made + "/name")));
+
+        model::ShowModel show;
+        show.refresh (*snapshot, listId);
+        const auto at = show.indexOf (made);
+        REQUIRE (at >= 0);
+        const auto& row = show.rows()[static_cast<std::size_t> (at)];
+        CHECK (row.kind == "timecode");
+        CHECK (row.format == format);
+        CHECK (model::formatWord (row.format) == (format == "mtc" ? "MTC" : "LTC"));
+        CHECK (model::formatWord (row.format).size() <= 8);
+    }
+
+    //  A format nobody has read yet keeps the kind's own word rather than a blank cell.
+    CHECK (model::formatWord ("") == "timecode");
+}
+
+TEST_CASE ("client: the show's timecode is read off <Sync>, its rates and menus worded, its counts in a quiet line")
+{
+    Rig rig;
+    auto tick = std::int64_t { 1 };
+
+    //  A show nobody has set: 25, no port, no output, -18 dBFS, nothing late.
+    auto sync = model::readSync (*rig.publish (tick));
+    CHECK (sync.frameRate == "25");
+    CHECK (sync.mtcOut.empty());
+    CHECK (sync.ltcOut.empty());
+    CHECK (osc::parseDouble (sync.ltcLevel).value_or (0.0) == doctest::Approx (-18.0));
+    CHECK (sync.mtcLate == 0);
+    CHECK (sync.ltcLate == 0);
+    CHECK (model::lateLine (sync) == "MTC late: 0 (worst 0 ms) \xc2\xb7 LTC late: 0");
+
+    /*  THE RATES, WORDED, in the row's own order - checked against the row's
+        own range, so a rate the engine grows is a failing case here and not a
+        menu that cannot reach it. */
+    const auto rates = rig.publish (tick);
+    const auto* rateNode = rates->find ("/godot/sync/frameRate");
+    REQUIRE (rateNode != nullptr);
+
+    std::vector<std::string> stored, said;
+
+    for (const auto& [value, word] : model::rateChoices())
+    {
+        stored.push_back (value);
+        said.push_back (word);
+        CHECK (model::rateStored (model::rateWord (value)) == value);
+    }
+
+    CHECK (stored == rateNode->enumValues());
+    CHECK (said == std::vector<std::string> { "23.976", "24", "25", "29.97 drop-frame", "29.97", "30" });
+    CHECK (model::rateStored ("nonsense").empty());
+
+    //  A port, and an output of one channel beside the fixture's two stereo ones.
+    const auto port = rig.document.createPort ("Desk");
+    REQUIRE (port.ok);
+    const auto mono = rig.document.createBus ("direct", 1);
+    REQUIRE (mono.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/bus/" + mono.id + "/name", "Code").ok);
+    rig.parameters.markStale();
+
+    const auto snapshot = rig.publish (++tick);
+
+    //  MTC: None, then every port by its name.
+    const auto ports = model::mtcPortChoices (model::readPorts (*snapshot));
+    REQUIRE (ports.size() == 2u);
+    CHECK (ports[0] == model::SyncChoice { "", "None", true });
+    CHECK (ports[1] == model::SyncChoice { port.id, "Desk", true });
+
+    //  LTC: None, then every output - the stereo ones there, disabled, saying why.
+    const auto outputs = model::ltcOutputChoices (model::readOutputs (*snapshot));
+    REQUIRE (outputs.size() == 4u);
+    CHECK (outputs[0] == model::SyncChoice { "", "None", true });
+    CHECK (outputs[1] == model::SyncChoice { "J3MT5XYA", "Main L/R (2 channels: LTC needs one)", false });
+    CHECK (outputs[2] == model::SyncChoice { "K4NV6ZB1", "Foldback (2 channels: LTC needs one)", false });
+    CHECK (outputs[3] == model::SyncChoice { mono.id, "Code", true });
+
+    //  What the tab sends, read back.
+    for (const auto& [row, value] : { std::pair<std::string, std::string> { "frameRate", "29.97df" },
+                                      std::pair<std::string, std::string> { "mtcOut", port.id },
+                                      std::pair<std::string, std::string> { "ltcOut", mono.id },
+                                      std::pair<std::string, std::string> { "ltcLevel", "-20.5" } })
+    {
+        const auto event = gesture::setNode ("/godot/sync/" + row, value);
+        CHECK_MESSAGE (rig.apply (++tick, event.origin, event.command, event.args).applied == 1, row);
+    }
+
+    sync = model::readSync (*rig.publish (++tick));
+    CHECK (sync.frameRate == "29.97df");
+    CHECK (model::rateWord (sync.frameRate) == "29.97 drop-frame");
+    CHECK (sync.mtcOut == port.id);
+    CHECK (sync.ltcOut == mono.id);
+    CHECK (osc::parseDouble (sync.ltcLevel).value_or (0.0) == doctest::Approx (-20.5));
+
+    //  The machine's counts, as serve copies them in each tick, in no locale's spelling.
+    EngineState state;
+    state.tick = ++tick;
+    state.mtcLate = 3;
+    state.mtcWorstMs = 4.256;
+    state.ltcLate = 1;
+    rig.parameters.markStale();
+
+    sync = model::readSync (*rig.parameters.publish (tick, state));
+    CHECK (sync.mtcLate == 3);
+    CHECK (sync.mtcWorstMs == doctest::Approx (4.26));
+    CHECK (sync.ltcLate == 1);
+    CHECK (model::lateLine (sync) == "MTC late: 3 (worst 4.26 ms) \xc2\xb7 LTC late: 1");
+
+    //  A start as a reader shows it: a semicolon before the frames at 29.97 drop-frame only.
+    CHECK (model::shownLabel ("01:00:00:00", "29.97df") == "01:00:00;00");
+    CHECK (model::shownLabel ("01:00:00:00", "25") == "01:00:00:00");
+    CHECK (model::shownLabel ("01:00", "29.97df") == "01:00");
+}
+
+TEST_CASE ("client: a timecode cue is inspected as format, starts at and runs for, a length of nought until stopped")
+{
+    Rig rig;
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("timecode"), osc::Value::string ("Song code"),
+                                            osc::Value::string ("TCDE0001"),
+                                            osc::Value::string ("format"), osc::Value::string ("ltc") });
+
+    const auto panel = model::inspect (*rig.publish (2), "TCDE0001");
+    REQUIRE_FALSE (panel.empty());
+    CHECK (panel.kind == "timecode");
+
+    const auto fieldsOf = [] (const model::Inspection& inspection)
+    {
+        std::vector<model::Field> fields;
+
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == "format" || field.name == "from" || field.name == "length")
+                    fields.push_back (field);
+
+        return fields;
+    };
+
+    //  In the order somebody asks, first in what it does: which code, where it starts, how long it runs.
+    const auto does = std::find_if (panel.blocks.begin(), panel.blocks.end(),
+                                    [] (const model::Block& block) { return block.heading == "what it does"; });
+    REQUIRE (does != panel.blocks.end());
+    REQUIRE (does->fields.size() >= 3u);
+    CHECK (does->fields[0].name == "format");
+    CHECK (does->fields[1].name == "from");
+    CHECK (does->fields[2].name == "length");
+
+    auto fields = fieldsOf (panel);
+    REQUIRE (fields.size() == 3u);
+    CHECK (fields[0].name == "format");
+    CHECK (fields[1].name == "from");
+    CHECK (fields[2].name == "length");
+
+    CHECK (fields[0].label == "format");
+    CHECK (fields[1].label == "starts at");
+    CHECK (fields[2].label == "runs for");
+
+    //  The format a menu of the two codes, each saying what carries it.
+    CHECK (fields[0].control == model::Control::choice);
+    CHECK (fields[0].value == "ltc");
+    CHECK (fields[0].choices == std::vector<std::pair<std::string, std::string>> { { "mtc", "MTC (MIDI)" },
+                                                                                   { "ltc", "LTC (audio)" } });
+
+    //  The start as stored, at the show's 25.
+    CHECK (fields[1].value == "01:00:00:00");
+
+    //  Nought runs until stopped, and says so in the box rather than as a nought.
+    CHECK (fields[2].value.empty());
+    CHECK (fields[2].placeholder == "until stopped");
+
+    //  A length is a number; at 29.97 drop-frame the start shows its semicolon, as a reader does.
+    rig.apply (3, "window", "node.set", { osc::Value::string ("/godot/cue/TCDE0001/length"), osc::Value::string ("90") });
+    rig.apply (4, "window", "node.set", { osc::Value::string ("/godot/sync/frameRate"), osc::Value::string ("29.97df") });
+
+    fields = fieldsOf (model::inspect (*rig.publish (5), "TCDE0001"));
+    REQUIRE (fields.size() == 3u);
+    CHECK (fields[2].value == "90");
+    CHECK (fields[2].placeholder.empty());
+    CHECK (fields[1].value == "01:00:00;00");
+
+    //  Over two cues the rows are shared, and a length they disagree on is mixed rather than "until stopped".
+    rig.apply (6, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (1),
+                                            osc::Value::string ("timecode"), osc::Value::string ("Other code"),
+                                            osc::Value::string ("TCDE0002") });
+    fields = fieldsOf (model::inspectMany (*rig.publish (7), { "TCDE0001", "TCDE0002" }, "TCDE0001"));
+    REQUIRE (fields.size() == 3u);
+    CHECK (fields[0].mixed);
+    CHECK (fields[2].mixed);
+    CHECK (fields[2].value.empty());
+}
+
+TEST_CASE ("client: a timecode run reads its code's label, and its cue's length as the bar's")
+{
+    Rig rig;
+    const auto listId = rig.document.createList ("Codes").id;
+    const auto code = rig.document.createCue (listId, 0, "timecode", "Show code").id;
+    REQUIRE_FALSE (code.empty());
+
+    rig.runs.create ("RUNTC001", code, "timecode");
+    auto* run = rig.runs.find ("RUNTC001");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::playing;
+    run->position = 12.16;
+    run->timecode = "01:00:12:04";
+
+    const auto rowOf = [&rig] (std::int64_t tick)
+    {
+        model::RunRow found;
+
+        for (const auto& row : model::readRuns (*rig.publish (tick)))
+            if (row.id == "RUNTC001")
+                found = row;
+
+        return found;
+    };
+
+    //  Until stopped: the label where a sound's seconds would be, and no stretch to draw a bar over.
+    auto row = rowOf (1);
+    REQUIRE (row.id == "RUNTC001");
+    CHECK (row.kind == "timecode");
+    CHECK (row.timecode == "01:00:12:04");
+    CHECK (row.clockWords() == "01:00:12:04");
+    CHECK (row.seconds == doctest::Approx (12.16));
+    CHECK (row.length == doctest::Approx (0.0));
+    CHECK_FALSE (model::stripSpan (row, row.length).known());
+
+    //  Where its code starts and at what rate, for the label a scrub would land on.
+    CHECK (row.codeFrom == "01:00:00:00");
+    CHECK (row.codeRate == "25");
+    CHECK (model::labelAt (row.codeFrom, row.codeRate, row.seconds) == "01:00:12:04");
+
+    //  With a length: the bar is the code's own seconds, from its start to its end.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + code + "/length", "30").ok);
+    rig.parameters.markStale();
+
+    row = rowOf (2);
+    CHECK (row.length == doctest::Approx (30.0));
+    const auto span = model::stripSpan (row, row.length);
+    REQUIRE (span.known());
+    CHECK (span.from == doctest::Approx (0.0));
+    CHECK (span.to == doctest::Approx (30.0));
+
+    //  Before it is let go there is no clock, as for a sound; a sound's clock is its seconds.
+    run->state = cue::runState::waiting;
+    CHECK (rowOf (3).clockWords().empty());
+
+    model::RunRow sound;
+    sound.kind = "media";
+    sound.state = "playing";
+    sound.position = "12.2";
+    sound.timecode = "01:00:00:00";
+    CHECK (sound.clockWords() == "12.2");
+}
+
+TEST_CASE ("client: a timecode cue's time in the list is its length, blank until stopped, and the cell writes length")
+{
+    Rig rig;
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("timecode"), osc::Value::string ("Song code"),
+                                            osc::Value::string ("TCDE0003") });
+
+    const auto timeOf = [&rig] (std::int64_t tick)
+    {
+        model::ShowModel show;
+        show.refresh (*rig.publish (tick), "7K2QM9X4");
+        const auto at = show.indexOf ("TCDE0003");
+        REQUIRE (at >= 0);
+        return show.rows()[static_cast<std::size_t> (at)].duration;
+    };
+
+    //  Until stopped: nothing in the column, as a cue with no time has nothing.
+    CHECK (timeOf (2).empty());
+
+    //  With a length, written as a fade's duration is.
+    rig.apply (3, "window", "node.set", { osc::Value::string ("/godot/cue/TCDE0003/length"), osc::Value::string ("90") });
+    CHECK (timeOf (4) == "90.0");
+
+    rig.apply (5, "window", "node.set", { osc::Value::string ("/godot/cue/TCDE0003/length"), osc::Value::string ("2.48") });
+    CHECK (timeOf (6) == "2.5");
+
+    //  And the cell is the length's to write, as a fade's is its duration's.
+    CHECK (model::editAttributeFor (model::EditCell::duration, "timecode") == "length");
+}
+
+TEST_CASE ("client: the label a timecode run reads a second past its start, as a jump counts it")
+{
+    //  Whole frames: 12.16 s at 25 is frame 304, twelve seconds and four frames.
+    CHECK (model::labelAt ("01:00:00:00", "25", 12.16) == "01:00:12:04");
+    CHECK (model::labelAt ("01:00:00:00", "25", 1.16) == "01:00:01:04");      // 29 frames, not a hair below
+    CHECK (model::labelAt ("01:00:00:00", "25", -3.0) == "01:00:00:00");      // nothing before the start
+
+    //  Drop-frame: two frames past 00:00:59;28 is 00:01:00;02, the minute's first two names left out.
+    CHECK (model::labelAt ("00:00:59:28", "29.97df", 2.0 * 1001.0 / 30000.0) == "00:01:00;02");
+
+    //  Midnight wraps; a start or a rate that does not read says nothing.
+    CHECK (model::labelAt ("23:59:59:24", "25", 0.04) == "00:00:00:00");
+    CHECK (model::labelAt ("nonsense", "25", 1.0).empty());
+    CHECK (model::labelAt ("01:00:00:00", "nope", 1.0).empty());
 }

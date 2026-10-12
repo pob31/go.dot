@@ -19,10 +19,12 @@
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/Timecode.h>
 #include <wfg/client/model/Video.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -202,6 +204,12 @@ namespace wfg::client::model
             { "Channel pressure", "pressure on the whole channel", "midi",
               { { "type", "channelPressure" } }, "Whole channel", false, false, {} },
             { "SysEx", "bytes copied from a manual", "midi", { { "type", "sysex" } }, "System", false, false, {} },
+
+            /*  AND THE CODE A DESK CHASES (namespace draft §59, AHD): a cue of
+                its own kind, `timecode`, born MTC by the list that made it -
+                where it goes and at what rate are the show's (AHA). */
+            { timecodeWords::mtcLine, timecodeWords::mtcExplanation, "timecode", { { "format", "mtc" } },
+              timecodeWords::section, false, false, {} },
         };
 
         return choices;
@@ -401,6 +409,13 @@ namespace wfg::client::model
             choices.push_back (std::move (line));
         }
 
+        /*  AND AFTER THE TEMPLATES, THE CODE A SOUND IS LOCKED TO (namespace
+            draft §59, AHD): an LTC cue is a sound Go.dot draws itself, on the
+            output the show names (AHA), so it is offered where sounds are made.
+            No file is chosen for it - only a media line opens the chooser. */
+        choices.push_back ({ timecodeWords::ltcLine, timecodeWords::ltcExplanation, "timecode",
+                             { { "format", "ltc" } }, timecodeWords::section, false, false, {} });
+
         return choices;
     }
 
@@ -410,9 +425,25 @@ namespace wfg::client::model
         lines.push_back ({ MenuLine::Kind::note, "New audio cues, " + destination, -1, false });
         appendChoices (lines, choices, true);
 
-        if (choices.size() <= 1)
-            lines.push_back ({ MenuLine::Kind::note,
-                               "No template yet: pick a cue, then Edit, Save as template.", -1, false });
+        /*  NO LINE IS A TEMPLATE, rather than "only the files": the list has
+            the LTC line under it now (§59), and a count would have taken the
+            word on how a template is made away from a show that has none. The
+            word goes where the templates would be - before the timecode part -
+            so it is not read as being about the code. */
+        const auto templated = std::any_of (choices.begin(), choices.end(),
+                                            [] (const Choice& choice) { return ! choice.cueTemplate.empty(); });
+
+        if (! templated)
+        {
+            auto at = std::find_if (lines.begin(), lines.end(), [] (const MenuLine& line)
+                                    { return line.kind == MenuLine::Kind::header && line.text == timecodeWords::section; });
+
+            if (at != lines.end() && at != lines.begin() && std::prev (at)->kind == MenuLine::Kind::separator)
+                --at;
+
+            lines.insert (at, { MenuLine::Kind::note,
+                                "No template yet: pick a cue, then Edit, Save as template.", -1, false });
+        }
 
         return lines;
     }

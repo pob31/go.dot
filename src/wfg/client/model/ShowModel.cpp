@@ -105,6 +105,17 @@ namespace wfg::client::model
 
             return written;
         }
+
+        /*  A TIMECODE CUE'S TIME IS ITS `length` (namespace draft §59): how long
+            its code runs, written as a fade's duration is - and nothing at all
+            for nought, a code that runs until it is stopped, which has no time
+            to put in the column. Its row is writable, so the rule above would
+            have spelled nought "0.0". */
+        std::string codeTime (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+        {
+            const auto written = timeText (snapshot, cueId, "length");
+            return written == "0.0" || written == "-0.0" ? std::string {} : written;
+        }
     }
 
     int ShowModel::indexOf (std::string_view cueId) const
@@ -359,6 +370,7 @@ namespace wfg::client::model
             its mark say so. Only a movie - a still has a speed row it ignores. */
         const auto isMovie = row.kind == "video" && attribute (snapshot, cueId, "source") == "movie";
         row.duration = row.kind == "media" || isMovie ? mediaTime (snapshot, cueId)
+                     : row.kind == "timecode"         ? codeTime (snapshot, cueId)
                                                       : timeText (snapshot, cueId, "duration");
         row.postWait = timeText (snapshot, cueId, "postWait");
         row.depth = depth;
@@ -384,6 +396,9 @@ namespace wfg::client::model
             row.verb = attribute (snapshot, cueId, "verb");
             row.andGo = flag (snapshot, "/godot/cue/" + cueId + "/andGo") == Flag::yes;
         }
+
+        if (row.kind == "timecode")
+            row.format = attribute (snapshot, cueId, "format");
 
         /*  WHAT THE MARKS BESIDE THE NAME ARE READ FROM, by address and only
             for the kinds that carry each row: a handful of binary searches per

@@ -178,6 +178,27 @@ namespace wfg::client::ui
                     line (l, 4.75f, 10.0f, 11.75f, 14.0f);
                     break;
 
+                case model::Icon::timecode:
+                    /*  A code (namespace draft §59): the square wave LTC is drawn
+                        as, its bits short and long, over the frames it counts -
+                        not the clock, which is the inspector's "when" drawer. */
+                    l.startNewSubPath (2.0f, 14.0f);
+                    l.lineTo (5.0f, 14.0f);
+                    l.lineTo (5.0f, 5.0f);
+                    l.lineTo (8.0f, 5.0f);
+                    l.lineTo (8.0f, 14.0f);
+                    l.lineTo (10.5f, 14.0f);
+                    l.lineTo (10.5f, 5.0f);
+                    l.lineTo (16.0f, 5.0f);
+                    l.lineTo (16.0f, 14.0f);
+                    l.lineTo (19.0f, 14.0f);
+                    l.lineTo (19.0f, 5.0f);
+                    l.lineTo (22.0f, 5.0f);
+
+                    for (const auto x : { 3.0f, 9.0f, 15.0f, 21.0f })
+                        f.addRoundedRectangle (x - 0.9f, 17.5f, 1.8f, 3.5f, 0.6f);
+                    break;
+
                 case model::Icon::group:
                     l.addRoundedRectangle (3.0f, 8.0f, 13.0f, 13.0f, 2.0f);
                     l.startNewSubPath (8.0f, 8.0f);

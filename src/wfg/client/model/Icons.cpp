@@ -65,6 +65,7 @@ namespace wfg::client::model
         if (kind == "osc")     return Icon::osc;
         if (kind == "midi")    return Icon::midi;
         if (kind == "process") return Icon::process;
+        if (kind == "timecode") return Icon::timecode;
         if (kind == "range")   return Icon::range;
         if (kind == "trigger") return Icon::trigger;
 
@@ -78,7 +79,7 @@ namespace wfg::client::model
             is one of the cues that act on a cue, and shares the transport's. */
         if (kind == "memo" || kind == "media" || kind == "mic" || kind == "video" || kind == "fade"
               || kind == "transport" || kind == "osc" || kind == "midi" || kind == "group"
-              || kind == "process")
+              || kind == "process" || kind == "timecode")
             return "kind-" + kind;
 
         if (kind == "start")

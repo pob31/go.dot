@@ -17,6 +17,7 @@
 #include <wfg/client/ui/RunPaneComponent.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/Timecode.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/audio/Timbre.h>
 
@@ -27,6 +28,12 @@ namespace wfg::client::ui
 {
     namespace
     {
+        /*  THE SCALE OF A SCRUB OVER SOMETHING WITH NO MEASURED END: a scene
+            nothing under which is known, a timecode run that goes until it is
+            stopped (namespace draft §59) - a minute across the strip, which is
+            a scale rather than a claim: the head is not held to it. */
+        constexpr double unmeasuredSeconds = 60.0;
+
         /*  THE CURSOR OF A STRIP THAT WILL NOT SCRUB (2026-10-05, namespace
             draft §30.6), the universal "not here": a ring and the bar across
             it, ink over a light edge so it reads on the dark pane and the
@@ -500,6 +507,78 @@ namespace wfg::client::ui
         return 0.0;
     }
 
+    /*  A HEAD ONLY OVER A KNOWN STRETCH, once the run has been let go: a sound
+        whose length is measured, a scene in a round the engine solved, and a
+        timecode run with a length - one that runs until it is stopped has no
+        end to be part-way to (namespace draft §59), so its row is the label
+        alone. */
+    bool RunPaneComponent::headFor (const model::RunRow& entry) const
+    {
+        return entry.launched() && spanOf (entry).known();
+    }
+
+    juce::String RunPaneComponent::clockFor (const model::RunRow& entry)
+    {
+        return juce::String (entry.clockWords());
+    }
+
+    int RunPaneComponent::clockWidth (const model::RunRow& entry, const juce::Font& font) const
+    {
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+        return juce::jmax (unit * 5, juce::GlyphArrangement::getStringWidthInt (font, clockFor (entry)) + unit);
+    }
+
+    juce::String RunPaneComponent::ghostWordsFor (const model::RunRow& entry) const
+    {
+        /*  THE SECOND A RELEASE SENDS, as a clock - and for a timecode run the
+            label it would land on (namespace draft §59, TC.8): its start plus
+            the whole frames the second falls in, as the Runner counts a jump,
+            and as the desk chasing it would read it. At the show's rate: the
+            run's own copy of the rate is not published, and the two differ
+            only when the rate was changed while the code ran. */
+        auto words = juce::String (model::clockText (ghostSecond()));
+
+        if (entry.kind == "timecode")
+            if (const auto label = model::labelAt (entry.codeFrom, entry.codeRate, ghostSecond()); ! label.empty())
+                words = juce::String (label);
+
+        if (const auto gearing = model::rateText (scrub.rate()); ! gearing.empty())
+            words += "  " + juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (gearing);
+
+        return words;
+    }
+
+    juce::String RunPaneComponent::ghostClock() const
+    {
+        if (! scrub.active())
+            return {};
+
+        for (const auto& row : rows)
+            if (row.id == scrubRun)
+                return ghostWordsFor (row);
+
+        return {};
+    }
+
+    juce::String RunPaneComponent::clockOf (int index) const
+    {
+        if (index < 0 || index >= static_cast<int> (rows.size()))
+            return {};
+
+        return clockFor (rows[static_cast<std::size_t> (index)]);
+    }
+
+    bool RunPaneComponent::drawsHead (int index) const
+    {
+        if (index < 0 || index >= static_cast<int> (rows.size()))
+            return false;
+
+        const auto& entry = rows[static_cast<std::size_t> (index)];
+
+        //  A wait draws its countdown and no head, whatever it knows (paintStrip).
+        return ! entry.isWaiting() && headFor (entry);
+    }
+
     model::StripSpan RunPaneComponent::spanOf (const model::RunRow& entry) const
     {
         /*  A scene with no solved round has none, and draws no head - as
@@ -557,7 +636,7 @@ namespace wfg::client::ui
             solved one (2026-10-05, namespace draft §30.6) - a group's row drew
             no head at all, since a group has no length of its own, and the
             ghost of a grab was the only head it ever showed. */
-        if (! spanOf (entry).known() || ! entry.launched())
+        if (! headFor (entry))
             return;
 
         const auto through = throughOf (entry);
@@ -858,11 +937,16 @@ namespace wfg::client::ui
         g.drawText (juce::String (juce::CharPointer_UTF8 ("\xc3\x97")),
                     killCell, juce::Justification::centred, false);
 
-        //  Where it has got to, when it has been let go.
-        auto positionCell = area.removeFromRight (unit * 5);
+        /*  Where it has got to, when it has been let go - and for a timecode
+            run its code's own label, `01:00:12:04` (namespace draft §59),
+            which is wider than a sound's seconds: the cell grows to it rather
+            than cutting the frames off, which are the part that moves. */
+        const auto clock = clockFor (entry);
         g.setColour (Look::colour (theme, "ink-faint"));
         g.setFont (Look::font (theme, 12.0f));
-        g.drawText (entry.position, positionCell, juce::Justification::centredRight, false);
+
+        auto positionCell = area.removeFromRight (clockWidth (entry, g.getCurrentFont()));
+        g.drawText (clock, positionCell, juce::Justification::centredRight, false);
 
         /*  The mark, or the word for every state that is not one of the two.
 
@@ -1023,6 +1107,14 @@ namespace wfg::client::ui
         if (entry.kind == "media")
             return entry.launched() && spanOf (entry).known();
 
+        /*  A TIMECODE RUN (namespace draft §59, TC.8): `run.seek` moves its
+            code since TC.7, and the engine's `seekable` says when. One with a
+            length is held to it, as a sound to its file; one that runs until
+            it is stopped has nothing to hold it to but its start, and is
+            geared as a scene with no known length is. */
+        if (entry.kind == "timecode")
+            return entry.launched();
+
         return entry.kind == "group";
     }
 
@@ -1064,7 +1156,7 @@ namespace wfg::client::ui
                 longest = juce::jmax (longest, lengthOf (row));
         }
 
-        return longest > 0.0 ? longest : 60.0;
+        return longest > 0.0 ? longest : unmeasuredSeconds;
     }
 
     double RunPaneComponent::secondsPerPixel (const model::RunRow& entry, int stripWidth) const
@@ -1077,8 +1169,10 @@ namespace wfg::client::ui
             §30.6:) For a scene, the round it is in when the engine has solved
             one; else the longest thing it plays, as before. */
         const auto span = spanOf (entry);
-        const auto seconds = span.known() ? span.length()
-                                          : entry.kind == "group" ? extentOf (entry) : lengthOf (entry);
+        const auto seconds = span.known()              ? span.length()
+                           : entry.kind == "group"     ? extentOf (entry)
+                           : entry.kind == "timecode"  ? unmeasuredSeconds
+                                                       : lengthOf (entry);
 
         return seconds / static_cast<double> (juce::jmax (1, stripWidth - 1));
     }
@@ -1122,6 +1216,13 @@ namespace wfg::client::ui
         const auto span = spanOf (entry);
         const auto scene = entry.kind == "group";
 
+        /*  AND A TIMECODE RUN IS SOUGHT ONCE, ON RELEASE, as a scene is (TC.8):
+            each seek relocates its code - a full frame on MTC, a jump on the
+            LTC line - and a desk chasing it relocates with it, firing what it
+            passes on the way. The ghost follows the hand and its box says the
+            label a release lands on; one jump is sent, where the hand let go. */
+        const auto code = entry.kind == "timecode";
+
         model::Scrub::Setup setup;
         setup.position = entry.seconds;
         setup.from = span.known() ? span.from : 0.0;
@@ -1129,7 +1230,7 @@ namespace wfg::client::ui
         setup.secondsPerPixel = secondsPerPixel (entry, strip.getWidth());
         setup.unit = hasWaveform (entry) ? stripHeight() : rowHeight();
         setup.x = event.position.x;
-        setup.onRelease = scene;
+        setup.onRelease = scene || code;
 
         scrub.begin (setup);
         scrubRun = entry.id;
@@ -1137,9 +1238,17 @@ namespace wfg::client::ui
         scrubDistance = 0.0;
         scrubPush = 0;
 
-        /*  The scale frozen at the grab: the hand's scale stays under it. */
-        scrubFrom = span.known() ? span.from : 0.0;
-        scrubTo = span.known() ? span.to : extentOf (entry);
+        /*  The scale frozen at the grab: the hand's scale stays under it. A
+            code that runs until it is stopped has no stretch, so its ghost is
+            drawn over the minute around where it was taken - pinned at the
+            right edge of a minute from nought, a code an hour in would never
+            have moved under the hand. */
+        scrubFrom = span.known() ? span.from
+                  : code         ? juce::jmax (0.0, entry.seconds - unmeasuredSeconds / 2.0)
+                                 : 0.0;
+        scrubTo = span.known() ? span.to
+                : code         ? scrubFrom + unmeasuredSeconds
+                               : extentOf (entry);
         scrubInRound = scene && span.known();
 
         canvas.setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
@@ -1275,11 +1384,7 @@ namespace wfg::client::ui
         g.setColour (picked);
         g.fillRect (x + 1, strip.getY(), 2, strip.getHeight());
 
-        auto words = juce::String (model::clockText (ghostSecond()));
-        const auto gearing = model::rateText (scrub.rate());
-
-        if (! gearing.empty())
-            words += "  " + juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (gearing);
+        const auto words = ghostWordsFor (entry);
 
         g.setFont (Look::font (theme, 12.0f));
 
@@ -1294,11 +1399,8 @@ namespace wfg::client::ui
             box sits at the strip's right end instead, beside the position
             the engine publishes - the two numbers a scrubbing hand compares. */
         if (! hasWaveform (entry))
-        {
-            const auto unit = juce::roundToInt (theme.type * 7.0);
-            box = juce::Rectangle<int> (strip.getRight() - unit * 5 - 4 - textWidth, strip.getY(),
-                                        textWidth, strip.getHeight());
-        }
+            box = juce::Rectangle<int> (strip.getRight() - clockWidth (entry, g.getCurrentFont()) - 4 - textWidth,
+                                        strip.getY(), textWidth, strip.getHeight());
 
         g.setColour (Look::colour (theme, "panel-runs").withAlpha (0.85f));
         g.fillRect (box);

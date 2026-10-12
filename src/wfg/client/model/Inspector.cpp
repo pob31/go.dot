@@ -27,7 +27,9 @@
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/Timecode.h>
 #include <wfg/client/model/Video.h>
+#include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -115,6 +117,11 @@ namespace wfg::client::model
                 { "start",   { "target" } },
                 //  A process cue (namespace draft §51): its patch, then its MIDI.
                 { "process", { "patch", "midiIn", "midiOut" } },
+
+                /*  A TIMECODE CUE (namespace draft §59): which code, where it
+                    starts, how long it runs - the rate and where it goes are
+                    the show's (AHA). */
+                { "timecode", { "format", "from", "length" } },
                 /*  WHAT DOH! DOES WITH WHAT IT SENT last on both (PRD §3.32,
                     2026-10-01): a question about after the send, so it comes
                     after everything the send itself is. */
@@ -493,6 +500,69 @@ namespace wfg::client::model
                     field.applies = verb == "fade";
                 else if (field.name == "andGo")
                     field.applies = verb == "jump";
+            }
+        }
+
+        /*  A TIMECODE CUE IN WORDS (namespace draft §59, TC.8 - the words were
+            the implementer's and the author accepted them as offered,
+            2026-10-12, and they are model/Timecode.h's): its three rows named
+            as somebody asks them, the format a menu of the two codes saying
+            what carries each, the start shown as a reader shows it at the
+            show's rate, and a length of nought - a code that runs until it is
+            stopped (AHB) - saying so in the box rather than showing a nought
+            that reads as "no time at all". That word stands in as Doh!'s
+            rollback does: greyed, and committed unchanged it writes nothing;
+            a number typed gives the code a length.
+
+            ASKED BY NAME AND ONLY FOR THIS KIND: `format` is a plugin's row
+            too, and the label table above is read for every kind. */
+        void wordTheCode (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
+        {
+            const auto rate = text (snapshot, "/godot/sync/frameRate");
+
+            for (auto& field : decided)
+            {
+                if (field.name == "format")
+                {
+                    field.label = timecodeWords::format;
+
+                    if (! field.writable || field.options.empty())
+                        continue;
+
+                    /*  The node's own values, worded - a format the engine
+                        grows later keeps its stored word in the menu, as a
+                        verb does. */
+                    field.choices.clear();
+
+                    for (const auto& option : field.options)
+                    {
+                        auto word = option;
+
+                        for (const auto& [stored, said] : formatChoices())
+                            if (stored == option)
+                                word = said;
+
+                        field.choices.emplace_back (option, word);
+                    }
+                }
+                else if (field.name == "from")
+                {
+                    field.label = timecodeWords::startsAt;
+
+                    if (! field.mixed)
+                        field.value = shownLabel (field.value, rate);
+                }
+                else if (field.name == "length")
+                {
+                    field.label = timecodeWords::runsFor;
+
+                    if (const auto seconds = osc::parseDouble (field.value);
+                        ! field.mixed && seconds.has_value() && ! (*seconds > 0.0))
+                    {
+                        field.value.clear();
+                        field.placeholder = timecodeWords::untilStopped;
+                    }
+                }
             }
         }
 
@@ -1516,6 +1586,9 @@ namespace wfg::client::model
 
         if (out.kind == "transport")
             wordTheVerb (decided);
+
+        if (out.kind == "timecode")
+            wordTheCode (snapshot, decided);
 
         /*  AN UNNAMED CUE'S NAME BOX shows, greyed, what the cue is called
             while it stays unnamed (namespace draft §53): a fade after its

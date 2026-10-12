@@ -1740,3 +1740,190 @@ TEST_CASE ("show settings UI: the Serial tab declares a port and says what this 
     panel.refresh (*rig.publish());
     CHECK_FALSE (add->isVisible());
 }
+
+TEST_CASE ("show settings UI: the Timecode tab sits before Playback, and each of its rows is a node.set on /godot/sync")
+{
+    /*  Namespace draft §59 (AHA, AHW; TC.8): the rate, the MIDI port MTC
+        leaves on, the one-channel output LTC plays on and its level - each a
+        `node.set` that lands at once, nothing waiting for Apply. The words
+        were the implementer's, accepted by the author as offered (2026-10-12). */
+    Rig rig;
+
+    const auto port = rig.document.createPort ("Desk");
+    REQUIRE (port.ok);
+    const auto mono = rig.document.createBus ("direct", 1);
+    const auto stereo = rig.document.createBus ("direct", 2);
+    REQUIRE (mono.ok);
+    REQUIRE (stereo.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/bus/" + mono.id + "/name", "Code").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/bus/" + stereo.id + "/name", "Main").ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    //  After the templates, and just before Playback - which stays the last tab that sets anything.
+    const auto names = tabs->getTabNames();
+    REQUIRE (names.contains ("Timecode"));
+    CHECK (names.indexOf ("Timecode") == names.indexOf ("Playback") - 1);
+    CHECK (names.indexOf ("Timecode") == names.indexOf ("Templates") + 1);
+    tabs->setCurrentTabIndex (names.indexOf ("Timecode"));
+
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    std::vector<juce::ComboBox*> menus;
+    std::vector<juce::TextEditor*> boxes;
+    std::vector<juce::Label*> labels;
+
+    std::function<void (juce::Component&)> collect = [&] (juce::Component& at)
+    {
+        if (auto* menu = dynamic_cast<juce::ComboBox*> (&at))
+            menus.push_back (menu);
+        else if (auto* box = dynamic_cast<juce::TextEditor*> (&at))
+            boxes.push_back (box);
+        else if (auto* label = dynamic_cast<juce::Label*> (&at))
+            labels.push_back (label);
+
+        for (auto* child : at.getChildren())
+            collect (*child);
+    };
+    collect (*page);
+
+    //  Three menus and a number, in the order the rows stand.
+    REQUIRE (menus.size() == 3u);
+    REQUIRE (boxes.size() == 1u);
+    auto* rate = menus[0];
+    auto* mtc = menus[1];
+    auto* ltc = menus[2];
+    auto* level = boxes[0];
+
+    const auto shownLabel = [&labels] (const juce::String& text) -> juce::Label*
+    {
+        for (auto* label : labels)
+            if (label->getText() == text)
+                return label;
+
+        return nullptr;
+    };
+
+    for (const auto* row : { "Frame rate", "MTC leaves on", "LTC plays on", "LTC level", "dBFS" })
+    {
+        INFO (row);
+        CHECK (shownLabel (row) != nullptr);
+    }
+
+    //  What a show nobody has set shows: 25, no port, no output, -18 dBFS - and no line about the output.
+    CHECK (rate->getText() == "25");
+    CHECK (mtc->getText() == "None");
+    CHECK (ltc->getText() == "None");
+    CHECK (level->getText().getDoubleValue() == doctest::Approx (-18.0));
+
+    auto* carriesOnly = shownLabel ("This output carries timecode only: no sound is heard on it.");
+    REQUIRE (carriesOnly != nullptr);
+    CHECK_FALSE (carriesOnly->isVisible());
+
+    //  The rates, worded; the ports by name; every output, the ones wider than a channel disabled and saying why.
+    REQUIRE (rate->getNumItems() == 6);
+    CHECK (rate->getItemText (3) == "29.97 drop-frame");
+    REQUIRE (mtc->getNumItems() == 2);
+    CHECK (mtc->getItemText (1) == "Desk");
+
+    auto codeItem = 0;
+    auto mainItem = 0;
+
+    for (int at = 0; at < ltc->getNumItems(); ++at)
+    {
+        const auto text = ltc->getItemText (at);
+        const auto item = ltc->getItemId (at);
+        INFO (text);
+
+        if (text == "None")
+            CHECK (ltc->isItemEnabled (item));
+        else if (text == "Code")
+        {
+            codeItem = item;
+            CHECK (ltc->isItemEnabled (item));
+        }
+        else if (text == "Main (2 channels: LTC needs one)")
+        {
+            mainItem = item;
+            CHECK_FALSE (ltc->isItemEnabled (item));
+        }
+        else
+        {
+            //  Anything else the show has is enabled only if it is one channel.
+            CHECK (text.contains ("channels: LTC needs one") != ltc->isItemEnabled (item));
+        }
+    }
+
+    REQUIRE (codeItem > 0);
+    REQUIRE (mainItem > 0);
+
+    //  Each control sends its own row: the rate's stored word, the port's identifier, the output's, the level.
+    rate->setSelectedId (4, juce::sendNotificationSync);
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent.back().command == "node.set");
+    CHECK (rig.sent.back().args[0].getString() == "/godot/sync/frameRate");
+    CHECK (rig.sent.back().args[1].getString() == "29.97df");
+
+    mtc->setSelectedId (2, juce::sendNotificationSync);
+    REQUIRE (rig.sent.size() == 2u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/sync/mtcOut");
+    CHECK (rig.sent.back().args[1].getString() == port.id);
+
+    ltc->setSelectedId (codeItem, juce::sendNotificationSync);
+    REQUIRE (rig.sent.size() == 3u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/sync/ltcOut");
+    CHECK (rig.sent.back().args[1].getString() == mono.id);
+
+    //  A disabled output is never sent, however it came to be picked.
+    ltc->setSelectedId (mainItem, juce::sendNotificationSync);
+    CHECK (rig.sent.size() == 3u);
+
+    //  A comma is a decimal point, as a French booth types it.
+    level->setText ("-20,5", juce::dontSendNotification);
+    level->onReturnKey();
+    REQUIRE (rig.sent.size() == 4u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/sync/ltcLevel");
+    CHECK (rig.sent.back().args[1].getString() == "-20.5");
+
+    //  Once the show says so, the tab shows it - and the line under the LTC row appears.
+    REQUIRE (rig.document.setAttribute ("/godot/sync/frameRate", "29.97df").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/sync/mtcOut", port.id).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/sync/ltcOut", mono.id).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/sync/ltcLevel", "-20.5").ok);
+    rig.state.mtcLate = 2;
+    rig.state.mtcWorstMs = 3.5;
+    rig.state.ltcLate = 0;
+    panel.refresh (*rig.publish());
+
+    CHECK (rate->getText() == "29.97 drop-frame");
+    CHECK (mtc->getText() == "Desk");
+    CHECK (ltc->getText() == "Code");
+    CHECK (carriesOnly->isVisible());
+
+    //  The machine's counts, a quiet line.
+    CHECK (shownLabel (juce::String::fromUTF8 ("MTC late: 2 (worst 3.5 ms) \xc2\xb7 LTC late: 0")) != nullptr);
+
+    //  The value a row already has is not an edit; None is a choice that sends the empty identifier.
+    rig.sent.clear();
+    rate->setSelectedId (4, juce::sendNotificationSync);
+    level->onFocusLost();
+    CHECK (rig.sent.empty());
+
+    mtc->setSelectedId (1, juce::sendNotificationSync);
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/sync/mtcOut");
+    CHECK (rig.sent.back().args[1].getString().empty());
+
+    //  Locked, nothing on the tab can be changed.
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (rate->isEnabled());
+    CHECK_FALSE (mtc->isEnabled());
+    CHECK_FALSE (ltc->isEnabled());
+    CHECK_FALSE (level->isEnabled());
+}

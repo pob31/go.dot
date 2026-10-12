@@ -14,6 +14,7 @@
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/Timecode.h>
 #include <wfg/client/model/Video.h>
 #include <wfg/engine/video/Displays.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -7059,6 +7060,233 @@ namespace wfg::client::ui
             Field debounce, dohWindow, panicFade, processBudget, processStuckAfter;
         };
 
+        /*  THE SHOW'S TIMECODE (namespace draft §59, AHA, AHW; TC.8): the rate
+            every timecode cue copies when it fires, the MIDI port MTC leaves
+            on, the output LTC plays on and how loud it is there. Each control
+            is a `node.set` on a `/godot/sync` row that lands at once, as on the
+            Playback tab after it - nothing here waits for Apply - and the
+            words are model/Timecode.h's: the implementer's, accepted by the
+            author as offered (2026-10-12).
+
+            THE OUTPUTS WIDER THAN ONE CHANNEL ARE IN THE MENU, DISABLED, with
+            the reason after the name: LTC replaces one channel (AHI), so a
+            stereo output can never carry it, and an output somebody expected
+            that is simply not there reads as a fault. And while an output is
+            chosen, the sentence under it says what that costs: whatever the
+            show routes there is not heard. A -18 dBFS square wave in a PA is
+            the one mistake on this tab that is loud. */
+        class TimecodePage final : public juce::Component
+        {
+        public:
+            TimecodePage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : send (std::move (dispatch))
+            {
+                namespace words = model::timecodeWords;
+
+                for (auto [label, said] : { std::pair { &rateLabel, words::frameRate },
+                                            std::pair { &mtcLabel, words::mtcOut },
+                                            std::pair { &ltcLabel, words::ltcOut },
+                                            std::pair { &levelLabel, words::ltcLevel },
+                                            std::pair { &levelUnit, words::ltcLevelUnit },
+                                            std::pair { &carriesOnly, words::timecodeOnly } })
+                {
+                    label->setText (said, juce::dontSendNotification);
+                    addAndMakeVisible (*label);
+                }
+
+                /*  THE RATES ARE FIXED, so their menu is filled once: the
+                    stored word is what is sent, the shown one what is read. */
+                const auto& rates = model::rateChoices();
+
+                for (std::size_t at = 0; at < rates.size(); ++at)
+                    rate.addItem (juce::String (rates[at].second), static_cast<int> (at) + 1);
+
+                for (auto [box, title] : { std::pair { &rate, words::frameRate },
+                                           std::pair { &mtc, words::mtcOut },
+                                           std::pair { &ltc, words::ltcOut } })
+                {
+                    box->setTitle (title);
+                    addAndMakeVisible (*box);
+                }
+
+                rate.onChange = [this] { commitRate(); };
+                mtc.onChange = [this] { commitChoice (mtc, mtcChoices, "/godot/sync/mtcOut", shown.mtcOut); };
+                ltc.onChange = [this] { commitChoice (ltc, ltcChoices, "/godot/sync/ltcOut", shown.ltcOut); };
+
+                level.setJustification (juce::Justification::centredLeft);
+                level.setInputRestrictions (6, "-0123456789.,");
+                level.setTitle (words::ltcLevel);
+                level.onReturnKey = [this] { commitLevel(); };
+                level.onFocusLost = [this] { commitLevel(); };
+                addAndMakeVisible (level);
+
+                carriesOnly.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
+                carriesOnly.setVisible (false);
+
+                //  The machine's readings, quiet: nothing on them is a setting.
+                late.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-faint"));
+                addAndMakeVisible (late);
+            }
+
+            void show (const model::SyncRow& sync, std::vector<model::SyncChoice> ports,
+                       std::vector<model::SyncChoice> outputs, bool editable)
+            {
+                shown = sync;
+
+                fill (mtc, mtcChoices, std::move (ports), sync.mtcOut);
+                fill (ltc, ltcChoices, std::move (outputs), sync.ltcOut);
+
+                auto rateId = 0;
+                const auto& rates = model::rateChoices();
+
+                for (std::size_t at = 0; at < rates.size(); ++at)
+                    if (rates[at].first == sync.frameRate)
+                        rateId = static_cast<int> (at) + 1;
+
+                if (rate.getSelectedId() != rateId)
+                    rate.setSelectedId (rateId, juce::dontSendNotification);
+
+                /*  Not while it is being typed into, or a refresh would take the
+                    caret back on every keystroke - the Playback tab's rule. */
+                if (! level.hasKeyboardFocus (true) && level.getText() != juce::String (sync.ltcLevel))
+                    level.setText (juce::String (sync.ltcLevel), juce::dontSendNotification);
+
+                carriesOnly.setVisible (! sync.ltcOut.empty());
+
+                if (const auto line = juce::String (model::lateLine (sync)); late.getText() != line)
+                    late.setText (line, juce::dontSendNotification);
+
+                for (auto* control : std::initializer_list<juce::Component*> { &rate, &mtc, &ltc, &level })
+                    control->setEnabled (editable);
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (22);
+
+                const auto row = [&area] (juce::Label& label, juce::Component& control, int width)
+                {
+                    auto line = area.removeFromTop (30);
+                    label.setBounds (line.removeFromLeft (230));
+                    control.setBounds (line.removeFromLeft (width).reduced (0, 2));
+                    area.removeFromTop (10);
+                    return line;
+                };
+
+                row (rateLabel, rate, 220);
+                row (mtcLabel, mtc, 360);
+                row (ltcLabel, ltc, 360);
+
+                /*  ITS PLACE KEPT WHEN IT IS NOT SHOWN, so choosing an output
+                    does not move the level row under the hand. */
+                carriesOnly.setBounds (area.removeFromTop (24).withTrimmedLeft (230));
+                area.removeFromTop (8);
+
+                auto line = row (levelLabel, level, 70);
+                line.removeFromLeft (6);
+                levelUnit.setBounds (line.removeFromLeft (60));
+
+                area.removeFromTop (14);
+                late.setBounds (area.removeFromTop (24));
+            }
+
+        private:
+            /*  A MENU REFILLED ONLY WHEN WHAT IT OFFERS CHANGES, so a pass at
+                the window's refresh rate does not close it under the hand. A
+                value the menu does not offer - a port or an output the show no
+                longer declares - is still in it, at the end and marked, as the
+                Surfaces tab marks one: the show names it, and a menu that
+                dropped it would make choosing anything else look like a
+                correction rather than a change. */
+            static void fill (juce::ComboBox& box, std::vector<model::SyncChoice>& held,
+                              std::vector<model::SyncChoice> offered, const std::string& current)
+            {
+                const auto known = std::any_of (offered.begin(), offered.end(),
+                                                [&current] (const model::SyncChoice& choice) { return choice.id == current; });
+
+                if (! known)
+                    offered.push_back ({ current, current + "  (not declared)", true });
+
+                if (offered != held)
+                {
+                    held = std::move (offered);
+                    box.clear (juce::dontSendNotification);
+
+                    for (std::size_t at = 0; at < held.size(); ++at)
+                    {
+                        const auto item = static_cast<int> (at) + 1;
+                        box.addItem (juce::String (held[at].label), item);
+                        box.setItemEnabled (item, held[at].enabled);
+                    }
+                }
+
+                auto selected = 0;
+
+                for (std::size_t at = 0; at < held.size(); ++at)
+                    if (held[at].id == current)
+                        selected = static_cast<int> (at) + 1;
+
+                if (box.getSelectedId() != selected)
+                    box.setSelectedId (selected, juce::dontSendNotification);
+            }
+
+            void commitChoice (const juce::ComboBox& box, const std::vector<model::SyncChoice>& held,
+                               const char* address, const std::string& current)
+            {
+                const auto at = box.getSelectedId() - 1;
+
+                if (! send || at < 0 || at >= static_cast<int> (held.size()))
+                    return;
+
+                //  A disabled item cannot be picked by a hand; nor by anything else.
+                const auto& picked = held[static_cast<std::size_t> (at)];
+
+                if (! picked.enabled || picked.id == current)
+                    return;
+
+                send (gesture::setNode (address, picked.id));
+            }
+
+            void commitRate()
+            {
+                const auto at = rate.getSelectedId() - 1;
+                const auto& rates = model::rateChoices();
+
+                if (! send || at < 0 || at >= static_cast<int> (rates.size()))
+                    return;
+
+                const auto& stored = rates[static_cast<std::size_t> (at)].first;
+
+                if (stored != shown.frameRate)
+                    send (gesture::setNode ("/godot/sync/frameRate", stored));
+            }
+
+            void commitLevel()
+            {
+                if (! send || ! level.isEnabled())
+                    return;
+
+                /*  A COMMA IS A DECIMAL POINT HERE, as on the Playback tab: the
+                    engine reads its own text, never the locale's. Above nought
+                    is no level this row holds, so a shown value that does not
+                    read compares unequal to anything typed. */
+                const auto typed = level.getText().trim().replaceCharacter (',', '.').toStdString();
+                const auto value = osc::parseDouble (typed);
+
+                if (! value || std::abs (*value - osc::parseDouble (shown.ltcLevel).value_or (1.0)) < 1.0e-9)
+                    return;
+
+                send (gesture::setNode ("/godot/sync/ltcLevel", typed));
+            }
+
+            std::function<void (Event)> send;
+            model::SyncRow shown;
+            std::vector<model::SyncChoice> mtcChoices, ltcChoices;
+            juce::Label rateLabel, mtcLabel, ltcLabel, levelLabel, levelUnit, carriesOnly, late;
+            juce::ComboBox rate, mtc, ltc;
+            juce::TextEditor level;
+        };
+
         /*  WHAT TO DO FIRST, AND WHAT EACH TAB IS FOR (author, 2026-09-30:
             "Should we add a 'Getting started' tab in the settings window
             explaining what people should do? And what each tab is for..." -
@@ -7110,6 +7338,10 @@ namespace wfg::client::ui
                                       " no picture." },
                     { "Templates",    "Cue templates: a cue's settings kept under a name, for new cues to be"
                                       " born with from the Add lists." },
+                    { model::timecodeWords::tab,
+                                      "The timecode the show sends a desk or a server: its frame rate, the MIDI"
+                                      " port MTC leaves on and the output LTC plays on. Nothing to do for a"
+                                      " show that sends none." },
                     { "Playback",     "How GO, Doh! and Esc behave: the least time between two GOs, how"
                                       " long after a GO it can be taken back, and how long the panic fade"
                                       " takes." },
@@ -7265,6 +7497,7 @@ namespace wfg::client::ui
             video->onWarps = [this] (const std::string& outputId) { pendingWarps = outputId; };
             warpTheme = theme;
             templates = std::make_unique<TemplatesPage> (theme, send);
+            timecode = std::make_unique<TimecodePage> (theme, send);
             playback = std::make_unique<PlaybackPage> (theme, send);
 
             /*  A tab named in the list is found by its name, so the list and
@@ -7357,6 +7590,11 @@ namespace wfg::client::ui
             /*  AFTER THE VIDEO: the cue templates the Add lists offer
                 (namespace draft §38), made from cues and kept with the show. */
             tabs.addTab ("Templates", background, templates.get(), false);
+
+            /*  AFTER THE TEMPLATES AND BEFORE PLAYBACK (namespace draft §59,
+                AHW): what the show sends a desk, set once its ports and outputs
+                are - and Playback stays the last tab that sets anything. */
+            tabs.addTab (model::timecodeWords::tab, background, timecode.get(), false);
 
             /*  AFTER THE RACK: the two numbers that say how GO and Esc behave,
                 set once a show is otherwise ready to run (2026-09-28). */
@@ -7534,6 +7772,14 @@ namespace wfg::client::ui
 
             templates->show (model::readCueTemplates (snapshot),
                              ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+
+            /*  THE SHOW'S TIMECODE (namespace draft §59): the document's, re-read
+                every pass like the rest, since each control lands at once as a
+                `node.set` - its menus made of the ports and outputs the tabs
+                before it declare, its quiet line the machine's counts. */
+            timecode->show (model::readSync (snapshot), model::mtcPortChoices (ports),
+                            model::ltcOutputChoices (model::readOutputs (snapshot)),
+                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 
             /*  GO AND ESC: the document's, re-read every pass like the outputs,
                 since each lands at once as a `node.set`. */
@@ -7752,6 +7998,7 @@ namespace wfg::client::ui
         std::unique_ptr<SurfacesPage> surfaces;
         std::unique_ptr<PluginsPage> plugins;
         std::unique_ptr<RackPage> rackPage;
+        std::unique_ptr<TimecodePage> timecode;
         std::unique_ptr<PlaybackPage> playback;
         std::unique_ptr<GettingStartedPage> gettingStarted;
         bool settled = false;

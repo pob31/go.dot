@@ -123,6 +123,11 @@ namespace wfg::client::model
         std::string verb;
         bool andGo = false;      ///< a jump cue's "and Go" (namespace draft §27)
 
+        /*  A TIMECODE CUE'S FORMAT, `mtc` or `ltc` as the tree spells it, so
+            the kind column says which code the cue sends (namespace draft
+            §59, AHD). Empty on anything else. */
+        std::string format;
+
         /*  A GROUP'S BEHAVIOUR, as the tree spells it: `sequential` or
             `shuffle`, and how many rounds it plays - where nought is for ever
             and one is once. Empty on anything that is not a group. */
