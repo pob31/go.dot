@@ -5365,6 +5365,10 @@ namespace
             }
         };
 
+        /*  WHEN THIS MACHINE, FOLLOWING, LAST ASKED FOR A STREAM IT WAS NOT HEARING
+            (2026-10-12; read beside the tick below). */
+        wfg::pair::LinkClock::time_point streamAskedAt {};
+
         const auto announce = [&presence, &dialler, &sayHelloTo]
         {
             for (const auto& channel : presence.channels())
@@ -5799,6 +5803,28 @@ namespace
                                                                         / static_cast<double> (ticks.sampleRate()));
 
                                          follower.start();
+                                     }
+
+                                     /*  A FOLLOW THAT HEARS NO STREAM ASKS FOR IT AGAIN (2026-10-12).
+                                         Linked is the other machine's tick heard moving (RD.7's
+                                         presence), not its beats, so a follower whose leader had
+                                         dropped it - RD.7's first CI run, Linux only, read a main
+                                         leading with nothing sent and a backup following with nothing
+                                         received, while both read linked - waited for a stream that
+                                         would never come: it says its hello only when its seat moves.
+                                         A leader sends a beat every tick, so half a second of none
+                                         from a leader still alive is a stream lost, and the hello is
+                                         said again, at most once a second - the leader takes it as it
+                                         takes any, from the counter this machine holds, a record that
+                                         comes twice dropped by its counter, and a follow that started
+                                         from now seated afresh. In the log, for the post-mortem. */
+                                     if (wfg::pair::follows (seated.seat) && presence.linked (now, timeout)
+                                           && ! linkReceiver.isLinked (now, 0.5)
+                                           && now - streamAskedAt >= std::chrono::seconds (1))
+                                     {
+                                         streamAskedAt = now;
+                                         engine.log().note ("pair: following a live leader and no beat for half a second - hello said again");
+                                         announce();
                                      }
 
                                      const auto roundTrip = std::max (linkReceiver.roundTripToSay(),
