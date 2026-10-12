@@ -301,6 +301,14 @@ namespace wfg::tree
             is arriving and being refused. Counted on the socket thread and
             read here once a tick, like everything else in this struct. */
         std::uint64_t refusedDatagrams = 0;
+
+        /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN (namespace draft §59.3):
+            `sync/mtcLate` and `sync/mtcWorst` as the MIDI sender's MTC lane
+            counts them, `sync/ltcLate` as the audio side's LTC generator does.
+            The machine's, so here; nought wherever nothing has sent a code. */
+        std::uint32_t mtcLate = 0;
+        double mtcWorstMs = 0.0;
+        std::uint32_t ltcLate = 0;
     };
 
     /*  WHAT THE LAST SORT OF ONE HALF OF THE TREE CAME TO (2026-10-11, §31.5):

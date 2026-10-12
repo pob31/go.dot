@@ -2298,15 +2298,20 @@ namespace wfg::cue
 
         /*  THE TIMECODE CUES, ONE TICK (namespace draft §59): a job not yet
             placed on the tick is placed, taking its output over from the run
-            that held it (AHC, AHL) - MTC until TC.6, and LTC with no audio side
-            to draw it, `not-sent` (AHR); LTC with one is placed on a sample by
-            `launchTimecode`. Every placed one says where its code has got to,
-            one whose length has run is ended, and one whose audio side has
-            restarted under it is ended as its sound would be (AHU). A run
-            stopping or killed is let go - its code stopped at its next frame
-            boundary or cut (AHK), and the run ended by `advanceWaits`' sweep of
-            the stopping runs no job claims, as a process cue's is. A hook,
-            after the processes. */
+            that held it (AHC, AHL) - LTC with no audio side to draw it,
+            `not-sent` (AHR), and MTC with no MIDI sender, as a replay has it;
+            with an audio side, LTC and MTC alike are placed on a sample by
+            `launchTimecode`. With a MIDI sender and NO audio side (TC.6), an
+            MTC run is placed here, on the tick's own count of samples - the
+            clock the MIDI sender's lane is fed without audio - a launch lead
+            ahead, so MTC works on a machine with no interface. Every placed
+            one says where its code has got to, one whose length has run is
+            ended, and one whose clock has gone from under it - an audio
+            restart, another player handed in - is ended as its sound would
+            be (AHU). A run stopping or killed is let go - its code stopped at
+            its next frame boundary or cut (AHK), and the run ended by
+            `advanceWaits`' sweep of the stopping runs no job claims, as a
+            process cue's is. A hook, after the processes. */
         struct TimecodeJob;
         void advanceTimecode (Engine& engine, std::int64_t tick);
 
@@ -2317,13 +2322,16 @@ namespace wfg::cue
             takeover is decided in. Hook-side, as it submits. */
         void placeTimecode (Engine& engine, TimecodeJob& job, std::int64_t tick, std::int64_t zeroSample);
 
-        /*  LTC PLACED ON THE SAME SAMPLE AS THE SOUNDS (TC.4, AHN), from
-            `launchIfDue` after its media loop and with its `now` and lead: on
-            the target that loop gives a launch, or on the sample a sound of its
-            group fired with it was launched on in this very call, once that
-            sound's disk has answered. Refused here, once, when the show's LTC
-            output cannot carry it (`bad-route`) or its start never read
-            (`bad-message`). MTC joins it in TC.6, as a branch of its own. */
+        /*  TIMECODE PLACED ON THE SAME SAMPLE AS THE SOUNDS (TC.4, TC.6, AHN),
+            from `launchIfDue` after its media loop and with its `now` and lead:
+            on the target that loop gives a launch, or on the sample a sound of
+            its group fired with it was launched on in this very call, once that
+            sound's disk has answered. LTC goes to the audio side, MTC to the
+            MIDI sender's lane - one loop, one target, a branch each. Refused
+            here, once: LTC when the show's output cannot carry it
+            (`bad-route`), MTC when the show names no declared port for it or
+            the port has nothing behind it (`no-port`), either when its start
+            never read (`bad-message`). */
         void launchTimecode (Engine& engine, std::int64_t tick, std::int64_t now, std::int64_t blockSize,
                              std::int64_t lead);
 
@@ -2332,9 +2340,49 @@ namespace wfg::cue
             start unreadable. Read when the run starts (AHM). */
         std::string ltcRefusal (const TimecodeJob& job) const;
 
-        /*  A JOB'S CODE LET GO OF THE LINE: stopped at its next frame boundary,
-            or cut where it stands (AHK) - once, never for a job a later run
-            took the output over from, and owed until the audio side takes it. */
+        /*  THE PORT MTC LEAVES ON (AHA): the show's `sync/mtcOut` when it
+            names a declared `<Port>`, else empty - which refuses the run
+            `no-port` (AHR). Read when the run starts (AHM). */
+        std::string mtcPortOf() const;
+
+        /*  REFUSED ONCE (AHR), either format: `run.failed` with the word
+            the other runs use, and the job finished. Reads an MTC job's port
+            into it on the way. Answers whether it was refused. */
+        bool refuseTimecode (Engine& engine, TimecodeJob& job);
+
+        /*  AN MTC RUN PUT ON THE MIDI SENDER'S LANE (TC.6): its program
+            started on `zeroSample` of the clock it is placed on - the audio's
+            samples, or with no audio side the tick's count (`onTickClock`) -
+            at `sampleRate`, the takeover decided, `run.started` said, and a
+            length's stop posted with it. A port with nothing behind it fails
+            the run `no-port`, unless the port's `tx` is off - then nothing was
+            ever to leave, and the run is `not-sent` and counted on the tick,
+            as a MIDI cue on a port switched off asks nothing of the port. */
+        void startMtc (Engine& engine, TimecodeJob& job, Run& run, std::int64_t tick,
+                       std::int64_t zeroSample, int sampleRate, bool onTickClock);
+
+        /*  Where the clock a placed code counts by stands now: the audio's
+            samples, or the tick's count for MTC placed with no audio side.
+            And whether that clock has gone from under it - another player
+            handed in, or the audio side's generator made ready again, which
+            restarts its count (AHU). */
+        std::int64_t timecodeClockNow (const TimecodeJob& job) const;
+        bool timecodeClockGone (const TimecodeJob& job) const;
+
+        /*  TX ON THE MTC PORT (AHR), followed each tick while an MTC run
+            holds the lane, and when one is placed: the lane muted while the
+            port the holder sends on has `tx` off - the run warned `not-sent`
+            once, and running its course - and unmuted when it is back on, the
+            lane picking the code up with a full frame (TC.5). A port's `tx`
+            read once per show revision (`mtcTxOff`). */
+        void followMtcTx();
+        bool mtcTxOff (const std::string& port);
+
+        /*  A JOB'S CODE LET GO OF ITS OUTPUT: stopped at its next frame
+            boundary, or cut where it stands (AHK) - once, never for a job a
+            later run took the output over from. LTC's is owed until the audio
+            side takes it; MTC's goes to the MIDI sender's lane, which always
+            takes it. */
         void releaseTimecode (TimecodeJob& job, bool cut);
         void postTimecodeStop (const TimecodeJob& job, std::int64_t atSample, bool cut);
 
@@ -2781,10 +2829,17 @@ namespace wfg::cue
             std::int64_t lengthFrames = 0;  // nought: until stopped (AHB)
 
             /*  Why the code cannot leave (AHR), reported once there are outputs
-                to report it (TC.4, TC.6): `no-port` and `bad-route` will be
+                to report it (TC.4, TC.6): `no-port` and `bad-route` are
                 theirs; `bad-message`, a start no door should have let in, is
                 the one GO can already tell. Empty is nothing wrong. */
             std::string failure;
+
+            /*  MTC's (TC.6): the port it leaves on, read when it starts (AHM);
+                and the port of the run it took the lane over from, whose code
+                still leaves until this one's zero - so a `tx` switched off
+                there keeps the lane muted until then. */
+            std::string port;
+            std::string takenFromPort;
 
             /*  The tick its GO was applied on: what a sound fired with it
                 carries as `launchRequestedAtTick`, which is how the code knows
@@ -2795,21 +2850,25 @@ namespace wfg::cue
             bool placed = false;
             std::int64_t placedAtTick = -1;
 
-            /*  ON THE LINE (TC.4): the sample the code's first frame begins on,
-                -1 for a code counted on the tick; the program the audio side
-                knows it by, never nought there (TC.3); and whether a later run
-                of its format took the output over - whose end must then never
-                silence the code the other now holds. */
+            /*  ON ITS OUTPUT (TC.4, TC.6): the sample the code's first frame
+                begins on, -1 for a code counted on the tick; the program the
+                audio side or the MIDI sender's lane knows it by, never nought
+                there (TC.3, TC.5); and whether a later run of its format took
+                the output over - whose end must then never silence the code
+                the other now holds. */
             std::int64_t launchSample = -1;
             std::uint64_t program = 0;
             bool handedOver = false;
 
-            /*  WHAT THE LINE WAS WHEN IT WAS PLACED ON IT: the audio side's
-                rate, and the generation and the player it was posted to - a
-                restart moves either, and ends the run (AHU). */
+            /*  WHAT ITS CLOCK WAS WHEN IT WAS PLACED: the rate of the samples
+                it counts by, and the generation and the player it was posted
+                under - a restart moves either, and ends the run (AHU). MTC
+                placed with no audio side counts the tick's own samples
+                (`onTickClock`), which only a player handed in moves. */
             int sampleRate = 0;
             std::uint64_t generation = 0;
             std::uint64_t epoch = 0;
+            bool onTickClock = false;
 
             /*  WHERE ITS LENGTH ENDS IT (AHB), on the line: the first sample of
                 the frame after its last, posted as a stop when it was placed.
@@ -2825,11 +2884,19 @@ namespace wfg::cue
 
         std::vector<TimecodeJob> timecoding;
 
-        /*  THE PROGRAMS LTC IS DRAWN UNDER, one a run and never nought (TC.3):
-            a count, since LTC is each machine's own and no other ever needs
-            the same number. And the player handed in, counted (AHU). */
+        /*  THE PROGRAMS A CODE IS DRAWN OR SENT UNDER, one a run and never
+            nought (TC.3, TC.5): a count, since a program is each machine's
+            own and no other ever needs the same number. And the player
+            handed in, counted (AHU). */
         std::uint64_t timecodePrograms = 0;
         std::uint64_t playerEpoch = 0;
+
+        /*  THE MTC LANE'S MUTE AS LAST TOLD (TC.6), so it is told only when
+            it changes; and each port's `tx` as read at one show revision -
+            one string compare a tick while nothing is edited. */
+        bool mtcMuted = false;
+        std::uint64_t mtcTxRevision = 0;
+        std::vector<std::pair<std::string, bool>> mtcTxSeen;
 
         /*  A STOP OR A CUT THE AUDIO SIDE WOULD NOT TAKE YET, posted again
             each tick by `retryTimecodeStops` - for the generation and the

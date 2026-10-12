@@ -4883,6 +4883,10 @@ namespace
             only then. */
         std::uint64_t videoRevisionSeen = document.showRevision();
 
+        /*  The interface's output latency the MIDI sender's MTC lane was last
+            told (namespace draft §59, AHP): told again only when it moves. */
+        int mtcLatencyTold = -1;
+
         /*  WHAT THE WINDOW WANTS OF THE PICKED CUE'S TILE (namespace draft §47,
             AAH): a cue and a second, written on the message thread when they
             change and read by the tick under a lock held for a copy. The tick
@@ -6227,13 +6231,20 @@ namespace
                                      runs on a machine with no interface - for
                                      the MIDI sender's lane to draw its own line
                                      from, and the interface's output latency it
-                                     holds the code back by (AHP). A store each;
-                                     nothing waits. */
+                                     holds the code back by (AHP): the
+                                     `audio/outputLatency` the audio side's
+                                     record writes, handed over when it changes
+                                     (TC.6). A store each; nothing waits. */
                                  midiOut.feedClock (runner.videoClockNow(),
                                                     std::chrono::duration_cast<std::chrono::nanoseconds> (
                                                         std::chrono::steady_clock::now().time_since_epoch()).count(),
                                                     runner.videoSampleRate());
-                                 midiOut.setTimecodeOutputLatency (audioState.outputLatency);
+
+                                 if (audioState.outputLatency != mtcLatencyTold)
+                                 {
+                                     midiOut.setTimecodeOutputLatency (audioState.outputLatency);
+                                     mtcLatencyTold = audioState.outputLatency;
+                                 }
 
                                  if (const auto revision = document.showRevision();
                                      revision != videoRevisionSeen || document.isLocked() != videoLockSeen)
@@ -7118,6 +7129,14 @@ namespace
 
                                 state.refusedDatagrams =
                                     refusedDatagrams.load (std::memory_order_relaxed);
+
+                                /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN
+                                    (namespace draft §59): MTC as its lane
+                                    counts it, LTC as the audio side's generator
+                                    does - relaxed loads, nothing waits. */
+                                state.mtcLate = midiOut.timecodeLate();
+                                state.mtcWorstMs = midiOut.timecodeWorstMs();
+                                state.ltcLate = runner.player() != nullptr ? runner.player()->timecodeLate() : 0u;
 
                                 /*  WHAT A PATCH IS EDITED IN, looked for every five
                                     seconds - a Pd installed or downloaded meanwhile is

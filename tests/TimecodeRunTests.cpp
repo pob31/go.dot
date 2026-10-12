@@ -32,6 +32,12 @@
     ahead on the same sample as the sounds of its group, a length's stop on
     its exact frame boundary, Esc's stop, a double Esc's cut, the takeover, the
     refusals, `not-sent`, an audio restart, and the output it plays on.
+
+    TC.6: MTC through a MIDI sender's lane - a fake one, recording what the
+    Runner asks of it on the same counter: placed on the same sample as the
+    sounds with an audio side, on the tick's own count without one, a length's
+    stop, Esc's stop, a double Esc's cut, the takeover, `no-port`, held, `tx`
+    off and on again, `bad-message`, and a replay.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
@@ -51,6 +57,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/log/Replay.h>
+#include <wfg/engine/midi/MidiSink.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/timecode/FrameClock.h>
 #include <wfg/engine/timecode/Timecode.h>
@@ -192,6 +199,74 @@ namespace
         std::vector<Stop> stops;
     };
 
+    /*  A MIDI SENDER WITH MTC IN THE TEST'S HANDS (TC.6): every start, stop,
+        cut and mute the Runner gives its lane, with the sample counter when it
+        gave it. A port is bound when it is in `bound`; a held machine answers
+        every start as taken (§58, AGG), as `MidiSender` does. */
+    struct CodeSink final : midi::MidiSink
+    {
+        struct Start
+        {
+            std::string runId;
+            std::string port;
+            std::uint64_t program = 0;
+            timecode::Rate rate = timecode::Rate::fps25;
+            int sampleRate = 0;
+            std::int64_t frame = 0;
+            std::int64_t zero = 0;
+            std::int64_t postedAt = 0;
+        };
+
+        struct Stop
+        {
+            std::uint64_t program = 0;
+            std::int64_t atSample = 0;
+            bool cut = false;
+            std::int64_t postedAt = 0;
+        };
+
+        std::string send (const std::string&, const midi::Bytes&) override { return {}; }
+
+        std::string startTimecode (const std::string& runId, const std::string& port, std::uint64_t program,
+                                   timecode::Rate rate, int sampleRate, std::int64_t frame, std::int64_t zero) override
+        {
+            if (program == 0 || sampleRate <= 0)
+                return midi::sendError::badMessage;
+
+            if (! held && std::find (bound.begin(), bound.end(), port) == bound.end())
+                return midi::sendError::noPort;
+
+            starts.push_back ({ runId, port, program, rate, sampleRate, frame, zero, now });
+            return {};
+        }
+
+        void stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut) override
+        {
+            stops.push_back ({ program, atSample, cut, now });
+        }
+
+        void muteTimecode (bool on) override { mutes.push_back (on); }
+
+        std::vector<Stop> stopsOf (std::uint64_t program) const
+        {
+            std::vector<Stop> out;
+
+            for (const auto& stop : stops)
+                if (stop.program == program)
+                    out.push_back (stop);
+
+            return out;
+        }
+
+        std::vector<std::string> bound;
+        bool held = false;
+        std::int64_t now = 0;
+
+        std::vector<Start> starts;
+        std::vector<Stop> stops;
+        std::vector<bool> mutes;
+    };
+
     struct TimecodeRig
     {
         TimecodeRig()
@@ -241,9 +316,30 @@ namespace
             REQUIRE (document.setAttribute ("/godot/sync/ltcOut", ltcBus).ok);
         }
 
+        /*  WITH A MIDI SENDER (TC.6): a declared port, bound, named as the
+            show's MTC output. */
+        void attachMidi()
+        {
+            runner.setMidiSink (&sink);
+
+            const auto port = document.createPort ("Desk");
+            REQUIRE (port.ok);
+            mtcPort = port.id;
+            sink.bound.push_back (mtcPort);
+            REQUIRE (document.setAttribute ("/godot/sync/mtcOut", mtcPort).ok);
+        }
+
+        /*  NO AUDIO SIDE, BUT A TICK SCHEDULE: the tick's own count, 960
+            samples a tick, which is the clock serve feeds the lane then. */
+        void tickClock()
+        {
+            runner.setSamplesPerTick (960);
+        }
+
         void tickOnce()
         {
             player.samples = tick * 960;
+            sink.now = tick * 960;
             runner.beforeTick (engine, tick);
             engine.processTick (tick++);
         }
@@ -290,9 +386,11 @@ namespace
         doc::IdRegistry runIds = doc::IdRegistry::withSeed (59);
         cue::Runner runner { document, runs, runIds, focus };
         CodePlayer player;
+        CodeSink sink;
 
         std::string listId;
         std::string ltcBus;
+        std::string mtcPort;
         int index = 0;
         int childIndex = 0;
         std::int64_t tick = 1;
@@ -1217,6 +1315,731 @@ TEST_CASE ("timecode line: a replay of a session on the line reaches the same ru
     CHECK (rig.player.starts.size() == 3u);
 
     for (const auto& cueId : { first, timed, inScene })
+        for (const auto& run : rig.runs.all())
+            if (run.cue == cueId)
+            {
+                INFO ("run " << run.id << " of " << cueId);
+                CHECK (run.isFinished());
+            }
+
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    TimecodeRig fresh;
+    REQUIRE (doc::CanonicalXml::read (show, fresh.document).ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+
+    for (const auto& run : rig.runs.all())
+    {
+        INFO ("run " << run.id << " of " << run.cue);
+        const auto* again = fresh.runs.find (run.id);
+        REQUIRE (again != nullptr);
+        CHECK (again->state == run.state);
+        CHECK (again->kind == run.kind);
+        CHECK (again->error == run.error);
+        CHECK (again->endedAtTick == run.endedAtTick);
+        CHECK (again->startedAtTick == run.startedAtTick);
+    }
+}
+
+//==============================================================================
+/*  TC.6: MTC ON THE MIDI SENDER'S LANE. With an audio side the lead is the
+    same two ticks as LTC's, so a code whose GO is applied on tick `t` is
+    started by the hook of `t + 1` on sample `(t + 3) * 960`; with none, the
+    tick's own count at 960 a tick and the two ticks a picture is given with no
+    player - the same arithmetic on another clock. */
+namespace
+{
+    /*  Frames of 29.97 in `since` samples at 48 kHz, by hand: a frame is
+        48000 * 1001 / 30000 = 1601.6 samples. */
+    std::int64_t framesAt2997 (std::int64_t since)
+    {
+        return since > 0 ? since * 30000 / (48000 * 1001) : 0;
+    }
+}
+
+TEST_CASE ("timecode lane: an MTC cue fired alone is started on the lane a launch horizon ahead, with the port and the rate of its GO")
+{
+    TimecodeRig rig;
+    rig.attach();
+    rig.attachMidi();
+    REQUIRE (rig.document.setAttribute ("/godot/sync/frameRate", "29.97").ok);
+    const auto cue = rig.makeTimecode ("mtc", "01:00:00:00");
+
+    rig.fire (cue);
+    const auto goTick = rig.tick - 1;
+
+    //  A change of rate after the GO reaches the next run, never this one (AHM).
+    REQUIRE (rig.document.setAttribute ("/godot/sync/frameRate", "25").ok);
+    CHECK (rig.sink.starts.empty());
+
+    rig.tickOnce();
+    REQUIRE (rig.sink.starts.size() == 1u);
+
+    const auto start = rig.sink.starts.front();
+    CHECK (start.runId == rig.runOf (cue)->id);
+    CHECK (start.port == rig.mtcPort);
+    CHECK (start.program != 0u);
+    CHECK (start.rate == timecode::Rate::fps2997);
+    CHECK (start.sampleRate == 48000);
+    CHECK (start.frame == 3600 * 30);                   // 01:00:00:00 at thirty a second, non-drop
+    CHECK (start.postedAt == (goTick + 1) * samplesPerTick);
+    CHECK (start.zero == (goTick + 1 + leadTicks) * samplesPerTick);
+
+    //  Said as a sound's launch says it; nothing for the audio side.
+    const auto* run = rig.runOf (cue);
+    CHECK (run->startedAtTick == goTick + 1);
+    CHECK (run->warning.empty());
+    CHECK (run->error.empty());
+    CHECK (rig.player.starts.empty());
+    CHECK (rig.sink.stops.empty());
+    CHECK (rig.sink.mutes.empty());
+
+    //  Read off the audio's samples, nought before its zero.
+    for (std::int64_t at = goTick + 2; at <= goTick + 60; ++at)
+    {
+        rig.tickOnce();
+        const auto since = (at - goTick - 1 - leadTicks) * samplesPerTick;
+        const auto frames = static_cast<int> (framesAt2997 (since));
+
+        INFO ("tick " << at << ", " << since << " samples into the code");
+        CHECK (rig.runOf (cue)->timecode == label (1, 0, frames / 30, frames % 30));
+    }
+
+    CHECK (rig.sink.starts.size() == 1u);
+    CHECK (rig.sink.stops.empty());
+}
+
+TEST_CASE ("timecode lane: an MTC cue fired with a sound of its group still on its disk starts on the sound's sample")
+{
+    TimecodeRig rig;
+    rig.attach();
+    rig.attachMidi();
+
+    const auto scene = makeScene (rig);
+    const auto song = rig.document.createCue (scene, rig.childIndex++, "media", "Song").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + song + "/file", "song.wav").ok);
+    const auto code = rig.makeTimecode ("mtc", "10:00:00:00", {}, scene);
+
+    rig.fire (scene);
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (code) != nullptr && rig.runOf (song) != nullptr; }, 10));
+
+    for (int n = 0; n < 6; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.player.launches.empty());
+    CHECK (rig.sink.starts.empty());
+    CHECK (rig.runOf (code)->state == cue::runState::playing);
+
+    rig.player.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.player.launches.empty(); }, 5));
+
+    REQUIRE (rig.player.launches.size() == 1u);
+    REQUIRE (rig.sink.starts.size() == 1u);
+    CHECK (rig.sink.starts.front().zero == rig.player.launches.front().second);
+    CHECK (rig.sink.starts.front().postedAt == rig.sink.starts.front().zero - leadTicks * samplesPerTick);
+    CHECK (rig.sink.starts.front().frame == 10 * oneHourAt25);
+    CHECK (rig.player.starts.empty());
+}
+
+TEST_CASE ("timecode lane: with no audio side an MTC cue is placed on the tick's own count, and counts on it")
+{
+    SUBCASE ("a tick schedule")
+    {
+        TimecodeRig rig;
+        rig.tickClock();
+        rig.attachMidi();
+        const auto cue = rig.makeTimecode ("mtc");
+
+        rig.fire (cue);
+        const auto goTick = rig.tick - 1;
+        CHECK (rig.sink.starts.empty());
+
+        rig.tickOnce();
+        REQUIRE (rig.sink.starts.size() == 1u);
+
+        const auto start = rig.sink.starts.front();
+        CHECK (start.port == rig.mtcPort);
+        CHECK (start.sampleRate == 48000);
+        CHECK (start.frame == oneHourAt25);
+        CHECK (start.rate == timecode::Rate::fps25);
+        CHECK (start.postedAt == (goTick + 1) * samplesPerTick);
+        CHECK (start.zero == (goTick + 1 + leadTicks) * samplesPerTick);
+
+        const auto* run = rig.runOf (cue);
+        CHECK (run->startedAtTick == goTick + 1);
+        CHECK (run->warning.empty());
+
+        //  The tick's count, against the zero: a frame every 1920 samples.
+        for (std::int64_t at = goTick + 2; at <= goTick + 60; ++at)
+        {
+            rig.tickOnce();
+            const auto since = (at - goTick - 1 - leadTicks) * samplesPerTick;
+            const auto frames = since > 0 ? static_cast<int> (since / 1920) : 0;
+
+            INFO ("tick " << at << ", " << since << " samples into the code");
+            CHECK (rig.runOf (cue)->timecode == label (1, 0, frames / 25, frames % 25));
+            CHECK (rig.runOf (cue)->position == doctest::Approx (static_cast<double> (std::max<std::int64_t> (since, 0)) / 48000.0));
+        }
+
+        //  And Esc stops it on the lane, as with audio.
+        rig.submit ("run.stopAll");
+        rig.tickOnce();
+        CHECK (rig.runOf (cue)->state == cue::runState::done);
+        REQUIRE (rig.sink.stopsOf (start.program).size() == 1u);
+        CHECK (rig.sink.stopsOf (start.program).front().atSample == 0);
+    }
+
+    SUBCASE ("no tick schedule either: nothing to time it by, so not-sent and counted on the tick")
+    {
+        TimecodeRig rig;
+        rig.attachMidi();
+        const auto cue = rig.makeTimecode ("mtc");
+
+        rig.fire (cue);
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.sink.starts.empty());
+        CHECK (rig.runOf (cue)->state == cue::runState::playing);
+        CHECK (rig.runOf (cue)->warning == "not-sent");
+    }
+}
+
+TEST_CASE ("timecode lane: a length posts its frame-boundary stop with the start, and the run ends done once it has passed")
+{
+    for (const auto withAudio : { true, false })
+    {
+        const std::string clock = withAudio ? "on the audio's samples" : "on the tick's count";
+        INFO (clock);
+
+        TimecodeRig rig;
+
+        if (withAudio)
+            rig.attach();
+        else
+            rig.tickClock();
+
+        rig.attachMidi();
+        const auto cue = rig.makeTimecode ("mtc", "10:00:00:00", "2");
+
+        rig.fire (cue);
+        rig.tickOnce();
+        REQUIRE (rig.sink.starts.size() == 1u);
+        const auto start = rig.sink.starts.front();
+
+        //  Fifty frames at 25 are 96000 samples at 48 kHz.
+        const auto expected = start.zero + 96000;
+        const auto stops = rig.sink.stopsOf (start.program);
+        REQUIRE (stops.size() == 1u);
+        CHECK (stops.front().atSample == expected);
+        CHECK_FALSE (stops.front().cut);
+        CHECK (stops.front().postedAt == start.postedAt);
+
+        const auto endTick = (expected + samplesPerTick - 1) / samplesPerTick;
+
+        while (rig.tick < endTick)
+        {
+            rig.tickOnce();
+            REQUIRE (rig.runOf (cue)->state == cue::runState::playing);
+        }
+
+        rig.tickOnce();
+        const auto* run = rig.runOf (cue);
+        CHECK (run->state == cue::runState::done);
+        CHECK (run->endedAtTick == endTick);
+        CHECK (run->timecode == label (10, 0, 1, 24));
+        CHECK (recordsOf (rig, "run.ended", run->id) == 1);
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.sink.stops.size() == 1u);
+    }
+}
+
+TEST_CASE ("timecode lane: Esc stops the code as soon as can be and the footer runs; a double Esc cuts it and none does")
+{
+    const auto sceneWithFooter = [] (TimecodeRig& rig, std::string& code, std::string& after)
+    {
+        const auto scene = makeScene (rig);
+        code = rig.makeTimecode ("mtc", {}, {}, scene);
+        const auto footer = rig.document.createRole (scene, "footer");
+        REQUIRE (footer.ok);
+        after = rig.document.createCue (footer.id, 0, "memo", "Lights down").id;
+        return scene;
+    };
+
+    SUBCASE ("Esc")
+    {
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+
+        std::string code, after;
+        const auto scene = sceneWithFooter (rig, code, after);
+
+        rig.fire (scene);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.sink.starts.empty(); }, 10));
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        const auto program = rig.sink.starts.front().program;
+        CHECK (rig.sink.stopsOf (program).empty());
+
+        rig.submit ("run.stopAll");
+        REQUIRE (rig.tickUntil ([&] { return rig.runOf (code)->isFinished(); }, 5));
+        CHECK (rig.runOf (code)->state == cue::runState::done);
+
+        const auto stops = rig.sink.stopsOf (program);
+        REQUIRE (stops.size() == 1u);
+        CHECK (stops.front().atSample == 0);
+        CHECK_FALSE (stops.front().cut);
+
+        REQUIRE (rig.tickUntil ([&] { return rig.runOf (after) != nullptr; }, 20));
+        REQUIRE (rig.tickUntil ([&] { return rig.runOf (scene)->isFinished(); }, 50));
+        CHECK (rig.sink.stops.size() == 1u);
+    }
+
+    SUBCASE ("double Esc")
+    {
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+
+        std::string code, after;
+        const auto scene = sceneWithFooter (rig, code, after);
+
+        rig.fire (scene);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.sink.starts.empty(); }, 10));
+        rig.tickOnce();
+
+        const auto program = rig.sink.starts.front().program;
+        const auto pressedAt = rig.tick;
+
+        rig.submit ("run.killAll");
+
+        //  In the press's own drain, where the code stands.
+        const auto stops = rig.sink.stopsOf (program);
+        REQUIRE (stops.size() == 1u);
+        CHECK (stops.front().cut);
+        CHECK (stops.front().atSample == 0);
+        CHECK (stops.front().postedAt == pressedAt * samplesPerTick);
+
+        REQUIRE (rig.tickUntil ([&] { return rig.runOf (code)->isFinished() && rig.runOf (scene)->isFinished(); }, 10));
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runOf (after) == nullptr);
+        CHECK (rig.sink.stopsOf (program).size() == 1u);
+    }
+}
+
+TEST_CASE ("timecode lane: a second MTC cue's start takes the lane over with no stop for the first; LTC beside it is neither taken nor takes")
+{
+    TimecodeRig rig;
+    rig.attach();
+    rig.attachMidi();
+    const auto first = rig.makeTimecode ("mtc", "01:00:00:00");
+    const auto second = rig.makeTimecode ("mtc", "02:00:00:00");
+    const auto line = rig.makeTimecode ("ltc", "03:00:00:00");
+
+    rig.fire (first);
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.sink.starts.size() == 1u);
+    const auto firstProgram = rig.sink.starts.front().program;
+
+    //  LTC beside it: another output, no takeover either way.
+    rig.fire (line);
+    rig.tickOnce();
+    REQUIRE (rig.player.starts.size() == 1u);
+    CHECK (rig.runOf (first)->state == cue::runState::playing);
+    CHECK (rig.runOf (line)->state == cue::runState::playing);
+
+    rig.fire (second);
+    CHECK (rig.runOf (first)->state == cue::runState::playing);    // not at its GO (AHL)
+
+    const auto placedAt = rig.tick;
+    rig.tickOnce();
+
+    REQUIRE (rig.sink.starts.size() == 2u);
+    const auto taking = rig.sink.starts.back();
+    CHECK (taking.frame == 2 * oneHourAt25);
+    CHECK (taking.zero == (placedAt + leadTicks) * samplesPerTick);
+    CHECK (taking.program != firstProgram);
+
+    CHECK (rig.runOf (first)->state == cue::runState::done);
+    CHECK (rig.runOf (first)->endedAtTick == placedAt);
+    CHECK (rig.runOf (second)->state == cue::runState::playing);
+    CHECK (rig.runOf (line)->state == cue::runState::playing);
+
+    //  The new start replaces the old program on the lane: nothing stops it.
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.sink.stops.empty());
+    CHECK (rig.player.stops.empty());
+    CHECK (rig.player.starts.size() == 1u);
+
+    //  Esc stops the program holding the lane now, and the line's code, only.
+    rig.submit ("run.stopAll");
+    rig.tickOnce();
+
+    REQUIRE (rig.sink.stops.size() == 1u);
+    CHECK (rig.sink.stops.front().program == taking.program);
+    CHECK (rig.player.stops.size() == 1u);
+}
+
+TEST_CASE ("timecode lane: no MTC port, or nothing behind it, fails the run no-port once; a held machine runs it, done")
+{
+    const auto failsWith = [] (const std::function<void (TimecodeRig&)>& misroute, bool withAudio)
+    {
+        TimecodeRig rig;
+
+        if (withAudio)
+            rig.attach();
+        else
+            rig.tickClock();
+
+        rig.attachMidi();
+        misroute (rig);
+
+        const auto cue = rig.makeTimecode ("mtc");
+        rig.fire (cue);
+
+        for (int n = 0; n < 6; ++n)
+            rig.tickOnce();
+
+        const auto* run = rig.runOf (cue);
+        INFO ("the run ended " << run->state << " " << run->error);
+        CHECK (run->state == cue::runState::failed);
+        CHECK (run->error == "no-port");
+        CHECK (rig.sink.starts.empty());
+        CHECK (recordsOf (rig, "run.failed", run->id) == 1);
+    };
+
+    /*  HELD IN THESE THREE, so the sink answers every start as taken and only
+        the Runner's own reading of the show can refuse: a backup holding its
+        MTC must still fail a run the main fails for want of a port (AGG). */
+    const auto noneNamed = [] (TimecodeRig& rig)
+    {
+        rig.sink.held = true;
+        REQUIRE (rig.document.setAttribute ("/godot/sync/mtcOut", "").ok);
+    };
+
+    SUBCASE ("none named")
+    {
+        failsWith (noneNamed, true);
+    }
+
+    SUBCASE ("none named, with no audio side")
+    {
+        failsWith (noneNamed, false);
+    }
+
+    SUBCASE ("one the show does not declare, written by hand")
+    {
+        failsWith ([] (TimecodeRig& rig)
+                   {
+                       rig.sink.held = true;
+                       auto sync = rig.document.root().getChildWithName ("Sync");
+                       REQUIRE (sync.isValid());
+                       sync.setProperty ("mtcOut", "Q7QQ7QQ7", nullptr);
+                   },
+                   true);
+    }
+
+    SUBCASE ("something that is not a port, written by hand")
+    {
+        failsWith ([] (TimecodeRig& rig)
+                   {
+                       rig.sink.held = true;
+                       auto sync = rig.document.root().getChildWithName ("Sync");
+                       REQUIRE (sync.isValid());
+                       sync.setProperty ("mtcOut", juce::String (rig.listId), nullptr);
+                   },
+                   true);
+    }
+
+    SUBCASE ("a declared port with nothing behind it")
+    {
+        failsWith ([] (TimecodeRig& rig) { rig.sink.bound.clear(); }, true);
+    }
+
+    SUBCASE ("a declared port with nothing behind it, with no audio side")
+    {
+        failsWith ([] (TimecodeRig& rig) { rig.sink.bound.clear(); }, false);
+    }
+
+    SUBCASE ("held: nothing behind the port, and the run goes on and ends done (AGG)")
+    {
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+        rig.sink.bound.clear();
+        rig.sink.held = true;
+
+        const auto cue = rig.makeTimecode ("mtc", {}, "1");
+        rig.fire (cue);
+        REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->isFinished(); }, 120));
+
+        const auto* run = rig.runOf (cue);
+        CHECK (run->state == cue::runState::done);
+        CHECK (run->error.empty());
+        CHECK (run->warning.empty());
+        CHECK (rig.sink.starts.size() == 1u);
+    }
+}
+
+TEST_CASE ("timecode lane: tx off mutes the lane and the run is not-sent once, running its course; tx back on unmutes it")
+{
+    SUBCASE ("off from the start, then on again")
+    {
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.mtcPort + "/tx", "false").ok);
+
+        const auto cue = rig.makeTimecode ("mtc");
+        rig.fire (cue);
+        rig.tickOnce();
+
+        //  The program runs on the lane, muted, so switching it back on picks it up.
+        REQUIRE (rig.sink.starts.size() == 1u);
+        CHECK (rig.sink.mutes == std::vector<bool> { true });
+        CHECK (rig.runOf (cue)->warning == "not-sent");
+        CHECK (rig.runOf (cue)->error.empty());
+        CHECK (rig.runOf (cue)->state == cue::runState::playing);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.sink.mutes.size() == 1u);
+        CHECK (rig.runOf (cue)->state == cue::runState::playing);
+        CHECK (rig.runOf (cue)->timecode == "01:00:00:04");
+
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.mtcPort + "/tx", "true").ok);
+        rig.tickOnce();
+        CHECK (rig.sink.mutes == std::vector<bool> { true, false });
+        CHECK (rig.runOf (cue)->state == cue::runState::playing);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.sink.mutes.size() == 2u);
+
+        rig.submit ("run.stopAll");
+        rig.tickOnce();
+        CHECK (rig.runOf (cue)->state == cue::runState::done);
+        CHECK (rig.sink.stops.size() == 1u);
+    }
+
+    SUBCASE ("switched off part way")
+    {
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+
+        const auto cue = rig.makeTimecode ("mtc");
+        rig.fire (cue);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.sink.mutes.empty());
+        CHECK (rig.runOf (cue)->warning.empty());
+
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.mtcPort + "/tx", "false").ok);
+        rig.tickOnce();
+        CHECK (rig.sink.mutes == std::vector<bool> { true });
+        CHECK (rig.runOf (cue)->warning == "not-sent");
+        CHECK (rig.runOf (cue)->state == cue::runState::playing);
+    }
+
+    SUBCASE ("taken over onto another port, the old one off: muted until the new code's zero, then not")
+    {
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+
+        const auto other = rig.document.createPort ("Other desk");
+        REQUIRE (other.ok);
+        rig.sink.bound.push_back (other.id);
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.mtcPort + "/tx", "false").ok);
+
+        const auto first = rig.makeTimecode ("mtc", "01:00:00:00");
+        const auto second = rig.makeTimecode ("mtc", "02:00:00:00");
+
+        rig.fire (first);
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.sink.mutes == std::vector<bool> { true });
+
+        //  The show's MTC moved to the other port, which is on.
+        REQUIRE (rig.document.setAttribute ("/godot/sync/mtcOut", other.id).ok);
+        rig.fire (second);
+        const auto placedAt = rig.tick;
+        rig.tickOnce();
+
+        REQUIRE (rig.sink.starts.size() == 2u);
+        CHECK (rig.sink.starts.back().port == other.id);
+        CHECK (rig.sink.starts.back().zero == (placedAt + leadTicks) * samplesPerTick);
+
+        //  The first's code still leaves until the second's zero: still muted.
+        rig.tickOnce();
+        CHECK (rig.sink.mutes == std::vector<bool> { true });
+
+        //  The zero reached, the lane is the second's, whose port is on.
+        rig.tickOnce();
+        CHECK (rig.sink.mutes == std::vector<bool> { true, false });
+        CHECK (rig.runOf (second)->warning.empty());
+        CHECK (rig.runOf (first)->warning == "not-sent");
+    }
+
+    SUBCASE ("off, with nothing behind the port: not-sent and counted on the tick, never no-port")
+    {
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+        rig.sink.bound.clear();
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.mtcPort + "/tx", "false").ok);
+
+        const auto cue = rig.makeTimecode ("mtc");
+        rig.fire (cue);
+        rig.tickOnce();
+        const auto placedAt = rig.tick - 1;
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        const auto* run = rig.runOf (cue);
+        CHECK (run->state == cue::runState::playing);
+        CHECK (run->error.empty());
+        CHECK (run->warning == "not-sent");
+        CHECK (run->startedAtTick == -1);
+        CHECK (run->timecode == label (1, 0, 0, static_cast<int> ((rig.tick - 1 - placedAt) / 2)));
+        CHECK (rig.sink.starts.empty());
+    }
+}
+
+TEST_CASE ("timecode lane: a start no door let in fails the MTC run bad-message, once")
+{
+    TimecodeRig rig;
+    rig.attach();
+    rig.attachMidi();
+    const auto cue = rig.makeTimecode ("mtc");
+    rig.document.findById (cue).setProperty ("from", "half past seven", nullptr);
+
+    rig.fire (cue);
+
+    for (int n = 0; n < 4; ++n)
+        rig.tickOnce();
+
+    const auto* run = rig.runOf (cue);
+    CHECK (run->state == cue::runState::failed);
+    CHECK (run->error == "bad-message");
+    CHECK (recordsOf (rig, "run.failed", run->id) == 1);
+    CHECK (rig.sink.starts.empty());
+}
+
+TEST_CASE ("timecode lane: an audio restart ends an MTC run and cuts its program on the lane")
+{
+    TimecodeRig rig;
+    rig.attach();
+    rig.attachMidi();
+    const auto cue = rig.makeTimecode ("mtc");
+
+    rig.fire (cue);
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.sink.starts.size() == 1u);
+    const auto program = rig.sink.starts.front().program;
+
+    ++rig.player.generation;
+    const auto movedAt = rig.tick;
+    rig.tickOnce();
+
+    CHECK (rig.runOf (cue)->state == cue::runState::done);
+    CHECK (rig.runOf (cue)->endedAtTick == movedAt);
+
+    const auto stops = rig.sink.stopsOf (program);
+    REQUIRE (stops.size() == 1u);
+    CHECK (stops.front().cut);
+    CHECK (stops.front().atSample == 0);
+
+    for (int n = 0; n < 3; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.sink.stops.size() == 1u);
+}
+
+TEST_CASE ("timecode lane: a replay of a session on the lane reaches the same runs, ended and failed on the same ticks")
+{
+    TimecodeRig rig;
+    rig.attach();
+    rig.attachMidi();
+
+    const auto scene = makeScene (rig);
+    const auto song = rig.document.createCue (scene, rig.childIndex++, "media", "Song").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + song + "/file", "song.wav").ok);
+    const auto inScene = rig.makeTimecode ("mtc", "03:00:00:00", {}, scene);
+
+    const auto first = rig.makeTimecode ("mtc", "01:00:00:00");
+    const auto timed = rig.makeTimecode ("mtc", "05:00:00:00", "0.5");
+    const auto line = rig.makeTimecode ("ltc", "07:00:00:00");
+
+    rig.fire (first);
+    rig.fire (line);
+    for (int n = 0; n < 7; ++n)
+        rig.tickOnce();
+
+    //  Takes the lane over, then its length ends it.
+    rig.fire (timed);
+    for (int n = 0; n < 40; ++n)
+        rig.tickOnce();
+
+    //  Waits for its sound, then takes the lane over too.
+    rig.fire (scene);
+    for (int n = 0; n < 4; ++n)
+        rig.tickOnce();
+
+    rig.player.completeArms (rig.engine);
+    for (int n = 0; n < 6; ++n)
+        rig.tickOnce();
+
+    //  Switched off part way, and on again.
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.mtcPort + "/tx", "false").ok);
+    rig.tickOnce();
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.mtcPort + "/tx", "true").ok);
+    rig.tickOnce();
+
+    rig.submit ("run.stopAll");
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    //  And one refused, the port taken away.
+    REQUIRE (rig.document.setAttribute ("/godot/sync/mtcOut", "").ok);
+    rig.fire (first);
+    for (int n = 0; n < 3; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.sink.starts.size() == 3u);
+    CHECK (rig.player.starts.size() == 1u);
+
+    for (const auto& cueId : { first, timed, inScene, line })
         for (const auto& run : rig.runs.all())
             if (run.cue == cueId)
             {

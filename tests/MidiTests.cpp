@@ -3317,6 +3317,99 @@ TEST_CASE ("mtc lane: a quarter frame waits for a SysEx on its port to end, and 
     CHECK ((wire[3].bytes[1] >> 4) == 1);
 }
 
+TEST_CASE ("mtc lane: an MTC cue the Runner places reaches the port - the full frame, then the quarters, each at its moment")
+{
+    /*  TC.6 END TO END, short of a cable: the Runner's hook puts the cue on
+        the real sender's lane - with no audio side, on the tick's own count
+        at 960 samples a tick, the clock serve feeds the lane then - and the
+        lane, pumped on the hand clock with that count fed 1:1, sends the full
+        frame and the quarters MtcSchedule says, each at its sample's moment.
+        Esc then ends the code at the frame boundary after the next message. */
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (63);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    MtcRig rig;
+    runner.setMidiSink (&rig.outputs);
+    runner.setSamplesPerTick (960);
+
+    const auto listId = document.createList ("Show").id;
+    REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    const auto port = document.createPort ("Desk");
+    REQUIRE (port.ok);
+    rig.outputs.attach (port.id, rig.desk);
+    REQUIRE (document.setAttribute ("/godot/sync/mtcOut", port.id).ok);
+
+    const auto cue = document.createCue (listId, 0, "timecode", {}, {},
+                                         doc::ShowDocument::Attributes { { "format", "mtc" } });
+    REQUIRE (cue.ok);
+
+    //  Fired on tick 1, placed by the hook of tick 2 on (2 + 2) * 960.
+    REQUIRE (engine.submit (origin::cli, "cue.fire", { osc::Value::string (cue.id) }));
+    engine.processTick (1);
+    runner.beforeTick (engine, 2);
+    engine.processTick (2);
+
+    REQUIRE (runs.all().size() == 1u);
+    const auto runId = runs.all().front().id;
+    CHECK (runs.all().front().state == cue::runState::playing);
+    CHECK (runs.all().front().error.empty());
+    CHECK (runs.all().front().startedAtTick == 2);
+
+    const std::int64_t zero = 4 * 960;
+    const timecode::Label from { 1, 0, 0, 0 };
+
+    //  Nothing before the zero's moment, 80 ms on the line.
+    rig.runTo (79'900'000);
+    CHECK (rig.desk->wire().empty());
+
+    rig.runTo (150'000'000);
+
+    const auto wire = rig.desk->wire();
+    const auto wanted = scheduleOf (timecode::Rate::fps25, from, zero, 150'000'000LL * 48 / 1'000'000);
+
+    REQUIRE (wanted.size() == 9u);                  // the full frame, and a cycle of quarters
+    REQUIRE (wire.size() == wanted.size());
+
+    for (std::size_t n = 0; n < wire.size(); ++n)
+    {
+        INFO ("message " << n << ": " << hexOf (wire[n].bytes));
+        CHECK (wire[n].bytes == bytesOf (wanted[n]));
+        CHECK (wire[n].due == rig.momentOf (wanted[n].dueSample));
+        CHECK (wire[n].at == wire[n].due);
+    }
+
+    CHECK (wire[0].bytes == midi::Bytes { 0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x21, 0x00, 0x00, 0x00, 0xF7 });
+    CHECK (wire[0].due == 80'000'000);
+    CHECK (wire[1].bytes == midi::Bytes { 0xF1, 0x00 });
+    CHECK (wire.back().due == 150'000'000);
+    CHECK (rig.outputs.timecodeProgram() != 0u);
+
+    /*  ESC: the run stopping on tick 3, ended by the sweep of tick 4, whose
+        hook posts the stop - as soon as can be, so at the first frame
+        boundary at or after the next message still to go, 160 ms, which is
+        frame 2's: nothing more leaves. */
+    REQUIRE (engine.submit (origin::cli, "run.stopAll", {}));
+    runner.beforeTick (engine, 3);
+    engine.processTick (3);
+    runner.beforeTick (engine, 4);
+    engine.processTick (4);
+
+    CHECK (runs.find (runId)->state == cue::runState::done);
+
+    rig.runTo (300'000'000);
+    CHECK (rig.desk->wire().size() == wanted.size());
+}
+
 TEST_CASE ("mtc lane: its own thread on the real clock sends in order near each moment, and stops cleanly")
 {
     /*  ~400 ms of real time. The bounds are loose and looser on CI, whose

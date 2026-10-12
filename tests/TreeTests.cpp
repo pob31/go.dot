@@ -289,6 +289,30 @@ TEST_CASE ("tree: a timecode cue publishes its rows, the show its timecode setti
         const auto* node = snapshot->find (readout);
         REQUIRE (node != nullptr);
         CHECK (node->access == Access::read);
+        REQUIRE (node->soleValue().has_value());
+        CHECK (node->soleValue()->asDouble() == doctest::Approx (0.0));
+    }
+
+    /*  AND WHAT THE OUTPUTS COUNTED (TC.6), as serve copies it into the state
+        each tick: the worst to a hundredth of a millisecond. */
+    {
+        EngineState counted;
+        counted.mtcLate = 3;
+        counted.mtcWorstMs = 4.567;
+        counted.ltcLate = 2;
+
+        const auto later = rig.parameters.publish (1, counted);
+        const auto valueAt = [&later] (const std::string& address)
+        {
+            const auto* node = later->find (address);
+            REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+            REQUIRE (node->soleValue().has_value());
+            return *node->soleValue();
+        };
+
+        CHECK (valueAt ("/godot/sync/mtcLate").asDouble() == doctest::Approx (3.0));
+        CHECK (valueAt ("/godot/sync/mtcWorst").asDouble() == doctest::Approx (4.57));
+        CHECK (valueAt ("/godot/sync/ltcLate").asDouble() == doctest::Approx (2.0));
     }
 
     const auto* container = snapshot->find ("/godot/sync");

@@ -34,6 +34,7 @@
 #include <wfg/engine/cue/Override.h>
 
 #include <wfg/engine/midi/MidiMessages.h>
+#include <wfg/engine/midi/MidiSink.h>
 
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountProbe.h>
@@ -13853,16 +13854,18 @@ namespace wfg::cue
             tick. Its job is marked handed over: what ends it from here on must
             never stop the output, which this run now holds.
 
-            ON THE LINE THE HANDOVER IS THE AUDIO SIDE'S (TC.4): this run's
-            start is already posted for its own first sample, and a start
-            replaces whatever program the line is drawing there - the old code
-            drawn up to that sample and the new from it, the edge carried on
-            rather than dropped. So the old job posts nothing more: a stop
-            decided now would end the old code at its next frame boundary,
-            before the new one's first sample a launch horizon ahead, and leave
-            the line quiet between them. Only a new run NOT drawn - its start
-            refused, counted on the tick - leaves the old code on the line with
-            nobody left to end it, and that one is stopped here. */
+            ON THE LINE THE HANDOVER IS THE AUDIO SIDE'S (TC.4), AND ON THE
+            MIDI SENDER'S LANE THE LANE'S (TC.6): this run's start is already
+            posted for its own first sample, and a start replaces whatever
+            program the line is drawing there - the old code drawn up to that
+            sample and the new from it, the edge carried on rather than
+            dropped; MTC's old messages due before it still leaving, and the
+            new code opening with a full frame. So the old job posts nothing
+            more: a stop decided now would end the old code at its next frame
+            boundary, before the new one's first sample a launch horizon ahead,
+            and leave the line quiet between them. Only a new run NOT drawn -
+            its start refused, counted on the tick - leaves the old code on the
+            line with nobody left to end it, and that one is stopped here. */
         auto& holder = timecodeHolder (job.format);
 
         if (! holder.empty() && holder != job.self)
@@ -13899,8 +13902,83 @@ namespace wfg::cue
         return job.failure;
     }
 
+    std::string Runner::mtcPortOf() const
+    {
+        /*  A PORT THE SHOW DECLARES, or nothing (AHA, AHR): an empty row is no
+            MTC output, and one naming something that is not a `<Port>` - only
+            a file edited by hand, or a port deleted since - is none either.
+            Whether a device is behind it is the MIDI sender's to say. */
+        auto port = document.getAttribute ("/godot/sync/mtcOut").value_or (std::string {});
+
+        if (port.empty())
+            return {};
+
+        if (const auto node = document.findById (port); ! node.isValid() || ! node.hasType ("Port"))
+            return {};
+
+        return port;
+    }
+
+    bool Runner::refuseTimecode (Engine& engine, TimecodeJob& job)
+    {
+        /*  The route first and then the start, in that order for both formats:
+            what the show is missing is said before what the cue is. */
+        std::string refusal;
+
+        if (job.format == "ltc")
+        {
+            refusal = ltcRefusal (job);
+        }
+        else
+        {
+            job.port = mtcPortOf();
+            refusal = job.port.empty() ? std::string (runError::noPort) : job.failure;
+        }
+
+        if (refusal.empty())
+            return false;
+
+        engine.submit (origin::engine, "run.failed",
+                       { osc::Value::string (job.self), osc::Value::string (refusal) });
+        job.finished = true;
+        return true;
+    }
+
+    std::int64_t Runner::timecodeClockNow (const TimecodeJob& job) const
+    {
+        if (job.onTickClock)
+            return currentTick * static_cast<std::int64_t> (samplesPerTick);
+
+        return audio != nullptr ? audio->samplesElapsed() : -1;
+    }
+
+    bool Runner::timecodeClockGone (const TimecodeJob& job) const
+    {
+        /*  Another player handed in moves every clock a code was placed on:
+            the audio's, whose count starts again, and the tick's, which the
+            MIDI sender's lane is no longer fed once there is audio. */
+        if (job.epoch != playerEpoch)
+            return true;
+
+        if (job.onTickClock)
+            return false;
+
+        return audio == nullptr || audio->timecodeGeneration() != job.generation;
+    }
+
     void Runner::postTimecodeStop (const TimecodeJob& job, std::int64_t atSample, bool cut)
     {
+        /*  MTC'S TO THE LANE (TC.6), whose inbox always takes it: it ends the
+            program at the frame boundary, or cuts it, on the lane's own thread
+            (TC.5). No sender - a replay - has nothing sending to stop. */
+        if (job.format == "mtc")
+        {
+            if (midiOut != nullptr)
+                midiOut->stopTimecode (job.program, atSample, cut);
+
+            return;
+        }
+
         /*  NEVER LOST (TC.4): a queue that would not take it - only an audio
             thread that has stopped draining it fills one - is asked again on
             every tick until it does, for the line this job was drawn on. */
@@ -13917,15 +13995,146 @@ namespace wfg::cue
 
         /*  THE LINE GONE WITH ITS AUDIO SIDE (AHU): a restart drew it to
             silence, and a stop for a program the new line never knew is
-            nothing to send. */
-        if (audio == nullptr || job.epoch != playerEpoch || audio->timecodeGeneration() != job.generation)
+            nothing to send. Not MTC's: the lane sends on whatever the audio
+            does, and only a stop takes its program off. */
+        if (job.format == "ltc" && timecodeClockGone (job))
             return;
 
-        /*  AS SOON AS THE AUDIO SIDE CAN (AHK): Esc is decided on the tick and
+        /*  AS SOON AS THE OUTPUT CAN (AHK): Esc is decided on the tick and
             never placed ahead, so its stop is for sample nought - at the next
-            frame boundary of the block that takes it, never counted late - and
-            a double Esc's cut is where the line stands. */
+            frame boundary of the block or the message that takes it, never
+            counted late - and a double Esc's cut is where the code stands. */
         postTimecodeStop (job, 0, cut);
+    }
+
+    bool Runner::mtcTxOff (const std::string& port)
+    {
+        /*  READ ONCE PER SHOW REVISION: `tx` is a show row, so only an edit
+            moves it, and between edits this is one comparison. As a MIDI cue
+            reads it - anything but `false` is on (J3). */
+        if (mtcTxRevision != document.showRevision())
+        {
+            mtcTxSeen.clear();
+            mtcTxRevision = document.showRevision();
+        }
+
+        for (const auto& [seen, off] : mtcTxSeen)
+            if (seen == port)
+                return off;
+
+        const auto off = document.getAttribute ("/godot/port/" + port + "/tx").value_or (std::string {}) == "false";
+        mtcTxSeen.emplace_back (port, off);
+        return off;
+    }
+
+    void Runner::followMtcTx()
+    {
+        if (midiOut == nullptr)
+            return;
+
+        /*  THE RUN HOLDING THE LANE SAYS: muted while the port its code leaves
+            on has `tx` off (AHR) - its run warned `not-sent`, once, and left to
+            run its course, so switching the port back on picks the code up
+            where it has got to. And until its zero, the port of the run it
+            took the lane over from too, whose code leaves until then. With no
+            run holding it, the lane is told nothing is muted: whatever it was
+            still sending was stopped first, at a frame boundary the unmute's
+            full frame at the next cycle can never come before. */
+        auto mute = false;
+
+        if (! mtcHolder.empty())
+            for (const auto& job : timecoding)
+            {
+                if (job.self != mtcHolder || job.format != "mtc" || job.finished || job.released || ! job.onLine())
+                    continue;
+
+                if (mtcTxOff (job.port))
+                {
+                    mute = true;
+
+                    if (auto* run = runs.find (job.self); run != nullptr && run->warning.empty())
+                        run->warning = runWarning::notSent;
+                }
+                else if (! job.takenFromPort.empty() && timecodeClockNow (job) < job.launchSample)
+                {
+                    mute = mtcTxOff (job.takenFromPort);
+                }
+
+                break;
+            }
+
+        if (mute != mtcMuted)
+        {
+            midiOut->muteTimecode (mute);
+            mtcMuted = mute;
+        }
+    }
+
+    void Runner::startMtc (Engine& engine, TimecodeJob& job, Run& run, std::int64_t tick,
+                           std::int64_t zeroSample, int sampleRate, bool onTickClock)
+    {
+        /*  The generation before the start, as LTC reads it: a restart between
+            the two is one the job sees. */
+        const auto generation = (onTickClock || audio == nullptr) ? std::uint64_t { 0 } : audio->timecodeGeneration();
+        const auto program = ++timecodePrograms;
+        const auto answer = midiOut->startTimecode (job.self, job.port, program, job.rate, sampleRate,
+                                                    job.startFrame + job.offsetFrames, zeroSample);
+
+        /*  NOTHING BEHIND THE PORT (AHR): `no-port`, refused once - a held
+            machine never answers it (AGG). But a port switched off was never
+            going to send, and a MIDI cue on one ends `not-sent` without asking
+            what is behind it (J3): so does this run, counted on the tick. */
+        const auto txOff = mtcTxOff (job.port);
+
+        if (! answer.empty() && ! (txOff && answer == runError::noPort))
+        {
+            engine.submit (origin::engine, "run.failed",
+                           { osc::Value::string (job.self), osc::Value::string (answer) });
+            job.finished = true;
+            return;
+        }
+
+        /*  THE TAKEOVER (AHC, AHL), the lane's as it is the audio side's for
+            LTC: the new start replaces the program sending from its zero, and
+            the old run ends now and posts nothing more - unless this one was
+            not put on the lane, when the old code is stopped. */
+        const auto onLane = answer.empty();
+        std::string fromPort;
+
+        for (const auto& other : timecoding)
+            if (other.self == mtcHolder && other.self != job.self && other.onLine() && ! other.released)
+                fromPort = other.port;
+
+        job.program = onLane ? program : 0;
+        placeTimecode (engine, job, tick, onLane ? zeroSample : -1);
+
+        if (! onLane)
+        {
+            run.warning = runWarning::notSent;
+            return;
+        }
+
+        job.takenFromPort = fromPort != job.port ? fromPort : std::string {};
+        job.sampleRate = sampleRate;
+        job.generation = generation;
+        job.epoch = playerEpoch;
+        job.onTickClock = onTickClock;
+
+        /*  SENT FROM ITS SAMPLE, said as a sound's launch says it - held or
+            not, since held is sent (AGG). */
+        engine.submit (origin::engine, "run.started", one (job.self));
+
+        /*  ITS LENGTH (AHB), placed now: the lane sends nothing due from the
+            first sample of the frame after its last, by FrameClock's one rule,
+            and the run ends on the tick that sample has passed. */
+        if (job.lengthFrames > 0)
+        {
+            job.stopSample = zeroSample + timecode::frameStartSample (job.lengthFrames, job.sampleRate, job.rate);
+            postTimecodeStop (job, job.stopSample, false);
+        }
+
+        //  And the port's `tx` heard from the start (AHR).
+        followMtcTx();
     }
 
     void Runner::retryTimecodeStops()
@@ -13953,10 +14162,10 @@ namespace wfg::cue
     {
         for (auto& job : timecoding)
         {
-            /*  LTC ALONE, FOR NOW: MTC is counted on the tick until TC.6 gives
-                it a lane of its own, and then takes the same target here as a
-                branch beside this one. */
-            if (job.finished || job.placed || job.format != "ltc")
+            /*  LTC, and MTC when there is a MIDI sender to put it on a lane
+                (TC.6): with none - a replay, a rig - MTC was counted on the
+                tick by `advanceTimecode`, and is placed already. */
+            if (job.finished || job.placed || (job.format == "mtc" && midiOut == nullptr))
                 continue;
 
             auto* run = runs.find (job.self);
@@ -13966,14 +14175,9 @@ namespace wfg::cue
                 continue;
 
             /*  REFUSED ONCE (AHR), with the words the other runs use: a run
-                that cannot be drawn fails, and its group goes on without it. */
-            if (const auto refusal = ltcRefusal (job); ! refusal.empty())
-            {
-                engine.submit (origin::engine, "run.failed",
-                               { osc::Value::string (job.self), osc::Value::string (refusal) });
-                job.finished = true;
+                that cannot leave fails, and its group goes on without it. */
+            if (refuseTimecode (engine, job))
                 continue;
-            }
 
             /*  THE SAME SAMPLE AS THE SOUNDS OF ITS GROUP (AHN). The target is
                 the one the media loop above gives a launch in this call - its
@@ -14011,6 +14215,16 @@ namespace wfg::cue
                 start placed too close to the block in hand would land late. */
             if (waits || target - now < 2 * blockSize)
                 continue;
+
+            /*  MTC ON THE MIDI SENDER'S LANE (TC.6), on the same target and
+                counted on the same samples: the lane is fed the audio's clock
+                every tick, so its code leaves when the sound of that sample is
+                heard (AHP). */
+            if (job.format == "mtc")
+            {
+                startMtc (engine, job, *run, tick, target, audio->sampleRate(), false);
+                continue;
+            }
 
             /*  ON THE LINE: a program of its own, replacing whatever the line
                 draws at `target` - a takeover's handover, without a gap (AHL).
@@ -14104,28 +14318,60 @@ namespace wfg::cue
 
             /*  AN AUDIO RESTART (AHU) - another player, or the generator made
                 ready again - drew the line to silence: the run ends, as a sound
-                whose voice went with the graph ends on its edge. */
-            if (job.onLine()
-                  && (audio == nullptr || job.epoch != playerEpoch || audio->timecodeGeneration() != job.generation))
+                whose voice went with the graph ends on its edge. MTC's lane
+                sends on regardless, on samples that now mean nothing, so its
+                program is cut from the next message it has still to send. */
+            if (job.onLine() && timecodeClockGone (job))
             {
+                if (job.format == "mtc" && ! job.released && ! job.handedOver)
+                    postTimecodeStop (job, 0, true);
+
                 job.released = true;
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 letGo (job);
                 continue;
             }
 
-            /*  ON THE TICK: MTC until TC.6, and LTC with no audio side to draw
-                it - `not-sent`, its frames counted all the same (AHR). LTC with
-                one waits for `launchTimecode`, after the sounds of this tick. */
+            /*  ON THE TICK: LTC with no audio side to draw it - `not-sent`, its
+                frames counted all the same (AHR) - and MTC with no MIDI sender,
+                a replay's; with an audio side each waits for `launchTimecode`,
+                after the sounds of this tick. MTC with a sender and no audio
+                side is put on the lane here (TC.6), on the tick's own count of
+                samples - the clock serve feeds the lane without audio - a
+                launch lead ahead, the lead a picture is given with no player. */
             if (! job.placed)
             {
-                if (job.format == "ltc" && audio != nullptr)
+                if (audio != nullptr && (job.format == "ltc" || midiOut != nullptr))
                     continue;
 
-                placeTimecode (engine, job, tick, -1);
+                if (job.format == "mtc" && midiOut != nullptr)
+                {
+                    if (refuseTimecode (engine, job))
+                        continue;
 
-                if (job.format == "ltc")
-                    run->warning = runWarning::notSent;
+                    if (const auto now = videoClockNow(); now >= 0)
+                    {
+                        startMtc (engine, job, *run, tick,
+                                  now + static_cast<std::int64_t> (videoLeadTicks()) * samplesPerTick,
+                                  videoSampleRate(), true);
+
+                        if (job.finished)
+                            continue;
+                    }
+                    else
+                    {
+                        //  No tick schedule, so no clock to time it by: a rig's.
+                        placeTimecode (engine, job, tick, -1);
+                        run->warning = runWarning::notSent;
+                    }
+                }
+                else
+                {
+                    placeTimecode (engine, job, tick, -1);
+
+                    if (job.format == "ltc")
+                        run->warning = runWarning::notSent;
+                }
             }
 
             std::int64_t elapsedFrames = 0;
@@ -14133,11 +14379,12 @@ namespace wfg::cue
 
             if (job.onLine())
             {
-                /*  WHERE THE LINE HAS GOT TO, from the samples the audio side
-                    has drawn since the code's first - FrameClock's one rule,
-                    the one it is drawn by - and nought before that sample is
-                    reached, while the start is still placed ahead. */
-                const auto now = audio->samplesElapsed();
+                /*  WHERE THE CODE HAS GOT TO, from the samples its clock has
+                    counted since the code's first - the audio side's, or the
+                    tick's for MTC with no audio - by FrameClock's one rule,
+                    the one it is drawn and sent by, and nought before that
+                    sample is reached, while the start is still placed ahead. */
+                const auto now = timecodeClockNow (job);
                 const auto since = now - job.launchSample;
 
                 if (since > 0 && job.sampleRate > 0)
@@ -14186,6 +14433,11 @@ namespace wfg::cue
                                                                       job.rate),
                                                    job.rate, true);
         }
+
+        /*  THE MTC PORT'S TX, while a run holds the lane (TC.6, AHR), and the
+            lane let go of a mute once none does. */
+        if (! mtcHolder.empty() || mtcMuted)
+            followMtcTx();
 
         timecoding.erase (std::remove_if (timecoding.begin(), timecoding.end(),
                                           [] (const TimecodeJob& job) { return job.finished; }),

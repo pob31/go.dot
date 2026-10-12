@@ -3981,12 +3981,25 @@ namespace wfg::tree
 
         /*  AND HOW LATE THE SHOW'S TIMECODE HAS BEEN (namespace draft §59):
             MTC's messages and LTC's starts, stops and jumps, counted where they
-            leave. Nothing sends either yet - the lanes that count them come
-            with the outputs (TC.3, TC.5) - so each reads its default, nought,
-            which is the true answer for a show that has sent no code. */
+            leave - the MIDI sender's lane and the audio side's generator - and
+            copied into the state each tick (TC.6). Nought wherever nothing has
+            sent a code, which is the true answer then. The worst to a
+            hundredth of a millisecond: finer is the clock's noise. */
         for (const auto* row : doc::Schema::rowsForOwner ("sync"))
-            if (row->persist == doc::Persist::none)
-                engineValue (*row, "sync", std::string (row->defaultText));
+        {
+            if (row->persist != doc::Persist::none)
+                continue;
+
+            const auto name = std::string (row->name);
+            std::string text;
+
+            if (name == "mtcLate")       text = std::to_string (state.mtcLate);
+            else if (name == "mtcWorst") text = osc::formatDouble (std::round (state.mtcWorstMs * 100.0) / 100.0);
+            else if (name == "ltcLate")  text = std::to_string (state.ltcLate);
+            else                         text = std::string (row->defaultText);
+
+            engineValue (*row, "sync", text);
+        }
 
         /*  EVERY RUN, EVERY TICK. A run changes several times a second while
             nothing about the show does, which is exactly why it is here and not

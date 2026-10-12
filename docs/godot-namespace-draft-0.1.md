@@ -26203,3 +26203,63 @@ clean over a ten-minute render.
   worst 0.8 ms; before the Windows yield, 1.0 ms and 1.8 ms); the render's lines. VideoHostTests:
   `nanosAt` inverting `sampleAt` to a sample on a drifting, jittered line three days into the
   machine's uptime. Twelve deliberate breakages each turned their own case red.
+- **TC.6**, 2026-10-12: the Runner to MTC. `launchTimecode`'s loop takes MTC beside LTC - one
+  target, the same cold-sibling wait (AHN), RD.8's `launchNotBefore` and the guard - and a branch
+  each: LTC to the audio side, MTC to `startMtc`, which starts the program on the MIDI sender's
+  lane, `startTimecode (run, port, program, rate, sampleRate, start + offset, zero)`, the program
+  drawn from the same count as LTC's. With a sender and NO audio side (`launchIfDue` does not
+  run), `advanceTimecode` places it on the tick's own count of samples - `videoClockNow()`, the
+  clock serve feeds the lane without audio (TC.5) - two ticks ahead (`videoLeadTicks`, a
+  picture's lead with no player), at `videoSampleRate()`, the job marked `onTickClock`; with no
+  tick schedule either (a rig), `not-sent` and counted on the tick. With no sender - a replay -
+  MTC is counted on the tick as TC.1 counted it. The takeover stays `placeTimecode`'s, per
+  format: the new start replaces the old program from its zero on the lane, the old run ended
+  and handed over (AHC, AHL). Refused once (AHR) by `refuseTimecode`, one function for both
+  formats, the route before the start: `no-port` when `sync/mtcOut` is empty or names no
+  declared `<Port>` (`mtcPortOf`, read when the run starts, AHM) - the Runner's own reading of the
+  show, so a held machine, whose sender answers every start as taken, still fails it as the main
+  does (AGG) - or when `startTimecode` answers `no-port`, nothing bound and not held;
+  `bad-message` for TC.1's unreadable start. Held otherwise: no failure, `run.started`, and the
+  run ends `done`. TX (AHR): `followMtcTx`, at the end of `advanceTimecode` while an MTC run
+  holds the lane or the lane is muted, and when one is placed: the lane muted while the port the
+  holder sends on has `tx` off - `muteTimecode` called only when that changes - the run warned
+  `not-sent` once and left to run its course, and unmuted when the port is on again, the lane
+  re-seating with a full frame (TC.5). A port's `tx` is read as a MIDI cue reads it, once per
+  show revision (`mtcTxOff`): one comparison a tick between edits. A takeover onto ANOTHER port
+  keeps the lane muted until the new code's zero when the old port is off, since what the old
+  code had due before that sample still leaves (`takenFromPort`). A port switched off with
+  nothing behind it is `not-sent`, counted on the tick, never `no-port`: a MIDI cue on a port
+  switched off asks nothing of the port either (J3). A length's stop is posted with the start,
+  `frameStartSample (lengthFrames)` after the zero on the clock the code was placed on, and the
+  run ends on the tick that sample has passed (AHB). `postTimecodeStop` and `releaseTimecode` are
+  format-aware: MTC's stops go to `midiOut->stopTimecode`, whose inbox always takes them, so
+  nothing is owed - Esc, a stop cue and a group's end `(program, 0, false)`, a kill `(program, 0,
+  true)`, and `dropOutputs` cuts in the press's own drain; a fade that ends in a stop was already
+  format-blind (TC.4). A clock gone from under a code (`timecodeClockGone`, AHU): another player
+  handed in moves both clocks, the generator's generation moves the audio's; LTC's line was drawn
+  to silence, but the lane sends on, on samples that now mean nothing, so an MTC program is cut
+  from its next message and the run ended. Teardown is the sender's: serve stops the tick thread
+  and then `midiOut`, which joins the lane's thread first (TC.5), and nothing more leaves; the
+  Runner posts nothing as it is destroyed, the sender being gone before it in `runServe`, and
+  serve has no show close but its exit. `run/timecode` and the position count against the clock
+  the code was placed on (`timecodeClockNow`). The interface's output latency (AHP) is handed to
+  the lane when `audio/outputLatency` moves rather than every tick. And the readouts:
+  `sync/mtcLate`, `sync/mtcWorst` (to a hundredth of a millisecond) and `sync/ltcLate` are
+  `MidiSink::timecodeLate`, `timecodeWorstMs` and `Player::timecodeLate`, three relaxed loads
+  serve copies into `EngineState` each tick. Tests under C and fr_FR, TimecodeRunTests with a
+  `CodeSink` of the test's own (bound ports and a hold, every start, stop and mute with the
+  counter at it): an MTC cue alone started a horizon ahead with the port, the rate of its GO and
+  its start, read off the audio's samples at 29.97; with a cold sound of its timeline group, on
+  the sound's launch sample; with no audio side, on the tick's count and read off it, and with no
+  tick schedule `not-sent`; a length's stop with the start and the run `done` on its tick, on
+  both clocks; Esc's stop with the footer, the double Esc's cut in the press's drain with none;
+  the takeover with no stop, LTC beside it neither taken nor taking; `no-port` six ways - none
+  named, not declared, not a port, all three held so only the Runner can refuse, and nothing
+  behind the port with and without audio - and held running `done`; `tx` off from the start and
+  on again, switched off part way, a takeover onto another port, and off with nothing behind it;
+  `bad-message`; an audio restart's cut; a replay reaching the same runs. MidiTests, through the
+  real `MidiSender` on TC.5's hand clock: a Runner-placed cue with no audio side sends the full
+  frame at its zero's 80 ms and the cycle of quarter frames MtcSchedule gives, each at its
+  moment, and Esc ends it at the next frame boundary. Ten deliberate breakages, in four rounds,
+  each turned its own cases red - the declared-port check only once the refusal cases were made
+  held, the fake's own `no-port` having hidden it.
