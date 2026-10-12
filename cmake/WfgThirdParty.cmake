@@ -669,7 +669,15 @@ unset(_hidapi)
 #     debugging line to stdout whenever it makes a long expression, which the
 #     copy of x_vexp.c does not;
 #   * a patch's own [netsend] holds with the machine (namespace draft §58, RD.1):
-#     the copy of x_net.c asks a hook of Go.dot's before it sends.
+#     the copy of x_net.c asks a hook of Go.dot's before it sends;
+#   * how deep an object's loading has gone is counted per thread: Pd 0.56-5
+#     keeps that guard against an abstraction that holds itself in one integer
+#     for the whole process, while each patch here loads on a thread of its own,
+#     so two patches opening at once raced on it - and a count that drifts past
+#     a thousand makes every abstraction after it fail to load, `maximum object
+#     loading depth 1000 reached`, as a ready-made patch did on the real-time
+#     job of 2026-10-12 (run 38209202452). The copy of m_class.c marks it
+#     PERTHREAD, Pd's own word for state each instance's thread keeps.
 # Each copy is made at configure time - line endings made LF first, so a checkout
 # with CRLF matches too - and the submodule is left as pinned. If a text the build
 # replaces ever moves, configure stops here rather than building a Pd without
@@ -684,7 +692,7 @@ foreach(_file d_arithmetic d_array d_ctl d_dac d_delay d_fft d_fft_fftsg d_filte
               d_soundfile_next d_soundfile_wave d_ugen g_all_guis g_array g_bang g_canvas
               g_clone g_editor g_editor_extras g_graph g_guiconnect g_io g_mycanvas g_numbox
               g_radio g_readwrite g_rtext g_scalar g_slider g_template g_text g_toggle
-              g_traversal g_undo g_vumeter m_atom m_binbuf m_class m_conf m_glob m_memory
+              g_traversal g_undo g_vumeter m_atom m_binbuf m_conf m_glob m_memory
               m_obj m_pd m_sched s_audio s_audio_dummy s_inter_gui s_main s_net
               s_path s_print s_utf8 x_acoustics x_arithmetic x_array x_connective x_file
               x_gui x_interface x_list x_midi x_misc x_scalar x_text x_time
@@ -733,7 +741,12 @@ _wfg_pd_amend(x_vexp.c
 _wfg_pd_amend(x_net.c
     "static int netsend_dosend(t_netsend *x, int sockfd, int argc, t_atom *argv)\n{\n    char *buf, *bp;\n    int length, sent, fail = 0;\n    t_binbuf *b = 0;\n"
     "int (*wfg_pd_netsend_held)(void) = 0;\n\nstatic int netsend_dosend(t_netsend *x, int sockfd, int argc, t_atom *argv)\n{\n    char *buf, *bp;\n    int length, sent, fail = 0;\n    t_binbuf *b = 0;\n    int (*wfg_held)(void) = wfg_pd_netsend_held;\n    if (wfg_held && wfg_held())\n        return (0);\n")
-foreach(_file s_loader.c s_inter.c x_vexp.c x_net.c)
+# The loading depth per thread (see above): a recursion guard, which is a fact
+# about the stack it guards, and that stack is one patch's thread.
+_wfg_pd_amend(m_class.c
+    "#define MAXOBJDEPTH 1000\nstatic int tryingalready;"
+    "#define MAXOBJDEPTH 1000\nstatic PERTHREAD int tryingalready;")
+foreach(_file s_loader.c s_inter.c x_vexp.c x_net.c m_class.c)
     file(WRITE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${_wfg_pd_${_file}}")
     configure_file("${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${CMAKE_BINARY_DIR}/wfg_pd/${_file}" COPYONLY)
     target_sources(wfg_pd PRIVATE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}")
