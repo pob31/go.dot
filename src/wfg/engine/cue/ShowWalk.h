@@ -56,6 +56,7 @@
     document, or on any thread at all by `wfg validate`, which has no engine.
 */
 
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -122,7 +123,9 @@ namespace wfg::cue
                                        //  A process cue's patch (namespace draft §51).
                                        "process",
                                        //  A timecode cue's start and length (namespace draft §59).
-                                       "timecode" })
+                                       "timecode",
+                                       //  A time group's member: its start and its chase (§60).
+                                       "timed" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
                     defaults[std::string (owner) + "/" + std::string (row->name)]
                         = std::string (row->defaultText);
@@ -159,6 +162,14 @@ namespace wfg::cue
                      std::string_view owner, const char* name) const
         {
             return static_cast<int> (number (node, owner, name));
+        }
+
+        /*  A group's two words, for the questions GroupMode.h names (namespace
+            draft §60, TG.2): the walk and the solver ask what a group IS, never
+            what its words spell. */
+        GroupMode groupMode (const juce::ValueTree& group) const
+        {
+            return { text (group, "group", "mode"), text (group, "group", "advance") };
         }
 
         bool flag (const juce::ValueTree& node,
@@ -395,11 +406,9 @@ namespace wfg::cue
 
                 /*  Nor inside a sampler group (Phase 6): its members are
                     played by hand from strips, and a pointer landed on one
-                    would be a GO with nothing to mean. */
-                if (! group.isValid()
-                     || reader.text (group, "group", "mode") == "timeline"
-                     || reader.text (group, "group", "mode") == "sampler"
-                     || reader.text (group, "group", "advance") == "auto")
+                    would be a GO with nothing to mean. Nor a time group's
+                    (namespace draft §60), which its code starts. */
+                if (! group.isValid() || ! isManual (reader.groupMode (group)))
                     entry.mayLandHere = false;
             }
 
@@ -434,7 +443,7 @@ namespace wfg::cue
 
             double running = memberTiming.known ? memberTiming.at : 0.0;
             bool chainAlive = memberTiming.known;
-            const auto timeline = reader.text (node, "group", "mode") == "timeline";
+            const auto timeline = isTimeline (reader.groupMode (node));
 
             for (const auto& child : node)
             {
@@ -502,16 +511,11 @@ namespace wfg::cue
         {
             Timing none;
 
-            const auto mode = reader.text (group, "group", "mode");
-            const auto advance = reader.text (group, "group", "advance");
-
             /*  A SAMPLER GROUP IS NEVER A CHAIN, whatever its `advance` says:
                 a hand launches its members, so nothing inside it has a time
-                the document could know. */
-            if (mode == "sampler")
-                return none;
-
-            if (mode != "timeline" && advance != "auto")
+                the document could know. Nor a manual sequence: a person stands
+                between its members. */
+            if (! pacedByMachine (reader.groupMode (group)))
                 return none;
 
             if (reader.integer (group, "group", "loops") != 1
@@ -668,13 +672,9 @@ namespace wfg::cue
             if (hasCuesIn (node, "Header") || hasCuesIn (node, "Footer"))
                 return std::nullopt;
 
-            const auto mode = reader.text (node, "group", "mode");
-            const auto advance = reader.text (node, "group", "advance");
+            const auto mode = reader.groupMode (node);
 
-            if (mode == "sampler")
-                return std::nullopt;
-
-            if (mode != "timeline" && advance != "auto")
+            if (! pacedByMachine (mode))
                 return std::nullopt;
 
             const auto rounds = reader.integer (node, "group", "loops");
@@ -683,7 +683,7 @@ namespace wfg::cue
                  || reader.text (node, "group", "selection") != "sequential")
                 return std::nullopt;
 
-            const auto timeline = mode == "timeline";
+            const auto timeline = isTimeline (mode);
             double running = 0.0;
             double furthest = 0.0;
 
@@ -770,8 +770,10 @@ namespace wfg::cue
 
             /*  AN ARMED SAMPLER GROUP RUNS UNTIL SOMEBODY DISARMS IT (PRD
                 §3.27): its members are played by hand any number of times, so
-                it never reaches an end the document could see coming. */
-            if (reader.text (node, "group", "mode") == "sampler")
+                it never reaches an end the document could see coming. AND A
+                TIME GROUP THE SAME (namespace draft §60, AIE): armed until it is
+                stopped, waiting for a code. */
+            if (armedUntilStopped (reader.groupMode (node)))
                 return false;
 
             if (reader.integer (node, "group", "loops") <= 0)

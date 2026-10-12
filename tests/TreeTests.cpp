@@ -325,6 +325,87 @@ TEST_CASE ("tree: a timecode cue publishes its rows, the show its timecode setti
     CHECK (text ("/godot/run/R7MM0002/timecode").empty());
 }
 
+TEST_CASE ("tree: a time group publishes its source, a member its time and chase, the show where the code comes in, the readouts at rest")
+{
+    /*  Namespace draft §60 (TG.2). The group's two rows and its members' two,
+        from the show; the show's chase settings from its half, the incoming
+        code's readouts from the runtime's at their resting values - nothing
+        reads a code yet (TG.5 fills them); and a run's chase readouts at
+        theirs. */
+    Rig rig;
+
+    const auto group = rig.document.createCue ("7K2QM9X4", 0, "group", {}, {},
+                                               { { "mode", "time" }, { "timeSource", "clock" } });
+    REQUIRE (group.ok);
+    const auto member = rig.document.createCue (group.id, 0, "media", "Rain", {},
+                                                { { "at", "20:00:00" }, { "chase", "jump" } });
+    REQUIRE (member.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/sync/chaseTolerance", "20").ok);
+    rig.parameters.markStale();
+
+    rig.runs.create ("R7TG0001", member.id, "media");
+
+    const auto snapshot = rig.publish (0);
+
+    const auto text = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "missing " << address);
+        REQUIRE (node->values.size() == 1u);
+        return node->values.front().getString();
+    };
+
+    const auto number = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "missing " << address);
+        REQUIRE (node->soleValue().has_value());
+        return node->soleValue()->asDouble();
+    };
+
+    const auto cue = "/godot/cue/" + group.id;
+    CHECK (text (cue + "/mode") == "time");
+    CHECK (text (cue + "/timeSource") == "clock");
+    CHECK (snapshot->find (cue + "/timeSource")->access == Access::readWrite);
+    CHECK (text (cue + "/autoName") == "Time group on the wall clock");
+
+    //  A group carries `at` and `chase` too: a timeline may be a member.
+    CHECK (text (cue + "/at").empty());
+    CHECK (text (cue + "/chase") == "free");
+
+    CHECK (text ("/godot/cue/" + member.id + "/at") == "20:00:00");
+    CHECK (text ("/godot/cue/" + member.id + "/chase") == "jump");
+
+    //  And a cue that carries neither publishes neither.
+    CHECK (snapshot->find ("/godot/cue/B3N8R5TW/at") == nullptr);
+
+    CHECK (text ("/godot/sync/ltcIn").empty());
+    CHECK (text ("/godot/sync/mtcIn").empty());
+    CHECK (number ("/godot/sync/chaseTolerance") == doctest::Approx (20.0));
+    CHECK (number ("/godot/sync/chaseJump") == doctest::Approx (0.25));
+    CHECK (number ("/godot/sync/chaseRate") == doctest::Approx (1.0));
+    CHECK (number ("/godot/sync/chaseCrossfade") == doctest::Approx (10.0));
+
+    for (const auto* code : { "ltc", "mtc" })
+    {
+        INFO ("incoming " << code);
+        const auto base = std::string ("/godot/sync/") + code + "In";
+        CHECK (text (base + "State") == "none");
+        CHECK (text (base + "Code").empty());
+        CHECK (text (base + "Rate").empty());
+        CHECK (number (base + "Speed") == doctest::Approx (0.0));
+        CHECK (snapshot->find (base + "State")->access == Access::read);
+    }
+
+    /*  A run's chase readouts at rest: no error, and no state - an enum row
+        with nothing in it carries no value, as a run's `phase` does. */
+    CHECK (number ("/godot/run/R7TG0001/chaseError") == doctest::Approx (0.0));
+    const auto* state = snapshot->find ("/godot/run/R7TG0001/chaseState");
+    REQUIRE (state != nullptr);
+    CHECK ((state->values.empty() || state->values.front().getString().empty()));
+    CHECK (state->access == Access::read);
+}
+
 TEST_CASE ("tree: the root holds one of each subtree, and every address exactly once")
 {
     Rig rig;

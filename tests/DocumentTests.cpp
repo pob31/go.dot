@@ -3201,3 +3201,436 @@ TEST_CASE ("timecode cue: refused in a sampler group, and the schema's container
     CHECK (ShowDocument::elementForKind ("timecode") == "Timecode");
     CHECK (ShowDocument::containerSegmentFor ("Sync") == "sync");
 }
+
+//==============================================================================
+/*  TIME GROUPS (namespace draft §60, TG.2): the rows, what a time group may
+    hold, the one judge of a member's time and what `wfg validate` says about a
+    time group that will not hear its code. Nothing here runs: TimeGroupTests
+    has the group armed and stopped. */
+namespace
+{
+    std::string timeGroup (ShowDocument& document, const std::string& parent, int index,
+                           const std::string& source = {})
+    {
+        ShowDocument::Attributes born { { "mode", "time" } };
+
+        if (! source.empty())
+            born.emplace_back ("timeSource", source);
+
+        const auto made = document.createCue (parent, index, "group", "Clock", {}, born);
+        REQUIRE (made.ok);
+        return made.id;
+    }
+
+    const AttributeRow* rowOf (std::string_view owner, std::string_view name)
+    {
+        for (const auto* row : Schema::rowsForOwner (owner))
+            if (row->name == name)
+                return row;
+
+        return nullptr;
+    }
+}
+
+TEST_CASE ("time group: the rows - mode gains time, timeSource on a group, timed on sounds, pictures and groups, the sync rows")
+{
+    const auto& schema = Schema::instance();
+
+    const auto* mode = schema.attribute ("Group", "mode");
+    REQUIRE (mode != nullptr);
+    CHECK (mode->isEnumValue ("time"));
+    CHECK (mode->defaultText() == "sequence");
+
+    const auto* source = schema.attribute ("Group", "timeSource");
+    REQUIRE (source != nullptr);
+    CHECK (source->defaultText() == "ltc");
+
+    for (const auto* word : { "ltc", "mtc", "clock" })
+        CHECK (source->isEnumValue (word));
+
+    CHECK_FALSE (source->isEnumValue ("source"));
+
+    //  `at` and `chase` on a sound, a picture and a group, and nowhere else.
+    for (const auto* element : { "Media", "Video", "Group" })
+    {
+        INFO ("element " << element);
+        const auto* at = schema.attribute (element, "at");
+        const auto* chase = schema.attribute (element, "chase");
+        REQUIRE (at != nullptr);
+        REQUIRE (chase != nullptr);
+        CHECK (at->row->owner == "timed");
+        CHECK (at->defaultText().empty());
+        CHECK (chase->defaultText() == "free");
+
+        for (const auto* word : { "free", "jump", "varispeed", "timestretch" })
+            CHECK (chase->isEnumValue (word));
+    }
+
+    for (const auto* element : { "Cue", "Mic", "Fade", "Transport", "Osc", "Midi", "Start", "Process", "Timecode" })
+    {
+        INFO ("element " << element);
+        CHECK (schema.attribute (element, "chase") == nullptr);
+        CHECK (schema.attribute (element, "at") == nullptr);
+    }
+
+    //  A clock trigger's `at` is the trigger's, a different element.
+    REQUIRE (schema.attribute ("Trigger", "at") != nullptr);
+    CHECK (schema.attribute ("Trigger", "at")->row->owner == "trigger");
+
+    //  The show's: where the code comes in, and the chase's four numbers.
+    ShowDocument document;
+    CHECK (document.getAttribute ("/godot/sync/ltcIn") == std::optional<std::string> (""));
+    CHECK (document.getAttribute ("/godot/sync/mtcIn") == std::optional<std::string> (""));
+    CHECK (document.getAttribute ("/godot/sync/chaseTolerance") == std::optional<std::string> ("10"));
+    CHECK (document.getAttribute ("/godot/sync/chaseJump") == std::optional<std::string> ("0.25"));
+    CHECK (document.getAttribute ("/godot/sync/chaseRate") == std::optional<std::string> ("1"));
+    CHECK (document.getAttribute ("/godot/sync/chaseCrossfade") == std::optional<std::string> ("10"));
+
+    CHECK (schema.attribute ("Sync", "ltcIn")->refers() == "input");
+    CHECK (schema.attribute ("Sync", "mtcIn")->refers() == "port");
+    CHECK_FALSE (document.setAttribute ("/godot/sync/chaseRate", "11").ok);
+    CHECK_FALSE (document.setAttribute ("/godot/sync/chaseTolerance", "-1").ok);
+    REQUIRE (document.setAttribute ("/godot/sync/chaseJump", "0.5").ok);
+
+    //  The readouts are the machine's, never stored and never written.
+    for (const auto* name : { "ltcInState", "mtcInState", "ltcInCode", "mtcInCode", "ltcInRate", "mtcInRate",
+                              "ltcInSpeed", "mtcInSpeed" })
+    {
+        INFO ("row " << name);
+        const auto* row = rowOf ("sync", name);
+        REQUIRE (row != nullptr);
+        CHECK (row->persist == Persist::none);
+        CHECK (row->access == Access::read);
+    }
+
+    CHECK (rowOf ("sync", "ltcInState")->defaultText == "none");
+    CHECK (rowOf ("run", "chaseError") != nullptr);
+    REQUIRE (rowOf ("run", "chaseState") != nullptr);
+    CHECK (rowOf ("run", "chaseState")->defaultText.empty());
+
+    //  And a group made one through the door reads back, its source with it.
+    const auto listId = document.createList ("Main").id;
+    const auto group = timeGroup (document, listId, 0, "mtc");
+    CHECK (document.getAttribute ("/godot/cue/" + group + "/mode") == std::optional<std::string> ("time"));
+    CHECK (document.getAttribute ("/godot/cue/" + group + "/timeSource") == std::optional<std::string> ("mtc"));
+    CHECK (document.getAttribute ("/godot/cue/" + group + "/at") == std::optional<std::string> (""));
+    CHECK (document.getAttribute ("/godot/cue/" + group + "/chase") == std::optional<std::string> ("free"));
+    CHECK_FALSE (document.setAttribute ("/godot/cue/" + group + "/timeSource", "smpte").ok);
+
+    ShowDocument read;
+    REQUIRE (CanonicalXml::read (CanonicalXml::write (document), read).ok);
+    CHECK (read.getAttribute ("/godot/cue/" + group + "/mode") == std::optional<std::string> ("time"));
+    CHECK (read.getAttribute ("/godot/cue/" + group + "/timeSource") == std::optional<std::string> ("mtc"));
+    CHECK (read.getAttribute ("/godot/sync/chaseJump") == std::optional<std::string> ("0.5"));
+    CHECK (read.validate().empty());
+}
+
+TEST_CASE ("time group: holds sounds, pictures, timelines and automatic sequences - refused anything else at create, move, paste and wrap")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+    const auto group = timeGroup (document, listId, 0);
+
+    //  What it holds, born into it.
+    CHECK (document.createCue (group, 0, "media", "Rain").ok);
+    CHECK (document.createCue (group, 1, "video", "Moon").ok);
+    CHECK (document.createCue (group, 2, "group", "Scene", {}, { { "mode", "timeline" } }).ok);
+    CHECK (document.createCue (group, 3, "group", "Chain", {}, { { "mode", "sequence" }, { "advance", "auto" } }).ok);
+
+    //  What it refuses, as a sampler refuses: nothing made.
+    const auto before = document.findById (group).getNumChildren();
+
+    const std::vector<std::pair<std::string, ShowDocument::Attributes>> refused {
+        { "group", {} },                                               // a manual sequence, by default
+        { "group", { { "mode", "sequence" }, { "advance", "manual" } } },
+        { "group", { { "mode", "sampler" } } },
+        { "group", { { "mode", "time" } } },
+        { "timecode", {} }, { "memo", {} }, { "fade", {} }, { "transport", {} }, { "osc", {} },
+        { "midi", {} }, { "start", {} }, { "process", {} }, { "mic", {} } };
+
+    for (const auto& [kind, born] : refused)
+    {
+        INFO ("kind " << kind << (born.empty() ? std::string {} : " " + born.front().second));
+        const auto made = document.createCue (group, 0, kind, {}, {}, born);
+        CHECK_FALSE (made.ok);
+        CHECK (made.reason == reason::badAddress);
+    }
+
+    CHECK (document.findById (group).getNumChildren() == before);
+
+    //  Its header, its footer and its triggers are its own, and stay free.
+    const auto header = document.createRole (group, "header");
+    REQUIRE (header.ok);
+    CHECK (document.createCue (header.id, 0, "memo", "Lights").ok);
+    const auto footer = document.createRole (group, "footer");
+    REQUIRE (footer.ok);
+    CHECK (document.createCue (footer.id, 0, "fade", "Down").ok);
+    CHECK (document.createTrigger (group, "osc").ok);
+
+    //  A move: refused a memo and a manual sequence, let in a sound - and a reorder among its own.
+    const auto memo = document.createCue (listId, 1, "memo", "Note").id;
+    const auto sound = document.createCue (listId, 2, "media", "Thunder").id;
+    const auto manual = document.createCue (listId, 3, "group", "Steps").id;
+
+    CHECK (document.move (memo, group, 0).reason == reason::badAddress);
+    CHECK (document.move (manual, group, 0).reason == reason::badAddress);
+    CHECK (document.findById (memo).getParent() == document.findById (listId));
+    CHECK (document.move (sound, group, 0).ok);
+    CHECK (document.move (sound, group, 2).ok);
+    CHECK (document.findById (sound).getParent() == document.findById (group));
+
+    //  A paste: the same rule.
+    const auto members = document.findById (group).getNumChildren();
+    CHECK_FALSE (document.paste (group, 0, document.fragmentOf ({ memo }), {}).ok);
+    CHECK (document.findById (group).getNumChildren() == members);
+    CHECK (document.paste (group, 0, document.fragmentOf ({ sound }), {}).ok);
+
+    //  A wrap into a new time group: only what one may hold, asked before anything is made.
+    const auto other = document.createCue (listId, 4, "media", "Wind").id;
+    const auto scene = document.createCue (listId, 5, "group", "Tide", {}, { { "mode", "timeline" } }).id;
+    const auto lists = document.findById (listId).getNumChildren();
+
+    CHECK (document.groupSelection ({ memo, other }, {}, { { "mode", "time" } }).reason == reason::typeMismatch);
+    CHECK (document.groupSelection ({ manual }, {}, { { "mode", "time" } }).reason == reason::typeMismatch);
+    CHECK (document.findById (listId).getNumChildren() == lists);
+
+    const auto wrapped = document.groupSelection ({ other, scene }, {}, { { "mode", "time" } });
+    REQUIRE (wrapped.ok);
+    CHECK (document.findById (other).getParent() == document.findById (wrapped.id));
+    CHECK (document.findById (scene).getParent() == document.findById (wrapped.id));
+
+    //  And a member wrapped in a manual sequence inside it: refused at that group's birth.
+    CHECK_FALSE (document.groupSelection ({ other }).ok);
+    CHECK (document.findById (other).getParent() == document.findById (wrapped.id));
+
+    CHECK (document.validate().empty());
+}
+
+TEST_CASE ("time group: made one only over members it may hold, and a member group stays one a code can start")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+
+    //  A manual sequence holding a memo: not made a time group.
+    const auto steps = document.createCue (listId, 0, "group", "Steps").id;
+    REQUIRE (document.createCue (steps, 0, "memo", "Note").ok);
+
+    const auto refused = document.setAttribute ("/godot/cue/" + steps + "/mode", "time");
+    CHECK_FALSE (refused.ok);
+    CHECK (refused.reason == reason::badValue);
+    CHECK (document.getAttribute ("/godot/cue/" + steps + "/mode") == std::optional<std::string> ("sequence"));
+
+    //  One holding a sound and a timeline: made one.
+    const auto bed = document.createCue (listId, 1, "group", "Bed").id;
+    REQUIRE (document.createCue (bed, 0, "media", "Rain").ok);
+    const auto scene = document.createCue (bed, 1, "group", "Scene", {}, { { "mode", "timeline" } }).id;
+    REQUIRE (! scene.empty());
+    REQUIRE (document.setAttribute ("/godot/cue/" + bed + "/mode", "time").ok);
+
+    //  The member scene may not become a manual sequence, a sampler or a time group.
+    for (const auto* value : { "sequence", "sampler", "time" })
+    {
+        INFO ("mode = " << value);
+        const auto written = document.setAttribute ("/godot/cue/" + scene + "/mode", value);
+        CHECK_FALSE (written.ok);
+        CHECK (written.reason == reason::badValue);
+    }
+
+    CHECK (document.getAttribute ("/godot/cue/" + scene + "/mode") == std::optional<std::string> ("timeline"));
+
+    //  An automatic sequence may not lose its advance, and may become a timeline.
+    const auto chain = document.createCue (bed, 2, "group", "Chain", {},
+                                           { { "mode", "sequence" }, { "advance", "auto" } }).id;
+    REQUIRE (! chain.empty());
+    CHECK (document.setAttribute ("/godot/cue/" + chain + "/advance", "manual").reason == reason::badValue);
+    CHECK (document.setAttribute ("/godot/cue/" + chain + "/mode", "timeline").ok);
+
+    //  A timeline made a sequence that advances by itself: its advance first, then its mode.
+    REQUIRE (document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    CHECK (document.setAttribute ("/godot/cue/" + scene + "/mode", "sequence").ok);
+
+    //  Outside a time group the same writes are anybody's, as before.
+    CHECK (document.setAttribute ("/godot/cue/" + steps + "/advance", "auto").ok);
+    CHECK (document.setAttribute ("/godot/cue/" + steps + "/mode", "timeline").ok);
+}
+
+TEST_CASE ("time group: a member's time is judged against its group's source, stored with colons, and empty is kept")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+    const auto code = timeGroup (document, listId, 0, "ltc");
+    const auto clock = timeGroup (document, listId, 1, "clock");
+    const auto mtc = timeGroup (document, listId, 2, "mtc");
+
+    const auto onCode = document.createCue (code, 0, "media", "Rain").id;
+    const auto onClock = document.createCue (clock, 0, "media", "Bells").id;
+    const auto onMtc = document.createCue (mtc, 0, "group", "Scene", {}, { { "mode", "timeline" } }).id;
+    const auto loose = document.createCue (listId, 3, "video", "Moon").id;
+
+    const auto at = [] (const std::string& id) { return "/godot/cue/" + id + "/at"; };
+
+    //  LTC and MTC read a label, stored with colons whatever it was typed with.
+    REQUIRE (document.setAttribute (at (onCode), "01;00;00;00").ok);
+    CHECK (document.getAttribute (at (onCode)) == std::optional<std::string> ("01:00:00:00"));
+    REQUIRE (document.setAttribute (at (onMtc), "10:00:00.12").ok);
+    CHECK (document.getAttribute (at (onMtc)) == std::optional<std::string> ("10:00:00:12"));
+
+    for (const auto* bad : { "20:00:00", "25:00:00:00", "01:00:00:30", "one o'clock" })
+    {
+        INFO ("ltc at \"" << bad << "\"");
+        const auto written = document.setAttribute (at (onCode), bad);
+        CHECK_FALSE (written.ok);
+        CHECK (written.reason == reason::badValue);
+        CHECK (document.getAttribute (at (onCode)) == std::optional<std::string> ("01:00:00:00"));
+    }
+
+    //  The wall clock reads a time of day, as a clock trigger's `at` does.
+    REQUIRE (document.setAttribute (at (onClock), "20:30:00").ok);
+    CHECK (document.getAttribute (at (onClock)) == std::optional<std::string> ("20:30:00"));
+
+    for (const auto* bad : { "01:00:00:00", "24:00:00", "8:30:00", "20h30" })
+    {
+        INFO ("clock at \"" << bad << "\"");
+        CHECK (document.setAttribute (at (onClock), bad).reason == reason::badValue);
+    }
+
+    //  Empty is a member that never fires: kept, and said (below).
+    REQUIRE (document.setAttribute (at (onClock), "").ok);
+    CHECK (document.getAttribute (at (onClock)) == std::optional<std::string> (""));
+
+    //  A cue in no time group is held to either grammar.
+    CHECK (document.setAttribute (at (loose), "20:30:00").ok);
+    CHECK (document.setAttribute (at (loose), "01;00;00;00").ok);
+    CHECK (document.getAttribute (at (loose)) == std::optional<std::string> ("01:00:00:00"));
+    CHECK (document.setAttribute (at (loose), "soon").reason == reason::badValue);
+
+    //  Born with one is the same door, against the group it is born into.
+    const auto count = document.findById (clock).getNumChildren();
+    CHECK (document.createCue (clock, 1, "media", {}, {}, { { "at", "01:00:00:00" } }).reason == reason::badValue);
+    CHECK (document.findById (clock).getNumChildren() == count);
+
+    const auto born = document.createCue (code, 1, "media", {}, {}, { { "at", "02;00;00;00" } });
+    REQUIRE (born.ok);
+    CHECK (document.getAttribute (at (born.id)) == std::optional<std::string> ("02:00:00:00"));
+
+    //  The group's source changed: nothing is judged again at the door, the warning says it.
+    REQUIRE (document.setAttribute ("/godot/cue/" + code + "/timeSource", "clock").ok);
+    CHECK (document.getAttribute (at (onCode)) == std::optional<std::string> ("01:00:00:00"));
+    CHECK (anySays (document.warnings(), "Media[" + onCode + "]/@at: \"01:00:00:00\" is not a time of day"));
+    CHECK (document.validate().empty());
+
+    //  A member moved to a group reading another source keeps what was written, and is said the same way.
+    REQUIRE (document.move (born.id, clock, 1).ok);
+    CHECK (document.getAttribute (at (born.id)) == std::optional<std::string> ("02:00:00:00"));
+    CHECK (anySays (document.warnings(), "Media[" + born.id + "]/@at: \"02:00:00:00\" is not a time of day"));
+
+    //  Saved and opened again as it stands: what was written is kept, and opens.
+    ShowDocument reopened;
+    REQUIRE (CanonicalXml::read (CanonicalXml::write (document), reopened).ok);
+    CHECK (reopened.getAttribute (at (onCode)) == std::optional<std::string> ("01:00:00:00"));
+    CHECK (reopened.validate().empty());
+
+    //  And a file carrying one that reads under no source does not open.
+    document.findById (onMtc).setProperty ("at", "half past", nullptr);
+    const auto problems = document.validate();
+    REQUIRE (problems.size() == 1u);
+    INFO (problems[0]);
+    CHECK (problems[0].find ("\"at\" is \"half past\"") != std::string::npos);
+}
+
+TEST_CASE ("time group warnings: no input for its source, a member with no time or one that does not read, ports and inputs shared or wide, and none for a chase against the speed mode")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+
+    const auto onLtc = timeGroup (document, listId, 0, "ltc");
+    const auto sound = document.createCue (onLtc, 0, "media", "Rain", {}, { { "at", "01:00:00:00" } }).id;
+    REQUIRE (! sound.empty());
+
+    //  No input for LTC: said for the group.
+    CHECK (anySays (document.warnings(), "Group[" + onLtc + "]/@timeSource: ltc, and sync/ltcIn names no input"));
+
+    const auto mono = document.createInput (1);
+    const auto stereo = document.createInput (2);
+    REQUIRE (mono.ok);
+    REQUIRE (stereo.ok);
+    REQUIRE (document.setAttribute ("/godot/sync/ltcIn", mono.id).ok);
+    CHECK (document.warnings().empty());
+
+    //  An input wider than one channel.
+    REQUIRE (document.setAttribute ("/godot/sync/ltcIn", stereo.id).ok);
+    CHECK (anySays (document.warnings(), "/Show/Sync/@ltcIn: names \"" + stereo.id + "\", which is 2 channels wide"));
+    REQUIRE (document.setAttribute ("/godot/sync/ltcIn", mono.id).ok);
+
+    //  The wall clock is always there: nothing said for a group reading it.
+    const auto onClock = timeGroup (document, listId, 1, "clock");
+    REQUIRE (document.createCue (onClock, 0, "media", "Bells", {}, { { "at", "20:00:00" } }).ok);
+    CHECK (document.warnings().empty());
+
+    //  MTC: no port, then a port a surface uses, then the port MTC leaves on.
+    const auto onMtc = timeGroup (document, listId, 2, "mtc");
+    REQUIRE (document.createCue (onMtc, 0, "media", "Wind", {}, { { "at", "10:00:00:00" } }).ok);
+    CHECK (anySays (document.warnings(), "Group[" + onMtc + "]/@timeSource: mtc, and sync/mtcIn names no port"));
+
+    const auto port = document.createPort ("Desk").id;
+    const auto spare = document.createPort ("Spare").id;
+    REQUIRE (document.setAttribute ("/godot/sync/mtcIn", port).ok);
+    CHECK (document.warnings().empty());
+
+    std::vector<std::string> strips;
+    const auto surface = document.createSurface ("midiPads", "Pads", {}, {}, strips);
+    REQUIRE (surface.ok);
+    REQUIRE (document.setAttribute ("/godot/surface/" + surface.id + "/ports", port).ok);
+    CHECK (anySays (document.warnings(), "/Show/Sync/@mtcIn: names \"" + port + "\", a port a control surface uses"));
+    REQUIRE (document.setAttribute ("/godot/surface/" + surface.id + "/ports", spare).ok);
+    CHECK_FALSE (anySays (document.warnings(), "@mtcIn"));
+
+    REQUIRE (document.setAttribute ("/godot/sync/mtcOut", port).ok);
+    CHECK (anySays (document.warnings(), "/Show/Sync/@mtcIn: names \"" + port + "\", the port MTC leaves on"));
+    REQUIRE (document.setAttribute ("/godot/sync/mtcOut", "").ok);
+    CHECK_FALSE (anySays (document.warnings(), "@mtcIn"));
+
+    //  A member with no time.
+    const auto silent = document.createCue (onLtc, 1, "media", "Never").id;
+    CHECK (anySays (document.warnings(), "Media[" + silent + "]/@at: empty"));
+    REQUIRE (document.setAttribute ("/godot/cue/" + silent + "/at", "01:00:10:00").ok);
+    CHECK_FALSE (anySays (document.warnings(), "@at"));
+
+    //  A chase never warns against the cue's own speed mode (AIU): the chase decides, and a speed
+    //  mode left at its default reads varispeed, so every timestretch chaser would be warned.
+    for (const auto* chase : { "varispeed", "timestretch", "jump" })
+    {
+        REQUIRE (document.setAttribute ("/godot/cue/" + sound + "/chase", chase).ok);
+        CHECK_FALSE (anySays (document.warnings(), "@chase"));
+    }
+
+    //  Each a warning, never a refusal.
+    REQUIRE (document.setAttribute ("/godot/sync/ltcIn", "").ok);
+    CHECK (anySays (document.warnings(), "sync/ltcIn names no input"));
+    CHECK (document.validate().empty());
+}
+
+TEST_CASE ("time group: kept by a persistent section, named for what starts it")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+    const auto section = document.createPersistent (listId);
+    REQUIRE (section.ok);
+
+    //  A time group there is asserted, and not said to be ignored; any other group still is.
+    const auto kept = timeGroup (document, section.id, 0, "clock");
+    CHECK_FALSE (anySays (document.warnings(), "Persistent/Group[" + kept + "]"));
+
+    const auto ignored = document.createCue (section.id, 1, "group", "Scene", {}, { { "mode", "timeline" } }).id;
+    CHECK (anySays (document.warnings(), "Persistent/Group[" + ignored + "]: a persistent section asserts media,"
+                                         " mic, osc, midi and process cues and time groups"));
+
+    //  The automatic name: what starts its members (implementer's words).
+    const auto onLtc = timeGroup (document, listId, 0);
+    const auto onMtc = timeGroup (document, listId, 1, "mtc");
+    const cue::AutoNames names { document.root() };
+    CHECK (names.of (document.findById (onLtc)) == "Time group on LTC");
+    CHECK (names.of (document.findById (onMtc)) == "Time group on MTC");
+    CHECK (names.of (document.findById (kept)) == "Time group on the wall clock");
+    CHECK (names.of (document.findById (ignored)).empty());
+}

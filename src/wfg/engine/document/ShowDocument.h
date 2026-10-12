@@ -130,6 +130,18 @@ namespace wfg::doc
         show's rate HAS that label is a warning (`warnings()`), not this. */
     std::optional<std::string> readTimecodeLabel (std::string_view text);
 
+    /*  THE ONE JUDGE OF A TIME GROUP MEMBER'S START (namespace draft §60,
+        AIL), read under the source its group names: `ltc` and `mtc` a
+        timecode label, stored with colons as `readTimecodeLabel` stores one;
+        `clock` a time of day, `HH:MM:SS`, as a clock trigger's `at` is read;
+        an empty source - a cue that is not a time group's member - either of
+        the two. Empty text is a member that never fires, and is kept, and
+        warned (`warnings()`). Nothing for text that does not read. Asked at
+        the write door and at a cue's birth against its group's source, and by
+        `validate()` against no source at all - a group whose source changed
+        keeps what was written, and `warnings()` names what no longer reads. */
+    std::optional<std::string> readMemberTime (std::string_view text, std::string_view source);
+
     /*  The outcome of anything that changes the document. `reason` is a code
         from wfg::reason when it failed, so a command can return it unchanged
         and the log records the same word every time. */

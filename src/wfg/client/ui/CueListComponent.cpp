@@ -26,6 +26,8 @@
 #include <wfg/client/ui/Icons.h>
 #include <wfg/client/ui/Look.h>
 
+#include <wfg/engine/cue/GroupMode.h>
+
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
@@ -1661,7 +1663,8 @@ namespace wfg::client::ui
                     on screen is not its order in time - said now, because the
                     author reordered one and read the result as a fault. */
                 const auto* container = rowById (drop.container);
-                const auto intoTimeline = container != nullptr && container->mode == "timeline";
+                const auto intoTimeline = container != nullptr
+                                            && cue::isTimeline (cue::GroupMode { container->mode, container->advance });
 
                 /*  A mark or a header or footer move is said with the GROUP's
                     name, which a band's own row does not carry (§30, S6). */

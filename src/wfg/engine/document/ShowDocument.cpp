@@ -18,7 +18,9 @@
 
 #include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/cue/Override.h>
+#include <wfg/engine/cue/TriggerIndex.h>
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/command/Event.h>
 #include <wfg/engine/document/CanonicalXml.h>
@@ -48,6 +50,13 @@ namespace wfg::doc
         const juce::Identifier standbyProperty { "standby" };
         const juce::Identifier lockedProperty { "locked" };
 
+        /*  A group's two words read straight off the node: absent is the
+            empty word, which GroupMode.h reads as the table's default. */
+        cue::GroupMode groupModeOf (const juce::ValueTree& group)
+        {
+            return { group["mode"].toString().toStdString(), group["advance"].toString().toStdString() };
+        }
+
         /*  A SAMPLER GROUP'S MEMBERS ARE SOUNDS (namespace draft §39, the
             author's niggle of 2026-10-07: "Nothing prevents video cues from
             being dragged into sampler groups"). The hand plays a sampler's
@@ -65,7 +74,7 @@ namespace wfg::doc
             movie is a member already, or arrives with it in the same edit. */
         bool isSampler (const juce::ValueTree& parent)
         {
-            return parent.hasType ("Group") && parent["mode"].toString() == "sampler";
+            return parent.hasType ("Group") && cue::isSampler (groupModeOf (parent));
         }
 
         bool samplerRefuses (const juce::ValueTree& parent, std::string_view element, const juce::String& lockedTo,
@@ -96,6 +105,68 @@ namespace wfg::doc
         {
             return samplerRefuses (parent, node.getType().toString().toStdString(), node["lockedTo"].toString(),
                                    moviesArriving);
+        }
+
+        /*  A TIME GROUP (namespace draft §60, AIE): its members start when a
+            code - LTC, MTC or the wall clock - reaches the time each names. */
+        bool isTimeGroup (const juce::ValueTree& group)
+        {
+            return group.hasType ("Group") && cue::isTimeGroup (groupModeOf (group));
+        }
+
+        /*  WHAT A TIME GROUP'S MEMBERS MAY BE (namespace draft §60, AIK): what
+            a code can start on the very sample it reaches a time and steer
+            once it plays - a sound, a picture, and a scene the machine paces
+            by itself, a timeline or an automatic sequence. Not a manual
+            sequence, which waits for a GO nobody gives inside a time group;
+            not a sampler or another time group, which a code would only arm;
+            not a timecode cue, whose code a code starting it would locate at
+            every crossing; and no fade, stop, message or memo, which have
+            nothing a chase could steer. Its header, its footer and its
+            triggers are the group's own and not members, as a sampler's are,
+            so they stay free: their parent is not the group, or they are no
+            cue at all.
+
+            `member` is the arriving group's two words - from the attributes it
+            is born with, or off the node that moves - and is read only when
+            it is a group. */
+        bool timeGroupTakes (std::string_view element, const cue::GroupMode& member)
+        {
+            if (element == "Media" || element == "Video")
+                return true;
+
+            if (element == "Group")
+                return cue::pacedByMachine (member);
+
+            return ShowDocument::ownerForElement (element) != "cue";
+        }
+
+        bool timeGroupRefuses (const juce::ValueTree& parent, std::string_view element, const cue::GroupMode& member)
+        {
+            return isTimeGroup (parent) && ! timeGroupTakes (element, member);
+        }
+
+        bool timeGroupRefuses (const juce::ValueTree& parent, const juce::ValueTree& node)
+        {
+            return timeGroupRefuses (parent, node.getType().toString().toStdString(), groupModeOf (node));
+        }
+
+        /*  THE SOURCE A MEMBER'S TIME IS READ UNDER (AIL): its time group's
+            `timeSource`, the table's default where nobody wrote one - or
+            nothing, for a cue that is not a time group's member, whose `at`
+            is read under either grammar. */
+        std::string timeSourceOf (const juce::ValueTree& parent)
+        {
+            if (! isTimeGroup (parent))
+                return {};
+
+            const juce::Identifier property { "timeSource" };
+
+            if (parent.hasProperty (property))
+                return parent[property].toString().toStdString();
+
+            const auto* attribute = Schema::instance().attribute ("Group", "timeSource");
+            return attribute != nullptr ? std::string (attribute->defaultText()) : std::string {};
         }
 
         /*  Whether a value is a legal standby for this list: one of the places
@@ -1000,6 +1071,39 @@ namespace wfg::doc
         return timecode::formatLabel (*label, timecode::Rate::fps25);
     }
 
+    std::optional<std::string> readMemberTime (std::string_view text, std::string_view source)
+    {
+        if (text.empty())
+            return std::string {};
+
+        /*  THE WALL CLOCK'S GRAMMAR IS A CLOCK TRIGGER'S (namespace draft §60,
+            AIL): the one reader, `secondOfDayFor`, so a member's time and a
+            trigger's are the same words. Kept as typed - the reader takes one
+            spelling only, so there is nothing to put right. */
+        const auto ofTheClock = [text]() -> std::optional<std::string>
+        {
+            const std::string typed (text);
+
+            if (cue::secondOfDayFor (typed) < 0)
+                return std::nullopt;
+
+            return typed;
+        };
+
+        if (source == "clock")
+            return ofTheClock();
+
+        if (source == "ltc" || source == "mtc")
+            return readTimecodeLabel (text);
+
+        /*  No source to read it under: either grammar. They cannot be confused,
+            eleven characters against eight. */
+        if (auto label = readTimecodeLabel (text))
+            return label;
+
+        return ofTheClock();
+    }
+
     void ShowDocument::beginTransaction (const std::string& commandName,
                                          std::int64_t tick,
                                          const std::string& writeOrigin,
@@ -1488,6 +1592,43 @@ namespace wfg::doc
             value = Value::string (*label);
         }
 
+        /*  A TIME GROUP MEMBER'S START (namespace draft §60, AIL), judged
+            against the source its group reads: a timecode label stored with
+            colons, or a time of day - and empty, a member that never fires,
+            kept and warned. A cue in no time group is held to either grammar,
+            so a time written before the cue is moved in is still a time. */
+        if (target.attribute->row->owner == "timed" && target.attribute->name() == "at")
+        {
+            const auto time = readMemberTime (text, timeSourceOf (target.node.getParent()));
+
+            if (! time.has_value())
+                return EditResult::failed (reason::badValue);
+
+            value = Value::string (*time);
+        }
+
+        /*  WHAT A TIME GROUP HOLDS, KEPT FROM BOTH SIDES (AIK). A member group
+            of one stays a scene the machine paces - a timeline or an automatic
+            sequence - so neither its `mode` nor its `advance` may make it a
+            manual sequence, a sampler or another time group under the group.
+            And a group made a time group must hold only what one may: a group
+            of fades and memos made `time` would be a time group with members
+            no code can start. `bad-value`, the value being what is wrong. */
+        if (target.node.hasType ("Group")
+              && (target.attribute->name() == "mode" || target.attribute->name() == "advance"))
+        {
+            auto after = groupModeOf (target.node);
+            (target.attribute->name() == "mode" ? after.mode : after.advance) = value.getString();
+
+            if (timeGroupRefuses (target.node.getParent(), "Group", after))
+                return EditResult::failed (reason::badValue);
+
+            if (cue::isTimeGroup (after))
+                for (const auto& member : target.node)
+                    if (! timeGroupTakes (member.getType().toString().toStdString(), groupModeOf (member)))
+                        return EditResult::failed (reason::badValue);
+        }
+
         if (target.attribute->element == "Audio"
             && (target.attribute->name() == "inputPatch" || target.attribute->name() == "outputPatch"))
         {
@@ -1599,6 +1740,10 @@ namespace wfg::doc
             //  MTC or LTC, from where, for how long (namespace draft §59).
             if (element == "Timecode")
                 return any ({ "format", "from", "length" });
+
+            //  A time group and what starts it (namespace draft §60).
+            if (element == "Group")
+                return any ({ "mode", "timeSource" });
 
             return false;
         }
@@ -1857,11 +2002,22 @@ namespace wfg::doc
         {
             juce::String lockedTo;
 
+            /*  AND A GROUP BORN INTO A TIME GROUP is judged by the words it is
+                born with (namespace draft §60, AIK): one with none is a manual
+                sequence, which a time group refuses. */
+            cue::GroupMode born;
+
             for (const auto& [name, value] : attributes)
+            {
                 if (name == "lockedTo")
                     lockedTo = juce::String (value);
+                else if (name == "mode")
+                    born.mode = value;
+                else if (name == "advance")
+                    born.advance = value;
+            }
 
-            if (samplerRefuses (parent, elementName, lockedTo))
+            if (samplerRefuses (parent, elementName, lockedTo) || timeGroupRefuses (parent, elementName, born))
                 return EditResult::failed (reason::badAddress);
         }
 
@@ -1943,6 +2099,22 @@ namespace wfg::doc
                 }
 
                 value = Value::string (*label);
+            }
+
+            /*  AND A TIME GROUP MEMBER BORN WITH ITS START, judged against the
+                group it is born into as `setAttribute` judges one written
+                after (namespace draft §60, AIL). */
+            if (attribute->row->owner == "timed" && name == "at")
+            {
+                const auto time = readMemberTime (text, timeSourceOf (parent));
+
+                if (! time.has_value())
+                {
+                    registry.release (objectId);
+                    return EditResult::failed (reason::badValue);
+                }
+
+                value = Value::string (*time);
             }
 
             node.setProperty (juce::Identifier (juce::String (std::string (name))),
@@ -2079,7 +2251,7 @@ namespace wfg::doc
                 moviesPicked.push_back (node[idProperty].toString());
 
         for (const auto& [name, value] : attributes)
-            if (name == "mode" && value == "sampler")
+            if (name == "mode" && cue::isSampler (cue::GroupMode { value, {} }))
                 for (const auto& node : ordered)
                 {
                     const auto lockedTo = node["lockedTo"].toString();
@@ -2090,6 +2262,16 @@ namespace wfg::doc
                                       && std::find (moviesPicked.begin(), moviesPicked.end(), lockedTo) == moviesPicked.end())))
                         return EditResult::failed (reason::typeMismatch);
                 }
+
+        /*  And a new time group only what a time group may hold (namespace
+            draft §60, AIK): sounds, pictures, timelines and automatic
+            sequences, asked before anything is made, with the sampler's
+            refusal. */
+        for (const auto& [name, value] : attributes)
+            if (name == "mode" && cue::isTimeGroup (cue::GroupMode { value, {} }))
+                for (const auto& node : ordered)
+                    if (! timeGroupTakes (node.getType().toString().toStdString(), groupModeOf (node)))
+                        return EditResult::failed (reason::typeMismatch);
 
         // All sources and the destination are validated before the first edit.
         const auto created = createCue (parent[idProperty].toString().toStdString(), position, "group", "", id,
@@ -4918,6 +5100,14 @@ namespace wfg::doc
         if (samplerRefuses (newParent, node) && node.getParent() != newParent)
             return EditResult::failed (reason::badAddress);
 
+        /*  NOR INTO A TIME GROUP what a time group may not hold (namespace draft
+            §60, AIK), with the sampler's exception for a reorder among its own.
+            Its `at` is not judged again: a member moved in from a group reading
+            another source keeps what was written, and `warnings()` says when
+            that no longer reads. */
+        if (timeGroupRefuses (newParent, node) && node.getParent() != newParent)
+            return EditResult::failed (reason::badAddress);
+
         /*  A group cannot be moved inside itself. Without this the tree stops
             being a tree: the subtree detaches with the node and is never seen
             again, and the identifiers in it stay reserved forever. */
@@ -5165,7 +5355,7 @@ namespace wfg::doc
         for (const auto& node : read.nodes)
         {
             if (! parentElement->mayContain (node.getType().toString().toStdString())
-                || samplerRefuses (parent, node, moviesArriving))
+                || samplerRefuses (parent, node, moviesArriving) || timeGroupRefuses (parent, node))
             {
                 for (const auto& id : read.ids)
                     registry.release (id);
@@ -5333,6 +5523,18 @@ namespace wfg::doc
                         problems.push_back (here + ": \"from\" is \"" + text
                                               + "\", which is not a timecode label - HH:MM:SS:FF, two digits"
                                                 " each, hours below 24 and frames below 30");
+
+                    /*  A TIME GROUP MEMBER'S START, by the same judge (namespace
+                        draft §60, AIL) - against no source: text that is neither
+                        a label nor a time of day is a time under no code at all.
+                        One that reads under another source than its group's -
+                        the group's source changed after it was written - opens,
+                        and `warnings()` names it. */
+                    if (attribute->row->owner == "timed" && attributeName == "at"
+                          && ! readMemberTime (text, {}).has_value())
+                        problems.push_back (here + ": \"at\" is \"" + text
+                                              + "\", which is neither a timecode label, HH:MM:SS:FF, nor a time"
+                                                " of day, HH:MM:SS");
                 }
 
                 for (const auto& child : node)
@@ -6028,6 +6230,14 @@ namespace wfg::doc
                             continue;
                         }
 
+                        /*  A TIME GROUP IS ASSERTED (namespace draft §60, AIW):
+                            armed at the first step and re-armed when it is
+                            stopped, so its members are ready whenever the code
+                            reaches them all show. A lifetime the section keeps,
+                            the one group it does. */
+                        if (isTimeGroup (child))
+                            continue;
+
                         if (element != "Fade" && element != "Transport" && element != "Group"
                              && element != "Start")
                             continue;
@@ -6036,8 +6246,8 @@ namespace wfg::doc
                             "/Show/.../Persistent/" + element + "["
                               + child[idProperty].toString().toStdString()
                               + "]: a persistent section asserts media, mic, osc, midi and process cues and"
-                                " nothing else - a fade asserts nothing, a stop is what suspends"
-                                " an assertion, a group is a lifetime rather than a state - so"
+                                " time groups and nothing else - a fade asserts nothing, a stop is what"
+                                " suspends an assertion, any other group is a lifetime rather than a state - so"
                                 " this one is ignored");
                     }
                 }
@@ -6681,6 +6891,99 @@ namespace wfg::doc
                 problems.push_back ("/Show/Sync/@mtcOut: names \"" + mtcOut + "\", a port MIDI cues send"
                                       " SysEx on - a quarter frame waits behind a whole SysEx message, which"
                                       " a reader sees as the code stumbling; give MTC a port of its own");
+
+            /*  TIME GROUPS THAT WILL NOT HEAR THEIR CODE, OR MEMBERS IT WILL NOT
+                START (namespace draft §60), each a WARNING for the reason the
+                ones above are: the show plays, and the repair is a choice.
+
+                An input or a port the incoming code is not on: none named for
+                a group that reads it (never for the wall clock, which is
+                always there); an LTC input wider than one channel - the code
+                is read on one (AIM); an MTC port a control surface uses - what
+                arrives there is the surface's - or the port MTC leaves on,
+                where Go.dot would chase its own code. A member with no time,
+                which never starts, or with one that does not read under its
+                group's source - the source changed after it was written, which
+                the door lets stand (AIL). And a member whose chase decides how
+                its voice changes speed against what its own speed mode says
+                (AIU): the chase wins, and the designer should know. */
+            const auto ltcIn = read ("ltcIn");
+            const auto mtcIn = read ("mtcIn");
+
+            if (! ltcIn.empty())
+                if (const auto input = findById (ltcIn); input.isValid() && input.hasType ("Input"))
+                {
+                    const auto width = juce::String (getAttribute ("/godot/input/" + ltcIn + "/width")
+                                                       .value_or (std::string ("1"))).getIntValue();
+
+                    if (width > 1)
+                        problems.push_back ("/Show/Sync/@ltcIn: names \"" + ltcIn + "\", which is "
+                                              + std::to_string (width) + " channels wide - LTC is read on one"
+                                                " channel; give it an input of its own, one channel wide");
+                }
+
+            if (! mtcIn.empty()
+                  && std::find (surfacePorts.begin(), surfacePorts.end(), mtcIn) != surfacePorts.end())
+                problems.push_back ("/Show/Sync/@mtcIn: names \"" + mtcIn + "\", a port a control surface"
+                                      " uses - what arrives there is the surface's; give MTC a port of its own");
+
+            if (! mtcIn.empty() && mtcIn == mtcOut)
+                problems.push_back ("/Show/Sync/@mtcIn: names \"" + mtcIn + "\", the port MTC leaves on"
+                                      " (mtcOut) - a time group reading it would chase Go.dot's own code;"
+                                      " give the incoming code a port of its own");
+
+            const std::function<void (const juce::ValueTree&)> timed = [&] (const juce::ValueTree& node)
+            {
+                if (isTimeGroup (node))
+                {
+                    const auto groupId = node[idProperty].toString().toStdString();
+                    const auto source = timeSourceOf (node);
+
+                    if ((source == "ltc" && ltcIn.empty()) || (source == "mtc" && mtcIn.empty()))
+                        problems.push_back ("/Show/.../Group[" + groupId + "]/@timeSource: " + source
+                                              + ", and sync/" + source + "In names "
+                                              + (source == "ltc" ? "no input" : "no port")
+                                              + " it comes in on - the group arms and none of its members"
+                                                " starts");
+
+                    for (const auto& member : node)
+                    {
+                        const auto element = member.getType().toString().toStdString();
+
+                        if (ShowDocument::ownerForElement (element) != "cue")
+                            continue;
+
+                        const auto memberId = member[idProperty].toString().toStdString();
+                        const auto here = "/Show/.../" + element + "[" + memberId + "]";
+                        const auto at = member["at"].toString().toStdString();
+
+                        if (at.empty())
+                            problems.push_back (here + "/@at: empty - a member of a time group with no time"
+                                                       " to start at never starts");
+                        else if (! readMemberTime (at, source).has_value())
+                            problems.push_back (here + "/@at: \"" + at + "\" is not "
+                                                  + (source == "clock" ? "a time of day, HH:MM:SS, which"
+                                                                       : "a timecode label, HH:MM:SS:FF, which")
+                                                  + " its group reads "
+                                                  + (source == "clock" ? std::string ("the wall clock")
+                                                                       : (source == "ltc" ? std::string ("LTC")
+                                                                                          : std::string ("MTC")))
+                                                  + " in - it never starts until its time is written again");
+
+                        /*  NO WARNING FOR A CHASE AGAINST THE CUE'S SPEED MODE (AIU):
+                            the chase decides how the sound changes speed, and a
+                            speed mode left at its default reads varispeed, so a
+                            warning here would be said of every timestretch chaser
+                            nobody gave a speed mode. The window shows which one
+                            governs (TG.10). */
+                    }
+                }
+
+                for (const auto& child : node)
+                    timed (child);
+            };
+
+            timed (showNode.getChildWithName ("Lists"));
         }
 
         return problems;

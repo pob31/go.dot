@@ -1342,6 +1342,45 @@ TEST_CASE ("cursor: and on a member of a timeline group, which walks the same wa
     CHECK (previousStandby (list, rig.m1) == rig.top);
 }
 
+TEST_CASE ("cursor: a time group is stepped onto and past, never into, and a member set as the standby parks on the group")
+{
+    /*  A TIME GROUP (namespace draft §60, TG.2): GO on its row arms it, and its
+        code starts its members, so - as for a sampler bank - the walk lands on
+        the group and steps on past it, and none of its members is a stop. Its
+        `advance` reads `manual` by default; read by the old compares it was a
+        manual sequence, and the walk went down into it onto its first member. */
+    CursorRig rig;
+
+    const auto clock = rig.document.createCue (rig.listId, 2, "group", "Clock", {},
+                                               { { "mode", "time" }, { "timeSource", "clock" } }).id;
+    REQUIRE (! clock.empty());
+    const auto sound = rig.document.createCue (clock, 0, "media", "Rain", {}, { { "at", "20:00:00" } }).id;
+    const auto scene = rig.document.createCue (clock, 1, "group", "Storm", {}, { { "mode", "timeline" } }).id;
+    const auto inScene = rig.document.createCue (scene, 0, "memo", "Thunder").id;
+    REQUIRE (! inScene.empty());
+
+    const auto list = rig.list();
+
+    //  Onto its row from either side, and past it - never into it.
+    CHECK (nextStandby (list, rig.m3) == clock);
+    CHECK (nextStandby (list, clock) == rig.auto_);
+    CHECK (previousStandby (list, rig.auto_) == clock);
+    CHECK (previousStandby (list, clock) == rig.m3);
+
+    //  The group is a place; nothing in it is.
+    CHECK (mayStandOn (list, clock));
+    CHECK_FALSE (mayStandOn (list, sound));
+    CHECK_FALSE (mayStandOn (list, scene));
+    CHECK_FALSE (mayStandOn (list, inScene));
+
+    //  Asked to stand on a member, the pointer parks on the group, as for a sampler's.
+    REQUIRE (rig.run (1, "standby.set", { osc::Value::string (rig.top) }).applied == 1);
+    CHECK (rig.run (2, "standby.set", { osc::Value::string (sound) }).applied == 1);
+    CHECK (rig.standbyOf (rig.listId) == clock);
+    CHECK (rig.run (3, "standby.set", { osc::Value::string (inScene) }).applied == 1);
+    CHECK (rig.standbyOf (rig.listId) == clock);
+}
+
 TEST_CASE ("cursor: a cue two groups deep, with a non-manual group between it and the list, is a stop")
 {
     /*  The rule is "anywhere the pointer is allowed to be", not "one level in",

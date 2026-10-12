@@ -108,6 +108,10 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # leave, how loud LTC is. Named `sync` and not `timecode`, which
                 # the cue kind already is.
                 "sync",
+                # What a time group's member carries (namespace draft 60, AIJ):
+                # the time it starts at and how it chases the code. A sound, a
+                # picture and a group all carry it, as `member` is carried.
+                "timed",
                 # A serial port (namespace draft 51, ACR; PC.10): an Arduino on
                 # USB, its path on this machine and its speed.
                 "serial",

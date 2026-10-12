@@ -295,6 +295,11 @@ namespace wfg::cue
         return osc::parseDouble (textOf (cue, name)).value_or (0.0);
     }
 
+    GroupMode Runner::groupMode (const juce::ValueTree& cue) const
+    {
+        return { textOf (cue, "mode"), textOf (cue, "advance") };
+    }
+
     namespace
     {
         /*  THE LOGICAL CHANNEL LTC PLAYS ON, or -1 (namespace draft §59, AHI):
@@ -692,7 +697,7 @@ namespace wfg::cue
             never checked: a second GO on a running timeline group at the top
             of a list starts the scene again. Changing that is the author's
             call and not this phase's (namespace draft §16.12 records it). */
-        if (fireAtOnce && kind == "group" && textOf (cue, "mode") == "sampler")
+        if (fireAtOnce && kind == "group" && isSampler (groupMode (cue)))
             if (const auto* live = liveUntakenRunOf (cueId))
             {
                 if (auto* armed = runs.find (live->id))
@@ -703,6 +708,19 @@ namespace wfg::cue
 
                 return live->id;
             }
+
+        /*  AND GO ON AN ARMED TIME GROUP ADOPTS IT (namespace draft §60, AIX):
+            it is already waiting for its code, and a second run beside it would
+            fire every member twice when the code reached it. No refresh: a time
+            group holds no strips to claim back.
+
+            NOT ONE ON ITS WAY OUT - stopped by Esc or a stop cue and running its
+            footer: that one is no longer waiting for anything, and the GO that
+            follows the stop is asking for the group armed again, so it gets a
+            run of its own while the old one finishes its release. */
+        if (fireAtOnce && kind == "group" && isTimeGroup (groupMode (cue)))
+            if (const auto* live = liveUntakenRunOf (cueId); live != nullptr && ! goingOut (*live))
+                return live->id;
 
         /*  AND A GROUP THE HORIZON PREPARED IS ADOPTED, not made a second time.
 
@@ -865,12 +883,12 @@ namespace wfg::cue
             the operator is not its parent the way they are a manual
             sequence's - no GO steps through its members, a hand on a strip
             launches them - so the pointer does not descend into it and a
-            surface may fire it by name to arm it. */
+            surface may fire it by name to arm it. NOR A TIME GROUP (namespace
+            draft §60), whose `advance` reads `manual` by default and whose
+            members its code starts: fired by name or by a trigger, it arms. */
         return cue.isValid()
                  && cue.getType().toString() == "Group"
-                 && textOf (cue, "mode") != "timeline"
-                 && textOf (cue, "mode") != "sampler"
-                 && textOf (cue, "advance") != "auto";
+                 && isManual (groupMode (cue));
     }
 
     std::vector<juce::ValueTree> Runner::descentTo (const juce::ValueTree& list,
@@ -1396,7 +1414,7 @@ namespace wfg::cue
                     not fired there, and its takeover must not depend on which
                     road the GO took. */
                 if (const auto cue = document.findById (run->cue);
-                    cue.isValid() && textOf (cue, "mode") == "sampler")
+                    cue.isValid() && isSampler (groupMode (cue)))
                     takeOverFrom (runId, cue);
             }
 
@@ -2003,8 +2021,17 @@ namespace wfg::cue
 
                 /*  A PROCESS CUE IS ASSERTED AS A SOUND IS (namespace draft §51,
                     ACL): left alone while it runs, started again from its patch's
-                    beginning when it does not, suspended by the pane's kill. */
-                if (kind == "media" || kind == "mic" || kind == "process")
+                    beginning when it does not, suspended by the pane's kill.
+
+                    AND A TIME GROUP (namespace draft §60, AIW), the one group the
+                    solver plans: left alone while it is armed, armed again when it
+                    is not. Esc is a STOP for it and never K8's pause - a group
+                    holds no playhead to carry on from, and `pausePersistent`
+                    takes sounds only - so it comes down through its footer with
+                    everything else, and the next step arms it again. A stop cue
+                    before the pointer suspends it, as it suspends a bed; the
+                    pane's kill for the session. */
+                if (kind == "media" || kind == "mic" || kind == "process" || kind == "group")
                 {
                     /*  STILL SOUNDING, and left alone - unless it is the run
                         Esc paused, still on its way out over the panic fade:
@@ -2940,7 +2967,7 @@ namespace wfg::cue
                 pre-wait - has nothing sounding to wait on, so it waits on the
                 member due first; with nothing awaited it waited for an armed
                 member nothing would arm, for ever. */
-            if (textOf (cue, "mode") != "timeline")
+            if (! isTimeline (groupMode (cue)))
             {
                 if (job.awaiting.empty() && firstDue != nullptr)
                     job.awaiting = firstDue->id;
@@ -4836,7 +4863,7 @@ namespace wfg::cue
                         armed beside the bank it should have closed. Only ever
                         after a GO: a block is launched by its parent's members,
                         and not by its parent's preparation (IE). */
-                    if (textOf (cue, "mode") == "sampler")
+                    if (isSampler (groupMode (cue)))
                         takeOverFrom (runId, cue);
                 }
 
@@ -4846,7 +4873,7 @@ namespace wfg::cue
             /*  A SAMPLER GROUP ARMING TAKES OVER (PRD §3.27): with
                 `takeover=group` every other armed sampler group is closed, in
                 this handler, so a replay closes the same ones. */
-            if (textOf (cue, "mode") == "sampler")
+            if (isSampler (groupMode (cue)))
                 takeOverFrom (runId, cue);
 
             GroupJob job;
@@ -7414,7 +7441,7 @@ namespace wfg::cue
 
             const auto otherCue = document.findById (other.cue);
 
-            if (! otherCue.isValid() || textOf (otherCue, "mode") != "sampler")
+            if (! otherCue.isValid() || ! isSampler (groupMode (otherCue)))
                 continue;
 
             if (auto* closing = runs.find (other.id))
@@ -8446,8 +8473,7 @@ namespace wfg::cue
             own, so it does not reach through. */
         const auto automatic = [this] (const juce::ValueTree& node)
         {
-            return node.isValid() && node.getType().toString() == "Group" && ! isManualGroup (node)
-                     && textOf (node, "mode") != "sampler";
+            return node.isValid() && node.getType().toString() == "Group" && pacedByMachine (groupMode (node));
         };
 
         if (! automatic (document.findById (standby)))
@@ -9609,7 +9635,9 @@ namespace wfg::cue
             red team A major) - not a member's run merely existing, which the
             horizon's arms adopted with a block always are - and none is in its
             footer, loops, shuffles, plays some of its members or is a sampler
-            bank (ruling 17, L4): those start from their top. */
+            bank (ruling 17, L4): those start from their top. A time group too
+            (namespace draft §60, AIX): the corrected GO arms it afresh, as a
+            bank is armed afresh. */
         for (const auto* run : inOrder)
         {
             if (! run->isGroup() || run->isFinished())
@@ -9620,7 +9648,7 @@ namespace wfg::cue
             const auto play = numberOf (groupCue, "play");
 
             if (run->state == runState::preparing || run->iterations != 1
-                  || textOf (groupCue, "selection") == "shuffle" || textOf (groupCue, "mode") == "sampler"
+                  || textOf (groupCue, "selection") == "shuffle" || armedUntilStopped (groupMode (groupCue))
                   || (play > 0.0 && play < static_cast<double> (members.size())))
                 return std::nullopt;
 
@@ -9697,7 +9725,7 @@ namespace wfg::cue
 
             const auto* parent = runs.find (run->parent);
             const auto inSequence = run->id != rootId && parent != nullptr && parent->isGroup()
-                                      && textOf (document.findById (parent->cue), "mode") != "timeline";
+                                      && ! isTimeline (groupMode (document.findById (parent->cue)));
             const auto waiting = run->state == runState::waiting;
             const auto remaining = seconds (std::max<std::int64_t> (0, run->dueTick - tick));
 
@@ -12191,7 +12219,7 @@ namespace wfg::cue
         /*  ONLY A SCENE THE WALK TIMES AS WRITTEN - a timeline or an automatic
             sequence that plays once, its members in order - has a second to be
             put back at (L14). */
-        if (! group.isValid() || textOf (group, "mode") == "sampler" || ! seeksAsWritten (*scene, group))
+        if (! group.isValid() || armedUntilStopped (groupMode (group)) || ! seeksAsWritten (*scene, group))
         {
             back.items.push_back (label + ": stopped by the GO - not started again (only a scene that plays once"
                                           " by itself can be put back where it would be)");
@@ -13005,7 +13033,15 @@ namespace wfg::cue
         const auto parent = cue.getParent();
 
         return parent.isValid() && parent.getType().toString() == "Group"
-                 && textOf (parent, "mode") == "sampler";
+                 && isSampler (groupMode (parent));
+    }
+
+    bool Runner::isTimeMember (const std::string& cueId) const
+    {
+        const auto parent = document.findById (cueId).getParent();
+
+        return parent.isValid() && parent.getType().toString() == "Group"
+                 && isTimeGroup (groupMode (parent));
     }
 
     std::string Runner::pressMember (Engine& engine, std::int64_t tick, const std::string& cueId,
@@ -16218,7 +16254,7 @@ namespace wfg::cue
             if (auto* adopted = runs.find (id); adopted != nullptr && ! adopted->sampler)
                 if (const auto* parent = runs.find (parentRun))
                     if (const auto parentCue = document.findById (parent->cue);
-                        parentCue.isValid() && textOf (parentCue, "mode") == "sampler"
+                        parentCue.isValid() && isSampler (groupMode (parentCue))
                           && (kind == "media" || kind == "video"))
                     {
                         adopted->sampler = true;
@@ -16297,7 +16333,7 @@ namespace wfg::cue
         if (kind == "media" || kind == "video")
             if (const auto* parent = runs.find (parentRun))
                 if (const auto parentCue = document.findById (parent->cue);
-                    parentCue.isValid() && textOf (parentCue, "mode") == "sampler")
+                    parentCue.isValid() && isSampler (groupMode (parentCue)))
                 {
                     run->sampler = true;
                     const auto stripId = stripForMember (parentCue, cueId);
@@ -16459,8 +16495,7 @@ namespace wfg::cue
             Ignored rather than refused at load, because the pair is meaningful
             the moment somebody makes the group automatic - which is a toggle
             §3.6 expects during tech. */
-        const auto manual = textOf (group, "mode") != "timeline"
-                              && textOf (group, "advance") != "auto";
+        const auto manual = ! pacedByMachine (groupMode (group));
 
         const auto shuffles = ! manual && textOf (group, "selection") == "shuffle";
         const auto authored = static_cast<std::int32_t> (numberOf (group, "seed"));
@@ -16891,11 +16926,21 @@ namespace wfg::cue
                 waited on in order. What the phase does every tick is keep the
                 bank armed - its own function, because it shares nothing with
                 the loop below but the phase's name. */
-            if (job.phase == groupPhase::members && textOf (group, "mode") == "sampler")
+            if (job.phase == groupPhase::members && isSampler (groupMode (group)))
             {
                 samplerTick (engine, job, group, *run);
                 continue;
             }
+
+            /*  A TIME GROUP'S MEMBERS ARE NOT A ROUND EITHER (namespace draft
+                §60, AIE): GO armed it, and its code starts each member at the
+                time the member names - TG.7's `timeTick`, here, once a code is
+                read. Until then the phase spawns nothing, launches nothing and
+                waits on nothing, and the group stays armed until it is stopped:
+                Esc and a stop cue end it through its footer, a double Esc and a
+                kill without, as they end any group (AIX). */
+            if (job.phase == groupPhase::members && isTimeGroup (groupMode (group)))
+                continue;
 
             if (job.phase == groupPhase::members && run->iteration > 0)
                 job.phaseCues = run->round;
@@ -16910,7 +16955,7 @@ namespace wfg::cue
             }
 
             const auto timeline = job.phase == groupPhase::members
-                                    && textOf (group, "mode") == "timeline";
+                                    && isTimeline (groupMode (group));
 
             /*  THE CHILDREN OF THIS PHASE, and not every child of the run.
 
@@ -17012,7 +17057,7 @@ namespace wfg::cue
                 whatever the group says: they are the group's own preparation and
                 release, and an operator does not step through them. */
             const auto manual = job.phase == groupPhase::members
-                                  && textOf (group, "advance") != "auto";
+                                  && isManual (groupMode (group));
 
             if (manual)
             {
@@ -17070,10 +17115,13 @@ namespace wfg::cue
                 itself arms one and moves on at once - waiting for it to finish
                 would hold the rest of the scene for as long as the pads were
                 live, which is the whole of the time they are wanted. */
+            /*  AND A TIME GROUP THE SAME (namespace draft §60): armed, it waits
+                for its code until somebody stops it, so the sequence hands it
+                over and goes on. */
             const auto handedOver = [this] (const Run& member)
             {
                 return member.kind == "group" && member.state == runState::playing
-                         && textOf (document.findById (member.cue), "mode") == "sampler";
+                         && armedUntilStopped (groupMode (document.findById (member.cue)));
             };
 
             if (awaited == nullptr || ! (awaited->isFinished() || handedOver (*awaited)))
@@ -17196,8 +17244,13 @@ namespace wfg::cue
             any order, so `selection`, `play` and `loops` mean nothing to it -
             the manual group's rule (namespace draft §12.5), for the same
             reason. Its phase is its media members, and the scheduler's tick
-            arms them; nothing is spawned here. */
-        const auto sampler = phase == groupPhase::members && textOf (group, "mode") == "sampler";
+            arms them; nothing is spawned here.
+
+            NOR A TIME GROUP (namespace draft §60, AIE): its code starts each
+            member at its own time, in no order a round could draw, and the
+            phase is its members as written - nothing spawned, nothing drawn,
+            nothing logged as a round. */
+        const auto sampler = phase == groupPhase::members && armedUntilStopped (groupMode (group));
 
         auto cues = sampler ? membersOf (group)
                   : phase == groupPhase::members
@@ -17235,7 +17288,7 @@ namespace wfg::cue
             return true;
 
         const auto timeline = phase == groupPhase::members
-                                && textOf (group, "mode") == "timeline";
+                                && isTimeline (groupMode (group));
 
         const auto childRuns = runs.childrenOf (job.run);
 
@@ -18255,11 +18308,16 @@ namespace wfg::cue
 
         /*  A SAMPLER GROUP LAUNCHES NOTHING FIRST: GO arms every member onto
             its strip at once, and a member armed ahead without a strip would be
-            a voice held for a cue no hand could press. */
-        if (textOf (cue, "mode") == "sampler")
+            a voice held for a cue no hand could press.
+
+            NOR A TIME GROUP (namespace draft §60): GO arms it and its code
+            starts the members, each at its own time - which may be an hour
+            away - so the horizon prepares nothing inside it; the read-ahead
+            for the code is TG.7's, about two seconds before each time. */
+        if (armedUntilStopped (groupMode (cue)))
             return {};
 
-        const auto timeline = textOf (cue, "mode") == "timeline";
+        const auto timeline = isTimeline (groupMode (cue));
 
         std::vector<juce::ValueTree> out;
 
@@ -18716,7 +18774,7 @@ namespace wfg::cue
 
             const auto group = document.findById (bank.cue);
 
-            if (! group.isValid() || textOf (group, "mode") != "sampler")
+            if (! group.isValid() || ! isSampler (groupMode (group)))
                 continue;
 
             for (const auto& member : placeMembers (document, group, samplerStrips()))
@@ -23164,6 +23222,27 @@ namespace wfg::cue
                                   && runner.isManualGroup (cue))
                                 return Outcome::rejected (reason::needsGo);
 
+                            /*  A TIME GROUP'S MEMBER IS STARTED BY ITS CODE
+                                (namespace draft §60, AIE), and nothing reads a
+                                code yet: refused, armed or not, with the word
+                                a cue only its group's own pace may start already
+                                carries - `needs-go`, since what it needs first
+                                is a GO on its group. The time group itself is
+                                fired: GO, a name or a trigger arms it.
+
+                                WHAT TG.7 SHOULD MAKE OF IT (the implementer's
+                                call, the author's to overrule): a member fired
+                                by name while its group is armed is a manual
+                                start - begun now, from its top, free-running, as
+                                if the code had reached its time; the hand an
+                                operator reaches for when the code has failed,
+                                as a sampler member fired by name is a press on
+                                its strip. Still `needs-go` while its group is
+                                not armed, as a sampler member is `needs-strip`
+                                with no bank armed. */
+                            if (runner.isTimeMember (cueId))
+                                return Outcome::rejected (reason::needsGo);
+
                             /*  A SAMPLER MEMBER FIRED BY NAME IS A PRESS on the
                                 strip it holds (plan decision 10) - which is what
                                 a take from the live recorder replays - and with
@@ -23374,6 +23453,13 @@ namespace wfg::cue
                                 press that is never coming. */
                             if (cue.getType().toString() == "Group"
                                   && runner.isManualGroup (cue))
+                                return Outcome::rejected (reason::needsGo);
+
+                            /*  NOR A TIME GROUP'S MEMBER, which its code starts
+                                (namespace draft §60): `cue.fire`'s refusal, and
+                                its reason. A trigger on the time group itself
+                                arms it, as GO does. */
+                            if (runner.isTimeMember (cueId))
                                 return Outcome::rejected (reason::needsGo);
 
                             /*  A trigger on a sampler member presses its strip,

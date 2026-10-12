@@ -26677,7 +26677,8 @@ Mine, the author's to overrule:
 - **AIT** (mine) **The jump**: inside one slice, a crossfaded jump on the voice; across slices, a seek,
   with its gap warned; a picture cuts rather than crossfades.
 - **AIU** (mine) **The chase method sets the voice's mode**: `varispeed` resamples, `timestretch`
-  stretches, whatever the cue's own speed mode says - and a cue saying otherwise is warned.
+  stretches, whatever the cue's own speed mode says; a cue saying otherwise is not warned, since a speed
+  mode left at its default reads varispeed and every timestretch chaser would be.
 - **AIV** (mine) **A group member's descendants are placed on the code**, and steered by the member's
   method.
 - **AIW** (mine) **In the Persistent section** a time group is asserted - armed at the first step,
@@ -26724,7 +26725,7 @@ Mine, the author's to overrule:
 `bad-value` at the write door for an `at` that does not read at the parent's source, and for a
 member a time group cannot hold (AIK). Warnings in the show: a time group whose source has no input,
 a member with an empty or unreadable `at`, `mtcIn` a surface's port or the port MTC leaves on, `ltcIn`
-wider than one channel, a member's speed mode that its chase method overrides (AIU).
+wider than one channel. A chase against the cue's own speed mode is not warned (AIU): the chase decides.
 
 ### 60.6 Stages
 
@@ -26790,3 +26791,94 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   back on, and fired for one never written to; the earlier clock cases through a helper that moves
   both clocks alike. Two deliberate breakages beyond the red first run (the memory keyed by
   trigger alone; `enabled` read off the node) each turned their own cases red.
+- **TG.2**, 2026-10-12: the time group in the document, and an idle group that arms and stops (AIE,
+  AIJ, AIK, AIL, AIM, AIW, AIX). The rows of 60.3: `group/mode` gains `time`; `group/timeSource`
+  (`ltc|mtc|clock`, `ltc` by default); the owner `timed`, last on Media, Video and Group, with `at`
+  (empty by default) and `chase` (`free` by default) - no name of either on any other owner those
+  elements carry, a clock trigger's `at` being the trigger's; `sync/ltcIn` (an input), `sync/mtcIn`
+  (a port), `sync/chaseTolerance` 10 ms, `chaseJump` 0.25 s, `chaseRate` 1 %, `chaseCrossfade`
+  10 ms; and the readouts `sync/{ltc,mtc}In{State,Code,Rate,Speed}` and `run/chaseError`,
+  `run/chaseState`, published at rest - `none`, empty, nought - until TG.5 reads a code. `show.rng`
+  regenerated. Nothing of it is written into a show that does not use it, so no fixture moved.
+  **`cue/GroupMode.h`** names the questions a group's two words answer - `isSampler`,
+  `isTimeGroup`, `armedUntilStopped` (either), `isTimeline`, `isSequence`, `isAutoSequence`,
+  `pacedByMachine` (a timeline or an automatic sequence), `isManual` - std only, so the desktop
+  client's model asks them of the published tree with the engine's own functions; an empty word reads
+  as the table's default, so a node read raw answers as one read through the getters. The Runner
+  reads the words through `textOf` (`Runner::groupMode`), the walk through its `Reader`, the pointer's
+  walk and the document's door off the node. Every compare of a group's `mode` went through it, in a
+  refactor first with no behaviour change (unit.C 613 s and unit.fr_FR 607 s green before `time`
+  existed): in the Runner the second GO's refresh of a bank, `isManualGroup`, the adopted bank's
+  takeover (three doors), the seated sequence's waits, the bank closing others, `reaches`, Doh!'s
+  root and its put-back, `inSequence` in Doh!'s plan, `isSamplerMember`, a member's strip (two),
+  `drawRound`'s manual, `advanceGroups` (the bank's tick, the timeline, the manual sequence, the bank
+  a sequence hands over), `beginPhase` (twice), `launchedFirst` (twice), the bank's pictures read
+  ahead; `seekableNow` through `roundSolvable`; in the walk `mayLandHere`, the timeline's members,
+  `timingInside`, `groupLength`, `endsOnItsOwn`; in the solver `roundSolvable` and `planRound`;
+  `CueList`'s manual sequence and the bank the pointer does not search; `SamplerLayout`; the
+  document's sampler and the wrap's; and in the client `iconFor`, the follow mark, the inspector's
+  bank (twice), a drag into a bank, the scrub's refusal, the bank's runs, a member's row, the timeline
+  panel (three), a new cue outside a bank and a drop into a timeline. Two corners moved, and no test
+  noticed either: the client's timeline panel no longer works out a length for a sampler bank set to
+  advance by itself, which the engine's walk never did; and `drawRound` reads such a bank as manual,
+  which no bank reaches, since a bank draws no round.
+  **An idle time group in the Runner.** GO arms it: its run plays and enters its members phase,
+  `beginPhase` lists its members as a bank's and spawns nothing, and `advanceGroups` passes it by -
+  the seam TG.7's `timeTick` goes in; it never ends on its own (`endsOnItsOwn`), so it is still armed
+  after thirty seconds of ticks. The standby steps onto its row and past it, never in (`findOnPath`
+  passes it by as a bank), and `standby.set` on a member parks on the group as on a bank's member
+  (`nearestStop`). A second GO adopts the armed run - not one on its way out, stopped and running
+  its footer: the GO after a stop arms it again, a run of its own (the implementer's call). Fired by
+  name or by a trigger it arms; `needs-go` was what the old compares answered, its `advance` reading
+  `manual`. A member fired by name or by a trigger is refused `needs-go`, armed or not: nothing reads
+  a code yet; the implementer recommends that TG.7 make one fired while its group is armed a manual
+  start - from its top, free-running, as if the code had reached it - and keep `needs-go` while the
+  group is not, as a bank's member is `needs-strip` (the author's to overrule). Esc and a stop cue end
+  it through its footer, a double Esc without. Doh! takes back the GO that armed it and puts the
+  pointer back on it, and the corrected GO arms it from its top (L4). The horizon prepares nothing
+  inside it (`launchedFirst`), a sequence holding one hands it over and goes on, and Doh! neither
+  resumes nor puts one back at a second.
+  **The Persistent section (AIW).** `solvePersistent` plans a time group, the one group it does, and
+  `assertPersistent` arms it at the first step and again at the next one after it is not armed; Esc is
+  a stop for it - `pausePersistent` takes sounds only - so the next step re-arms it; a stop cue before
+  the pointer suspends it, as it suspends a bed, and the pane's kill for the session. The section's
+  warning no longer names a time group, and says it asserts time groups.
+  **Membership (AIK).** `timeGroupRefuses` beside `samplerRefuses`: a sound, a picture, a timeline or
+  an automatic sequence; refused `bad-address` at create - a group judged by the words it is born
+  with, so one born with none is a manual sequence - at a move (a reorder among its own excepted) and
+  at a paste; `type-mismatch` at a wrap, as a bank's; header, footer and triggers free. And from both
+  sides at the write door, `bad-value`: `mode=time` on a group holding anything else, and a `mode` or
+  an `advance` that would make a member group a manual sequence, a bank or a time group.
+  **The label judge (AIL)**, `doc::readMemberTime`: under `ltc` and `mtc` the timecode label TC.1's
+  judge reads, stored with colons; under `clock` a time of day as `secondOfDayFor` reads a clock
+  trigger's, kept as typed; for a cue in no time group either grammar - eleven characters against
+  eight, never confused; empty kept, a member that never fires. Asked at the write door and at a
+  cue's birth against its group's source; `validate()` refuses only text neither grammar reads (a
+  file edited by hand); a group's source changed, a member moved or pasted keeps what was written,
+  opens, and is named by `warnings()`.
+  **Warnings**, with the show's others: a time group whose source has no input (never the clock); an
+  LTC input wider than a channel; an MTC input a surface uses, or the port MTC leaves on; a member
+  with no time, or one that does not read under its group's source. A chase against the cue's own
+  `rateMode` is not warned (AIU): the chase decides, and a mode left at its default reads `varispeed`,
+  so every timestretch chaser would be (a first draft warned it, and was taken out). The
+  automatic name is the implementer's, for TG.10 to put to the author: "Time group on LTC", "on MTC",
+  "on the wall clock", fed by `mode` and `timeSource`. In the client, `greyWhatOnlyACodeAsks` greys
+  `at` and `chase` but on a time group's member, `timeSource` but on a time group, and a time group's
+  round rows; a time group draws the plain group's icon, and its scrub says nothing, until TG.10's
+  words; the console's row says `time`.
+  Tests under C and fr_FR: `TimeGroupTests` (new: armed, idle and past by the standby for thirty
+  seconds; a second GO adopting; fired by name and by a trigger; members refused armed or not; Esc
+  with its footer, a double Esc without, a stop cue; Doh!; the Persistent section at the first step,
+  left alone at the second, down at Esc and armed again at the next; a replay), `DocumentTests` (the
+  rows; what a time group holds at create, move, paste and wrap; `mode=time` and a member group's
+  words; the judge per source, at birth, after a source change and a move, through a save; the
+  warnings; the section and the name), `SolverTests`, `CueListTests`, `TreeTests`, `ClientTests`
+  (the greying; the predicates, the icon, the follow mark, the panel's length, the scrub). Eighteen
+  cases, green in both locales; `schema.generated`, `wfg.schema` in both, `schema.fixtures`,
+  `client.boundary`, the replay and command gates; unit.C (609 s) and unit.fr_FR (614 s) whole. Eleven
+  deliberate breakages: ten turned their own cases red; the eleventh, `advanceGroups` without its
+  time-group branch, did not - `beginPhase` already spawns nothing for one - and the branch stays as
+  the seam TG.7 fills. Left for later: a load to time past the GO that armed a time group does not arm
+  it, as it does not arm a bank (TG.8); a member with an endless range before the aim is planned by
+  `solve` as still going though no code started it (TG.7, TG.8); the inspector's words and order for
+  the new rows, a drag refused in words, the icon (TG.10).

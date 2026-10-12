@@ -107,6 +107,7 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/AutoName.cpp
     wfg/engine/cue/ShowWalk.h
     wfg/engine/cue/Override.h
+    wfg/engine/cue/GroupMode.h
     wfg/engine/cue/Solver.h
     wfg/engine/cue/Solver.cpp
     wfg/engine/cue/SlotAnalysis.h

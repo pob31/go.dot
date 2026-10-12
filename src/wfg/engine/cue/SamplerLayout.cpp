@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/SamplerLayout.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/cue/Override.h>
 
 #include <wfg/engine/document/ShowDocument.h>
@@ -42,7 +43,7 @@ namespace wfg::cue
         bool isSamplerGroup (const doc::ShowDocument& document, const juce::ValueTree& node)
         {
             return node.getType().toString() == "Group"
-                && cueRow (document, idOf (node), "mode") == "sampler";
+                && isSampler (GroupMode { cueRow (document, idOf (node), "mode"), {} });
         }
 
         /*  A SOUND LOCKED TO A MOVIE (namespace draft 37.5, WJ): its `lockedTo`

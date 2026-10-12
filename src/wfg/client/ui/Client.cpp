@@ -87,6 +87,7 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/TakePictures.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/video/Ffmpeg.h>
 #include <wfg/engine/process/PatchEditor.h>
@@ -4445,7 +4446,7 @@ namespace wfg::client
                                                          const std::string& kind) const
             {
                 if (latest == nullptr || kind == "media" || kind == "video" || parent.empty()
-                    || model::text (*latest, "/godot/cue/" + parent + "/mode") != "sampler")
+                    || ! cue::isSampler (cue::GroupMode { model::text (*latest, "/godot/cue/" + parent + "/mode"), {} }))
                     return { parent, index };
 
                 const auto above = model::text (*latest, "/godot/cue/" + parent + "/parent");

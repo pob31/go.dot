@@ -17,6 +17,7 @@
 #include <wfg/client/model/RunModel.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -133,14 +134,20 @@ namespace wfg::client::model
             if (row.kind != "group" || row.state != "playing" || row.seekable)
                 return {};
 
-            const auto cue = "/godot/cue/" + row.cueId + "/";
-            const auto mode = text (snapshot, cue + "mode");
+            const auto base = "/godot/cue/" + row.cueId + "/";
+            const cue::GroupMode group { text (snapshot, base + "mode"), text (snapshot, base + "advance") };
 
-            if (mode == "sampler")
+            if (cue::isSampler (group))
                 return "A sampler group is played by hand \xe2\x80\x94 it cannot be scrubbed";
 
-            if (mode != "timeline" && text (snapshot, cue + "advance") != "auto")
+            if (cue::isManual (group))
                 return "A manual sequence is played by GO \xe2\x80\x94 it cannot be scrubbed";
+
+            /*  A TIME GROUP IS PLAYED BY ITS CODE (namespace draft §60), and its
+                words are the window's round (TG.10, AJA): until then it says
+                nothing, rather than the round below it never begins. */
+            if (cue::isTimeGroup (group))
+                return {};
 
             const auto phase = at (snapshot, row.id, "phase");
 
@@ -482,7 +489,7 @@ namespace wfg::client::model
             row.iterations = static_cast<int> (osc::parseDouble (at (snapshot, id, "iterations")).value_or (1.0));
 
             if (row.kind == "group" && ! row.cueId.empty()
-                 && text (snapshot, "/godot/cue/" + row.cueId + "/mode") == "sampler")
+                 && cue::isSampler (cue::GroupMode { text (snapshot, "/godot/cue/" + row.cueId + "/mode"), {} }))
                 samplerGroups.insert (id);
 
             /*  WHAT IT IS WAITING FOR, and for a sampler member the strip it

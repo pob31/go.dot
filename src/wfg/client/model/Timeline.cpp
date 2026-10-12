@@ -17,6 +17,7 @@
 #include <wfg/client/model/Timeline.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -78,14 +79,13 @@ namespace wfg::client::model
                  || ! text (snapshot, base + "footer").empty())
                 return false;
 
-            auto mode = text (snapshot, base + "mode");
+            /*  A SCENE THE MACHINE PACES, as the engine's walk asks it: a
+                timeline or a sequence that advances by itself - never a bank a
+                hand plays, nor a group a code starts, whose length nobody can
+                know. */
+            const cue::GroupMode mode { text (snapshot, base + "mode"), text (snapshot, base + "advance") };
 
-            if (mode.empty())
-                mode = "sequence";
-
-            const auto advance = text (snapshot, base + "advance");
-
-            if (mode != "timeline" && advance != "auto")
+            if (! cue::pacedByMachine (mode))
                 return false;
 
             const auto rounds = static_cast<int> (osc::parseDouble (
@@ -102,7 +102,7 @@ namespace wfg::client::model
             if (rounds < 1 || plays != 0 || selection != "sequential")
                 return false;
 
-            const auto timeline = mode == "timeline";
+            const auto timeline = cue::isTimeline (mode);
             auto running = 0.0;
             auto furthest = 0.0;
 
@@ -196,7 +196,7 @@ namespace wfg::client::model
             starts when the one before it finishes, so where a bar sits is
             arithmetic rather than a decision and moving it would move
             everything after it without being asked. */
-        out.draggable = out.mode == "timeline";
+        out.draggable = cue::isTimeline (cue::GroupMode { out.mode, {} });
 
         const auto order = words (text (snapshot, base + "order"));
 
@@ -227,7 +227,7 @@ namespace wfg::client::model
                 running sum, and one unknown length ends the arithmetic for
                 everything after it - the same rule the engine's own walk
                 applies, and for the same reason. */
-            if (out.mode == "timeline")
+            if (out.draggable)
             {
                 bar.at = bar.preWait;
             }

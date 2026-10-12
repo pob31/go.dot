@@ -134,7 +134,7 @@ namespace wfg::doc
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Process", "Timecode", "Header", "Footer", "Trigger" },
-                                                                          { "cue", "group", "mark" } },
+                                                                          { "cue", "group", "mark", "timed" } },
 
                 /*  A HEADER AND A FOOTER ARE ORDINARY CUE LISTS (§3.6), which
                     is why they are elements holding cues rather than a word on
@@ -199,9 +199,15 @@ namespace wfg::doc
                     AND AFTER THEM THE `mark` ROWS (namespace draft §50, ABT): the
                     mapping the cue's DCA mark carries - the picture's curve and
                     the sound's offset - which a mic, a video cue and a group
-                    carry too. Last again, for the same reason. */
+                    carry too. Last again, for the same reason.
+
+                    AND THE `timed` ROWS AFTER THOSE (namespace draft §60, AIJ):
+                    what a time group's member carries - the time it starts at
+                    and how it chases the code - which a video cue and a group
+                    carry too, since a time group's members are sounds, pictures,
+                    timelines and automatic sequences (AIK). Last again. */
                 { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Section", "Trigger", "Fx" },
-                                                          { "cue", "sound", "media", "member", "mark" } },
+                                                          { "cue", "sound", "media", "member", "mark", "timed" } },
 
                 /*  A LIVE INPUT PLAYED AS A CUE (Phase 9b, decisions BW and CE):
                     a cue first, a sound second - the same level, routing, DCA,
@@ -222,7 +228,8 @@ namespace wfg::doc
                     Send, nothing of a voice. And a sampler member's rows, as a
                     sound's (namespace draft §49): played from a strip, its
                     fader is how solid it is. */
-                { "Video",  true,  { "Trigger", "Range", "Section" }, { "cue", "video", "member", "mark" } },
+                { "Video",  true,  { "Trigger", "Range", "Section" },
+                                                          { "cue", "video", "member", "mark", "timed" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,

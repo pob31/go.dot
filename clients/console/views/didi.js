@@ -257,11 +257,15 @@ function cueRow(id, depth, section, rail, standby, out) {
   const flags = [];
 
   /*  A SAMPLER GROUP SAYS `pads` (Phase 6): GO arms it and hands play it, so
-      neither "auto" nor "manual" is true of it - its `advance` is never read. */
+      neither "auto" nor "manual" is true of it - its `advance` is never read.
+      A TIME GROUP SAYS `time` (namespace draft 60), its mode's own word, as a
+      timeline says `timeline`: GO arms it and its code starts the members, so
+      its `advance` - `manual` by default - is never read either. */
   if (isGroup) {
     const mode = tree.cue(id, "mode", "sequence");
     const advance = tree.cue(id, "advance", "manual");
     flags.push(mode === "timeline" ? "timeline" : mode === "sampler" ? "pads"
+               : mode === "time" ? "time"
                : advance === "auto" ? "auto" : "manual");
   }
 

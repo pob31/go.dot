@@ -1403,6 +1403,14 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("mark"))
                     rows.push_back (row);
 
+            /*  AND WHAT A TIME GROUP'S MEMBER CARRIES (namespace draft §60, AIJ):
+                the time it starts at and how it chases, last, as on the element -
+                on every sound, picture and group, a member or not, as a sampler
+                member's rows are. */
+            if (isMedia || isVideo || isGroup)
+                for (auto* row : doc::Schema::rowsForOwner ("timed"))
+                    rows.push_back (row);
+
             if (isFade)
                 for (auto* row : doc::Schema::rowsForOwner ("fade"))
                     rows.push_back (row);

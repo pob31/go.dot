@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/cue/Override.h>
 
 #include <wfg/engine/document/ShowDocument.h>
@@ -82,16 +83,20 @@ namespace wfg::cue
             the default and not an empty string, and reading it directly gets
             that wrong; here the elements are checked against the same words the
             table uses. */
+        /*  A group's two words read straight off the node: absent is the
+            empty word, which GroupMode.h reads as the table's default. */
+        GroupMode groupModeOf (const juce::ValueTree& cue)
+        {
+            return { cue[juce::Identifier ("mode")].toString().toStdString(),
+                     cue[juce::Identifier ("advance")].toString().toStdString() };
+        }
+
         bool isManualSequence (const juce::ValueTree& cue)
         {
             if (! cue.isValid() || cue.getType().toString() != "Group")
                 return false;
 
-            const auto mode = cue[juce::Identifier ("mode")].toString();
-            const auto advance = cue[juce::Identifier ("advance")].toString();
-
-            return (mode.isEmpty() || mode == "sequence")
-                     && (advance.isEmpty() || advance == "manual");
+            return isManual (groupModeOf (cue));
         }
 
         /*  ABSENT MEANS THE DEFAULT, AND PRESENT MEANS ITS OWN TYPE - which
@@ -108,11 +113,15 @@ namespace wfg::cue
             refuses them to standby-set the way a header's cues are refused,
             and the flag PRD §3.5's widening left on that sentence is honoured
             by building it as written (namespace draft §16.5). The group ITSELF
-            is a place: GO on it arms the bank. Absent means `sequence`. */
-        bool isSamplerGroup (const juce::ValueTree& cue)
+            is a place: GO on it arms the bank. Absent means `sequence`.
+
+            AND A TIME GROUP THE SAME (namespace draft §60, AIE): its code
+            starts its members, so none is a place the pointer stands; GO on
+            the group arms it, and the standby steps on past it. */
+        bool isArmedUntilStopped (const juce::ValueTree& cue)
         {
             return cue.isValid() && cue.getType().toString() == "Group"
-                     && cue[juce::Identifier ("mode")].toString() == "sampler";
+                     && armedUntilStopped (groupModeOf (cue));
         }
 
         /*  AND THE OVERRIDE OVER IT (namespace draft §27): the pointer does
@@ -292,7 +301,7 @@ namespace wfg::cue
                 if (child[idProperty].toString().toStdString() == cueId)
                     return child;
 
-                if (isSamplerGroup (child))
+                if (isArmedUntilStopped (child))
                     continue;
 
                 if (const auto found = findOnPath (child, cueId); found.isValid())

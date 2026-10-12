@@ -96,6 +96,7 @@ add_executable(wfg_tests
     TimecodeTests.cpp
     LtcReader.h
     TimecodeRunTests.cpp
+    TimeGroupTests.cpp
     SerialTests.cpp
     WireTests.cpp
     TrafficTapTests.cpp
@@ -249,9 +250,16 @@ endif()
 # failure PRD §3.20 exists to prevent, so "the locale was not installed" must
 # be a red build and not a quiet pass. On the Linux runner that means
 # `locale-gen fr_FR.UTF-8` is a hard prerequisite, and ci.yml runs it.
+#
+# --duration=true NAMES EVERY CASE AS IT ENDS, with its time. A case that fails
+# names itself; one that CRASHES the process does not, and the macOS runner's
+# unit suite died twice with a bus error (runs 38227264401 at 493 s in C,
+# 38299523050 at 361 s in fr_FR) with nothing to say which case was running.
+# The last name printed is the case before the one that died. ctest shows the
+# output only when a suite fails, so a green run's log is unchanged.
 # -----------------------------------------------------------------------------
-add_test(NAME unit.C     COMMAND wfg_tests --wfg-locale=C "--test-case-exclude=video gpu:*")
-add_test(NAME unit.fr_FR COMMAND wfg_tests --wfg-locale=${WFG_LOCALE_FR} "--test-case-exclude=video gpu:*")
+add_test(NAME unit.C     COMMAND wfg_tests --wfg-locale=C "--test-case-exclude=video gpu:*" --duration=true)
+add_test(NAME unit.fr_FR COMMAND wfg_tests --wfg-locale=${WFG_LOCALE_FR} "--test-case-exclude=video gpu:*" --duration=true)
 
 # THE VIDEO RENDERER ON THE GRAPHICS DEVICE (namespace draft §44), in a process
 # of its own: the system's software rasteriser where there is no card - WARP,

@@ -29,6 +29,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Timecode.h>
 #include <wfg/client/model/Video.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -1010,7 +1011,7 @@ namespace wfg::client::model
 
             if (kind == "group")
             {
-                const auto sampler = valueOf ("mode") == "sampler";
+                const auto sampler = cue::isSampler (cue::GroupMode { valueOf ("mode"), valueOf ("advance") });
 
                 for (auto& field : decided)
                 {
@@ -1034,7 +1035,8 @@ namespace wfg::client::model
             const auto parent = text (snapshot, base + "parent");
             const auto member = text (snapshot, base + "role") == "member";
             const auto pressable = member && ! parent.empty()
-                                     && text (snapshot, "/godot/cue/" + parent + "/mode") == "sampler";
+                                     && cue::isSampler (cue::GroupMode { text (snapshot, "/godot/cue/" + parent + "/mode"),
+                                                                         {} });
 
             const auto holds = valueOf ("release") == "hold";
             const auto scaled = valueOf ("velocity") == "true" || valueOf ("pressure") == "true";
@@ -1050,6 +1052,54 @@ namespace wfg::client::model
                     field.applies = pressable && scaled;
                 else
                     field.applies = pressable;
+            }
+        }
+
+        /*  WHAT ONLY A CODE ASKS (namespace draft §60, TG.2), the twin of the
+            above: greyed where no code reaches. A sound, a picture and a group
+            carry `at` and `chase` whatever they are in, and they mean
+            something only on a MEMBER of a TIME group - its header's and its
+            footer's cues are the group's own and no code starts them, so the
+            cue's `role` is asked as well as its parent's `mode`. A group's
+            `timeSource` is a question only a time group is asked. Greyed and
+            never hidden, so a cue moved into a time group shows its time where
+            it already was; the rows' words and their place are the window's
+            round (TG.10).
+
+            AND A TIME GROUP IS ASKED NO ROUND, as a sampler is not: its code
+            starts each member at its own time, so how it advances, how a round
+            is drawn and how many it plays mean nothing to it. */
+        void greyWhatOnlyACodeAsks (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                                    const std::string& kind, std::vector<Field>& decided)
+        {
+            if (kind != "media" && kind != "video" && kind != "group")
+                return;
+
+            const auto valueOf = [&decided] (const std::string& name)
+            {
+                for (const auto& field : decided)
+                    if (field.name == name)
+                        return field.value;
+
+                return std::string {};
+            };
+
+            const auto base = "/godot/cue/" + cueId + "/";
+            const auto parent = text (snapshot, base + "parent");
+            const auto member = text (snapshot, base + "role") == "member";
+            const auto timed = member && ! parent.empty()
+                                 && cue::isTimeGroup (cue::GroupMode { text (snapshot, "/godot/cue/" + parent + "/mode"),
+                                                                       {} });
+            const auto timeGroup = kind == "group" && cue::isTimeGroup (cue::GroupMode { valueOf ("mode"), {} });
+
+            for (auto& field : decided)
+            {
+                if (field.name == "at" || field.name == "chase")
+                    field.applies = timed;
+                else if (field.name == "timeSource")
+                    field.applies = timeGroup;
+                else if (timeGroup && named (roundRows, field.name))
+                    field.applies = false;
             }
         }
 
@@ -1609,6 +1659,7 @@ namespace wfg::client::model
         offerTheGroupsAround (snapshot, cueId, decided);
 
         greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
+        greyWhatOnlyACodeAsks (snapshot, cueId, out.kind, decided);
         greyTheMapping (out.kind, decided);
 
         /*  THE EQ'S NINETEEN ROWS HAVE AN EDITOR OF THEIR OWN (Phase 9a), the

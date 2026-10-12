@@ -244,6 +244,23 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="at">
+          <a:documentation>A time group&apos;s member: the time it starts at (namespace draft 60, AIJ, AIL). HH:MM:SS:FF when its group reads LTC or MTC - a label at the show&apos;s frame rate, stored with colons whatever it was typed with - and HH:MM:SS when it reads the wall clock. Judged against the group&apos;s timeSource when it is written, and refused as bad-value when it does not read there. Empty is a member that never fires, which wfg validate says. Carried by every sound, picture and group, and read only on a member of a time group.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="chase">
+          <a:documentation>A time group&apos;s member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue&apos;s own speed mode says, and wfg validate says so (AIU).</a:documentation>
+          <choice>
+            <value>free</value>
+            <value>jump</value>
+            <value>varispeed</value>
+            <value>timestretch</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="colour">
           <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
           <data type="string"/>
@@ -292,11 +309,12 @@
       </optional>
       <optional>
         <attribute name="mode">
-          <a:documentation>Whether members are scheduled at entry, run one after another, or wait for a hand. sampler launches none of its members: GO arms the group, every member is loaded onto a strip, and faders and pads start them - in any order, any number of times, several at once (PRD 3.27).</a:documentation>
+          <a:documentation>Whether members are scheduled at entry, run one after another, or wait for a hand. sampler launches none of its members: GO arms the group, every member is loaded onto a strip, and faders and pads start them - in any order, any number of times, several at once (PRD 3.27). time launches none either: GO arms it until it is stopped, and each member starts when the code timeSource names reaches the time in its at - LTC, MTC or the wall clock (namespace draft 60, AIE, AIJ). The standby never moves into it.</a:documentation>
           <choice>
             <value>timeline</value>
             <value>sequence</value>
             <value>sampler</value>
+            <value>time</value>
           </choice>
         </attribute>
       </optional>
@@ -377,6 +395,16 @@
           <choice>
             <value>group</value>
             <value>strip</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="timeSource">
+          <a:documentation>time: what starts this group&apos;s members (namespace draft 60, AIE, AIJ). ltc is the linear timecode coming in on the input sync/ltcIn names, mtc the MIDI Time Code coming in on the port sync/mtcIn names, clock the wall clock of the machine the show runs on; each member says the time it starts at in at. Named timeSource and not source, which a video cue&apos;s row is, so a selection of both never mixes the two. Changing it keeps every member&apos;s at as it was written, and wfg validate names each one that no longer reads under the new source.</a:documentation>
+          <choice>
+            <value>ltc</value>
+            <value>mtc</value>
+            <value>clock</value>
           </choice>
         </attribute>
       </optional>
@@ -480,12 +508,29 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="at">
+          <a:documentation>A time group&apos;s member: the time it starts at (namespace draft 60, AIJ, AIL). HH:MM:SS:FF when its group reads LTC or MTC - a label at the show&apos;s frame rate, stored with colons whatever it was typed with - and HH:MM:SS when it reads the wall clock. Judged against the group&apos;s timeSource when it is written, and refused as bad-value when it does not read there. Empty is a member that never fires, which wfg validate says. Carried by every sound, picture and group, and read only on a member of a time group.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="channels">
           <a:documentation>How many channels the file has, decided when it was imported and written into the cue rather than read off the disk whenever it is wanted. The file travels between machines and may be absent tonight, and the routing below is shaped by this number - a cue whose count nobody knows cannot be pointed at an output without guessing what a guess would cost. Nought means nobody has said, which is every show written before the number existed.</a:documentation>
           <data type="integer">
             <param name="minInclusive">0</param>
             <param name="maxInclusive">512</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="chase">
+          <a:documentation>A time group&apos;s member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue&apos;s own speed mode says, and wfg validate says so (AIU).</a:documentation>
+          <choice>
+            <value>free</value>
+            <value>jump</value>
+            <value>varispeed</value>
+            <value>timestretch</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -1338,6 +1383,12 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="at">
+          <a:documentation>A time group&apos;s member: the time it starts at (namespace draft 60, AIJ, AIL). HH:MM:SS:FF when its group reads LTC or MTC - a label at the show&apos;s frame rate, stored with colons whatever it was typed with - and HH:MM:SS when it reads the wall clock. Judged against the group&apos;s timeSource when it is written, and refused as bad-value when it does not read there. Empty is a member that never fires, which wfg validate says. Carried by every sound, picture and group, and read only on a member of a time group.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="blend">
           <a:documentation>How it lies on what is under it, in display space (namespace draft 35, VD): normal covers it by its opacity; add adds its light; screen lightens as two projectors on one wall do, never past white; multiply darkens, as a gel does. Each at the layer&apos;s opacity.</a:documentation>
           <choice>
@@ -1352,6 +1403,17 @@
         <attribute name="canvas">
           <a:documentation>The canvas it is laid onto, by identifier. Empty puts it nowhere: the cue runs and shows nothing, and wfg validate says so before the show.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="chase">
+          <a:documentation>A time group&apos;s member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue&apos;s own speed mode says, and wfg validate says so (AIU).</a:documentation>
+          <choice>
+            <value>free</value>
+            <value>jump</value>
+            <value>varispeed</value>
+            <value>timestretch</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -4341,6 +4403,42 @@
   <define name="Sync">
     <element name="Sync">
       <optional>
+        <attribute name="chaseCrossfade">
+          <a:documentation>How long a jumping member&apos;s crossfade takes, in milliseconds (namespace draft 60, AIN): 10 by default, the crossfaded jump a slice moved while it sounds already makes.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">500</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="chaseJump">
+          <a:documentation>How far out of step, in seconds, a member that chases by varispeed or timestretch may be before it jumps rather than catching up (namespace draft 60, AIN): a quarter of a second by default.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">60</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="chaseRate">
+          <a:documentation>The most a member catching up may run faster or slower than the code, in % (namespace draft 60, AIN): 1 by default, seventeen cents under varispeed.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="chaseTolerance">
+          <a:documentation>How far out of step, in milliseconds, a chasing member may be before it acts (namespace draft 60, AIN): 10 by default - under the twenty or so at which two sounds flam, and far above the noise of the line the code is read through.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">1000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="frameRate">
           <a:documentation>The frame rate of the timecode this show generates (namespace draft 59, AHA, AHG): one for the whole show, since the desk or the server reading it is set to one. 25 by default; 23.976, 24, 29.97 drop-frame (29.97df), 29.97 and 30 beside it. A timecode cue copies it when it fires, so a change reaches the next run and never one already running (AHM).</a:documentation>
           <choice>
@@ -4351,6 +4449,12 @@
             <value>29.97</value>
             <value>30</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="ltcIn">
+          <a:documentation>The named input LTC comes in on, by identifier (namespace draft 60, AIM): one channel, read on the audio side for every time group whose timeSource is ltc. Empty for none, and wfg validate warns of a time group reading ltc then - and of an input wider than one channel.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>
@@ -4365,6 +4469,12 @@
       <optional>
         <attribute name="ltcOut">
           <a:documentation>The identifier of the one-channel output LTC plays on (namespace draft 59, AHA, AHI). The code replaces whatever the show sends to that channel, after its trim and its DCA, so no sound leaks onto the line and no DCA cuts it; between runs the channel is silent. Empty for none, and an LTC cue then fails its run as bad-route, as it does on an output wider than one channel. wfg validate warns when the output is wider than one channel and when a cue-s sound is routed onto it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="mtcIn">
+          <a:documentation>The identifier of the declared &lt;Port&gt; MIDI Time Code comes in on (namespace draft 60, AIM), its rx honoured: a port that does not listen hears no code. Empty for none, and wfg validate warns of a time group reading mtc then - and of a port a control surface uses, or the one MTC leaves on (sync/mtcOut).</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

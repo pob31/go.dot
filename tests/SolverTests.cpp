@@ -39,6 +39,7 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/cue/ListState.h>
+#include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/tree/Mount.h>
@@ -1069,4 +1070,76 @@ TEST_CASE ("solve: a timecode cue in the persistent section is never planned")
                          [&code] (const cue::PlannedRun& run) { return run.cue == code.id; }));
     CHECK (std::any_of (plan.runs.begin(), plan.runs.end(),
                         [&bed] (const cue::PlannedRun& run) { return run.cue == bed; }));
+}
+
+//==============================================================================
+TEST_CASE ("solve: a time group is never a timed chain, never landed in, never over - and the persistent pass plans it")
+{
+    /*  A TIME GROUP (namespace draft §60, TG.2): its code starts each member,
+        so nothing inside it has a time the document knows, the pointer never
+        lands on a member, and armed it runs until it is stopped. Its `advance`
+        reads `manual`, so by the old compares it was a manual sequence; made
+        `auto`, it was a chain the walk timed member after member. */
+    SolverRig rig;
+
+    const auto group = rig.document.createCue (rig.listId, 0, "group", "Clock", {},
+                                               { { "mode", "time" }, { "timeSource", "clock" } }).id;
+    REQUIRE (! group.empty());
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + group + "/advance", "auto").ok);
+
+    const auto first = rig.media (group, 0, "Rain");
+    const auto second = rig.media (group, 1, "Bells");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + first + "/at", "20:00:00").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + second + "/at", "20:00:10").ok);
+
+    const auto after = rig.osc (1, "/after", "1");
+
+    const auto node = rig.document.findById (group);
+    CHECK_FALSE (cue::roundSolvable (node));
+    CHECK_FALSE (cue::walkTimes (node));
+
+    const cue::Reader read;
+    cue::Walk walk { read, &rig.durations };
+    walk.visitList (rig.document.findById (rig.listId));
+
+    for (const auto& entry : walk.placed)
+    {
+        if (entry.id != first && entry.id != second)
+            continue;
+
+        INFO ("member " << entry.id);
+        CHECK_FALSE (entry.timed);
+        CHECK (entry.chain.empty());
+        CHECK_FALSE (entry.mayLandHere);
+    }
+
+    //  Armed, it never ends by itself: still going at a later step, its extent never closed.
+    CHECK (walk.unbounded[group]);
+    REQUIRE (walk.extents.count (group) == 1u);
+    CHECK_FALSE (walk.extents[group].endsOnItsOwn);
+
+    //  In a persistent section it is planned, as a bed is; any other group is not.
+    const auto section = rig.document.createPersistent (rig.listId);
+    REQUIRE (section.ok);
+
+    const auto kept = rig.document.createCue (section.id, 0, "group", "Always", {}, { { "mode", "time" } }).id;
+    const auto scene = rig.document.createCue (section.id, 1, "group", "Scene", {}, { { "mode", "timeline" } }).id;
+    REQUIRE (! kept.empty());
+    REQUIRE (! scene.empty());
+
+    const auto pass = cue::solvePersistent (rig.document, &rig.durations, nullptr, rig.listId, after);
+    const auto keptRow = std::find_if (pass.runs.begin(), pass.runs.end(),
+                                       [&kept] (const cue::PlannedRun& run) { return run.cue == kept; });
+    REQUIRE (keptRow != pass.runs.end());
+    CHECK (keptRow->when == cue::planned::sounding);
+    CHECK (std::none_of (pass.runs.begin(), pass.runs.end(),
+                         [&scene] (const cue::PlannedRun& run) { return run.cue == scene; }));
+
+    //  And a stop before the pointer naming it suspends it, as it suspends a bed.
+    const auto stop = rig.document.createCue (rig.listId, 1, "transport", "Stop", {}, { { "target", kept } }).id;
+    REQUIRE (! stop.empty());
+
+    const auto stopped = cue::solvePersistent (rig.document, &rig.durations, nullptr, rig.listId, after);
+    CHECK (std::none_of (stopped.runs.begin(), stopped.runs.end(),
+                         [&kept] (const cue::PlannedRun& run) { return run.cue == kept; }));
 }

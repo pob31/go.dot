@@ -18,6 +18,7 @@
 
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <cmath>
@@ -30,9 +31,16 @@ namespace wfg::client::model
     {
         if (kind == "group")
         {
-            if (mode == "timeline") return Icon::timeline;
-            if (mode == "sampler")  return Icon::sampler;
-            if (mode == "sequence") return Icon::sequence;
+            const cue::GroupMode group { mode, {} };
+
+            if (cue::isTimeline (group)) return Icon::timeline;
+            if (cue::isSampler (group))  return Icon::sampler;
+
+            /*  A WORD, NOT ITS DEFAULT: the new-cue bar's group button asks
+                with none, and is the plain group. A time group draws the plain
+                group too until the window's round gives it one (namespace
+                draft §60, TG.10). */
+            if (! mode.empty() && cue::isSequence (group)) return Icon::sequence;
 
             return Icon::group;
         }
@@ -190,7 +198,7 @@ namespace wfg::client::model
             /*  ONE AFTER ANOTHER WITHOUT A GO, which only a sequence does -
                 a timeline's members start together, and a sampler's wait for
                 a hand. */
-            if (row.advance == "auto" && (row.mode == "sequence" || row.mode.empty()))
+            if (cue::isAutoSequence (cue::GroupMode { row.mode, row.advance }))
                 marks.push_back ({ Icon::follow, {}, "each member follows the one before, with no GO" });
         }
 

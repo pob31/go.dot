@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/AutoName.h>
+#include <wfg/engine/cue/GroupMode.h>
 
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -411,6 +412,19 @@ namespace wfg::cue
                 out += " for " + clockWords (length);
 
             return out;
+        }
+
+        /*  A TIME GROUP (namespace draft §60): what starts its members - "Time
+            group on LTC", "on MTC", "on the wall clock". Any other group has no
+            automatic name: what it holds is its own, and its members name
+            themselves. */
+        if (element == "Group" && isTimeGroup (GroupMode { text (cue, "group", "mode"), {} }))
+        {
+            const auto source = text (cue, "group", "timeSource");
+
+            return "Time group on " + (source == "clock" ? std::string ("the wall clock")
+                                       : source == "mtc" ? std::string ("MTC")
+                                                         : std::string ("LTC"));
         }
 
         return {};

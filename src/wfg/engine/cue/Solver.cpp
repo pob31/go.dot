@@ -750,17 +750,12 @@ namespace wfg::cue
     {
         /*  The machine paces it: a timeline, or a sequence that advances by
             itself. A sampler bank is played by hand whatever its `advance`
-            says, and a manual group has a person between its members. */
+            says, a time group's members wait for a code (namespace draft §60),
+            and a manual group has a person between its members. */
         if (! group.isValid() || group.getType().toString() != "Group")
             return false;
 
-        const auto& read = sharedReader();
-        const auto mode = read.text (group, "group", "mode");
-
-        if (mode == "sampler")
-            return false;
-
-        return mode == "timeline" || read.text (group, "group", "advance") == "auto";
+        return pacedByMachine (sharedReader().groupMode (group));
     }
 
     RoundPlan planRound (const Reader& read, const doc::ShowDocument& document,
@@ -825,7 +820,7 @@ namespace wfg::cue
             whose length is unknown still has a start - every member of a
             timeline, and in a sequence the first one whose length stops the
             sum - and the members after that one in a sequence have none. */
-        const auto timeline = read.text (copy, "group", "mode") == "timeline";
+        const auto timeline = isTimeline (read.groupMode (copy));
         auto everyLength = true;
         auto furthest = 0.0;
         auto startKnown = true;
@@ -1817,6 +1812,19 @@ namespace wfg::cue
                 if (element == "Media")
                     placeInRanges (read, cue, 0.0, run, plan.confused);
 
+                plan.runs.push_back (run);
+            }
+            /*  A TIME GROUP IS ASSERTED TOO (namespace draft §60, AIW): armed
+                at the first step and armed again when it is not, so its members
+                are ready all show whenever the code reaches them. `sounding`
+                is the plan's word for "should be live"; a group has no offset
+                into anything, and is armed from its top. The only group the
+                section keeps: any other is a lifetime, not a state. */
+            else if (element == "Group" && isTimeGroup (read.groupMode (cue)))
+            {
+                PlannedRun run;
+                run.cue = id;
+                run.when = planned::sounding;
                 plan.runs.push_back (run);
             }
             else if (element == "Osc")

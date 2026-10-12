@@ -17,6 +17,7 @@
 #include <wfg/client/model/ShowModel.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -376,7 +377,7 @@ namespace wfg::client::model
         row.depth = depth;
         row.section = section;
         row.memberOfSampler = section == Section::member && ! parent.empty()
-                                && attribute (snapshot, parent, "mode") == "sampler";
+                                && cue::isSampler (cue::GroupMode { attribute (snapshot, parent, "mode"), {} });
         row.parent = parent;
         row.indexInParent = indexInParent;
         row.enabled = flag (snapshot, "/godot/cue/" + cueId + "/enabled") != Flag::no;

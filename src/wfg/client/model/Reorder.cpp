@@ -15,6 +15,7 @@
 */
 
 #include <wfg/client/model/Reorder.h>
+#include <wfg/engine/cue/GroupMode.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -267,7 +268,8 @@ namespace wfg::client::model
 
             if (over.isGroup)
             {
-                if (over.mode == "sampler" && ! samplerTakes (dragged) && dragged.parent != over.id)
+                if (cue::isSampler (cue::GroupMode { over.mode, over.advance }) && ! samplerTakes (dragged)
+                      && dragged.parent != over.id)
                 {
                     drop.refused = notForASampler (dragged);
                     return drop;

@@ -54,6 +54,7 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/GroupJob.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/CurveJob.h>
 #include <wfg/engine/cue/CurveTable.h>
@@ -811,6 +812,13 @@ namespace wfg::cue
         bool isSamplerMember (const std::string& cueId) const;
         std::string pressMember (Engine& engine, std::int64_t tick, const std::string& cueId,
                                  const std::string& origin);
+
+        /*  A TIME GROUP'S MEMBER (namespace draft §60): a cue whose parent is a
+            time group - not its header's or its footer's, whose parent is the
+            section. `cue.fire` and `trigger.fire` refuse one (`needs-go`):
+            the code starts it, and until the code is read (TG.7) nothing
+            does. */
+        bool isTimeMember (const std::string& cueId) const;
 
         /*  The sampler strips of every surface, in the order a group fills
             them: surfaces in document order, then each strip's index. Read
@@ -1754,6 +1762,13 @@ namespace wfg::cue
             default, which is what having one door is for. */
         std::string textOf (const juce::ValueTree& cue, const char* name) const;
         double numberOf (const juce::ValueTree& cue, const char* name) const;
+
+        /*  A group's `mode` and `advance` through the same door, for the
+            questions GroupMode.h names (namespace draft §60, TG.2) - asked by
+            what they mean, never by comparing the words here. Two empty words
+            for a node that is not there, which every question answers no to
+            but `isManual`, and `isManualGroup` asks validity first. */
+        GroupMode groupMode (const juce::ValueTree& cue) const;
 
         /*  A media cue's ranges, in playlist order, empty when it has none.
 

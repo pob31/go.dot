@@ -112,6 +112,7 @@
 #include <wfg/engine/cue/CurveTable.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/DohSetting.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/LaneTable.h>
@@ -8699,6 +8700,141 @@ TEST_CASE ("client: a sampler row is greyed on a cue no hand can press, and draw
     CHECK (appliesIn (model::inspectMany (*snapshot, { loose.id, member.id }), "release"));
     CHECK (appliesIn (model::inspectMany (*snapshot, { member.id, loose.id }), "release"));
     CHECK_FALSE (appliesIn (model::inspectMany (*snapshot, { loose.id, another.id }), "release"));
+}
+
+TEST_CASE ("client: what only a code asks is greyed where no code reaches, and a time group is asked no round (§60)")
+{
+    /*  TG.2, the twin of the sampler's rows: a sound, a picture and a group
+        carry `at` and `chase` wherever they are, and they mean something only
+        on a member of a time group - not on its header's cues, not on a cue in
+        any other group; `timeSource` only on a time group. The rows' words
+        and their place are TG.10's: only the greying here. */
+    Rig rig;
+
+    const std::string list = "7K2QM9X4";
+
+    const auto loose = rig.document.createCue (list, 0, "media", "Loose");
+    const auto clock = rig.document.createCue (list, 1, "group", "Clock", {},
+                                               { { "mode", "time" }, { "timeSource", "clock" } });
+    REQUIRE (loose.ok);
+    REQUIRE (clock.ok);
+
+    const auto sound = rig.document.createCue (clock.id, 0, "media", "Rain");
+    const auto picture = rig.document.createCue (clock.id, 1, "video", "Moon");
+    const auto scene = rig.document.createCue (clock.id, 2, "group", "Storm", {}, { { "mode", "timeline" } });
+    REQUIRE (sound.ok);
+    REQUIRE (picture.ok);
+    REQUIRE (scene.ok);
+
+    const auto inScene = rig.document.createCue (scene.id, 0, "media", "Thunder");
+    REQUIRE (inScene.ok);
+
+    const auto header = rig.document.createRole (clock.id, "header");
+    REQUIRE (header.ok);
+    const auto preload = rig.document.createCue (header.id, 0, "media", "Preload");
+    REQUIRE (preload.ok);
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+
+    //  A member's time and its chase: drawn on a time group's members, a sound, a picture and a scene alike.
+    for (const auto& id : { sound.id, picture.id, scene.id })
+    {
+        INFO ("member " << id);
+        const auto inside = model::inspect (*snapshot, id);
+        CHECK (appliesIn (inside, "at"));
+        CHECK (appliesIn (inside, "chase"));
+    }
+
+    /*  Greyed everywhere else: a cue in no group, a header's cue, a cue inside
+        a member scene, a group of another kind - and the time group itself,
+        which is a member of nothing. */
+    for (const auto& id : { loose.id, preload.id, inScene.id, std::string ("D9FH2JKA"), clock.id })
+    {
+        INFO ("not a member " << id);
+        const auto outside = model::inspect (*snapshot, id);
+        CHECK_FALSE (appliesIn (outside, "at"));
+        CHECK_FALSE (appliesIn (outside, "chase"));
+    }
+
+    //  Its source: a question only a time group is asked.
+    CHECK (appliesIn (model::inspect (*snapshot, clock.id), "timeSource"));
+    CHECK_FALSE (appliesIn (model::inspect (*snapshot, "D9FH2JKA"), "timeSource"));
+    CHECK_FALSE (appliesIn (model::inspect (*snapshot, scene.id), "timeSource"));
+
+    /*  AND NO ROUND: its code starts each member at its own time, so how it
+        advances and how its rounds are drawn mean nothing to it - and still
+        everything to any other group. Nor a sampler's takeover. */
+    for (const auto* name : { "advance", "selection", "play", "loops", "seed" })
+    {
+        INFO ("row " << name);
+        CHECK_FALSE (appliesIn (model::inspect (*snapshot, clock.id), name));
+        CHECK (appliesIn (model::inspect (*snapshot, "D9FH2JKA"), name));
+    }
+
+    CHECK_FALSE (appliesIn (model::inspect (*snapshot, clock.id), "takeover"));
+}
+
+TEST_CASE ("client: a time group asks the engine's questions - no icon of a sequence, no follow mark, no length, no words at a scrub (§60)")
+{
+    /*  The predicates the engine asks (cue/GroupMode.h) are the client's too.
+        A time group whose `advance` reads `manual` - its default - or `auto`
+        is neither a sequence nor a chain: its row draws the plain group until
+        TG.10 gives it its own, no "each member follows" mark, the timeline
+        panel cannot know its length, and a drag on its run is not said to be a
+        manual sequence's. */
+    CHECK (model::iconFor ("group", "time") == model::Icon::group);
+    CHECK (model::iconFor ("group", "sequence") == model::Icon::sequence);
+    CHECK (model::iconFor ("group") == model::Icon::group);
+
+    CHECK (cue::armedUntilStopped ({ "time", "manual" }));
+    CHECK (cue::armedUntilStopped ({ "sampler", "auto" }));
+    CHECK_FALSE (cue::isManual ({ "time", "manual" }));
+    CHECK_FALSE (cue::pacedByMachine ({ "time", "auto" }));
+    CHECK (cue::isManual ({ "", "" }));                         // the table's defaults, read raw
+    CHECK (cue::pacedByMachine ({ "sequence", "auto" }));
+    CHECK (cue::isAutoSequence ({ "", "auto" }));
+    CHECK_FALSE (cue::isAutoSequence ({ "timeline", "auto" }));
+
+    Rig rig;
+
+    const auto listId = rig.document.createList ("Sound").id;
+    const auto clock = rig.document.createCue (listId, 0, "group", "Clock", {}, { { "mode", "time" } }).id;
+    REQUIRE (! clock.empty());
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + clock + "/advance", "auto").ok);
+    REQUIRE (rig.document.createCue (clock, 0, "media", "Rain").ok);
+
+    rig.runs.create ("RVNC10C1", clock, "group");
+    auto* run = rig.runs.find ("RVNC10C1");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::playing;
+    run->phase = "members";
+
+    const auto snapshot = rig.publish (1);
+
+    for (const auto& row : model::readRuns (*snapshot))
+        if (row.id == "RVNC10C1")
+            CHECK (row.scrubRefusal.empty());
+
+    CHECK_FALSE (model::readTimeline (*snapshot, clock).draggable);
+
+    const auto follows = [] (const std::string& mode)
+    {
+        model::Row row;
+        row.kind = "group";
+        row.isGroup = true;
+        row.mode = mode;
+        row.advance = "auto";
+
+        const auto marks = model::marksFor (row);
+        return std::any_of (marks.begin(), marks.end(),
+                            [] (const model::Mark& mark) { return mark.icon == model::Icon::follow; });
+    };
+
+    CHECK (follows ("sequence"));
+    CHECK_FALSE (follows ("time"));
+    CHECK_FALSE (follows ("sampler"));
+    CHECK_FALSE (follows ("timeline"));
 }
 
 //==============================================================================
