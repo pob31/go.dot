@@ -94,6 +94,11 @@ namespace wfg::audio
         std::uint64_t timecodeGeneration() const override;
         std::uint32_t timecodeLate() const override;
 
+        /*  LTC IN (namespace draft §60, TG.3): AudioHost's decoder, on the
+            input the Runner names, and the frames it read. */
+        void setTimecodeInput (int channel) override;
+        void takeHeardLtc (std::vector<timecode::LtcHeard>& heard) override;
+
         bool placeRate (int track, std::int64_t sample, double rate) override;
         std::uint64_t placeLoop (int track, int slot, const LoopMove& move) override;
         void endsOutside (int track, bool outside) override;

@@ -329,6 +329,33 @@ namespace wfg::cue
             return std::max (0, read ("firstChannel", "0"));
         }
 
+        /*  ITS TWIN, THE LOGICAL INPUT LTC IS READ ON, or -1 (namespace draft
+            §60, AIM): the show's `sync/ltcIn` naming an `<Input>` one channel
+            wide. Wider is read as none - which input of two would the code be
+            on? - as `wfg validate` warns. Through the document's getters, as
+            the output is. */
+        int ltcInChannelOf (const doc::ShowDocument& document)
+        {
+            const auto inputId = document.getAttribute ("/godot/sync/ltcIn").value_or (std::string {});
+
+            if (inputId.empty())
+                return -1;
+
+            if (const auto input = document.findById (inputId); ! input.isValid() || ! input.hasType ("Input"))
+                return -1;
+
+            const auto read = [&document, &inputId] (const char* row, const char* otherwise)
+            {
+                return juce::String (document.getAttribute ("/godot/input/" + inputId + "/" + row)
+                                       .value_or (std::string (otherwise))).getIntValue();
+            };
+
+            if (read ("width", "1") != 1)
+                return -1;
+
+            return std::max (0, read ("firstChannel", "0"));
+        }
+
         /*  How many samples one pass of a range is.
 
             ROUNDED TO NEAREST rather than truncated, because the boundary is
@@ -7294,6 +7321,11 @@ namespace wfg::cue
             ltcChannel = ltcChannelOf (document);
             ltcLevelDb = osc::parseDouble (document.getAttribute ("/godot/sync/ltcLevel").value_or (std::string {}))
                            .value_or (-18.0);
+
+            /*  AND WHERE LTC COMES IN (namespace draft §60, TG.3; AIM): the
+                show's one-channel input for it, or none. The audio side reads
+                the code there; what it heard is TG.5's to take. */
+            ltcInChannel = ltcInChannelOf (document);
         }
 
         for (const auto& source : outputGainSources)
@@ -7311,6 +7343,7 @@ namespace wfg::cue
             handed in since - an audio restart - is told without waiting for an
             edit. */
         audio->setTimecodeOutput (ltcChannel, ltcLevelDb);
+        audio->setTimecodeInput (ltcInChannel);
     }
 
     //==============================================================================

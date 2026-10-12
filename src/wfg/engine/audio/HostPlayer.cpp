@@ -392,6 +392,19 @@ namespace wfg::audio
         return audioHost.timecodeLate();
     }
 
+    void HostPlayer::setTimecodeInput (int channel)
+    {
+        //  The tick thread, every tick: one relaxed store (namespace draft §60).
+        audioHost.setTimecodeInput (channel);
+    }
+
+    void HostPlayer::takeHeardLtc (std::vector<timecode::LtcHeard>& heard)
+    {
+        /*  The tick thread: the decoder's queue drained into the caller's
+            vector, which it reserved once. Nothing waits. */
+        audioHost.takeHeardLtc (heard);
+    }
+
     bool HostPlayer::placeRate (int track, std::int64_t sample, double rate)
     {
         /*  The tick thread, at a launch and at each change of speed (namespace

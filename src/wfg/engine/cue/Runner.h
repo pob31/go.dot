@@ -75,6 +75,7 @@
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
+#include <wfg/engine/timecode/LtcDecoder.h>
 #include <wfg/engine/timecode/Timecode.h>
 #include <wfg/engine/video/VideoSink.h>
 
@@ -368,6 +369,18 @@ namespace wfg::cue
             with no audio side. */
         virtual std::uint64_t timecodeGeneration() const { return 0; }
         virtual std::uint32_t timecodeLate() const { return 0; }
+
+        /*  LTC COMING IN (namespace draft §60, TG.3; AIM): the logical input
+            the audio side reads the code on, -1 for none. Tick thread, every
+            tick, as the output is: a player handed in since is told without
+            waiting for an edit. Nothing by default - a replay hears nothing. */
+        virtual void setTimecodeInput (int) {}
+
+        /*  THE FRAMES THE AUDIO SIDE READ SINCE THE LAST TAKE, oldest first,
+            into `heard` - cleared first, and the caller's, reserved once so a
+            tick allocates nothing. Nothing by default: a player with no audio
+            side hears no code. Tick thread (TG.5 reads them). */
+        virtual void takeHeardLtc (std::vector<timecode::LtcHeard>& heard) { heard.clear(); }
 
         /*  A VOICE'S SPEED, placed ahead (namespace draft §22.4): from the last
             breakpoint the voice holds, its speed moves in a straight line to
@@ -3236,6 +3249,11 @@ namespace wfg::cue
             output, -1 for none or one that cannot carry it, and its level. */
         int ltcChannel = -1;
         double ltcLevelDb = -18.0;
+
+        /*  AND WHERE LTC COMES IN (namespace draft §60, AIM), read with them:
+            the logical input of the show's one-channel `sync/ltcIn`, -1 for
+            none or one wider than a channel. */
+        int ltcInChannel = -1;
 
         /*  EACH CANVAS AS `followCanvasLevels` READS IT, at the revision it was
             read at, and what was last handed to the video side. */

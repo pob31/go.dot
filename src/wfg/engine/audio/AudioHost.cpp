@@ -420,6 +420,13 @@ namespace wfg::audio
                 how loud are the show's, set by the tick, and kept. */
             ltc.prepare (requested.sampleRate);
 
+            /*  AND LTC COMING IN (namespace draft §60, TG.3): nothing heard,
+                the line read from nothing, the generation moved on with the
+                generator's. Which input it is read on is the show's, set by
+                the tick, and kept. */
+            ltcIn.prepare (requested.sampleRate);
+            ltcInDecoded = -1;
+
             current = requested;
             sampleRate = static_cast<double> (requested.sampleRate);
             blocks.store (0, std::memory_order_relaxed);
@@ -1333,6 +1340,7 @@ namespace wfg::audio
                 host plays no timecode, and says so - its program reads nought
                 and its generation has moved (AHU). */
             ltc.prepare (0);
+            ltcIn.prepare (0);
 
             if (engine != nullptr)
             {
@@ -1402,6 +1410,26 @@ namespace wfg::audio
                 {
                     tap.clear (channel, 0, current.blockSize);
                 }
+            }
+
+            /*  LTC COMING IN (namespace draft §60, TG.3; AIM), read RIGHT
+                AFTER THE TAP IS FILLED, from the tap and on the count the tap
+                is placed on, so every frame comes out with the sample its bit
+                0 began on in Go.dot's own count. An input changed is a new
+                line, read from nothing; none, or one the interface was not
+                opened with, is not read. Ours, and allocation-free: a fixed
+                ring, a fixed queue, and arithmetic. */
+            {
+                const auto input = ltcInChannel.load (std::memory_order_relaxed);
+
+                if (input != ltcInDecoded)
+                {
+                    ltcIn.reset();
+                    ltcInDecoded = input;
+                }
+
+                if (input >= 0 && input < tapChannels)
+                    ltcIn.process (tap.getReadPointer (input), current.blockSize, tapView.blockStart);
             }
 
             /*  EVERY VOICE'S SPEED, brought up to date before the graph reads
@@ -2528,6 +2556,15 @@ namespace wfg::audio
             tick thread. */
         timecode::LtcGenerator ltc;
 
+        /*  THE LTC DECODER (namespace draft §60, TG.3): prepared at `start`
+            and `stop` with the generator, run right after the tap is filled
+            on the logical input the tick stores here, -1 for none, and taken
+            from by the tick thread. `ltcInDecoded` is the input the audio
+            thread last read, its own: a change starts the line again. */
+        timecode::LtcDecoder ltcIn;
+        std::atomic<int> ltcInChannel { -1 };
+        int ltcInDecoded = -1;
+
         AudioClockSource samples;
         std::atomic<std::int64_t> blocks { 0 };
 
@@ -3119,6 +3156,19 @@ namespace wfg::audio
     std::uint32_t AudioHost::timecodeLate() const noexcept        { return impl->ltc.lateCount(); }
     std::uint64_t AudioHost::timecodeProgram() const noexcept     { return impl->ltc.currentProgram(); }
     std::uint64_t AudioHost::timecodeGeneration() const noexcept  { return impl->ltc.generation(); }
+
+    void AudioHost::setTimecodeInput (int channel) noexcept
+    {
+        impl->ltcInChannel.store (channel, std::memory_order_relaxed);
+    }
+
+    void AudioHost::takeHeardLtc (std::vector<timecode::LtcHeard>& heard)
+    {
+        impl->ltcIn.take (heard);
+    }
+
+    std::uint32_t AudioHost::ltcInDropped() const noexcept     { return impl->ltcIn.droppedCount(); }
+    std::uint64_t AudioHost::ltcInGeneration() const noexcept  { return impl->ltcIn.generation(); }
 
     int AudioHost::inputChannelCount() const noexcept
     {

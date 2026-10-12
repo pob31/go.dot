@@ -38,6 +38,15 @@
     LtcReader.h - a reader written from the standard's description of the
     signal that shares no code with the encoder or the generator, so the line
     is judged by what a timecode reader would make of it.
+
+    And TG.3's decoder (namespace draft §60; AIL, AIR): the reading side,
+    fed with the generator's line - the reference signal TC.3 already holds
+    to the standard - and cross-checked against LtcReader.h. Every frame read
+    at every rate and in every block size, each where its bit 0 began to a
+    tenth of a sample once the edge filter's constant delay is known; played
+    backwards, at half and at twice its speed, quiet, off-centre, inverted and
+    under noise; a dropout, a takeover, a stop; the rate told from the frames;
+    and the outbox's sixty-four.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
@@ -45,6 +54,7 @@
 #include "LtcReader.h"
 
 #include <wfg/engine/timecode/FrameClock.h>
+#include <wfg/engine/timecode/LtcDecoder.h>
 #include <wfg/engine/timecode/LtcEncoder.h>
 #include <wfg/engine/timecode/LtcGenerator.h>
 #include <wfg/engine/timecode/MtcSchedule.h>
@@ -55,6 +65,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -1843,4 +1855,768 @@ TEST_CASE ("ltc generator: the inbox holds thirty-two commands, and a program mu
 
     //  Nought is no program: currentProgram's word for none.
     CHECK_FALSE (generator.post (Command::start (0, 3000000, 0, Rate::fps25)));
+}
+
+//==============================================================================
+//  LTC read: the decoder on the audio thread, fed by the generator (TG.3)
+
+namespace
+{
+    /*  THE CODE AS A LINE: program 7 of `rate` from `startLabel`, its frame
+        nought beginning on `zero`, drawn for `count` samples from nought the
+        way AudioHost draws it. */
+    std::vector<float> codeLine (Rate rate, int sampleRate, std::int64_t zero, std::int64_t count,
+                                 const Label& startLabel = Label { 1, 0, 0, 0 })
+    {
+        LtcGenerator generator;
+        generator.prepare (sampleRate);
+        generator.setOutput (1, ltcGain);
+        REQUIRE (generator.post (Command::start (7, zero, frameOf (startLabel, rate), rate)));
+        return render (generator, 0, count).samples;
+    }
+
+    /*  EVERYTHING A DECODER HEARS of a line, fed `block` samples at a time,
+        the first of them sample `from` of Go.dot's count, and taken after
+        every block as the tick would take it - into a vector reserved once. */
+    std::vector<LtcHeard> hear (LtcDecoder& decoder, const std::vector<float>& line, std::int64_t from, int block)
+    {
+        std::vector<LtcHeard> all, some;
+        some.reserve (static_cast<std::size_t> (LtcDecoder::outboxSize));
+
+        for (std::size_t at = 0; at < line.size();)
+        {
+            const auto size = std::min (static_cast<std::size_t> (block), line.size() - at);
+            decoder.process (line.data() + at, static_cast<int> (size), from + static_cast<std::int64_t> (at));
+            decoder.take (some);
+            all.insert (all.end(), some.begin(), some.end());
+            at += size;
+        }
+
+        return all;
+    }
+
+    std::vector<LtcHeard> hear (const std::vector<float>& line, int sampleRate, int block = 64)
+    {
+        LtcDecoder decoder;
+        decoder.prepare (sampleRate);
+        return hear (decoder, line, 0, block);
+    }
+
+    //  Where a frame began, as one number.
+    double startOf (const LtcHeard& heard)
+    {
+        return static_cast<double> (heard.startSample) + static_cast<double> (heard.startFraction);
+    }
+
+    /*  THE EXACT MOMENT frame `k` of a run begins: `k * rate * den / num`
+        samples after its zero. Not FrameClock's sample, which is the first
+        AT OR AFTER that moment: the generator places every edge at its
+        fraction of a sample, and the decoder finds it there. */
+    double exactStart (std::int64_t zero, std::int64_t k, int sampleRate, Rate rate)
+    {
+        return static_cast<double> (zero)
+                 + static_cast<double> (k * sampleRate * denOf (rate)) / static_cast<double> (numOf (rate));
+    }
+
+    //  A bit, in samples.
+    double bitLengthOf (int sampleRate, Rate rate)
+    {
+        return static_cast<double> (sampleRate) * static_cast<double> (denOf (rate))
+                 / (80.0 * static_cast<double> (numOf (rate)));
+    }
+
+    /*  HOW MANY FRAMES of a run end two bits or more before `end`: each of
+        them whole in the line, and read in time - a frame's last bit is
+        closed by the next frame's first edge, which is placed once the edge
+        after it is found. */
+    std::size_t wholeBefore (std::int64_t end, std::int64_t zero, int sampleRate, Rate rate)
+    {
+        std::size_t count = 0;
+
+        while (exactStart (zero, static_cast<std::int64_t> (count) + 1, sampleRate, rate)
+                 + 2.0 * bitLengthOf (sampleRate, rate) <= static_cast<double> (end))
+            ++count;
+
+        return count;
+    }
+
+    /*  THAT FRAMES READ ARE A RUN: entry `i` is frame `first + i` of a program
+        whose frame nought began on `zero` and was called `startFrame` - read
+        forwards, its label, its drop flag, its parity even - and began where
+        the frame's exact moment is plus `delay`, the edge filter's constant,
+        to within `tolerance` of a sample. */
+    struct ReadCheck
+    {
+        int wrong = 0;
+        std::string firstWrong;
+        double worst = 0.0;
+    };
+
+    ReadCheck checkRead (const std::vector<LtcHeard>& heard, std::size_t from, std::size_t count,
+                         std::int64_t zero, std::int64_t startFrame, std::int64_t first, int sampleRate,
+                         Rate rate, double delay, double tolerance)
+    {
+        ReadCheck result;
+
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            const auto& frame = heard.at (from + i);
+            const auto k = first + static_cast<std::int64_t> (i);
+            const auto wanted = labelOf (startFrame + k, rate);
+            const auto off = startOf (frame) - exactStart (zero, k, sampleRate, rate) - delay;
+            result.worst = std::max (result.worst, std::fabs (off));
+
+            const auto right = ! frame.lost && ! frame.reverse && frame.parityOk && frame.label == wanted
+                                 && frame.drop == dropsFrames (rate) && ! (std::fabs (off) > tolerance);
+
+            if (! right && result.wrong++ == 0)
+                result.firstWrong = "frame " + std::to_string (k) + ": heard " + formatLabel (frame.label, rate)
+                                      + (frame.lost ? " (lost)" : "") + (frame.reverse ? " (reverse)" : "")
+                                      + (frame.parityOk ? "" : " (odd)") + " at "
+                                      + std::to_string (frame.startSample) + ", wanted " + formatLabel (wanted, rate)
+                                      + " at " + std::to_string (static_cast<std::int64_t> (
+                                                   std::floor (exactStart (zero, k, sampleRate, rate) + delay)));
+        }
+
+        return result;
+    }
+
+    /*  WHITE NOISE, its standard deviation one, the same on every platform:
+        four of mt19937's own numbers summed - the standard fixes those, where
+        std::normal_distribution is each library's own. */
+    struct Noise
+    {
+        std::mt19937 numbers { 20261013u };
+
+        double next()
+        {
+            double sum = 0.0;
+
+            for (int n = 0; n < 4; ++n)
+                sum += static_cast<double> (numbers()) / 4294967295.0 - 0.5;
+
+            return sum * std::sqrt (3.0);
+        }
+    };
+
+    /*  A LINE PLAYED AT `speed`: read every `speed` samples, straight between
+        the two either side - as a tape machine run fast or slow would hand
+        it on. */
+    std::vector<float> playedAt (const std::vector<float>& line, double speed)
+    {
+        std::vector<float> out;
+
+        for (std::size_t m = 0;; ++m)
+        {
+            const auto at = static_cast<double> (m) * speed;
+            const auto index = static_cast<std::size_t> (at);
+
+            if (index + 1 >= line.size())
+                break;
+
+            const auto fraction = at - static_cast<double> (index);
+            out.push_back (static_cast<float> ((1.0 - fraction) * static_cast<double> (line[index])
+                                               + fraction * static_cast<double> (line[index + 1])));
+        }
+
+        return out;
+    }
+
+    std::size_t lostIn (const std::vector<LtcHeard>& heard)
+    {
+        return static_cast<std::size_t> (std::count_if (heard.begin(), heard.end(),
+                                                        [] (const LtcHeard& one) { return one.lost; }));
+    }
+}
+
+TEST_CASE ("ltc decoder: every frame at every rate and 44.1, 48 and 96 kHz, in blocks of 1, 7, 64, 333 and 512, each where it began to a tenth of a sample")
+{
+    /*  Two seconds from 01:00:00:00, read from the code's first edge - out of
+        silence - to the last frame whole in the line. The edge filter delays
+        every edge alike, by under two samples (a few tenths at 44.1 and 48 kHz,
+        more at 96 where the rise is more samples long): learned from the first
+        frame, every later one is held to it. And the blocks change nothing,
+        not by a bit of a fraction. */
+    for (const auto rate : everyRate)
+    {
+        for (const int sampleRate : { 44100, 48000, 96000 })
+        {
+            INFO ("rate " << std::string (wordOf (rate)) << " at " << sampleRate << " Hz");
+
+            constexpr std::int64_t zero = 1000;
+            const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+            const auto count = zero + 2 * sampleRate;
+            const auto line = codeLine (rate, sampleRate, zero, count);
+            const auto whole = wholeBefore (count, zero, sampleRate, rate);
+
+            std::vector<LtcHeard> firstHeard;
+
+            for (const int block : { 1, 7, 64, 333, 512 })
+            {
+                INFO ("in blocks of " << block);
+
+                const auto heard = hear (line, sampleRate, block);
+                REQUIRE (heard.size() >= whole);
+                CHECK (heard.size() <= whole + 1);
+
+                const auto delay = startOf (heard.front()) - exactStart (zero, 0, sampleRate, rate);
+                CHECK (delay > 0.0);
+                CHECK (delay < 2.0);
+
+                const auto read = checkRead (heard, 0, heard.size(), zero, startFrame, 0, sampleRate, rate, delay, 0.1);
+                INFO (read.firstWrong);
+                CHECK (read.wrong == 0);
+                CHECK (read.worst < 0.1);
+
+                for (const auto& frame : heard)
+                    CHECK (frame.bitPeriod == doctest::Approx (bitLengthOf (sampleRate, rate)).epsilon (0.001));
+
+                if (firstHeard.empty())
+                {
+                    firstHeard = heard;
+                    continue;
+                }
+
+                auto same = firstHeard.size() == heard.size();
+
+                for (std::size_t i = 0; same && i < heard.size(); ++i)
+                    same = heard[i].label == firstHeard[i].label && heard[i].startSample == firstHeard[i].startSample
+                             && ! (std::fabs (heard[i].startFraction - firstHeard[i].startFraction) > 0.0f);
+
+                CHECK (same);
+            }
+
+            /*  AND AS THE TESTS' OWN READER HEARS IT (LtcReader.h, written from
+                the standard alone): the same labels, each on the first sample
+                of the new sign its edge brought - within two samples of where
+                the decoder placed it. */
+            const auto reader = ltcreader::decode (line.data(), line.size(), static_cast<double> (sampleRate),
+                                                   framesPerSecondOf (rate), 0);
+            const auto heard = firstHeard;
+            REQUIRE (reader.size() >= whole);
+
+            int disagree = 0;
+
+            for (std::size_t i = 0; i < std::min (reader.size(), heard.size()); ++i)
+                if (heardLabel (reader[i]) != heard[i].label || std::fabs (static_cast<double> (reader[i].sample) - startOf (heard[i])) > 2.0)
+                    ++disagree;
+
+            CHECK (disagree == 0);
+        }
+    }
+}
+
+TEST_CASE ("ltc decoder: a code played backwards reads with reverse set and its labels descending, each start the same edge met from the other side")
+{
+    /*  Reversed, a frame arrives bit 79 first, the sync word mirrored at its
+        head, and its bit 0 last: the edge that began bit 0 is the one that
+        closes it as it arrives. A sample `n` played backwards is `count - 1 -
+        n`, so a moment `t` of the line forwards is `count - t` backwards -
+        and the filter's delay, which followed each edge forwards, precedes it
+        now. The frame the line ended inside comes first and is not whole; the
+        last read is frame nought, closed by the fall into the silence the code
+        started from. */
+    for (const auto rate : { Rate::fps25, Rate::fps2997df, Rate::fps23976 })
+    {
+        INFO ("rate " << std::string (wordOf (rate)));
+
+        constexpr int sampleRate = 48000;
+        constexpr std::int64_t zero = 1000;
+        const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+        const auto count = zero + 2 * sampleRate;
+        auto line = codeLine (rate, sampleRate, zero, count);
+
+        const auto forwards = hear (line, sampleRate);
+        REQUIRE (! forwards.empty());
+        const auto delay = startOf (forwards.front()) - exactStart (zero, 0, sampleRate, rate);
+
+        std::reverse (line.begin(), line.end());
+        const auto heard = hear (line, sampleRate);
+        const auto whole = wholeBefore (count, zero, sampleRate, rate);
+
+        REQUIRE (heard.size() >= whole);
+        CHECK (heard.size() <= whole + 1);
+        CHECK (lostIn (heard) == 0);
+
+        int wrong = 0;
+        double worst = 0.0;
+
+        for (std::size_t i = 0; i < heard.size(); ++i)
+        {
+            const auto& frame = heard[i];
+            const auto k = static_cast<std::int64_t> (heard.size() - 1 - i);
+            const auto off = startOf (frame) - (static_cast<double> (count) - exactStart (zero, k, sampleRate, rate) - delay);
+            worst = std::max (worst, std::fabs (off));
+
+            if (! frame.reverse || ! frame.parityOk || frame.drop != dropsFrames (rate)
+                  || frame.label != labelOf (startFrame + k, rate))
+                ++wrong;
+        }
+
+        CHECK (wrong == 0);
+        CHECK (heard.back().label == label (1, 0, 0, 0));
+        CHECK (worst < 0.1);
+    }
+}
+
+TEST_CASE ("ltc decoder: a code played at half and at twice its speed, or sped up as it plays, reads, and the bit period follows it")
+{
+    /*  Four seconds from 01:00:00:00, played as a tape run at half speed and
+        at twice - 23.976 at half is the longest bit the decoder follows, 30 at
+        twice the shortest. Every frame reads, in order, and each says how long
+        its bits were where it was heard: the period the speed made. */
+    for (const auto rate : { Rate::fps23976, Rate::fps25, Rate::fps2997df, Rate::fps30 })
+    {
+        for (const double speed : { 0.5, 2.0 })
+        {
+            INFO ("rate " << std::string (wordOf (rate)) << " at " << speed << " times");
+
+            constexpr int sampleRate = 48000;
+            constexpr std::int64_t zero = 1000;
+            const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+            const auto count = zero + 4 * sampleRate;
+            const auto played = playedAt (codeLine (rate, sampleRate, zero, count), speed);
+            const auto heard = hear (played, sampleRate);
+            const auto whole = wholeBefore (count, zero, sampleRate, rate);
+
+            REQUIRE (heard.size() + 1 >= whole);
+            CHECK (lostIn (heard) == 0);
+
+            const auto bit = bitLengthOf (sampleRate, rate) / speed;
+            const auto frameLength = 80.0 * bit;
+            int wrong = 0;
+
+            for (std::size_t i = 0; i < heard.size(); ++i)
+            {
+                const auto& frame = heard[i];
+                const auto k = static_cast<std::int64_t> (i);
+                const auto spaced = i == 0 || std::fabs (startOf (frame) - startOf (heard[i - 1]) - frameLength) < 0.5;
+
+                if (frame.reverse || ! frame.parityOk || frame.label != labelOf (startFrame + k, rate) || ! spaced
+                      || std::fabs (frame.bitPeriod / bit - 1.0) > 0.005)
+                    ++wrong;
+            }
+
+            CHECK (wrong == 0);
+        }
+    }
+
+    /*  AND A VARISPEED: 25 frames a second sped up from once to one and a
+        half times over two seconds. Past a third faster a whole bit is
+        shorter than three quarters of the bit the code began with, so only a
+        period that follows the code reads it to the end - and the last frames
+        say the bit the speed made. */
+    constexpr int sampleRate = 48000;
+    constexpr std::int64_t zero = 1000;
+    const auto rate = Rate::fps25;
+    const auto line = codeLine (rate, sampleRate, zero, zero + 4 * sampleRate);
+
+    std::vector<float> ramped;
+    constexpr double rampSamples = 2.0 * static_cast<double> (sampleRate);
+
+    for (double at = 0.0, speed = 1.0; at + 1.0 < static_cast<double> (line.size()); at += speed)
+    {
+        const auto index = static_cast<std::size_t> (at);
+        const auto fraction = at - static_cast<double> (index);
+        ramped.push_back (static_cast<float> ((1.0 - fraction) * static_cast<double> (line[index])
+                                              + fraction * static_cast<double> (line[index + 1])));
+        speed = std::min (1.5, 1.0 + 0.5 * static_cast<double> (ramped.size()) / rampSamples);
+    }
+
+    const auto heard = hear (ramped, sampleRate);
+    REQUIRE (heard.size() > 90u);
+    CHECK (lostIn (heard) == 0);
+
+    int wrong = 0;
+
+    for (std::size_t i = 0; i < heard.size(); ++i)
+        if (heard[i].reverse || ! heard[i].parityOk
+              || heard[i].label != labelOf (frameOf (label (1, 0, 0, 0), rate) + static_cast<std::int64_t> (i), rate))
+            ++wrong;
+
+    CHECK (wrong == 0);
+    CHECK (heard.back().bitPeriod == doctest::Approx (24.0 / 1.5).epsilon (0.005));
+}
+
+TEST_CASE ("ltc decoder: a code at -40 dBFS, off-centre, inverted or under white noise reads every frame, and noise alone reads nothing")
+{
+    /*  29.97 drop-frame at 44.1 kHz, the fractional worst case, three
+        seconds: at -40 dBFS; on a DC offset of a quarter of its peak; upside
+        down; under white noise 20 dB below it, from the code's first sample;
+        and all four at once. Every frame is read and nothing else is - no
+        frame that is not the code's, no `lost`. The followers make a quiet,
+        an off-centre and an inverted code read exactly as the code itself,
+        to a tenth of a sample. Noise moves each edge, and the first edge out
+        of silence most - a sample at -20 dB, the plateau it reached read from
+        a peak the noise rides on - so under noise the reading is what is held
+        to, and the starts only to two samples. Ten seconds of the noise alone
+        read as nothing at all. */
+    constexpr int sampleRate = 44100;
+    constexpr std::int64_t zero = 1000;
+    const auto rate = Rate::fps2997df;
+    const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+    const auto count = zero + 3 * sampleRate;
+    const auto code = codeLine (rate, sampleRate, zero, count);
+    const auto whole = wholeBefore (count, zero, sampleRate, rate);
+
+    const auto delay = startOf (hear (code, sampleRate).front()) - exactStart (zero, 0, sampleRate, rate);
+    const auto peak = static_cast<double> (ltcGain);
+
+    struct Condition
+    {
+        const char* name;
+        double gain;
+        double offset;
+        double noise;
+        double tolerance;
+    };
+
+    const Condition conditions[] {
+        { "at -40 dBFS", 0.01 / peak, 0.0, 0.0, 0.1 },
+        { "on a DC offset of a quarter of its peak", 1.0, 0.25, 0.0, 0.1 },
+        { "inverted", -1.0, 0.0, 0.0, 0.1 },
+        { "under white noise 20 dB down", 1.0, 0.0, 0.1, 2.0 },
+        { "at -40 dBFS, off-centre, inverted and under noise", -0.01 / peak, 0.25, 0.1, 2.0 }
+    };
+
+    for (const auto& condition : conditions)
+    {
+        INFO (std::string (condition.name));
+
+        Noise noise;
+        std::vector<float> line (code.size());
+        const auto level = peak * std::fabs (condition.gain);
+
+        for (std::size_t n = 0; n < line.size(); ++n)
+        {
+            auto value = static_cast<double> (code[n]) * condition.gain + condition.offset * level;
+
+            if (condition.noise > 0.0 && static_cast<std::int64_t> (n) >= zero)
+                value += condition.noise * level * noise.next();
+
+            line[n] = static_cast<float> (value);
+        }
+
+        const auto heard = hear (line, sampleRate);
+        REQUIRE (heard.size() >= whole);
+        CHECK (heard.size() <= whole + 1);
+
+        const auto read = checkRead (heard, 0, heard.size(), zero, startFrame, 0, sampleRate, rate, delay,
+                                     condition.tolerance);
+        INFO (read.firstWrong << "; the worst start " << read.worst << " samples out");
+        CHECK (read.wrong == 0);
+    }
+
+    Noise noise;
+    std::vector<float> alone (static_cast<std::size_t> (10 * sampleRate));
+
+    for (auto& value : alone)
+        value = static_cast<float> (0.1 * peak * noise.next());
+
+    CHECK (hear (alone, sampleRate).empty());
+}
+
+TEST_CASE ("ltc decoder: half a second of silence says lost once, two frames after the last frame heard, and the code is read again after it")
+{
+    /*  25 at 48 kHz, a frame every 1920 samples from 1000; the line cut to
+        silence from 48000 to 72000 - mid-frame both ways. The frames whole
+        before the cut are read; two of their lengths after the last one
+        ended, one `lost` (AIR's freewheel is TG.5's: the decoder says only
+        that the code went quiet); and from the first frame whole after the
+        silence, the code again, every frame where it began. */
+    constexpr int sampleRate = 48000;
+    constexpr std::int64_t zero = 1000;
+    const auto rate = Rate::fps25;
+    const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+    const auto count = zero + 3 * sampleRate;
+
+    auto line = codeLine (rate, sampleRate, zero, count);
+    const auto delay = startOf (hear (line, sampleRate).front()) - exactStart (zero, 0, sampleRate, rate);
+
+    std::fill (line.begin() + 48000, line.begin() + 72000, 0.0f);
+    const auto heard = hear (line, sampleRate);
+
+    REQUIRE (lostIn (heard) == 1);
+    const auto lost = static_cast<std::size_t> (std::find_if (heard.begin(), heard.end(),
+                                                              [] (const LtcHeard& one) { return one.lost; })
+                                                - heard.begin());
+
+    //  Frames 0 to 23 end by 47080; frame 24 runs into the silence.
+    REQUIRE (lost == 24);
+    const auto before = checkRead (heard, 0, lost, zero, startFrame, 0, sampleRate, rate, delay, 0.1);
+    INFO (before.firstWrong);
+    CHECK (before.wrong == 0);
+
+    //  Frame 23 ended where frame 24 would have begun: two frames after that.
+    CHECK (startOf (heard[lost]) == doctest::Approx (exactStart (zero, 24, sampleRate, rate) + delay + 2.0 * 1920.0).epsilon (1.0e-6));
+
+    //  Frame 37 is the first to begin after the silence, at 72040.
+    const auto after = heard.size() - lost - 1;
+    REQUIRE (after >= 30u);
+    const auto again = checkRead (heard, lost + 1, after, zero, startFrame, 37, sampleRate, rate, delay, 0.1);
+    INFO (again.firstWrong);
+    CHECK (again.wrong == 0);
+}
+
+TEST_CASE ("ltc decoder: a takeover splices a new code in, and its frames are read from within a frame of it")
+{
+    /*  Program 1 from 01:00:00:00 on 1000; program 2 from 10:00:00:00 takes
+        the line over 777 samples into the old code's twenty-sixth frame - the
+        generator's takeover, one more edge with the line never quiet (AHL).
+        The old code's frames whole before it are read; then the new code's,
+        the first of them within a frame of the splice, each where it began. */
+    constexpr int sampleRate = 48000;
+    constexpr std::int64_t zero = 1000;
+    const auto rate = Rate::fps25;
+    constexpr std::int64_t splice = zero + 25 * 1920 + 777;
+
+    LtcGenerator generator;
+    generator.prepare (sampleRate);
+    generator.setOutput (1, ltcGain);
+    REQUIRE (generator.post (Command::start (1, zero, frameOf (label (1, 0, 0, 0), rate), rate)));
+    REQUIRE (generator.post (Command::start (2, splice, frameOf (label (10, 0, 0, 0), rate), rate)));
+
+    const auto line = render (generator, 0, 3 * sampleRate).samples;
+    const auto heard = hear (line, sampleRate);
+    REQUIRE (heard.size() > 25u);
+    CHECK (lostIn (heard) == 0);
+
+    const auto delay = startOf (heard.front()) - exactStart (zero, 0, sampleRate, rate);
+    const auto old = checkRead (heard, 0, 25, zero, frameOf (label (1, 0, 0, 0), rate), 0, sampleRate, rate, delay, 0.1);
+    INFO (old.firstWrong);
+    CHECK (old.wrong == 0);
+
+    //  The first of the new code's: frame nought or frame one of it.
+    const auto& first = heard[25];
+    const auto newFrame = frameOf (first.label, rate) - frameOf (label (10, 0, 0, 0), rate);
+    CHECK (newFrame >= 0);
+    CHECK (newFrame <= 1);
+
+    const auto taken = checkRead (heard, 25, heard.size() - 25, splice, frameOf (label (10, 0, 0, 0), rate),
+                                  newFrame, sampleRate, rate, delay, 0.1);
+    INFO (taken.firstWrong);
+    CHECK (taken.wrong == 0);
+}
+
+TEST_CASE ("ltc decoder: a code stopped on a frame boundary is read to its last frame, then said lost")
+{
+    /*  The generator ends a stopped code on a frame boundary, its last edge
+        drawn down to silence (AHK). That fall is the edge closing the last
+        bit of the last frame - read, as a reader on the end of the line reads
+        it - and two frames later the code is lost. */
+    constexpr int sampleRate = 48000;
+    constexpr std::int64_t zero = 1000;
+    const auto rate = Rate::fps25;
+
+    LtcGenerator generator;
+    generator.prepare (sampleRate);
+    generator.setOutput (1, ltcGain);
+    REQUIRE (generator.post (Command::start (1, zero, frameOf (label (1, 0, 0, 0), rate), rate)));
+    REQUIRE (generator.post (Command::stop (1, zero + 10 * 1920 - 5)));
+
+    const auto heard = hear (render (generator, 0, sampleRate).samples, sampleRate);
+    REQUIRE (heard.size() == 11u);
+
+    const auto delay = startOf (heard.front()) - exactStart (zero, 0, sampleRate, rate);
+    const auto read = checkRead (heard, 0, 10, zero, frameOf (label (1, 0, 0, 0), rate), 0, sampleRate, rate, delay, 0.1);
+    INFO (read.firstWrong);
+    CHECK (read.wrong == 0);
+
+    CHECK (heard.back().lost);
+    CHECK (startOf (heard.back()) == doctest::Approx (exactStart (zero, 10, sampleRate, rate) + delay + 2.0 * 1920.0).epsilon (1.0e-5));
+}
+
+TEST_CASE ("ltc decoder: detectRate tells the six rates apart from a second of frames, and says nothing from three")
+{
+    /*  AIL: what the labels count to comes from the largest frame number, the
+        drop flag from the frames, and 23.976 from 24 and 29.97 from 30 from
+        how long the frames are - here, measured from the decoder's own starts
+        over a second and a fifth. */
+    constexpr int sampleRate = 48000;
+    constexpr std::int64_t zero = 1000;
+
+    for (const auto rate : everyRate)
+    {
+        INFO ("rate " << std::string (wordOf (rate)));
+
+        const auto heard = hear (codeLine (rate, sampleRate, zero, zero + sampleRate + sampleRate / 5), sampleRate);
+        REQUIRE (heard.size() > 24u);
+
+        int largest = 0;
+        auto drop = true;
+
+        for (const auto& frame : heard)
+        {
+            largest = std::max (largest, frame.label.frames);
+            drop = drop && frame.drop;
+        }
+
+        const auto period = (startOf (heard.back()) - startOf (heard.front())) / static_cast<double> (heard.size() - 1);
+        const auto detected = detectRate (largest, drop, period, sampleRate);
+        REQUIRE (detected.has_value());
+        CHECK (*detected == rate);
+
+        //  Three frames show what the labels count to no more than a label does.
+        int fewLargest = 0;
+
+        for (std::size_t i = 0; i < 3; ++i)
+            fewLargest = std::max (fewLargest, heard[i].label.frames);
+
+        const auto fewPeriod = (startOf (heard[2]) - startOf (heard[0])) / 2.0;
+        CHECK_FALSE (detectRate (fewLargest, heard[0].drop, fewPeriod, sampleRate).has_value());
+    }
+
+    //  By hand, at 48 kHz: a frame of 2000 samples is 24 a second, 2002 is 23.976, 1600 is 30, 1601.6 is 29.97.
+    CHECK (detectRate (23, false, 2000.0, sampleRate) == Rate::fps24);
+    CHECK (detectRate (23, false, 2002.0, sampleRate) == Rate::fps23976);
+    CHECK (detectRate (24, false, 1920.0, sampleRate) == Rate::fps25);
+    CHECK (detectRate (29, false, 1600.0, sampleRate) == Rate::fps30);
+    CHECK (detectRate (29, false, 1601.6, sampleRate) == Rate::fps2997);
+    CHECK (detectRate (29, true, 1601.6, sampleRate) == Rate::fps2997df);
+
+    //  Nothing for what no rate is, or what the frames do not yet show.
+    CHECK_FALSE (detectRate (29, true, 1600.0, sampleRate).has_value());
+    CHECK_FALSE (detectRate (24, true, 1920.0, sampleRate).has_value());
+    CHECK_FALSE (detectRate (23, true, 2000.0, sampleRate).has_value());
+    CHECK_FALSE (detectRate (23, false, 1920.0, sampleRate).has_value());
+    CHECK_FALSE (detectRate (24, false, 1920.0 * 1.0006, sampleRate).has_value());
+    CHECK_FALSE (detectRate (29, false, 1600.8, sampleRate).has_value());
+    CHECK_FALSE (detectRate (22, false, 2000.0, sampleRate).has_value());
+    CHECK_FALSE (detectRate (24, false, 1920.0, 0).has_value());
+    CHECK_FALSE (detectRate (24, false, 0.0, sampleRate).has_value());
+}
+
+TEST_CASE ("ltc decoder: a frame whose ones are odd is read, and says so")
+{
+    /*  The generator draws only even frames - that is its polarity bit's
+        work - so this line is drawn by hand: five frames from 01:00:00:00 at
+        25 and 48 kHz, square, a half-bit twelve samples exactly, the second
+        with its polarity bit (59, at 25) turned over. Every frame reads with
+        its label; the second says its ones are odd and is not refused for it
+        - what an odd frame means is TG.5's. The silence after the last one
+        closes its last bit, and two frames on, the code is lost. */
+    constexpr int sampleRate = 48000;
+    constexpr std::size_t halfBit = 12;
+    const auto rate = Rate::fps25;
+    const auto first = frameOf (label (1, 0, 0, 0), rate);
+
+    std::vector<float> line (1000, 0.0f);
+    auto level = -ltcGain;
+
+    for (std::int64_t f = 0; f < 5; ++f)
+    {
+        auto bits = ltcBits (labelOf (first + f, rate), rate);
+
+        if (f == 1)
+            bits[std::size_t { 59 / 8 }] = static_cast<std::uint8_t> (bits[std::size_t { 59 / 8 }] ^ (1u << (59 % 8)));
+
+        for (int b = 0; b < ltcBitsPerFrame; ++b)
+        {
+            //  Every cell begins with a change, and a one changes again in its middle.
+            level = -level;
+            line.insert (line.end(), halfBit, level);
+
+            if (ltcBit (bits, b))
+                level = -level;
+
+            line.insert (line.end(), halfBit, level);
+        }
+    }
+
+    line.insert (line.end(), std::size_t { 8000 }, 0.0f);
+
+    const auto heard = hear (line, sampleRate);
+    REQUIRE (heard.size() == 6u);
+
+    for (std::size_t f = 0; f < 5; ++f)
+    {
+        INFO ("frame " << f);
+        CHECK_FALSE (heard[f].lost);
+        CHECK (heard[f].label == labelOf (first + static_cast<std::int64_t> (f), rate));
+        CHECK (heard[f].parityOk == (f != 1));
+        CHECK (heard[f].startSample == 1000 + static_cast<std::int64_t> (f) * 1920);
+    }
+
+    CHECK (heard[5].lost);
+}
+
+TEST_CASE ("ltc decoder: the outbox holds sixty-four frames undrained, the sixty-fifth is dropped and counted")
+{
+    /*  Sixty-five frames whole and nobody taking: the first sixty-four wait,
+        the newest is dropped and counted - what is waiting is older, and the
+        tick is told it lost one. Each carries the generation it was read
+        under. */
+    constexpr int sampleRate = 48000;
+    constexpr std::int64_t zero = 1000;
+    const auto rate = Rate::fps25;
+    const auto line = codeLine (rate, sampleRate, zero, zero + 65 * 1920 + 300);
+
+    LtcDecoder decoder;
+    decoder.prepare (sampleRate);
+
+    for (std::size_t at = 0; at < line.size(); at += 512)
+        decoder.process (line.data() + at, static_cast<int> (std::min<std::size_t> (512, line.size() - at)),
+                         static_cast<std::int64_t> (at));
+
+    std::vector<LtcHeard> heard;
+    heard.reserve (static_cast<std::size_t> (LtcDecoder::outboxSize));
+    const auto reserved = heard.capacity();
+
+    //  Into the caller's room: nothing allocated by the take.
+    CHECK (decoder.take (heard) == 64u);
+    CHECK (decoder.droppedCount() == 1);
+    CHECK (heard.capacity() == reserved);
+    CHECK (heard.front().label == label (1, 0, 0, 0));
+    CHECK (heard.back().label == label (1, 0, 2, 13));
+
+    auto stamped = true;
+
+    for (const auto& frame : heard)
+        stamped = stamped && frame.generation == decoder.generation();
+
+    CHECK (stamped);
+
+    //  Taken, it is empty.
+    CHECK (decoder.take (heard) == 0u);
+    CHECK (heard.empty());
+}
+
+TEST_CASE ("ltc decoder: prepare forgets the line, moves the generation on, and the next whole frame reads")
+{
+    /*  An audio restart (as LtcGenerator's prepare is, AHU): half a frame
+        heard before it is not finished after it, the generation moves on and
+        every frame after carries the new one, read from where its bit 0 began
+        on the count that carries on. */
+    constexpr int sampleRate = 48000;
+    constexpr std::int64_t zero = 1000;
+    const auto rate = Rate::fps25;
+    const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+    const auto line = codeLine (rate, sampleRate, zero, zero + 2 * sampleRate);
+
+    LtcDecoder decoder;
+    decoder.prepare (sampleRate);
+
+    //  Ten frames and half of the eleventh.
+    const auto cut = static_cast<std::size_t> (zero + 10 * 1920 + 960);
+    const std::vector<float> early (line.begin(), line.begin() + static_cast<std::ptrdiff_t> (cut));
+    const std::vector<float> late (line.begin() + static_cast<std::ptrdiff_t> (cut), line.end());
+
+    const auto before = hear (decoder, early, 0, 64);
+    REQUIRE (before.size() == 10u);
+    const auto generation = decoder.generation();
+    CHECK (before.back().generation == generation);
+
+    const auto delay = startOf (before.front()) - exactStart (zero, 0, sampleRate, rate);
+
+    decoder.prepare (sampleRate);
+    CHECK (decoder.generation() == generation + 1);
+
+    const auto after = hear (decoder, late, static_cast<std::int64_t> (cut), 64);
+    REQUIRE (after.size() > 20u);
+    CHECK (after.front().generation == generation + 1);
+
+    //  Frame 10 was half heard: the first read after is frame 11.
+    const auto read = checkRead (after, 0, after.size(), zero, startFrame, 11, sampleRate, rate, delay, 0.1);
+    INFO (read.firstWrong);
+    CHECK (read.wrong == 0);
 }

@@ -44,6 +44,9 @@
     yet sent ended, one sent paused on a frame boundary and resumed by the
     corrected GO from there, a scene's code re-seated with its sound on one
     sample, the second press and a refused one.
+
+    TG.3 (namespace draft §60, AIM): the input LTC is read on, as the Runner
+    tells the audio side - one channel of the input `sync/ltcIn` names.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
@@ -66,6 +69,7 @@
 #include <wfg/engine/midi/MidiSink.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/timecode/FrameClock.h>
+#include <wfg/engine/timecode/LtcDecoder.h>
 #include <wfg/engine/timecode/Timecode.h>
 
 #include <algorithm>
@@ -163,6 +167,8 @@ namespace
             outputLevelDb = levelDb;
         }
 
+        void setTimecodeInput (int channel) override { inputChannel = channel; }
+
         std::uint64_t timecodeGeneration() const override { return generation; }
 
         //  The disk answers: every arm outstanding is ready.
@@ -197,6 +203,7 @@ namespace
 
         int outputChannel = -99;
         double outputLevelDb = 0.0;
+        int inputChannel = -99;
 
         std::vector<cue::ArmRequest> arms;
         std::vector<int> ready;
@@ -1276,6 +1283,58 @@ TEST_CASE ("timecode line: the output follows an edit of ltcOut and ltcLevel, an
     rig.tickOnce();
     CHECK (rig.player.outputChannel == 2);
     CHECK (rig.player.outputLevelDb == doctest::Approx (-12.0));
+}
+
+TEST_CASE ("timecode line: the input LTC is read on follows sync/ltcIn - one channel of a named input, none when it is wider or none is named")
+{
+    /*  TG.3 (AIM): `ltcIn` names an input; the Runner reads its first logical
+        channel - one channel wide, or none - once a revision, with the
+        output, and tells the audio side every tick. The expected channels by
+        hand: a stereo input on 0 and 1, then two mono ones on 2 and 3. */
+    TimecodeRig rig;
+    rig.attach();
+    rig.tickOnce();
+    CHECK (rig.player.inputChannel == -1);
+
+    const auto stereo = rig.document.createInput (2);
+    const auto voice = rig.document.createInput (1);
+    const auto code = rig.document.createInput (1);
+    REQUIRE (stereo.ok);
+    REQUIRE (voice.ok);
+    REQUIRE (code.ok);
+
+    REQUIRE (rig.document.setAttribute ("/godot/sync/ltcIn", code.id).ok);
+    rig.tickOnce();
+    CHECK (rig.player.inputChannel == 3);
+
+    REQUIRE (rig.document.setAttribute ("/godot/sync/ltcIn", voice.id).ok);
+    rig.tickOnce();
+    CHECK (rig.player.inputChannel == 2);
+
+    //  Wider than a channel: which of two would the code be on? None (validate warns).
+    REQUIRE (rig.document.setAttribute ("/godot/sync/ltcIn", stereo.id).ok);
+    rig.tickOnce();
+    CHECK (rig.player.inputChannel == -1);
+
+    //  The inputs repacked under it: the stereo one gone, the code's input is channel 1.
+    REQUIRE (rig.document.setAttribute ("/godot/sync/ltcIn", code.id).ok);
+    REQUIRE (rig.document.removeInput (stereo.id).ok);
+    rig.tickOnce();
+    CHECK (rig.player.inputChannel == 1);
+
+    //  Told every tick, so a player handed in since is told at once.
+    rig.player.inputChannel = -99;
+    rig.tickOnce();
+    CHECK (rig.player.inputChannel == 1);
+
+    REQUIRE (rig.document.setAttribute ("/godot/sync/ltcIn", "").ok);
+    rig.tickOnce();
+    CHECK (rig.player.inputChannel == -1);
+
+    //  A player that hears no code hands back nothing - and leaves nothing in the caller's vector.
+    std::vector<timecode::LtcHeard> heard (3);
+    rig.player.takeHeardLtc (heard);
+    CHECK (heard.empty());
 }
 
 TEST_CASE ("timecode line: a replay of a session on the line reaches the same runs, ended and failed on the same ticks")

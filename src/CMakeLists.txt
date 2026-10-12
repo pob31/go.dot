@@ -321,6 +321,7 @@ add_library(wfg_engine STATIC
     wfg/engine/timecode/FrameClock.h
     wfg/engine/timecode/LtcEncoder.h
     wfg/engine/timecode/LtcEncoder.cpp
+    wfg/engine/timecode/LtcDecoder.h
     wfg/engine/timecode/LtcGenerator.h
     wfg/engine/timecode/MtcSchedule.h
     wfg/engine/timecode/MtcSchedule.cpp

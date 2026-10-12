@@ -57,6 +57,8 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
+#include <wfg/engine/timecode/LtcDecoder.h>
+#include <wfg/engine/timecode/LtcGenerator.h>
 #include <wfg/engine/timecode/Timecode.h>
 
 #include "LtcReader.h"
@@ -8180,6 +8182,233 @@ TEST_CASE ("rt: LTC drawn on the audio thread allocates nothing of ours")
     CHECK (rt::violations() == 0);
     CHECK (rig.host.timecodeProgram() == 0);
     CHECK (rig.host.timecodeLate() == 1);
+}
+
+//==============================================================================
+TEST_CASE ("audio host: LTC on the input sync/ltcIn names is read right after the tap is filled, each frame where the input put it")
+{
+    /*  Namespace draft §60 (TG.3, AIM), through the Runner, HostPlayer and
+        AudioHost. Two named inputs of one channel; `sync/ltcIn` names the
+        second, so the Runner tells the host to read logical input 1 - every
+        tick, as it tells the output. A generator of the test's own draws 25
+        frames a second from 02:00:00:00 into that input, block by block on
+        the host's own count; a tone is in the other. The frames the host
+        reads - right after its tap is filled, inside Go.dot's own part of the
+        block - are taken through the Player, and are the very frames a
+        decoder of the test's own reads from the same blocks on the same
+        count: the same labels, the same samples, the same fractions. So each
+        is where the input buffer put it, the edge filter's constant after the
+        frame's exact moment. `ltcIn` emptied, nothing more is read; named on
+        the input with the tone, nothing is either. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+    constexpr int blocksPerTick = (rate / 50) / blockSize;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (60);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    engine.log().openInMemory ({});
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    const auto voice = document.createInput (1);
+    const auto code = document.createInput (1);
+    REQUIRE (voice.ok);
+    REQUIRE (code.ok);
+    REQUIRE (document.setAttribute ("/godot/sync/ltcIn", code.id).ok);
+
+    audio::HostPlayer player { rig.host, engine };
+    runner.setPlayer (&player);
+    runner.setSamplesPerTick (rate / 50);
+
+    const auto codeRate = timecode::Rate::fps25;
+    const auto startFrame = timecode::frameOf (timecode::Label { 2, 0, 0, 0 }, codeRate);
+    constexpr std::int64_t zero = 1000;
+
+    timecode::LtcGenerator generator;
+    generator.prepare (rate);
+    generator.setOutput (0, 0.125892541f);
+    REQUIRE (generator.post (timecode::LtcGenerator::Command::start (5, zero, startFrame, codeRate)));
+
+    timecode::LtcDecoder reference;
+    reference.prepare (rate);
+
+    std::vector<float> voiceBlock (blockSize), codeBlock (blockSize);
+    const float* inputs[] { voiceBlock.data(), codeBlock.data() };
+    float* codeOut = codeBlock.data();
+
+    std::vector<timecode::LtcHeard> some, fromHost, fromReference;
+    some.reserve (static_cast<std::size_t> (timecode::LtcDecoder::outboxSize));
+
+    std::int64_t tick = 0;
+    std::int64_t toneAt = 0;
+
+    const auto takeBoth = [&]
+    {
+        player.takeHeardLtc (some);
+        fromHost.insert (fromHost.end(), some.begin(), some.end());
+        reference.take (some);
+        fromReference.insert (fromReference.end(), some.begin(), some.end());
+    };
+
+    const auto oneTick = [&]
+    {
+        runner.beforeTick (engine, tick);
+        engine.processTick (tick++);
+        takeBoth();
+
+        for (int i = 0; i < blocksPerTick; ++i)
+        {
+            const auto blockStart = rig.host.clock().samplesElapsed();
+
+            for (auto& sample : voiceBlock)
+                sample = 0.5f * std::sin (0.05f * static_cast<float> (toneAt++));
+
+            generator.render (&codeOut, 1, blockSize, blockStart);
+            reference.process (codeBlock.data(), blockSize, blockStart);
+            rig.host.processBlock (inputs, 2);
+        }
+    };
+
+    //  A second and a fifth: thirty frames.
+    for (int i = 0; i < 60; ++i)
+        oneTick();
+
+    takeBoth();
+
+    REQUIRE (fromHost.size() >= 27u);
+    REQUIRE (fromHost.size() == fromReference.size());
+
+    const auto delay = static_cast<double> (fromHost.front().startSample) + static_cast<double> (fromHost.front().startFraction)
+                         - static_cast<double> (zero);
+    CHECK (fromHost.front().startSample == zero);
+    CHECK (delay < 1.0);
+
+    int differ = 0, wrong = 0;
+
+    for (std::size_t k = 0; k < fromHost.size(); ++k)
+    {
+        const auto& heard = fromHost[k];
+        const auto& own = fromReference[k];
+
+        if (heard.label != own.label || heard.startSample != own.startSample
+              || std::fabs (heard.startFraction - own.startFraction) > 0.0f || heard.lost != own.lost)
+            ++differ;
+
+        const auto start = static_cast<double> (heard.startSample) + static_cast<double> (heard.startFraction);
+        const auto due = static_cast<double> (zero + 1920 * static_cast<std::int64_t> (k));
+
+        if (heard.lost || ! heard.parityOk || heard.label != timecode::labelOf (startFrame + static_cast<std::int64_t> (k), codeRate)
+              || std::fabs (start - due - delay) > 0.1)
+            ++wrong;
+    }
+
+    CHECK (differ == 0);
+    CHECK (wrong == 0);
+
+    /*  NONE NAMED: the Runner tells the host -1 on the next tick, and the
+        code still in the input is read no more. */
+    REQUIRE (document.setAttribute ("/godot/sync/ltcIn", "").ok);
+    oneTick();
+    fromHost.clear();
+
+    for (int i = 0; i < 25; ++i)
+        oneTick();
+
+    takeBoth();
+    CHECK (fromHost.empty());
+
+    //  On the input with the tone: a tone is no code.
+    REQUIRE (document.setAttribute ("/godot/sync/ltcIn", voice.id).ok);
+
+    for (int i = 0; i < 25; ++i)
+        oneTick();
+
+    takeBoth();
+    CHECK (fromHost.empty());
+}
+
+TEST_CASE ("rt: LTC read on the audio thread allocates nothing of ours")
+{
+    /*  PRD §4.2 with the decoder working: a code read from an input block
+        after block, the input switched away and back - the line started
+        again - and the frames taken from this thread while the blocks run,
+        as the tick thread will. Go.dot's regions allocate nothing. */
+    REQUIRE (rt::isCounting());
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    timecode::LtcGenerator generator;
+    generator.prepare (48000);
+    generator.setOutput (0, 0.125892541f);
+    REQUIRE (generator.post (timecode::LtcGenerator::Command::start (1, 500, 0, timecode::Rate::fps2997df)));
+
+    std::vector<float> silence (128), codeBlock (128);
+    const float* inputs[] { silence.data(), codeBlock.data() };
+    float* codeOut = codeBlock.data();
+
+    std::vector<timecode::LtcHeard> heard;
+    heard.reserve (static_cast<std::size_t> (timecode::LtcDecoder::outboxSize));
+    std::size_t frames = 0;
+
+    rig.host.setTimecodeInput (1);
+
+    const auto block = [&]
+    {
+        generator.render (&codeOut, 1, 128, rig.host.clock().samplesElapsed());
+        rig.host.processBlock (inputs, 2);
+    };
+
+    for (int i = 0; i < 50; ++i)
+        block();
+
+    rt::resetCounts();
+
+    for (int i = 0; i < 400; ++i)
+    {
+        if (i == 150)
+            rig.host.setTimecodeInput (0);
+
+        if (i == 170)
+            rig.host.setTimecodeInput (1);
+
+        block();
+
+        if (i % 7 == 0)
+        {
+            rig.host.takeHeardLtc (heard);
+            frames += heard.size();
+        }
+    }
+
+    INFO ("Go.dot's own regions allocated " << rt::violations() << " times while LTC was read");
+    CHECK (rt::violations() == 0);
+    CHECK (frames > 20u);
+    CHECK (rig.host.ltcInDropped() == 0);
 }
 
 TEST_CASE ("audio host: a song and its LTC fired together in one group start on the same sample, and Esc stops the code within a frame")

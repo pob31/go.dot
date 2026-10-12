@@ -26882,3 +26882,86 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   it, as it does not arm a bank (TG.8); a member with an endless range before the aim is planned by
   `solve` as still going though no code started it (TG.7, TG.8); the inspector's words and order for
   the new rows, a drag refused in words, the icon (TG.10).
+- **TG.3**, 2026-10-13: the LTC decoder on the audio thread (AIL, AIM, AIQ, AIR). `timecode::LtcDecoder`,
+  vendor-free and header-only, `process` marked `WFG_AUDIO_THREAD`. **Edges**: crossings of the line's
+  middle with hysteresis - half its half-swing beyond the middle, never under -66 dBFS - the middle and
+  the swing from two peak followers that take a peak at once and let go towards the line over a tenth
+  of a second, so a code at -40 dBFS reads as one at full scale, and a DC offset is where the middle
+  is; a line at rest (after `prepare`, or fallen quiet) takes its first excursion beyond the band
+  either way as an edge from the rest level, so a code starting out of silence is read from its first
+  frame, and the line's first sample is its rest, so a DC offset is never an edge. **Each edge placed
+  by its area, not its crossing**: the crossing, linear between two samples as the brief said, wanders
+  by a seventh of a sample as an edge rounded over a sample or two slides across one (0.15 sample at
+  44.1 and 48 kHz on the generator's 40 µs edge, measured), too much for TG.5; so the crossing finds the
+  edge and `t = b - sum (x - L0) / (L1 - L0)`, over the samples reaching half way to the crossings
+  either side, places it - exact for any rounding a linear filter makes, to that filter's constant
+  delay. `L0` is the plateau the edge left, taken when it is found; `L1` the one it reached, taken when
+  it is placed - once the next edge is found, or its stretch has passed with none. Measured: every
+  frame's start within 0.007 sample of its exact moment plus that constant, at every rate at 44.1, 48
+  and 96 kHz (the constant 0.40, 0.47 and 1.30 sample there). A code that falls back to rest and stays
+  in the band longer than an edge takes to pass it - a stop, which ends on a frame boundary (AHK) -
+  makes one last edge to the middle, which closes the last bit of its last frame; no crossing for a
+  bit and a half is a line standing at a plateau, quiet too. **Bits**: half a bit or a whole one at
+  three quarters of a tracked period; the period found from a half beside a whole (a ratio of 1.5 to
+  2.6) or forty wholes alike within 30 %, the intervals heard while finding it read again by it so the
+  first frame is not lost; then moved a sixteenth of the way by each accepted interval; held between
+  `fs / 4800` (30 at twice speed) and `fs * 1001 / 960000` (23.976 at half), and lost by an interval
+  under 0.3 or over 1.5 of it. A half left over when a whole comes is dropped. **Frames**: the last
+  eighty bits with the edges that began and ended each; the sync word at their end is a frame read
+  forwards, mirrored at their head one read backwards; digits that are not digits, seconds or minutes
+  tens over 5, hours over 23 or frames over 29 are no frame; the parity said, not judged. A frame's
+  start is the edge that began its bit 0 - forwards its first edge, backwards the edge that closed the
+  last bit to arrive - as a whole sample and a `float` fraction; `bitPeriod` is the frame's own length
+  over eighty. **The outbox**, sixty-four one way, two atomics: full, the newest is dropped and counted
+  (`droppedCount`). Once a frame is read and none follows for two of its own lengths after it ended,
+  one `lost` entry at that moment. `prepare` forgets everything and moves a generation on; it leaves
+  the outbox alone - emptying it from the preparing thread would race the tick's take - and every entry
+  carries the generation it was read under. `LtcHeard` gained `lost` and `generation` beside the
+  brief's fields. **`detectRate (largestFrame, dropFrame, framePeriodSamples, sampleRate)`**, pure,
+  beside it: 23, 24 and 29 as the largest frame number mean 24, 25 and 30; 23.976 is told from 24 and
+  29.97 from 30 by the frames' length within 500 ppm; a drop flag at 24 or 25, a drop-frame code at
+  30.000, a largest frame below 23 or a length near neither answer nothing, and TG.5 reads at the
+  show's rate (AIL).
+  **AudioHost** prepares it at `start` and `stop` with the generator and runs it right after the input
+  tap is filled, inside `rt::Region::ours`, over `tap.getReadPointer (channel)` on `tapView.blockStart`,
+  for the logical input in `ltcInChannel` (-1 none, nothing decoded; an input the interface was not
+  opened with, likewise); an input changed, or a block that does not follow the last, starts the line
+  again. `setTimecodeInput`, `takeHeardLtc` (into the caller's vector, cleared first, reserved once),
+  `ltcInDropped`, `ltcInGeneration`. `cue::Player` gains `setTimecodeInput` and `takeHeardLtc` (by
+  default the vector cleared: no code heard); `HostPlayer` forwards both. The Runner reads `sync/ltcIn`
+  once a revision beside the LTC output, through `ltcInChannelOf`, `ltcChannelOf`'s twin - the named
+  `<Input>`'s `firstChannel` when it is one channel wide, else -1 - and tells the player every tick. It
+  takes nothing yet (TG.5).
+  Two places this stage differs from its brief. The tenth of a sample each frame is held to is from
+  the frame's EXACT moment, `zero + k * rate * den / num`, and not from FrameClock's `frameStartSample`,
+  which is the first sample at or after it - up to 0.99 sample later at 29.97 and 44.1 kHz - since the
+  generator places each edge at its fraction of a sample and the decoder finds it there. And the
+  white noise 20 dB under the code is added from the code's first sample: before it, the line is
+  noise alone, a reader cannot know which way it stood when the code's first edge came, and the first
+  frame would be luck. Under noise the first edge out of silence is placed about a sample late (its
+  new plateau read from a peak the noise rides on), so noisy starts are held to two samples.
+  Tests under C and fr_FR. `TimecodeTests`, eleven cases "ltc decoder: ...", fed by the generator and
+  cross-checked against `tests/LtcReader.h`: every rate at 44.1, 48 and 96 kHz in blocks of 1, 7, 64,
+  333 and 512, every frame from the first, each within 0.1 sample of its exact moment and the filter's
+  constant learned from the first, the same to the bit whatever the blocks; played backwards, labels
+  descending, each start the same edge from the other side; at half and twice speed and on a
+  varispeed from once to one and a half times, the bit period following; at -40 dBFS, on a DC offset
+  of a quarter of the peak, inverted, under -20 dB noise and all four at once, every frame and nothing
+  else, and ten seconds of noise alone nothing; half a second of silence, `lost` once two frames after
+  the last frame and the code read again from the first frame after; a takeover read from its first
+  frame (within one, the brief's bound); a stop read to its last frame, then lost; an odd frame drawn
+  by hand, read and said odd; `detectRate` on six rates from 1.2 s of frames, nothing from three, and
+  by hand; the outbox's sixty-four and the sixty-fifth dropped; `prepare`. `AudioTests`: LTC drawn
+  into the second of two named inputs, `sync/ltcIn` naming it, through the Runner, HostPlayer and
+  AudioHost - every frame the very frame a decoder of the test's own reads from the same blocks, the
+  first on its start's own sample, and nothing read once `ltcIn` is emptied or names the input with a
+  tone; and "rt: LTC read on the audio thread allocates nothing of ours", the input switched away and
+  back. `TimecodeRunTests`: the input follows `ltcIn` - a mono input's channel, none for a stereo one
+  or none named, the channel after the inputs are repacked, told every tick. Fourteen cases, green in
+  both locales; unit.C (630 s) and unit.fr_FR (631 s) whole; `source.comments`, `client.boundary`.
+  Sixteen deliberate breakages, each turning its own cases red: fourteen in the decoder (edges at their crossings; no
+  backwards sync; what was heard while finding the period not read again; the period never
+  following; bounds for nominal speed only; a fixed threshold; a full outbox dropping the oldest;
+  `lost` never said, or two frames late; no fall into rest; parity not counted - which nothing caught
+  until the hand-drawn odd frame; the backwards start at the first edge; `prepare` keeping the
+  generation), the tap read before it is filled, and the input's width ignored.

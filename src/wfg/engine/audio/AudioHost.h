@@ -24,6 +24,7 @@
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/clock/SampleClock.h>
+#include <wfg/engine/timecode/LtcDecoder.h>
 #include <wfg/engine/timecode/LtcGenerator.h>
 
 #include <array>
@@ -566,6 +567,29 @@ namespace wfg::audio
         std::uint32_t timecodeLate() const noexcept;
         std::uint64_t timecodeProgram() const noexcept;
         std::uint64_t timecodeGeneration() const noexcept;
+
+        /*  LTC COMING IN (namespace draft §60, TG.3; AIM): the logical input
+            the code is read on, -1 for none. The audio thread reads it once a
+            block, right after the input tap is filled, and decodes that
+            channel of the tap - LtcDecoder.h says how; nothing is decoded on
+            -1 or on an input the interface was not opened with, and an input
+            changed starts the reading again. Any thread: one relaxed store. */
+        void setTimecodeInput (int channel) noexcept;
+
+        /*  THE FRAMES READ SINCE THE LAST TAKE, oldest first, and the `lost`
+            the code's silence owes, into `heard` - cleared first, and the
+            caller's: reserved once, so the tick thread allocates nothing here
+            in a show's steady state. Each carries the sample its bit 0 began
+            on in Go.dot's count, and the generation it was read under. Tick
+            thread: a queue of sixty-four one way. */
+        void takeHeardLtc (std::vector<timecode::LtcHeard>& heard);
+
+        /*  Readouts, any thread: the frames dropped because the queue above
+            was full, never reset; and how many times the decoder has been
+            prepared - at every start and stop of the host, as the generator
+            is, so a change is an audio restart. */
+        std::uint32_t ltcInDropped() const noexcept;
+        std::uint64_t ltcInGeneration() const noexcept;
 
         /*  A SLOT'S LOOP POINTS MOVED WHILE IT PLAYS (namespace draft §33): from
             the segment's reader position on, the slot's clip reads the file
