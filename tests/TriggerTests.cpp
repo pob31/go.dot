@@ -39,6 +39,11 @@
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 
+#include <cstdint>
+#include <map>
+#include <string>
+#include <vector>
+
 using namespace wfg;
 using namespace wfg::cue;
 
@@ -79,6 +84,68 @@ namespace
     };
 
     std::vector<osc::Value> noArgs() { return {}; }
+
+    /*  A reading of the clocks, said the way a case thinks of one: a time of
+        day, where the steady clock stood, and the date. The steady clock's
+        origin is anything at all; only its advance between two readings is
+        ever asked. */
+    constexpr int october25 = 20261025;
+
+    ClockReading secondAt (int secondOfDay, std::int64_t steadyMilliseconds, int date = october25)
+    {
+        ClockReading reading;
+        reading.date = date;
+        reading.millisecondOfDay = static_cast<std::int64_t> (secondOfDay) * 1000;
+        reading.steadyMilliseconds = steadyMilliseconds;
+        return reading;
+    }
+
+    ClockReading clockAt (const char* timeOfDay, std::int64_t steadyMilliseconds, int date = october25)
+    {
+        const auto second = secondOfDayFor (timeOfDay);
+        REQUIRE (second >= 0);
+        return secondAt (second, steadyMilliseconds, date);
+    }
+
+    std::vector<std::string> idsOf (const ClockCrossings& crossings)
+    {
+        std::vector<std::string> ids;
+
+        for (const auto& crossing : crossings.crossed)
+            ids.push_back (crossing.id);
+
+        return ids;
+    }
+
+    /*  Time passing from one second of the day to another: the steady clock
+        goes on exactly as far as the wall clock does, the near way forward
+        round the dial, so nothing here is a step. */
+    std::vector<std::string> crossedBetween (const TriggerIndex& index, int from, int to)
+    {
+        const auto advance = ((to - from) % 86400 + 86400) % 86400;
+        const auto crossings = clockCrossings (index, secondAt (from % 86400, 0),
+                                               secondAt (to % 86400, static_cast<std::int64_t> (advance) * 1000));
+        CHECK_FALSE (crossings.stepped);
+        return idsOf (crossings);
+    }
+
+    /*  A show with a clock trigger at each of these times, in this order: the
+        shape every case below about steps wants, since what a step used to do
+        was fire nearly all of them. */
+    struct ClockRig : TriggerRig
+    {
+        explicit ClockRig (std::vector<const char*> times)
+        {
+            for (const auto* time : times)
+            {
+                const auto id = add (triggerKind::clock);
+                set (id, "at", time);
+                ids.push_back (id);
+            }
+        }
+
+        std::vector<std::string> ids;
+    };
 }
 
 //==============================================================================
@@ -347,14 +414,14 @@ TEST_CASE ("clock: a crossing is asked about an INTERVAL, so it happens exactly 
     const auto at = 19 * 3600 + 30 * 60;
 
     //  Half open, (previous, now], so the second belongs to exactly one interval.
-    CHECK (clockCrossings (*index, at - 1, at) == std::vector<std::string> { id });
-    CHECK (clockCrossings (*index, at, at + 1).empty());
-    CHECK (clockCrossings (*index, at, at).empty());
-    CHECK (clockCrossings (*index, at - 1, at - 1).empty());
+    CHECK (crossedBetween (*index, at - 1, at) == std::vector<std::string> { id });
+    CHECK (crossedBetween (*index, at, at + 1).empty());
+    CHECK (crossedBetween (*index, at, at).empty());
+    CHECK (crossedBetween (*index, at - 1, at - 1).empty());
 
     //  And a gap - a machine that went to sleep, a reading that was late -
     //  still crosses it exactly once.
-    CHECK (clockCrossings (*index, at - 60, at + 60) == std::vector<std::string> { id });
+    CHECK (crossedBetween (*index, at - 60, at + 60) == std::vector<std::string> { id });
 }
 
 TEST_CASE ("clock: midnight is the interval wrapping, not a special case")
@@ -370,10 +437,10 @@ TEST_CASE ("clock: midnight is the interval wrapping, not a special case")
     const auto index = rig.index();
 
     //  23:59:59 to 00:00:01 crosses midnight and nothing else.
-    CHECK (clockCrossings (*index, 86399, 1) == std::vector<std::string> { midnight });
+    CHECK (crossedBetween (*index, 86399, 1) == std::vector<std::string> { midnight });
 
     //  And a wider wrap takes both.
-    CHECK (clockCrossings (*index, 86390, 10)
+    CHECK (crossedBetween (*index, 86390, 10)
              == std::vector<std::string> { midnight, small });
 }
 
@@ -389,7 +456,273 @@ TEST_CASE ("clock: a trigger with no time, or a bad one, never fires")
     const auto index = rig.index();
 
     for (int second = 0; second < 86400; second += 997)
-        CHECK (clockCrossings (*index, second, second + 997).empty());
+        CHECK (crossedBetween (*index, second, second + 997).empty());
+}
+
+//==============================================================================
+/*  THE WALL CLOCK'S STEP RULE (namespace draft §60, AIY).
+
+    The wall clock is the one clock in the machine somebody else may move, and
+    until 2026-10-12 a step BACK of it landed in the branch meant for midnight
+    and fired every clock trigger in the show but the ones it stepped over. The
+    steady clock, read beside it, tells a step from time passing: when time
+    passes they advance alike. Every case below is a pair of readings a test
+    made up, which is the point of the rule being a pure function.
+*/
+TEST_CASE ("clock: the night summer time ends fires nothing, and says it stepped")
+{
+    /*  02:59:59 is followed by 02:00:00 one second later. Read as two seconds
+        of the day, that was "previous greater than now", which was midnight,
+        and midnight fired everything after 02:59:59 and everything up to
+        02:00:00 - the cue at noon, the cue at half past seven, the one at
+        midnight - on the night the clocks went back. */
+    ClockRig rig ({ "00:00:00", "02:00:00", "02:30:00", "12:00:00", "19:30:00" });
+    const auto index = rig.index();
+
+    const auto crossings = clockCrossings (*index, clockAt ("02:59:59", 5'000),
+                                                   clockAt ("02:00:00", 6'000));
+
+    CHECK (crossings.crossed.empty());
+    CHECK (crossings.stepped);
+
+    //  The wall clock went back 3599 s while the steady clock went on 1 s.
+    CHECK (crossings.stepMilliseconds == -3'600'000);
+
+    //  And the next tick is time passing again, from where the step landed.
+    const auto after = clockCrossings (*index, clockAt ("02:00:00", 6'000),
+                                               clockAt ("02:00:01", 7'000));
+    CHECK_FALSE (after.stepped);
+    CHECK (after.crossed.empty());
+}
+
+TEST_CASE ("clock: summer time starting fires nothing across the hour it skips")
+{
+    /*  01:59:59 is followed by 03:00:00. The rule fires nothing across a step
+        whichever way it went, so the cue at half past two is NOT fired that
+        night - nor the one at three, which the step landed on rather than
+        reached (AIY: the author may overrule this direction). */
+    ClockRig rig ({ "02:30:00", "03:00:00", "19:30:00" });
+    const auto index = rig.index();
+
+    const auto crossings = clockCrossings (*index, clockAt ("01:59:59", 0),
+                                                   clockAt ("03:00:00", 1'000));
+
+    CHECK (crossings.crossed.empty());
+    CHECK (crossings.stepped);
+    CHECK (crossings.stepMilliseconds == 3'600'000);
+}
+
+TEST_CASE ("clock: a time-sync step of five seconds, back or forward, fires nothing")
+{
+    ClockRig rig ({ "19:30:00", "19:30:02", "19:30:05", "12:00:00" });
+    const auto index = rig.index();
+
+    //  Back: 19:30:05 to 19:30:00 inside one tick of the steady clock.
+    const auto back = clockCrossings (*index, clockAt ("19:30:05", 100'000),
+                                              clockAt ("19:30:00", 100'020));
+    CHECK (back.stepped);
+    CHECK (back.crossed.empty());
+    CHECK (back.stepMilliseconds == -5'020);
+
+    //  Forward: 19:30:00 to 19:30:05 inside one tick.
+    const auto forward = clockCrossings (*index, clockAt ("19:30:00", 100'000),
+                                                 clockAt ("19:30:05", 100'020));
+    CHECK (forward.stepped);
+    CHECK (forward.crossed.empty());
+    CHECK (forward.stepMilliseconds == 4'980);
+}
+
+TEST_CASE ("clock: a nudge back under two seconds is no step, crosses nothing, and fires nothing twice")
+{
+    /*  The smallest case of the fault: one second back, from 19:30:05 to
+        19:30:04, fired nearly every trigger in the show. Under the
+        threshold it is not a step - the steady clock went on a tick - but the
+        wall clock went back, so it crosses nothing at all. */
+    ClockRig rig ({ "19:30:00", "19:30:05", "12:00:00", "00:00:00" });
+    const auto index = rig.index();
+
+    const auto back = clockCrossings (*index, clockAt ("19:30:05", 0), clockAt ("19:30:04", 20));
+    CHECK_FALSE (back.stepped);
+    CHECK (back.crossed.empty());
+
+    /*  And going on from there crosses 19:30:05 a second time. The interval
+        says so; the day remembers it fired, so it fires once. */
+    ClockDays days;
+    CHECK (days.admit (*index, clockCrossings (*index, clockAt ("19:30:04", 0), clockAt ("19:30:05", 1'000)).crossed)
+             == std::vector<std::string> { rig.ids[1] });
+
+    const auto again = clockCrossings (*index, clockAt ("19:30:04", 1'020), clockAt ("19:30:05", 2'020));
+    CHECK (idsOf (again) == std::vector<std::string> { rig.ids[1] });
+    CHECK (days.admit (*index, again.crossed).empty());
+}
+
+TEST_CASE ("clock: midnight counts when the steady clock crosses it, and only then")
+{
+    ClockRig rig ({ "00:00:00", "12:00:00", "23:59:59" });
+    const auto index = rig.index();
+
+    //  23:59:59 to 00:00:00 with a second of the steady clock: the day turned.
+    const auto turned = clockCrossings (*index, clockAt ("23:59:59", 0, october25),
+                                                clockAt ("00:00:00", 1'000, october25 + 1));
+    CHECK_FALSE (turned.stepped);
+    CHECK (idsOf (turned) == std::vector<std::string> { rig.ids[0] });
+
+    //  A crossing falls on the date of its side of midnight.
+    const auto wide = clockCrossings (*index, clockAt ("23:59:58", 0, october25),
+                                              clockAt ("00:00:01", 3'000, october25 + 1));
+    REQUIRE (wide.crossed.size() == 2u);
+    CHECK (wide.crossed[0].id == rig.ids[0]);
+    CHECK (wide.crossed[0].date == october25 + 1);
+    CHECK (wide.crossed[1].id == rig.ids[2]);
+    CHECK (wide.crossed[1].date == october25);
+
+    /*  23:00:00 to 01:00:00 in a second of the steady clock is the wall clock
+        moved two hours on, not a night that passed: nothing, midnight's cue
+        included. */
+    const auto moved = clockCrossings (*index, clockAt ("23:00:00", 0, october25),
+                                               clockAt ("01:00:00", 1'000, october25 + 1));
+    CHECK (moved.stepped);
+    CHECK (moved.crossed.empty());
+
+    //  And back across midnight the other way - 00:30:00 to 23:30:00 - likewise.
+    const auto backAcross = clockCrossings (*index, clockAt ("00:30:00", 0, october25 + 1),
+                                                    clockAt ("23:30:00", 1'000, october25));
+    CHECK (backAcross.stepped);
+    CHECK (backAcross.crossed.empty());
+}
+
+TEST_CASE ("clock: a slow tick is time passing, and its seconds' triggers fire")
+{
+    /*  The hook not run for three seconds - a machine that was busy - moves
+        both clocks three seconds. They agree, and the three seconds' triggers
+        fire, each once. */
+    ClockRig rig ({ "19:30:00", "19:30:01", "19:30:02", "19:30:03", "19:30:04" });
+    const auto index = rig.index();
+
+    const auto crossings = clockCrossings (*index, clockAt ("19:30:00", 40'000),
+                                                   clockAt ("19:30:03", 43'000));
+    CHECK_FALSE (crossings.stepped);
+    CHECK (idsOf (crossings) == std::vector<std::string> { rig.ids[1], rig.ids[2], rig.ids[3] });
+}
+
+TEST_CASE ("clock: a slew of fifty parts per million over an hour fires every trigger once")
+{
+    /*  A time-sync service that disciplines the clock by its rate rather than
+        by a step: the wall clock runs 50 ppm fast, or slow, against the steady
+        clock for an hour, read every tenth of a second. Each reading agrees
+        with the steady clock to a few microseconds, so nothing is ever a step,
+        and a trigger every thirty seconds fires exactly once. */
+    std::vector<std::string> times;
+
+    for (int second = 19 * 3600 + 30; second < 20 * 3600; second += 30)
+    {
+        const auto twoDigits = [] (int value) { return (value < 10 ? "0" : "") + std::to_string (value); };
+        times.push_back (twoDigits (second / 3600) + ":" + twoDigits (second / 60 % 60) + ":"
+                         + twoDigits (second % 60));
+    }
+
+    std::vector<const char*> names;
+
+    for (const auto& time : times)
+        names.push_back (time.c_str());
+
+    ClockRig rig (names);
+    const auto index = rig.index();
+    REQUIRE (rig.ids.size() == 119u);
+
+    for (const std::int64_t partsFast : { 50, -50 })
+    {
+        CAPTURE (partsFast);
+
+        std::map<std::string, int> fires;
+        ClockDays days;
+        bool stepped = false;
+        const std::int64_t start = 19LL * 3600 * 1000;
+        auto previous = ClockReading { october25, start, 0 };
+
+        for (std::int64_t steady = 100; steady <= 3'600'000 + 1'000; steady += 100)
+        {
+            //  Whole milliseconds, as a reading has them: 50 ppm is one in 20 000.
+            const auto now = ClockReading { october25, start + steady + steady * partsFast / 1'000'000, steady };
+            const auto crossings = clockCrossings (*index, previous, now);
+            stepped = stepped || crossings.stepped;
+
+            for (const auto& id : days.admit (*index, crossings.crossed))
+                ++fires[id];
+
+            previous = now;
+        }
+
+        CHECK_FALSE (stepped);
+        CHECK (fires.size() == rig.ids.size());
+
+        for (const auto& [id, count] : fires)
+        {
+            CAPTURE (id);
+            CHECK (count == 1);
+        }
+    }
+}
+
+TEST_CASE ("clock: a trigger fires once a calendar day, and again the next")
+{
+    /*  §12.8 said it from the start - "fires once each day it is crossed" -
+        and nothing kept it until now. Kept by `ClockDays`, so an hour the wall
+        clock replays cannot fire a trigger twice even if a step ever got past
+        the steady clock. */
+    ClockRig rig ({ "02:30:00", "19:30:00" });
+    const auto index = rig.index();
+    ClockDays days;
+
+    const auto crossing = clockCrossings (*index, clockAt ("02:29:59", 0), clockAt ("02:30:00", 1'000));
+    REQUIRE (idsOf (crossing) == std::vector<std::string> { rig.ids[0] });
+
+    CHECK (days.admit (*index, crossing.crossed) == std::vector<std::string> { rig.ids[0] });
+
+    //  The same interval forced through again, on the same date: nothing.
+    CHECK (days.admit (*index, crossing.crossed).empty());
+    CHECK (days.admit (*index, clockCrossings (*index, clockAt ("02:29:00", 2'000), clockAt ("02:31:00", 122'000)).crossed)
+             .empty());
+
+    //  The next date, it fires again.
+    const auto tomorrow = clockCrossings (*index, clockAt ("02:29:59", 86'400'000, october25 + 1),
+                                                  clockAt ("02:30:00", 86'401'000, october25 + 1));
+    CHECK (days.admit (*index, tomorrow.crossed) == std::vector<std::string> { rig.ids[0] });
+}
+
+TEST_CASE ("clock: a trigger re-timed fires on its new time the same day")
+{
+    /*  In a tech, somebody sets a trigger a minute ahead to try it, then a
+        minute ahead again. The second time is a new decision and fires; the
+        memory is of a trigger AT a time, not of a trigger. */
+    ClockRig rig ({ "19:30:00" });
+    ClockDays days;
+
+    CHECK (days.admit (*rig.index(), clockCrossings (*rig.index(), clockAt ("19:29:59", 0),
+                                                                   clockAt ("19:30:00", 1'000)).crossed)
+             == rig.ids);
+
+    rig.set (rig.ids[0], "at", "19:31:00");
+    const auto index = rig.index();
+
+    CHECK (days.admit (*index, clockCrossings (*index, clockAt ("19:30:59", 60'000),
+                                                       clockAt ("19:31:00", 61'000)).crossed)
+             == rig.ids);
+}
+
+TEST_CASE ("clock: a step is said in a sentence the log can carry")
+{
+    const auto back = clockStepNote (clockAt ("02:59:59", 0), clockAt ("02:00:00", 1'000), -3'600'000);
+    CAPTURE (back);
+    CHECK (back.find ("back") != std::string::npos);
+    CHECK (back.find ("02:59:59") != std::string::npos);
+    CHECK (back.find ("02:00:00") != std::string::npos);
+    CHECK (back.find ("3600") != std::string::npos);
+
+    const auto forward = clockStepNote (clockAt ("01:59:59", 0), clockAt ("03:00:00", 1'000), 3'600'000);
+    CAPTURE (forward);
+    CHECK (forward.find ("forward") != std::string::npos);
+    CHECK (forward.find ("not fired") != std::string::npos);
 }
 
 //==============================================================================
@@ -418,7 +751,7 @@ TEST_CASE ("triggers: each kind answers only to its own input")
     CHECK (matchOsc (*index, "/desk/go", noArgs()) == std::vector<std::string> { viaOsc });
     CHECK (matchMidi (*index, { "", "noteOn", 1, 60, 100 })
              == std::vector<std::string> { viaMidi });
-    CHECK (clockCrossings (*index, 19 * 3600 + 30 * 60 - 1, 19 * 3600 + 30 * 60)
+    CHECK (crossedBetween (*index, 19 * 3600 + 30 * 60 - 1, 19 * 3600 + 30 * 60)
              == std::vector<std::string> { viaClock });
 }
 
@@ -526,6 +859,36 @@ TEST_CASE ("trigger.fire: a manual sequence group is refused, because nobody wou
     //  it from outside is exactly what a trigger is for.
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + group + "/advance", "auto").ok);
     CHECK (rig.tick ("trigger.fire", { osc::Value::string (id) }).applied == 1);
+}
+
+TEST_CASE ("trigger.fire: a disabled trigger is refused, and nothing runs")
+{
+    /*  Until 2026-10-12 only the matchers asked: a disabled trigger matched
+        nothing, but a `trigger.fire` sent by hand, or replayed from a log,
+        fired it all the same (namespace draft §60, AIY). The command asks
+        now, with the word a disabled cue is refused with - read through the
+        document, since a trigger nobody has touched holds no `enabled` at
+        all and the ValueTree would answer false for it. */
+    FiringRig rig;
+    const auto id = rig.add (triggerKind::clock);
+    rig.set (id, "at", "19:30:00");
+    rig.set (id, "enabled", "false");
+
+    const auto outcome = rig.tick ("trigger.fire", { osc::Value::string (id) });
+    CHECK (outcome.rejected == 1);
+    CHECK (outcome.applied == 0);
+    CHECK (rig.engine.lastError().find (reason::disabled) != std::string::npos);
+    CHECK (rig.runs.all().empty());
+
+    //  Switched back on, the same command fires it.
+    rig.set (id, "enabled", "true");
+    CHECK (rig.tick ("trigger.fire", { osc::Value::string (id) }).applied == 1);
+    CHECK (! rig.runOf (rig.cueId).empty());
+
+    //  And one never written to is enabled: its default, read through the document.
+    const auto untouched = rig.add (triggerKind::osc, rig.other);
+    CHECK (rig.tick ("trigger.fire", { osc::Value::string (untouched) }).rejected == 0);
+    CHECK (! rig.runOf (rig.other).empty());
 }
 
 //==============================================================================

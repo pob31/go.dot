@@ -43,6 +43,7 @@
 #include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/UndoStep.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/TriggerIndex.h>
 #include <wfg/engine/pair/Follow.h>
 #include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/pair/Leadership.h>
@@ -5823,11 +5824,31 @@ namespace
             consults nothing: the same session reproduces on a machine where it
             is a different time of day, in a different year.
 
-            "Which second it was last time" is machine state and lives here,
-            never in the document (§4.10). It starts at -1, which is what makes
+            "What the clocks read last time" is machine state and lives here,
+            never in the document (§4.10). It starts unread, which is what makes
             the FIRST tick cross nothing: a show opened at 19:30:00 must not
-            fire the 19:30:00 cue because it happened to be started then. */
-        int previousSecond = -1;
+            fire the 19:30:00 cue because it happened to be started then.
+
+            WITH THE STEADY CLOCK BESIDE IT (2026-10-12, namespace draft §60,
+            AIY), so a step of the wall clock - the night summer time ends, a
+            time-sync step, a hand on the clock - is told from time passing and
+            fires nothing, where a step back used to fire every clock trigger
+            in the show; and with what each trigger last fired on, so none
+            fires twice on one date. The rule is `cue::clockCrossings` and
+            `cue::ClockDays`, pure and tested; this reads the clocks and
+            submits.
+
+            FORGOTTEN AT AN OUTAGE'S END by whoever ends it, through the flag
+            and not the reading itself: the settings pump ends one on the
+            message thread, an `audio.connection` another inside a tick, and
+            the reading belongs to this hook. The flag is raised before the
+            ticks are let go, so the first tick after an outage crosses
+            nothing - the triggers it slept through are not all fired at once
+            (decision DI) - while the dates fired are kept. */
+        wfg::cue::ClockReading previousClock;
+        wfg::cue::ClockDays clockDays;
+        std::atomic<bool> clockForget { false };
+        const wfg::cue::TriggerIndex noTriggers;
 
         ticks.setBeforeTick ([&] (std::int64_t tickIndex)
                              {
@@ -6313,19 +6334,49 @@ namespace
                                      }
                                  }
 
-                                 const auto now = juce::Time::getCurrentTime();
-                                 const auto second = now.getHours() * 3600
-                                                       + now.getMinutes() * 60
-                                                       + now.getSeconds();
+                                 {
+                                     /*  Both clocks, one after the other: the
+                                         microseconds between the two reads are
+                                         nothing beside the two seconds a step
+                                         has to exceed. */
+                                     const auto wall = juce::Time::getCurrentTime();
+                                     const auto steady = std::chrono::duration_cast<std::chrono::milliseconds> (
+                                                           std::chrono::steady_clock::now().time_since_epoch()).count();
 
-                                 if (previousSecond >= 0 && second != previousSecond)
-                                     if (const auto index = triggerIndex)
-                                         for (const auto& id : wfg::cue::clockCrossings (
-                                                                 *index, previousSecond, second))
+                                     wfg::cue::ClockReading reading;
+                                     reading.date = wall.getYear() * 10000 + (wall.getMonth() + 1) * 100
+                                                      + wall.getDayOfMonth();
+                                     reading.millisecondOfDay = ((static_cast<std::int64_t> (wall.getHours()) * 60
+                                                                    + wall.getMinutes()) * 60 + wall.getSeconds()) * 1000
+                                                                  + wall.getMilliseconds();
+                                     reading.steadyMilliseconds = static_cast<std::int64_t> (steady);
+
+                                     if (clockForget.exchange (false))
+                                         previousClock = {};
+
+                                     const auto index = triggerIndex;
+                                     const auto& triggers = index != nullptr ? *index : noTriggers;
+                                     const auto crossings = wfg::cue::clockCrossings (triggers, previousClock, reading);
+
+                                     /*  SAID ONCE, IN THE LOG: a step is a thing
+                                         the machine did that nobody decided, as
+                                         an interface going quiet is, and the
+                                         reading it moved to is the next one's
+                                         previous, so the next tick sees time
+                                         passing again. Never stderr (the
+                                         maintenance below says why). */
+                                     if (crossings.stepped)
+                                         engine.log().note (wfg::cue::clockStepNote (previousClock, reading,
+                                                                                    crossings.stepMilliseconds)
+                                                              + ", by tick " + std::to_string (tickIndex));
+
+                                     if (! crossings.crossed.empty())
+                                         for (const auto& id : clockDays.admit (triggers, crossings.crossed))
                                              engine.submit ({ "clock", "trigger.fire",
                                                               { wfg::osc::Value::string (id) } });
 
-                                 previousSecond = second;
+                                     previousClock = reading;
+                                 }
 
                                  /*  THE AUTOSAVE, DECIDED HERE, SNAPSHOTTED BY
                                      ITS HANDLER, AND WRITTEN BY THE WRITER
@@ -6370,7 +6421,7 @@ namespace
             after-tick say "the show moved during this one" - and so stamp
             `session.lastChangeTick`, the quiet the autosave waits for.
 
-            Machine state and not the document's, like `previousSecond` above;
+            Machine state and not the document's, like `previousClock` above;
             and a revision rather than "was anything applied", because a GO is
             applied and moves only the operator's position. A quiet timer that
             restarted on every GO would never run out during a show, and the
@@ -7322,8 +7373,8 @@ namespace
                 triggers it slept through are not all fired at once. */
             if (ticks.isSuspended())
             {
+                clockForget.store (true);
                 ticks.setSuspended (false);
-                previousSecond = -1;
             }
 
             ticks.start();
@@ -7539,8 +7590,8 @@ namespace
 
             runner.setPlayer (player.get());
             sessionClock.use (*blockSource, ticks.rebaseAudio (rate));
+            clockForget.store (true);
             ticks.setSuspended (false);
-            previousSecond = -1;
 
             engine.submit ("engine", "audio.settingsReady",
                 { wfg::osc::Value::string (error), wfg::osc::Value::int32 (rate),
@@ -7569,7 +7620,7 @@ namespace
         {
             if (! deviceDriver || ! deviceDriver->resumeConnection()) return false;
             // Clock triggers missed during an outage must not all fire on return.
-            previousSecond = -1;
+            clockForget.store (true);
             ticks.setSuspended (false);
             return true;
         };

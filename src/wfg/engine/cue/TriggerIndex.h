@@ -47,6 +47,8 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -139,8 +141,61 @@ namespace wfg::cue
     /** The triggers a MIDI event fires. */
     std::vector<std::string> matchMidi (const TriggerIndex& index, const MidiEvent& event);
 
-    /*  The clock triggers crossed between two readings of the wall clock, each
-        a second of the day, 0..86399.
+    /*  ONE READING OF THE WALL CLOCK, WITH THE STEADY CLOCK BESIDE IT
+        (namespace draft §60, AIY).
+
+        The wall clock is what a clock trigger names - local time of day - and
+        it is the one clock in the machine that somebody else may move: the
+        night summer time ends, a time-sync service stepping it, a hand on the
+        clock. The steady clock nobody moves. Read together, once a tick, the
+        two say whether time passed or the wall clock was moved: when time
+        passes they advance alike, and when the wall clock jumps they do not.
+
+        Whole milliseconds rather than seconds, so a step is measured to the
+        reading's own precision and not to a second either side; and integers
+        rather than doubles, so nothing here is ever a comparison of two
+        floating-point numbers. */
+    struct ClockReading
+    {
+        /** The local calendar date, any number that changes once a day and only
+            then - serve writes yyyymmdd. What "once a day" counts by. */
+        int date = 0;
+
+        /** The local time of day, 0 to 86 399 999; negative is no reading,
+            which crosses nothing. */
+        std::int64_t millisecondOfDay = -1;
+
+        /** The steady clock, from whatever origin it has: only its advance between
+            two readings is ever used. */
+        std::int64_t steadyMilliseconds = 0;
+    };
+
+    /** How far the wall clock may move beyond the steady clock between two
+        readings and still be time passing: two seconds (AIY). */
+    inline constexpr std::int64_t clockStepMilliseconds = 2000;
+
+    /*  One clock trigger crossed, with the date the crossing fell on - the
+        earlier reading's for a second before midnight, the later one's after
+        it - and the second it was crossed at, which the once-a-day memory
+        keeps beside the date. */
+    struct ClockCrossing
+    {
+        std::string id;
+        int secondOfDay = -1;
+        int date = 0;
+    };
+
+    /*  What two readings say: the triggers crossed, in document order, or that
+        the wall clock was STEPPED, by how much more than the steady clock went
+        on (signed: negative is back), in which case nothing is crossed. */
+    struct ClockCrossings
+    {
+        std::vector<ClockCrossing> crossed;
+        bool stepped = false;
+        std::int64_t stepMilliseconds = 0;
+    };
+
+    /*  The clock triggers crossed between two readings of the wall clock.
 
         BETWEEN, rather than "equal to now", because a tick is 20 ms and a
         second is fifty of them: asking whether the clock reads 19:30:00 would
@@ -148,10 +203,67 @@ namespace wfg::cue
         would miss it. A crossing is asked about an interval, which is the shape
         that is right at any rate and for any lateness.
 
-        Midnight is handled: `previous` greater than `now` is the day turning
-        over, and the interval is then the two ends of it. */
-    std::vector<std::string> clockCrossings (const TriggerIndex& index,
-                                             int previousSecondOfDay, int nowSecondOfDay);
+        AND ONLY WHEN TIME PASSED (2026-10-12, namespace draft §60, AIY). Until
+        then two readings were two seconds of the day and nothing else, and
+        `previous` greater than `now` was taken to be midnight - so every step
+        BACK of the wall clock landed in the midnight branch and fired every
+        clock trigger in the show but the ones between the two readings: the
+        night summer time ends, a time-sync step of one second back from
+        19:30:05 to 19:30:04. The steady clock tells the two apart now. The
+        wall clock's advance is taken the near way round the dial - a second
+        back is minus one second, not plus a day less one - and set against
+        the steady clock's: more than two seconds apart, the wall clock
+        stepped, and nothing is crossed. A slew, a time-sync service nudging
+        the rate by a few parts per million, is time passing; so is a tick
+        that ran late, since both clocks were late together. Midnight is
+        still the interval wrapping, but only when the steady clock went
+        forward across it too.
+
+        A STEP FORWARD FIRES NOTHING EITHER: summer time starting, 02:00 to
+        03:00, crosses an hour of the dial in a second of the steady clock,
+        and the triggers in that skipped hour are NOT fired. A step the steady
+        clock contradicts is not time passing, whichever way it went (AIY: the
+        author may overrule it, for this direction). */
+    ClockCrossings clockCrossings (const TriggerIndex& index,
+                                   const ClockReading& previous, const ClockReading& now);
+
+    /*  ONCE A CALENDAR DAY (namespace draft §60, AIY; §12.8 said it from the
+        start and nothing kept it until now). A clock trigger fires at most
+        once on each local date, so an hour the wall clock replays - the night
+        summer time ends, should a step ever get past the steady clock - cannot
+        fire a trigger twice, nor can a small nudge back of the clock that
+        crosses the same second again.
+
+        Machine state, never the document's (§4.10): what was fired on which
+        date is a fact about this machine's evening, held by serve beside the
+        previous reading. Keyed by the trigger, with the second it fired at:
+        a trigger re-timed since is a new time somebody chose - in a tech, set
+        a minute ahead to try it - and fires on its new time the same day. A
+        trigger gone from the show is forgotten. */
+    class ClockDays
+    {
+    public:
+        /*  Of what was crossed, what fires: each crossing whose trigger has
+            not fired on that date at that second, remembered as it is let
+            through. Pure, apart from the memory itself - no clock is read. */
+        std::vector<std::string> admit (const TriggerIndex& index,
+                                        const std::vector<ClockCrossing>& crossed);
+
+    private:
+        struct Fired
+        {
+            int date = 0;
+            int secondOfDay = -1;
+        };
+
+        std::map<std::string, Fired> fired;
+    };
+
+    /*  The sentence a step is said in, for the engine log: which way the wall
+        clock went and how far beyond the steady clock, the two times of day,
+        and that the clock triggers between them were not fired. */
+    std::string clockStepNote (const ClockReading& previous, const ClockReading& now,
+                               std::int64_t stepMilliseconds);
 
     /*  `HH:MM:SS` as a second of the day, or -1 if it is not one. Public
         because the load-time check and the index both ask it. */

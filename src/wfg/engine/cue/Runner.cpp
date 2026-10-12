@@ -23341,6 +23341,19 @@ namespace wfg::cue
                                   || trigger.getType().toString() != "Trigger")
                                 return Outcome::rejected (reason::unknownId);
 
+                            /*  NOR A TRIGGER SWITCHED OFF (2026-10-12, namespace
+                                draft §60, AIY). Only the matchers asked until
+                                then, so a disabled trigger matched nothing - and
+                                a `trigger.fire` sent by hand, or replayed, fired
+                                it all the same. Refused with the word a cue that
+                                is off is refused with. Read through the
+                                document, never off the node: a trigger nobody
+                                has touched holds no `enabled` at all, and the
+                                ValueTree would answer false for every one. */
+                            if (document.getAttribute ("/godot/trigger/" + args[0].getString() + "/enabled")
+                                  .value_or (std::string ("true")) == "false")
+                                return Outcome::rejected (reason::disabled);
+
                             const auto cue = trigger.getParent();
 
                             if (! cue.isValid())

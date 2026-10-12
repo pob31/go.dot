@@ -2074,6 +2074,11 @@ seven are: each is a choice somebody could reasonably have made differently.
    asking on a tick that happened to be late would miss it. Midnight falls out of the interval
    wrapping rather than a special case. The first tick crosses nothing, so a show opened at
    19:30:00 does not fire the 19:30:00 cue because it happened to be started then.
+   *Amended 2026-10-12 (§60, AIY, TG.1):* "previous greater than now" was every step back of the
+   wall clock too, and fired nearly every clock trigger in the show. The steady clock is read
+   beside it now: a step it contradicts by more than two seconds fires nothing and is noted in the
+   log, midnight wraps only when the steady clock crossed it, and a trigger fires once a calendar
+   day.
 
 6. **A `--midi-in` device that is not there is fatal at startup**, like a mistyped `--ui`, and
    the message lists the ports the machine does have. A cue that can be fired from a foot switch
@@ -26748,3 +26753,40 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
 
 - **TG.0**, 2026-10-12: this section; PRD §3.7, §3.14's chasing half and its open question answered,
   §3.25, §3.29, §6.9, §6.11's M64, §9's sixth action settled; the devplan's stages under Phase 10.
+- **TG.1**, 2026-10-12: the wall clock's step rule, once a day, a disabled trigger refused (AIY).
+  `cue::ClockReading` holds one reading - the local date (serve writes yyyymmdd), the local time of
+  day in milliseconds, the steady clock in milliseconds - and `clockCrossings` takes two of them in
+  place of two seconds of the day, answering the crossings (each with its second and the date of its
+  side of midnight) or `stepped` with how far the wall clock went beyond the steady one. The wall
+  clock's advance is taken the near way round the dial, so a second back is minus a second and never
+  a day less one forward; more than two seconds (`clockStepMilliseconds`) from the steady clock's
+  advance, the clock stepped and nothing is crossed, either way - summer time starting fires none of
+  the hour it skips, which the author may overrule; under the threshold, a wall clock that stood or
+  went back crosses nothing, and one that went on crosses `(previous, now]` as before, midnight
+  wrapping only when the steady clock went across it too. A slew and a late tick are time passing.
+  `cue::ClockDays` is the once-a-day memory: a crossing is let through unless its trigger already
+  fired on that date at that second, and a trigger gone from the show, or re-timed, is forgotten -
+  so a trigger set a minute ahead in a tech, then a minute ahead again, fires both times (the
+  implementer's call, the brief had said keyed by trigger; the author's to overrule). Serve's
+  before-tick hook reads `juce::Time` and `std::chrono::steady_clock` together, submits what
+  `ClockDays` admits, and says a step once, as a `# note` in the engine log beside the interface's
+  stops and late ticks (`clockStepNote`: "wall clock stepped back 3600.0 s against the steady clock,
+  02:59:59 to 02:00:00 - the clock triggers between them are not fired, by tick N"), never on
+  stderr; the window does not show it yet. An outage's end forgets the previous reading through an
+  atomic flag raised before the ticks are let go - two of the three places that wrote
+  `previousSecond = -1` ran on the message thread, writing a plain int the tick thread read - and
+  keeps the dates fired.
+  `trigger.fire` refuses a trigger whose `enabled` reads false through the document, `disabled`, as
+  a cue off for this run is refused: until now only the matchers asked, so a hand-sent or replayed
+  `trigger.fire` fired a disabled trigger. No replay fixture fired one; `wfg.replay.triggers` and
+  every other replay reproduce unchanged. Tests under C and fr_FR, in `TriggerTests`: the night
+  summer time ends (02:59:59 to 02:00:00 in a second - red before, firing four of five triggers),
+  summer time starting, a time-sync step of five seconds back and forward, a nudge back of a second
+  that crosses nothing and a re-crossing the day keeps from firing twice, midnight with the steady
+  clock across it and the dates of its two sides, two hours forward and an hour back across
+  midnight, a slow tick of three seconds, an hour at 50 ppm fast and slow with a trigger every
+  thirty seconds each fired once, once a calendar day and again the next, a re-timed trigger, the
+  note's words, and `trigger.fire` refused on a disabled trigger with nothing run, fired once it is
+  back on, and fired for one never written to; the earlier clock cases through a helper that moves
+  both clocks alike. Two deliberate breakages beyond the red first run (the memory keyed by
+  trigger alone; `enabled` read off the node) each turned their own cases red.
