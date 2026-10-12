@@ -599,13 +599,14 @@ namespace wfg::cue
             }
 
             /*  IN A WAIT, whatever its kind, `seatPlan` makes it waiting for the
-                tick it comes due, as a jump does. Otherwise only a scene and a
-                sound are its to make. */
+                tick it comes due, as a jump does. Otherwise only a scene, a
+                sound and a code (namespace draft §59, TC.7) are its to make. */
             const auto waits = their.state == runState::waiting || their.state == runState::postWait;
 
             if (their.isFinished()
                   || (! waits && (armedAhead (their) || refiredKind (their)
-                                    || (their.kind != "group" && their.kind != "media" && their.kind != "mic"))))
+                                    || (their.kind != "group" && their.kind != "media" && their.kind != "mic"
+                                          && their.kind != "timecode"))))
             {
                 after.push_back (&their);
 
@@ -647,7 +648,14 @@ namespace wfg::cue
                     its slice, passes and all, for one that plays slices. */
                 wants.when = planned::sounding;
 
-                const auto moved = their.launched ? secondsOf (lead) * std::abs (their.rate) : 0.0;
+                /*  A CODE (TC.7) at the frame the leader's will have reached
+                    when this one starts, counted from its `run.started` -
+                    nothing of a code is a voice launched - and at the speed of
+                    the clock, which is the only speed a code has; its
+                    position is how far past its start it is. */
+                const auto heardThere = their.kind == "timecode" ? their.startedTick != -1 : their.launched;
+                const auto speed = their.kind == "timecode" ? 1.0 : std::abs (their.rate);
+                const auto moved = heardThere ? secondsOf (lead) * speed : 0.0;
                 const auto ranges = rangesOf (cueNode);
 
                 if (their.range >= 0 && static_cast<std::size_t> (their.range) < ranges.size())
@@ -708,10 +716,18 @@ namespace wfg::cue
         for (const auto& wants : wanted)
             if (wants.when == planned::sounding)
                 if (const auto found = runFor.find (wants.cue); found != runFor.end() && kept.count (found->second) == 0)
-                    if (auto* sound = runs.find (found->second); sound != nullptr && (sound->kind == "media" || sound->kind == "mic"))
+                    if (auto* sound = runs.find (found->second);
+                        sound != nullptr && (sound->kind == "media" || sound->kind == "mic" || sound->kind == "timecode"))
                     {
                         sound->launchNotBefore = launchSample;
                         sound->launchRequestedAtTick = tick + seatLeadTicks;
+
+                        /*  A CODE (TC.7) on that same sample, and with the sounds
+                            of its group seated beside it - waited for when one
+                            is slow to arm, so the two still start together. */
+                        for (auto& job : timecoding)
+                            if (job.self == sound->id)
+                                job.firedAtTick = sound->launchRequestedAtTick;
                     }
 
         for (const auto* their : after)
@@ -876,6 +892,18 @@ namespace wfg::cue
                     run->launchNotBefore = launchSample;
                     run->launchRequestedAtTick = tick + seatLeadTicks;
                 }
+            }
+
+            /*  A CODE THAT STOOD (TC.7), out by as much: moved to the frame the
+                leader's will have reached when this one is placed again, on the
+                same sample a sound sought here launches on. */
+            if (kept.count (their.id) > 0 && run->kind == "timecode" && their.startedTick != -1 && run->startedAtTick >= 0)
+            {
+                const auto wantedAt = their.position + secondsOf (since);
+
+                if (std::abs (run->position - wantedAt) > secondsOf (pair::playheadToleranceTicks)
+                      && seekTimecode (run->id, their.position + secondsOf (lead)))
+                    run->launchNotBefore = launchSample;
             }
         }
 

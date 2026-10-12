@@ -48,6 +48,8 @@
 #include <algorithm>
 #include <map>
 #include <string>
+#include <tuple>
+#include <vector>
 
 using namespace wfg;
 
@@ -918,4 +920,153 @@ TEST_CASE ("solve: an OSC cue's curve is placed at its end, and a looping one is
     CHECK (fader->value == osc::Values { osc::Value::float32 (0.6f) });
 
     CHECK (rig.valueAt (plan, "/desk/pan") == nullptr);
+}
+
+//==============================================================================
+TEST_CASE ("solve: a timecode cue in a timeline is planned that far past its start, and one whose length has run is over")
+{
+    /*  A CODE IS PLANNED WHERE A SOUND IS (namespace draft §59, TC.7): the
+        scene's second less where it starts, so a load to time starts it at its
+        `from` plus that. One that runs until it is stopped has one end and is
+        placed all the same; one whose length the second has passed is over; one
+        still to come is due. */
+    SolverRig rig;
+    rig.durations["long.wav"] = 60.0;
+
+    const auto scene = rig.document.createCue (rig.listId, 0, "group", "Scene").id;
+    rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline");
+
+    const auto song = rig.document.createCue (scene, 0, "media", "Song").id;
+    rig.document.setAttribute ("/godot/cue/" + song + "/file", "long.wav");
+
+    const auto make = [&rig, &scene] (int index, const std::string& length, const std::string& preWait)
+    {
+        doc::ShowDocument::Attributes born { { "format", "ltc" } };
+
+        if (! length.empty())
+            born.emplace_back ("length", length);
+
+        const auto made = rig.document.createCue (scene, index, "timecode", {}, {}, born);
+        REQUIRE (made.ok);
+
+        if (! preWait.empty())
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + made.id + "/preWait", preWait).ok);
+
+        return made.id;
+    };
+
+    const auto endless = make (1, {}, {});
+    const auto brief = make (2, "10", {});
+    const auto longer = make (3, "30", {});
+    const auto late = make (4, {}, "20");
+    const auto delayed = make (5, {}, "5");
+
+    const auto rowOf = [] (const cue::Plan& plan, const std::string& cueId) -> const cue::PlannedRun*
+    {
+        for (const auto& run : plan.runs)
+            if (run.cue == cueId)
+                return &run;
+
+        return nullptr;
+    };
+
+    const auto plan = rig.solve (scene, 12.0);
+    REQUIRE (plan.ok);
+
+    for (const auto& [cueId, when, offset] : { std::tuple { song, cue::planned::sounding, 12.0 },
+                                               std::tuple { endless, cue::planned::sounding, 12.0 },
+                                               std::tuple { brief, cue::planned::finished, 0.0 },
+                                               std::tuple { longer, cue::planned::sounding, 12.0 },
+                                               std::tuple { delayed, cue::planned::sounding, 7.0 } })
+    {
+        INFO ("cue " << cueId);
+        const auto* row = rowOf (plan, cueId);
+        REQUIRE (row != nullptr);
+        CHECK (row->when == when);
+        CHECK (row->ancestors == std::vector<std::string> { scene });
+
+        if (std::string (when) == cue::planned::sounding)
+            CHECK (row->offset == doctest::Approx (offset));
+    }
+
+    //  Twenty seconds in, eight from now.
+    const auto* due = rowOf (plan, late);
+    REQUIRE (due != nullptr);
+    CHECK (due->when == cue::planned::due);
+    CHECK (due->startsIn == doctest::Approx (8.0));
+
+    //  Nothing guessed: every one of them has a place the document says.
+    CHECK (plan.confused.empty());
+
+    //  AIMED AT A CODE THAT RUNS UNTIL STOPPED, three seconds into it: its scene
+    //  read at its own second plus three, the code itself three past its start.
+    const auto atCode = rig.solve (delayed, 3.0);
+    REQUIRE (rowOf (atCode, delayed) != nullptr);
+    CHECK (rowOf (atCode, delayed)->offset == doctest::Approx (3.0));
+    REQUIRE (rowOf (atCode, song) != nullptr);
+    CHECK (rowOf (atCode, song)->offset == doctest::Approx (8.0));
+    REQUIRE (rowOf (atCode, endless) != nullptr);
+    CHECK (rowOf (atCode, endless)->offset == doctest::Approx (8.0));
+
+    //  AND AIMED PAST ITS OWN LENGTH, a code is over.
+    const auto pastIt = rig.solve (brief, 11.0);
+    REQUIRE (rowOf (pastIt, brief) != nullptr);
+    CHECK (rowOf (pastIt, brief)->when == cue::planned::finished);
+}
+
+TEST_CASE ("solve: a timecode cue that runs until stopped, fired at an earlier step, is still going and says it does not know where")
+{
+    SolverRig rig;
+
+    const auto made = rig.document.createCue (rig.listId, 0, "timecode", {}, {},
+                                              doc::ShowDocument::Attributes { { "format", "mtc" } });
+    REQUIRE (made.ok);
+
+    const auto timed = rig.document.createCue (rig.listId, 1, "timecode", {}, {},
+                                               doc::ShowDocument::Attributes { { "format", "ltc" }, { "length", "5" } });
+    REQUIRE (timed.ok);
+
+    const auto later = rig.osc (2, "/later", "1");
+
+    const auto plan = rig.solve (later, 0.0);
+
+    const auto* row = static_cast<const cue::PlannedRun*> (nullptr);
+
+    for (const auto& run : plan.runs)
+    {
+        if (run.cue == made.id)
+            row = &run;
+
+        //  One with a length, fired before a manual step, is over by then.
+        CHECK (run.cue != timed.id);
+    }
+
+    REQUIRE (row != nullptr);
+    CHECK (row->when == cue::planned::sounding);
+    CHECK (row->offset == doctest::Approx (0.0));
+    CHECK (rig.confusedAbout (plan, made.id, cue::confusion::endlessCode));
+}
+
+TEST_CASE ("solve: a timecode cue in the persistent section is never planned")
+{
+    /*  AHT: a code re-asserted at every step would fight the takeover (AHC) -
+        it is ignored there, and the show says so (TC.1's warning). */
+    SolverRig rig;
+
+    const auto section = rig.document.createPersistent (rig.listId);
+    REQUIRE (section.ok);
+
+    const auto code = rig.document.createCue (section.id, 0, "timecode", {}, {},
+                                              doc::ShowDocument::Attributes { { "format", "ltc" } });
+    REQUIRE (code.ok);
+
+    const auto bed = rig.media (section.id, 1, "Bed");
+    const auto memo = rig.osc (0, "/x", "1");
+
+    const auto plan = cue::solvePersistent (rig.document, &rig.durations, nullptr, rig.listId, memo);
+
+    CHECK (std::none_of (plan.runs.begin(), plan.runs.end(),
+                         [&code] (const cue::PlannedRun& run) { return run.cue == code.id; }));
+    CHECK (std::any_of (plan.runs.begin(), plan.runs.end(),
+                        [&bed] (const cue::PlannedRun& run) { return run.cue == bed; }));
 }

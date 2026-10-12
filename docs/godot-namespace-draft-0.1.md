@@ -25976,6 +25976,26 @@ Mine, the author's to overrule:
   before each message**, since a short sleep there lasts a millisecond: a median of 40 µs late
   rather than 1 ms, for about a tenth of one core while an MTC cue runs. Elsewhere it yields for the
   last 0.3 ms.
+- **AIA** (mine, TC.7) **A jump keeps its program and its destination.** `run.seek` places a running
+  code again under the program it already has, so it replaces itself on the line and on the lane and
+  an Esc while the jump waits for its sample stops both; the port and the output are the ones read
+  when the run started (AHM), so a jump is never refused for an edit of `sync/*` since. A stop posted
+  before a start of the same program is not that start's: the length the first placement posted
+  does not end the code a jump moved back.
+- **AIB** (mine, TC.7) **A paused code is re-seated at its frame, never carried on in place.** Doh!
+  stops it at its next frame boundary with no fade (AHK), so there is nothing to bring back up
+  inside the Doh fade: the corrected GO always starts a new run, under a new program, from the frame
+  the stop landed on - read by the hook as it posts the stop and carried on `go.dohPlayhead`, the
+  handler's count of ticks since `run.started` until then.
+- **AIC** (mine, TC.7) **A code that runs until it is stopped, fired at an earlier manual step, is
+  planned at its start** by the order reading of a load to time, as a bed is planned at the start of
+  its endless range, and the plan says so (`endless-code`); read from the history it is where the
+  steps put it.
+- **AID** (mine, TC.6) **A port switched off is asked nothing.** An MTC cue on a port whose tx is off
+  runs its course `not-sent` - with nothing behind the port too, as a MIDI cue's message would, rather
+  than `no-port` - and still says `run.started`, which Doh! reads. A takeover onto another port keeps
+  the lane muted until the new code's zero sample when the old port's tx was off: the lane has one
+  mute, and the old code goes on until then.
 
 ### 59.3 Rows
 
@@ -26263,3 +26283,87 @@ clean over a ten-minute render.
   moment, and Esc ends it at the next frame boundary. Ten deliberate breakages, in four rounds,
   each turned its own cases red - the declared-port check only once the refusal cases were made
   held, the fake's own `no-port` having hidden it.
+- **TC.7**, 2026-10-12: a jump, load to time, `seatPlan` (and with it `pair.seat`), Doh!. A JUMP:
+  `seekableNow` says yes for a timecode run not finished, not taken back, its cue in the show, so
+  `run/seekable` offers the scrub; `run.seek` on one is `seekTimecode`, applied whatever its job has
+  got to, as a seek of a run that is over is, so a replay takes the same record the same way. The
+  job's offset becomes the frame the second falls in (`framesInto`: a floor, a millionth of a frame
+  added for a second made from whole frames), its placement undone - `placed`, its length's stop,
+  `endAsked` and `released` reset - while its program and zero stay, so the code goes on where it
+  was until the new start's sample and an Esc meanwhile still stops it; the handler writes the
+  readout, the position and `armedOrigin` (the second it is placed at), what a replay reads. The
+  next tick places it again a launch horizon ahead - `launchTimecode`, or `advanceTimecode` on the
+  tick's own clock - under the SAME program (AIA): `placeTimecode`'s holder is the run itself, so it
+  takes nothing over, LTC carries on from the new frame on the line and MTC opens with a full frame
+  on the lane (AHL), and it is not refused again (its port and output are its start's, AHM); a start
+  the line or the lane will not take stops the old program, which nothing else would end;
+  `run.started` is said again. A length counts from the code's start: placed at `offset`, its stop
+  is `frameStartSample (length - offset)` after the new zero - a load to time's too - and a jump
+  past it sets `jumpedPast`, which the next tick ends as the length running out would, `run.ended`
+  once and the code stopped at its next frame boundary, the readout on its last frame. `position`
+  is now how far past its start the code is - the offset's seconds and the time since its zero -
+  where the pane draws its head and what a seek is asked in. THE GENERATOR (AIA): a start records
+  the order it came in (`Run::startOrder`), and a stop or a cut posted before a start of its
+  program does not reach it, so the length the first placement posted - for frames the code no
+  longer runs - cannot end a code a jump moved back; the MTC lane already behaved so, every start
+  being a new `Program` there. THE SOLVER: `Placed::startChain` (ShowWalk.h) is the chain a cue's
+  start is counted in, known whether or not its end is. Beside the target in its chain a timecode
+  cue - timed by its length, or running until stopped by its `startChain` - is planned `at - from`
+  past its start, over once its length has passed, due before its start (Solver.cpp, the target's
+  part); aimed at, one that runs until stopped reads its scene at its own second plus the offset,
+  and one aimed past its length is over. A round's pass for members of unknown length leaves a code
+  to that placing, and in a sequence gives nothing after it a start. The order reading's "still
+  going" pass plans a code that runs until stopped, fired at an earlier manual step, at its start
+  and says `endless-code` (AIC) - not one of the target's own chain, which the chain places - and
+  seats it, as it seats an endless bed, without the scene around it; the history reading leaves out
+  a code whose length the instant has passed and places the rest at the seconds since its step. In
+  a Persistent section it stays unplanned (AHT). `seatPlan` gains a Timecode branch before the
+  media arm, `seatTimecode`: the job built by `timecodeJobOf`, factored out of `fireTimecode`, the
+  offset in whole frames, not placed, the run `playing`, its `firedAtTick` and `launchRequestedAtTick`
+  the seat's tick - the tick the sounds the same seat makes carry - so the code waits for a cold one
+  of its group and starts on its sample (AHN); over already when the offset is past its length. That
+  one branch is load to time, a scene Doh! re-seats and RD.8's `pair.seat`: `seatAt` takes timecode
+  among the kinds `seatPlan` makes, at the leader's position plus the seat's lead (counted from
+  `run.started`, at the clock's speed), `launchNotBefore` and the job's `firedAtTick` those of the
+  sounds seated with it; a code a follower kept, more than two ticks from the leader's, is sought
+  there. DOH! (AHS): `heardUnder` counts a timecode run with `run.started`. Pass A ends one not yet
+  started, as a silent sound - a start the press's own tick had placed ahead is taken back by the
+  stop its job's let-go posts on the next. Pass B takes a started one back, `askStop (0)` and no
+  fade (AHK); on the next tick the sweep ends it and `advanceTimecode` stops its code, noting where
+  the stop lands - the first frame boundary at or after where its clock stands - in
+  `timecodeStoppedAt`, which `noteDohPlayheads` reports in the same tick on `go.dohPlayhead`.
+  `DohRoot::Kind::timecode`, from `rootFor` for a code at the top of its list or in an older manual
+  act: `offset` the handler's count (`armedOrigin` and the ticks since `run.started`) until that
+  record writes the frame, no root when past its length, `landsAt` the press's own tick so it is
+  never carried on in place (AIB); `publishResume` says "<cue> <seconds>". A scene's plan carries
+  its codes - sent, at the counted point refined by the same record (`heardRuns`); fired and not
+  placed, at its start; waiting, due; over, finished. The corrected GO seats a code root cold, and
+  a scene through `seatPlan`, so a code comes back with its scene's sounds on one sample, under a
+  new program, from the frame its stop landed on; a second press forgets it and a refused press
+  leaves it running, as for a sound. `soundRootOf` answers sound roots only: nothing arms a code.
+  Found on the way: before TC.7 a timecode cue at the top of a list that Doh! took back was only
+  marked taken back and played on - pass B passed over its kind. Named limitation: a jump of the
+  list (`list.loadToTime`) and a seek of a scene end the code's run and seat a new one under a new
+  program, so the line is quiet from the old code's next frame boundary to the new zero - a launch
+  horizon, about two frames, or as long as a sound seated with it takes to arm; `run.seek` on the
+  timecode run itself never is. Tests under C and fr_FR:
+  TimecodeRunTests (a jump on LTC and MTC - the relocation's start with the same program, the frame
+  a second falls in, a launch horizon ahead, nothing stopped or ended, the readout and the position
+  counting on from there, Esc stopping that program once, a run over not sought; a length's stop
+  placed for what is left, a jump past it ended once and stopped as soon as can be; a load to time
+  into a timeline scene starting the code at its start plus twelve seconds on its cold sound's
+  launch sample, the one whose length had run over; Doh! - a code placed in the press's tick ended
+  and its start taken back, one waiting for its cold sound never placed, one sent stopped on a frame
+  boundary and resumed by the corrected GO from that frame on LTC and MTC, a scene re-seated with
+  its sound and its code on one sample, the second press and a refusal; each replaying record for
+  record), SolverTests (a timeline at twelve seconds - the code at twelve, one with a ten-second
+  length over, a thirty-second one at twelve, one delayed five at seven, one due in eight, nothing
+  confused; aimed at a code and past a length; a code fired at an earlier step, `endless-code`; the
+  persistent section), SeatTests (a follower seated while the leader's LTC runs starts its own code
+  on the seat's launch sample at the frame the leader's is at then, and stays in step), TimecodeTests
+  (the generator: a program started again carries on past the old length's stop, never quiet, and a
+  stop after it ends it), MidiTests (the lane: the same, and an Esc while the jump waits ending both).
+  Eleven deliberate breakages, in three rounds, each turned its own cases red - the jump's program,
+  the generator's start order, the length less the offset, the solver's code beside the target and
+  its offset, the seat's branch, `pair.seat`'s kind, pass A, pass B, `heardUnder` and where the stop
+  landed. unit.C and unit.fr_FR whole.

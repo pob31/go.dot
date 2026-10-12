@@ -426,13 +426,21 @@ namespace wfg::cue
                     running group be re-seated at another second of its own
                     timeline, which is what scrubbing a group in the running pane
                     asks for. */
+                /*  AND A CODE THAT RUNS UNTIL IT IS STOPPED (namespace draft §59,
+                    TC.7), aimed at inside its chain: not timed, but its start a
+                    known second of it, so its scene is read at that second plus
+                    the offset as a timed member's is. */
+                const auto untilStopped = ! target.timed && target.element == "Timecode"
+                                           && ! target.startChain.empty();
+
                 const auto chain = target.timed ? target.chain
                                  : target.element == "Group" ? target.id
-                                                              : std::string {};
+                                 : untilStopped ? target.startChain
+                                               : std::string {};
 
                 if (! chain.empty())
                 {
-                    const auto at = target.timed ? target.from + offset : offset;
+                    const auto at = (target.timed || untilStopped) ? target.from + offset : offset;
 
                     /*  WHAT EACH INNER GROUP WAS FOUND TO BE, by identifier, so
                         that its members can follow it: a group that is DUE will
@@ -444,7 +452,14 @@ namespace wfg::cue
 
                     for (const auto& entry : walk.placed)
                     {
-                        if (entry.id == target.id || ! entry.timed || entry.chain != chain)
+                        /*  AND A CODE THAT RUNS UNTIL IT IS STOPPED (namespace
+                            draft §59, TC.7): one end, so not timed, but its
+                            start a known second of the chain - sounding from
+                            there for as long as the scene is. */
+                        const auto endless = ! entry.timed && entry.element == "Timecode"
+                                               && entry.startChain == chain;
+
+                        if (entry.id == target.id || ((! entry.timed || entry.chain != chain) && ! endless))
                             continue;
 
                         if (! read.flag (entry.node, "cue", "enabled"))
@@ -483,7 +498,7 @@ namespace wfg::cue
                             the scene the scheduler takes over never fires it. A
                             fade or a message the instant has already passed is
                             over - what it wrote is in the values and the trims. */
-                        if (inner == planned::finished || entry.to <= at)
+                        if (inner == planned::finished || (! endless && entry.to <= at))
                             beside.when = planned::finished;
                         else if (at < entry.from)
                         {
@@ -498,6 +513,16 @@ namespace wfg::cue
                         {
                             /*  A LIVE INPUT BESIDE THE TARGET IS SOUNDING
                                 (Phase 9b), with no offset to be at. */
+                        }
+                        else if (entry.element == "Timecode")
+                        {
+                            /*  A CODE BESIDE THE TARGET (namespace draft §59,
+                                TC.7) is that far past its start, as a sound
+                                is that far into its file: the run starts it at
+                                its `from` plus that, on the sounds' sample. One
+                                whose length the instant has passed is over,
+                                above. */
+                            beside.offset = at - entry.from;
                         }
                         else
                             beside.when = planned::finished;
@@ -692,6 +717,14 @@ namespace wfg::cue
                     run.cue = target.id;
                     run.ancestors = target.ancestors;
                     run.offset = offset;
+
+                    /*  A CODE AIMED AT PAST ITS LENGTH IS OVER (namespace draft
+                        §59, TC.7): it has stopped by itself there (AHB). */
+                    if (target.element == "Timecode")
+                        if (const auto length = read.number (target.node, "timecode", "length");
+                            length > 0.0 && offset >= length)
+                            run.when = planned::finished;
+
                     plan.runs.push_back (run);
                 }
             }
@@ -931,6 +964,19 @@ namespace wfg::cue
 
             if (std::find (stopped.begin(), stopped.end(), entry.id) != stopped.end())
                 continue;
+
+            /*  A CODE THAT RUNS UNTIL IT IS STOPPED (namespace draft §59, TC.7)
+                is not a length nobody knows: the walk's own placing beside the
+                target has it at its second already. In a sequence nothing after
+                it has a start, since nothing comes after it until it is
+                stopped. */
+            if (entry.element == "Timecode")
+            {
+                if (! timeline)
+                    startKnown = false;
+
+                continue;
+            }
 
             PlannedRun run;
             run.cue = entry.id;
@@ -1295,11 +1341,18 @@ namespace wfg::cue
 
             read.pass (entry.node);
 
-            if ((entry.element != "Media" && entry.element != "Mic")
+            if ((entry.element != "Media" && entry.element != "Mic" && entry.element != "Timecode")
                   || ! read.flag (entry.node, "cue", "enabled"))
                 continue;
 
             if (! stillGoing (walk, entry) || wasStopped (entry.id))
+                continue;
+
+            /*  NOT A CODE OF THE TARGET'S OWN CHAIN (namespace draft §59, TC.7):
+                where that one has got to is arithmetic, not an actor's pace -
+                the target's part of the plan places it at its second. */
+            if (entry.element == "Timecode" && ! entry.startChain.empty() && fired
+                  && (entry.startChain == target->startChain || entry.startChain == target->id))
                 continue;
 
             /*  Still going, and where in it is operator-timed. `placeInRanges`
@@ -1311,6 +1364,13 @@ namespace wfg::cue
 
             if (entry.element == "Media")
                 placeInRanges (read, entry.node, 0.0, run, plan.confused);
+
+            /*  A CODE THAT RUNS UNTIL IT IS STOPPED (namespace draft §59,
+                TC.7), fired at an earlier manual step: running, and how far it
+                has got is however long the actor took. Landed at its start, as
+                a bed lands at the start of its endless range, and said. */
+            if (entry.element == "Timecode")
+                plan.confused.push_back ({ entry.id, confusion::endlessCode, "its start" });
 
             plan.runs.push_back (run);
         }
@@ -1531,8 +1591,20 @@ namespace wfg::cue
                 continue;
             }
 
-            if (entry->element != "Media" && entry->element != "Group" && entry->element != "Mic")
+            if (entry->element != "Media" && entry->element != "Group" && entry->element != "Mic"
+                  && entry->element != "Timecode")
                 continue;
+
+            /*  A CODE WHOSE LENGTH HAS RUN BY THE INSTANT IS OVER (namespace
+                draft §59, TC.7), as a sound that has run out is; one that runs
+                until it is stopped is that many seconds past its start. */
+            if (entry->element == "Timecode")
+                if (const auto length = read.number (entry->node, "timecode", "length");
+                    length > 0.0 && seconds >= length)
+                {
+                    unplan (entry->id);
+                    continue;
+                }
 
             /*  A SOUND THAT HAS RUN OUT BY THE INSTANT IS OVER, and is left
                 out rather than planned at its last instant: the order reading

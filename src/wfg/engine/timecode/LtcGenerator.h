@@ -55,6 +55,17 @@
     program that was posted before it and has not begun - and a start posted
     after it is a new one, and plays.
 
+    AND A START IS NOT ENDED BY A STOP POSTED BEFORE IT (TC.7). A jump moves a
+    running code by starting its own program again from another frame - the
+    same program, so an Esc pressed while the jump waits for its sample stops
+    both the old placement and the new one. The old placement's length had
+    already posted its stop, for where the old frames would have run out; left
+    to land, it would end the code a jump had moved back at the old frame's
+    end. So a stop or a cut reaches only a start of its program posted before
+    it: one posted after it is the program placed again, which a stop it never
+    saw cannot end - as a new program on the MIDI sender's lane is never
+    ended by what was posted for the one it replaced.
+
     THE BIT CLOCK IN WHOLE NUMBERS (§59.1). A run counts half-bits from its
     zero, the first sample of the frame it starts on: the half-bit at sample
     `s` is `floor ((s - zero) * 160 * num / (rate * den))`, the frame that over
@@ -334,6 +345,9 @@ namespace wfg::timecode
             std::int64_t endSample = never;
             std::int64_t endHalfBit = never;
 
+            //  The order its start came in: a stop or a cut that came before it is not its (TC.7).
+            std::uint64_t startOrder = 0;
+
             //  A half-bit's exact moment is `k * multiplier / divisor` samples after zero.
             std::int64_t multiplier = 1;
             std::int64_t divisor = 1;
@@ -465,6 +479,7 @@ namespace wfg::timecode
 
                     run = {};
                     run.id = command.program;
+                    run.startOrder = item.order;
                     run.zero = command.sample;
                     run.startFrame = command.startFrame;
                     run.rate = command.rate;
@@ -487,7 +502,7 @@ namespace wfg::timecode
                 {
                     dropStartsOf (command.program, item.order);
 
-                    if (run.id != command.program)
+                    if (run.id != command.program || item.order < run.startOrder)
                         return;
 
                     const auto frame = firstFrameAtOrAfter (at - run.zero, samplesPerSecond, run.rate);
@@ -506,7 +521,7 @@ namespace wfg::timecode
                 {
                     dropStartsOf (command.program, item.order);
 
-                    if (run.id == command.program && at < run.endSample)
+                    if (run.id == command.program && item.order >= run.startOrder && at < run.endSample)
                         run.endSample = at;
 
                     return;

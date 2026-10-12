@@ -194,6 +194,11 @@ namespace wfg::cue
         /** A range that plays for ever, fired at an earlier manual step. */
         inline constexpr const char* endlessRange = "endless-range";
 
+        /*  A timecode cue that runs until it is stopped, fired at an earlier
+            manual step (namespace draft §59, TC.7): how far its code has got
+            is how long somebody held the scene. */
+        inline constexpr const char* endlessCode = "endless-code";
+
         /** A shuffled group whose order was drawn on a night nobody recorded. */
         inline constexpr const char* drawnOrder = "drawn-order";
 

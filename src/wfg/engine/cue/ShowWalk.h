@@ -261,6 +261,15 @@ namespace wfg::cue
         double from = 0.0;
         double to = 0.0;
 
+        /*  THE CHAIN ITS START IS COUNTED IN, when its start is known whether
+            or not its end is (namespace draft §59, TC.7): a timecode cue that
+            runs until it is stopped, inside a timeline or an automatic
+            sequence, starts at a known second of that chain and never ends by
+            itself - not `timed`, since it has one end, but placed all the
+            same. `chain` for every timed cue; empty where the start is not
+            known. */
+        std::string startChain;
+
         /*  WHETHER A JUMP MAY LEAVE THE POINTER HERE, which since 2026-09-16 is
             NOT the same question as whether the pointer may STAND here.
 
@@ -396,6 +405,7 @@ namespace wfg::cue
 
             entry.timed = timing.known && length.has_value();
             entry.chain = entry.timed ? timing.origin : std::string {};
+            entry.startChain = timing.known ? timing.origin : std::string {};
             entry.from = timing.at;
             entry.to = timing.at + length.value_or (0.0);
             placed.push_back (entry);

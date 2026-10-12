@@ -121,8 +121,24 @@ namespace
             arms.clear();
         }
 
+        /*  A LINE FOR LTC (namespace draft §59, TC.7): every code started on
+            it, its program, its first sample and its first frame. */
+        struct Code
+        {
+            std::uint64_t program = 0;
+            std::int64_t zero = 0;
+            std::int64_t frame = 0;
+        };
+
+        bool placeTimecode (std::uint64_t program, std::int64_t zero, std::int64_t frame, timecode::Rate) override
+        {
+            codes.push_back ({ program, zero, frame });
+            return true;
+        }
+
         std::vector<cue::ArmRequest> arms;
         std::set<int> ready, playing;
+        std::vector<Code> codes;
         std::int64_t samples = 0;
     };
 
@@ -1250,4 +1266,94 @@ TEST_CASE ("seat: what a position and a summary cost - fifty sounds running")
     CHECK (median (summaryCompared) < 5000.0);
     CHECK (median (positionMade) < 50000.0);
     CHECK (median (seatCold) < 200000.0);
+}
+
+//==============================================================================
+TEST_CASE ("seat: a follower seated while the leader's timecode runs starts its own code at the frame the leader's will be at, on the seat's launch sample")
+{
+    /*  THROUGH `seatPlan`, as a sound is seated (namespace draft §59, TC.7): the
+        leader's run under the leader's name, its code started where the leader's
+        will have got to when this one starts - a seat's lateness, the launch
+        latency and a cold arm's lead on - and from then on the two read alike. */
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    doc::ShowDocument made;
+    const auto list = made.createList ("Sound").id;
+    REQUIRE (made.createBus ("direct", 2).ok);
+    const auto line = made.createBus ("direct", 1);
+    REQUIRE (line.ok);
+    REQUIRE (made.setAttribute ("/godot/sync/ltcOut", line.id).ok);
+
+    const auto code = made.createCue (list, 0, "timecode", {}, {},
+                                      doc::ShowDocument::Attributes { { "format", "ltc" }, { "from", "01:00:00:00" } });
+    REQUIRE (code.ok);
+    const auto after = made.createCue (list, 1, "memo", "After").id;
+    REQUIRE (! after.empty());
+    REQUIRE (made.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    const auto text = doc::CanonicalXml::write (made);
+    Machine leader { text }, follower { text };
+
+    follower.runIds.drawSeed();
+    follower.runner.runNames().setSalt (follower.runner.runNames().salt() ^ 0x5a5a5a5au);
+
+    std::int64_t tick = 50;
+    leader.go (tick, list, code.id);
+    tick += 2;
+
+    for (; tick < 200; ++tick)
+        leader.tickOnce (tick);
+
+    REQUIRE (leader.audio.codes.size() == 1u);
+    const auto theirs = leader.audio.codes.front();
+    const auto runId = leader.runOf (code.id);
+    REQUIRE (! runId.empty());
+
+    const std::int64_t local = 3000;
+    const auto leaderTick = tick - 1;
+    auto at = leader.runner.positionNow (leaderTick, 7);
+    at.rebase (local - leaderTick);
+
+    REQUIRE (follower.engine.submit (std::string (origin::engine), "pair.seat", { s (pair::toText (at)) }));
+    follower.tickOnce (local, false);
+
+    //  The leader's run, under its name, and nothing said: a code is the seat's to make.
+    CHECK (follower.runner.seatNotes().empty());
+    CHECK (follower.runOf (code.id) == runId);
+
+    //  Placed by the next tick, on the sample a sound seated now would launch
+    //  on - the leader's tick and the follower's a seat apart from here.
+    leader.tickOnce (leaderTick + 1);
+    follower.tickOnce (local + 1);
+    REQUIRE (follower.audio.codes.size() == 1u);
+
+    const auto ours = follower.audio.codes.front();
+    const auto launchIn = static_cast<std::int64_t> (follower.runner.latencyTicks() + cue::Runner::seatLeadTicks);
+    CHECK (ours.zero == (local + launchIn) * 960);
+
+    //  Where the leader's code is at that moment - its tick `leaderTick + launchIn` - by hand.
+    const auto leaderSince = (leaderTick + launchIn) * 960 - theirs.zero;
+    CHECK (ours.frame == theirs.frame + leaderSince / 1920);
+
+    //  And from then on, tick for tick, the same runs at the same playheads.
+    std::string firstDifference;
+
+    for (std::int64_t n = 2; n <= 80; ++n)
+    {
+        leader.tickOnce (leaderTick + n);
+        follower.tickOnce (local + n);
+
+        if (n <= follower.runner.seatSettleTicks() || ! firstDifference.empty())
+            continue;
+
+        if (const auto difference = differenceAt (leader, leaderTick + n, follower, local + n); ! difference.empty())
+            firstDifference = "after " + std::to_string (n) + " ticks: " + difference;
+    }
+
+    CHECK (firstDifference == "");
+
+    const auto* run = follower.runs.find (runId);
+    REQUIRE (run != nullptr);
+    CHECK (run->state == cue::runState::playing);
+    CHECK (run->timecode == leader.runs.find (runId)->timecode);
 }

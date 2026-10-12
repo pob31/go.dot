@@ -3018,6 +3018,66 @@ TEST_CASE ("mtc lane: a second start takes over on its own zero sample with a fu
     }
 }
 
+TEST_CASE ("mtc lane: a program started again from another frame - a jump - takes itself over on its new zero with a full frame, and outlives its old length")
+{
+    /*  TC.7: `run.seek` starts a code's OWN program again from another frame.
+        Its first placement's length had posted a stop for frames the code no
+        longer runs; the new placement is a new program on the lane as far as
+        that stop goes, and a stop posted after it - an Esc - reaches both. */
+    const timecode::Label from { 1, 0, 0, 0 };
+    const timecode::Label jumped { 1, 0, 20, 0 };
+
+    {
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.outputs.stopTimecode (1, 10 * 1920, false);         // ten frames: ends at 400 ms
+        rig.runTo (50'000'000);
+
+        REQUIRE (rig.start (1, timecode::Rate::fps25, jumped, 4900).empty());
+        rig.runTo (600'000'000);
+
+        const auto wire = rig.desk->wire();
+        const auto fromFirst = scheduleOf (timecode::Rate::fps25, from, 0, 4899);
+        const auto fromJump = scheduleOf (timecode::Rate::fps25, jumped, 4900, 600'000'000LL * 48 / 1'000'000);
+
+        REQUIRE (wire.size() == fromFirst.size() + fromJump.size());
+
+        for (std::size_t n = 0; n < fromFirst.size(); ++n)
+            CHECK (wire[n].bytes == bytesOf (fromFirst[n]));
+
+        const auto& jump = wire[fromFirst.size()];
+        CHECK (jump.bytes == fullFrameOf (jumped, timecode::Rate::fps25));
+        CHECK (jump.due == rig.momentOf (4900));
+
+        for (std::size_t n = 0; n < fromJump.size(); ++n)
+            CHECK (wire[fromFirst.size() + n].bytes == bytesOf (fromJump[n]));
+
+        //  Still sending at the end, long past where the old length ended at 19200.
+        CHECK (fromJump.back().dueSample > 25000);
+        CHECK (wire.back().due == rig.momentOf (fromJump.back().dueSample));
+        CHECK (rig.outputs.timecodeProgram() == 1u);
+        CHECK (rig.outputs.timecodeLate() == 0u);
+    }
+
+    {
+        //  AN ESC WHILE THE JUMP WAITS FOR ITS ZERO: one stop of the program ends
+        //  the code sending at its next frame boundary, and the jump never begins.
+        MtcRig rig;
+        REQUIRE (rig.start (1, timecode::Rate::fps25, from, 0).empty());
+        rig.runTo (50'000'000);
+        REQUIRE (rig.desk->wire().size() == 7u);                // the full frame and quarters 0 to 5
+
+        REQUIRE (rig.start (1, timecode::Rate::fps25, jumped, 4900).empty());
+        rig.outputs.stopTimecode (1, 0, false);
+        rig.runTo (300'000'000);
+
+        const auto wire = rig.desk->wire();
+        REQUIRE (wire.size() == 9u);                            // 6 and 7, frame 1's last two
+        CHECK (wire.back().due == rig.momentOf (7 * 480));
+        CHECK (rig.outputs.timecodeProgram() == 0u);
+    }
+}
+
 TEST_CASE ("mtc lane: a stop waits for the frame, a cut does not, and a stop before the zero takes the start back")
 {
     //  Frames of 1920 samples at 25 and 48 kHz: frame 3 is 5760 to 7679.

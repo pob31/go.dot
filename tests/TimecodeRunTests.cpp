@@ -38,6 +38,12 @@
     sounds with an audio side, on the tick's own count without one, a length's
     stop, Esc's stop, a double Esc's cut, the takeover, `no-port`, held, `tx`
     off and on again, `bad-message`, and a replay.
+
+    TC.7: a jump (`run.seek`) placing the code again under its own program, a
+    jump past its length, a load to time into a scene, and Doh!: a code not
+    yet sent ended, one sent paused on a frame boundary and resumed by the
+    corrected GO from there, a scene's code re-seated with its sound on one
+    sample, the second press and a refused one.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
@@ -65,6 +71,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -2072,4 +2079,612 @@ TEST_CASE ("timecode lane: a replay of a session on the lane reaches the same ru
         CHECK (again->endedAtTick == run.endedAtTick);
         CHECK (again->startedAtTick == run.startedAtTick);
     }
+}
+
+//==============================================================================
+/*  TC.7: A JUMP, LOAD TO TIME AND DOH! A timecode run moves in time as a sound
+    does. `run.seek` on one places its code again a launch horizon ahead, at its
+    start plus the second asked, under the SAME program - it replaces itself on
+    the line and on the lane, so nothing is taken over and nothing is stopped -
+    and a jump past its length ends it. A load to time starts a code planned in
+    a scene at its start plus the scene's second, on the sample of the sounds
+    seated beside it. Doh! pauses a code it took back as it pauses a sound: one
+    not yet sent is ended and its start taken back, one sent is stopped on a
+    frame boundary, with no fade, and the corrected GO starts it again from the
+    frame its stop landed on - a scene's code with the scene's sounds, on one
+    sample. Every sample and frame below is worked out by hand: 960 samples a
+    tick, a frame every 1920 at 25. */
+namespace
+{
+    struct AnyStart
+    {
+        std::uint64_t program = 0;
+        std::int64_t zero = 0;
+        std::int64_t frame = 0;
+        std::int64_t postedAt = 0;
+    };
+
+    struct AnyStop
+    {
+        std::int64_t atSample = 0;
+        bool cut = false;
+        std::int64_t postedAt = 0;
+    };
+
+    //  The starts the Runner gave the output `format` plays on: the line, or the lane.
+    std::vector<AnyStart> startsOn (const TimecodeRig& rig, const std::string& format)
+    {
+        std::vector<AnyStart> out;
+
+        if (format == "ltc")
+            for (const auto& start : rig.player.starts)
+                out.push_back ({ start.program, start.zero, start.frame, start.postedAt });
+        else
+            for (const auto& start : rig.sink.starts)
+                out.push_back ({ start.program, start.zero, start.frame, start.postedAt });
+
+        return out;
+    }
+
+    std::vector<AnyStop> stopsOn (const TimecodeRig& rig, const std::string& format, std::uint64_t program)
+    {
+        std::vector<AnyStop> out;
+
+        if (format == "ltc")
+            for (const auto& stop : rig.player.stopsOf (program))
+                out.push_back ({ stop.atSample, stop.cut, stop.postedAt });
+        else
+            for (const auto& stop : rig.sink.stopsOf (program))
+                out.push_back ({ stop.atSample, stop.cut, stop.postedAt });
+
+        return out;
+    }
+
+    //  A GO as the operator makes one: the standby onto the cue, then GO.
+    void goOn (TimecodeRig& rig, const std::string& cueId)
+    {
+        rig.submit ("standby.set", { osc::Value::string (cueId) });
+        rig.submit ("go");
+    }
+
+    //  The newest run of a cue that is not `old`, or null.
+    const cue::Run* runOtherThan (const TimecodeRig& rig, const std::string& cueId, const std::string& old)
+    {
+        const cue::Run* out = nullptr;
+
+        for (const auto& run : rig.runs.all())
+            if (run.cue == cueId && run.id != old)
+                out = &run;
+
+        return out;
+    }
+
+    //  The first frame boundary at or after `since` samples into a code at 25 and 48 kHz.
+    std::int64_t boundaryAt25 (std::int64_t since)
+    {
+        return since > 0 ? (since + 1919) / 1920 : 0;
+    }
+
+    //  A session replayed from its log alone: every run reaches the same end.
+    void replaysAlike (TimecodeRig& rig)
+    {
+        const auto show = doc::CanonicalXml::write (rig.document);
+        const auto original = LogFile::parse (rig.engine.log().contents());
+        REQUIRE (original.errors.empty());
+
+        TimecodeRig fresh;
+        REQUIRE (doc::CanonicalXml::read (show, fresh.document).ok);
+
+        const auto result = replay (fresh.engine, original);
+
+        for (const auto& mismatch : result.mismatches)
+            MESSAGE (mismatch);
+
+        CHECK (result.ok);
+
+        for (const auto& run : rig.runs.all())
+        {
+            INFO ("run " << run.id << " of " << run.cue);
+            const auto* again = fresh.runs.find (run.id);
+            REQUIRE (again != nullptr);
+            CHECK (again->state == run.state);
+            CHECK (again->endedAtTick == run.endedAtTick);
+            CHECK (again->startedAtTick == run.startedAtTick);
+            CHECK (again->takenBack == run.takenBack);
+        }
+    }
+}
+
+TEST_CASE ("timecode jump: run.seek places the code again a launch horizon ahead at its start plus the second, under its own program, and nothing ends")
+{
+    for (const std::string format : { "ltc", "mtc" })
+    {
+        INFO ("format " << format);
+
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+
+        const auto cue = rig.makeTimecode (format, "01:00:00:00");
+        rig.fire (cue);
+        rig.tickOnce();
+
+        REQUIRE (startsOn (rig, format).size() == 1u);
+        const auto first = startsOn (rig, format).front();
+
+        for (int n = 0; n < 20; ++n)
+            rig.tickOnce();
+
+        //  A run playing is one the pane may scrub (`run/seekable`).
+        const auto runId = rig.runOf (cue)->id;
+        CHECK (rig.runOf (cue)->seekable);
+        CHECK (rig.runner.seekableNow (*rig.runOf (cue)));
+
+        rig.submit ("run.seek", { osc::Value::string (runId), osc::Value::float64 (12.0) });
+        const auto soughtAt = rig.tick - 1;
+
+        //  The handler moves the readout - all a replay sees - and the next tick the code.
+        CHECK (startsOn (rig, format).size() == 1u);
+        CHECK (rig.runOf (cue)->timecode == "01:00:12:00");
+
+        rig.tickOnce();
+        REQUIRE (startsOn (rig, format).size() == 2u);
+
+        const auto moved = startsOn (rig, format).back();
+        CHECK (moved.program == first.program);
+        CHECK (moved.frame == oneHourAt25 + 12 * 25);
+        CHECK (moved.postedAt == (soughtAt + 1) * samplesPerTick);
+        CHECK (moved.zero == (soughtAt + 1 + leadTicks) * samplesPerTick);
+
+        //  Nothing taken over and nothing stopped: the program replaced itself.
+        CHECK (stopsOn (rig, format, first.program).empty());
+        CHECK (rig.runOf (cue)->state == cue::runState::playing);
+        CHECK (rig.runOf (cue)->id == runId);
+        CHECK (rig.runOf (cue)->startedAtTick == soughtAt + 1);
+        CHECK (recordsOf (rig, "run.ended", runId) == 0);
+
+        //  And it counts on from there, its position how far past its start it is.
+        for (std::int64_t at = soughtAt + 2; at <= soughtAt + 40; ++at)
+        {
+            rig.tickOnce();
+            const auto since = std::max<std::int64_t> (0, (at - soughtAt - 1 - leadTicks) * samplesPerTick);
+            const auto frames = static_cast<int> (since / 1920);
+
+            INFO ("tick " << at);
+            CHECK (rig.runOf (cue)->timecode == label (1, 0, 12 + frames / 25, frames % 25));
+            CHECK (rig.runOf (cue)->position == doctest::Approx (12.0 + static_cast<double> (since) / 48000.0));
+        }
+
+        //  A second between frames is the frame it falls in: 3.03 s is frame 75.
+        rig.submit ("run.seek", { osc::Value::string (runId), osc::Value::float64 (3.03) });
+        rig.tickOnce();
+        REQUIRE (startsOn (rig, format).size() == 3u);
+        CHECK (startsOn (rig, format).back().frame == oneHourAt25 + 75);
+        CHECK (startsOn (rig, format).back().program == first.program);
+
+        //  Esc then stops that program, once.
+        rig.submit ("run.stopAll");
+        rig.tickOnce();
+        CHECK (rig.runOf (cue)->state == cue::runState::done);
+        REQUIRE (stopsOn (rig, format, first.program).size() == 1u);
+        CHECK (stopsOn (rig, format, first.program).front().atSample == 0);
+
+        //  Over, it is not one to scrub, and a seek of it moves nothing.
+        CHECK_FALSE (rig.runner.seekableNow (*rig.runOf (cue)));
+        rig.submit ("run.seek", { osc::Value::string (runId), osc::Value::float64 (1.0) });
+        rig.tickOnce();
+        CHECK (startsOn (rig, format).size() == 3u);
+
+        replaysAlike (rig);
+    }
+}
+
+TEST_CASE ("timecode jump: a code with a length is placed again with what is left of it; one sought past its length ends")
+{
+    for (const std::string format : { "ltc", "mtc" })
+    {
+        INFO ("format " << format);
+
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+
+        //  Ten seconds: 250 frames at 25.
+        const auto cue = rig.makeTimecode (format, "10:00:00:00", "10");
+        rig.fire (cue);
+        rig.tickOnce();
+
+        REQUIRE (startsOn (rig, format).size() == 1u);
+        const auto first = startsOn (rig, format).front();
+        REQUIRE (stopsOn (rig, format, first.program).size() == 1u);
+        CHECK (stopsOn (rig, format, first.program).front().atSample == first.zero + 250 * 1920);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        const auto runId = rig.runOf (cue)->id;
+
+        //  Four seconds in: frame 100, and 150 frames left to run from its new zero.
+        rig.submit ("run.seek", { osc::Value::string (runId), osc::Value::float64 (4.0) });
+        rig.tickOnce();
+
+        REQUIRE (startsOn (rig, format).size() == 2u);
+        const auto moved = startsOn (rig, format).back();
+        CHECK (moved.program == first.program);
+        CHECK (moved.frame == 10 * oneHourAt25 + 100);
+
+        const auto stops = stopsOn (rig, format, first.program);
+        REQUIRE (stops.size() == 2u);
+        CHECK (stops.back().atSample == moved.zero + 150 * 1920);
+        CHECK_FALSE (stops.back().cut);
+
+        //  Past its length: ended on the next tick, as its length running out
+        //  would end it, its code stopped as soon as can be, its readout its last frame.
+        rig.submit ("run.seek", { osc::Value::string (runId), osc::Value::float64 (12.0) });
+        const auto soughtAt = rig.tick - 1;
+        CHECK (rig.runOf (cue)->timecode == "10:00:09:24");
+        CHECK (rig.runOf (cue)->state == cue::runState::playing);
+
+        rig.tickOnce();
+        CHECK (rig.runOf (cue)->state == cue::runState::done);
+        CHECK (rig.runOf (cue)->endedAtTick == soughtAt + 1);
+        CHECK (recordsOf (rig, "run.ended", runId) == 1);
+        CHECK (startsOn (rig, format).size() == 2u);
+        REQUIRE (stopsOn (rig, format, first.program).size() == 3u);
+        CHECK (stopsOn (rig, format, first.program).back().atSample == 0);
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (stopsOn (rig, format, first.program).size() == 3u);
+        CHECK (rig.runOf (cue)->timecode == "10:00:09:24");
+
+        replaysAlike (rig);
+    }
+}
+
+TEST_CASE ("timecode jump: a load to time starts a scene's code at its start plus the scene's second, on its sound's sample; one past its length is over")
+{
+    TimecodeRig rig;
+    rig.attach();
+    rig.attachMidi();
+
+    std::map<std::string, double> lengths { { "song.wav", 60.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    const auto scene = makeScene (rig);
+    const auto song = rig.document.createCue (scene, rig.childIndex++, "media", "Song").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + song + "/file", "song.wav").ok);
+    const auto code = rig.makeTimecode ("ltc", "10:00:00:00", {}, scene);
+    const auto brief = rig.makeTimecode ("mtc", "11:00:00:00", "10", scene);
+
+    //  Twelve seconds into the scene.
+    rig.submit ("list.aim", { osc::Value::string (rig.listId), osc::Value::string (scene), osc::Value::float64 (12.0) });
+    rig.submit ("list.loadToTime", { osc::Value::string (rig.listId) });
+
+    REQUIRE (rig.runOf (code) != nullptr);
+    REQUIRE (rig.runOf (brief) != nullptr);
+    CHECK (rig.runOf (code)->state == cue::runState::playing);
+    CHECK (rig.runOf (code)->timecode == "10:00:12:00");
+    CHECK (rig.runOf (brief)->state == cue::runState::done);
+
+    //  The sound is on its disk, so the code waits for it.
+    for (int n = 0; n < 4; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.player.starts.empty());
+    CHECK (rig.player.launches.empty());
+
+    rig.player.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.player.launches.empty(); }, 5));
+
+    REQUIRE (rig.player.launches.size() == 1u);
+    REQUIRE (rig.player.starts.size() == 1u);
+    CHECK (rig.player.starts.front().zero == rig.player.launches.front().second);
+    CHECK (rig.player.starts.front().frame == 10 * oneHourAt25 + 12 * 25);
+    CHECK (rig.player.stops.empty());
+
+    //  The code past its length never started.
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.sink.starts.empty());
+    CHECK (rig.runOf (code)->state == cue::runState::playing);
+}
+
+TEST_CASE ("timecode doh: a code not yet sent is ended and its start taken back, and the next GO starts it from its top")
+{
+    SUBCASE ("placed by the tick the Doh drains in, before its run.started")
+    {
+        for (const std::string format : { "ltc", "mtc" })
+        {
+            INFO ("format " << format);
+
+            TimecodeRig rig;
+            rig.attach();
+            rig.attachMidi();
+            const auto cue = rig.makeTimecode (format, "01:00:00:00");
+
+            goOn (rig, cue);
+            const auto old = rig.runOf (cue)->id;
+
+            //  The hook of this tick places it; the Doh drains before what it said.
+            rig.submit ("go.doh");
+            REQUIRE (startsOn (rig, format).size() == 1u);
+            const auto program = startsOn (rig, format).front().program;
+
+            CHECK (rig.runs.find (old)->state == cue::runState::done);
+            CHECK (rig.runs.find (old)->startedAtTick == -1);
+
+            //  The next tick lets the job go: its start taken back by a stop of its program.
+            rig.tickOnce();
+            REQUIRE (stopsOn (rig, format, program).size() == 1u);
+            CHECK (stopsOn (rig, format, program).front().atSample == 0);
+            CHECK (rig.runner.listState().resumeOf (rig.listId).empty());
+
+            //  Nothing to carry on: the next GO starts it at its start, a new program.
+            rig.submit ("go");
+            rig.tickOnce();
+            REQUIRE (startsOn (rig, format).size() == 2u);
+            CHECK (startsOn (rig, format).back().frame == oneHourAt25);
+            CHECK (startsOn (rig, format).back().program != program);
+        }
+    }
+
+    SUBCASE ("waiting for a cold sound of its scene: nothing of it was ever placed")
+    {
+        TimecodeRig rig;
+        rig.attach();
+
+        const auto scene = makeScene (rig);
+        const auto song = rig.document.createCue (scene, rig.childIndex++, "media", "Song").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + song + "/file", "song.wav").ok);
+        const auto code = rig.makeTimecode ("ltc", "10:00:00:00", {}, scene);
+
+        goOn (rig, scene);
+        REQUIRE (rig.tickUntil ([&] { return rig.runOf (code) != nullptr && rig.runOf (song) != nullptr; }, 10));
+
+        for (int n = 0; n < 4; ++n)
+            rig.tickOnce();
+
+        rig.submit ("go.doh");
+        CHECK (rig.runOf (code)->state == cue::runState::done);
+        CHECK (rig.runOf (song)->isFinished());
+
+        //  The disk answers too late: nothing starts, nothing is stopped.
+        rig.player.completeArms (rig.engine);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.player.starts.empty());
+        CHECK (rig.player.stops.empty());
+        CHECK (rig.player.launches.empty());
+    }
+}
+
+TEST_CASE ("timecode doh: a code sent is stopped on a frame boundary with no fade, and the corrected GO resumes it from the frame it stopped on")
+{
+    for (const std::string format : { "ltc", "mtc" })
+    {
+        INFO ("format " << format);
+
+        TimecodeRig rig;
+        rig.attach();
+        rig.attachMidi();
+        const auto cue = rig.makeTimecode (format, "01:00:00:00");
+
+        goOn (rig, cue);
+        rig.tickOnce();
+
+        REQUIRE (startsOn (rig, format).size() == 1u);
+        const auto first = startsOn (rig, format).front();
+        const auto old = rig.runOf (cue)->id;
+
+        for (int n = 0; n < 31; ++n)
+            rig.tickOnce();
+
+        rig.submit ("go.doh");
+        const auto pressedAt = rig.tick - 1;
+
+        //  Taken back: on its way out, and no longer one to scrub.
+        const auto* paused = rig.runs.find (old);
+        CHECK (paused->takenBack);
+        CHECK (paused->state == cue::runState::stopping);
+        CHECK_FALSE (rig.runner.seekableNow (*paused));
+
+        //  The next tick ends it and stops its code as soon as can be - a stop,
+        //  never a fade or a cut - on the first frame boundary from where it stands.
+        rig.tickOnce();
+        CHECK (rig.runs.find (old)->state == cue::runState::done);
+
+        const auto stops = stopsOn (rig, format, first.program);
+        REQUIRE (stops.size() == 1u);
+        CHECK (stops.front().atSample == 0);
+        CHECK_FALSE (stops.front().cut);
+        CHECK (stops.front().postedAt == (pressedAt + 1) * samplesPerTick);
+
+        const auto stoppedAt = boundaryAt25 ((pressedAt + 1) * samplesPerTick - first.zero);
+        INFO ("stopped on frame " << stoppedAt);
+        REQUIRE (stoppedAt > 10);
+
+        //  The mark's root: the code, where its stop landed.
+        const auto* mark = rig.runner.markOf (rig.listId);
+        REQUIRE (mark != nullptr);
+        REQUIRE (mark->root.has_value());
+        CHECK (mark->root->kind == cue::Runner::DohRoot::Kind::timecode);
+        CHECK (mark->root->offset == doctest::Approx (static_cast<double> (stoppedAt) / 25.0));
+        CHECK (rig.runner.listState().resumeOf (rig.listId).rfind (cue + " ", 0) == 0);
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (startsOn (rig, format).size() == 1u);
+
+        //  The corrected GO: a new run, from that frame, placed a horizon ahead.
+        rig.submit ("go");
+        const auto goneAt = rig.tick - 1;
+
+        const auto* again = runOtherThan (rig, cue, old);
+        REQUIRE (again != nullptr);
+        CHECK (again->state == cue::runState::playing);
+        CHECK (again->timecode == label (1, 0, static_cast<int> (stoppedAt / 25), static_cast<int> (stoppedAt % 25)));
+
+        rig.tickOnce();
+        REQUIRE (startsOn (rig, format).size() == 2u);
+
+        const auto resumed = startsOn (rig, format).back();
+        CHECK (resumed.frame == oneHourAt25 + stoppedAt);
+        CHECK (resumed.zero == (goneAt + 1 + leadTicks) * samplesPerTick);
+        CHECK (resumed.program != first.program);
+
+        //  The resume is spent.
+        CHECK (rig.runner.listState().resumeOf (rig.listId).empty());
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        replaysAlike (rig);
+    }
+}
+
+TEST_CASE ("timecode doh: a scene with a sound and a code is re-seated by the corrected GO, both on one sample, the code from where it stopped")
+{
+    TimecodeRig rig;
+    rig.attach();
+
+    std::map<std::string, double> lengths { { "song.wav", 60.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    const auto scene = makeScene (rig);
+    const auto song = rig.document.createCue (scene, rig.childIndex++, "media", "Song").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + song + "/file", "song.wav").ok);
+    const auto code = rig.makeTimecode ("ltc", "10:00:00:00", {}, scene);
+
+    goOn (rig, scene);
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (code) != nullptr && rig.runOf (song) != nullptr; }, 10));
+
+    rig.player.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.player.launches.empty(); }, 5));
+    REQUIRE (rig.player.starts.size() == 1u);
+
+    const auto first = rig.player.starts.front();
+    CHECK (first.zero == rig.player.launches.front().second);
+
+    const auto oldCode = rig.runOf (code)->id;
+    const auto oldSong = rig.runOf (song)->id;
+
+    for (int n = 0; n < 40; ++n)
+        rig.tickOnce();
+
+    rig.submit ("go.doh");
+    const auto pressedAt = rig.tick - 1;
+    rig.tickOnce();
+
+    const auto stoppedAt = boundaryAt25 ((pressedAt + 1) * samplesPerTick - first.zero);
+    INFO ("stopped on frame " << stoppedAt);
+
+    REQUIRE (rig.player.stopsOf (first.program).size() == 1u);
+    CHECK (rig.player.stopsOf (first.program).front().atSample == 0);
+
+    //  The scene's plan holds its code where its stop landed, and its sound.
+    const auto* mark = rig.runner.markOf (rig.listId);
+    REQUIRE (mark != nullptr);
+    REQUIRE (mark->root.has_value());
+    CHECK (mark->root->kind == cue::Runner::DohRoot::Kind::tree);
+
+    auto codeRow = false, songRow = false;
+
+    for (const auto& row : mark->root->plan)
+    {
+        if (row.cue == code)
+        {
+            codeRow = true;
+            CHECK (row.when == cue::planned::sounding);
+            CHECK (row.offset == doctest::Approx (static_cast<double> (stoppedAt) / 25.0));
+        }
+
+        if (row.cue == song)
+        {
+            songRow = true;
+            CHECK (row.when == cue::planned::sounding);
+        }
+    }
+
+    CHECK (codeRow);
+    CHECK (songRow);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    //  The corrected GO re-seats the scene: the sound armed again, the code waiting for it.
+    const auto launchesBefore = rig.player.launches.size();
+    rig.submit ("go");
+
+    const auto* newCode = runOtherThan (rig, code, oldCode);
+    const auto* newSong = runOtherThan (rig, song, oldSong);
+    REQUIRE (newCode != nullptr);
+    REQUIRE (newSong != nullptr);
+    CHECK (newCode->state == cue::runState::playing);
+
+    for (int n = 0; n < 3; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.player.starts.size() == 1u);
+
+    rig.player.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&] { return rig.player.launches.size() > launchesBefore; }, 5));
+
+    REQUIRE (rig.player.starts.size() == 2u);
+    CHECK (rig.player.starts.back().zero == rig.player.launches.back().second);
+    CHECK (rig.player.starts.back().frame == 10 * oneHourAt25 + stoppedAt);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    replaysAlike (rig);
+}
+
+TEST_CASE ("timecode doh: a second press forgets the code's resume and the next GO starts it from its top; a refused Doh leaves it running")
+{
+    TimecodeRig rig;
+    rig.attach();
+
+    const auto cue = rig.makeTimecode ("ltc", "01:00:00:00");
+    const auto memo = rig.document.createCue (rig.listId, rig.index++, "memo", "Elsewhere").id;
+
+    goOn (rig, cue);
+    rig.tickOnce();
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    rig.submit ("go.doh");
+    rig.tickOnce();
+    REQUIRE (rig.runner.markOf (rig.listId) != nullptr);
+    REQUIRE (rig.runner.markOf (rig.listId)->root.has_value());
+
+    //  Start over: the second press forgets where it was.
+    rig.submit ("go.doh");
+    CHECK ((rig.runner.markOf (rig.listId) == nullptr || ! rig.runner.markOf (rig.listId)->root.has_value()));
+    CHECK (rig.runner.listState().resumeOf (rig.listId).empty());
+
+    rig.submit ("go");
+    rig.tickOnce();
+    REQUIRE (rig.player.starts.size() == 2u);
+    CHECK (rig.player.starts.back().frame == oneHourAt25);
+
+    //  REFUSED: a fire by name on its list since the GO - the code plays on.
+    const auto running = rig.player.starts.back().program;
+
+    rig.fire (memo);
+    rig.submit ("go.doh");
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (cue)->state == cue::runState::playing);
+    CHECK_FALSE (rig.runOf (cue)->takenBack);
+    CHECK (rig.player.stopsOf (running).empty());
+    CHECK (rig.player.starts.size() == 2u);
 }

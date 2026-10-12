@@ -1452,6 +1452,75 @@ TEST_CASE ("ltc generator: a start takes the running program over on its sample,
     }
 }
 
+TEST_CASE ("ltc generator: a program started again from another frame - a jump - carries on from it on its sample, and the stop its old frames posted does not end it")
+{
+    /*  TC.7: `run.seek` places a code again under its OWN program, so an Esc
+        while the jump waits stops both; the length its first placement posted
+        is for frames the code no longer runs, and a stop posted before a start
+        of its program is not that start's. */
+    for (const auto& at : { RateAt { Rate::fps25, 48000 }, RateAt { Rate::fps2997, 44100 } })
+    {
+        const auto rate = at.rate;
+        const auto sampleRate = at.sampleRate;
+
+        INFO ("rate " << std::string (wordOf (rate)) << " at " << sampleRate << " Hz");
+
+        LtcGenerator generator;
+        generator.prepare (sampleRate);
+        generator.setOutput (1, ltcGain);
+
+        constexpr std::int64_t zero = 200;
+        const auto startFrame = frameOf (label (1, 0, 0, 0), rate);
+        const auto jumpedFrame = frameOf (label (1, 0, 20, 0), rate);
+
+        //  Its length, twelve frames, posted with its start.
+        REQUIRE (generator.post (Command::start (3, zero, startFrame, rate)));
+        REQUIRE (generator.post (Command::stop (3, zero + frameStartSample (12, sampleRate, rate))));
+
+        //  Drawn into frame 6; then the jump, placed ahead inside frame 8.
+        const auto split = zero + frameStartSample (6, sampleRate, rate) + 100;
+        const auto jumpAt = zero + frameStartSample (8, sampleRate, rate) + 333;
+
+        auto line = render (generator, 0, split);
+        REQUIRE (generator.post (Command::start (3, jumpAt, jumpedFrame, rate)));
+        const auto rest = render (generator, split, jumpAt + 2 * sampleRate - split);
+        line.samples.insert (line.samples.end(), rest.samples.begin(), rest.samples.end());
+
+        const auto frames = read (line, sampleRate, rate);
+        const auto jumped = std::find_if (frames.begin(), frames.end(),
+                                          [] (const ltcreader::Frame& frame) { return frame.seconds == 20; });
+        REQUIRE (jumped != frames.end());
+
+        //  Eight whole frames of the first placement, then the jump's from its zero.
+        const auto firstCount = static_cast<std::size_t> (jumped - frames.begin());
+        CHECK (firstCount == 8u);
+
+        const auto before = checkRun (frames, 0, firstCount, zero, startFrame, 0, sampleRate, rate);
+        INFO ("before: " << before.firstWrong);
+        CHECK (before.wrong == 0);
+
+        const auto after = checkRun (frames, firstCount, frames.size() - firstCount, jumpAt, jumpedFrame, 0,
+                                     sampleRate, rate);
+        INFO ("after: " << after.firstWrong);
+        CHECK (after.wrong == 0);
+
+        //  Two seconds of it - far past where the old length would have ended it.
+        CHECK (frames.size() - firstCount + 2 >= static_cast<std::size_t> (2 * framesPerSecondOf (rate)));
+
+        //  Never quiet: below half the level only where the line crosses nought.
+        CHECK (longestBelow (line, zero + 1, line.end(), 0.5f * ltcGain) <= 3);
+        CHECK (generator.currentProgram() == 3);
+        CHECK (generator.lateCount() == 0);
+
+        //  A stop posted after it is its: the jumped code ends on its next frame boundary.
+        REQUIRE (generator.post (Command::stop (3, 0)));
+        const auto tail = render (generator, line.end(), sampleRate / 2);
+
+        CHECK (generator.currentProgram() == 0);
+        CHECK (aboveFrom (tail, tail.from + frameStartSample (1, sampleRate, rate) + fewTaus (sampleRate), 1.0e-4f) == 0);
+    }
+}
+
 TEST_CASE ("ltc generator: a run begun a day before at 192 kHz reads its labels through midnight")
 {
     /*  THE ARITHMETIC OVER A DAY. The program's zero is ten seconds' worth of

@@ -125,6 +125,32 @@ namespace wfg::cue
             return { osc::Value::string (text) };
         }
 
+        /*  A SECOND OF A TIMECODE RUN AS THE FRAME IT FALLS IN, at the run's
+            rate (namespace draft §59, TC.7): where a jump, a load to time or a
+            Doh's resume puts the code past its start - whole frames, since a
+            code can only start on one. The millionth of a frame added first is
+            for a second that was itself made from whole frames, which a double
+            may carry a hair below its frame: 0.48 s at 25 is frame 12, not 11.
+            Held below what a frame count can hold, however far somebody
+            dragged. */
+        std::int64_t framesInto (double seconds, timecode::Rate rate)
+        {
+            if (! (seconds > 0.0))
+                return 0;
+
+            const auto frames = seconds * static_cast<double> (timecode::numOf (rate))
+                                  / static_cast<double> (timecode::denOf (rate));
+
+            return static_cast<std::int64_t> (std::floor (std::min (frames, 1.0e15) + 1.0e-6));
+        }
+
+        /*  And back: where a whole number of frames puts a code, in seconds. */
+        double secondsOfFrames (std::int64_t frames, timecode::Rate rate)
+        {
+            return static_cast<double> (frames) * static_cast<double> (timecode::denOf (rate))
+                     / static_cast<double> (timecode::numOf (rate));
+        }
+
         /*  A `node.set` of a device's address: the address, then every value of
             the message (namespace draft §45) - one for a node of one. */
         std::vector<osc::Value> addressAnd (const std::string& address, const osc::Values& values)
@@ -2673,6 +2699,19 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  A CODE SOUNDING (namespace draft §59, TC.7): its job built as its
+                GO builds one, `offset` seconds past its start, and placed by
+                the next tick a launch horizon ahead - on the sample the sounds
+                this seat makes beside it start on, since it waits for a sound
+                of its group seated in the same tick (AHN). One load to time, a
+                scene a Doh re-seats and a follower's seat all come through
+                here. Nothing to arm and no arrival: a code starts on its frame. */
+            if (cue.hasType ("Timecode"))
+            {
+                seatTimecode (cue, *run, wants.offset, tick);
+                continue;
+            }
+
             /*  AND THE ONES MAKING A NOISE. Armed with their launch asked for
                 and their offset on them: the arm applies it as the clip's own
                 offset, which M17 measured landing on the sample. */
@@ -2949,6 +2988,12 @@ namespace wfg::cue
             moves where it is sought - not one Doh! took back. */
         if (run.kind == "osc")
             return ! run.takenBack && isCurving (run.id);
+
+        /*  A TIMECODE RUN (namespace draft §59, TC.7): its code goes on from
+            the frame it is sought to - not one Doh! took back, whose code is
+            stopping at its frame boundary, nor one whose cue is gone. */
+        if (run.kind == "timecode")
+            return ! run.takenBack && document.findById (run.cue).isValid();
 
         /*  NOR A SCENE DOH! TOOK BACK (K9's review, MV), coming down under
             the Doh's fade as a sound it took back is. */
@@ -8255,6 +8300,12 @@ namespace wfg::cue
             if (run.kind == "video" && run.startedAtTick >= 0)
                 return true;
 
+            /*  AND A CODE SENT AS A SOUND IS (namespace draft §59, AHS): Go.dot's
+                own output, which a desk or a server chasing it has followed from
+                its `run.started` on. */
+            if (run.kind == "timecode" && run.startedAtTick >= 0)
+                return true;
+
             return run.kind == "midi" && hasLaunchEvidence (run) && playsSound (document, run.cue);
         };
 
@@ -8773,11 +8824,14 @@ namespace wfg::cue
 
     const Runner::DohRoot* Runner::soundRootOf (const std::string& cueId) const
     {
+        /*  A SOUND'S ONLY: a code a Doh paused (TC.7) is never armed - nothing
+            makes one ready - and the corrected GO seats it at its frame. */
         for (const auto& entry : marks)
         {
             const auto& mark = entry.second;
 
-            if (mark.root.has_value() && mark.root->kind != DohRoot::Kind::tree && mark.root->cue == cueId)
+            if (mark.root.has_value() && (mark.root->kind == DohRoot::Kind::media || mark.root->kind == DohRoot::Kind::mic)
+                  && mark.root->cue == cueId)
                 return &*mark.root;
         }
 
@@ -8917,6 +8971,11 @@ namespace wfg::cue
             }
 
             text += " " + osc::formatDouble (second);
+        }
+        else if (root.kind == DohRoot::Kind::timecode)
+        {
+            //  A code's own second past its start (TC.7).
+            text += " " + osc::formatDouble (root.offset);
         }
         else if (root.kind == DohRoot::Kind::tree)
         {
@@ -9270,10 +9329,27 @@ namespace wfg::cue
             playhead, read the same second. A run whose launch was never placed
             has no playhead and keeps the handler's count. */
         if (playheadsOwed.empty())
+        {
+            timecodeStoppedAt.clear();
             return;
+        }
 
         const auto toRead = std::move (playheadsOwed);
         playheadsOwed.clear();
+
+        /*  A CODE'S PLACE IS WHERE ITS STOP LANDED (TC.7, AHS), noted by
+            `advanceTimecode` earlier in this tick as it posted the stop - on
+            the tick's own clock too, for MTC with no audio side. One whose
+            code was never on its output has nothing to report and keeps the
+            handler's count. */
+        const auto stoppedAt = std::move (timecodeStoppedAt);
+        timecodeStoppedAt.clear();
+
+        for (const auto& id : toRead)
+            if (const auto found = stoppedAt.find (id); found != stoppedAt.end())
+                engine.submit (origin::engine, "go.dohPlayhead",
+                               { osc::Value::string (id), osc::Value::float64 (found->second),
+                                 osc::Value::int32 (-1) });
 
         if (audio == nullptr)
             return;
@@ -9355,6 +9431,23 @@ namespace wfg::cue
                 return;
             }
 
+            /*  A CODE DOH! PAUSED (TC.7, AHS): where its stop landed, the
+                frame the corrected GO resumes it from - and, past its length
+                there, nothing to resume: the next GO starts it from its top. */
+            if (root.kind == DohRoot::Kind::timecode && root.run == runId)
+            {
+                root.offset = from;
+
+                if (timecodeOverAt (document.findById (root.cue), from))
+                {
+                    dropRoot (engine, tick, listId);
+                    return;
+                }
+
+                publishResume (listId);
+                return;
+            }
+
             if (root.kind != DohRoot::Kind::tree)
                 continue;
 
@@ -9364,13 +9457,26 @@ namespace wfg::cue
                 continue;
 
             const auto cueId = heard->second;
+            const auto heardCue = document.findById (cueId);
 
             for (auto& wants : root.plan)
             {
                 if (wants.cue != cueId || wants.when != planned::sounding)
                     continue;
 
-                if (! notOver (document.findById (cueId), range, from))
+                /*  A SCENE'S CODE (TC.7): re-seated at the frame its stop landed
+                    on, or over when that is past its length. */
+                if (heardCue.hasType ("Timecode"))
+                {
+                    if (timecodeOverAt (heardCue, from))
+                        wants.when = planned::finished;
+                    else
+                        wants.offset = from;
+
+                    continue;
+                }
+
+                if (! notOver (heardCue, range, from))
                 {
                     wants.when = planned::finished;
                 }
@@ -9457,6 +9563,25 @@ namespace wfg::cue
         {
             out.kind = DohRoot::Kind::mic;
             out.levelDb = root->ownLevel;
+            return out;
+        }
+
+        /*  A CODE (TC.7, AHS): Go.dot's own output, paused as a sound is - its
+            code stopped at its next frame boundary, no fade (AHK) - and where
+            it had got to, by the count until the hook's reading of where the
+            stop landed arrives; not at all past its length. It lands at once:
+            there is no fade to bring it back up inside, so the corrected GO
+            always seats it afresh at its frame. */
+        if (root->kind == "timecode")
+        {
+            const auto at = countedTimecodeSeconds (*root, tick);
+
+            if (timecodeOverAt (cue, at))
+                return std::nullopt;
+
+            out.kind = DohRoot::Kind::timecode;
+            out.offset = at;
+            out.landsAt = tick;
             return out;
         }
 
@@ -9691,6 +9816,48 @@ namespace wfg::cue
                 {
                     wants.when = planned::sounding;
                     out.arrival.levels[cueId] = run->ownLevel;
+                }
+                else
+                {
+                    keep = never();
+                }
+            }
+            else if (kind == "timecode")
+            {
+                /*  A CODE OF THE SCENE'S (TC.7, AHS) is re-seated as a sound of
+                    it is: over, over; in its wait, waiting; sent, at the frame
+                    its stop landed on - counted until the hook says - which the
+                    seat starts with the scene's sounds on one sample (AHN);
+                    fired and not yet placed - waiting for a sound of its group -
+                    at the second it was to start from. */
+                if (run->isFinished() || run->state == runState::postWait)
+                {
+                    wants.when = planned::finished;
+                }
+                else if (waiting)
+                {
+                    wants.when = planned::due;
+                    wants.startsIn = remaining;
+                }
+                else if (run->startedAtTick >= 0)
+                {
+                    const auto at = countedTimecodeSeconds (*run, tick);
+
+                    if (timecodeOverAt (cueNode, at))
+                    {
+                        wants.when = planned::finished;
+                    }
+                    else
+                    {
+                        wants.when = planned::sounding;
+                        wants.offset = at;
+                        out.heardRuns[run->id] = cueId;
+                    }
+                }
+                else if (hasLaunchEvidence (*run))
+                {
+                    wants.when = planned::sounding;
+                    wants.offset = run->armedOrigin;
                 }
                 else
                 {
@@ -10770,7 +10937,12 @@ namespace wfg::cue
                 if (run == nullptr || run->isFinished())
                     continue;
 
-                const auto silentSound = (run->kind == "media" || run->kind == "mic") && run->startedAtTick < 0;
+                /*  A CODE NOT YET SENT IS A SOUND NOT YET HEARD (TC.7, AHS): ended
+                    here, and its start - placed ahead, or not placed at all -
+                    taken back by the stop its run's end posts on the next tick
+                    (LtcGenerator.h, MtcLane.h). */
+                const auto silentSound = (run->kind == "media" || run->kind == "mic" || run->kind == "timecode")
+                                           && run->startedAtTick < 0;
                 const auto sender = run->kind == "osc" || run->kind == "midi" || run->kind == "memo"
                                       || run->kind == "start" || run->kind == "process";
 
@@ -10827,6 +10999,18 @@ namespace wfg::cue
                     run->takenBack = true;
                     run->askStop (0);
                     fadeOutVideo (id, tick, ticks);
+                    continue;
+                }
+
+                /*  A CODE SENT (TC.7, AHS), paused as a sound is but with no
+                    fade (AHK) - a fading LTC is a reader losing lock: its run
+                    ended by the next tick's sweep, as Esc's is, and its code
+                    stopped at its next frame boundary; the frame that is, the
+                    corrected GO resumes it from (`rootFor`, `go.dohPlayhead`). */
+                if (run->kind == "timecode" && run->startedAtTick >= 0)
+                {
+                    run->takenBack = true;
+                    run->askStop (0);
                     continue;
                 }
 
@@ -11045,10 +11229,11 @@ namespace wfg::cue
             mark.root = std::move (resumeRoot);
 
             /*  AND THE HOOK READS WHERE EACH PAUSED SOUND HAD GOT TO, on the
-                next tick, off its playhead (`go.dohPlayhead`). */
+                next tick, off its playhead (`go.dohPlayhead`) - and where each
+                paused code's stop landed (TC.7). */
             playheadsOwed.clear();
 
-            if (mark.root->kind == DohRoot::Kind::media)
+            if (mark.root->kind == DohRoot::Kind::media || mark.root->kind == DohRoot::Kind::timecode)
                 playheadsOwed.push_back (mark.root->run);
 
             for (const auto& heard : mark.root->heardRuns)
@@ -13794,6 +13979,22 @@ namespace wfg::cue
 
         run->state = runState::playing;
 
+        auto job = timecodeJobOf (cue, runId, tick);
+
+        /*  ITS START, FROM ITS GO: what the run reads until the code is placed,
+            and all a replay ever reads, since it runs no hook. And the second
+            past its start it is placed at, nought, which a Doh's count reads
+            (TC.7). */
+        run->timecode = timecode::formatLabel (timecode::labelOf (job.startFrame + job.offsetFrames, job.rate),
+                                               job.rate, true);
+        run->armedOrigin = 0.0;
+
+        timecoding.push_back (std::move (job));
+    }
+
+    Runner::TimecodeJob Runner::timecodeJobOf (const juce::ValueTree& cue, const std::string& runId,
+                                               std::int64_t tick) const
+    {
         TimecodeJob job;
         job.self = runId;
         job.cue = cue[idProperty].toString().toStdString();
@@ -13837,12 +14038,110 @@ namespace wfg::cue
             job.lengthFrames = std::max<std::int64_t> (job.lengthFrames, 1);
         }
 
-        /*  ITS START, FROM ITS GO: what the run reads until the code is placed,
-            and all a replay ever reads, since it runs no hook. */
-        run->timecode = timecode::formatLabel (timecode::labelOf (job.startFrame + job.offsetFrames, job.rate),
-                                               job.rate, true);
+        return job;
+    }
+
+    void Runner::seatTimecode (const juce::ValueTree& cue, Run& run, double offset, std::int64_t tick)
+    {
+        /*  BUILT AS ITS GO BUILDS IT (TC.7) - the rate the show says now, its
+            start, its length - and placed `offset` seconds on, in the frame that
+            second falls in: a load to time, a scene a Doh re-seats where it was,
+            a follower's seat at the leader's code. Not placed: the next tick
+            places it a launch horizon ahead, on the same sample as the sounds
+            the same seat made (AHN), through the one door a GO's code goes
+            through, the takeover included (AHC, AHL). Its GO's tick is the
+            seat's, which those sounds carry as theirs. */
+        auto job = timecodeJobOf (cue, run.id, tick);
+        job.offsetFrames = framesInto (offset, job.rate);
+
+        /*  PAST ITS LENGTH, OVER - what the solver plans a code whose length
+            the second has passed, said here for a root or a follower that
+            reaches one: done, as a member the seat finds over is, and never
+            published, since nothing of it sounded here. */
+        if (job.lengthFrames > 0 && job.offsetFrames >= job.lengthFrames)
+        {
+            run.state = runState::done;
+            run.endedAtTick = tick - retentionTicks - 1;
+            return;
+        }
+
+        run.state = runState::playing;
+        run.launchRequestedAtTick = tick;
+        run.armedOrigin = secondsOfFrames (job.offsetFrames, job.rate);
+        run.position = run.armedOrigin;
+        run.timecode = timecode::formatLabel (timecode::labelOf (job.startFrame + job.offsetFrames, job.rate),
+                                              job.rate, true);
 
         timecoding.push_back (std::move (job));
+    }
+
+    bool Runner::seekTimecode (const std::string& runId, double seconds)
+    {
+        auto* run = runs.find (runId);
+
+        /*  NOT ONE DOH! TOOK BACK, nor one being stopped: its code is going at
+            its next frame boundary, and a jump would place it again after that
+            stop had let it go. */
+        if (run == nullptr || run->isFinished() || run->kind != "timecode" || run->takenBack || run->stopAsked)
+            return false;
+
+        for (auto& job : timecoding)
+        {
+            if (job.self != runId || job.finished)
+                continue;
+
+            const auto frames = framesInto (seconds, job.rate);
+
+            /*  PAST ITS LENGTH: over, as if its length had run out there -
+                ended by the next tick, a record, its code stopped at its next
+                frame boundary. The readout holds its last frame, the last a
+                reader would have seen. */
+            if (job.lengthFrames > 0 && frames >= job.lengthFrames)
+            {
+                job.jumpedPast = true;
+                run->timecode = timecode::formatLabel (timecode::labelOf (job.startFrame + job.lengthFrames - 1, job.rate),
+                                                       job.rate, true);
+                return true;
+            }
+
+            /*  THE FRAME IT GOES ON FROM, AND ITS PLACEMENT UNDONE: the next
+                tick places it again a launch horizon ahead, keeping its program
+                - the line and the lane go on drawing and sending it where it was
+                until the new start's sample, and an Esc meanwhile stops both.
+                A length's stop posted for the old frames is the old
+                placement's, which the new start outlives (TC.7, LtcGenerator.h);
+                the new placement posts its own. */
+            job.offsetFrames = frames;
+            job.placed = false;
+            job.stopSample = -1;
+            job.endAsked = false;
+            job.released = false;
+
+            /*  What the run reads, and what a replay reads: the frame it goes
+                on from, and the second a Doh would count from. */
+            run->armedOrigin = secondsOfFrames (frames, job.rate);
+            run->position = run->armedOrigin;
+            run->timecode = timecode::formatLabel (timecode::labelOf (job.startFrame + frames, job.rate),
+                                                   job.rate, true);
+            return true;
+        }
+
+        return false;
+    }
+
+    double Runner::countedTimecodeSeconds (const Run& run, std::int64_t tick) const
+    {
+        const auto elapsed = run.startedAtTick >= 0
+                               ? static_cast<double> (tick - run.startedAtTick) / static_cast<double> (TickClock::rateHz)
+                               : 0.0;
+
+        return run.armedOrigin + std::max (elapsed, 0.0);
+    }
+
+    bool Runner::timecodeOverAt (const juce::ValueTree& cue, double seconds) const
+    {
+        const auto length = numberOf (cue, "length");
+        return length > 0.0 && seconds >= length;
     }
 
     void Runner::placeTimecode (Engine& engine, TimecodeJob& job, std::int64_t tick, std::int64_t zeroSample)
@@ -14076,9 +14375,18 @@ namespace wfg::cue
         /*  The generation before the start, as LTC reads it: a restart between
             the two is one the job sees. */
         const auto generation = (onTickClock || audio == nullptr) ? std::uint64_t { 0 } : audio->timecodeGeneration();
-        const auto program = ++timecodePrograms;
+
+        /*  A JUMP STARTS ITS OWN PROGRAM AGAIN (TC.7): from its new zero it
+            replaces itself on the lane, opening with a full frame (AHL), and a
+            stop of the program meanwhile reaches both. One the lane will not
+            take leaves the old sending, so that one is stopped. */
+        const auto relocating = job.program != 0;
+        const auto program = relocating ? job.program : ++timecodePrograms;
         const auto answer = midiOut->startTimecode (job.self, job.port, program, job.rate, sampleRate,
                                                     job.startFrame + job.offsetFrames, zeroSample);
+
+        if (relocating && ! answer.empty())
+            postTimecodeStop (job, 0, false);
 
         /*  NOTHING BEHIND THE PORT (AHR): `no-port`, refused once - a held
             machine never answers it (AGG). But a port switched off was never
@@ -14126,10 +14434,12 @@ namespace wfg::cue
 
         /*  ITS LENGTH (AHB), placed now: the lane sends nothing due from the
             first sample of the frame after its last, by FrameClock's one rule,
-            and the run ends on the tick that sample has passed. */
+            and the run ends on the tick that sample has passed - less what a
+            jump or a load to time placed it past (TC.7). */
         if (job.lengthFrames > 0)
         {
-            job.stopSample = zeroSample + timecode::frameStartSample (job.lengthFrames, job.sampleRate, job.rate);
+            job.stopSample = zeroSample + timecode::frameStartSample (job.lengthFrames - job.offsetFrames,
+                                                                      job.sampleRate, job.rate);
             postTimecodeStop (job, job.stopSample, false);
         }
 
@@ -14165,7 +14475,7 @@ namespace wfg::cue
             /*  LTC, and MTC when there is a MIDI sender to put it on a lane
                 (TC.6): with none - a replay, a rig - MTC was counted on the
                 tick by `advanceTimecode`, and is placed already. */
-            if (job.finished || job.placed || (job.format == "mtc" && midiOut == nullptr))
+            if (job.finished || job.placed || job.jumpedPast || (job.format == "mtc" && midiOut == nullptr))
                 continue;
 
             auto* run = runs.find (job.self);
@@ -14175,8 +14485,10 @@ namespace wfg::cue
                 continue;
 
             /*  REFUSED ONCE (AHR), with the words the other runs use: a run
-                that cannot leave fails, and its group goes on without it. */
-            if (refuseTimecode (engine, job))
+                that cannot leave fails, and its group goes on without it. Not
+                again for a code a jump is placing again (TC.7), which has its
+                program, its output and its port from its start (AHM). */
+            if (job.program == 0 && refuseTimecode (engine, job))
                 continue;
 
             /*  THE SAME SAMPLE AS THE SOUNDS OF ITS GROUP (AHN). The target is
@@ -14232,9 +14544,18 @@ namespace wfg::cue
                 between the two is one the job sees. Nothing to draw it - the
                 host not running, its queue full - and the run is `not-sent`,
                 counted on the tick as with no audio side at all (AHR). */
+            /*  A JUMP PLACES THE CODE AGAIN UNDER ITS OWN PROGRAM (TC.7): the
+                new start replaces the old on its sample, the line never quiet
+                between them, and a stop of the program - an Esc - reaches both
+                while the new one waits. Not drawn, the old is stopped: nothing
+                else would ever end it. */
             const auto generation = audio->timecodeGeneration();
-            const auto program = ++timecodePrograms;
+            const auto relocating = job.program != 0;
+            const auto program = relocating ? job.program : ++timecodePrograms;
             const auto drawn = audio->placeTimecode (program, target, job.startFrame + job.offsetFrames, job.rate);
+
+            if (relocating && ! drawn)
+                postTimecodeStop (job, 0, false);
 
             job.program = drawn ? program : 0;
             placeTimecode (engine, job, tick, drawn ? target : -1);
@@ -14257,10 +14578,12 @@ namespace wfg::cue
                 sample of the frame after its last, by FrameClock's one rule -
                 the rule the line is drawn by - so the last frame is whole and
                 nothing of the next is drawn. The run ends on the tick that
-                sample has passed. */
+                sample has passed. Counted from its start, so a code placed
+                past it - a jump, a load to time - has that much less to run. */
             if (job.lengthFrames > 0)
             {
-                job.stopSample = target + timecode::frameStartSample (job.lengthFrames, job.sampleRate, job.rate);
+                job.stopSample = target + timecode::frameStartSample (job.lengthFrames - job.offsetFrames,
+                                                                      job.sampleRate, job.rate);
                 postTimecodeStop (job, job.stopSample, false);
             }
         }
@@ -14282,6 +14605,28 @@ namespace wfg::cue
             job.finished = true;
         };
 
+        /*  WHERE A CODE DOH! TOOK BACK STOPS (TC.7, AHS), noted as its stop is
+            posted - as soon as can be, so on the first frame boundary at or
+            after where its clock stands now, which is where the line or the
+            lane ends it - for `noteDohPlayheads` to report below, in this same
+            tick, as a paused sound's playhead is reported. Before its zero it
+            had drawn nothing, and resumes where it was to start. */
+        const auto noteWhereStopped = [this] (const TimecodeJob& job, const Run* run)
+        {
+            if (run == nullptr || ! run->takenBack || job.released || job.handedOver || ! job.onLine()
+                  || job.sampleRate <= 0
+                  || std::find (playheadsOwed.begin(), playheadsOwed.end(), job.self) == playheadsOwed.end())
+                return;
+
+            const auto since = std::max<std::int64_t> (0, timecodeClockNow (job) - job.launchSample);
+            auto frames = timecode::firstFrameAtOrAfter (since, job.sampleRate, job.rate);
+
+            if (job.lengthFrames > 0)
+                frames = std::min (frames, job.lengthFrames - job.offsetFrames);
+
+            timecodeStoppedAt[job.self] = secondsOfFrames (job.offsetFrames + frames, job.rate);
+        };
+
         for (auto& job : timecoding)
         {
             if (job.finished)
@@ -14296,6 +14641,7 @@ namespace wfg::cue
                 the sample it was placed for. */
             if (run == nullptr || run->isFinished() || run->state == runState::postWait)
             {
+                noteWhereStopped (job, run);
                 releaseTimecode (job, false);
                 letGo (job);
                 continue;
@@ -14311,8 +14657,25 @@ namespace wfg::cue
                 road, footers and all, as it stops the sounds. */
             if (run->state == runState::stopping || beingKilled (*run))
             {
+                noteWhereStopped (job, run);
                 releaseTimecode (job, beingKilled (*run));
                 letGo (job);
+                continue;
+            }
+
+            /*  A JUMP PAST ITS LENGTH (TC.7): ended as its length running out
+                ends it - a record, once - and its code stopped at its next
+                frame boundary; the run's end lets the job go on the next tick.
+                Its readout stays on the last frame the handler gave it. */
+            if (job.jumpedPast)
+            {
+                if (! job.endAsked)
+                {
+                    releaseTimecode (job, false);
+                    engine.submit (origin::engine, "run.ended", one (job.self));
+                    job.endAsked = true;
+                }
+
                 continue;
             }
 
@@ -14346,7 +14709,8 @@ namespace wfg::cue
 
                 if (job.format == "mtc" && midiOut != nullptr)
                 {
-                    if (refuseTimecode (engine, job))
+                    //  Once, and not for a code a jump is placing again (TC.7).
+                    if (job.program == 0 && refuseTimecode (engine, job))
                         continue;
 
                     if (const auto now = videoClockNow(); now >= 0)
@@ -14377,6 +14741,12 @@ namespace wfg::cue
             std::int64_t elapsedFrames = 0;
             auto lengthRun = false;
 
+            /*  THE POSITION IS WHERE THE CODE IS PAST ITS START (TC.7): the
+                frame a jump or a load to time placed it at, in seconds, and the
+                time since - what the running pane draws its head at, and what a
+                seek is asked in. */
+            const auto placedAt = secondsOfFrames (job.offsetFrames, job.rate);
+
             if (job.onLine())
             {
                 /*  WHERE THE CODE HAS GOT TO, from the samples its clock has
@@ -14390,11 +14760,11 @@ namespace wfg::cue
                 if (since > 0 && job.sampleRate > 0)
                 {
                     elapsedFrames = timecode::frameAtSample (since, job.sampleRate, job.rate);
-                    run->position = static_cast<double> (since) / static_cast<double> (job.sampleRate);
+                    run->position = placedAt + static_cast<double> (since) / static_cast<double> (job.sampleRate);
                 }
                 else
                 {
-                    run->position = 0.0;
+                    run->position = placedAt;
                 }
 
                 lengthRun = job.stopSample >= 0 && now >= job.stopSample;
@@ -14409,9 +14779,9 @@ namespace wfg::cue
                 const auto elapsedTicks = tick - job.placedAtTick;
                 elapsedFrames = elapsedTicks * timecode::numOf (job.rate)
                                   / (static_cast<std::int64_t> (TickClock::rateHz) * timecode::denOf (job.rate));
-                run->position = static_cast<double> (elapsedTicks) / static_cast<double> (TickClock::rateHz);
+                run->position = placedAt + static_cast<double> (elapsedTicks) / static_cast<double> (TickClock::rateHz);
 
-                lengthRun = job.lengthFrames > 0 && elapsedFrames >= job.lengthFrames;
+                lengthRun = job.lengthFrames > 0 && elapsedFrames >= job.lengthFrames - job.offsetFrames;
             }
 
             /*  ITS LENGTH RUN (AHB): ended on the tick its last frame is over -
@@ -14427,7 +14797,7 @@ namespace wfg::cue
             }
 
             if (job.lengthFrames > 0)
-                elapsedFrames = std::min (elapsedFrames, job.lengthFrames - 1);
+                elapsedFrames = std::min (elapsedFrames, job.lengthFrames - job.offsetFrames - 1);
 
             run->timecode = timecode::formatLabel (timecode::labelOf (job.startFrame + job.offsetFrames + elapsedFrames,
                                                                       job.rate),
@@ -22096,7 +22466,8 @@ namespace wfg::cue
         registry.add ({ "run.seek",
                         "Moves a run to a second of its own material: a media run to that second"
                         " of its file, a group run to that second of its timeline, its members"
-                        " re-seated around it.",
+                        " re-seated around it, a timecode run to the frame that second past its"
+                        " start falls in.",
                         { { "run", 's', false }, { "seconds", 'd', false },
                           { "made", 's', true, true } },
                         true,
@@ -22151,6 +22522,19 @@ namespace wfg::cue
                             if (run->kind == "osc" && runner.isCurving (runId))
                             {
                                 runner.seekCurves (runId, seconds, context.tick);
+                                return Outcome::ok (applied);
+                            }
+
+                            /*  A TIMECODE RUN (namespace draft §59, TC.7): its
+                                code goes on from the frame that second falls in,
+                                placed again a launch horizon ahead; past its
+                                length, it ends. Applied whatever its job has
+                                got to, as a seek of a run that is over is, so a
+                                replay - whose jobs no hook moves - applies the
+                                same record the same way. */
+                            if (run->kind == "timecode")
+                            {
+                                runner.seekTimecode (runId, seconds);
                                 return Outcome::ok (applied);
                             }
 

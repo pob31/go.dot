@@ -1279,6 +1279,20 @@ namespace wfg::cue
             there. Handler-safe: it moves state a replay rebuilds the same way. */
         void seekCurves (const std::string& runId, double seconds, std::int64_t tick);
 
+        /*  A JUMP OF A TIMECODE RUN (namespace draft §59, TC.7): `run.seek` on
+            one, or a follower's seat moving one it already runs. Its code goes
+            on from the frame `seconds` falls in, counted from its start at the
+            rate it fired at: the job's offset moved there, its placement
+            undone, and the next tick places it again a launch horizon ahead -
+            under the same program, which replaces itself on the line and on
+            the lane, so the run takes nothing over from itself, LTC carries on
+            from the new frame and MTC sends a full frame (AHL). A jump past its
+            length ends the run, as its length running out would. Handler-safe:
+            the offset and the readout are what a replay reaches too, and the
+            rest is the hook's. False for a run that is not a timecode run
+            playing, or one Doh! took back. */
+        bool seekTimecode (const std::string& runId, double seconds);
+
         /*  ESC, THE GRACEFUL WAY, AS A FADE (author, 2026-09-28: "a 'Panic'
             fade duration that fades out all playing cues. It seems the Panic
             cuts everything with no fade time").
@@ -1480,7 +1494,12 @@ namespace wfg::cue
 
         struct DohRoot
         {
-            enum class Kind { media, mic, tree };
+            /*  A TIMECODE ROOT (TC.7, AHS): a code Go.dot was sending as its own
+                output, paused at a frame boundary by the Doh - no fade (AHK) -
+                and re-seated by the corrected GO from that frame, `offset`
+                seconds past its start. Never carried on in place: its run ends
+                with its code, on the tick after the press. */
+            enum class Kind { media, mic, tree, timecode };
 
             Kind kind = Kind::media;
             std::string cue, run;
@@ -1490,7 +1509,9 @@ namespace wfg::cue
             std::string underRun;
 
             /*  A media root: where in its file it carries on from, or the slice
-                it was in and how far into it (K8's `sliceFrom`). */
+                it was in and how far into it (K8's `sliceFrom`). A timecode
+                root: how far past its start its code had got, in seconds of
+                whole frames. */
             double offset = 0.0;
             int range = -1;
             double sliceFrom = 0.0;
@@ -2879,10 +2900,42 @@ namespace wfg::cue
             bool endAsked = false;          // its length ran, `run.ended` submitted
             bool finished = false;
 
+            /*  A JUMP PAST ITS LENGTH (TC.7): set by the handler, so the next
+                tick ends the run as its length running out would - a record -
+                and stops its code at its next frame boundary. */
+            bool jumpedPast = false;
+
             bool onLine() const noexcept { return launchSample >= 0 && program != 0; }
         };
 
         std::vector<TimecodeJob> timecoding;
+
+        /*  WHERE A CODE DOH! TOOK BACK STOPPED (TC.7, AHS), in seconds past its
+            start: noted by the hook as it posts the code's stop - the first
+            frame boundary at or after where the line stood, which is where the
+            stop lands - and reported on `go.dohPlayhead` by `noteDohPlayheads`
+            in the same tick, for the root the corrected GO resumes it from.
+            Only for a run a Doh's playhead is owed for; emptied as it is read. */
+        std::map<std::string, double> timecodeStoppedAt;
+
+        /*  WHERE A TIMECODE RUN HAS GOT TO AS A HANDLER CAN COUNT IT (TC.7):
+            the second past its start it was placed at (`armedOrigin`) and the
+            ticks since `run.started`. The hook's own reading replaces it on the
+            tick after a Doh (`go.dohPlayhead`). And whether a code has run its
+            length by `seconds` past its start, by the cue's `length` - nought
+            never has (AHB). */
+        double countedTimecodeSeconds (const Run& run, std::int64_t tick) const;
+        bool timecodeOverAt (const juce::ValueTree& cue, double seconds) const;
+
+        /*  A TIMECODE RUN SEATED AT `offset` SECONDS PAST ITS START (TC.7): its
+            job built as `fireTimecode` builds one, the offset in whole frames,
+            not placed - a load to time, a scene a Doh re-seats, a follower's
+            seat - and over already when that is past its length. */
+        void seatTimecode (const juce::ValueTree& cue, Run& run, double offset, std::int64_t tick);
+
+        /*  What a timecode run's code is, read when it fires or is seated: its
+            format, the show's rate now (AHM), its start and its length. */
+        TimecodeJob timecodeJobOf (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick) const;
 
         /*  THE PROGRAMS A CODE IS DRAWN OR SENT UNDER, one a run and never
             nought (TC.3, TC.5): a count, since a program is each machine's
