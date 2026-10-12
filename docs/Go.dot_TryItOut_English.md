@@ -125,6 +125,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Device presets (new) | Make a device from a preset for your desk or processor - Yamaha, DiGiCo, Allen & Heath, Behringer and Midas, SSL Live, ETC Eos, grandMA, Holophonix, L-ISA, d&b Soundscape, Spat Revolution, ADM-OSC, MIDI Show Control. Every protocol the device speaks is a preset of its own, the cue's menus follow it, and the message leaves on the device's own wire: OSC over UDP or TCP, Yamaha's RCP, a telnet line or MIDI. The device's rows say where it is (the Where cell: by datagram, over a connection, a serial port or a MIDI port) and how it is heard back. Built from the vendors' public documents and not yet checked against a console: tell us what your desk did | *Show settings > Network > PRESET* |
 | Doh! rollback | When a GO is taken back, send each device the command that undoes it | Cue inspector; *Network* tab |
 | MIDI cues | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
+| Timecode out (new) | MTC on a MIDI port, or SMPTE LTC on an audio output, from a cue. It starts at the label you give it (01:00:00:00 unless you say otherwise) and runs until it is stopped, or for a length. Put it in a group with a song and both start on the same sample; a second timecode cue takes the line over; Esc stops it on a frame boundary; Doh! pauses it and the next GO picks it up where it stopped; drag it in the running pane to jump. Pick the frame rate, the MIDI port and the output once for the show, and give LTC an output of its own: it carries nothing else. Not yet checked against a desk or a timecode reader: tell us what yours did | *Add > midi > MTC*, *Add > audio > LTC timecode*; *Show settings > Timecode* |
 | Network monitor | See every message in and out | *Show > Network monitor…* |
 | Control surfaces | Faders, pads, dials and DCAs. Full support for the Asparion D700: faders, EQ and plugin pages on the rotaries, a master dial, standby on the arrows | *Show > Surfaces…* |
 | Web console | The same show in a browser, on any machine on the network | `http://<this machine>:5010/ui` |
@@ -179,7 +180,7 @@ Set a projector's delay once, and sound is held back to line up with the picture
 
 ### Timecode
 
-**LTC and MTC, both chase and generate.** Go.dot will follow a timecode source or be one.
+**Chasing LTC and MTC.** Go.dot will follow a timecode source. It already generates both: see *Timecode out* above.
 
 ### Joining a sequence's members
 

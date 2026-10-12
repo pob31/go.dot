@@ -1526,8 +1526,20 @@ frame of the code after them, on from the cue's start; an MTC cue's quarter fram
 milliseconds of their moment at the 99th percentile; a second cue takes the code over, Esc stops it on
 a frame boundary, a double Esc cuts it, a backup holds its MTC and plays its LTC; CI is green.
 
-**Needs from the author:** the words on screen (the tab, the list lines, the fields) before they ship;
-a bench with a reader - a desk chasing, a timecode display, a DAW - on LTC and on MTC.
+**Needs from the author:** the words on screen (the tab, the list lines, the fields) before they ship
+- *met 2026-10-12: accepted as offered*; a bench with a reader - a desk chasing, a timecode display, a
+DAW - on LTC and on MTC.
+
+**Built** (2026-10-12, TC.0-TC.10, namespace draft §59.7): the timecode cue and the show's `<Sync>`
+settings; rates and labels with drop-frame; the LTC encoder and the MTC schedule on one timing rule;
+LTC drawn on the audio thread, replacing its own output's channel; the MTC lane, a thread of its own
+in the MIDI sender behind a gate per port, timed from the clock line now in `clock/` that RD.9 will
+reuse; the Runner placing both on the sounds' sample, the takeover, the stops, the length; a jump,
+load to time, `pair.seat` and Doh!; the Timecode tab, the list lines, the inspector and the running
+pane's scrub; `blackbox.timecode` (three passes, a third decoder in Python) and M63 - MTC 1.8 ms late
+at worst alone on its port, LTC clean over ten minutes with no drift. Found on the way: Pd's
+abstraction-loading guard shared by every patch's thread, now per thread. Owed to a bench: a desk or
+a timecode display chasing each, the hour-long run, and MTC beside a SysEx on a real cable.
 
 ---
 

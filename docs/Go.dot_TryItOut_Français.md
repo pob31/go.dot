@@ -127,6 +127,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Presets d'appareils (nouveau) | Créer un appareil depuis un preset pour votre console ou votre processeur : Yamaha, DiGiCo, Allen & Heath, Behringer et Midas, SSL Live, ETC Eos, grandMA, Holophonix, L-ISA, d&b Soundscape, Spat Revolution, ADM-OSC, MIDI Show Control. Chaque protocole que l'appareil parle est un preset à part, les menus de la cue le suivent, et le message part sur le fil propre à l'appareil : OSC en UDP ou en TCP, le RCP de Yamaha, une ligne telnet ou du MIDI. Les lignes de l'appareil disent où il est (la cellule Where : par datagramme, par connexion, sur un port série ou un port MIDI) et comment on l'entend en retour. Construits d'après les documents publics des fabricants et pas encore vérifiés sur une console : dites-nous ce que votre console a fait | *Show settings > Network > PRESET* |
 | Retour arrière Doh! | Quand un GO est repris, envoyer à chaque appareil la commande qui l'annule | Inspecteur ; onglet *Network* |
 | Cues MIDI | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
+| Timecode en sortie (nouveau) | Du MTC sur un port MIDI, ou du LTC SMPTE sur une sortie audio, depuis une cue. Il démarre au label que vous lui donnez (01:00:00:00 si vous ne dites rien) et tourne jusqu'à ce qu'on l'arrête, ou pendant une durée. Placé dans un groupe avec une chanson, les deux démarrent sur le même échantillon ; une deuxième cue de timecode reprend la ligne ; Échap l'arrête sur une limite d'image ; Doh! le met en pause et le GO suivant le reprend là où il s'était arrêté ; on le fait sauter en le glissant dans le panneau des cues en cours. On choisit une fois pour le spectacle la cadence d'images, le port MIDI et la sortie, et on donne au LTC une sortie à lui : elle ne porte rien d'autre. Pas encore vérifié avec une console ou un lecteur de timecode : dites-nous ce que le vôtre a fait | *Add > midi > MTC*, *Add > audio > LTC timecode* ; *Show settings > Timecode* |
 | Moniteur réseau | Voir chaque message entrant et sortant | *Show > Network monitor…* |
 | Surfaces de contrôle | Faders, pads, potentiomètres et DCA. Prise en charge complète de l'Asparion D700 : faders, pages EQ et plugins sur les rotatifs, molette maître, attente sur les flèches | *Show > Surfaces…* |
 | Console web | Le même spectacle dans un navigateur, sur n'importe quelle machine du réseau | `http://<cette machine>:5010/ui` |
@@ -181,7 +182,7 @@ On règle une fois le retard du vidéoprojecteur, et le son est retardé d'autan
 
 ### Timecode
 
-**LTC et MTC, en lecture et en génération.** Go.dot pourra suivre une source de timecode ou en être une.
+**Suivre du LTC et du MTC.** Go.dot pourra suivre une source de timecode. Il génère déjà les deux : voir *Timecode en sortie* plus haut.
 
 ### Enchaîner les membres d'une séquence
 

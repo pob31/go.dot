@@ -116,6 +116,13 @@ has stood in front of the thing.
   Data or plugdata. Go.dot ships ready-made patches for the usual chores
   ([`pd/`](pd/)) and an example show. Serial ports carry an Arduino's lines, or
   OSC over SLIP.
+- **Timecode out.** MTC on a MIDI port, and SMPTE LTC that Go.dot draws itself on
+  an audio output, from a cue: it starts at the label it names and runs until it
+  is stopped or for a length, on the same sample as the sounds of its group. A
+  second one takes the line over, Esc stops it on a frame boundary, Doh! pauses
+  it and the corrected GO picks it up where it stopped, and the running pane
+  scrubs it. The frame rate, the MIDI port and the output are the show's, on a
+  Timecode tab of their own.
 - **Stopping.** Esc fades running cues out over the panic fade and runs their
   footers, as if they had ended; a persistent cue is paused instead, and the
   next GO resumes it. A double Esc stops everything Go.dot started, at once,
@@ -128,8 +135,8 @@ has stood in front of the thing.
 
 ### Not built yet
 
-- **Timecode** — chasing LTC and MTC (devplan Phase 10); generating them, as
-  MTC and LTC cues, is being built (namespace draft §59).
+- **Timecode chase** — following an LTC or MTC source rather than being one
+  (devplan Phase 10, PRD §3.14's open question); generating both is built.
 - **Panic values** — every parameter declares a resting state (PRD §3.3), but
   nothing yet puts a node back to it.
 - **Bindings** — a general way to bind any parameter to any control, with read,
@@ -199,6 +206,7 @@ and says afterwards what was built against what was drawn.
 | Phase 8 | Video: stills, movies, the native renderer, NDI/Spout/Syphon, read-ahead, pictures in sampler groups, the DCA knob | §35–§37, §40, §44, §47–§50 |
 | OSC cues | Several messages, bundles, recorded curves | §45 |
 | Process cues | Pure Data inside a cue, serial ports | §51 |
+| Timecode out | MTC and LTC cues, the Timecode tab | §59 |
 
 The documents, besides the PRD and the devplan:
 

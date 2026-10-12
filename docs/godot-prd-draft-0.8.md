@@ -4079,6 +4079,12 @@ calls from AHD in §59.2 are the author's to overrule:
 - **Doh! treats timecode as Go.dot's own sound**: paused, and resumed by the corrected GO.
 - **A timecode cue in a Persistent section is ignored there**, with a warning; one cannot join a
   sampler group.
+- *Added while building (2026-10-12):* **a jump keeps the code's program and destination**, so a
+  scrub or a seek relocates the code in place; **a code Doh! paused comes back at its frame** under a
+  new run; **a load to time plans a code that runs until stopped, fired at an earlier step, at its
+  start**, and says so; **a MIDI port switched off is asked nothing** - an MTC cue on it runs its course
+  as not sent; and **on Windows the MTC thread yields for its last 1.2 ms** before each message, since a
+  short sleep there lasts a millisecond - about a tenth of a core while an MTC cue runs.
 
 What the work leaves out: chasing (§3.14's open question); MTC on several ports or LTC on several
 outputs at once; user bits; a timecode that follows a sound's playhead rather than starting with it;
@@ -4234,6 +4240,12 @@ Mackie vs HUI first — first week with the D700.
   leaves against its moment, over ten minutes (the median, the 99th percentile, the worst), alone on
   its port and then sharing it with a SysEx cue; and LTC decoded clean over a ten-minute render, every
   frame where it should be. A real reader - a desk chasing, a timecode display - is owed to the bench.
+  *Measured 2026-10-12* (namespace draft §59.6), on a Debug build on Windows at 29.97 drop-frame: MTC
+  alone on its port left a median of 0.018 ms after its moment, 1.19 ms at the 99th percentile and
+  1.82 ms at worst over 71,933 messages, none dropped; beside a SysEx cue a second on the same port,
+  3.36 ms at worst, two messages past 2 ms. LTC decoded every one of 17,983 frames with no error, its
+  frames within 0.145 samples of where they belong after ten minutes. A render file cannot show the
+  32 ms a 100-byte SysEx holds a real cable for; that, a reader and the hour are the bench's.
 
 ---
 
