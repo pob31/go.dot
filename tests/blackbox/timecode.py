@@ -772,7 +772,16 @@ def judge_ltc(report: Report, word: str, rate: Rate, sample_rate: int, tone, lin
     frames = decoder.frames
     second_at = next((k for k, f in enumerate(frames) if f.label[0] == second_label[0]), -1)
     skipped = steps_between(first_label, frames[0].label, rate, 1, lead if counted_late else 0) if frames else None
-    skipped_second = (steps_between(second_label, frames[second_at].label, rate, 1, lead if counted_late else 0)
+    # THE TAKEOVER'S FIRST FRAME MAY BE THE ONE A READER RELOCKS ON. The new
+    # code's first edge lands wherever the old code's bit happens to be, so the
+    # interval across the splice is a fraction of a bit, and a reader pairing
+    # half-bits can lose its place until the next frame - as a desk does at any
+    # locate. Seen on CI (run 38299523050, Windows and macOS alike, 29.97
+    # drop-frame at 44.1 kHz): the code jumped with the line never quiet, and
+    # the frames read from 02:00:00;01. One frame is let go here; the unit
+    # tests hold the generator's own takeover frame by frame.
+    skipped_second = (steps_between(second_label, frames[second_at].label, rate, 1,
+                                    max(1, lead if counted_late else 0))
                       if second_at >= 0 else None)
     if skipped or skipped_second:
         print(f"       LTC: a start the engine counted late (sync/ltcLate {counted_late}) began {skipped or 0}"
