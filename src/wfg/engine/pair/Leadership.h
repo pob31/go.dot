@@ -166,14 +166,18 @@ namespace wfg::pair
     std::string refusal (const Seated& now, Ask ask, std::string_view peerSeat);
 
     //==========================================================================
-    /*  WHAT A FOLLOWER IS NOT IN STEP WITH, until RD.8 seats it at the leader's
-        position: cues that were already running on the leader when it started
-        following - which never run here - and what its own clients changed
-        while it waited for its main. */
+    /*  WHAT A FOLLOWER IS NOT IN STEP WITH: cues that were already running on
+        the leader when it started following, and what its own clients changed
+        while it waited for its main - until it is seated at the leader's
+        position (RD.8), which `seating` says is on its way; and once seated,
+        what the leader's summaries say differs (`differs`, pair/Summary.h),
+        empty while the two are in step. */
     struct NotInStep
     {
         std::int64_t leaderRuns = 0;
         bool changedWhileWaiting = false;
+        bool seating = false;
+        std::string differs = {};
     };
 
     /*  `pair/alarm`: the sentence the window and the page put in front of the

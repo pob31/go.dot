@@ -328,6 +328,11 @@ namespace wfg
         inline constexpr const char* notLinked       = "not-linked";
         inline constexpr const char* notBothSending  = "not-both-sending";
 
+        /*  `pair.realign` on a machine that does not follow (namespace draft
+            §58.5, RD.8): there is no leader whose position to take - it sends,
+            or waits for its main, or is not paired. */
+        inline constexpr const char* notFollowing    = "not-following";
+
         /*  Show mode is on, and the command would have changed the show half
             of the document: a create, a delete, a move, or a write to a value
             that persists in show.xml.

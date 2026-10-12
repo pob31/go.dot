@@ -317,6 +317,22 @@ namespace wfg::cue
             return found == resumes.end() ? std::string {} : found->second;
         }
 
+        /*  A LIST'S HISTORY AS ANOTHER MACHINE HAS IT (namespace draft §58,
+            RD.8): a follower seated at its leader's position takes the leader's
+            steps, on its own clock, in place of its own - the history a later
+            load to time places what fired by. The recorder's take is this
+            machine's and is left. The count of steps does NOT move: the hooks
+            that watch it - the persistent assertion, the observation sweep -
+            act on a step somebody took, and a seat is none; moved, they would
+            act here and not on the leader. */
+        void seatHistory (const std::string& list, std::vector<Step> steps)
+        {
+            while (steps.size() > kept)
+                steps.erase (steps.begin());
+
+            histories[list] = std::move (steps);
+        }
+
         /** Newest last. */
         const std::vector<Step>& historyOf (const std::string& list) const
         {

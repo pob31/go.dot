@@ -123,6 +123,7 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/RunNames.cpp
     wfg/engine/cue/Runner.h
     wfg/engine/cue/Runner.cpp
+    wfg/engine/cue/RunnerSeat.cpp
     wfg/engine/cue/PictureSpec.h
     wfg/engine/cue/PictureSpec.cpp
     wfg/engine/cue/InsertChain.h
@@ -200,6 +201,10 @@ add_library(wfg_engine STATIC
     wfg/engine/pair/Presence.h
     wfg/engine/pair/Presence.cpp
     wfg/engine/pair/SavePump.h
+    wfg/engine/pair/Position.h
+    wfg/engine/pair/Position.cpp
+    wfg/engine/pair/Summary.h
+    wfg/engine/pair/Summary.cpp
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp
     wfg/engine/serial/Slip.cpp

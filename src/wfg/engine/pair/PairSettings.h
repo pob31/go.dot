@@ -193,6 +193,12 @@ namespace wfg::pair
             replay sets it and nothing reads it: its moves are in the log. */
         std::optional<Ask> asked;
 
+        /*  AN OPERATOR'S `pair.realign`, accepted on a machine that follows and
+            waiting for serve's next tick (RD.8): the leader is asked where it
+            is, and this machine is seated there again. A replay sets it and
+            nothing reads it: the seat it led to is its own record. */
+        bool realignAsked = false;
+
         /*  THE OTHER MACHINE'S SEAT AS THIS ONE SEES IT NOW, `pair/state`'s
             word, empty when it is not linked: what an operator's command is
             applied with (its argument as applied), so a replay refuses alike.
@@ -207,6 +213,7 @@ namespace wfg::pair
         And RD.7's: the engine's `pair.lead` and `pair.hold`, which say what
         this machine now is and why, and the operator's `pair.takeOver`,
         `pair.handOver` and `pair.keep` - machine-local too, since each acts on
-        this machine, though each also tells the other machine when it can. */
+        this machine, though each also tells the other machine when it can.
+        And RD.8's `pair.realign`, the operator's on a machine that follows. */
     void registerPairCommands (CommandRegistry& registry, Pairing& pairing);
 }

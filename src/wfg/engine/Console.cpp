@@ -49,8 +49,10 @@
 #include <wfg/engine/pair/MachineLocal.h>
 #include <wfg/engine/pair/PairSettings.h>
 #include <wfg/engine/pair/PeerLink.h>
+#include <wfg/engine/pair/Position.h>
 #include <wfg/engine/pair/Presence.h>
 #include <wfg/engine/pair/SavePump.h>
+#include <wfg/engine/pair/Summary.h>
 #include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/ProcessHost.h>
@@ -5139,6 +5141,34 @@ namespace
         dialler.setHello (helloNow);
         dialler.start();
 
+        /*  WHETHER THIS MACHINE IS WHERE ITS LEADER IS (namespace draft §58,
+            RD.8; pair/Summary.h): the leader's summaries held to their slot and
+            compared there; a seat asked of the leader - a follow begun, a
+            `pair.realign` - and not yet applied; one applied this tick; and
+            RD.6's count of records applied otherwise, as last read. */
+        wfg::pair::InStep inStep;
+        auto seatAsked = false;
+        auto seatLanded = false;
+        std::int64_t differencesRead = 0;
+
+        //  How the sentence names a cue and a list: as the operator reads them.
+        wfg::pair::Labels inStepLabels;
+        inStepLabels.cue = [&runner] (const std::string& id) { return runner.labelOf (id); };
+        inStepLabels.list = inStepLabels.cue;
+
+        /*  A MESSAGE FOR THE LEADER, down one path: a dialled one when this
+            machine dials, else the connection the leader dialled it on. What a
+            follower passes on goes this way, and a `pair.realign`'s ask (RD.8). */
+        const auto toLeader = [&dialler, &presence, &linkServer] (std::vector<std::uint8_t> bytes)
+        {
+            if (dialler.openPaths() > 0)
+                return dialler.relay (std::move (bytes));
+
+            const auto via = presence.relayChannel();
+            return linkServer != nullptr && via.rfind ("ws:", 0) == 0
+                     && linkServer->sendTo (via, bytes.data(), bytes.size());
+        };
+
         /*  A MACHINE THAT FOLLOWS (namespace draft §58, RD.6, RD.7; pair/Follow.h):
             the follower holds the leader's records to their slot and submits
             them at the head of the tick; the gate in front of the engine's
@@ -5152,15 +5182,7 @@ namespace
         wfg::pair::Follower follower { [&engine] (wfg::Event event) { return engine.submit (std::move (event)); } };
         wfg::pair::FollowGate followGate {
             engine.commands(),
-            [&dialler, &presence, &linkServer] (std::vector<std::uint8_t> bytes)
-            {
-                if (dialler.openPaths() > 0)
-                    return dialler.relay (std::move (bytes));
-
-                const auto via = presence.relayChannel();
-                return linkServer != nullptr && via.rfind ("ws:", 0) == 0
-                         && linkServer->sendTo (via, bytes.data(), bytes.size());
-            },
+            toLeader,
             (static_cast<std::uint64_t> (juce::Time::getHighResolutionTicks()) & 0x3fffffffu) << 32 | 1u };
         engine.setGate ([&followGate] (wfg::Event& event) { return followGate.take (event); });
 
@@ -5191,6 +5213,20 @@ namespace
                                         follower.beat (leaderTick, arrival);
                                 });
 
+        /*  THE LEADER'S POSITION AND ITS SUMMARIES (RD.8), taken only by a
+            machine that follows: two machines both sending apply each other's
+            operators' commands and are each where they are. */
+        linkReceiver.setOnPosition ([&follower, &pairing] (std::uint64_t, std::int64_t leaderTick, std::string text)
+                                    {
+                                        if (pairing.seated.seat == wfg::pair::Seat::following)
+                                            follower.position (leaderTick, std::move (text));
+                                    });
+        linkReceiver.setOnSummary ([&inStep, &pairing] (wfg::pair::Summary summary)
+                                   {
+                                       if (pairing.seated.seat == wfg::pair::Seat::following)
+                                           inStep.heard (std::move (summary));
+                                   });
+
         /*  AND ON THE MACHINE THAT LEADS, A COMMAND ITS FOLLOWER PASSED ON (AFT),
             applied as `peer:<origin>` with the follower's ticket - submitted
             from the thread it arrived on, as a client's own is, so it lands on
@@ -5208,6 +5244,19 @@ namespace
             engine.submit (std::move (event));
         });
 
+        /*  AND WHERE IT IS (RD.8): its position for a follower that starts
+            following or asks again, and every fifth tick a summary, both made on
+            the tick thread at the end of the tick, true after the stream's last
+            record. */
+        linkStream.setPositionMaker ([&runner] (std::int64_t tick, std::uint64_t counter)
+                                     {
+                                         return wfg::pair::toText (runner.positionNow (tick, counter));
+                                     });
+        linkStream.setSummaryMaker ([&runner] (std::int64_t tick, std::uint64_t counter)
+                                    {
+                                        return wfg::pair::summaryBytes (runner.summaryNow (tick, counter));
+                                    });
+
         /*  WHETHER THIS MACHINE HAS RUN ANYTHING SINCE IT STARTED (AGA): a GO
             applied, or a cue run (counted at the end of every tick, below) - a
             machine that has not follows straight away the one it finds sending
@@ -5220,11 +5269,33 @@ namespace
             keeps the ones that travel and nothing else (pair::travels), and a
             follower compares each of the leader's it applied with what the
             leader made of it (RD.6). */
-        engine.setAfterRecord ([&linkStream, &follower, &ranNothing, &changedWhileWaiting, &pairing]
+        engine.setAfterRecord ([&linkStream, &follower, &ranNothing, &changedWhileWaiting, &pairing,
+                                &inStep, &seatAsked, &seatLanded, &runner]
                                (const wfg::LogRecord& written, const wfg::Command* writtenBy)
                                {
                                    linkStream.keep (written, writtenBy);
                                    follower.applied (written);
+
+                                   /*  THE SEAT LANDED (RD.8): its sounds start a
+                                       launch latency later, and a summary of
+                                       the moments before that is passed over; a
+                                       position this build could not read is said. */
+                                   if (written.command == "pair.seat")
+                                   {
+                                       seatAsked = false;
+
+                                       if (written.kind == wfg::LogRecord::Kind::applied)
+                                       {
+                                           seatLanded = true;
+                                           inStep.seated (written.tick + runner.seatSettleTicks());
+                                       }
+                                       else
+                                       {
+                                           inStep.recordDiffered ("the leader's position could not be read here ("
+                                                                  + written.reason + (written.detail.empty() ? "" : ": ")
+                                                                  + written.detail + ")");
+                                       }
+                                   }
 
                                    if (written.kind != wfg::LogRecord::Kind::applied)
                                        return;
@@ -5326,6 +5397,7 @@ namespace
         std::string followedStream;
         wfg::pair::LinkClock::time_point followSince {};
         wfg::pair::NotInStep behind;
+        const std::string noDifference;
         std::int64_t liveRunsSaid = 0;
         auto freshSaid = true;
 
@@ -5704,6 +5776,8 @@ namespace
                                      move a tick, recorded as `pair.lead` or
                                      `pair.hold` and acted on once applied, at the
                                      end of this tick. */
+                                 const auto seatsBefore = follower.seats();
+
                                  {
                                      const auto now = wfg::pair::LinkClock::now();
                                      const auto timeout = pairing.inForce.timeout;
@@ -5808,6 +5882,20 @@ namespace
                                                               wfg::osc::Value::string (move->reason) });
                                              inFlight = std::move (move);
                                          }
+                                     }
+
+                                     /*  SEATED AGAIN, AS AN OPERATOR ASKED (RD.8,
+                                         `pair.realign`): the leader is asked where
+                                         it is, down the one path relays take; its
+                                         position comes in the stream's order, and
+                                         the alarm says a seat is on its way. */
+                                     if (pairing.realignAsked)
+                                     {
+                                         pairing.realignAsked = false;
+
+                                         if (seated.seat == wfg::pair::Seat::following
+                                               && toLeader (wfg::pair::wire::encode (wfg::pair::wire::seat, {})))
+                                             seatAsked = true;
                                      }
                                  }
 
@@ -6023,7 +6111,16 @@ namespace
                                              ! pushed.empty())
                                              engine.submit ("surface:spacemouse", "curve.ride", std::move (pushed));
 
-                                 if (audioState.settingsStatus != "applying")
+                                 /*  NOT ON THE TICK A SEAT GOES IN (RD.8): what the
+                                     Runner's hooks would decide now they would
+                                     decide on the state the seat replaces, and
+                                     it would be applied after the seat, on the
+                                     leader's state - a member spawned under a
+                                     scene the seat ended, a standby prepared
+                                     under names drawn before the seat. The seat
+                                     is the leader's tick, its hooks and all, and
+                                     this machine's own hooks go on from the next. */
+                                 if (audioState.settingsStatus != "applying" && follower.seats() == seatsBefore)
                                      runner.beforeTick (engine, tickIndex);
 
                                  /*  THE RENDERER'S CLOCK, every tick and
@@ -6284,17 +6381,29 @@ namespace
                                     linkStream.setLeading (seated.role != wfg::pair::Role::none
                                                              && wfg::pair::sends (seated.seat));
 
-                                    if (wfg::pair::follows (seated.seat) && ! wfg::pair::follows (seatBefore))
+                                    /*  AND A MACHINE THAT NOW FOLLOWS AND DID NOT
+                                        (RD.8) is seated where its leader is: one
+                                        that both sent until an operator kept the
+                                        show on the other has been running its own
+                                        show meanwhile, and starts its follow
+                                        afresh too, so the leader's position comes
+                                        with the welcome. */
+                                    const auto seatBegins = seated.seat == wfg::pair::Seat::following
+                                                              && seatBefore != wfg::pair::Seat::following;
+
+                                    if ((wfg::pair::follows (seated.seat) && ! wfg::pair::follows (seatBefore)) || seatBegins)
                                     {
                                         /*  A FOLLOW BEGINS: from now on in the
                                             leader's stream, never what it kept
-                                            before (RD.8 seats a position); the
-                                            leader's run-name salt adopted by a
-                                            machine that has run nothing, so the
-                                            runs the engine names by itself are
-                                            named alike from the first GO (RD.2);
-                                            and what this machine is not in step
-                                            with, said in the alarm. */
+                                            before - the leader sends where it is
+                                            with the welcome, and this machine is
+                                            seated there (RD.8); the leader's
+                                            run-name salt adopted by a machine
+                                            that has run nothing, so the runs the
+                                            engine names by itself are named alike
+                                            from the first GO (RD.2); and what
+                                            this machine is not in step with, said
+                                            in the alarm until it is seated. */
                                         const auto& leader = presence.peer();
                                         followedStream = leader.ownStream;
                                         followSince = wfg::pair::LinkClock::now();
@@ -6305,6 +6414,18 @@ namespace
 
                                         behind.leaderRuns = leader.described ? leader.liveRuns : 0;
                                         behind.changedWhileWaiting = seatBefore == wfg::pair::Seat::waiting && changedWhileWaiting;
+                                    }
+
+                                    if (seatBegins)
+                                    {
+                                        seatAsked = true;
+                                        inStep.reset();
+                                        differencesRead = 0;
+                                    }
+                                    else if (seated.seat != wfg::pair::Seat::following)
+                                    {
+                                        seatAsked = false;
+                                        inStep.reset();
                                     }
 
                                     if (! wfg::pair::follows (seated.seat))
@@ -6407,6 +6528,39 @@ namespace
                                     tick that has one. */
                                 linkStream.afterTick (outcome.tick, pairing.inForce.timeout);
                                 linkReceiver.drain (wfg::pair::LinkClock::now(), pairing.inForce.timeout);
+
+                                /*  IN STEP (RD.8; pair/Summary.h), on a machine
+                                    that follows: a seat applied this tick
+                                    clears what the follow began without, and
+                                    says what it could not make as the leader
+                                    has it; a record of the leader's applied
+                                    otherwise here is said at once (RD.6); and
+                                    the leader's summary whose slot this tick
+                                    is, laid against what this machine has now
+                                    - this tick having run, as the leader's had
+                                    when it made it. */
+                                if (seatLanded)
+                                {
+                                    seatLanded = false;
+                                    behind.leaderRuns = 0;
+                                    behind.changedWhileWaiting = false;
+
+                                    if (! runner.seatNotes().empty())
+                                        inStep.recordDiffered (runner.seatNotes().front());
+                                }
+
+                                if (pairing.seated.seat == wfg::pair::Seat::following && follower.isFollowing())
+                                {
+                                    if (follower.differences() > differencesRead)
+                                        inStep.recordDiffered (follower.differs());
+
+                                    differencesRead = follower.differences();
+                                    inStepLabels.leader = pairRole == wfg::pair::Role::backup ? "the main" : "the backup";
+                                    inStep.afterTick (outcome.tick, follower.offset(),
+                                                      follower.delayFixed() && ! seatAsked && ! follower.seatHeld(),
+                                                      [&runner, &outcome] { return runner.summaryNow (outcome.tick, 0); },
+                                                      inStepLabels);
+                                }
 
                                 /*  The runtime half of the state, refreshed
                                     before the publish that carries it. Left
@@ -6530,6 +6684,17 @@ namespace
                                     if (follow.state != word)
                                         follow.state = word;
 
+                                    /*  IN STEP OR NOT (RD.8), a follower's alone:
+                                        the one sentence of what differs, the most
+                                        recent cause, and a seat on its way. */
+                                    const auto followingNow = pairing.seated.seat == wfg::pair::Seat::following;
+                                    const auto& differsNow = followingNow ? inStep.differs() : noDifference;
+
+                                    behind.seating = followingNow && (seatAsked || follower.seatHeld());
+
+                                    if (behind.differs != differsNow)
+                                        behind.differs = differsNow;
+
                                     auto sentence = wfg::pair::alarm (pairing.seated, situation, behind);
 
                                     if (follow.alarm != sentence)
@@ -6538,8 +6703,10 @@ namespace
                                     follow.delay = follower.delay();
                                     follow.late = follower.late();
 
-                                    if (follow.differs != follower.differs())
-                                        follow.differs = follower.differs();
+                                    if (follow.differs != differsNow)
+                                        follow.differs = differsNow;
+
+                                    follow.inStep = followingNow && inStep.inStep();
 
                                     follow.relayed = followGate.passedOn();
                                     follow.dropped = followGate.ignored();

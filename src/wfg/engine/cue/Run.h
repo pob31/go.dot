@@ -1133,6 +1133,15 @@ namespace wfg::cue
         /** The sample the launch was placed at. Zero before it is placed. */
         std::int64_t launchedAtSample = 0;
 
+        /*  NOT BEFORE THIS SAMPLE (namespace draft §58, RD.8): a sound a
+            follower was seated with is armed cold, and armed at the second the
+            leader's sound will have reached at this sample - a few ticks on,
+            time for its disk to answer - so it is launched here and not as soon
+            as it is ready, and starts where the leader's is. Nought for every
+            other run; nought again once the launch is placed. A hook's, as the
+            launch is: a replay places none. */
+        std::int64_t launchNotBefore = 0;
+
         /*  Whether the last poll saw it sounding. The edge from true to false
             is what ends a run - a launcher clip stops itself at the end of its
             length, so this is the ordinary finish as well as how a stop is
@@ -1565,6 +1574,17 @@ namespace wfg::cue
         const std::vector<Run>& all() const noexcept { return runs; }
 
         void clear() { runs.clear(); }
+
+        /*  A RUN TAKEN OUT OF THE TABLE, and out of its parent's children - what
+            no road but one takes (namespace draft §58, RD.8): a follower seated
+            at its leader's position holds the leader's run table, and a run of
+            its own the position does not hold, ended there, is gone from it, so
+            the leader's run can be made under the same name and every name the
+            engine draws from then on finds the same names taken on both
+            machines. A handler's (`pair.seat`), so a replay takes out the same
+            runs. Its children keep their parent's name, as a run whose parent
+            is pruned would. */
+        void remove (const std::string& id);
 
     private:
         std::vector<Run> runs;

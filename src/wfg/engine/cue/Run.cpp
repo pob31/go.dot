@@ -40,6 +40,21 @@ namespace wfg::cue
         runs.push_back (std::move (run));
     }
 
+    void RunTable::remove (const std::string& id)
+    {
+        const auto found = std::find_if (runs.begin(), runs.end(), [&id] (const Run& run) { return run.id == id; });
+
+        if (found == runs.end())
+            return;
+
+        const auto parentRun = found->parent;
+        runs.erase (found);
+
+        if (auto* parent = find (parentRun))
+            parent->children.erase (std::remove (parent->children.begin(), parent->children.end(), id),
+                                    parent->children.end());
+    }
+
     std::vector<const Run*> RunTable::childrenOf (const std::string& parentRun) const
     {
         std::vector<const Run*> out;

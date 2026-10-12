@@ -68,6 +68,8 @@
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/pair/Hold.h>
+#include <wfg/engine/pair/Position.h>
+#include <wfg/engine/pair/Summary.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/process/ProcessHost.h>
@@ -1603,6 +1605,54 @@ namespace wfg::cue
         RunNames& runNames() noexcept { return namer; }
         const RunNames& runNames() const noexcept { return namer; }
 
+        //======================================================================
+        /*  WHERE THIS MACHINE IS, AND BEING SEATED WHERE ANOTHER IS (namespace
+            draft §58, RD.8; pair/Position.h). Defined in cue/RunnerSeat.cpp.
+
+            `positionNow` is the leader's, made at the end of its tick for a
+            follower that starts following or asks again: the rows `state.xml`
+            keeps, what each list keeps beside them, every live run with what
+            it carries and the jobs carrying them on, tonight's trims, the
+            names - true at `tick`, after the stream's record `counter`.
+
+            `seatAt` is `pair.seat`'s handler on the follower - a handler, so a
+            replay of the session seats the same: the rows written through the
+            document's own door, Doh!'s books forgotten as a jump forgets them,
+            every run of its own the position does not hold ended the way a
+            jump ends what it abandons - no footer, no post-wait, no fade, no
+            value put back, its voice stopped - and taken out of the table,
+            and the leader's built under the leader's names, through `seatPlan`
+            for scenes and sounds, at their playheads. `tick` is the drain's;
+            the position's own ticks are this machine's already (rebased by
+            the follower before it submits). */
+        pair::Position positionNow (std::int64_t tick, std::uint64_t counter) const;
+        void seatAt (Engine& engine, doc::ShowDocument& editable, std::int64_t tick, const pair::Position& at);
+
+        /*  WHAT THE LAST SEAT COULD NOT MAKE AS THE LEADER HAS IT, a sentence
+            each - a cue missing from this show, a sound whose file is not on
+            this machine, a run of a kind the seat ends rather than carries on.
+            Read by serve after the seat, for `pair/differs`. Handler state. */
+        const std::vector<std::string>& seatNotes() const noexcept { return seatSaid; }
+
+        /*  WHAT AN OPERATOR WOULD LOOK AT, every five ticks on a leader and on
+            a follower to compare (pair/Summary.h): each list's standby and each
+            live run's state and playhead. */
+        pair::Summary summaryNow (std::int64_t tick, std::uint64_t counter) const;
+
+        /** A cue as the operator reads it: its number and name, or its name, or its identifier. */
+        std::string labelOf (const std::string& cueId) const { return cueLabel (cueId); }
+
+        /*  HOW FAR AHEAD A SEATED SOUND IS LAUNCHED, beyond the launch latency,
+            in ticks: a fifth of a second for its cold arm to answer - a disk, a
+            graph - so that it starts on the sample its offset was worked out
+            for and not whenever it is ready (`Run::launchNotBefore`). One that
+            takes longer starts late, and the summary says by how much. */
+        static constexpr int seatLeadTicks = 10;
+
+        /*  The ticks after a seat before the leader's summaries are compared:
+            its sounds' launch, and a tick each side. */
+        int seatSettleTicks() const noexcept { return latencyTicks() + seatLeadTicks + 3; }
+
         /*  HANDS OUT THE NAME OF A RUN ABOUT TO BE MADE under `parentRun` (empty
             for none) for `cueId`: the next one a record supplied, in the order
             they were drawn, or one derived from that cause. Every site that
@@ -2508,6 +2558,22 @@ namespace wfg::cue
         /*  One per group run in flight. A vector like every other job list
             here, and drained by the same `remove_if` on a retired flag. */
         ListState lists;
+
+        /*  What the last `pair.seat` could not make as the leader has it
+            (`seatNotes`). Handler state. */
+        std::vector<std::string> seatSaid;
+
+        /*  The runs a position carries, in the table's order: every live one
+            the horizon did not only make ready, and the finished ones a live
+            scene counts among its members (RunnerSeat.cpp). */
+        std::vector<const Run*> carriedRuns() const;
+
+        /*  A sound's playhead as the record clock reads it: seconds into its
+            own material for a sound, into its scene for a group, since its GO
+            for anything else - into the slice, passes and all, for one that
+            plays a slice; for a run in a wait, minus the seconds still to run. */
+        double playheadOf (const Run& run, std::int64_t tick) const;
+
         const audio::MediaInfo* mediaInfo = nullptr;
         const std::map<std::string, double>* fixedDurations = nullptr;
 

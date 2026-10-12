@@ -565,7 +565,7 @@ namespace wfg::cue
                             nobody had asked for, which is what the arm was -
                             noted as it was first (D2), so a Doh of a GO nobody
                             heard hands it back exactly. */
-                        if (armed->launchRequestedAtTick <= 0)
+                        if (armed->launchRequestedAtTick == 0)
                         {
                             snapshotAdoption (armed->id, {});
                             armed = runs.find (live->id);
@@ -4644,9 +4644,12 @@ namespace wfg::cue
 
             Guarded, so the arming paths keep the stamp they already made:
             theirs is the tick lateness is measured against, and it is the same
-            tick anyway. */
+            tick anyway. NOUGHT IS "NEVER", and only nought (namespace draft
+            §58, RD.8): a run a follower was seated with, launched on its leader
+            before this machine started, has a tick before this machine's
+            first - below nought - and is launched all the same. */
         if (auto* starting = runs.find (runId);
-            starting != nullptr && starting->launchRequestedAtTick <= 0)
+            starting != nullptr && starting->launchRequestedAtTick == 0)
         {
             starting->launchRequestedAtTick = tick;
         }
@@ -7836,7 +7839,7 @@ namespace wfg::cue
             (L31). */
         for (const auto& snapshot : runs.all())
         {
-            if (snapshot.kind != "osc" || snapshot.isFinished() || snapshot.launchRequestedAtTick <= 0
+            if (snapshot.kind != "osc" || snapshot.isFinished() || snapshot.launchRequestedAtTick == 0
                   || snapshot.launchRequestedAtTick != tick || ! beingKilled (snapshot))
                 continue;
 
@@ -7942,7 +7945,9 @@ namespace wfg::cue
         replay has none of those, and must reach the same answer. */
     bool Runner::hasLaunchEvidence (const Run& run) noexcept
     {
-        return run.launchRequestedAtTick > 0 || run.isWaiting() || run.startedAtTick >= 0;
+        /*  A launch tick below nought is a run a follower was seated with,
+            launched before this machine started (RD.8): launched all the same. */
+        return run.launchRequestedAtTick != 0 || run.isWaiting() || run.startedAtTick >= 0;
     }
 
     std::uint64_t Runner::goOfRun (const std::string& runId) const
@@ -9578,7 +9583,7 @@ namespace wfg::cue
                         out.heardRuns[run->id] = cueId;
                     }
                 }
-                else if (run->launchRequestedAtTick > 0)
+                else if (run->launchRequestedAtTick != 0)
                 {
                     /*  ASKED FOR AND NOT YET HEARD: at its start. */
                     const auto ranged = ! rangesOf (cueNode).empty();
@@ -18483,7 +18488,11 @@ namespace wfg::cue
                 tick being processed, so it is a pure function of the tick index
                 and the schedule - which is what makes it reproduce on replay
                 rather than depending on when this loop happened to run. */
-            const auto target = now + static_cast<std::int64_t> (ticksAhead) * samplesPerTick;
+            /*  OR LATER, FOR A SOUND A FOLLOWER WAS SEATED WITH (RD.8): at the
+                sample its offset was worked out for, when its disk answered in
+                time - the second the leader's sound is at then. */
+            const auto target = std::max (now + static_cast<std::int64_t> (ticksAhead) * samplesPerTick,
+                                          run->launchNotBefore);
 
             /*  The guarantee the arithmetic exists to provide, checked rather
                 than assumed. A tick thread that overslept would otherwise place
@@ -18511,6 +18520,7 @@ namespace wfg::cue
             {
                 run->launchRequested = false;
                 run->launchedAtSample = target;
+                run->launchNotBefore = 0;
 
                 /*  THE SPEED FROM THE LAUNCH (namespace draft §22.4): the run's
                     clock starts on the launch's sample at the run's speed, and
@@ -19148,7 +19158,10 @@ namespace wfg::cue
                     and sought, which ticks since the GO would overwrite. */
                 /*  NOR A MOVIE (namespace draft §47, AAC): `advanceVideo`
                     reads its playhead off the picture's own, in the file. */
-                if (run->launchRequestedAtTick > 0 && ! run->isWaiting()
+                /*  SINCE ITS GO, which for a run a follower was seated with
+                    can be before this machine's first tick (RD.8): a launch
+                    tick below nought, read like any other. */
+                if (run->launchRequestedAtTick != 0 && ! run->isWaiting()
                       && run->state != runState::armed
                       && run->state != runState::preparing
                       && ! (run->kind == "osc" && isCurving (run->id))
@@ -21285,6 +21298,36 @@ namespace wfg::cue
 
                             return Outcome::ok (applied);
                         } });
+
+        //----------------------------------------------------------------------
+        /*  A FOLLOWER SEATED AT ITS LEADER'S POSITION (namespace draft §58.4,
+            RD.8; cue/RunnerSeat.cpp, pair/Position.h): the engine's, submitted
+            by the follower when the leader's position reaches its slot - one
+            record, its text already on this machine's clock, so a replay of
+            the follower's session is seated exactly where the session was.
+            Machine-local: never mirrored, no step of undo; the rows it writes
+            are state rows, which the lock leaves alone. A text that does not
+            read is refused, the reason after it. */
+        registry.add (machineLocal ({ "pair.seat",
+            "The engine's: seats this machine at its leader's position in one step - the state rows, each list's"
+            " history, every live run under the leader's name at its playhead, the jobs carrying them on, the DCA"
+            " trims and the run names - ending every run of its own the position does not hold, with no footer.",
+            { { "position", 's', false } }, true,
+            [&engine, &runner, &document] (CommandContext& context, const std::vector<osc::Value>& args)
+            {
+                std::string why;
+                const auto position = pair::readPosition (args[0].getString(), &why);
+
+                if (! position.has_value())
+                {
+                    auto refused = Outcome::rejected (reason::badValue);
+                    refused.detail = why;
+                    return refused;
+                }
+
+                runner.seatAt (engine, document, context.tick, *position);
+                return Outcome::ok (args);
+            } }));
 
         //----------------------------------------------------------------------
         /*  A SEEK (author, 2026-09-18: "I'd like to be able to scrub active

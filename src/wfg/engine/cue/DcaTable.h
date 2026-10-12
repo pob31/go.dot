@@ -72,6 +72,10 @@ namespace wfg::cue
             return found != hands.end() ? found->second : 0;
         }
 
+        /*  Every DCA a hand or a fade has written tonight, by identifier: what a
+            leader's position carries to its follower (namespace draft §58, RD.8). */
+        const std::map<std::string, double>& all() const noexcept { return trims; }
+
         /** Every DCA back to nought - a show closed, or another opened. */
         void clear()
         {

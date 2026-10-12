@@ -126,7 +126,11 @@ namespace
         /*  And RD.7's: what the machine now is in its pair, and the operator's
             three - each acts on this machine, and tells the other its own way,
             never by being mirrored. */
-        "pair.lead", "pair.hold", "pair.takeOver", "pair.handOver", "pair.keep"
+        "pair.lead", "pair.hold", "pair.takeOver", "pair.handOver", "pair.keep",
+
+        /*  And RD.8's: a follower seated at its leader's position, and an
+            operator asking for it again - each this machine's alone. */
+        "pair.seat", "pair.realign"
     };
 
     const std::string mainList  = "7K2QM9X4";

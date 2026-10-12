@@ -20,6 +20,7 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/command/Recovery.h>
 #include <wfg/engine/pair/MachineLocal.h>
+#include <wfg/engine/pair/Position.h>
 
 #include <algorithm>
 #include <chrono>
@@ -268,7 +269,24 @@ namespace wfg::pair
 
     void Follower::record (const LogRecord& mainRecord)
     {
-        held.push_back (mainRecord);
+        held.push_back ({ mainRecord, false });
+    }
+
+    void Follower::position (std::int64_t leaderTick, std::string text)
+    {
+        Held seat;
+        seat.seat = true;
+        seat.record.kind = LogRecord::Kind::applied;
+        seat.record.tick = leaderTick;
+        seat.record.origin = std::string (origin::engine);
+        seat.record.command = "pair.seat";
+        seat.record.args = { osc::Value::string (std::move (text)) };
+        held.push_back (std::move (seat));
+    }
+
+    bool Follower::seatHeld() const noexcept
+    {
+        return std::any_of (held.begin(), held.end(), [] (const Held& entry) { return entry.seat; });
     }
 
     void Follower::beforeTick (std::int64_t localTick, LinkClock::time_point due, double roundTripSeconds)
@@ -321,7 +339,8 @@ namespace wfg::pair
     {
         while (! held.empty())
         {
-            auto& next = held.front();
+            auto& entry = held.front();
+            auto& next = entry.record;
 
             /*  ITS SLOT, or at once when it has passed: every record of one main
                 tick shares a slot, so they go in together, in the main's order. */
@@ -332,12 +351,38 @@ namespace wfg::pair
                 if (slot > localTick)
                     break;
 
-                if (slot < localTick)
+                if (slot < localTick && ! entry.seat)
                     ++lateCount;
             }
-            else
+            else if (! entry.seat)
             {
                 ++lateCount;
+            }
+
+            /*  THE LEADER'S POSITION (RD.8), on this machine's clock: every tick
+                in it moved by the offset its records are applied at, so a run
+                the leader launched at its tick T was launched here at T plus
+                the offset, as a record of T would have been. */
+            if (entry.seat)
+            {
+                auto rebased = fixed && ! next.args.empty() && next.args[0].isString()
+                                 ? rebasedText (next.args[0].getString(), slotOffset)
+                                 : std::nullopt;
+
+                held.pop_front();
+
+                if (! rebased.has_value())
+                {
+                    ++droppedSeats;
+                    continue;
+                }
+
+                ++seatCount;
+
+                if (submit)
+                    submit ({ std::string (origin::engine), "pair.seat", { osc::Value::string (std::move (*rebased)) } });
+
+                continue;
             }
 
             Event event;

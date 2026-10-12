@@ -97,11 +97,15 @@ namespace wfg::pair
             arrived too late for the tick Δ gave it and went in at once. */
         std::int64_t late = 0;
 
-        /*  THE FIRST RECORD THE BACKUP APPLIED OTHERWISE THAN ITS MAIN, in one
-            sentence with how many have, this link; empty while every one has
-            come out as the main's - applied with the same arguments, or
-            refused for the same reason. */
+        /*  WHAT IS NOT IN STEP WITH THE LEADER, in one sentence, the most
+            recent cause (RD.6, RD.8; pair/Summary.h): what its summaries showed
+            different, or a record of its applied otherwise here; empty once a
+            summary matches. */
         std::string differs;
+
+        /*  WHETHER THE LEADER'S LAST SUMMARY MATCHED what this machine had at
+            the same moment (RD.8); false on a machine that does not follow. */
+        bool inStep = false;
 
         /*  Commands this backup's clients gave it that it passed on to the
             main (AFT), and commands its devices sent it that it ignored

@@ -485,5 +485,24 @@ namespace wfg::pair
             "While both machines are sending: keeps the show on this machine, and tells the other to hold and"
             " follow it.",
             { { "peer", 's', true } }, true, ask (Ask::keep) }));
+
+        /*  SEATED AGAIN (namespace draft §58.4, RD.8): the operator's, on a
+            machine that follows and is not in step with its leader - a file
+            missing here, a record refused here, a hand on this machine's page.
+            Accepted from the seat the log last said, so a replay decides alike;
+            serve asks the leader where it is on its next tick, and the seat
+            that follows is its own record, `pair.seat`. */
+        registry.add (machineLocal ({ "pair.realign",
+            "On a machine that follows its leader: asks the leader where it is and seats this machine there"
+            " again - its standby, its history, every cue running at its playhead - in place of its own.",
+            {}, true,
+            [&pairing] (CommandContext&, const std::vector<osc::Value>& args)
+            {
+                if (pairing.seated.seat != Seat::following)
+                    return Outcome::rejected (reason::notFollowing);
+
+                pairing.realignAsked = true;
+                return Outcome::ok (args);
+            } }));
     }
 }

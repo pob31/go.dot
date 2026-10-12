@@ -1,0 +1,1253 @@
+/*
+    This file is part of Go.dot — https://github.com/pob31/go.dot
+
+    Copyright (C) 2026 Pierre-Olivier Boulant
+
+    Go.dot is free software: you can redistribute it and/or modify it under the
+    terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later
+    version. Go.dot is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+    or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+    (LICENSE, at the repository root) for more details.
+
+    SPDX-License-Identifier: GPL-3.0-or-later
+*/
+
+/*
+    A FOLLOWER SEATED AT ITS LEADER'S POSITION, AND WHETHER IT STAYS THERE
+    (namespace draft §58, RD.8).
+
+    What is pinned here: a position made from an engine with lists, a bed
+    looping in a range, a timeline scene and a sequence going, DCA trims, the
+    faders flipped to a cue and the run-name salt reads back as it was written,
+    its numbers unmoved by a French locale; seated into an engine that was
+    elsewhere, it ends that engine's own runs with no footer, builds the
+    leader's under the leader's names at their playheads, writes the standby,
+    draws the leader's names from then on, and is one `pair.seat` record a
+    replay seats alike; two engines joined by the real stream and receiver, a
+    follower that joins late is seated, its run table the leader's on every
+    tick for two hundred ticks, in step by the summaries - and a run stopped on
+    it by hand puts it out of step, said in a sentence, until a realign seats
+    it again; the summary's wire and its sentences; a position of two hundred
+    runs in parts and whole again; what it all costs.
+
+    Every case runs under fr_FR as well as C: a position's numbers are text.
+*/
+
+#include <3rd_party/doctest/tracktion_doctest.hpp>
+
+#include "TestSupport.h"
+
+#include <wfg/engine/Engine.h>
+#include <wfg/engine/command/Command.h>
+#include <wfg/engine/command/Event.h>
+#include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LaneTable.h>
+#include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/UndoStep.h>
+#include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/Ids.h>
+#include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/log/Replay.h>
+#include <wfg/engine/osc/OscCodec.h>
+#include <wfg/engine/pair/Follow.h>
+#include <wfg/engine/pair/PairSettings.h>
+#include <wfg/engine/pair/PeerLink.h>
+#include <wfg/engine/pair/Position.h>
+#include <wfg/engine/pair/Summary.h>
+
+#include <algorithm>
+#include <bit>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <map>
+#include <optional>
+#include <random>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
+using namespace wfg;
+
+namespace
+{
+    using Clock = pair::LinkClock;
+    using namespace std::chrono_literals;
+
+    osc::Value s (std::string text) { return osc::Value::string (std::move (text)); }
+
+    const Clock::time_point t0 = Clock::time_point {} + std::chrono::hours { 1000 };
+
+    /*  THE AUDIO SIDE WITH NOBODY LISTENING: an arm completes the tick after it
+        is asked, a launched voice plays until it is stopped - so a stop, a kill
+        and a seat's ending are seen ending, and a bed plays for ever. */
+    struct QuietPlayer final : cue::Player
+    {
+        int trackCount() const override                     { return 64; }
+        void requestArm (const cue::ArmRequest& request) override { arms.push_back (request); }
+        int slotCount() const override                      { return 2; }
+        bool launchAtSample (int track, int, std::int64_t) override { playing.insert (track); return true; }
+        bool stop (int track) override                      { playing.erase (track); return true; }
+        bool stopAtSample (int track, int, std::int64_t) override { playing.erase (track); return true; }
+        void setLevelDb (int, double) override              {}
+        void setRouting (int, const std::vector<cue::Coefficient>&) override {}
+        bool isPlaying (int track) const override           { return playing.count (track) > 0; }
+        bool isArmReady (int track) const override          { return ready.count (track) > 0; }
+        std::int64_t samplesElapsed() const override        { return samples; }
+        int blockSize() const override                      { return 128; }
+        int sampleRate() const override                     { return 48000; }
+        int channelsPerTrack() const override               { return 2; }
+
+        void completeArms (Engine& engine)
+        {
+            for (const auto& arm : arms)
+            {
+                engine.submit (origin::engine, "audio.armed", { s (arm.runId), osc::Value::int32 (arm.track) });
+                ready.insert (arm.track);
+            }
+
+            arms.clear();
+        }
+
+        std::vector<cue::ArmRequest> arms;
+        std::set<int> ready, playing;
+        std::int64_t samples = 0;
+    };
+
+    /*  ONE MACHINE: its own engine, show, run table, sound, DCAs and faders,
+        the show read from one text, the undo rule serve's. With no sound, a
+        machine as `wfg replay` is. */
+    struct Machine
+    {
+        explicit Machine (const std::string& showText, bool withSound = true)
+        {
+            engine.log().openInMemory ({});
+            REQUIRE (doc::CanonicalXml::read (showText, document).ok);
+
+            doc::registerDocumentCommands (engine.commands(), document);
+            cue::registerCueCommands (engine.commands(), document, focus);
+            cue::registerRunCommands (engine.commands(), runs);
+            cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+            pair::registerPairCommands (engine.commands(), pairing);
+
+            if (withSound)
+                runner.setPlayer (&audio);
+
+            runner.setSamplesPerTick (960);
+            runner.setDcas (&dcas);
+            runner.setLanes (&lanes);
+
+            engine.setBeforeApply ([this] (const Command& command, const Event& event,
+                                           const std::vector<osc::Value>& args, std::int64_t tick)
+                                   { cue::beginUndoStep (document, nullptr, command, event, args, tick); });
+        }
+
+        /*  One tick, as serve runs one - without the Runner's hooks on the tick
+            a seat goes in, as serve leaves them out then. */
+        void tickOnce (std::int64_t tick, bool hooks = true)
+        {
+            audio.samples = tick * 960;
+
+            if (hooks)
+                runner.beforeTick (engine, tick);
+
+            engine.processTick (tick);
+            audio.completeArms (engine);
+        }
+
+        void go (std::int64_t tick, const std::string& listId, const std::string& cueId)
+        {
+            REQUIRE (engine.submit (std::string (origin::cli), "node.set", { s (cue::standbyAddressOf (listId)), s (cueId) }));
+            tickOnce (tick);
+            REQUIRE (engine.submit (std::string (origin::cli), "go"));
+            tickOnce (tick + 1);
+        }
+
+        /** The live run of a cue, or empty. */
+        std::string runOf (const std::string& cueId) const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == cueId && ! run.isFinished() && ! run.onlyPrepared())
+                    return run.id;
+
+            return {};
+        }
+
+        std::string standbyOf (const std::string& listId) const
+        {
+            return document.getAttribute (cue::standbyAddressOf (listId)).value_or (std::string {});
+        }
+
+        Engine engine;
+        doc::ShowDocument document;
+        cue::RunTable runs;
+        cue::Focus focus;
+        doc::IdRegistry runIds { doc::IdRegistry::withSeed (11) };
+        cue::Runner runner { document, runs, runIds, focus };
+        QuietPlayer audio;
+        cue::DcaTable dcas;
+        cue::LaneTable lanes;
+        pair::Pairing pairing;
+    };
+
+    /*  A SHOW WITH EVERYTHING A POSITION CARRIES: a bed looping in a range for
+        ever; a timeline scene - a sound at once, another two seconds in, two
+        memos at three and six; a sequence of memos that steps on by itself,
+        each holding its post-wait, so the engine names its members as it
+        goes; a scene with a long member and a footer; a memo after; a DCA. */
+    struct Show
+    {
+        Show()
+        {
+            doc::ShowDocument show;
+            list = show.createList ("Sound").id;
+
+            bed = show.createCue (list, 0, "media", "Bed").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + bed + "/file", "bed.wav").ok);
+            const auto range = show.createRange (bed, 2.0, 2.5);
+            REQUIRE (range.ok);
+            REQUIRE (show.setAttribute ("/godot/range/" + range.id + "/loops", "0").ok);
+
+            scene = show.createCue (list, 1, "group", "Scene").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+            rain = show.createCue (scene, 0, "media", "Rain").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav").ok);
+            thunder = show.createCue (scene, 1, "media", "Thunder").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + thunder + "/file", "thunder.wav").ok);
+            REQUIRE (show.setAttribute ("/godot/cue/" + thunder + "/preWait", "2").ok);
+            lightsA = show.createCue (scene, 2, "memo", "Lights A").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + lightsA + "/preWait", "3").ok);
+            lightsB = show.createCue (scene, 3, "memo", "Lights B").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + lightsB + "/preWait", "6").ok);
+
+            walk = show.createCue (list, 2, "group", "Walk").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + walk + "/advance", "auto").ok);
+
+            for (int n = 0; n < 6; ++n)
+            {
+                const auto step = show.createCue (walk, n, "memo", "Step " + std::to_string (n + 1)).id;
+                REQUIRE (show.setAttribute ("/godot/cue/" + step + "/postWait", "1").ok);
+                steps.push_back (step);
+            }
+
+            other = show.createCue (list, 3, "group", "Other").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + other + "/advance", "auto").ok);
+            hold = show.createCue (other, 0, "memo", "Hold").id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + hold + "/preWait", "60").ok);
+            const auto footer = show.createRole (other, "footer");
+            REQUIRE (footer.ok);
+            release = show.createCue (footer.id, 0, "memo", "Release").id;
+
+            next = show.createCue (list, 4, "memo", "Next").id;
+            after = show.createCue (list, 5, "memo", "After").id;
+
+            dca = show.createDca ("Band").id;
+            REQUIRE (! dca.empty());
+
+            REQUIRE (show.setAttribute ("/godot/list/goDebounce", "0").ok);
+            text = doc::CanonicalXml::write (show);
+        }
+
+        std::string text, list, bed, scene, rain, thunder, lightsA, lightsB, walk, other, hold, release, next, after, dca;
+        std::vector<std::string> steps;
+    };
+
+    /*  THE LEADER'S EVENING: the bed, the scene, the walk; a DCA ridden and the
+        faders flipped to the bed. */
+    void playEvening (Machine& leader, const Show& show, std::int64_t& tick)
+    {
+        leader.go (tick, show.list, show.bed);
+        tick += 20;
+        leader.go (tick, show.list, show.scene);
+        tick += 20;
+        leader.go (tick, show.list, show.walk);
+        tick += 2;
+
+        leader.dcas.set (show.dca, -4.5);
+        leader.lanes.flip (show.bed);
+        leader.lanes.setArmed (cue::levelLaneKey, true);
+    }
+
+    struct RunLine
+    {
+        std::string id, cue, state, parent;
+
+        bool operator== (const RunLine& other) const
+        {
+            return id == other.id && cue == other.cue && state == other.state && parent == other.parent;
+        }
+    };
+
+    /** The runs a summary would say: live, and not only made ready. */
+    std::map<std::string, RunLine> liveLines (const cue::RunTable& runs)
+    {
+        std::map<std::string, RunLine> out;
+
+        for (const auto& run : runs.all())
+            if (! run.isFinished() && ! run.onlyPrepared())
+                out[run.id] = { run.id, run.cue, run.state, run.parent };
+
+        return out;
+    }
+
+    std::string spelled (const std::map<std::string, RunLine>& lines)
+    {
+        std::string out;
+
+        for (const auto& [id, line] : lines)
+            out += id + " " + line.cue + " " + line.state + " under " + (line.parent.empty() ? "-" : line.parent) + "\n";
+
+        return out;
+    }
+
+    std::vector<LogRecord> recordsOf (Engine& engine, const std::string& command)
+    {
+        std::vector<LogRecord> out;
+
+        for (auto& record : LogFile::parse (engine.log().contents()).records)
+            if (record.command == command)
+                out.push_back (std::move (record));
+
+        return out;
+    }
+}
+
+//==============================================================================
+TEST_CASE ("seat: a position reads back as it was written - lists, runs, rounds, fades, trims, faders, names - in any locale")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const Show show;
+    Machine leader { show.text };
+    std::int64_t tick = 50;
+    playEvening (leader, show, tick);
+
+    for (; tick < 200; ++tick)
+        leader.tickOnce (tick);
+
+    const auto at = leader.runner.positionNow (tick, 41);
+    const auto text = pair::toText (at);
+
+    //  What it carried: the rows, a list's history, the bed in its slice, the scene, the walk, the trims, the faders.
+    CHECK (at.counter == 41u);
+    CHECK (at.tick == tick);
+    CHECK (std::any_of (at.rows.begin(), at.rows.end(), [&show] (const pair::Position::Row& row)
+                        { return row.address == cue::standbyAddressOf (show.list); }));
+    CHECK (std::none_of (at.rows.begin(), at.rows.end(), [] (const pair::Position::Row& row)
+                         { return row.address.find ("DeviceId") != std::string::npos
+                                    || row.address.find ("Settled") != std::string::npos; }));
+    REQUIRE (at.lists.size() == 1u);
+    CHECK (at.lists.front().history.size() >= 3u);
+
+    const auto* bed = at.runNamed (leader.runOf (show.bed));
+    REQUIRE (bed != nullptr);
+    CHECK (bed->state == cue::runState::playing);
+    CHECK (bed->range == 0);
+    CHECK (bed->slicePlayed > 1.0);              // looped round its half second more than twice
+
+    const auto* scene = at.runNamed (leader.runOf (show.scene));
+    REQUIRE (scene != nullptr);
+    CHECK (scene->kind == "group");
+    CHECK (scene->iteration == 1);
+    CHECK (! scene->round.empty());
+    CHECK (std::any_of (at.groups.begin(), at.groups.end(), [scene] (const cue::GroupJob& job) { return job.run == scene->id; }));
+
+    CHECK (at.dcas.count (show.dca) == 1u);
+    CHECK (at.laneCue == show.bed);
+    CHECK (at.laneArmed == std::vector<std::string> { cue::levelLaneKey });
+    CHECK (at.names.salt == leader.runner.runNames().salt());
+    CHECK (! at.names.counts.empty());
+
+    //  AND READ BACK, every value: the same text written again, and the same values.
+    std::string why;
+    const auto read = pair::readPosition (text, &why);
+    INFO (why);
+    REQUIRE (read.has_value());
+    CHECK (pair::toText (*read) == text);
+    CHECK (read->names == at.names);
+    CHECK (read->runs.size() == at.runs.size());
+    CHECK (read->dcas == at.dcas);
+    CHECK (read->runNamed (bed->id)->slicePlayed == doctest::Approx (bed->slicePlayed).epsilon (1e-12));
+    CHECK (std::bit_cast<std::uint64_t> (read->dcas.at (show.dca)) == std::bit_cast<std::uint64_t> (-4.5));
+
+    //  A NUMBER WITH A POINT, whatever the locale: never a comma inside a d: atom.
+    CHECK (text.find ("d:-4.5") != std::string::npos);
+    CHECK (text.find ("d:-4,5") == std::string::npos);
+
+    //  REBASED: every tick moved, nothing else.
+    auto moved = *read;
+    moved.rebase (1000);
+    CHECK (moved.tick == at.tick + 1000);
+    CHECK (moved.runNamed (scene->id)->launchTick == scene->launchTick + 1000);
+    CHECK (moved.lists.front().history.front().tick == at.lists.front().history.front().tick + 1000);
+
+    //  REFUSED, never half read: a text cut short, a format this build does not write, a line that is not one.
+    CHECK_FALSE (pair::readPosition (text.substr (0, text.size() / 2)).has_value());
+    CHECK_FALSE (pair::readPosition ("position i:2 h:1 h:1\nend\n").has_value());
+    CHECK_FALSE (pair::readPosition ("position i:1 h:1 h:1\nrun s:\"A\"\nend\n").has_value());
+    CHECK (pair::readPosition ("position i:1 h:1 h:1\nend\n").has_value());
+}
+
+//==============================================================================
+namespace
+{
+    /** Every preparation the horizon has made, by name and cue. */
+    std::set<std::pair<std::string, std::string>> preparationsOf (const cue::RunTable& runs)
+    {
+        std::set<std::pair<std::string, std::string>> out;
+
+        for (const auto& run : runs.all())
+            if (! run.isFinished() && run.onlyPrepared())
+                out.emplace (run.id, run.cue);
+
+        return out;
+    }
+
+    std::string differenceAt (Machine& leader, std::int64_t leaderTick, Machine& follower, std::int64_t localTick)
+    {
+        pair::Labels labels;
+        labels.cue = [&follower] (const std::string& id) { return follower.runner.labelOf (id); };
+
+        auto theirs = leader.runner.summaryNow (leaderTick, 0);
+        auto ours = follower.runner.summaryNow (localTick, 0);
+        return pair::differenceOf (theirs, ours, labels);
+    }
+}
+
+TEST_CASE ("seat: an engine that was elsewhere is seated where the leader is - its own runs ended with no footer, the leader's made under their names at their playheads, the standby written, the names drawn alike, one record a replay seats alike")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const Show show;
+    Machine leader { show.text }, follower { show.text };
+
+    //  Each machine's own randomness: a salt of its own.
+    follower.runIds.drawSeed();
+    follower.runner.runNames().setSalt (follower.runner.runNames().salt() ^ 0x5a5a5a5au);
+    REQUIRE (follower.runner.runNames().salt() != leader.runner.runNames().salt());
+
+    std::int64_t tick = 50;
+    playEvening (leader, show, tick);
+
+    for (; tick < 200; ++tick)
+        leader.tickOnce (tick);
+
+    /*  THE FOLLOWER WAS ELSEWHERE: a scene of its own running, its member
+        holding and its footer still to come, the standby on another cue. */
+    std::int64_t local = 3000;
+    follower.go (local, show.list, show.other);
+    local += 2;
+
+    for (int n = 0; n < 10; ++n)
+        follower.tickOnce (local++);
+
+    const auto ownScene = follower.runOf (show.other);
+    REQUIRE (! ownScene.empty());
+    REQUIRE (follower.engine.submit (std::string (origin::cli), "node.set",
+                                     { s (cue::standbyAddressOf (show.list)), s (show.after) }));
+    follower.tickOnce (local++);
+
+    /*  THE LEADER'S POSITION, as its last tick left it, read on the follower's
+        clock and applied in the follower's next tick - the slot, so on time. */
+    const auto leaderTick = tick - 1;
+    auto at = leader.runner.positionNow (leaderTick, 7);
+    at.rebase (local - leaderTick);
+
+    REQUIRE (follower.engine.submit (std::string (origin::engine), "pair.seat", { s (pair::toText (at)) }));
+    follower.tickOnce (local, false);
+
+    const auto seats = recordsOf (follower.engine, "pair.seat");
+    REQUIRE (seats.size() == 1u);
+    CHECK (seats.front().kind == LogRecord::Kind::applied);
+    CHECK (follower.runner.seatNotes().empty());
+
+    //  ITS OWN SCENE ENDED, no footer, and gone from the table; the standby the leader's.
+    CHECK (follower.runs.find (ownScene) == nullptr);
+    CHECK (follower.standbyOf (show.list) == leader.standbyOf (show.list));
+
+    //  THE LEADER'S RUNS, UNDER THE LEADER'S NAMES, the scene in its round.
+    {
+        const auto theirs = liveLines (leader.runs);
+        const auto ours = liveLines (follower.runs);
+        INFO ("leader:\n" << spelled (theirs) << "follower:\n" << spelled (ours));
+        REQUIRE (theirs.size() == ours.size());
+
+        for (const auto& [id, line] : theirs)
+        {
+            REQUIRE (ours.count (id) == 1u);
+            CHECK (ours.at (id).cue == line.cue);
+            CHECK (ours.at (id).parent == line.parent);
+        }
+
+        const auto* scene = follower.runs.find (leader.runOf (show.scene));
+        REQUIRE (scene != nullptr);
+        CHECK (scene->iteration == leader.runs.find (scene->id)->iteration);
+        CHECK (scene->round == leader.runs.find (scene->id)->round);
+    }
+
+    //  TONIGHT'S, AND THE NAMES.
+    CHECK (follower.dcas.trimOf (show.dca) == doctest::Approx (-4.5));
+    CHECK (follower.lanes.cue() == show.bed);
+    CHECK (follower.lanes.isArmed (cue::levelLaneKey));
+    CHECK (follower.runner.runNames().salt() == leader.runner.runNames().salt());
+    CHECK (follower.runner.runNames().next ("root:" + show.next, show.next)
+           == leader.runner.runNames().next ("root:" + show.next, show.next));
+
+    /*  AND FROM THEN ON, TICK FOR TICK: the leader's tick and the follower's a
+        seat apart - the scene's memos coming due, the walk stepping on and
+        naming its members, the bed looping - and every summary the same, once
+        the seated sounds have started. */
+    std::string firstDifference;
+    std::int64_t compared = 0;
+
+    for (int n = 1; n <= 260; ++n)
+    {
+        leader.tickOnce (leaderTick + n);
+        follower.tickOnce (local + n);
+
+        if (n <= follower.runner.seatSettleTicks())
+            continue;
+
+        ++compared;
+
+        if (! firstDifference.empty())
+            continue;
+
+        if (const auto difference = differenceAt (leader, leaderTick + n, follower, local + n); ! difference.empty())
+            firstDifference = "after " + std::to_string (n) + " ticks: " + difference;
+        else if (! (liveLines (leader.runs) == liveLines (follower.runs)))
+            firstDifference = "after " + std::to_string (n) + " ticks, the run tables:\n" + spelled (liveLines (leader.runs))
+                            + "against\n" + spelled (liveLines (follower.runs));
+    }
+
+    CHECK (firstDifference == "");
+    CHECK (compared > 240);
+
+    //  NO FOOTER EVER RAN for the scene the seat ended; the walk named the same members on both.
+    CHECK (std::none_of (follower.runs.all().begin(), follower.runs.all().end(),
+                         [&show] (const cue::Run& run) { return run.cue == show.release; }));
+    CHECK (preparationsOf (follower.runs) == preparationsOf (leader.runs));
+
+    //  ONE RECORD, AND A REPLAY OF THE FOLLOWER'S LOG IS SEATED ALIKE.
+    Machine replayed { show.text, false };
+    const auto result = wfg::replay (replayed.engine, LogFile::parse (follower.engine.log().contents()));
+
+    std::string mismatches;
+    for (const auto& mismatch : result.mismatches)
+        mismatches += mismatch + "\n";
+
+    INFO (mismatches);
+    CHECK (result.ok);
+    CHECK (spelled (liveLines (replayed.runs)) == spelled (liveLines (follower.runs)));
+    CHECK (replayed.standbyOf (show.list) == follower.standbyOf (show.list));
+    CHECK (replayed.runner.runNames().position() == follower.runner.runNames().position());
+}
+
+//==============================================================================
+namespace
+{
+    /*  THE WIRE AS A TCP CONNECTION IS: in order, each frame arriving no sooner
+        than the one before it, a random 0 to 15 ms after it left. */
+    struct JitteryWire
+    {
+        struct Frame
+        {
+            Clock::time_point at;
+            osc::Packet packet;
+        };
+
+        explicit JitteryWire (unsigned seed) : random (seed) {}
+
+        pair::Stream::Send send()
+        {
+            return [this] (const std::string&, const std::vector<std::uint8_t>& bytes)
+            {
+                const auto decoded = osc::decode (bytes.data(), bytes.size());
+
+                if (! decoded.ok)
+                    return false;
+
+                auto at = sentAt + std::chrono::microseconds (jitter (random));
+                at = std::max (at, lastArrival);
+                lastArrival = at;
+                frames.push_back ({ at, decoded.packet });
+                return true;
+            };
+        }
+
+        void deliverUpTo (Clock::time_point now, pair::Receiver& receiver)
+        {
+            while (! frames.empty() && frames.front().at <= now)
+            {
+                receiver.deliver ("127.0.0.1:5010", frames.front().packet, frames.front().at);
+                frames.pop_front();
+            }
+        }
+
+        std::mt19937 random;
+        std::uniform_int_distribution<int> jitter { 0, 15000 };
+        Clock::time_point sentAt {}, lastArrival {};
+        std::deque<Frame> frames;
+    };
+
+    osc::Packet packetOf (const std::vector<std::uint8_t>& bytes)
+    {
+        const auto decoded = osc::decode (bytes.data(), bytes.size());
+        REQUIRE (decoded.ok);
+        return decoded.packet;
+    }
+}
+
+TEST_CASE ("seat: two engines on one show - a follower that joins late is seated, its runs the leader's for two hundred ticks and in step; a run stopped on it by hand puts it out of step until a realign")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const Show show;
+    Machine main { show.text }, backup { show.text };
+    backup.runIds.drawSeed();
+    backup.runner.runNames().setSalt (backup.runner.runNames().salt() ^ 0x0f0f0f0fu);
+
+    //  THE LEADER'S HALF, as serve wires it: the stream, its position and its summaries.
+    pair::Stream stream { "S1" };
+    stream.setLeading (true);
+    main.engine.setAfterRecord ([&stream] (const LogRecord& record, const Command* command) { stream.keep (record, command); });
+    stream.setPositionMaker ([&main] (std::int64_t at, std::uint64_t counter)
+                             { return pair::toText (main.runner.positionNow (at, counter)); });
+    stream.setSummaryMaker ([&main] (std::int64_t at, std::uint64_t counter)
+                            { return pair::summaryBytes (main.runner.summaryNow (at, counter)); });
+
+    unsigned seed = 11;
+    SUBCASE ("one evening's jitter")    { seed = 11; }
+    SUBCASE ("another evening's")       { seed = 2027; }
+
+    JitteryWire wire { seed };
+    stream.setSend (wire.send());
+
+    //  THE FOLLOWER'S, as serve wires it.
+    pair::Receiver receiver;
+    pair::Follower following { [&backup] (Event event) { return backup.engine.submit (std::move (event)); } };
+    pair::InStep inStep;
+    pair::Labels labels;
+    labels.cue = [&backup] (const std::string& id) { return backup.runner.labelOf (id); };
+    labels.list = labels.cue;
+
+    receiver.setOnRecord ([&following] (std::uint64_t, const LogRecord& record) { following.record (record); });
+    receiver.setOnBeat ([&following] (std::int64_t mainTick, Clock::time_point at) { following.beat (mainTick, at); });
+    receiver.setOnPosition ([&following] (std::uint64_t, std::int64_t mainTick, std::string text)
+                            { following.position (mainTick, std::move (text)); });
+    receiver.setOnSummary ([&inStep] (pair::Summary summary) { inStep.heard (std::move (summary)); });
+
+    pair::FollowGate gate { backup.engine.commands(), [] (std::vector<std::uint8_t>) { return true; } };
+    backup.engine.setGate ([&gate] (Event& event) { return gate.take (event); });
+    backup.engine.setAfterRecord ([&following, &inStep, &backup] (const LogRecord& record, const Command*)
+                                  {
+                                      following.applied (record);
+
+                                      if (record.command == "pair.seat" && record.kind == LogRecord::Kind::applied)
+                                          inStep.seated (record.tick + backup.runner.seatSettleTicks());
+                                  });
+
+    /*  THE TWO CLOCKS, 7 ms out of phase: the backup's counter far ahead of
+        the main's, or behind it - a machine started after its main, whose
+        clock reads the main's first sounds as ticks before its own first. */
+    std::int64_t clockBase = 2000;
+    SUBCASE ("the backup's clock ahead of the main's")  { clockBase = 2000; }
+    SUBCASE ("the backup's clock behind the main's")    { clockBase = -150; }
+
+    const auto mainDue = [] (std::int64_t at) { return t0 + 20ms * at; };
+    const auto backupDue = [clockBase] (std::int64_t local) { return t0 + 20ms * (local - clockBase) + 7ms; };
+
+    //  THE MAIN'S EVENING, BEFORE THE BACKUP IS THERE.
+    std::int64_t mainTick = 50;
+    playEvening (main, show, mainTick);
+
+    for (; mainTick < 200; ++mainTick)
+    {
+        main.tickOnce (mainTick);
+        wire.sentAt = mainDue (mainTick) + 2ms;
+        stream.afterTick (mainTick, 1.0);
+    }
+
+    //  THE BACKUP JOINS: it says hello from now, and follows.
+    pair::wire::Hello hello;
+    hello.machine = "backup";
+    hello.role = "backup";
+    hello.lastCounter = pair::wire::fromNow;
+    hello.stream = "S1";
+    hello.state = "following";
+    hello.ownStream = "S2";
+    hello.described = true;
+    stream.received ("ws:127.0.0.1:50001", packetOf (pair::wire::helloBytes (hello)), mainDue (mainTick));
+    receiver.startAfresh ("S1");
+    following.start();
+    backup.engine.setGated (true);
+
+    /*  TICK BY TICK, each machine on its own clock. On the backup's, after the
+        seat has settled, the summaries say whether it is in step, and its run
+        table is laid against the main's of the same moment - the main's tick
+        the follower's slot names. */
+    std::map<std::int64_t, std::map<std::string, RunLine>> mainRuns;
+    std::map<std::int64_t, pair::Summary> mainSummaries;
+    std::int64_t localTick = clockBase + mainTick + 3;
+    std::int64_t seatedAt = -1, compared = 0, inStepTicks = 0;
+    std::string firstDifference;
+
+    std::string plantedRun, outOfStep;
+    std::int64_t plantedAt = -1, realignedAt = -1, backInStepAt = -1;
+
+    const auto lastMainTick = mainTick + 520;
+
+    while (mainTick <= lastMainTick)
+    {
+        if (mainDue (mainTick) <= backupDue (localTick))
+        {
+            main.tickOnce (mainTick);
+            wire.sentAt = mainDue (mainTick) + 2ms;
+            stream.afterTick (mainTick, 1.0);
+            mainRuns[mainTick] = liveLines (main.runs);
+            mainSummaries[mainTick] = main.runner.summaryNow (mainTick, 0);
+            ++mainTick;
+            continue;
+        }
+
+        const auto now = backupDue (localTick);
+        wire.deliverUpTo (now, receiver);
+        receiver.drain (now, 1.0);
+        const auto seatsBefore = following.seats();
+        following.beforeTick (localTick, now, 0.0004);
+        backup.tickOnce (localTick, following.seats() == seatsBefore);
+
+        inStep.afterTick (localTick, following.offset(), following.delayFixed() && ! following.seatHeld(),
+                          [&backup, localTick] { return backup.runner.summaryNow (localTick, 0); }, labels);
+
+        if (seatedAt < 0 && following.seats() > 0)
+            seatedAt = localTick;
+
+        if (inStep.inStep())
+            ++inStepTicks;
+
+        //  THE SEAT SETTLED: two hundred ticks of the main's runs, a delay later.
+        const auto settle = backup.runner.seatSettleTicks();
+
+        if (seatedAt >= 0 && plantedAt < 0 && localTick > seatedAt + settle && localTick <= seatedAt + settle + 200)
+        {
+            if (const auto theirs = mainRuns.find (localTick - following.offset()); theirs != mainRuns.end())
+            {
+                ++compared;
+
+                if (firstDifference.empty() && ! (liveLines (backup.runs) == theirs->second))
+                    firstDifference = "local tick " + std::to_string (localTick) + ", the main's "
+                                    + std::to_string (theirs->first) + ":\n" + spelled (theirs->second)
+                                    + "against\n" + spelled (liveLines (backup.runs));
+
+                //  AND THE PLAYHEADS, every tick and not every fifth: within two ticks of the main's.
+                if (firstDifference.empty())
+                    if (const auto difference = pair::differenceOf (mainSummaries.at (theirs->first),
+                                                                    backup.runner.summaryNow (localTick, 0), labels);
+                        ! difference.empty())
+                        firstDifference = "local tick " + std::to_string (localTick) + ": " + difference;
+            }
+        }
+
+        /*  A DIFFERENCE PLANTED BY HAND: the bed killed on the backup alone, as
+            its engine might have decided - the leader's plays on. */
+        if (seatedAt >= 0 && plantedAt < 0 && localTick == seatedAt + settle + 210)
+        {
+            INFO ("differs: " << inStep.differs() << "; run tables: " << firstDifference
+                  << "; compared " << inStep.compared() << ", mismatched " << inStep.mismatched());
+            REQUIRE (inStep.inStep());
+            plantedRun = backup.runOf (show.bed);
+            REQUIRE (! plantedRun.empty());
+            REQUIRE (backup.engine.submit (std::string (origin::engine), "run.kill", { s (plantedRun) }));
+            plantedAt = localTick;
+        }
+
+        //  OUT OF STEP, SAID - then a realign asked of the leader, as `pair.realign` asks.
+        if (plantedAt >= 0 && realignedAt < 0 && ! inStep.inStep() && ! inStep.differs().empty())
+        {
+            outOfStep = inStep.differs();
+            stream.received ("ws:127.0.0.1:50001", osc::Packet::message (pair::wire::seat, {}), now);
+            realignedAt = localTick;
+        }
+
+        if (realignedAt >= 0 && backInStepAt < 0 && following.seats() > 1 && inStep.inStep())
+            backInStepAt = localTick;
+
+        ++localTick;
+    }
+
+    MESSAGE ("offset " << following.offset() << ", delay " << following.delay() << ", seated at local tick "
+             << seatedAt << ", seats " << following.seats() << ", run tables compared " << compared
+             << ", summaries compared " << inStep.compared() << ", mismatched " << inStep.mismatched()
+             << ", out of step: \"" << outOfStep << "\", in step again " << (backInStepAt - realignedAt)
+             << " ticks after the realign was asked");
+
+    //  SEATED ONCE ON JOINING, AND THE MAIN'S POSITION SENT FOR IT.
+    REQUIRE (seatedAt >= 0);
+    CHECK (stream.positionsSent() >= 1);
+    CHECK (following.seatsDropped() == 0);
+
+    //  ITS RUNS THE MAIN'S, UNDER THE MAIN'S NAMES, FOR TWO HUNDRED TICKS.
+    CHECK (firstDifference == "");
+    CHECK (compared >= 190);
+    CHECK (inStepTicks > 150);
+
+    //  A RUN STOPPED HERE ALONE: OUT OF STEP, IN WORDS - AND A REALIGN SEATS IT AGAIN.
+    REQUIRE (plantedAt >= 0);
+    CHECK (outOfStep == "cue Bed is running on the main, not here");
+    REQUIRE (realignedAt >= 0);
+    CHECK (stream.positionsSent() >= 2);
+    CHECK (following.seats() >= 2);
+    CHECK (backInStepAt >= 0);
+    CHECK (backup.runOf (show.bed) == main.runOf (show.bed));
+    CHECK (inStep.inStep());
+    CHECK (inStep.differs() == "");
+
+    //  THE SEATS ARE THE ENGINE'S RECORDS ON THE FOLLOWER: two, applied.
+    const auto seats = recordsOf (backup.engine, "pair.seat");
+    CHECK (seats.size() == static_cast<std::size_t> (following.seats()));
+    CHECK (std::all_of (seats.begin(), seats.end(), [] (const LogRecord& record)
+                        { return record.kind == LogRecord::Kind::applied && record.origin == origin::engine; }));
+}
+
+//==============================================================================
+TEST_CASE ("in step: a summary's wire, and the one sentence for what differs")
+{
+    pair::Summary leader;
+    leader.tick = 1234;
+    leader.counter = 56;
+    leader.standby = { { "7K2QM9X4", "B3N8R5TW" } };
+    leader.runs = { { "R8M2K4Q1", "C1D2E3F4", "playing", 400, -1, 0 },
+                    { "R8M2K4Q2", "G5H6J7K8", "playing", 90, 1, 0 },
+                    { "R8M2K4Q3", "M9N8P7Q6", "waiting", -25, -1, 0 } };
+
+    //  THE WIRE: what went is what comes.
+    const auto bytes = pair::summaryBytes (leader);
+    const auto decoded = osc::decode (bytes.data(), bytes.size());
+    REQUIRE (decoded.ok);
+    CHECK (pair::wire::boundFor (decoded.packet) == pair::wire::Bound::follower);
+
+    const auto read = pair::readSummary (decoded.packet);
+    REQUIRE (read.has_value());
+    CHECK (read->tick == 1234);
+    CHECK (read->counter == 56u);
+    REQUIRE (read->runs.size() == 3u);
+    CHECK (read->runs[1].range == 1);
+    CHECK (read->runs[2].playhead == -25);
+    CHECK (read->runs[0].loop == 0);
+    CHECK_FALSE (pair::readSummary (osc::Packet::message (pair::wire::summary, { osc::Value::int64 (1) })).has_value());
+
+    pair::Labels labels;
+    labels.cue = [] (const std::string& id) { return id == "C1D2E3F4" ? std::string ("12 Thunder") : std::string {}; };
+    labels.list = [] (const std::string& id) { return id == "7K2QM9X4" ? std::string ("Main") : std::string {}; };
+
+    //  THE SAME: nothing to say - two ticks apart is in step.
+    auto here = leader;
+    here.runs[0].playhead = 402;
+    CHECK (pair::differenceOf (leader, here, labels) == "");
+
+    here.runs[0].playhead = 403;
+    CHECK (pair::differenceOf (leader, here, labels) == "cue 12 Thunder's playhead is 60 ms apart");
+
+    here = leader;
+    here.standby[0].cue = "N6VRA3WB";
+    CHECK (pair::differenceOf (leader, here, labels) == "standby differs on list Main");
+
+    here = leader;
+    here.runs.erase (here.runs.begin());
+    CHECK (pair::differenceOf (leader, here, labels) == "cue 12 Thunder is running on the main, not here");
+
+    here = leader;
+    here.runs[0].state = "stopping";
+    CHECK (pair::differenceOf (leader, here, labels) == "cue 12 Thunder is playing on the main and stopping here");
+
+    here = leader;
+    here.runs[1].range = 0;
+    CHECK (pair::differenceOf (leader, here, labels) == "cue G5H6J7K8 plays range 2 on the main and range 1 here");
+
+    /*  ROUND THE LOOP: a slice a follower counts again from the pass it is in
+        is the same point of it - the same sound. */
+    auto looping = leader;
+    looping.runs[1].loop = 25;
+    here = looping;
+    here.runs[1].playhead = 90 - 3 * 25 + 1;
+    CHECK (pair::differenceOf (looping, here, labels) == "");
+    here.runs[1].playhead = 90 - 3 * 25 + 10;
+    CHECK (pair::differenceOf (looping, here, labels) == "cue G5H6J7K8's playhead is 200 ms apart");
+
+    here = leader;
+    here.runs.push_back ({ "R8M2K4Q9", "C1D2E3F4", "playing", 3, -1, 0 });
+    labels.leader = "the backup";
+    CHECK (pair::differenceOf (leader, here, labels) == "cue 12 Thunder is running here, not on the backup");
+}
+
+TEST_CASE ("in step: a summary at its slot, a difference said the second time, a match at once, a record applied otherwise at once")
+{
+    pair::Labels labels;
+    pair::InStep inStep;
+
+    pair::Summary same;
+    same.runs = { { "R8M2K4Q1", "C1D2E3F4", "playing", 100, -1, 0 } };
+
+    const pair::Summary missing;
+
+    std::int64_t localTick = 1000;
+    const std::int64_t offset = 2;
+    auto own = same;
+
+    const auto leaderAt = [] (pair::Summary summary, std::int64_t tick)
+    {
+        summary.tick = tick;
+        return summary;
+    };
+
+    const auto runTo = [&] (std::int64_t until)
+    {
+        for (; localTick <= until; ++localTick)
+            inStep.afterTick (localTick, offset, true, [&own] { return own; }, labels);
+    };
+
+    CHECK_FALSE (inStep.inStep());
+
+    //  Held to its slot: the leader's tick 1000 is compared at local 1002, not before.
+    inStep.heard (leaderAt (same, 1000));
+    runTo (1001);
+    CHECK (inStep.compared() == 0);
+    runTo (1002);
+    CHECK (inStep.compared() == 1);
+    CHECK (inStep.inStep());
+
+    //  A difference once is a launch a tick apart; twice, it is said.
+    own = missing;
+    inStep.heard (leaderAt (same, 1005));
+    runTo (1007);
+    CHECK (inStep.inStep());
+    CHECK (inStep.differs() == "");
+
+    inStep.heard (leaderAt (same, 1010));
+    runTo (1012);
+    CHECK_FALSE (inStep.inStep());
+    CHECK (inStep.differs() == "cue C1D2E3F4 is running on the main, not here");
+
+    //  A match says in step at once, and clears the sentence.
+    own = same;
+    inStep.heard (leaderAt (same, 1015));
+    runTo (1017);
+    CHECK (inStep.inStep());
+    CHECK (inStep.differs() == "");
+
+    //  A record applied otherwise: said at once, cleared by the next match.
+    inStep.recordDiffered ("1 record applied otherwise than on the main; the first, go at the main's tick 1016:"
+                           " refused there (too-soon), applied here");
+    CHECK_FALSE (inStep.inStep());
+    CHECK (inStep.differs().rfind ("1 record applied otherwise", 0) == 0);
+    inStep.heard (leaderAt (same, 1020));
+    runTo (1022);
+    CHECK (inStep.inStep());
+
+    //  A summary whose slot has passed is dropped, unread; so is one in a seat's settling.
+    inStep.heard (leaderAt (same, 1000));
+    runTo (1023);
+    CHECK (inStep.waiting() == 0u);
+
+    const auto before = inStep.compared();
+    inStep.seated (1040);
+    own = missing;
+    inStep.heard (leaderAt (same, 1030));
+    inStep.heard (leaderAt (same, 1035));
+    runTo (1038);
+    CHECK (inStep.compared() == before);
+    CHECK (inStep.inStep());
+}
+
+//==============================================================================
+TEST_CASE ("seat: a position of two hundred runs goes in parts of whole lines, and comes back whole, once, whichever path brings it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    pair::Position at;
+    at.counter = 9001;
+    at.tick = 77777;
+    at.names.salt = 0xfedcba9876543210ull;
+
+    for (int n = 0; n < 200; ++n)
+    {
+        pair::SeatedRun run;
+        run.id = "R" + std::to_string (1000000 + n);
+        run.cue = "C" + std::to_string (2000000 + n);
+        run.kind = n % 3 == 0 ? "group" : "media";
+        run.state = "playing";
+        run.launchTick = 70000 + n;
+        run.launched = true;
+        run.position = 12.345678901234 + n;
+        run.ownLevel = -6.5;
+        run.round = { "A0000001", "A0000002", "A0000003" };
+        run.moved["send/B0000001"] = -3.25;
+        at.runs.push_back (std::move (run));
+        at.names.counts[{ "root:C" + std::to_string (2000000 + n), "C" + std::to_string (2000000 + n) }] = 3;
+    }
+
+    const auto text = pair::toText (at);
+    REQUIRE (text.size() > 2 * pair::wire::positionPartBytes);
+
+    const auto parts = pair::wire::positionMessages (at.counter, at.tick, text);
+    CHECK (parts.size() >= 3u);
+
+    pair::Receiver receiver;
+    std::vector<std::string> handed;
+    receiver.setOnPosition ([&handed] (std::uint64_t counter, std::int64_t tick, std::string whole)
+                            {
+                                CHECK (counter == 9001u);
+                                CHECK (tick == 77777);
+                                handed.push_back (std::move (whole));
+                            });
+
+    //  ONE BUNDLE, AS A TICK SENDS IT; then the same again down a second path.
+    std::vector<osc::Packet> elements;
+
+    for (const auto& bytes : parts)
+    {
+        const auto decoded = osc::decode (bytes.data(), bytes.size());
+        REQUIRE (decoded.ok);
+        CHECK (pair::wire::boundFor (decoded.packet) == pair::wire::Bound::follower);
+        elements.push_back (decoded.packet);
+    }
+
+    const auto bundle = osc::Packet::bundle (osc::TimeTag {}, elements);
+    receiver.deliver ("10.0.0.1:5010", bundle, t0);
+    receiver.deliver ("10.0.0.2:5010", bundle, t0 + 1ms);
+    receiver.drain (t0 + 2ms, 1.0);
+
+    REQUIRE (handed.size() == 1u);
+    CHECK (handed.front() == text);
+
+    const auto read = pair::readPosition (handed.front());
+    REQUIRE (read.has_value());
+    CHECK (read->runs.size() == 200u);
+    CHECK (read->names == at.names);
+    CHECK (read->runs[199].position == doctest::Approx (12.345678901234 + 199).epsilon (1e-15));
+
+    //  A PART OUT OF ITS PLACE STARTS NOTHING: a position missing its middle is never handed on.
+    pair::Receiver broken;
+    auto brokenHanded = 0;
+    broken.setOnPosition ([&brokenHanded] (std::uint64_t, std::int64_t, std::string) { ++brokenHanded; });
+
+    for (std::size_t n = 0; n < elements.size(); ++n)
+        if (n != 1)
+            broken.deliver ("10.0.0.1:5010", elements[n], t0);
+
+    broken.drain (t0 + 1ms, 1.0);
+    CHECK (brokenHanded == 0);
+}
+
+//==============================================================================
+TEST_CASE ("seat: the leader's position asked for - by a follow from now, by a realign - sent once, after the records it is true at")
+{
+    pair::Stream stream { "S1" };
+    stream.setLeading (true);
+
+    std::int64_t made = 0;
+    stream.setPositionMaker ([&made] (std::int64_t tick, std::uint64_t counter)
+                             {
+                                 ++made;
+                                 return "position i:1 h:" + std::to_string (counter) + " h:" + std::to_string (tick) + "\nend\n";
+                             });
+
+    std::vector<osc::Packet> frames;
+    stream.setSend ([&frames] (const std::string&, const std::vector<std::uint8_t>& bytes)
+                    {
+                        const auto decoded = osc::decode (bytes.data(), bytes.size());
+                        REQUIRE (decoded.ok);
+                        frames.push_back (decoded.packet);
+                        return true;
+                    });
+
+    const auto addresses = [] (const osc::Packet& frame)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& element : frame.elements)
+            out.push_back (element.address);
+
+        return out;
+    };
+
+    //  Three records kept before anybody follows.
+    for (int n = 0; n < 3; ++n)
+    {
+        LogRecord record;
+        record.kind = LogRecord::Kind::applied;
+        record.origin = "cli";
+        record.command = "go";
+        stream.keep (record, nullptr);
+    }
+
+    //  A FOLLOW FROM NOW: welcomed after the last counter, and told where this machine is.
+    pair::wire::Hello hello;
+    hello.machine = "backup";
+    hello.role = "backup";
+    hello.lastCounter = pair::wire::fromNow;
+    hello.stream = "S1";
+    hello.state = "following";
+    hello.described = true;
+    const auto helloBytes = pair::wire::helloBytes (hello);
+    const auto helloPacket = osc::decode (helloBytes.data(), helloBytes.size());
+    REQUIRE (helloPacket.ok);
+    stream.received ("ws:a", helloPacket.packet, t0);
+    stream.afterTick (100, 1.0);
+
+    REQUIRE (frames.size() == 1u);
+    CHECK (addresses (frames[0]) == std::vector<std::string> { pair::wire::welcome, pair::wire::position, pair::wire::beat });
+    CHECK (frames[0].elements[1].args[0].getInt64() == 3);
+    CHECK (made == 1);
+
+    //  Once: the next tick sends only the beat.
+    stream.afterTick (101, 1.0);
+    CHECK (addresses (frames[1]) == std::vector<std::string> { pair::wire::beat });
+
+    //  A REALIGN, after a record: the record first, then the position true after it.
+    LogRecord record;
+    record.kind = LogRecord::Kind::applied;
+    record.origin = "cli";
+    record.command = "go";
+    stream.keep (record, nullptr);
+    stream.received ("ws:a", osc::Packet::message (pair::wire::seat, {}), t0 + 50ms);
+    stream.afterTick (102, 1.0);
+    CHECK (addresses (frames[2]) == std::vector<std::string> { pair::wire::record, pair::wire::position, pair::wire::beat });
+    CHECK (frames[2].elements[1].args[0].getInt64() == 4);
+    CHECK (stream.positionsSent() == 2);
+
+    //  A RESUME THE RING ANSWERS IS WHERE IT WAS: no position.
+    hello.lastCounter = 4;
+    const auto resumeBytes = pair::wire::helloBytes (hello);
+    const auto resume = osc::decode (resumeBytes.data(), resumeBytes.size());
+    stream.received ("ws:b", resume.packet, t0 + 60ms);
+    stream.afterTick (103, 1.0);
+    CHECK (stream.positionsSent() == 2);
+
+    //  A connection that does not follow asking is nobody's to seat.
+    stream.received ("ws:c", osc::Packet::message (pair::wire::seat, {}), t0 + 70ms);
+    stream.afterTick (104, 1.0);
+    CHECK (stream.positionsSent() == 2);
+}
+
+//==============================================================================
+TEST_CASE ("seat: what a position and a summary cost - fifty sounds running")
+{
+    /*  WHAT RD.8 ADDS TO A TICK. On the leader: a summary every fifth tick,
+        and a position when a follower starts following or asks again. On the
+        follower: the summary compared every fifth tick, and a seat when its
+        position's slot comes - the text read, moved onto this machine's clock,
+        and every run built. Fifty sounds playing, with a scene: the busy case.
+        Loose checks, for a runner busy with other suites; the figures are the
+        measurement. */
+    std::string text, list;
+    std::vector<std::string> sounds;
+
+    {
+        doc::ShowDocument show;
+        list = show.createList ("Sound").id;
+
+        for (int n = 0; n < 50; ++n)
+        {
+            const auto id = show.createCue (list, n, "media", "Sound " + std::to_string (n + 1)).id;
+            REQUIRE (show.setAttribute ("/godot/cue/" + id + "/file", "sound" + std::to_string (n + 1) + ".wav").ok);
+            sounds.push_back (id);
+        }
+
+        REQUIRE (show.setAttribute ("/godot/list/goDebounce", "0").ok);
+        text = doc::CanonicalXml::write (show);
+    }
+
+    Machine leader { text };
+    std::int64_t tick = 10;
+
+    for (const auto& sound : sounds)
+        REQUIRE (leader.engine.submit (std::string (origin::cli), "cue.fire", { s (sound) }));
+
+    for (; tick < 40; ++tick)
+        leader.tickOnce (tick);
+
+    REQUIRE (leader.runner.summaryNow (tick, 0).runs.size() == 50u);
+
+    std::vector<double> summaryMade, summaryCompared, positionMade, rebased, seatCold, seatWarm;
+    std::size_t positionBytes = 0;
+
+    pair::Labels labels;
+    labels.cue = [&leader] (const std::string& id) { return leader.runner.labelOf (id); };
+
+    for (int round = 0; round < 30; ++round)
+    {
+        const auto a = std::chrono::steady_clock::now();
+        const auto bytes = pair::summaryBytes (leader.runner.summaryNow (tick, 7));
+        const auto b = std::chrono::steady_clock::now();
+        const auto decoded = osc::decode (bytes.data(), bytes.size());
+        const auto theirs = pair::readSummary (decoded.packet);
+        const auto difference = pair::differenceOf (*theirs, leader.runner.summaryNow (tick, 7), labels);
+        const auto c = std::chrono::steady_clock::now();
+        CHECK (difference == "");
+
+        const auto position = pair::toText (leader.runner.positionNow (tick, 7));
+        const auto d = std::chrono::steady_clock::now();
+        const auto moved = pair::rebasedText (position, 1000);
+        const auto e = std::chrono::steady_clock::now();
+        REQUIRE (moved.has_value());
+        positionBytes = position.size();
+
+        summaryMade.push_back (std::chrono::duration<double, std::micro> (b - a).count());
+        summaryCompared.push_back (std::chrono::duration<double, std::micro> (c - b).count());
+        positionMade.push_back (std::chrono::duration<double, std::micro> (d - c).count());
+        rebased.push_back (std::chrono::duration<double, std::micro> (e - d).count());
+    }
+
+    //  THE SEAT ITSELF: on a machine with nothing, every run built; then again, every run kept.
+    for (int round = 0; round < 5; ++round)
+    {
+        Machine follower { text };
+        auto at = leader.runner.positionNow (tick, 7);
+        at.rebase (5000 - tick);
+        const auto seatText = pair::toText (at);
+
+        for (int again = 0; again < 2; ++again)
+        {
+            const auto local = 5000 + again;
+            REQUIRE (follower.engine.submit (std::string (origin::engine), "pair.seat", { s (seatText) }));
+            follower.audio.samples = local * 960;
+            const auto a = std::chrono::steady_clock::now();
+            follower.engine.processTick (local);
+            const auto b = std::chrono::steady_clock::now();
+            follower.audio.completeArms (follower.engine);
+            (again == 0 ? seatCold : seatWarm).push_back (std::chrono::duration<double, std::micro> (b - a).count());
+        }
+
+        CHECK (liveLines (follower.runs).size() == 50u);
+    }
+
+    for (auto* figures : { &summaryMade, &summaryCompared, &positionMade, &rebased, &seatCold, &seatWarm })
+        std::sort (figures->begin(), figures->end());
+
+    const auto median = [] (const std::vector<double>& figures) { return figures[figures.size() / 2]; };
+
+    MESSAGE ("fifty sounds running: a summary made " << median (summaryMade) << " us (" << pair::summaryBytes (leader.runner.summaryNow (tick, 7)).size()
+             << " bytes), read and compared " << median (summaryCompared) << " us; a position made "
+             << median (positionMade) << " us (" << positionBytes << " bytes), read and moved onto another clock "
+             << median (rebased) << " us; a seat applied, every run built " << median (seatCold)
+             << " us, every run kept " << median (seatWarm) << " us");
+
+    CHECK (median (summaryMade) < 5000.0);
+    CHECK (median (summaryCompared) < 5000.0);
+    CHECK (median (positionMade) < 50000.0);
+    CHECK (median (seatCold) < 200000.0);
+}

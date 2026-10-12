@@ -124,12 +124,38 @@
         /godot/pair/beat    h:tick h:lastCounter h:liveRuns
                             how many cues run on the leader, for a follower
                             that joined while some did and is not in step
+
+    AND WHAT RD.8 ADDS, so a follower is seated where its leader is and says
+    whether it stays there (pair/Position.h, pair/Summary.h):
+
+      follower -> leader
+        /godot/pair/seat                                  send me where you
+                            are: `pair.realign`, asked on the follower. A
+                            follow that starts asks by its hello, from now
+                            (RD.7), and a resume the ring no longer holds is
+                            seated as well - neither needs saying.
+      leader -> follower
+        /godot/pair/position h:counter h:tick i:part i:parts s:text
+                            the leader's position, true at the end of `tick`
+                            after its stream's record `counter`, as text in
+                            the log's own grammar; in parts of whole lines a
+                            few kilobytes each, all in the one bundle of the
+                            tick that sends it, after the records up to the
+                            counter and before the beat - so a follower
+                            seated at it applies what follows on top, in
+                            order. Sent only once that follower has been sent
+                            every record up to the counter.
+        /godot/pair/summary h:tick h:counter i:lists [s:list s:cue]...
+                            [s:run s:cue s:state h:playhead i:range]...
+                            every fifth tick, what an operator would look at:
+                            each list's standby and each live run.
 */
 
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/pair/LinkReading.h>
+#include <wfg/engine/pair/Summary.h>
 
 #include <array>
 #include <atomic>
@@ -172,6 +198,24 @@ namespace wfg::pair
         inline constexpr const char* pong    = "/godot/pair/pong";
         inline constexpr const char* relay   = "/godot/pair/relay";
         inline constexpr const char* order   = "/godot/pair/order";
+
+        //  RD.8's.
+        inline constexpr const char* seat     = "/godot/pair/seat";
+        inline constexpr const char* position = "/godot/pair/position";
+        inline constexpr const char* summary  = "/godot/pair/summary";
+
+        /*  HOW LONG ONE PART OF A POSITION MAY BE, in bytes of text: a
+            position is cut into parts of whole lines no longer than this -
+            one line longer goes alone - so a show with hundreds of runs going
+            is several messages rather than one string the size of all of
+            them. The bundle that carries them is still one frame. */
+        inline constexpr std::size_t positionPartBytes = 16 * 1024;
+
+        /*  A POSITION'S TEXT CUT INTO ITS PARTS, and the messages that carry
+            them: `/godot/pair/position h:counter h:tick i:part i:parts s:text`. */
+        std::vector<std::vector<std::uint8_t>> positionMessages (std::uint64_t counter, std::int64_t tick,
+                                                                 std::string_view text,
+                                                                 std::size_t partBytes = positionPartBytes);
 
         /** Whether an address is the link's: `/godot/pair/` and something after it. */
         bool isPairAddress (std::string_view address) noexcept;
@@ -337,6 +381,24 @@ namespace wfg::pair
             RD.8 seats it, and says so. The tick thread's, before `afterTick`. */
         void setLiveRuns (std::int64_t count) noexcept { liveRuns = count; }
 
+        /*  WHERE THIS MACHINE IS, AS TEXT (RD.8, pair/Position.h): made on the
+            tick thread, in `afterTick`, at most once a tick and only when a
+            follower is owed one - a follow that has just started, a resume the
+            ring could not answer, a `/godot/pair/seat` - and true at the end of
+            this tick, after the stream's last counter. Set before `afterTick`
+            first runs; none, and no follower is ever seated. */
+        using PositionMaker = std::function<std::string (std::int64_t tick, std::uint64_t counter)>;
+        void setPositionMaker (PositionMaker make) { makePosition = std::move (make); }
+
+        /*  WHAT AN OPERATOR WOULD LOOK AT, every `summaryEveryTicks` ticks to
+            every follower (pair/Summary.h): the message's bytes, made once a
+            tick it is due. None: no summary. */
+        using SummaryMaker = std::function<std::vector<std::uint8_t> (std::int64_t tick, std::uint64_t counter)>;
+        void setSummaryMaker (SummaryMaker make) { makeSummary = std::move (make); }
+
+        /** Positions sent, to any follower: what a test and a black box count. */
+        std::int64_t positionsSent() const noexcept { return positionCount; }
+
         /*  THE HEARTBEAT, from serve's after-tick: what arrived since the last
             tick is read, then each follower is sent what it has not had - its
             welcome and any gap first, then the records, `backlogPerTick` at
@@ -372,7 +434,7 @@ namespace wfg::pair
     private:
         struct Arrival
         {
-            enum class Kind { hello, ping, closed };
+            enum class Kind { hello, ping, closed, seat };
 
             Kind kind = Kind::hello;
             std::string origin;
@@ -393,6 +455,7 @@ namespace wfg::pair
             std::uint64_t next = 0;             // the first counter its welcome promised
             bool welcomed = false;
             std::uint64_t gapOldest = 0;        // non-zero: a `gap` still to be said
+            bool owesPosition = false;          // to be sent where this machine is (RD.8)
             bool pinged = false;
             LinkClock::time_point lastPing {};
             double roundTrip = 0.0;
@@ -407,6 +470,9 @@ namespace wfg::pair
         const std::size_t backlog;
         Send send;
         Relayed relayed;
+        PositionMaker makePosition;
+        SummaryMaker makeSummary;
+        std::int64_t positionCount = 0;
 
         //  Written on the tick thread, read on the server's too (a relay).
         std::atomic<bool> leading { false };
@@ -511,6 +577,17 @@ namespace wfg::pair
         /** How many cues ran on the leader, as its last heartbeat said (RD.7). */
         std::int64_t leaderLiveRuns() const noexcept { return beatRuns; }
 
+        /*  THE LEADER'S POSITION, once its parts are all in, in the stream's
+            order - after the records up to its counter, before those after
+            (RD.8): the text, the counter and the leader's tick it is true at.
+            One that a second path brings again is not handed on. Tick thread. */
+        using OnPosition = std::function<void (std::uint64_t counter, std::int64_t leaderTick, std::string text)>;
+        void setOnPosition (OnPosition callback) { onPosition = std::move (callback); }
+
+        /** Each summary the leader sends, once (RD.8). Tick thread. */
+        using OnSummary = std::function<void (Summary summary)>;
+        void setOnSummary (OnSummary callback) { onSummary = std::move (callback); }
+
         /*  A FOLLOW STARTS NOW, on the leader whose stream is `leaderStream`
             (RD.7): what this receiver held of any stream is forgotten, the
             next hello asks for what the leader keeps from now on
@@ -522,14 +599,25 @@ namespace wfg::pair
     private:
         struct Item
         {
-            enum class Kind { welcome, gap, record, beat, pong };
+            enum class Kind { welcome, gap, record, beat, pong, position, summary };
 
             Kind kind = Kind::beat;
             std::string path;
             LinkClock::time_point at {};
             std::int64_t first = 0, second = 0, third = 0;
-            std::string stream;
+            std::string stream;                 // a welcome's stream; a position part's text
             LogRecord record;
+            Summary summary;
+        };
+
+        /*  A POSITION COMING IN PARTS, by the path bringing it: what has come,
+            and which part is next. */
+        struct Partial
+        {
+            std::uint64_t counter = 0;
+            std::int64_t tick = 0;
+            std::int64_t parts = 0, next = 0;
+            std::string text;
         };
 
         void take (Item& item, double timeoutSeconds);
@@ -552,6 +640,15 @@ namespace wfg::pair
         std::int64_t receivedThisLink = 0, gapsThisLink = 0, duplicateCount = 0;
         OnRecord onRecord;
         OnBeat onBeat;
+        OnPosition onPosition;
+        OnSummary onSummary;
+
+        //  RD.8's: positions in parts by path, and the last handed on.
+        std::map<std::string, Partial> partials;
+        std::string positionStream;
+        std::uint64_t positionCounter = 0;
+        std::int64_t positionTick = 0;
+        bool positionHanded = false;
 
         /*  THE LAST SECOND'S ROUND TRIPS, a few a path: their arrival and their
             length. A fixed ring - a ping a tenth of a second on each of a few

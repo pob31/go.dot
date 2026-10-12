@@ -3740,6 +3740,7 @@ namespace wfg::tree
             else if (name == "delay")     text = std::to_string (state.pairFollow.delay);
             else if (name == "late")      text = std::to_string (state.pairFollow.late);
             else if (name == "differs")   text = state.pairFollow.differs;
+            else if (name == "inStep")    text = state.pairFollow.inStep ? "true" : "false";
             else if (name == "relayed")   text = std::to_string (state.pairFollow.relayed);
             else if (name == "dropped")   text = std::to_string (state.pairFollow.dropped);
             else if (name == "alarm")     text = state.pairFollow.alarm;

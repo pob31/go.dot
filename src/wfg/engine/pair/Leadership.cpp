@@ -337,15 +337,31 @@ namespace wfg::pair
                        " on one of them; the other will hold and follow.";
 
             case Seat::following:
+            {
+                /*  ON ITS WAY TO THE LEADER'S POSITION (RD.8): said with why it
+                    needs one, when there is something to say. */
+                const std::string seating = behind.seating ? " Taking the other machine's position." : "";
+
                 if (behind.leaderRuns > 0)
                     return "Following, but not yet in step: " + spelledRuns (behind.leaderRuns)
                          + " running on the other machine when this one began to follow, and "
-                         + (behind.leaderRuns == 1 ? "it does" : "they do") + " not run here.";
+                         + (behind.leaderRuns == 1 ? "it does" : "they do") + " not run here." + seating;
 
                 if (behind.changedWhileWaiting)
-                    return "Following, but not yet in step: this machine was changed while it waited for its main.";
+                    return "Following, but not yet in step: this machine was changed while it waited for its main."
+                         + seating;
+
+                if (behind.seating)
+                    return "Following, and taking the other machine's position.";
+
+                /*  SEATED, AND APART SINCE (RD.8): the first thing the leader's
+                    summaries say differs, and what puts it right. */
+                if (! behind.differs.empty())
+                    return "Following, but not in step: " + behind.differs + ". Realign to take the other machine's"
+                           " position again.";
 
                 return {};
+            }
 
             case Seat::alone:
             case Seat::leading:

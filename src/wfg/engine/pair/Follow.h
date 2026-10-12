@@ -29,8 +29,10 @@
     started again follows the backup that took over, and two machines both
     sending each follow the other's operators - and a follower whose stream
     falls silent takes over: its hold let go, its gate opened, and what it
-    passed on and never saw answered settled (`settle`, AGJ). Catching up is
-    RD.8's.
+    passed on and never saw answered settled (`settle`, AGJ). And from RD.8
+    a follower is seated at its leader's position when its follow begins or
+    an operator asks again (`position`, pair/Position.h): held to its slot
+    with the records, and submitted there as the engine's `pair.seat`.
 
     TWO PIECES, FOR TWO THREADS.
 
@@ -265,6 +267,25 @@ namespace wfg::pair
         /** One of the main's records, in counter order (Receiver::setOnRecord). */
         void record (const LogRecord& mainRecord);
 
+        /*  THE LEADER'S POSITION (RD.8; pair/Position.h), in the stream's order
+            among its records (Receiver::setOnPosition): held to the slot of the
+            tick it is true at, as a record of that tick is, and submitted there
+            as the engine's `pair.seat` - its text moved onto this machine's
+            clock first, by the offset, so the record logged speaks this
+            machine's ticks and a replay needs nothing else. The records after
+            it go in after it, on top. One still held when following stops is
+            submitted with the rest, if the offset was fixed; with none fixed
+            the leader's ticks cannot be read as this machine's, and it is
+            dropped. A text that does not read is dropped too, and counted. */
+        void position (std::int64_t leaderTick, std::string text);
+
+        /** Whether a position waits for its slot. */
+        bool seatHeld() const noexcept;
+
+        /** Seats submitted, and positions dropped unread or with no clock to read them on. */
+        std::int64_t seats() const noexcept         { return seatCount; }
+        std::int64_t seatsDropped() const noexcept  { return droppedSeats; }
+
         /*  AT THE HEAD OF THE BEFORE-TICK HOOK of local tick `localTick`, which
             was due at `due` (now, less the tick's lateness): the beats since
             the last are measured, the offset fixed once there are enough, and
@@ -298,7 +319,7 @@ namespace wfg::pair
         std::int64_t differences() const noexcept { return differenceCount; }
         const std::string& differs() const noexcept { return differsText; }
 
-        /** Records received and not yet submitted. */
+        /** Records received and not yet submitted, a held position among them. */
         std::size_t waiting() const noexcept { return held.size(); }
 
     private:
@@ -324,9 +345,18 @@ namespace wfg::pair
         int beatsMeasured = 0;
         double earliestSeen = 0.0, latestSeen = 0.0, clocks = 0.0;
 
-        //  The main's records waiting for their slot, and those submitted and not yet seen applied.
-        std::deque<LogRecord> held;
+        /*  The main's records waiting for their slot, a position among them
+            (`seat`, its text the record's one argument and its tick the
+            leader's), and those submitted and not yet seen applied. */
+        struct Held
+        {
+            LogRecord record;
+            bool seat = false;
+        };
+
+        std::deque<Held> held;
         std::deque<LogRecord> inFlight;
+        std::int64_t seatCount = 0, droppedSeats = 0;
 
         std::int64_t lateCount = 0;
         std::int64_t differenceCount = 0;

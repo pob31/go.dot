@@ -25185,13 +25185,13 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair/delay` | `i` | Δ in ticks (AGF); the extra launch lead while linked |
 | `pair/late` | `i` | records applied after their slot, this link |
 | `pair/drift` | `f` | parts per million between the two sound clocks (AGI) |
-| `pair/inStep` | `T` | the last summary matched |
-| `pair/differs` | `s` | what did not, in one sentence |
+| `pair/inStep` | `T` | on a machine that follows, the leader's last summary matched what this machine had at the same moment of the record clock - each list's standby, each live run's state and playhead, two ticks of tolerance; false until the first summary after a seat, after two in a row differ or a record came out otherwise, and on a machine that does not follow (RD.8) |
+| `pair/differs` | `s` | what is not in step, one sentence, the most recent cause: what the summaries showed different twice in a row (`cue 12 is running on the main, not here`), or one of the leader's records applied otherwise here, said at once with RD.6's count; empty once a summary matches again (RD.6, RD.8) |
 | `pair/relayed` | `h` | commands this backup's clients gave it that it passed on to the main (RD.6) |
 | `pair/dropped` | `h` | commands this backup's devices sent it that it ignored while following (RD.6) |
 | `pair/showMatch` | `T` | the fingerprints agree (AFU) |
 | `pair/showDiffers` | `s` | what differs: cues, settings, sounds missing or changed |
-| `pair/alarm` | `s` | the sentence the window and the page put in front of the operator - both sending, waiting for the main, the other lost and this one sending, a follower not in step; empty when none (RD.7) |
+| `pair/alarm` | `s` | the sentence the window and the page put in front of the operator - both sending, waiting for the main, the other lost and this one sending, a follower being seated at its leader's position or not in step with it, saying what differs; empty when none (RD.7, RD.8) |
 | `pair/unconfirmed` | `h` | commands this machine passed on that its leader never answered, dropped: at a takeover all but Esc and double Esc (AGJ), and one left unanswered past twice the timeout (RD.7) |
 
 ### 58.4 Commands
@@ -25205,10 +25205,10 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair.takeOver` | `[s:peer]` | on a machine that holds - following, or a backup waiting: send from now on, and tell the other to hold and follow if it can be reached (machine) |
 | `pair.handOver` | `[s:peer]` | from the machine sending, the other there: the other sends from now on, this one holds and follows (machine) |
 | `pair.keep` | `[s:peer]` | AFQ, while both send: keep the show here; the other machine holds and follows (machine) |
-| `pair.realign` | | the follower seats itself at the main's position again |
+| `pair.realign` | | on a machine that follows: asks its leader where it is (`/godot/pair/seat`) and is seated there again; refused `not-following` elsewhere (machine; RD.8) |
 | `pair.adoptShow` | | the follower takes the main's show text (AFU); refused while anything runs |
 | `pair.lead`, `pair.hold` | `s:role s:seat s:reason` | the engine's: this machine now sends (`alone`, `leading`, `bothSending`), or holds (`following`, `waiting`), and why; logged, and where the seat lives (machine; RD.7) |
-| `pair.seat` | `s:position` | the engine's: one record seating the follower at the main's position |
+| `pair.seat` | `s:position` | the engine's: one record seating the follower at its leader's position, the position as text in the log's own grammar on this machine's clock; refused `bad-value` for a text that does not read (machine; RD.8) |
 | `pair.launchAt` | `s:run h:sample` | the engine's: the main's launch sample, mapped onto this machine's clock |
 
 ### 58.5 Refused
@@ -25679,3 +25679,176 @@ passed on and the main refused comes back refused, with the main's reason.
   dropped here; a hello's `liveRuns` is as of the hello (the beat carries it
   while streaming); orders are sent once, down every path, and a machine that
   missed one decides from the hellos; the words on screen are RD.11's.
+- **RD.8**, 2026-10-12: catching up and in step (AGE, AGF). A machine that
+  starts following - started late, a backup that waited and was changed
+  (AGK), a main started again after its backup took over (AFR), a machine
+  both sending until an operator kept the show on the other - is SEATED at
+  its leader's position in one step, and from then on the two say whether
+  they are in step. THE POSITION (pair/Position.h), made by the leader
+  (`Runner::positionNow`, cue/RunnerSeat.cpp) at the end of a tick, true
+  after its stream's last counter: the rows `state.xml` keeps - standby,
+  `list/finished`, the focus, the lock, the folded flags - every one at its
+  value or its default, so a standby the leader cleared clears the
+  follower's, and never a row marked `machine` (RD.3: a port's identifier,
+  the patch's settled flags, a display's), which is why the rows are
+  collected beside `EphemeralState` rather than through its text, which
+  leaves out defaults and keeps machine rows; each list's history of steps,
+  aim and landing, the GO debounce's and Doh!'s clocks and the count of GOs;
+  every LIVE run that the horizon did not only make ready - id, cue, kind,
+  parent, state, clocks, playhead, slice and pass, speed, rounds, round
+  order, seed, pruned members, stop flags, level, the hand's trim, a held
+  clip and its hand, solo, what a fade moved - and the finished runs of
+  every live scene, which its job counts; each live scene's job (phase,
+  members, place, what it has taken) and every fade's job as far as it has
+  got; the runs that end on the next tick by themselves (a memo, a start
+  cue, a stop cue's own run); the DCA trims, the faders flipped and the
+  lanes armed, the beds Esc paused, the cues a kill suspended; RD.2's names,
+  less what the leader's horizon made. NOT CARRIED, each said: what the
+  horizon only made ready - each machine prepares for itself, and the seat
+  ends the follower's own and lets its horizon prepare the standby again,
+  which, the counts carried being the leader's less its horizon's, draws the
+  leader's names (proved in the tests); Doh!'s books - the GO it would take
+  back, its desk values, its marks, the cue it paused to carry on - which
+  describe a GO the follower did not take under this state, so the seat
+  forgets its own as a jump does (`forgetGoOnJump`) and a Doh! the leader
+  takes in its window after a seat comes out otherwise here, said; a lane
+  pass recording, which is this machine's hands; a speed an ended fade left
+  somewhere. THE LOG'S OWN ATOM GRAMMAR, a line a thing (`run s:"R8M2K4Q1"
+  ...`), and not JSON, which reads numbers as doubles and would cut the
+  64-bit salt; read back exactly on a French machine, and refused whole, not
+  half read, for a format this build does not write or a text cut short.
+  THE WIRE, beside RD.7's: `/godot/pair/seat` (follower to leader, no
+  arguments, `pair.realign`'s ask); `/godot/pair/position h:counter h:tick
+  i:part i:parts s:text`, in parts of whole lines of at most 16 KB, all in
+  the one bundle of the tick that sends them, after the records up to the
+  counter and before the beat - sent to a follower whose hello asked from
+  now (a follow that starts, RD.7), whose resume the ring could no longer
+  answer (RD.5's gap), or that asked, and only once it has been sent every
+  record up to the counter; put back together by the path that brings it and
+  handed on once, whichever path; and `/godot/pair/summary h:tick h:counter
+  i:lists [s:list s:cue]... [s:run s:cue s:state h:playhead i:range
+  h:loop]...` every fifth tick. SEATING (`pair.seat s:position`, the
+  engine's, machine-local, logged, registered with the GO commands; the
+  handler `Runner::seatAt`): the follower holds the position in its queue
+  among the leader's records (`Follower::position`), moves every tick in it
+  onto its own clock by the offset its records are applied at, and submits
+  it at the slot of the tick it is true at - so the record speaks this
+  machine's ticks and a replay of the session is seated alike - and on THAT
+  tick serve runs no Runner hooks: what they would decide they would decide
+  on the state the seat replaces, applied after it (a member spawned under a
+  scene the seat ended, a standby prepared under names drawn before it); the
+  seat is the leader's tick, hooks and all. The handler writes the rows
+  through the document's own door, forgets Doh!'s books, takes the lists'
+  history, clocks and count, and then the runs: one of the follower's own
+  that the position holds as it is - same name, cue, kind and parent, both
+  live, the same state or both launching - STANDS, corrected (its fields set,
+  a sound more than two ticks out sought); EVERY OTHER is ended the way a
+  jump ends what it abandons (`endHere`): done on the model, no footer, no
+  post-wait, no fade, no value put back - a seat is not a stop, and a
+  follower holds everything meant for a device anyway (RD.1) - its voice
+  stopped, its jobs let go, a picture it showed taken down (AGH: video is
+  not held); and then TAKEN OUT of the run table (`RunTable::remove`, new),
+  finished ones with it, so the leader's run is made under the same name and
+  every name drawn afterwards finds the same names taken on both machines.
+  The leader's runs are then made under the LEADER'S NAMES: scenes and sounds
+  through `seatPlan`, its `NameDraw` answering the leader's name by parent
+  and cue - a scene at its second, rounds and seed set, a sound at its
+  playhead inside its slice, passes and all, a run in a wait or a post-wait
+  due at the leader's tick; a scene's members already over, created done; a
+  member spawned ahead of its turn through `spawnChild`; a movie, a patch
+  and an OSC cue's curves fired again under the leader's name (`fireNow`)
+  and sought (`seekMovie`, `seekCurves`), a movie's locked sounds made by
+  its fire under the same unsalted names (RD.2); a fade or stop cue's run
+  carried on by its carried job, a memo or start cue's ending on the next
+  tick as the leader's; any other run that is over in moments - a MIDI
+  message, an OSC cue waiting for its device's answer - created over, and
+  said. Then each run's fields, each scene's job in place of what `seatPlan`
+  worked out, every fade job `since` ticks on, the trims and the faders, and
+  last `RunNames::seat`. A cue this show does not have, or a sound whose file
+  is not on this machine (created as the leader's, failing `media-missing`),
+  is said (`Runner::seatNotes`) and lands in `pair/differs`. THE CLOCK A
+  SEATED SOUND KEEPS IS THE RECORD CLOCK, and that departs from the plan: a
+  sound is armed at the second the leader's will have reached when this one
+  starts - the seat's lateness, the launch latency and `seatLeadTicks`, ten
+  ticks for its cold arm - and launched on exactly that sample
+  (`Run::launchNotBefore`, new: not as soon as it is ready), so it is where
+  the leader's was a fixed delay ago, as every sound the follower starts from
+  the stream is; landing it Δ further on, where the plan put it, would leave
+  a seated scene Δ ahead of the stops and GOs applied to it and of its own
+  members' waits, and RD.9's launch mapping moves every sound by Δ at once.
+  A moment the leader passed before the follower started is a tick below
+  nought on the follower's clock: a launch tick there is "launched" (the
+  Runner's six `launchRequestedAtTick` tests now read nought alone as
+  never), a tick that lands on a value meaning "never" is put a tick before
+  it, and a slice the leader has looped for longer than the follower's clock
+  has run counts its passes again from the one it is in (`launchIfDue`'s
+  "session younger than that") - the same sound; a counted loop then plays
+  on longer here, and says so. IN STEP (pair/Summary.h): every fifth tick
+  the leader sends what an operator would look at; the follower holds it to
+  its slot and lays it against its own after that tick has run
+  (`pair::InStep`), the leader's runs by name: missing, running here alone,
+  another state, another range, a playhead more than TWO TICKS apart - each
+  machine reads a playhead once a tick off its own sample clock, its ticks
+  up to a tick from the other's, and places a launch on a tick of its own -
+  compared round the loop for a slice that loops; for a run in a wait, the
+  ticks it still has. A difference is said only when the next summary
+  shows one too (a launch a tick apart reads `armed` against `playing`);
+  a match says in step at once. `pair/differs` is one sentence, the most
+  recent cause - a summary's, or RD.6's record applied otherwise, at once
+  with its count - cleared by the next summary that matches; summaries of
+  the ticks a seat's sounds take to start are passed over
+  (`seatSettleTicks`). The alarm says a seat is on its way (`Following, and
+  taking the other machine's position.`, after RD.7's sentence when there
+  is one) and once seated what differs (`Following, but not in step: ...
+  Realign to take the other machine's position again.`). `pair.realign`
+  (machine, refused `not-following` where the machine does not follow) asks
+  the leader down the path relays take; the position comes in the stream's
+  order and the follower is seated again, every run that stands left
+  sounding. A follow that begins from both sending starts afresh as one from
+  `waiting` does, so it is seated too. Rows `pair/inStep`, and
+  `pair/differs` and `pair/alarm` as above; `Stream::positionsSent`,
+  `Follower::seats` and `seatsDropped` (a position held when following
+  stopped before a delay was fixed) are not published. Cost, Debug, this
+  bench, fifty sounds and a scene running: a summary made 0.46 to 0.51 ms (2.5
+  to 3.0 KB) every fifth tick on the leader, read and compared 0.60 to 0.64
+  ms on the follower; a position made 3.1 to 3.3 ms (13.6 KB), read and moved
+  onto the follower's clock 7.5 to 7.9 ms, and the seat applied 28 to 32 ms
+  with every run built cold - a tick and a half, once, on a machine not on
+  air - and 6.5 to 7.5 ms with every run standing. Tests under C and fr_FR:
+  SeatTests (a position from an engine with a bed looping in a range, a
+  timeline scene, a sequence stepping on, DCA trims, faders flipped and the
+  salt read back exactly and refused when cut or of another format; an
+  engine that was elsewhere seated - its scene ended with no footer and gone
+  from the table, the leader's runs under the leader's names, the standby
+  written, the names drawn alike, its preparations the leader's, the summary
+  the same every tick for 260 ticks, one `pair.seat` and a replay of the log
+  seated alike; two engines on one show joined by the real stream and
+  receiver over a link jittering 0 to 15 ms, the follower joining late with
+  its clock ahead of the leader's and behind it - seated once, its live runs
+  and every playhead the leader's on every tick for 200 ticks, in step; the
+  bed killed on the follower alone: out of step, `cue Bed is running on the
+  main, not here`, and a realign in step again 20 ticks after it was asked;
+  the summary's wire and its sentences, round the loop included; the
+  in-step rules; a position of two hundred runs in parts of whole lines,
+  whole again once from two paths, and nothing from a part missing; what
+  asks for a position and what does not; the cost), LeadershipTests (the
+  alarm's new sentences, `pair.realign` accepted following and refused
+  elsewhere, replayed alike), MachineScopeTests, and
+  tests/blackbox/pair_seat.py: two hosted serves on copies of the phase 2
+  fixture, the show rewritten and a 90-second bed generated by the driver; a
+  main plays the bed and a timeline scene; a backup started late follows, is
+  seated - the bed and the scene under the main's names, the scene's memo
+  waiting, the standby the main's - reads `pair/inStep` true and its alarm
+  nothing, its bed 11 to 25 ms from the main's once Δ is allowed for (two
+  ticks allowed, four on CI); `pair.realign` keeps it in step, and on the
+  main is refused `not-following`; the main killed, the backup leads; the
+  main started again follows it, is seated, in step, its bed within two
+  ticks of the backup's. Found and left: a sound seated cold that takes
+  longer than `seatLeadTicks` to arm starts that much late, and says so in the
+  summary; a fade-and-stop seated before its stop lands carries the stop but
+  not the sound's fade-out level path; a movie is sought at the launch
+  latency's horizon, not the picture's own; a Doh! within its window after a
+  seat is refused here; a pass recording lanes is not carried; an OSC cue
+  waiting for its device's answer, a MIDI message and an advance seated mid-
+  flight are made over here at once; a position that cannot be read is said
+  and nothing is seated; Δ drifts with the two clocks (RD.9).

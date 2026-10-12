@@ -239,13 +239,59 @@ namespace wfg::pair
 
             const auto& address = message.address;
 
-            if (address == hello || address == ping || address == relay)
+            if (address == hello || address == ping || address == relay || address == seat)
                 return Bound::leader;
 
-            if (address == welcome || address == gap || address == record || address == beat || address == pong)
+            if (address == welcome || address == gap || address == record || address == beat || address == pong
+                  || address == position || address == summary)
                 return Bound::follower;
 
             return Bound::neither;
+        }
+
+        std::vector<std::vector<std::uint8_t>> positionMessages (std::uint64_t counter, std::int64_t tick,
+                                                                 std::string_view text, std::size_t partBytes)
+        {
+            /*  WHOLE LINES A PART, so no part ends inside an atom or a
+                character: a part is read only once they are all in, but every
+                part on its own is still the log's own grammar, cut where the
+                log cuts. A line longer than a part goes alone. */
+            std::vector<std::string_view> parts;
+            std::size_t from = 0;
+
+            while (from < text.size())
+            {
+                auto upTo = from;
+
+                while (upTo < text.size())
+                {
+                    const auto newline = text.find ('\n', upTo);
+                    const auto lineEnd = newline == std::string_view::npos ? text.size() : newline + 1;
+
+                    if (upTo > from && lineEnd - from > partBytes)
+                        break;
+
+                    upTo = lineEnd;
+                }
+
+                parts.push_back (text.substr (from, upTo - from));
+                from = upTo;
+            }
+
+            if (parts.empty())
+                parts.push_back (text);
+
+            std::vector<std::vector<std::uint8_t>> out;
+            out.reserve (parts.size());
+
+            for (std::size_t n = 0; n < parts.size(); ++n)
+                out.push_back (encode (position, { osc::Value::int64 (static_cast<std::int64_t> (counter)),
+                                                   osc::Value::int64 (tick),
+                                                   osc::Value::int32 (static_cast<std::int32_t> (n)),
+                                                   osc::Value::int32 (static_cast<std::int32_t> (parts.size())),
+                                                   osc::Value::string (std::string (parts[n])) }));
+
+            return out;
         }
 
         bool Hello::wantsStream() const noexcept
@@ -446,6 +492,20 @@ namespace wfg::pair
             return;
         }
 
+        /*  WHERE THIS MACHINE IS, ASKED FOR AGAIN (RD.8, `pair.realign` on the
+            follower): taken on the next tick, by a connection that follows. */
+        if (! message.isBundle() && message.address == wire::seat && a.empty())
+        {
+            Arrival asked;
+            asked.kind = Arrival::Kind::seat;
+            asked.origin = origin;
+            asked.at = arrival;
+
+            const std::lock_guard<std::mutex> held { inboxLock };
+            inbox.push_back (std::move (asked));
+            return;
+        }
+
         if (const auto said = wire::readHello (message))
         {
             Arrival hello;
@@ -484,6 +544,17 @@ namespace wfg::pair
             case Arrival::Kind::closed:
                 followers.erase (arrival.origin);
                 return;
+
+            case Arrival::Kind::seat:
+            {
+                //  Only a connection that follows is seated; another asking is not one of ours.
+                if (const auto found = followers.find (arrival.origin); found != followers.end())
+                    found->second.owesPosition = true;
+                else
+                    ignoredCount.fetch_add (1, std::memory_order_relaxed);
+
+                return;
+            }
 
             case Arrival::Kind::ping:
             {
@@ -569,6 +640,13 @@ namespace wfg::pair
                 if (follower.gapOldest != 0)
                     ++gapsThisLink;
 
+                /*  AND SEATED WHERE THIS MACHINE IS (RD.8): a follow that starts
+                    now asks from now, and is not where this machine is unless it
+                    is told; a resume the ring could no longer answer has missed
+                    what made this machine what it is. A resume the ring answers
+                    is where it was, and is not. */
+                follower.owesPosition = arrival.lastCounter >= wire::fromNow || follower.gapOldest != 0;
+
                 //  A second hello on one connection starts it again: it says what it holds now.
                 followers[arrival.origin] = std::move (follower);
 
@@ -606,6 +684,14 @@ namespace wfg::pair
 
         wire::writeBeat (beatBytes, tick, last, liveRuns);
 
+        /*  WHERE THIS MACHINE IS, made at most once this tick and only for a
+            follower owed it (RD.8), and what an operator would look at, every
+            fifth tick: both true now, at the end of this tick, after `last`. */
+        std::vector<std::vector<std::uint8_t>> positionParts;
+        auto positionMade = false;
+        const auto summaryDue = makeSummary && tick % summaryEveryTicks == 0;
+        const auto summaryMessage = summaryDue ? makeSummary (tick, last) : std::vector<std::uint8_t> {};
+
         for (auto at = followers.begin(); at != followers.end();)
         {
             auto& follower = at->second;
@@ -640,6 +726,26 @@ namespace wfg::pair
                 ++upTo;
             }
 
+            /*  SEATED ONCE IT HAS EVERY RECORD UP TO THE COUNTER THE POSITION
+                IS TRUE AT, so it applies the records after it on top and none
+                twice; one still catching up is seated on a later tick. */
+            const auto seatNow = follower.owesPosition && upTo == last && makePosition;
+
+            if (seatNow)
+            {
+                if (! positionMade)
+                {
+                    positionParts = wire::positionMessages (last, tick, makePosition (tick, last));
+                    positionMade = true;
+                }
+
+                for (const auto& part : positionParts)
+                    addToBundle (frame, part);
+            }
+
+            if (summaryDue)
+                addToBundle (frame, summaryMessage);
+
             addToBundle (frame, beatBytes);
 
             //  A connection the server no longer has is a follower gone, and what was not sent is not counted.
@@ -650,6 +756,12 @@ namespace wfg::pair
             }
 
             follower.welcomed = true;
+
+            if (seatNow)
+            {
+                follower.owesPosition = false;
+                ++positionCount;
+            }
 
             if (jumped)
                 ++gapsThisLink;
@@ -763,6 +875,22 @@ namespace wfg::pair
             item.kind = Item::Kind::pong;
             item.first = a[0].getInt64();
             item.second = a[1].getInt64();
+        }
+        else if (is (wire::position) && a.size() == 5 && counterOf (a[0]).has_value() && a[1].isInt64()
+                   && a[2].isInt32() && a[3].isInt32() && a[2].getInt32() >= 0 && a[3].getInt32() > a[2].getInt32()
+                   && a[4].isString())
+        {
+            //  A PART OF THE LEADER'S POSITION (RD.8), put together on the tick thread.
+            item.kind = Item::Kind::position;
+            item.first = a[0].getInt64();
+            item.second = a[1].getInt64();
+            item.third = static_cast<std::int64_t> (a[2].getInt32()) << 32 | static_cast<std::int64_t> (a[3].getInt32());
+            item.stream = a[4].getString();
+        }
+        else if (auto summary = is (wire::summary) ? readSummary (message) : std::nullopt)
+        {
+            item.kind = Item::Kind::summary;
+            item.summary = std::move (*summary);
         }
         else
         {
@@ -957,6 +1085,65 @@ namespace wfg::pair
                 //  Each of the main's ticks once, as it first arrived (RD.6).
                 if (fresh && onBeat)
                     onBeat (item.first, item.at);
+
+                return;
+            }
+
+            case Item::Kind::position:
+            {
+                /*  PUT TOGETHER BY THE PATH THAT BRINGS IT, in order: a part out
+                    of its place starts nothing, and a first part starts afresh.
+                    Handed on whole, once - a second path's copy of a position
+                    already handed on, by its stream, counter and tick, is not. */
+                const auto part = item.third >> 32;
+                const auto parts = item.third & 0xffffffff;
+                auto& partial = partials[item.path];
+
+                if (part == 0)
+                {
+                    partial = {};
+                    partial.counter = static_cast<std::uint64_t> (item.first);
+                    partial.tick = item.second;
+                    partial.parts = parts;
+                }
+                else if (partial.next != part || partial.parts != parts || partial.tick != item.second
+                           || partial.counter != static_cast<std::uint64_t> (item.first))
+                {
+                    partials.erase (item.path);
+                    return;
+                }
+
+                partial.text += item.stream;
+                partial.next = part + 1;
+                heard (item.at);
+
+                if (partial.next < partial.parts)
+                    return;
+
+                auto whole = std::move (partial);
+                partials.erase (item.path);
+
+                if (positionHanded && positionStream == stream && positionCounter == whole.counter
+                      && positionTick == whole.tick)
+                    return;
+
+                positionHanded = true;
+                positionStream = stream;
+                positionCounter = whole.counter;
+                positionTick = whole.tick;
+
+                if (onPosition)
+                    onPosition (whole.counter, whole.tick, std::move (whole.text));
+
+                return;
+            }
+
+            case Item::Kind::summary:
+            {
+                heard (item.at);
+
+                if (onSummary)
+                    onSummary (std::move (item.summary));
 
                 return;
             }

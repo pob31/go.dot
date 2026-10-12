@@ -519,6 +519,24 @@ TEST_CASE ("leadership: the alarm in front of the operator, and empty when there
               " follow, and it does not run here.");
     CHECK (pair::alarm ({ Role::backup, Seat::following, "main-found" }, nobody, { 0, true })
            == "Following, but not yet in step: this machine was changed while it waited for its main.");
+
+    //  RD.8: a seat on its way, said with why it is needed; and once seated, what the summaries say differs.
+    pair::NotInStep seating;
+    seating.seating = true;
+    CHECK (pair::alarm ({ Role::backup, Seat::following, "main-found" }, nobody, seating)
+           == "Following, and taking the other machine's position.");
+
+    seating.leaderRuns = 2;
+    CHECK (pair::alarm ({ Role::main, Seat::following, "leader-found" }, nobody, seating)
+           == "Following, but not yet in step: 2 cues were running on the other machine when this one began to"
+              " follow, and they do not run here. Taking the other machine's position.");
+
+    pair::NotInStep apart;
+    apart.differs = "cue 12 is running on the main, not here";
+    CHECK (pair::alarm ({ Role::backup, Seat::following, "main-found" }, nobody, apart)
+           == "Following, but not in step: cue 12 is running on the main, not here. Realign to take the other"
+              " machine's position again.");
+    CHECK (pair::alarm ({ Role::backup, Seat::leading, "take-over" }, linkedFollower, apart).empty());
 }
 
 //==============================================================================
@@ -562,7 +580,7 @@ TEST_CASE ("leadership: pair.lead and pair.hold are where the seat lives; the op
     SeatRig rig;
     const auto engineOrigin = std::string (origin::engine);
 
-    for (const auto* name : { "pair.lead", "pair.hold", "pair.takeOver", "pair.handOver", "pair.keep" })
+    for (const auto* name : { "pair.lead", "pair.hold", "pair.takeOver", "pair.handOver", "pair.keep", "pair.realign" })
     {
         const auto* command = rig.engine.commands().find (name);
         REQUIRE_MESSAGE (command != nullptr, "not registered: " << name);
@@ -605,12 +623,21 @@ TEST_CASE ("leadership: pair.lead and pair.hold are where the seat lives; the op
     CHECK (rig.apply (8, "pair.keep").reason == "not-both-sending");
     CHECK (rig.apply (9, "pair.handOver").reason == "not-sending");
 
+    //  Following: a realign is accepted, and waits for serve's next tick (RD.8).
+    REQUIRE (rig.apply (9, "pair.realign").kind == LogRecord::Kind::applied);
+    CHECK (rig.pairing.realignAsked);
+    rig.pairing.realignAsked = false;
+
     //  Both sending: keep is the way out; handing over to nobody is not.
     REQUIRE (rig.apply (10, "pair.lead", seatArgs ("backup", "bothSending", "both-sending"), engineOrigin).kind
              == LogRecord::Kind::applied);
     rig.peer = "";
     CHECK (rig.apply (11, "pair.handOver").reason == "not-linked");
     CHECK (rig.apply (12, "pair.keep").kind == LogRecord::Kind::applied);
+
+    //  RD.8's realign: only where this machine follows, and it is asked of serve's next tick.
+    CHECK (rig.apply (12, "pair.realign").reason == "not-following");
+    CHECK_FALSE (rig.pairing.realignAsked);
 
     //  A record that says what cannot be: a held seat by pair.lead, a role nobody knows, no reason.
     CHECK (rig.apply (13, "pair.lead", seatArgs ("backup", "following", "x"), engineOrigin).reason == "bad-value");

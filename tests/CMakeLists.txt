@@ -156,6 +156,7 @@ add_executable(wfg_tests
     PairSettingsTests.cpp
     PeerLinkTests.cpp
     FollowTests.cpp
+    SeatTests.cpp
     LeadershipTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
@@ -1202,6 +1203,24 @@ add_test(NAME blackbox.redundancy-failover.C
 add_test(NAME blackbox.redundancy-failover.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/redundancy_failover.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.redundancy-failover.C blackbox.redundancy-failover.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
+# -----------------------------------------------------------------------------
+# A BACKUP STARTED LATE, SEATED AND IN STEP (namespace draft §58, RD.8): two
+# hosted serves on copies of the phase 2 fixture, its show rewritten by the
+# driver and its sound generated there. A main plays a long bed and a timeline
+# scene; a backup started late follows, is seated at the main's position - the
+# bed and the scene under the main's run names, the scene's memo waiting, the
+# standby the main's - and reads `pair/inStep` true, its bed's playhead within
+# two ticks of the main's once the delay is allowed for (four on CI);
+# `pair.realign` on the backup seats it again and it stays in step, on the main
+# it is refused `not-following`; the main killed, the backup leads, and the main
+# started again follows it and is seated where the backup is, in step.
+add_test(NAME blackbox.pair-seat.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_seat.py" --wfg-locale=C)
+add_test(NAME blackbox.pair-seat.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_seat.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.pair-seat.C blackbox.pair-seat.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------
