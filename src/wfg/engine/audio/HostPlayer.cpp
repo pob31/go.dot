@@ -367,13 +367,14 @@ namespace wfg::audio
         return audioHost.postTimecode (timecode::LtcGenerator::Command::start (program, zeroSample, startFrame, rate));
     }
 
-    void HostPlayer::stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut)
+    bool HostPlayer::stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut)
     {
         using Command = timecode::LtcGenerator::Command;
 
-        /*  A full queue drops it, and cannot be full unless the audio thread
-            has stopped draining it - when there is no line left to stop. */
-        audioHost.postTimecode (cut ? Command::cut (program, atSample) : Command::stop (program, atSample));
+        /*  The queue's answer, passed through (TC.4): a full queue - which
+            only an audio thread that has stopped draining it can leave - takes
+            nothing, and the Runner posts the stop again on the next tick. */
+        return audioHost.postTimecode (cut ? Command::cut (program, atSample) : Command::stop (program, atSample));
     }
 
     void HostPlayer::setTimecodeOutput (int channel, double levelDb)

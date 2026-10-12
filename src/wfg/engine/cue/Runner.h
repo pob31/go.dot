@@ -349,8 +349,13 @@ namespace wfg::cue
             `atSample`, or exactly there with `cut` - a double Esc. An
             `atSample` of nought or less is as soon as can be: an Esc is decided
             on the tick and never placed ahead. A stop for a program whose start
-            has not come yet takes that start back. Tick thread. */
-        virtual void stopTimecode (std::uint64_t, std::int64_t, bool) {}
+            has not come yet takes that start back. Tick thread.
+
+            FALSE WHEN IT WAS NOT TAKEN - the audio side's queue full - and the
+            Runner posts it again on the next tick until it is (TC.4): an Esc
+            is never lost. True by default: a player with no audio side drew
+            nothing, and owes no stop. */
+        virtual bool stopTimecode (std::uint64_t, std::int64_t, bool) { return true; }
 
         /*  Where LTC plays and how loud: a logical output channel, -1 for
             none, and its peak in dBFS (AHH, AHI). Tick thread. */
@@ -583,8 +588,16 @@ namespace wfg::cue
         /** Lets go of the run table's release listener, which calls into this. */
         ~Runner();
 
-        /** Null is legal and means a show with no audio side. */
-        void setPlayer (Player* player) noexcept { audio = player; }
+        /*  Null is legal and means a show with no audio side. Each one handed
+            in is a new audio side, which a timecode run on the old one's line
+            never reaches (namespace draft §59, AHU): counted, so a new host
+            whose generator counts its generations from the start again is
+            still told apart. */
+        void setPlayer (Player* player) noexcept
+        {
+            audio = player;
+            ++playerEpoch;
+        }
 
         /*  THE PICTURE SIDE (Phase 8a, namespace draft 35): null is legal and
             means a show that draws nothing - a replay, a rig - as a null
@@ -2163,8 +2176,9 @@ namespace wfg::cue
         /*  A TIMECODE CUE FIRING (namespace draft §59): `playing` from its GO,
             and a job built that says what the code is - its format, the rate
             copied now (AHM), where it starts and how long it runs - for the
-            tick hook to place. No Engine, for fireOsc's reason. */
-        void fireTimecode (const juce::ValueTree& cue, const std::string& runId);
+            tick hook to place. No Engine, for fireOsc's reason. `tick` is the
+            GO's, which the sounds fired with it carry as theirs (AHN). */
+        void fireTimecode (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick);
 
         /*  `selfCueId` is the fade or stop cue being fired; `targetCueId` is
             the cue it acts on. They are two arguments and not one because the
@@ -2283,20 +2297,51 @@ namespace wfg::cue
                                 const std::vector<process::Sent>& sent);
 
         /*  THE TIMECODE CUES, ONE TICK (namespace draft §59): a job not yet
-            placed is placed, taking its output over from the run that held it
-            (AHC, AHL); every placed one says where its code has got to, and
-            one whose length has run is ended. A run stopping or killed is let
-            go - ended by `advanceWaits`' sweep of the stopping runs no job
-            claims, as a process cue's is. A hook, after the processes. */
+            placed on the tick is placed, taking its output over from the run
+            that held it (AHC, AHL) - MTC until TC.6, and LTC with no audio side
+            to draw it, `not-sent` (AHR); LTC with one is placed on a sample by
+            `launchTimecode`. Every placed one says where its code has got to,
+            one whose length has run is ended, and one whose audio side has
+            restarted under it is ended as its sound would be (AHU). A run
+            stopping or killed is let go - its code stopped at its next frame
+            boundary or cut (AHK), and the run ended by `advanceWaits`' sweep of
+            the stopping runs no job claims, as a process cue's is. A hook,
+            after the processes. */
         struct TimecodeJob;
         void advanceTimecode (Engine& engine, std::int64_t tick);
 
-        /*  WHERE A TIMECODE RUN STARTS, decided once: on this tick, and over
-            the run of the same format that held the output, which ends. ONE
-            FUNCTION, so the stage that puts the code on the same sample as the
-            sounds of its group (TC.4, AHN) moves the call into `launchIfDue`
-            and changes nothing else. Hook-side, as it submits. */
-        void placeTimecode (Engine& engine, TimecodeJob& job, std::int64_t tick);
+        /*  WHERE A TIMECODE RUN STARTS, decided once: on `zeroSample` - the
+            first sample of its first frame, on the line the audio side draws -
+            or on this tick when it is below nought, and over the run of the
+            same format that held the output, which ends. The one function the
+            takeover is decided in. Hook-side, as it submits. */
+        void placeTimecode (Engine& engine, TimecodeJob& job, std::int64_t tick, std::int64_t zeroSample);
+
+        /*  LTC PLACED ON THE SAME SAMPLE AS THE SOUNDS (TC.4, AHN), from
+            `launchIfDue` after its media loop and with its `now` and lead: on
+            the target that loop gives a launch, or on the sample a sound of its
+            group fired with it was launched on in this very call, once that
+            sound's disk has answered. Refused here, once, when the show's LTC
+            output cannot carry it (`bad-route`) or its start never read
+            (`bad-message`). MTC joins it in TC.6, as a branch of its own. */
+        void launchTimecode (Engine& engine, std::int64_t tick, std::int64_t now, std::int64_t blockSize,
+                             std::int64_t lead);
+
+        /*  Why an LTC run cannot be drawn (AHR), or empty: the show's output
+            for it missing, not an output, or wider than one channel; or its
+            start unreadable. Read when the run starts (AHM). */
+        std::string ltcRefusal (const TimecodeJob& job) const;
+
+        /*  A JOB'S CODE LET GO OF THE LINE: stopped at its next frame boundary,
+            or cut where it stands (AHK) - once, never for a job a later run
+            took the output over from, and owed until the audio side takes it. */
+        void releaseTimecode (TimecodeJob& job, bool cut);
+        void postTimecodeStop (const TimecodeJob& job, std::int64_t atSample, bool cut);
+
+        /*  What the audio side would not take yet - a stop or a cut posted
+            into a full queue - posted again, every tick, until it is taken or
+            the line it was for has gone with an audio restart. */
+        void retryTimecodeStops();
 
         /*  THE PASS, ONE TICK (O.9): each armed curve takes the device's newest
             report or the hand's ride, latched from the first, sampled on the
@@ -2741,23 +2786,64 @@ namespace wfg::cue
                 the one GO can already tell. Empty is nothing wrong. */
             std::string failure;
 
+            /*  The tick its GO was applied on: what a sound fired with it
+                carries as `launchRequestedAtTick`, which is how the code knows
+                which of its group's sounds it is to start with (AHN). */
+            std::int64_t firedAtTick = 0;
+
             //  Where it started: on which tick, and whether it has.
             bool placed = false;
             std::int64_t placedAtTick = -1;
 
-            /*  FOR THE OUTPUTS TO COME: the sample the code starts on (TC.4),
-                the program the audio or MIDI side knows it by (TC.3, TC.5), and
-                whether a later run of its format took the output over - whose
-                end must then never silence the code the other now holds. */
+            /*  ON THE LINE (TC.4): the sample the code's first frame begins on,
+                -1 for a code counted on the tick; the program the audio side
+                knows it by, never nought there (TC.3); and whether a later run
+                of its format took the output over - whose end must then never
+                silence the code the other now holds. */
             std::int64_t launchSample = -1;
             std::uint64_t program = 0;
             bool handedOver = false;
 
+            /*  WHAT THE LINE WAS WHEN IT WAS PLACED ON IT: the audio side's
+                rate, and the generation and the player it was posted to - a
+                restart moves either, and ends the run (AHU). */
+            int sampleRate = 0;
+            std::uint64_t generation = 0;
+            std::uint64_t epoch = 0;
+
+            /*  WHERE ITS LENGTH ENDS IT (AHB), on the line: the first sample of
+                the frame after its last, posted as a stop when it was placed.
+                -1 for a code that runs until it is stopped. */
+            std::int64_t stopSample = -1;
+
+            bool released = false;          // its stop or cut posted: nothing more for the line
             bool endAsked = false;          // its length ran, `run.ended` submitted
             bool finished = false;
+
+            bool onLine() const noexcept { return launchSample >= 0 && program != 0; }
         };
 
         std::vector<TimecodeJob> timecoding;
+
+        /*  THE PROGRAMS LTC IS DRAWN UNDER, one a run and never nought (TC.3):
+            a count, since LTC is each machine's own and no other ever needs
+            the same number. And the player handed in, counted (AHU). */
+        std::uint64_t timecodePrograms = 0;
+        std::uint64_t playerEpoch = 0;
+
+        /*  A STOP OR A CUT THE AUDIO SIDE WOULD NOT TAKE YET, posted again
+            each tick by `retryTimecodeStops` - for the generation and the
+            player it was meant for, and dropped once the line is gone. */
+        struct TimecodeStop
+        {
+            std::uint64_t program = 0;
+            std::int64_t atSample = 0;
+            bool cut = false;
+            std::uint64_t generation = 0;
+            std::uint64_t epoch = 0;
+        };
+
+        std::vector<TimecodeStop> timecodeStopsOwed;
 
         /*  WHICH RUN HOLDS EACH OUTPUT, MTC's and LTC's, by identifier: the one
             a run of the same format placed after it takes over (AHC). Hook
@@ -3009,6 +3095,12 @@ namespace wfg::cue
         std::vector<OutputGainSource> outputGainSources;
         std::uint64_t outputGainsRevision = 0;
         bool outputGainsRead = false;
+
+        /*  WHERE LTC PLAYS AND HOW LOUD (namespace draft §59, AHH, AHI), read
+            with the outputs: the logical channel of the show's one-channel LTC
+            output, -1 for none or one that cannot carry it, and its level. */
+        int ltcChannel = -1;
+        double ltcLevelDb = -18.0;
 
         /*  EACH CANVAS AS `followCanvasLevels` READS IT, at the revision it was
             read at, and what was last handed to the video side. */

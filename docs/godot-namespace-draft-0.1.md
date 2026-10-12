@@ -26086,3 +26086,46 @@ clean over a ten-minute render.
   start's own; each edge's fraction and the rise recovered by inverting the low-pass; stops, cuts,
   takeovers, late and as-soon-as-can-be commands; and through `AudioHost::processBlock`, the code
   on its channel with a tone routed there replaced and the DCA down, and no allocation of Go.dot's.
+- **TC.4**, 2026-10-12: the Runner to LTC. `launchIfDue` gains a second loop after its media loop,
+  `launchTimecode`, from the same `now` and lead: an LTC run is placed on the target a launch gets
+  in that call (RD.8's `launchNotBefore` honoured), and a sound of its group fired in the same tick
+  (`launchRequestedAtTick` against the job's `firedAtTick`, the same parent run) that is still on
+  its disk is waited for - the code placed in the call that sound launches in, on its sample
+  (AHN); one that fails, is killed or is stopping lets it go. Only within a group: two cues side by
+  side in a list are two GOs. MTC stays on the tick until TC.6 adds its branch there. The run gets
+  a program (a count, never nought), `placeTimecode` now takes the sample - the takeover posts no
+  stop for the old code, whose program the new start replaces on its sample (AHL), and stops it
+  only when the new run could not be drawn - and `run.started` is submitted as a sound's launch
+  submits it. The target is the job's `launchSample`, never `Run::launchedAtSample`. A length posts
+  its stop at once, on `frameStartSample (lengthFrames)` after the zero - FrameClock's one rule -
+  and the run ends on the tick that sample has passed (AHB). Refused once, through `run.failed`
+  (AHR): `bad-route` when `sync/ltcOut` is empty, names nothing, names something that is not a
+  `<Bus>` or one wider than a channel; `bad-message` for TC.1's unreadable start. With no player,
+  or a `placeTimecode` that says false, the run is `not-sent` and counts on the tick as TC.1 does;
+  the refusals are an audio side's, as a sound's `bad-route` is, so `serve` with no audio reports
+  `not-sent` for a misrouted LTC cue. The readout on the line counts from `samplesElapsed()`
+  against the zero at the run's rate, nought before it. Esc, a stop cue and a group's end post
+  `stopTimecode (program, 0, false)`, a kill `(program, 0, true)`, and `dropOutputs` cuts every
+  code on the line in the double Esc's own drain - once a job, never for one handed over.
+  `Player::stopTimecode` returns whether it was taken, and a stop a full queue refused is posted
+  again each tick until it is (`retryTimecodeStops`). A fade that ends in a stop - a stop cue's
+  `fade` verb or a fade cue's `stopWhenDone` - aimed at a timecode run is a stop now (AHK): TC.1's
+  finding was the stop cue's own run held for the fade's length, the code's run already ended by
+  the sweep. An audio restart (AHU): a job reads the generation and the player (`setPlayer` counts
+  them, since a new host's generator counts from the start again) it was placed under, and either
+  moving ends its run with `run.ended`, posting nothing - as a sound whose voice went with the graph
+  ends on its edge; `audio.clockMoved` stops every root the Esc way first, and the code with them.
+  `applyOutputLevels` reads `sync/ltcOut` and `sync/ltcLevel` through the getters once a revision
+  and calls `setTimecodeOutput` every tick, -1 for an output that cannot carry the code. At
+  teardown nothing is posted: the host's own stop prepares the generator and the line falls
+  silent, and the Runner's player is gone before it is. Tests under C and fr_FR: TimecodeRunTests
+  with a fake audio side of its own (placed a horizon ahead on the tick after its GO; waiting for a
+  cold sound and starting on its sample; a failed sound letting it go; a length's stop on its exact
+  frame boundary at 25 and 29.97 and the run done the tick it passes; Esc with its footer; a double
+  Esc's cut in the press's drain with none; a refused stop posted again; the takeover with no stop;
+  `bad-route` four ways and `bad-message`; `not-sent` with no player and with one that will not
+  draw; a stop cue's fade; a restart by generation and by player; the output following edits; a
+  replay reaching the same runs); and AudioTests, through the real Runner, HostPlayer and AudioHost:
+  a tone and its LTC in one timeline scene fired cold begin on the same sample, the code decoded
+  by `tests/LtcReader.h` frame by frame from 01:00:00:00, and after Esc the line silent on the
+  frame boundary after the stop. Nine deliberate breakages each turned their own case red.

@@ -45,6 +45,8 @@
 #include <wfg/engine/video/DcaOpacity.h>
 #include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/timecode/FrameClock.h>
+#include <wfg/engine/timecode/Timecode.h>
 
 /*  For `juce::Decibels` alone, which turns a send's level into a coefficient.
     Written out rather than leaned on: this file reaches it today through
@@ -268,6 +270,33 @@ namespace wfg::cue
 
     namespace
     {
+        /*  THE LOGICAL CHANNEL LTC PLAYS ON, or -1 (namespace draft §59, AHI):
+            the show's `sync/ltcOut` naming an output - a `<Bus>` - one channel
+            wide. Read through the document's getters, which put back the
+            defaults a saved show leaves unwritten. The one rule the output's
+            setting and the run's `bad-route` both read (AHR). */
+        int ltcChannelOf (const doc::ShowDocument& document)
+        {
+            const auto busId = document.getAttribute ("/godot/sync/ltcOut").value_or (std::string {});
+
+            if (busId.empty())
+                return -1;
+
+            if (const auto bus = document.findById (busId); ! bus.isValid() || ! bus.hasType ("Bus"))
+                return -1;
+
+            const auto read = [&document, &busId] (const char* row, const char* otherwise)
+            {
+                return juce::String (document.getAttribute ("/godot/bus/" + busId + "/" + row)
+                                       .value_or (std::string (otherwise))).getIntValue();
+            };
+
+            if (read ("width", "1") != 1)
+                return -1;
+
+            return std::max (0, read ("firstChannel", "0"));
+        }
+
         /*  How many samples one pass of a range is.
 
             ROUNDED TO NEAREST rather than truncated, because the boundary is
@@ -4829,7 +4858,7 @@ namespace wfg::cue
             it or its length has run (AHB). */
         if (kind == "timecode")
         {
-            fireTimecode (cue, runId);
+            fireTimecode (cue, runId, tick);
             return;
         }
 
@@ -6471,6 +6500,20 @@ namespace wfg::cue
 
         const auto targetId = target->id;
 
+        /*  A TIMECODE RUN HAS NOTHING TO FADE (namespace draft §59, AHK): a
+            code faded is a reader losing lock, and its level is the show's, not
+            the run's. So a fade that ends in a stop is the stop, now - the code
+            ended at its next frame boundary, as Esc ends it - and the cue doing
+            it is over on the next tick, as a hard stop's is, rather than
+            holding its run for a fade that moves nothing anybody hears. Only a
+            stop: a fade that does not stop moves a number nobody reads. */
+        if (stopWhenDone && target->kind == "timecode")
+        {
+            seconds = 0.0;
+            points.clear();
+            stopLagTicks = 0;
+        }
+
         /*  FROM ITS OWN LEVEL, not from its effective one. A member inside a
             group trimmed to -6 dB is HEARD at -9 while its own level says -3,
             and a fade that took over from -9 would fold the trim into the base:
@@ -7170,6 +7213,14 @@ namespace wfg::cue
                     outputGainSources.push_back (std::move (source));
                 }
             }
+
+            /*  AND WHERE LTC PLAYS, AND HOW LOUD (namespace draft §59, AHH,
+                AHI): the show's one-channel output for it, or nowhere - an
+                output wider than one channel carries no code, and a run aimed
+                at it fails `bad-route` - at the show's level. */
+            ltcChannel = ltcChannelOf (document);
+            ltcLevelDb = osc::parseDouble (document.getAttribute ("/godot/sync/ltcLevel").value_or (std::string {}))
+                           .value_or (-18.0);
         }
 
         for (const auto& source : outputGainSources)
@@ -7182,6 +7233,11 @@ namespace wfg::cue
 
             audio->setOutputGainDb (source.firstChannel, source.width, gainDb);
         }
+
+        /*  Every tick, as the gains are: two relaxed stores, and a player
+            handed in since - an audio restart - is told without waiting for an
+            edit. */
+        audio->setTimecodeOutput (ltcChannel, ltcLevelDb);
     }
 
     //==============================================================================
@@ -7885,6 +7941,15 @@ namespace wfg::cue
             a note-off for each note a cue started that nothing has ended. */
         if (midiOut != nullptr)
             midiOut->dropQueued();
+
+        /*  EVERY TIMECODE ON THE LINE, CUT (namespace draft §59, AHK): where
+            each stands, in the block that takes it, rather than at its next
+            frame boundary - PRD §4.4's immediate, for what Go.dot originates,
+            and a wrongly routed square wave into a PA is exactly what a double
+            Esc is for. Once a job: the kill the next tick's hook sees posts
+            nothing more. A replay has no audio side and posts nothing. */
+        for (auto& job : timecoding)
+            releaseTimecode (job, true);
 
         /*  A START CUE'S FIRE IS SUBMITTED BY THE NEXT TICK'S HOOK, so one fired
             earlier in this drain would fire its target a tick after the press.
@@ -13719,7 +13784,7 @@ namespace wfg::cue
     }
 
     //==============================================================================
-    void Runner::fireTimecode (const juce::ValueTree& cue, const std::string& runId)
+    void Runner::fireTimecode (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick)
     {
         auto* run = runs.find (runId);
 
@@ -13732,6 +13797,7 @@ namespace wfg::cue
         job.self = runId;
         job.cue = cue[idProperty].toString().toStdString();
         job.format = textOf (cue, "format") == "ltc" ? "ltc" : "mtc";
+        job.firedAtTick = tick;
 
         /*  THE SHOW'S RATE AS IT IS NOW (AHM), kept for the run's life: a
             receiver is locked to the rate the code started at. A word the table
@@ -13778,14 +13844,25 @@ namespace wfg::cue
         timecoding.push_back (std::move (job));
     }
 
-    void Runner::placeTimecode (Engine& engine, TimecodeJob& job, std::int64_t tick)
+    void Runner::placeTimecode (Engine& engine, TimecodeJob& job, std::int64_t tick, std::int64_t zeroSample)
     {
         /*  A TAKEOVER (AHC, AHL): the run that held this format's output ends
             on the tick this one starts, never at its GO or during its pre-wait,
             so the line is never quiet between the two - the receiver sees the
             code jump, as at a locate. A record, so a replay ends it on the same
             tick. Its job is marked handed over: what ends it from here on must
-            never stop the output, which this run now holds. */
+            never stop the output, which this run now holds.
+
+            ON THE LINE THE HANDOVER IS THE AUDIO SIDE'S (TC.4): this run's
+            start is already posted for its own first sample, and a start
+            replaces whatever program the line is drawing there - the old code
+            drawn up to that sample and the new from it, the edge carried on
+            rather than dropped. So the old job posts nothing more: a stop
+            decided now would end the old code at its next frame boundary,
+            before the new one's first sample a launch horizon ahead, and leave
+            the line quiet between them. Only a new run NOT drawn - its start
+            refused, counted on the tick - leaves the old code on the line with
+            nobody left to end it, and that one is stopped here. */
         auto& holder = timecodeHolder (job.format);
 
         if (! holder.empty() && holder != job.self)
@@ -13797,6 +13874,9 @@ namespace wfg::cue
                 if (const auto* held = runs.find (other.self); held != nullptr && ! held->isFinished())
                     engine.submit (origin::engine, "run.ended", one (other.self));
 
+                if (zeroSample < 0)
+                    releaseTimecode (other, false);
+
                 other.handedOver = true;
                 other.finished = true;
             }
@@ -13804,10 +13884,178 @@ namespace wfg::cue
         holder = job.self;
         job.placed = true;
         job.placedAtTick = tick;
+        job.launchSample = zeroSample >= 0 ? zeroSample : -1;
+    }
+
+    std::string Runner::ltcRefusal (const TimecodeJob& job) const
+    {
+        /*  NOWHERE IT COULD PLAY (AHR): no output named, one the show does not
+            have, something that is not an output, or one wider than the one
+            channel the code replaces - which `wfg validate` has said before the
+            night. Then a start no door should have let in (TC.1 kept it). */
+        if (ltcChannelOf (document) < 0)
+            return runError::badRoute;
+
+        return job.failure;
+    }
+
+    void Runner::postTimecodeStop (const TimecodeJob& job, std::int64_t atSample, bool cut)
+    {
+        /*  NEVER LOST (TC.4): a queue that would not take it - only an audio
+            thread that has stopped draining it fills one - is asked again on
+            every tick until it does, for the line this job was drawn on. */
+        if (audio != nullptr && ! audio->stopTimecode (job.program, atSample, cut))
+            timecodeStopsOwed.push_back ({ job.program, atSample, cut, job.generation, job.epoch });
+    }
+
+    void Runner::releaseTimecode (TimecodeJob& job, bool cut)
+    {
+        if (job.released || job.handedOver || ! job.onLine())
+            return;
+
+        job.released = true;
+
+        /*  THE LINE GONE WITH ITS AUDIO SIDE (AHU): a restart drew it to
+            silence, and a stop for a program the new line never knew is
+            nothing to send. */
+        if (audio == nullptr || job.epoch != playerEpoch || audio->timecodeGeneration() != job.generation)
+            return;
+
+        /*  AS SOON AS THE AUDIO SIDE CAN (AHK): Esc is decided on the tick and
+            never placed ahead, so its stop is for sample nought - at the next
+            frame boundary of the block that takes it, never counted late - and
+            a double Esc's cut is where the line stands. */
+        postTimecodeStop (job, 0, cut);
+    }
+
+    void Runner::retryTimecodeStops()
+    {
+        if (timecodeStopsOwed.empty())
+            return;
+
+        if (audio == nullptr)
+        {
+            timecodeStopsOwed.clear();
+            return;
+        }
+
+        const auto generation = audio->timecodeGeneration();
+
+        std::erase_if (timecodeStopsOwed, [this, generation] (const TimecodeStop& unsent)
+        {
+            return unsent.epoch != playerEpoch || unsent.generation != generation
+                     || audio->stopTimecode (unsent.program, unsent.atSample, unsent.cut);
+        });
+    }
+
+    void Runner::launchTimecode (Engine& engine, std::int64_t tick, std::int64_t now, std::int64_t blockSize,
+                                 std::int64_t lead)
+    {
+        for (auto& job : timecoding)
+        {
+            /*  LTC ALONE, FOR NOW: MTC is counted on the tick until TC.6 gives
+                it a lane of its own, and then takes the same target here as a
+                branch beside this one. */
+            if (job.finished || job.placed || job.format != "ltc")
+                continue;
+
+            auto* run = runs.find (job.self);
+
+            //  A run on its way out is `advanceTimecode`'s to let go.
+            if (run == nullptr || run->state != runState::playing || beingKilled (*run))
+                continue;
+
+            /*  REFUSED ONCE (AHR), with the words the other runs use: a run
+                that cannot be drawn fails, and its group goes on without it. */
+            if (const auto refusal = ltcRefusal (job); ! refusal.empty())
+            {
+                engine.submit (origin::engine, "run.failed",
+                               { osc::Value::string (job.self), osc::Value::string (refusal) });
+                job.finished = true;
+                continue;
+            }
+
+            /*  THE SAME SAMPLE AS THE SOUNDS OF ITS GROUP (AHN). The target is
+                the one the media loop above gives a launch in this call - its
+                lead from the same `now`, or later for a run a follower was
+                seated with (RD.8) - so a sound and a code fired together and
+                both ready start together. A SOUND OF ITS GROUP fired in the
+                same tick and still on its disk - fired cold - is waited for:
+                the code is placed in the call that sound launches in, after it,
+                on the sample it was given. One that fails, is killed or is on
+                its way out lets the code go without it. Its group's alone: two
+                cues fired side by side in a list are two GOs, and were never
+                promised one sample. */
+            auto target = std::max (now + lead, run->launchNotBefore);
+            auto waits = false;
+
+            if (! run->parent.empty())
+                for (const auto* sibling : runs.childrenOf (run->parent))
+                {
+                    if ((sibling->kind != "media" && sibling->kind != "mic")
+                          || sibling->launchRequestedAtTick != job.firedAtTick
+                          || sibling->isFinished() || sibling->state == runState::stopping
+                          || beingKilled (*sibling))
+                        continue;
+
+                    if (sibling->launchRequested)
+                    {
+                        waits = true;
+                        break;
+                    }
+
+                    target = std::max (target, sibling->launchedAtSample);
+                }
+
+            /*  And the guarantee the media loop checks, for the same reason: a
+                start placed too close to the block in hand would land late. */
+            if (waits || target - now < 2 * blockSize)
+                continue;
+
+            /*  ON THE LINE: a program of its own, replacing whatever the line
+                draws at `target` - a takeover's handover, without a gap (AHL).
+                The generation is read before the start is posted, so a restart
+                between the two is one the job sees. Nothing to draw it - the
+                host not running, its queue full - and the run is `not-sent`,
+                counted on the tick as with no audio side at all (AHR). */
+            const auto generation = audio->timecodeGeneration();
+            const auto program = ++timecodePrograms;
+            const auto drawn = audio->placeTimecode (program, target, job.startFrame + job.offsetFrames, job.rate);
+
+            job.program = drawn ? program : 0;
+            placeTimecode (engine, job, tick, drawn ? target : -1);
+
+            if (! drawn)
+            {
+                run->warning = runWarning::notSent;
+                continue;
+            }
+
+            job.sampleRate = audio->sampleRate();
+            job.generation = generation;
+            job.epoch = playerEpoch;
+
+            /*  HEARD FROM ITS SAMPLE, said as a sound's launch says it: the
+                record Doh! reads to know the code reached the room (TC.7). */
+            engine.submit (origin::engine, "run.started", one (job.self));
+
+            /*  ITS LENGTH (AHB), placed now and exactly: a stop on the first
+                sample of the frame after its last, by FrameClock's one rule -
+                the rule the line is drawn by - so the last frame is whole and
+                nothing of the next is drawn. The run ends on the tick that
+                sample has passed. */
+            if (job.lengthFrames > 0)
+            {
+                job.stopSample = target + timecode::frameStartSample (job.lengthFrames, job.sampleRate, job.rate);
+                postTimecodeStop (job, job.stopSample, false);
+            }
+        }
     }
 
     void Runner::advanceTimecode (Engine& engine, std::int64_t tick)
     {
+        retryTimecodeStops();
+
         /*  A JOB LET GO: its output given back, unless a later run of its
             format took it over and holds it now. */
         const auto letGo = [this] (TimecodeJob& job)
@@ -13829,9 +14077,12 @@ namespace wfg::cue
 
             /*  OVER BY ANOTHER ROAD - failed, revoked, taken back, its length's
                 end applied - or holding the post-wait that follows its end: the
-                code has stopped either way. */
+                code is stopped either way, at its next frame boundary when the
+                line still draws it. A length's end has stopped it already, on
+                the sample it was placed for. */
             if (run == nullptr || run->isFinished() || run->state == runState::postWait)
             {
+                releaseTimecode (job, false);
                 letGo (job);
                 continue;
             }
@@ -13840,42 +14091,97 @@ namespace wfg::cue
                 `advanceWaits`' sweep of the stopping runs no job claims, which
                 has already run - a timecode run has nothing to fade or wait
                 for, and its group's footer runs after it as after any member.
-                The code stops with it: at its next frame boundary once there
-                is an output to stop, cut at once under a kill (TC.4). */
+                The code stops with it: at its next frame boundary, or cut where
+                it stands under a kill. A clock that moved under the show stops
+                every run this way too, in `audio.clockMoved`'s handler - Esc's
+                road, footers and all, as it stops the sounds. */
             if (run->state == runState::stopping || beingKilled (*run))
             {
+                releaseTimecode (job, beingKilled (*run));
                 letGo (job);
                 continue;
             }
 
-            if (! job.placed)
-                placeTimecode (engine, job, tick);
-
-            /*  WHERE THE CODE HAS GOT TO, counted from the tick it was placed
-                in whole frames at the run's rate - a product and a division of
-                integers, never a sum, so a code that has run for hours is
-                exactly where its start says. A tick is a fiftieth of a second:
-                at 25 a frame every second tick. */
-            const auto elapsedTicks = tick - job.placedAtTick;
-            auto elapsedFrames = elapsedTicks * timecode::numOf (job.rate)
-                                   / (static_cast<std::int64_t> (TickClock::rateHz) * timecode::denOf (job.rate));
-
-            /*  ITS LENGTH RUN (AHB): ended on the tick its last frame is over,
-                once - a record, so a replay ends it on the same tick. The
-                readout stays on that last frame, which is the last a reader
-                saw. */
-            if (job.lengthFrames > 0 && elapsedFrames >= job.lengthFrames)
+            /*  AN AUDIO RESTART (AHU) - another player, or the generator made
+                ready again - drew the line to silence: the run ends, as a sound
+                whose voice went with the graph ends on its edge. */
+            if (job.onLine()
+                  && (audio == nullptr || job.epoch != playerEpoch || audio->timecodeGeneration() != job.generation))
             {
-                if (! job.endAsked)
-                {
-                    engine.submit (origin::engine, "run.ended", one (job.self));
-                    job.endAsked = true;
-                }
-
-                elapsedFrames = job.lengthFrames - 1;
+                job.released = true;
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                letGo (job);
+                continue;
             }
 
-            run->position = static_cast<double> (elapsedTicks) / static_cast<double> (TickClock::rateHz);
+            /*  ON THE TICK: MTC until TC.6, and LTC with no audio side to draw
+                it - `not-sent`, its frames counted all the same (AHR). LTC with
+                one waits for `launchTimecode`, after the sounds of this tick. */
+            if (! job.placed)
+            {
+                if (job.format == "ltc" && audio != nullptr)
+                    continue;
+
+                placeTimecode (engine, job, tick, -1);
+
+                if (job.format == "ltc")
+                    run->warning = runWarning::notSent;
+            }
+
+            std::int64_t elapsedFrames = 0;
+            auto lengthRun = false;
+
+            if (job.onLine())
+            {
+                /*  WHERE THE LINE HAS GOT TO, from the samples the audio side
+                    has drawn since the code's first - FrameClock's one rule,
+                    the one it is drawn by - and nought before that sample is
+                    reached, while the start is still placed ahead. */
+                const auto now = audio->samplesElapsed();
+                const auto since = now - job.launchSample;
+
+                if (since > 0 && job.sampleRate > 0)
+                {
+                    elapsedFrames = timecode::frameAtSample (since, job.sampleRate, job.rate);
+                    run->position = static_cast<double> (since) / static_cast<double> (job.sampleRate);
+                }
+                else
+                {
+                    run->position = 0.0;
+                }
+
+                lengthRun = job.stopSample >= 0 && now >= job.stopSample;
+            }
+            else
+            {
+                /*  WHERE THE CODE HAS GOT TO, counted from the tick it was
+                    placed in whole frames at the run's rate - a product and a
+                    division of integers, never a sum, so a code that has run
+                    for hours is exactly where its start says. A tick is a
+                    fiftieth of a second: at 25 a frame every second tick. */
+                const auto elapsedTicks = tick - job.placedAtTick;
+                elapsedFrames = elapsedTicks * timecode::numOf (job.rate)
+                                  / (static_cast<std::int64_t> (TickClock::rateHz) * timecode::denOf (job.rate));
+                run->position = static_cast<double> (elapsedTicks) / static_cast<double> (TickClock::rateHz);
+
+                lengthRun = job.lengthFrames > 0 && elapsedFrames >= job.lengthFrames;
+            }
+
+            /*  ITS LENGTH RUN (AHB): ended on the tick its last frame is over -
+                on the line, the tick its stop's sample has passed - once, and
+                a record, so a replay ends it on the same tick. The readout
+                stays on that last frame, which is the last a reader saw. The
+                line has already stopped where it was placed to. */
+            if (lengthRun && ! job.endAsked)
+            {
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                job.endAsked = true;
+                job.released = true;
+            }
+
+            if (job.lengthFrames > 0)
+                elapsedFrames = std::min (elapsedFrames, job.lengthFrames - 1);
+
             run->timecode = timecode::formatLabel (timecode::labelOf (job.startFrame + job.offsetFrames + elapsedFrames,
                                                                       job.rate),
                                                    job.rate, true);
@@ -18601,8 +18907,6 @@ namespace wfg::cue
 
     void Runner::launchIfDue (Engine& engine, std::int64_t tick)
     {
-        juce::ignoreUnused (tick);
-
         const auto ticksAhead = latencyTicks();
 
         if (ticksAhead <= 0 || samplesPerTick <= 0)
@@ -18914,6 +19218,15 @@ namespace wfg::cue
                 }
             }
         }
+
+        /*  AND THE TIMECODE, AFTER THE SOUNDS (namespace draft §59, AHN): in
+            this same call, from the same `now` and the same lead, so a code
+            fired with a sound starts on the sample the sound was just given -
+            and one whose sound launched only now, its disk having answered,
+            starts on that sound's. */
+        if (! timecoding.empty())
+            launchTimecode (engine, tick, now, blockSize,
+                            static_cast<std::int64_t> (ticksAhead) * samplesPerTick);
     }
 
     void Runner::advanceRanges (Engine& engine)

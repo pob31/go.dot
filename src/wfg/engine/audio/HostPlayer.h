@@ -89,7 +89,7 @@ namespace wfg::audio
             a queue of thirty-two one way. */
         bool placeTimecode (std::uint64_t program, std::int64_t zeroSample, std::int64_t startFrame,
                             timecode::Rate rate) override;
-        void stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut) override;
+        bool stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut) override;
         void setTimecodeOutput (int channel, double levelDb) override;
         std::uint64_t timecodeGeneration() const override;
         std::uint32_t timecodeLate() const override;

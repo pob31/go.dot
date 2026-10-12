@@ -50,12 +50,14 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
+#include <wfg/engine/timecode/Timecode.h>
 
 #include "LtcReader.h"
 #include "TestSupport.h"
@@ -8178,6 +8180,218 @@ TEST_CASE ("rt: LTC drawn on the audio thread allocates nothing of ours")
     CHECK (rt::violations() == 0);
     CHECK (rig.host.timecodeProgram() == 0);
     CHECK (rig.host.timecodeLate() == 1);
+}
+
+TEST_CASE ("audio host: a song and its LTC fired together in one group start on the same sample, and Esc stops the code within a frame")
+{
+    /*  Namespace draft §59 (TC.4, AHN, AHK), through everything: the Runner
+        placing both, HostPlayer, Tracktion launching the sound and the
+        generator drawing the code. A steady tone on output 0 and LTC on output
+        1, in one timeline group fired once from cold - the tone's disk answers
+        on the message thread, which this test pumps - so the code waits for
+        the sound and is placed on its sample. The first sample that is not
+        silence is the same on both channels, to the sample: the test's thread
+        is the only one posting, so the launch queue's try-lock never misses
+        here (M5's one block of slack is a contended lock's). From there, the
+        decoder of the tests' own reads consecutive frames from the cue's
+        start; and after Esc the line is silent within a frame, and the
+        low-pass's tail, of the tick that stopped it. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+    constexpr int blocksPerTick = (rate / 50) / blockSize;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 4;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 2;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 1, rate, 4);
+    REQUIRE (tone.existsAsFile());
+
+    //  --- a show: one timeline scene, a song and its LTC -------------------
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (59);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    engine.log().openInMemory ({});
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    document.root().getChildWithName ("Audio").setProperty (juce::Identifier ("tracks"), 2, nullptr);
+
+    const auto song = document.createBus ("direct", 1);
+    const auto line = document.createBus ("direct", 1);
+    REQUIRE (song.ok);
+    REQUIRE (line.ok);
+    REQUIRE (document.setAttribute ("/godot/sync/ltcOut", line.id).ok);
+
+    const auto listId = document.createList ("Sound").id;
+    REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    const auto scene = document.createCue (listId, 0, "group", "Song and code").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+
+    const auto mediaId = document.createCue (scene, 0, "media", "Song").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + mediaId + "/file", tone.getFileName().toStdString()).ok);
+
+    juce::ValueTree route { "Route" };
+    route.setProperty (juce::Identifier ("id"), "Z04EH7PH", nullptr);
+    route.setProperty (juce::Identifier ("bus"), juce::String (song.id), nullptr);
+    route.setProperty (juce::Identifier ("gains"), "1", nullptr);
+    document.findById (mediaId).appendChild (route, nullptr);
+
+    doc::ShowDocument::Attributes born { { "format", "ltc" } };
+    const auto codeId = document.createCue (scene, 1, "timecode", {}, {}, born).id;
+    REQUIRE (! codeId.empty());
+
+    document.setAttribute (cue::standbyAddressOf (listId), scene);
+
+    //  --- the audio side -----------------------------------------------------
+    audio::HostPlayer player { rig.host, engine };
+    runner.setPlayer (&player);
+    runner.setSamplesPerTick (rate / 50);
+    runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
+
+    RecordingSink sink;
+    sink.prepare (settings.outputChannels, 4 * rate);
+    rig.host.setBlockSink (&sink);
+    const auto began = rig.host.clock().samplesElapsed();
+
+    std::int64_t tick = 0;
+
+    const auto oneTick = [&]
+    {
+        runner.beforeTick (engine, tick);
+        engine.processTick (tick++);
+        player.serviceArms();
+
+        for (int i = 0; i < blocksPerTick; ++i)
+            rig.host.processBlock();
+    };
+
+    //  GO at once, before the standby's arm has had a tick: the sound is cold.
+    REQUIRE (engine.submit ("udp:127.0.0.1:9000", "go", {}));
+
+    const auto codeOf = [&]
+    {
+        for (const auto& run : runs.all())
+            if (run.cue == codeId)
+                return &run;
+
+        return static_cast<const cue::Run*> (nullptr);
+    };
+
+    /*  Until the code is drawn, then a second and a half of it - wall-clock
+        bounded, as the first-sound case is: the disk answers in its own time. */
+    for (int i = 0; i < 400 && rig.host.timecodeProgram() == 0; ++i)
+        oneTick();
+
+    REQUIRE (rig.host.timecodeProgram() != 0);
+    REQUIRE (codeOf() != nullptr);
+    CHECK (codeOf()->state == cue::runState::playing);
+    CHECK (codeOf()->warning.empty());
+
+    for (int i = 0; i < 75; ++i)
+        oneTick();
+
+    /*  Esc. Its scene asks the code to stop, and the hook after the drain
+        that applies that posts the stop - before that tick's blocks, on the
+        sample the counter stands at then. */
+    REQUIRE (engine.submit ("cli", "run.stopAll", {}));
+    std::int64_t stopPosted = -1;
+
+    for (int i = 0; i < 25; ++i)
+    {
+        oneTick();
+
+        if (stopPosted < 0 && codeOf()->state == cue::runState::stopping)
+            stopPosted = rig.host.clock().samplesElapsed();
+    }
+
+    REQUIRE (stopPosted > 0);
+
+    rig.host.setBlockSink (nullptr);
+
+    REQUIRE (codeOf()->isFinished());
+    CHECK (rig.host.timecodeProgram() == 0);
+    CHECK (rig.host.timecodeLate() == 0);
+
+    //  --- one sample for both ------------------------------------------------
+    const auto firstOf = [&sink] (int channel)
+    {
+        const auto* samples = sink.buffer.getReadPointer (channel);
+
+        for (int n = 0; n < sink.written; ++n)
+            if (std::abs (samples[n]) > 0.0f)
+                return n;
+
+        return -1;
+    };
+
+    const auto toneAt = firstOf (0);
+    const auto codeAt = firstOf (1);
+
+    INFO ("the tone began at " << toneAt << ", the code at " << codeAt << ", samples into the recording");
+    REQUIRE (toneAt > 0);
+    REQUIRE (codeAt > 0);
+    CHECK (codeAt == toneAt);
+
+    //  --- consecutive frames from the cue's start ---------------------------
+    const auto* code = sink.buffer.getReadPointer (1);
+    const auto frames = ltcreader::decode (code, static_cast<std::size_t> (sink.written), static_cast<double> (rate),
+                                           25.0, began);
+    REQUIRE (frames.size() >= 30u);
+
+    const auto zero = began + codeAt;
+    const auto startFrame = timecode::frameOf (timecode::Label { 1, 0, 0, 0 }, timecode::Rate::fps25);
+    int wrong = 0;
+
+    for (std::size_t k = 0; k < frames.size(); ++k)
+    {
+        const auto& frame = frames[k];
+        const auto wanted = timecode::labelOf (startFrame + static_cast<std::int64_t> (k), timecode::Rate::fps25);
+        const auto due = zero + 1920 * static_cast<std::int64_t> (k);
+
+        if (frame.hours != wanted.hours || frame.minutes != wanted.minutes || frame.seconds != wanted.seconds
+              || frame.frames != wanted.frames || ! frame.evenParity || frame.sample < due - 1 || frame.sample > due + 2)
+            ++wrong;
+    }
+
+    CHECK (wrong == 0);
+    CHECK (frames.front().sample == zero);
+
+    //  --- and Esc ------------------------------------------------------------
+    /*  The stop is for sample nought, applied at the start of the first block
+        after it was posted - `stopPosted` - and ends the code on the next
+        frame boundary: within 1920 samples, and the low-pass's tail after it,
+        a few dozen samples at most. The last frame drawn is whole. */
+    const auto* lineOut = sink.buffer.getReadPointer (1);
+    std::int64_t lastCode = -1;
+
+    for (int n = sink.written - 1; n >= 0 && lastCode < 0; --n)
+        if (std::abs (lineOut[n]) > 0.0f)
+            lastCode = began + n;
+
+    INFO ("the stop was posted at " << stopPosted << ", the last sample of code was " << lastCode);
+    CHECK (lastCode >= stopPosted);
+    CHECK (lastCode < stopPosted + 1920 + 64);
+
+    const auto boundaryAfter = zero + 1920 * ((stopPosted - zero + 1919) / 1920);
+    CHECK (lastCode >= boundaryAfter - 1);
+    CHECK (frames.back().sample + 1920 <= boundaryAfter);
 }
 
 
