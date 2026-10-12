@@ -30,6 +30,7 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DohSetting.h>
@@ -2918,4 +2919,285 @@ TEST_CASE ("the Doh! setting and plays sound survive a save and a load, and the 
     CHECK (read.getAttribute ("/godot/cue/" + note + "/doh") == std::optional<std::string> ("takeBack"));
 
     CHECK (read.validate().empty());
+}
+
+//==============================================================================
+/*  TIMECODE (namespace draft §59, TC.1): the cue that generates it, the show's
+    settings it reads, the one judge of a start, and what `wfg validate` says
+    about a code that will not go where it should. */
+namespace
+{
+    bool anySays (const std::vector<std::string>& lines, const std::string& fragment)
+    {
+        return std::any_of (lines.begin(), lines.end(),
+                            [&fragment] (const std::string& line) { return line.find (fragment) != std::string::npos; });
+    }
+
+    std::string timecodeCue (ShowDocument& document, const std::string& listId, int index,
+                             const ShowDocument::Attributes& born = {})
+    {
+        const auto made = document.createCue (listId, index, "timecode", {}, {}, born);
+        REQUIRE (made.ok);
+        return made.id;
+    }
+}
+
+TEST_CASE ("timecode cue: made by cue.create with its format in the pairs, its rows read back")
+{
+    Engine engine;
+    ShowDocument document;
+    registerDocumentCommands (engine.commands(), document);
+    engine.log().openInMemory ({});
+
+    const auto listId = document.createList ("Main").id;
+
+    REQUIRE (engine.submit (origin::cli, "cue.create",
+                            { osc::Value::string (listId), osc::Value::int32 (0), osc::Value::string ("timecode"),
+                              osc::Value::string (""), osc::Value::string (""),
+                              osc::Value::string ("format"), osc::Value::string ("ltc"),
+                              osc::Value::string ("from"), osc::Value::string ("10;00;00;00"),
+                              osc::Value::string ("length"), osc::Value::string ("150") }));
+    engine.processTick (1);
+
+    const auto list = document.findById (listId);
+    REQUIRE (list.getNumChildren() == 1);
+    const auto cue = list.getChild (0);
+    CHECK (cue.getType().toString() == "Timecode");
+
+    const auto id = cue["id"].toString().toStdString();
+    CHECK (document.getAttribute ("/godot/cue/" + id + "/format") == std::optional<std::string> ("ltc"));
+    CHECK (document.getAttribute ("/godot/cue/" + id + "/from") == std::optional<std::string> ("10:00:00:00"));
+    CHECK (document.getAttribute ("/godot/cue/" + id + "/length") == std::optional<std::string> ("150"));
+
+    //  And the automatic name says what it sends, from where, for how long.
+    CHECK (cue::AutoNames { document.root() }.of (cue) == "LTC from 10:00:00:00 for 2:30");
+
+    //  Born with nothing: MTC from one o'clock, until stopped.
+    const auto plain = timecodeCue (document, listId, 1);
+    CHECK (document.getAttribute ("/godot/cue/" + plain + "/format") == std::optional<std::string> ("mtc"));
+    CHECK (document.getAttribute ("/godot/cue/" + plain + "/from") == std::optional<std::string> ("01:00:00:00"));
+    CHECK (document.getAttribute ("/godot/cue/" + plain + "/length") == std::optional<std::string> ("0"));
+    CHECK (cue::AutoNames { document.root() }.of (document.findById (plain)) == "MTC from 01:00:00:00");
+
+    REQUIRE (document.setAttribute ("/godot/cue/" + plain + "/length", "3725.5").ok);
+    CHECK (cue::AutoNames { document.root() }.of (document.findById (plain)) == "MTC from 01:00:00:00 for 1:02:05.5");
+
+    //  A format that is neither is refused, as an enum is.
+    CHECK_FALSE (document.setAttribute ("/godot/cue/" + plain + "/format", "smpte").ok);
+
+    CHECK (document.validate().empty());
+}
+
+TEST_CASE ("timecode cue: a start that is not a label is refused bad-value, and a drop-frame spelling is stored with colons")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+    const auto cue = timecodeCue (document, listId, 0);
+    const auto address = "/godot/cue/" + cue + "/from";
+
+    for (const auto* bad : { "1:2:3", "25:00:00:00", "01:00:00:30", "01:60:00:00", "one o'clock", "" })
+    {
+        INFO ("from \"" << bad << "\"");
+        const auto written = document.setAttribute (address, bad);
+        CHECK_FALSE (written.ok);
+        CHECK (written.reason == reason::badValue);
+        CHECK (document.getAttribute (address) == std::optional<std::string> ("01:00:00:00"));
+    }
+
+    REQUIRE (document.setAttribute (address, "01;00;00;00").ok);
+    CHECK (document.getAttribute (address) == std::optional<std::string> ("01:00:00:00"));
+
+    REQUIRE (document.setAttribute (address, "09:59:59.24").ok);
+    CHECK (document.getAttribute (address) == std::optional<std::string> ("09:59:59:24"));
+
+    //  Born with one is the same door: refused, and no cue made.
+    const auto before = document.findById (listId).getNumChildren();
+    const auto refused = document.createCue (listId, 1, "timecode", {}, {}, { { "from", "1:2:3" } });
+    CHECK_FALSE (refused.ok);
+    CHECK (refused.reason == reason::badValue);
+    CHECK (document.findById (listId).getNumChildren() == before);
+
+    //  And a file carrying one that does not read does not open.
+    document.findById (cue).setProperty ("from", "1:2:3", nullptr);
+    const auto problems = document.validate();
+    REQUIRE (problems.size() == 1u);
+    INFO (problems[0]);
+    CHECK (problems[0].find ("from") != std::string::npos);
+    CHECK (problems[0].find ("timecode label") != std::string::npos);
+}
+
+TEST_CASE ("sync: the show's timecode settings are rows node.set reaches, at /godot/sync")
+{
+    Engine engine;
+    ShowDocument document;
+    registerDocumentCommands (engine.commands(), document);
+    engine.log().openInMemory ({});
+
+    const auto port = document.createPort ("MTC").id;
+    const auto bus = document.createBus ("direct", 1).id;
+    REQUIRE (! bus.empty());
+
+    //  The defaults, with nothing written: 25, no destinations, -18 dBFS.
+    CHECK (document.getAttribute ("/godot/sync/frameRate") == std::optional<std::string> ("25"));
+    CHECK (document.getAttribute ("/godot/sync/mtcOut") == std::optional<std::string> (""));
+    CHECK (document.getAttribute ("/godot/sync/ltcOut") == std::optional<std::string> (""));
+    CHECK (document.getAttribute ("/godot/sync/ltcLevel") == std::optional<std::string> ("-18"));
+
+    const std::vector<std::pair<std::string, std::string>> writes {
+        { "frameRate", "29.97df" }, { "mtcOut", port }, { "ltcOut", bus }, { "ltcLevel", "-12" } };
+
+    for (const auto& [row, value] : writes)
+        REQUIRE (engine.submit (origin::cli, "node.set",
+                                { osc::Value::string ("/godot/sync/" + row), osc::Value::string (value) }));
+
+    engine.processTick (1);
+
+    for (const auto& [row, value] : writes)
+    {
+        INFO ("row " << row);
+        CHECK (document.getAttribute ("/godot/sync/" + row) == std::optional<std::string> (value));
+    }
+
+    //  Held to the table: a rate it does not have, a level past its range, a readout.
+    CHECK_FALSE (document.setAttribute ("/godot/sync/frameRate", "50").ok);
+    CHECK_FALSE (document.setAttribute ("/godot/sync/ltcLevel", "-70").ok);
+    CHECK (document.setAttribute ("/godot/sync/mtcLate", "3").reason == reason::readOnly);
+
+    CHECK (document.validate().empty());
+    CHECK (document.warnings().empty());
+
+    //  Stored in the show, and read back.
+    ShowDocument read;
+    REQUIRE (CanonicalXml::read (CanonicalXml::write (document), read).ok);
+
+    for (const auto& [row, value] : writes)
+        CHECK (read.getAttribute ("/godot/sync/" + row) == std::optional<std::string> (value));
+}
+
+TEST_CASE ("sync: every show carries <Sync/>, last, through a save and a load and a serial port made")
+{
+    ShowDocument document;
+    const auto lastChild = [] (const ShowDocument& d)
+    {
+        return d.root().getChild (d.root().getNumChildren() - 1).getType().toString().toStdString();
+    };
+
+    CHECK (lastChild (document) == "Sync");
+
+    const auto written = CanonicalXml::write (document);
+    CHECK (written.find ("  <Dcas/>\n  <Sync/>\n</Show>\n") != std::string::npos);
+
+    //  A port made: its container goes before <Sync>, never after it.
+    REQUIRE (document.createSerial ("Arduino", {}).ok);
+    CHECK (lastChild (document) == "Sync");
+    CHECK (document.root().getChild (document.root().getNumChildren() - 2).getType().toString() == "SerialPorts");
+
+    const auto withSerial = CanonicalXml::write (document);
+    ShowDocument reloaded;
+    REQUIRE (CanonicalXml::read (withSerial, reloaded).ok);
+    CHECK (CanonicalXml::write (reloaded) == withSerial);
+    CHECK (reloaded.validate().empty());
+
+    //  A show written before there was a <Sync> gains it, last; one that has it
+    //  and lacks an older container gains that one before it.
+    ShowDocument old;
+    REQUIRE (CanonicalXml::read ("<Show>\n  <Lists/>\n  <Mounts/>\n  <Audio tracks=\"2\"/>\n</Show>\n", old).ok);
+    CHECK (lastChild (old) == "Sync");
+
+    ShowDocument partial;
+    REQUIRE (CanonicalXml::read ("<Show>\n  <Lists/>\n  <Mounts/>\n  <Audio tracks=\"2\"/>\n  <Sync frameRate=\"24\"/>\n</Show>\n",
+                                 partial).ok);
+    CHECK (lastChild (partial) == "Sync");
+    CHECK (partial.getAttribute ("/godot/sync/frameRate") == std::optional<std::string> ("24"));
+    CHECK (partial.root().getChildWithName ("Dcas").isValid());
+}
+
+TEST_CASE ("timecode warnings: a wide LTC output, sound routed onto it, an MTC port shared, a persistent code, a start the rate lacks")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+
+    const auto wide = document.createBus ("direct", 2).id;
+    const auto line = document.createBus ("direct", 1).id;
+    const auto port = document.createPort ("MTC").id;
+    REQUIRE (! wide.empty());
+    REQUIRE (! line.empty());
+
+    timecodeCue (document, listId, 0, { { "format", "ltc" } });
+    CHECK (document.warnings().empty());
+
+    //  An LTC output two channels wide.
+    REQUIRE (document.setAttribute ("/godot/sync/ltcOut", wide).ok);
+    {
+        const auto said = document.warnings();
+        CHECK (anySays (said, "/Show/Sync/@ltcOut"));
+        CHECK (anySays (said, "2 channels wide"));
+    }
+
+    //  A one-channel one: nothing to say, until a sound is sent there.
+    REQUIRE (document.setAttribute ("/godot/sync/ltcOut", line).ok);
+    CHECK (document.warnings().empty());
+
+    const auto sound = document.createCue (listId, 1, "media", "Thunder").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + sound + "/directOut", line).ok);
+    CHECK (anySays (document.warnings(), "/@directOut: names \"" + line + "\", the output LTC plays on"));
+    REQUIRE (document.setAttribute ("/godot/cue/" + sound + "/directOut", "").ok);
+
+    REQUIRE (document.createRoute (sound, line).ok);
+    CHECK (anySays (document.warnings(), "/@bus: names \"" + line + "\", the output LTC plays on"));
+
+    //  An MTC port a surface uses, and one MIDI cues send SysEx on.
+    REQUIRE (document.setAttribute ("/godot/sync/mtcOut", port).ok);
+    std::vector<std::string> strips;
+    const auto surface = document.createSurface ("midiPads", "Pads", {}, {}, strips);
+    REQUIRE (surface.ok);
+    REQUIRE (document.setAttribute ("/godot/surface/" + surface.id + "/ports", port).ok);
+    CHECK (anySays (document.warnings(), "a port a control surface uses"));
+
+    REQUIRE (document.createCue (listId, 2, "midi", "Dump", {}, { { "port", port }, { "type", "sysex" } }).ok);
+    CHECK (anySays (document.warnings(), "a port MIDI cues send SysEx on"));
+
+    //  A timecode cue in a persistent section.
+    const auto section = document.createPersistent (listId);
+    REQUIRE (section.ok);
+    timecodeCue (document, section.id, 0);
+    CHECK (anySays (document.warnings(), "/Persistent/Timecode["));
+
+    //  A start the show's rate lacks.
+    const auto late = timecodeCue (document, listId, 3, { { "from", "00:01:00:00" } });
+    CHECK_FALSE (anySays (document.warnings(), "Timecode[" + late + "]/@from"));
+    REQUIRE (document.setAttribute ("/godot/sync/frameRate", "29.97df").ok);
+    CHECK (anySays (document.warnings(), "Timecode[" + late + "]/@from: 00:01:00:00 is not a label at 29.97df"
+                                         " frames a second, so the code starts at the next one there is, 00:01:00;02"));
+
+    //  Each a warning, never a refusal: the show still opens.
+    CHECK (document.validate().empty());
+}
+
+TEST_CASE ("timecode cue: refused in a sampler group, and the schema's containers hold it")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+    const auto pads = document.createCue (listId, 0, "group", "Pads", {}, { { "mode", "sampler" } });
+    REQUIRE (pads.ok);
+
+    CHECK_FALSE (document.createCue (pads.id, 0, "timecode", {}).ok);
+
+    //  Everywhere else a cue goes: a list, a group, a header and footer, a persistent section.
+    const auto& schema = Schema::instance();
+
+    for (const auto* parent : { "List", "Group", "Header", "Footer", "Persistent" })
+    {
+        INFO ("parent " << parent);
+        REQUIRE (schema.element (parent) != nullptr);
+        CHECK (schema.element (parent)->mayContain ("Timecode"));
+    }
+
+    CHECK (schema.attribute ("Timecode", "name") != nullptr);
+    CHECK (schema.attribute ("Timecode", "from") != nullptr);
+    CHECK (schema.attribute ("Sync", "frameRate") != nullptr);
+    CHECK (ShowDocument::ownerForElement ("Timecode") == "cue");
+    CHECK (ShowDocument::ownerForElement ("Sync") == "sync");
+    CHECK (ShowDocument::elementForKind ("timecode") == "Timecode");
+    CHECK (ShowDocument::containerSegmentFor ("Sync") == "sync");
 }

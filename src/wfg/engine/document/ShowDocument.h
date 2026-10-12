@@ -120,6 +120,16 @@ namespace wfg::doc
         which is a `bad-value` and never a silent fall back to `document`. */
     std::optional<UndoDomain> undoDomainForWord (std::string_view word) noexcept;
 
+    /*  THE ONE JUDGE OF A TIMECODE CUE'S START (namespace draft §59, AHF): the
+        label as it is stored - `HH:MM:SS:FF`, with colons whatever it was
+        typed with - or nothing for text that is not a label. Asked at the
+        three doors a `from` comes through: `setAttribute`, the attributes a
+        cue is born with (`insertObject`), and `validate()`, which refuses a
+        file carrying one that does not read. One function, so a label the
+        write door takes is never one the next load refuses. Whether the
+        show's rate HAS that label is a warning (`warnings()`), not this. */
+    std::optional<std::string> readTimecodeLabel (std::string_view text);
+
     /*  The outcome of anything that changes the document. `reason` is a code
         from wfg::reason when it failed, so a command can return it unchanged
         and the log records the same word every time. */

@@ -74,6 +74,7 @@
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
+#include <wfg/engine/timecode/Timecode.h>
 #include <wfg/engine/video/VideoSink.h>
 
 #include <array>
@@ -2131,6 +2132,12 @@ namespace wfg::cue
         void fireOsc (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick);
         void fireMidi (const juce::ValueTree& cue, const std::string& runId);
 
+        /*  A TIMECODE CUE FIRING (namespace draft §59): `playing` from its GO,
+            and a job built that says what the code is - its format, the rate
+            copied now (AHM), where it starts and how long it runs - for the
+            tick hook to place. No Engine, for fireOsc's reason. */
+        void fireTimecode (const juce::ValueTree& cue, const std::string& runId);
+
         /*  `selfCueId` is the fade or stop cue being fired; `targetCueId` is
             the cue it acts on. They are two arguments and not one because the
             run being created belongs to the FIRST - a run says which cue it
@@ -2246,6 +2253,22 @@ namespace wfg::cue
         void advanceProcesses (Engine& engine, std::int64_t tick);
         void applyProcessSends (Engine& engine, const std::string& runId, const std::string& cueId,
                                 const std::vector<process::Sent>& sent);
+
+        /*  THE TIMECODE CUES, ONE TICK (namespace draft §59): a job not yet
+            placed is placed, taking its output over from the run that held it
+            (AHC, AHL); every placed one says where its code has got to, and
+            one whose length has run is ended. A run stopping or killed is let
+            go - ended by `advanceWaits`' sweep of the stopping runs no job
+            claims, as a process cue's is. A hook, after the processes. */
+        struct TimecodeJob;
+        void advanceTimecode (Engine& engine, std::int64_t tick);
+
+        /*  WHERE A TIMECODE RUN STARTS, decided once: on this tick, and over
+            the run of the same format that held the output, which ends. ONE
+            FUNCTION, so the stage that puts the code on the same sample as the
+            sounds of its group (TC.4, AHN) moves the call into `launchIfDue`
+            and changes nothing else. Hook-side, as it submits. */
+        void placeTimecode (Engine& engine, TimecodeJob& job, std::int64_t tick);
 
         /*  THE PASS, ONE TICK (O.9): each armed curve takes the device's newest
             report or the hand's ride, latched from the first, sampled on the
@@ -2660,6 +2683,60 @@ namespace wfg::cue
 
         /*  The tick up to which heard values have been handed to the patches. */
         std::int64_t processHeardTick = -1;
+
+        /*  THE TIMECODE CUES RUNNING (namespace draft §59): ONE PER RUN, made
+            by `fireTimecode` in the handler - so a replay makes it too - and
+            carried on by the tick hook. Not a run: it draws no name of its own
+            (RD.2), and it owns no ending - a timecode run is ended by being
+            asked, as a process run is, so neither the sweep's ownership test
+            nor `drivenByAJob` counts it.
+
+            What the code is was read at GO and kept: the rate is the show's at
+            that moment (AHM), so an edit of /godot/sync/frameRate reaches the
+            next run and never moves a code a receiver is locked to. The start
+            is the cue's label normalised against that rate (AHF), as a frame
+            number of the day. `offset` is where a jump or a load to time puts
+            the code past its start (TC.7), nought until then. */
+        struct TimecodeJob
+        {
+            std::string self;               // the run
+            std::string cue;
+            std::string format;             // "mtc" or "ltc"
+            timecode::Rate rate = timecode::Rate::fps25;
+            std::int64_t startFrame = 0;
+            std::int64_t offsetFrames = 0;
+            std::int64_t lengthFrames = 0;  // nought: until stopped (AHB)
+
+            /*  Why the code cannot leave (AHR), reported once there are outputs
+                to report it (TC.4, TC.6): `no-port` and `bad-route` will be
+                theirs; `bad-message`, a start no door should have let in, is
+                the one GO can already tell. Empty is nothing wrong. */
+            std::string failure;
+
+            //  Where it started: on which tick, and whether it has.
+            bool placed = false;
+            std::int64_t placedAtTick = -1;
+
+            /*  FOR THE OUTPUTS TO COME: the sample the code starts on (TC.4),
+                the program the audio or MIDI side knows it by (TC.3, TC.5), and
+                whether a later run of its format took the output over - whose
+                end must then never silence the code the other now holds. */
+            std::int64_t launchSample = -1;
+            std::uint64_t program = 0;
+            bool handedOver = false;
+
+            bool endAsked = false;          // its length ran, `run.ended` submitted
+            bool finished = false;
+        };
+
+        std::vector<TimecodeJob> timecoding;
+
+        /*  WHICH RUN HOLDS EACH OUTPUT, MTC's and LTC's, by identifier: the one
+            a run of the same format placed after it takes over (AHC). Hook
+            state - the takeover it decides is a `run.ended` the log keeps. */
+        std::string mtcHolder;
+        std::string ltcHolder;
+        std::string& timecodeHolder (const std::string& format) { return format == "ltc" ? ltcHolder : mtcHolder; }
 
         /*  The serial ports' lines, as `serial.heard` noted them, and where a
             patch's lines go out (PC.10). */

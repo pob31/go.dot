@@ -243,6 +243,64 @@ TEST_CASE ("tree: the show says whether it listens to strangers, and how many it
     CHECK (container->isContainer());
 }
 
+TEST_CASE ("tree: a timecode cue publishes its rows, the show its timecode settings, a run where its code has got to")
+{
+    /*  Namespace draft §59. The cue's three rows from the show; the settings'
+        decisions from the show's half and their readouts from the runtime's,
+        under one container the show's half owns, as Network's are; and a
+        run's label, copied from the run, empty for a run of another kind. */
+    Rig rig;
+
+    const auto made = rig.document.createCue ("7K2QM9X4", 0, "timecode", {}, {},
+                                              { { "format", "ltc" }, { "from", "02:00:00:00" }, { "length", "90" } });
+    REQUIRE (made.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/sync/frameRate", "29.97df").ok);
+    rig.parameters.markStale();
+
+    rig.runs.create ("R7TC0001", made.id, "timecode");
+    rig.runs.find ("R7TC0001")->timecode = "02:00:01;12";
+    rig.runs.create ("R7MM0002", "B3N8R5TW", "memo");
+
+    const auto snapshot = rig.publish (0);
+
+    const auto text = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "missing " << address);
+        REQUIRE (node->values.size() == 1u);
+        return node->values.front().getString();
+    };
+
+    const auto cue = "/godot/cue/" + made.id;
+    CHECK (text (cue + "/kind") == "timecode");
+    CHECK (text (cue + "/format") == "ltc");
+    CHECK (text (cue + "/from") == "02:00:00:00");
+    CHECK (snapshot->find (cue + "/length") != nullptr);
+    CHECK (snapshot->find (cue + "/format")->access == Access::readWrite);
+
+    CHECK (text ("/godot/sync/frameRate") == "29.97df");
+    CHECK (snapshot->find ("/godot/sync/frameRate")->access == Access::readWrite);
+    CHECK (text ("/godot/sync/mtcOut").empty());
+    CHECK (text ("/godot/sync/ltcOut").empty());
+
+    for (const auto* readout : { "/godot/sync/mtcLate", "/godot/sync/mtcWorst", "/godot/sync/ltcLate" })
+    {
+        INFO ("readout " << readout);
+        const auto* node = snapshot->find (readout);
+        REQUIRE (node != nullptr);
+        CHECK (node->access == Access::read);
+    }
+
+    const auto* container = snapshot->find ("/godot/sync");
+    REQUIRE (container != nullptr);
+    CHECK (container->isContainer());
+
+    CHECK (text ("/godot/run/R7TC0001/kind") == "timecode");
+    CHECK (text ("/godot/run/R7TC0001/timecode") == "02:00:01;12");
+    CHECK (snapshot->find ("/godot/run/R7TC0001/timecode")->access == Access::read);
+    CHECK (text ("/godot/run/R7MM0002/timecode").empty());
+}
+
 TEST_CASE ("tree: the root holds one of each subtree, and every address exactly once")
 {
     Rig rig;
@@ -250,7 +308,7 @@ TEST_CASE ("tree: the root holds one of each subtree, and every address exactly 
 
     for (const auto& address : { "/", "/godot", "/godot/engine", "/godot/document",
                                  "/godot/list", "/godot/cue", "/godot/mount",
-                                 "/godot/network", "/godot/cmd" })
+                                 "/godot/network", "/godot/sync", "/godot/cmd" })
     {
         INFO ("address: " << address);
         const auto* node = snapshot->find (address);

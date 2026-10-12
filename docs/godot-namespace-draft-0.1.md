@@ -25969,6 +25969,9 @@ Mine, the author's to overrule:
 - **AHW** (mine) **A Timecode tab before Playback**; a drawn icon and an accent of its own.
 - **AHX** (mine) **An MTC port that is also a surface's is warned about**: a surface's port passes the
   hold (AGH), so a backup would send its MTC twice.
+- **AHY** (mine, TC.1) **A second GO on a running timecode cue starts it again from its start**: a
+  new run, which takes the first one's output over as any other timecode cue would (AHC). A process
+  cue's second GO does nothing; a code restarted is what an operator pressing GO again on it means.
 
 ### 59.3 Rows
 
@@ -26003,8 +26006,8 @@ timecode cue in a Persistent section, a start the rate lacks.
 | Stage | What |
 |---|---|
 | TC.0 | This section; PRD §3.14, §6.9, §6.11; the devplan's Phase 10 |
-| TC.1 | The document: `Timecode`, `Sync`, the rows, the label judge; the run with no output - what a replay sees - its length, Esc, takeover and `run/timecode` |
-| TC.2 | `timecode::Rate` and labels, `LtcEncoder`, `MtcSchedule`: pure, with golden vectors |
+| TC.1 | The document: `Timecode`, `Sync`, the rows, the label judge; `timecode::Rate` and labels; the run with no output - what a replay sees - its length, Esc, takeover and `run/timecode` |
+| TC.2 | `LtcEncoder`, `MtcSchedule`: pure, with golden vectors |
 | TC.3 | `LtcGenerator` on the audio thread; `AudioHost`, `Player`, `HostPlayer`; a decoder of the tests' own |
 | TC.4 | The Runner to LTC: the second launch loop, the same sample, takeover, the stops, the warnings |
 | TC.5 | `clock::ClockEstimate`, the MTC lane and its gate, the hold, `--midi-render` |
@@ -26022,3 +26025,23 @@ clean over a ten-minute render.
 
 - **TC.0**, 2026-10-12: this section; PRD §3.14's paragraph on generating, §6.9, §6.11's M63; the
   devplan's stages under Phase 10.
+- **TC.1**, 2026-10-12: the document and the run with no output - what a replay sees. Rates and labels
+  came forward from TC.2: `timecode::Rate` (num and den, nominal frames, the drop flag, the MTC code),
+  `Label`, `parseLabel` (`:` or `;` between the parts, `.` before the frames), `formatLabel`,
+  `frameOf`/`labelOf` with the drop-frame arithmetic and the 24-hour wrap, `normalise` (AHF). The
+  rows of 59.3; `<Timecode>` beside the other cues and `<Sync>` last among the show's children, made
+  by `ensureContainers`, the containers made on demand (`createSerial`, a template's settings)
+  inserted before it. One judge, `doc::readTimecodeLabel`, at the write door, at a cue's birth and in
+  `validate()`: `bad-value`, or the label stored with colons. Six warnings: an LTC output wider than a
+  channel, sound routed onto it, an MTC port a surface uses (AHX) or MIDI cues send SysEx on (AHQ), a
+  timecode cue in a Persistent section (AHT, and not re-asserted there), a start the rate lacks. A
+  sampler group refuses a timecode cue (AHT). The automatic name: `MTC from 01:00:00:00`, `LTC from
+  10:00:00:00 for 2:30`. In the Runner, `fireTimecode` copies the rate (AHM) and builds a
+  `TimecodeJob`; `advanceTimecode`, after `advanceProcesses` and above the no-audio gate, places it
+  through the one function `placeTimecode` - where the takeover is decided (AHC, AHL), and where
+  TC.4 will give it its sample - counts its frames from the tick it was placed in whole numbers,
+  publishes `run/timecode` and ends the run on the tick its length runs out. Esc, a stop cue, a
+  group's end and a kill end it through `advanceWaits`' sweep, which no timecode job claims: it has
+  nothing to fade. Found and left for TC.4: a stop cue with the `fade` verb keeps the run for the
+  fade's length after its code is let go; a start no judge let in (a file edited by hand) is kept as
+  `bad-message` and reported when there is an output to refuse it.

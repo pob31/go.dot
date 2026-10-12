@@ -121,7 +121,7 @@ namespace wfg::doc
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts", "Network",
                                      "Surfaces", "Dcas", "Canvases", "VideoOutputs", "VideoInputs", "VideoInserts",
-                                     "CueTemplates", "SerialPorts" },
+                                     "CueTemplates", "SerialPorts", "Sync" },
                                                                           { "document" } },
                 /*  THE CONTAINER CARRIES A VALUE, which is why it is no
                     longer an empty pair of brackets. `focus` is a fact about
@@ -130,10 +130,10 @@ namespace wfg::doc
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
                 { "List",   true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                     "Midi", "Start", "Process", "Persistent" }, { "list" } },
+                                     "Midi", "Start", "Process", "Timecode", "Persistent" }, { "list" } },
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                     "Midi", "Start", "Process", "Header", "Footer", "Trigger" },
+                                     "Midi", "Start", "Process", "Timecode", "Header", "Footer", "Trigger" },
                                                                           { "cue", "group", "mark" } },
 
                 /*  A HEADER AND A FOOTER ARE ORDINARY CUE LISTS (§3.6), which
@@ -156,9 +156,9 @@ namespace wfg::doc
                     validate() would be paying a great deal for a smaller
                     diagnostic. */
                 { "Header", true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                     "Midi", "Start", "Process" }, {} },
+                                     "Midi", "Start", "Process", "Timecode" }, {} },
                 { "Footer", true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                     "Midi", "Start", "Process" }, {} },
+                                     "Midi", "Start", "Process", "Timecode" }, {} },
 
                 /*  THE PERSISTENT SECTION IS A LIST'S, not a group's (§3.29,
                     decision S): the thing that should be running at all times
@@ -168,7 +168,7 @@ namespace wfg::doc
                     put there is a validate WARNING that the section ignores
                     rather than a file that refuses to open. */
                 { "Persistent", true, { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                        "Midi", "Start", "Process" }, {} },
+                                        "Midi", "Start", "Process", "Timecode" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
                     pattern a Group already set. `kind` stays derived from the
@@ -298,6 +298,13 @@ namespace wfg::doc
                 /*  A PROCESS CUE (namespace draft §51): a Pure Data patch that runs
                     while the cue runs, its text one row of its own. */
                 { "Process", true, { "Trigger" },                     { "cue", "process" } },
+
+                /*  A TIMECODE CUE (namespace draft §59, AHD): MTC or LTC, one
+                    element for both - the list that made it says which in
+                    `format` - carrying where its code starts and how long it
+                    runs. Nothing of where the code goes: that is the show's,
+                    in <Sync> (AHA), and a cue only says when. */
+                { "Timecode", true, { "Trigger" },                    { "cue", "timecode" } },
 
                 /*  And a network cue is one too, for the same reason. It
                     carries no Route either: what it writes is somebody
@@ -506,6 +513,18 @@ namespace wfg::doc
                     `MidiPorts`. */
                 { "SerialPorts",  false, { "Serial" },      {} },
                 { "Serial",       true,  {},                { "serial" } },
+
+                /*  THE SHOW'S TIMECODE SETTINGS (namespace draft §59, AHA, AHE):
+                    the frame rate, the port MTC leaves on, the output LTC plays
+                    on and how loud. A container beside Network, carrying values
+                    of its own for Network's reason - one rate for the whole
+                    show is a fact about the show. ALWAYS PRESENT AND LAST, so
+                    `node.set` reaches its rows with no command of its own and
+                    every container made on demand is put before it. NAMED
+                    `Sync` and not `Timecode`, which the cue already is: the
+                    schema is keyed by element, and two of one name would be
+                    one. The chase's rows will stand beside these. */
+                { "Sync",         false, {},                { "sync" } },
             };
 
             return table;

@@ -1510,8 +1510,8 @@ condition), before RD.9, which reuses TC.5's clock seam.
 | Stage | What | Depends on |
 |---|---|---|
 | TC.0 | Docs: namespace §59, PRD §3.14/§6.9/§6.11, this | - |
-| TC.1 | The document (`Timecode`, `Sync`, the rows), and the run with no output: length, Esc, takeover | TC.0 |
-| TC.2 | Rates and labels, the LTC encoder, the MTC schedule: pure, golden vectors | TC.0 |
+| TC.1 | The document (`Timecode`, `Sync`, the rows), rates and labels, and the run with no output: length, Esc, takeover | TC.0 |
+| TC.2 | The LTC encoder, the MTC schedule: pure, golden vectors | TC.1 |
 | TC.3 | The LTC generator on the audio thread, and a decoder of the tests' own | TC.2 |
 | TC.4 | The Runner to LTC: the same sample as the sounds, takeover, the stops | TC.1, TC.3 |
 | TC.5 | The clock line moved to `clock/`, the MTC lane, its gate, the hold, `--midi-render` | TC.2 |

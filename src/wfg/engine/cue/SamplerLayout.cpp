@@ -61,7 +61,7 @@ namespace wfg::cue
 
             return element == "Media" || element == "Mic" || element == "Cue" || element == "Fade"
                 || element == "Transport" || element == "Osc" || element == "Midi"
-                || element == "Start";
+                || element == "Start" || element == "Timecode";
         }
     }
 

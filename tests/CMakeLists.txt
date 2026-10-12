@@ -93,6 +93,8 @@ add_executable(wfg_tests
     NetworkCueTests.cpp
     AuthoringTests.cpp
     ProcessTests.cpp
+    TimecodeTests.cpp
+    TimecodeRunTests.cpp
     SerialTests.cpp
     WireTests.cpp
     TrafficTapTests.cpp

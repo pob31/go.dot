@@ -11738,9 +11738,11 @@ TEST_CASE ("client: a serial port declared, said where it is, and read with its 
     CHECK (ports[0].state == "closed");
     CHECK (ports[0].stateWords() == "no port chosen");
 
-    //  THE SHOW'S LAST CONTAINER, made by the first port.
+    /*  THE SHOW'S LAST CONTAINER BUT ONE, made by the first port: before the
+        timecode settings, which are always last (namespace draft §59, AHE). */
     const auto root = rig.document.root();
-    CHECK (root.getChild (root.getNumChildren() - 1).getType().toString() == "SerialPorts");
+    CHECK (root.getChild (root.getNumChildren() - 2).getType().toString() == "SerialPorts");
+    CHECK (root.getChild (root.getNumChildren() - 1).getType().toString() == "Sync");
 
     rig.apply (8, "window", "node.set", { osc::Value::string ("/godot/serial/" + id + "/path"), osc::Value::string ("COM3") });
     rig.apply (9, "window", "node.set", { osc::Value::string ("/godot/serial/" + id + "/baud"), osc::Value::string ("9600") });

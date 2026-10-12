@@ -280,9 +280,12 @@ TEST_CASE ("video: a canvas and an output are made by their commands, at a fixed
 
     const auto after = rig.showChildren();
     REQUIRE (after.size() == before.size() + 2);
-    CHECK (after[after.size() - 3] == "Dcas");
-    CHECK (after[after.size() - 2] == "Canvases");
-    CHECK (after[after.size() - 1] == "VideoOutputs");
+    CHECK (after[after.size() - 4] == "Dcas");
+    CHECK (after[after.size() - 3] == "Canvases");
+    CHECK (after[after.size() - 2] == "VideoOutputs");
+
+    //  And the timecode settings still last (namespace draft §59, AHE).
+    CHECK (after[after.size() - 1] == "Sync");
 
     CHECK (rig.at ("/godot/canvas/MC000041/name") == "Cyclo");
     CHECK (rig.at ("/godot/canvas/MC000041/width") == "1920");

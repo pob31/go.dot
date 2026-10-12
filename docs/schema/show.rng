@@ -76,6 +76,9 @@
       <optional>
         <ref name="SerialPorts"/>
       </optional>
+      <optional>
+        <ref name="Sync"/>
+      </optional>
     </element>
   </define>
 
@@ -147,6 +150,7 @@
           <ref name="Midi"/>
           <ref name="Start"/>
           <ref name="Process"/>
+          <ref name="Timecode"/>
           <ref name="Persistent"/>
         </choice>
       </zeroOrMore>
@@ -389,6 +393,7 @@
           <ref name="Midi"/>
           <ref name="Start"/>
           <ref name="Process"/>
+          <ref name="Timecode"/>
           <ref name="Header"/>
           <ref name="Footer"/>
           <ref name="Trigger"/>
@@ -415,6 +420,7 @@
           <ref name="Midi"/>
           <ref name="Start"/>
           <ref name="Process"/>
+          <ref name="Timecode"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -438,6 +444,7 @@
           <ref name="Midi"/>
           <ref name="Start"/>
           <ref name="Process"/>
+          <ref name="Timecode"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -461,6 +468,7 @@
           <ref name="Midi"/>
           <ref name="Start"/>
           <ref name="Process"/>
+          <ref name="Timecode"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -2474,6 +2482,101 @@
     </element>
   </define>
 
+  <define name="Timecode">
+    <element name="Timecode">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="format">
+          <a:documentation>Which timecode this cue generates (namespace draft 59, AHD): mtc is MIDI Time Code, sent on the port the show names at /godot/sync/mtcOut; ltc is SMPTE linear timecode, a signal Go.dot draws itself on the one-channel output the show names at /godot/sync/ltcOut. Set by the list that made the cue - + midi makes mtc, + audio makes ltc - and the kind column reads MTC or LTC. The rate is the show-s, /godot/sync/frameRate. A second timecode cue of the same format that starts while this one runs takes its output over, and this one ends (AHC).</a:documentation>
+          <choice>
+            <value>mtc</value>
+            <value>ltc</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="from">
+          <a:documentation>The timecode this cue starts at, as a label HH:MM:SS:FF - hours, minutes, seconds and frames, two digits each - and stored with colons whatever the rate (namespace draft 59, AHF). A semicolon between the parts, or a full stop before the frames, is read too and stored as a colon; a label that does not read - one digit, 25 hours, 60 minutes, 30 frames - is refused as bad-value. One the show-s rate lacks is read as the next one there is when the cue runs: 00:00:10:27 at 25 frames a second is 00:00:11:00, and 00:01:00:00 at 29.97 drop-frame, which leaves out the frames 00 and 01 of every minute not divisible by ten, is 00:01:00:02 - and wfg validate says so.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="length">
+          <a:documentation>How long this cue runs before it ends by itself, in seconds, rounded up to whole frames at the show-s rate (namespace draft 59, AHB, AHF). Nought, the default, runs until something stops it - Esc, a stop cue, its group ending, or another timecode cue of the same format taking its output over.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <ref name="Trigger"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
   <define name="Osc">
     <element name="Osc">
       <attribute name="id">
@@ -4230,6 +4333,45 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Sync">
+    <element name="Sync">
+      <optional>
+        <attribute name="frameRate">
+          <a:documentation>The frame rate of the timecode this show generates (namespace draft 59, AHA, AHG): one for the whole show, since the desk or the server reading it is set to one. 25 by default; 23.976, 24, 29.97 drop-frame (29.97df), 29.97 and 30 beside it. A timecode cue copies it when it fires, so a change reaches the next run and never one already running (AHM).</a:documentation>
+          <choice>
+            <value>23.976</value>
+            <value>24</value>
+            <value>25</value>
+            <value>29.97df</value>
+            <value>29.97</value>
+            <value>30</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="ltcLevel">
+          <a:documentation>How loud LTC plays, in dB below full scale (namespace draft 59, AHH): -18 by default, which is 0 dBu on a desk aligned as the EBU aligns one.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-60</param>
+            <param name="maxInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="ltcOut">
+          <a:documentation>The identifier of the one-channel output LTC plays on (namespace draft 59, AHA, AHI). The code replaces whatever the show sends to that channel, after its trim and its DCA, so no sound leaks onto the line and no DCA cuts it; between runs the channel is silent. Empty for none, and an LTC cue then fails its run as bad-route, as it does on an output wider than one channel. wfg validate warns when the output is wider than one channel and when a cue-s sound is routed onto it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="mtcOut">
+          <a:documentation>The identifier of the declared &lt;Port&gt; MIDI Time Code leaves on (namespace draft 59, AHA). Empty for none, and an MTC cue then fails its run as no-port. A port of its own is best: wfg validate warns when a control surface uses it too - a surface-s port is never held, so a backup would send its MTC twice (AHX) - and when MIDI cues send SysEx on it, since a quarter frame waits behind a whole SysEx message (AHQ).</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
     </element>

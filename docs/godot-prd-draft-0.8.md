@@ -4069,7 +4069,8 @@ calls from AHD in §59.2 are the author's to overrule:
   sound cannot leak onto the line and a DCA pulled down cannot cut it; silence between runs.
 - **Esc stops timecode at the next frame boundary, with no fade**; footers run. A double Esc cuts it
   at once.
-- **A takeover happens when the new cue starts**, so the line never goes quiet between the two.
+- **A takeover happens when the new cue starts**, so the line never goes quiet between the two; a
+  second GO on a running timecode cue starts it again from its start, taking its own output over.
 - **The same sample as the sounds**: a timecode cue started with sounds of its group starts on their
   sample, waiting for one that is still loading.
 - **MTC leaves when it is heard**: delayed by the interface's output latency, so a desk chasing it

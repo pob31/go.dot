@@ -36,7 +36,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_engine_spaceMouse[] = { "off", "searching", "connected", "driver" };
     inline constexpr std::string_view enum_pair_role[] = { "none", "main", "backup" };
     inline constexpr std::string_view enum_pair_state[] = { "alone", "following", "leading", "bothSending", "waiting" };
-    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process" };
+    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
@@ -57,10 +57,11 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
     inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
     inline constexpr std::string_view enum_midi_doh[] = { "device", "takeBack", "leave" };
+    inline constexpr std::string_view enum_timecode_format[] = { "mtc", "ltc" };
     inline constexpr std::string_view enum_port_doh[] = { "takeBack", "leave" };
     inline constexpr std::string_view enum_serial_framing[] = { "lines", "slip" };
     inline constexpr std::string_view enum_serial_state[] = { "closed", "opening", "open", "retrying" };
-    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process" };
+    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode" };
     inline constexpr std::string_view enum_run_phase[] = { "entering", "preparing", "prepared", "header", "members", "footer" };
     inline constexpr std::string_view enum_run_state[] = { "preparing", "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
     inline constexpr std::string_view enum_run_warning[] = { "no-channel", "revoked", "not-sent", "left-to-operator" };
@@ -80,6 +81,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_preset_transport[] = { "udp", "tcp", "midi" };
     inline constexpr std::string_view enum_preset_wire[] = { "osc", "rcp", "line", "midi" };
     inline constexpr std::string_view enum_preset_framing[] = { "length", "slip" };
+    inline constexpr std::string_view enum_sync_frameRate[] = { "23.976", "24", "25", "29.97df", "29.97", "30" };
     inline constexpr std::string_view enum_audio_settingsStatus[] = { "ready", "applying", "error" };
     inline constexpr std::string_view enum_audio_status[] = { "stopped", "running", "noClock" };
     inline constexpr std::string_view enum_bus_kind[] = { "direct", "mix" };
@@ -799,7 +801,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "memo",
           false, 0.0, false, 0.0,
-          enum_cue_kind, 11,
+          enum_cue_kind, 12,
           "", 50.0, false, "park",
           "",
           "What kind of cue this is, derived from the element rather than stored: a Group is a group and a Media is media. Deriving it is what stops a client turning one kind into another by writing a word, and what lets the grammar refuse a file attribute on a cue that plays nothing." },
@@ -2171,6 +2173,30 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "port",
           "The identifier of the declared <Port> this process cue-s patch sends MIDI on (namespace draft 51, PC.3): what its [noteout], [ctlout], [pgmout], [bendout], [touchout], [polytouchout] and [midiout] send goes out there as a cue-s message does - not at all when the port-s tx is off, and dropped by a double Esc while it is still queued. Empty for none." },
+        { "timecode", "format",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "mtc",
+          false, 0.0, false, 0.0,
+          enum_timecode_format, 2,
+          "", 50.0, false, "park",
+          "",
+          "Which timecode this cue generates (namespace draft 59, AHD): mtc is MIDI Time Code, sent on the port the show names at /godot/sync/mtcOut; ltc is SMPTE linear timecode, a signal Go.dot draws itself on the one-channel output the show names at /godot/sync/ltcOut. Set by the list that made the cue - + midi makes mtc, + audio makes ltc - and the kind column reads MTC or LTC. The rate is the show-s, /godot/sync/frameRate. A second timecode cue of the same format that starts while this one runs takes its output over, and this one ends (AHC)." },
+        { "timecode", "from",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "01:00:00:00",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "The timecode this cue starts at, as a label HH:MM:SS:FF - hours, minutes, seconds and frames, two digits each - and stored with colons whatever the rate (namespace draft 59, AHF). A semicolon between the parts, or a full stop before the frames, is read too and stored as a colon; a label that does not read - one digit, 25 hours, 60 minutes, 30 frames - is refused as bad-value. One the show-s rate lacks is read as the next one there is when the cue runs: 00:00:10:27 at 25 frames a second is 00:00:11:00, and 00:01:00:00 at 29.97 drop-frame, which leaves out the frames 00 and 01 of every minute not divisible by ten, is 00:01:00:02 - and wfg validate says so." },
+        { "timecode", "length",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "s", 50.0, false, "park",
+          "",
+          "How long this cue runs before it ends by itself, in seconds, rounded up to whole frames at the show-s rate (namespace draft 59, AHB, AHF). Nought, the default, runs until something stops it - Esc, a stop cue, its group ending, or another timecode cue of the same format taking its output over." },
         { "port", "name",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -2375,7 +2401,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
           false, 0.0, false, 0.0,
-          enum_run_kind, 11,
+          enum_run_kind, 12,
           "", 50.0, false, "park",
           "",
           "The kind of the cue this run instantiates, copied at launch so a client reading a run does not have to go and look the cue up - and so the answer survives the cue being edited underneath it." },
@@ -2691,6 +2717,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "The last value on each name this process cue-s patch sends to or hears that Go.dot answers, one per line as the name then the value - what the canvas draws beside a line (namespace draft 51, PC.3, PC.8). At most 64 lines." },
+        { "run", "timecode",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "Where a timecode run has got to, as the label its code reads now (namespace draft 59): its start, plus the frames it has run at the rate it copied when it fired, written HH:MM:SS:FF - with a semicolon before the frames at 29.97 drop-frame, as a reader shows it. Its start until the code begins, it stays where it stopped once the run is over. Empty for a run of any other kind." },
         { "group", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
@@ -3203,6 +3237,62 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "How many datagrams strict senders has dropped since the show opened. The first thing to look at when a surface has gone quiet and nobody knows whose end is wrong: a number that climbs as somebody presses a button says the message is arriving and being refused, which is a different morning from one that never came." },
+        { "sync", "frameRate",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "25",
+          false, 0.0, false, 0.0,
+          enum_sync_frameRate, 6,
+          "", 1.0, false, "park",
+          "",
+          "The frame rate of the timecode this show generates (namespace draft 59, AHA, AHG): one for the whole show, since the desk or the server reading it is set to one. 25 by default; 23.976, 24, 29.97 drop-frame (29.97df), 29.97 and 30 beside it. A timecode cue copies it when it fires, so a change reaches the next run and never one already running (AHM)." },
+        { "sync", "mtcOut",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "port",
+          "The identifier of the declared <Port> MIDI Time Code leaves on (namespace draft 59, AHA). Empty for none, and an MTC cue then fails its run as no-port. A port of its own is best: wfg validate warns when a control surface uses it too - a surface-s port is never held, so a backup would send its MTC twice (AHX) - and when MIDI cues send SysEx on it, since a quarter frame waits behind a whole SysEx message (AHQ)." },
+        { "sync", "ltcOut",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "bus",
+          "The identifier of the one-channel output LTC plays on (namespace draft 59, AHA, AHI). The code replaces whatever the show sends to that channel, after its trim and its DCA, so no sound leaks onto the line and no DCA cuts it; between runs the channel is silent. Empty for none, and an LTC cue then fails its run as bad-route, as it does on an output wider than one channel. wfg validate warns when the output is wider than one channel and when a cue-s sound is routed onto it." },
+        { "sync", "ltcLevel",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "-18",
+          true, -60.0, true, 0.0,
+          nullptr, 0,
+          "dB", 1.0, false, "park",
+          "",
+          "How loud LTC plays, in dB below full scale (namespace draft 59, AHH): -18 by default, which is 0 dBu on a desk aligned as the EBU aligns one." },
+        { "sync", "mtcLate",
+          ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "How many MIDI Time Code messages have left more than 2 ms after their moment since the show opened (namespace draft 59). A count that climbs is a port shared with something slow - a SysEx cue, most often - or a machine too busy to keep time; nought is MTC on time. Never stored." },
+        { "sync", "mtcWorst",
+          ValueType::number, 'd', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "ms", 1.0, false, "park",
+          "",
+          "The latest any of those left, in milliseconds after its moment, since the show opened (namespace draft 59). Never stored." },
+        { "sync", "ltcLate",
+          ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "How many LTC starts, stops and jumps reached the audio side after the sample they were meant for, since the show opened (namespace draft 59): each of those began or ended its code a little late, by up to a block. Nought is every one on its sample. Never stored." },
         { "audio", "tracks",
           ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",

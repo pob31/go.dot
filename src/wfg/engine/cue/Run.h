@@ -588,6 +588,14 @@ namespace wfg::cue
         std::string processSaid;
         std::string processPorts;
 
+        /*  WHERE A TIMECODE RUN'S CODE HAS GOT TO (namespace draft §59): the
+            label it reads now, `;` before the frames at drop-frame. Its start
+            from the GO that fired it - a handler sets that, so a replay reads
+            it too - and moved on by the tick hook once the code is placed, a
+            READOUT like the meter: never logged, and left at its start in a
+            replay, which runs no hook. Empty for every other kind. */
+        std::string timecode;
+
         /*  THE EQ THE VOICE WAS LAST GIVEN (Phase 9a): the cue's twenty-three rows
             as they were carried by the arm, and as `Runner::applyEq` last
             pushed them. Kept on the run so a tick after an edit can say

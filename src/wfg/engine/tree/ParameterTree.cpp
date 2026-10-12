@@ -1330,6 +1330,7 @@ namespace wfg::tree
             const auto isMidi = element == "Midi";
             const auto isStart = element == "Start";
             const auto isProcess = element == "Process";
+            const auto isTimecode = element == "Timecode";
             const auto id = node[idProperty].toString().toStdString();
 
             if (id.empty())
@@ -1427,6 +1428,12 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("process"))
                     rows.push_back (row);
 
+            /*  A timecode cue's format, start and length (namespace draft §59):
+                stored rows all three, read through the `stored` case below. */
+            if (isTimecode)
+                for (auto* row : doc::Schema::rowsForOwner ("timecode"))
+                    rows.push_back (row);
+
             for (const auto* row : rows)
             {
                 const doc::Attribute attribute { element, row };
@@ -1487,6 +1494,7 @@ namespace wfg::tree
                              : isMidi  ? "midi"
                              : isStart ? "start"
                              : isProcess ? "process"
+                             : isTimecode ? "timecode"
                                          : "memo";
                         break;
 
@@ -2214,6 +2222,23 @@ namespace wfg::tree
 
                     nodes.push_back (makeLeaf (std::string (godot) + "/network/"
                                                  + std::string (row->name),
+                                               *row, storedText (attribute, container)));
+                }
+            }
+            else if (containerName == "Sync")
+            {
+                /*  THE SHOW'S TIMECODE SETTINGS (namespace draft §59): the
+                    STORED half, as Network's - the rate and where the code
+                    leaves are what somebody decided; how late MTC has been is
+                    what the machine did, and the runtime half publishes it. */
+                for (const auto* row : doc::Schema::rowsForOwner ("sync"))
+                {
+                    if (row->persist == doc::Persist::none)
+                        continue;
+
+                    const doc::Attribute attribute { "Sync", row };
+
+                    nodes.push_back (makeLeaf (std::string (godot) + "/sync/" + std::string (row->name),
                                                *row, storedText (attribute, container)));
                 }
             }
@@ -3491,7 +3516,7 @@ namespace wfg::tree
             meter, level, rate, trim, late, parent, children, phase, claims, pending,
             warning, asserted, seekable, roundFrom, roundLength, strip, held, solo, error,
             processState, processLate, processDropped, said, ports, iteration, iterations,
-            round, pruned, seed, range, rangeIteration,
+            round, pruned, seed, range, rangeIteration, timecode,
 
             /*  A row this publish does not know, which reads its default - a
                 row added to the table before anybody wrote its reading. */
@@ -3533,7 +3558,7 @@ namespace wfg::tree
                     { "said", RunRow::said }, { "ports", RunRow::ports }, { "iteration", RunRow::iteration },
                     { "iterations", RunRow::iterations }, { "round", RunRow::round },
                     { "pruned", RunRow::pruned }, { "seed", RunRow::seed }, { "range", RunRow::range },
-                    { "rangeIteration", RunRow::rangeIteration }
+                    { "rangeIteration", RunRow::rangeIteration }, { "timecode", RunRow::timecode }
                 };
 
                 std::vector<RunRowEntry> entries;
@@ -3953,6 +3978,15 @@ namespace wfg::tree
 
             engineValue (*row, "network", text);
         }
+
+        /*  AND HOW LATE THE SHOW'S TIMECODE HAS BEEN (namespace draft §59):
+            MTC's messages and LTC's starts, stops and jumps, counted where they
+            leave. Nothing sends either yet - the lanes that count them come
+            with the outputs (TC.3, TC.5) - so each reads its default, nought,
+            which is the true answer for a show that has sent no code. */
+        for (const auto* row : doc::Schema::rowsForOwner ("sync"))
+            if (row->persist == doc::Persist::none)
+                engineValue (*row, "sync", std::string (row->defaultText));
 
         /*  EVERY RUN, EVERY TICK. A run changes several times a second while
             nothing about the show does, which is exactly why it is here and not
@@ -4836,6 +4870,11 @@ namespace wfg::tree
                     case RunRow::seed:       text = std::to_string (run.seed); break;
                     case RunRow::range:      text = std::to_string (run.range); break;
                     case RunRow::rangeIteration: text = std::to_string (run.rangeIteration); break;
+
+                    /*  Where a timecode run's code has got to (namespace draft §59),
+                        as the Runner wrote it - a copy, and empty for every other
+                        kind, so no other run pays for a label it does not have. */
+                    case RunRow::timecode:   text = run.timecode; break;
                     case RunRow::other:      text = std::string (entry.row->defaultText); break;
                 }
 
@@ -4876,6 +4915,10 @@ namespace wfg::tree
                 answered for it. The show's half owns it, since a show always
                 has a Network element and may have no engine running. */
             std::string (godot) + "/network",
+
+            /*  And `/godot/sync` for Network's reason (namespace draft §59): the
+                rate is a decision, how late MTC was is a count. */
+            std::string (godot) + "/sync",
 
             /*  `/godot/port` for the reason `/godot/audio` is here: both
                 halves publish under it - the declared ports from the show,

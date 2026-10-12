@@ -80,7 +80,7 @@ namespace wfg::cue
         return element == "Cue"  || element == "Group" || element == "Media"
             || element == "Mic"  || element == "Video" || element == "Fade"
             || element == "Transport" || element == "Osc" || element == "Midi"
-            || element == "Start" || element == "Process";
+            || element == "Start" || element == "Process" || element == "Timecode";
     }
 
     //======================================================================
@@ -120,7 +120,9 @@ namespace wfg::cue
                                        //  What a cue's DCA mark carries (namespace draft §50).
                                        "mark",
                                        //  A process cue's patch (namespace draft §51).
-                                       "process" })
+                                       "process",
+                                       //  A timecode cue's start and length (namespace draft §59).
+                                       "timecode" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
                     defaults[std::string (owner) + "/" + std::string (row->name)]
                         = std::string (row->defaultText);
@@ -578,6 +580,16 @@ namespace wfg::cue
             if (element == "Group")
                 return groupLength (node);
 
+            /*  A TIMECODE CUE RUNS AS LONG AS IT SAYS, or until something stops
+                it (namespace draft §59, AHB): nought is for ever, which has no
+                number, as an ambience bed has none. As written - the run rounds
+                it up to a whole frame, a part of a frame no walk needs. */
+            if (element == "Timecode")
+            {
+                const auto length = reader.number (node, "timecode", "length");
+                return length > 0.0 ? std::optional<double> (length) : std::nullopt;
+            }
+
             return std::nullopt;
         }
 
@@ -726,6 +738,10 @@ namespace wfg::cue
                 sounding at it unless a stop came between. */
             if (element == "Mic")
                 return false;
+
+            //  NOR A TIMECODE CUE WITH NO LENGTH (namespace draft §59, AHB).
+            if (element == "Timecode")
+                return reader.number (node, "timecode", "length") > 0.0;
 
             if (element == "Media")
             {

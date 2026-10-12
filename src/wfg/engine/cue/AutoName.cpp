@@ -19,7 +19,9 @@
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <sstream>
 #include <string>
@@ -219,6 +221,41 @@ namespace wfg::cue
             return "Stop " + target;        // hard, and a verb added later until it has words
         }
 
+        /*  A LENGTH AS A CLOCK READS IT (namespace draft §59): minutes and
+            seconds, 2:30, and hours before them once there are any, 1:02:30 -
+            the shape a running time is written in on a cue sheet. A part of a
+            second is kept to the millisecond, as the range table keeps one. */
+        std::string clockWords (double seconds)
+        {
+            //  In whole milliseconds, so nothing below is a question about a double.
+            const auto millis = static_cast<long long> (std::llround (std::max (0.0, seconds) * 1000.0));
+            const auto whole = millis / 1000;
+            const auto part = millis % 1000;
+
+            const auto two = [] (long long value)
+            {
+                return (value < 10 ? "0" : "") + std::to_string (value);
+            };
+
+            const auto hours = whole / 3600;
+            const auto minutes = (whole / 60) % 60;
+            auto secondsText = two (whole % 60);
+
+            //  A part of a second, its trailing noughts left off: 2.5, not 2.500.
+            if (part > 0)
+            {
+                auto digits = std::to_string (part + 1000).substr (1);
+
+                while (! digits.empty() && digits.back() == '0')
+                    digits.pop_back();
+
+                secondsText += "." + digits;
+            }
+
+            return hours > 0 ? std::to_string (hours) + ":" + two (minutes) + ":" + secondsText
+                             : std::to_string (minutes) + ":" + secondsText;
+        }
+
         bool fadeMovesOnlyTheLevel (const juce::ValueTree& fade)
         {
             return ! flag (fade, "fade", "rateOn")
@@ -359,6 +396,21 @@ namespace wfg::cue
             }
 
             return source == "mask" ? std::string ("Mask") : std::string ("Fill");
+        }
+
+        /*  A TIMECODE CUE (namespace draft §59): what it sends and from where -
+            "LTC from 01:00:00:00" - and for how long when it ends by itself,
+            "MTC from 10:00:00:00 for 2:30". */
+        if (element == "Timecode")
+        {
+            const auto format = text (cue, "timecode", "format") == "ltc" ? std::string ("LTC")
+                                                                          : std::string ("MTC");
+            auto out = format + " from " + text (cue, "timecode", "from");
+
+            if (const auto length = number (cue, "timecode", "length"); length > 0.0)
+                out += " for " + clockWords (length);
+
+            return out;
         }
 
         return {};

@@ -27,6 +27,7 @@
 #include <wfg/engine/document/OutputLayout.h>
 #include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/timecode/Timecode.h>
 #include <wfg/engine/tree/Mount.h>
 
 #include <map>
@@ -35,6 +36,7 @@
 #include <cctype>
 #include <cstddef>
 #include <algorithm>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 
@@ -80,10 +82,13 @@ namespace wfg::doc
                          && ! parent.getChildWithProperty (idProperty, lockedTo).hasType ("Video")
                          && std::find (moviesArriving.begin(), moviesArriving.end(), lockedTo) == moviesArriving.end();
 
-            //  Its sections and its triggers are the group's own, not members.
+            /*  Its sections and its triggers are the group's own, not members.
+                A TIMECODE CUE NEITHER (namespace draft §59, AHT): a strip plays
+                a member by hand, any number of times, and a code that starts
+                at every press is a locate nobody asked for. */
             return element == "Cue" || element == "Group" || element == "Mic"
                 || element == "Fade" || element == "Transport" || element == "Osc" || element == "Midi"
-                || element == "Start" || element == "Process";
+                || element == "Start" || element == "Process" || element == "Timecode";
         }
 
         bool samplerRefuses (const juce::ValueTree& parent, const juce::ValueTree& node,
@@ -385,6 +390,7 @@ namespace wfg::doc
         if (kind == "midi")  return "Midi";
         if (kind == "start") return "Start";
         if (kind == "process") return "Process";
+        if (kind == "timecode") return "Timecode";
         return {};
     }
 
@@ -443,6 +449,10 @@ namespace wfg::doc
         /*  And namespace draft §38's: `/godot/cueTemplate/order` beside
             `/godot/cueTemplate/<id>/name`. */
         if (element == "CueTemplates") return "cueTemplate";
+
+        /*  And namespace draft §59's, a container with no members at all:
+            `/godot/sync/frameRate`, as `/godot/network/strictSenders`. */
+        if (element == "Sync")         return "sync";
         return {};
     }
 
@@ -454,7 +464,7 @@ namespace wfg::doc
         if (element == "Cue" || element == "Group" || element == "Media"
               || element == "Mic" || element == "Video" || element == "Fade"
               || element == "Transport" || element == "Osc" || element == "Midi"
-              || element == "Start" || element == "Process")       return "cue";
+              || element == "Start" || element == "Process" || element == "Timecode") return "cue";
         if (element == "Lists")                     return "lists";
         /*  A header and a footer are addressed by nothing: they carry no
             attribute but their identifier, and the cues inside them are
@@ -542,6 +552,10 @@ namespace wfg::doc
         /*  NAMESPACE DRAFT §51. A serial port; its container carries nothing. */
         if (element == "Serial")                    return "serial";
 
+        /*  NAMESPACE DRAFT §59. The show's timecode settings, a container
+            carrying values of its own, as Network does. */
+        if (element == "Sync")                      return "sync";
+
         return {};
     }
 
@@ -582,9 +596,20 @@ namespace wfg::doc
             writer keeps the order it is given and a golden file compares byte
             for byte: adding them in any other order would write a show whose
             containers read differently from one somebody opened. */
+        /*  BEFORE <Sync> WHEN THERE IS ONE, since it is the last of the show's
+            children (namespace draft §59, AHE): a file that carried it and
+            lacked an older container gains that one in its place, not after
+            the timecode settings. */
         for (const auto* name : { "Lists", "Mounts", "MidiPorts", "Network", "Surfaces", "Dcas" })
             if (! root.getChildWithName (name).isValid())
-                root.addChild (juce::ValueTree (name), -1, nullptr);
+                root.addChild (juce::ValueTree (name), root.indexOf (root.getChildWithName ("Sync")), nullptr);
+
+        /*  AND <Sync> ITSELF, ALWAYS AND LAST: the frame rate has a default
+            and the destinations are empty until somebody names them, so a
+            show that never thought about timecode carries an empty element,
+            and `node.set` reaches `/godot/sync/frameRate` in every show. */
+        if (! root.getChildWithName ("Sync").isValid())
+            root.addChild (juce::ValueTree ("Sync"), -1, nullptr);
     }
 
     ShowDocument::ShowDocument()
@@ -835,6 +860,7 @@ namespace wfg::doc
         if (segment == "videoInsert") return showNode.getChildWithName ("VideoInserts");
         if (segment == "cueTemplate") return showNode.getChildWithName ("CueTemplates");
         if (segment == "serial")      return showNode.getChildWithName ("SerialPorts");
+        if (segment == "sync")        return showNode.getChildWithName ("Sync");
         return {};
     }
 
@@ -959,6 +985,19 @@ namespace wfg::doc
             return UndoDomain::document;
 
         return std::nullopt;
+    }
+
+    std::optional<std::string> readTimecodeLabel (std::string_view text)
+    {
+        /*  READ BY THE PURE READER and written back at 25: the rate only
+            decides the separator before the frames, which the stored text
+            never takes from it (AHF). */
+        const auto label = timecode::parseLabel (text);
+
+        if (! label.has_value())
+            return std::nullopt;
+
+        return timecode::formatLabel (*label, timecode::Rate::fps25);
     }
 
     void ShowDocument::beginTransaction (const std::string& commandName,
@@ -1434,6 +1473,21 @@ namespace wfg::doc
         if (! parsed.ok)
             return EditResult::failed (reason::typeMismatch);
 
+        /*  A TIMECODE CUE'S START IS A LABEL (namespace draft §59, AHF): a
+            string as far as the table can say, so a word got past the parse,
+            and the judge `validate()` asks says whether it is one. Stored as
+            the judge writes it - with colons - so `01;00;00;00` typed from a
+            drop-frame display is the same start as `01:00:00:00`. */
+        if (target.attribute->element == "Timecode" && target.attribute->name() == "from")
+        {
+            const auto label = readTimecodeLabel (text);
+
+            if (! label.has_value())
+                return EditResult::failed (reason::badValue);
+
+            value = Value::string (*label);
+        }
+
         if (target.attribute->element == "Audio"
             && (target.attribute->name() == "inputPatch" || target.attribute->name() == "outputPatch"))
         {
@@ -1541,6 +1595,10 @@ namespace wfg::doc
             if (element == "Fade")
                 return any ({ "target", "dca", "level", "levelOn", "rateOn", "sends", "eq", "fx", "video",
                               "stopWhenDone" });
+
+            //  MTC or LTC, from where, for how long (namespace draft §59).
+            if (element == "Timecode")
+                return any ({ "format", "from", "length" });
 
             return false;
         }
@@ -1869,6 +1927,22 @@ namespace wfg::doc
             {
                 registry.release (objectId);
                 return EditResult::failed (reason::typeMismatch);
+            }
+
+            /*  A TIMECODE CUE BORN WITH ITS START judged as `setAttribute`
+                judges one written after (namespace draft §59, AHF): the same
+                refusal, the same stored text. */
+            if (elementName == "Timecode" && name == "from")
+            {
+                const auto label = readTimecodeLabel (text);
+
+                if (! label.has_value())
+                {
+                    registry.release (objectId);
+                    return EditResult::failed (reason::badValue);
+                }
+
+                value = Value::string (*label);
             }
 
             node.setProperty (juce::Identifier (juce::String (std::string (name))),
@@ -4286,12 +4360,17 @@ namespace wfg::doc
         /*  AT THE END OF THE SHOW, made by the first port and outside the
             history as the video containers are: every container the schema
             declares before it is either always there or inserted before it
-            by its own first create, so the canonical order holds. */
+            by its own first create, so the canonical order holds.
+
+            BEFORE <Sync> since namespace draft §59 (AHE): the timecode
+            settings are the one container always after it. Appended, a show
+            that made its first port wrote one that `wfg validate` passed and
+            the canonical golden did not. */
         auto container = showNode.getChildWithName ("SerialPorts");
         if (! container.isValid())
         {
             container = juce::ValueTree ("SerialPorts");
-            showNode.addChild (container, -1, nullptr);
+            showNode.addChild (container, showNode.indexOf (showNode.getChildWithName ("Sync")), nullptr);
         }
 
         std::vector<std::pair<std::string_view, std::string>> attributes;
@@ -5241,7 +5320,19 @@ namespace wfg::doc
                     const auto parsed = Schema::parseValue (*attribute, text, parsedValue);
 
                     if (! parsed.ok)
+                    {
                         problems.push_back (here + ": \"" + attributeName + "\" " + parsed.error);
+                        continue;
+                    }
+
+                    /*  A TIMECODE CUE'S START, by the judge the write door asks
+                        (namespace draft §59, AHF): text that is not a label has
+                        no frame to start at under any rate. */
+                    if (elementName == "Timecode" && attributeName == "from"
+                          && ! readTimecodeLabel (text).has_value())
+                        problems.push_back (here + ": \"from\" is \"" + text
+                                              + "\", which is not a timecode label - HH:MM:SS:FF, two digits"
+                                                " each, hours below 24 and frames below 30");
                 }
 
                 for (const auto& child : node)
@@ -5923,6 +6014,20 @@ namespace wfg::doc
                             continue;
                         }
 
+                        /*  NOR TIMECODE (namespace draft §59, AHT): re-asserted at
+                            every step, a code would take its own output over
+                            (AHC) and jump back to its start each time - a locate
+                            nobody asked for. */
+                        if (element == "Timecode")
+                        {
+                            problems.push_back ("/Show/.../Persistent/Timecode["
+                                                  + child[idProperty].toString().toStdString()
+                                                  + "]: a persistent section does not run timecode - put"
+                                                    " back at every step it would jump to its start each time -"
+                                                    " so this one is ignored; fire it from the list instead");
+                            continue;
+                        }
+
                         if (element != "Fade" && element != "Transport" && element != "Group"
                              && element != "Start")
                             continue;
@@ -6472,6 +6577,110 @@ namespace wfg::doc
             };
 
             visit (showNode);
+        }
+
+        /*  TIMECODE THAT WILL NOT GO WHERE IT SHOULD (namespace draft §59), each
+            said before the show rather than heard during it, and each a WARNING:
+            the show plays, and the repair is a choice in a menu.
+
+            An LTC output wider than one channel - the code replaces one
+            channel's content, and an LTC cue fired onto a wider output fails
+            as `bad-route` (AHI, AHR). A cue's sound routed onto the LTC output
+            - the code replaces it there, so the sound is never heard where it
+            was sent (AHI). An MTC port a control surface uses - a surface's
+            port is never held, so a backup would send its MTC twice (AHX). An
+            MTC port MIDI cues send SysEx on - a quarter frame waits behind a
+            whole SysEx message (AHQ). And a start the show's rate lacks - read
+            as the next label there is when the cue runs (AHF), which is worth
+            knowing before a desk is programmed against the one written. */
+        {
+            const auto read = [this] (const char* row)
+            {
+                return getAttribute (std::string ("/godot/sync/") + row).value_or (std::string {});
+            };
+
+            const auto ltcOut = read ("ltcOut");
+            const auto mtcOut = read ("mtcOut");
+            const auto rate = timecode::rateFromWord (read ("frameRate")).value_or (timecode::Rate::fps25);
+
+            if (! ltcOut.empty())
+                if (const auto bus = findById (ltcOut); bus.isValid() && bus.hasType ("Bus"))
+                {
+                    const auto width = juce::String (getAttribute ("/godot/bus/" + ltcOut + "/width")
+                                                       .value_or (std::string ("1"))).getIntValue();
+
+                    if (width > 1)
+                        problems.push_back ("/Show/Sync/@ltcOut: names \"" + ltcOut + "\", which is "
+                                              + std::to_string (width) + " channels wide - LTC plays on one"
+                                                " channel, so an LTC cue fails when it is fired (bad-route)");
+                }
+
+            /*  The ports each surface is reached through, space-separated. */
+            std::vector<std::string> surfacePorts;
+
+            for (const auto& surface : showNode.getChildWithName ("Surfaces"))
+            {
+                std::istringstream words (surface["ports"].toString().toStdString());
+
+                for (std::string word; words >> word;)
+                    surfacePorts.push_back (word);
+            }
+
+            if (! mtcOut.empty()
+                  && std::find (surfacePorts.begin(), surfacePorts.end(), mtcOut) != surfacePorts.end())
+                problems.push_back ("/Show/Sync/@mtcOut: names \"" + mtcOut + "\", a port a control surface"
+                                      " uses - a surface's port is never held, so a backup following this"
+                                      " machine would send its MTC as well; give MTC a port of its own");
+
+            bool sysexOnMtc = false;
+
+            const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& node)
+            {
+                const auto here = [&node]
+                {
+                    return "/Show/.../" + node.getType().toString().toStdString() + "["
+                             + node[idProperty].toString().toStdString() + "]";
+                };
+
+                if (! ltcOut.empty())
+                {
+                    if (node.hasProperty ("directOut") && node["directOut"].toString().toStdString() == ltcOut)
+                        problems.push_back (here() + "/@directOut: names \"" + ltcOut + "\", the output LTC"
+                                                     " plays on - the code replaces what is sent there, so this"
+                                                     " sound is never heard on it");
+
+                    if ((node.hasType ("Route") || node.hasType ("Send"))
+                          && node["bus"].toString().toStdString() == ltcOut)
+                        problems.push_back (here() + "/@bus: names \"" + ltcOut + "\", the output LTC plays"
+                                                     " on - the code replaces what is sent there, so this sound"
+                                                     " is never heard on it");
+                }
+
+                if (! mtcOut.empty() && node.hasType ("Midi")
+                      && node["port"].toString().toStdString() == mtcOut
+                      && getAttribute ("/godot/cue/" + node[idProperty].toString().toStdString() + "/type")
+                           .value_or (std::string {}) == "sysex")
+                    sysexOnMtc = true;
+
+                if (node.hasType ("Timecode"))
+                    if (const auto label = timecode::parseLabel (node["from"].toString().toStdString());
+                        label.has_value() && timecode::normalise (*label, rate) != *label)
+                        problems.push_back (here() + "/@from: " + timecode::formatLabel (*label, rate)
+                                              + " is not a label at " + std::string (timecode::wordOf (rate))
+                                              + " frames a second, so the code starts at the next one there is, "
+                                              + timecode::formatLabel (timecode::normalise (*label, rate), rate, true));
+
+                for (const auto& child : node)
+                    visit (child);
+            };
+
+            //  The cues, and what they carry: a route and a send are a cue's children.
+            visit (showNode.getChildWithName ("Lists"));
+
+            if (sysexOnMtc)
+                problems.push_back ("/Show/Sync/@mtcOut: names \"" + mtcOut + "\", a port MIDI cues send"
+                                      " SysEx on - a quarter frame waits behind a whole SysEx message, which"
+                                      " a reader sees as the code stumbling; give MTC a port of its own");
         }
 
         return problems;

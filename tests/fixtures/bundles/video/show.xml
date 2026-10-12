@@ -19,4 +19,5 @@
   <VideoOutputs>
     <VideoOutput id="VD000021" canvas="VD000011" name="Face"/>
   </VideoOutputs>
+  <Sync/>
 </Show>

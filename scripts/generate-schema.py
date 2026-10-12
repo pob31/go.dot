@@ -99,6 +99,15 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 "mark",
                 # A process cue: its patch, as Pure Data-s text (namespace draft 51).
                 "process",
+                # A timecode cue (namespace draft 59, AHD): MTC or LTC, where its
+                # code starts and how long it runs.
+                "timecode",
+                # The show's timecode settings (namespace draft 59, AHE): a
+                # CONTAINER token like `network`, addressed /godot/sync/frameRate
+                # with no identifier in the middle - the rate, where MTC and LTC
+                # leave, how loud LTC is. Named `sync` and not `timecode`, which
+                # the cue kind already is.
+                "sync",
                 # A serial port (namespace draft 51, ACR; PC.10): an Arduino on
                 # USB, its path on this machine and its speed.
                 "serial",

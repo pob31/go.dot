@@ -312,6 +312,8 @@ add_library(wfg_engine STATIC
     wfg/engine/clock/TickClock.h
     wfg/engine/clock/TickThread.cpp
     wfg/engine/clock/TickThread.h
+    wfg/engine/timecode/Timecode.h
+    wfg/engine/timecode/Timecode.cpp
     wfg/engine/TemplateChanges.h
     wfg/engine/document/Template.cpp
     wfg/engine/document/Template.h

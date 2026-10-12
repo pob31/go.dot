@@ -112,6 +112,7 @@ namespace wfg::cue
             if (element == "Midi")  return "midi";
             if (element == "Start") return "start";
             if (element == "Process") return "process";
+            if (element == "Timecode") return "timecode";
 
             return {};
         }
@@ -4820,6 +4821,15 @@ namespace wfg::cue
             job.patch = textOf (cue, "patch");
             job.revision = document.revision();
             processing.push_back (std::move (job));
+            return;
+        }
+
+        /*  A TIMECODE CUE (namespace draft §59): playing from its GO, its code
+            placed by the next tick's hook, and running until something stops
+            it or its length has run (AHB). */
+        if (kind == "timecode")
+        {
+            fireTimecode (cue, runId);
             return;
         }
 
@@ -13708,6 +13718,174 @@ namespace wfg::cue
         }
     }
 
+    //==============================================================================
+    void Runner::fireTimecode (const juce::ValueTree& cue, const std::string& runId)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr)
+            return;
+
+        run->state = runState::playing;
+
+        TimecodeJob job;
+        job.self = runId;
+        job.cue = cue[idProperty].toString().toStdString();
+        job.format = textOf (cue, "format") == "ltc" ? "ltc" : "mtc";
+
+        /*  THE SHOW'S RATE AS IT IS NOW (AHM), kept for the run's life: a
+            receiver is locked to the rate the code started at. A word the table
+            does not have - only a file edited by hand carries one, and the load
+            refuses it - reads as the default, 25 (AHG). */
+        job.rate = timecode::rateFromWord (document.getAttribute ("/godot/sync/frameRate").value_or (std::string {}))
+                     .value_or (timecode::Rate::fps25);
+
+        /*  WHERE IT STARTS, as a frame of the day at that rate: the label the
+            door stored, the next one there is when the rate lacks it (AHF). A
+            label that does not read is one no door lets in; a show that holds
+            one anyway starts at the default and says why, for the outputs to
+            report when they come (`bad-message`, AHR). */
+        auto label = timecode::parseLabel (textOf (cue, "from"));
+
+        if (! label.has_value())
+        {
+            job.failure = runError::badMessage;
+            label = timecode::Label { 1, 0, 0, 0 };
+        }
+
+        job.startFrame = timecode::frameOf (*label, job.rate);
+
+        /*  HOW LONG, IN WHOLE FRAMES, rounded up (AHF) with the exact fraction:
+            2 s at 29.97 is 59.94 frames, so 60. The millionth of a frame taken
+            off first is for a length typed as a whole number of frames, which
+            a double may carry a hair above it - 0.04 s at 25 is one frame, not
+            two. Held below what a frame count can hold, however long a length
+            somebody typed. */
+        if (const auto seconds = numberOf (cue, "length"); seconds > 0.0)
+        {
+            const auto frames = seconds * static_cast<double> (timecode::numOf (job.rate))
+                                  / static_cast<double> (timecode::denOf (job.rate));
+
+            job.lengthFrames = static_cast<std::int64_t> (std::ceil (std::min (frames, 1.0e15) - 1.0e-6));
+            job.lengthFrames = std::max<std::int64_t> (job.lengthFrames, 1);
+        }
+
+        /*  ITS START, FROM ITS GO: what the run reads until the code is placed,
+            and all a replay ever reads, since it runs no hook. */
+        run->timecode = timecode::formatLabel (timecode::labelOf (job.startFrame + job.offsetFrames, job.rate),
+                                               job.rate, true);
+
+        timecoding.push_back (std::move (job));
+    }
+
+    void Runner::placeTimecode (Engine& engine, TimecodeJob& job, std::int64_t tick)
+    {
+        /*  A TAKEOVER (AHC, AHL): the run that held this format's output ends
+            on the tick this one starts, never at its GO or during its pre-wait,
+            so the line is never quiet between the two - the receiver sees the
+            code jump, as at a locate. A record, so a replay ends it on the same
+            tick. Its job is marked handed over: what ends it from here on must
+            never stop the output, which this run now holds. */
+        auto& holder = timecodeHolder (job.format);
+
+        if (! holder.empty() && holder != job.self)
+            for (auto& other : timecoding)
+            {
+                if (other.self != holder || other.finished)
+                    continue;
+
+                if (const auto* held = runs.find (other.self); held != nullptr && ! held->isFinished())
+                    engine.submit (origin::engine, "run.ended", one (other.self));
+
+                other.handedOver = true;
+                other.finished = true;
+            }
+
+        holder = job.self;
+        job.placed = true;
+        job.placedAtTick = tick;
+    }
+
+    void Runner::advanceTimecode (Engine& engine, std::int64_t tick)
+    {
+        /*  A JOB LET GO: its output given back, unless a later run of its
+            format took it over and holds it now. */
+        const auto letGo = [this] (TimecodeJob& job)
+        {
+            auto& holder = timecodeHolder (job.format);
+
+            if (! job.handedOver && holder == job.self)
+                holder.clear();
+
+            job.finished = true;
+        };
+
+        for (auto& job : timecoding)
+        {
+            if (job.finished)
+                continue;
+
+            auto* run = runs.find (job.self);
+
+            /*  OVER BY ANOTHER ROAD - failed, revoked, taken back, its length's
+                end applied - or holding the post-wait that follows its end: the
+                code has stopped either way. */
+            if (run == nullptr || run->isFinished() || run->state == runState::postWait)
+            {
+                letGo (job);
+                continue;
+            }
+
+            /*  ESC, A STOP CUE, A GROUP'S END, A KILL (AHK): ended this tick by
+                `advanceWaits`' sweep of the stopping runs no job claims, which
+                has already run - a timecode run has nothing to fade or wait
+                for, and its group's footer runs after it as after any member.
+                The code stops with it: at its next frame boundary once there
+                is an output to stop, cut at once under a kill (TC.4). */
+            if (run->state == runState::stopping || beingKilled (*run))
+            {
+                letGo (job);
+                continue;
+            }
+
+            if (! job.placed)
+                placeTimecode (engine, job, tick);
+
+            /*  WHERE THE CODE HAS GOT TO, counted from the tick it was placed
+                in whole frames at the run's rate - a product and a division of
+                integers, never a sum, so a code that has run for hours is
+                exactly where its start says. A tick is a fiftieth of a second:
+                at 25 a frame every second tick. */
+            const auto elapsedTicks = tick - job.placedAtTick;
+            auto elapsedFrames = elapsedTicks * timecode::numOf (job.rate)
+                                   / (static_cast<std::int64_t> (TickClock::rateHz) * timecode::denOf (job.rate));
+
+            /*  ITS LENGTH RUN (AHB): ended on the tick its last frame is over,
+                once - a record, so a replay ends it on the same tick. The
+                readout stays on that last frame, which is the last a reader
+                saw. */
+            if (job.lengthFrames > 0 && elapsedFrames >= job.lengthFrames)
+            {
+                if (! job.endAsked)
+                {
+                    engine.submit (origin::engine, "run.ended", one (job.self));
+                    job.endAsked = true;
+                }
+
+                elapsedFrames = job.lengthFrames - 1;
+            }
+
+            run->position = static_cast<double> (elapsedTicks) / static_cast<double> (TickClock::rateHz);
+            run->timecode = timecode::formatLabel (timecode::labelOf (job.startFrame + job.offsetFrames + elapsedFrames,
+                                                                      job.rate),
+                                                   job.rate, true);
+        }
+
+        timecoding.erase (std::remove_if (timecoding.begin(), timecoding.end(),
+                                          [] (const TimecodeJob& job) { return job.finished; }),
+                          timecoding.end());
+    }
+
     void Runner::advanceCurves (Engine& engine, std::int64_t tick)
     {
         for (auto& job : curving)
@@ -17335,6 +17513,11 @@ namespace wfg::cue
         recordCurves (engine, tick);
         advanceCurves (engine, tick);
         advanceProcesses (engine, tick);
+
+        /*  ABOVE THE NULL-PLAYER GATE as the processes are (namespace draft
+            §59): a show with no audio side still counts its codes on the tick,
+            and a replay sees the same runs end. */
+        advanceTimecode (engine, tick);
         advanceSends (engine);
         observeAfterStep (engine, tick);
 
@@ -19161,11 +19344,14 @@ namespace wfg::cue
                 /*  SINCE ITS GO, which for a run a follower was seated with
                     can be before this machine's first tick (RD.8): a launch
                     tick below nought, read like any other. */
+                /*  NOR A TIMECODE RUN (namespace draft §59): `advanceTimecode`
+                    counts it from the tick its code was placed, not its GO. */
                 if (run->launchRequestedAtTick != 0 && ! run->isWaiting()
                       && run->state != runState::armed
                       && run->state != runState::preparing
                       && ! (run->kind == "osc" && isCurving (run->id))
-                      && ! (run->kind == "video" && isMovieRun (run->id)))
+                      && ! (run->kind == "video" && isMovieRun (run->id))
+                      && run->kind != "timecode")
                     run->position = static_cast<double> (tick - run->launchRequestedAtTick)
                                       / static_cast<double> (TickClock::rateHz);
 

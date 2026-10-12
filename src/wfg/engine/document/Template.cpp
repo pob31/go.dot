@@ -273,6 +273,7 @@ namespace wfg::doc::Template
                 { "Canvases", "video canvases" }, { "VideoOutputs", "video outputs and their mapping" },
                 { "VideoInputs", "video inputs" }, { "VideoInserts", "video inserts" },
                 { "CueTemplates", "cue templates" }, { "SerialPorts", "serial ports" },
+                { "Sync", "timecode: the rate and where it leaves" },
             };
 
             const auto known = words.find (container);
@@ -558,7 +559,14 @@ namespace wfg::doc::Template
                 const juce::Identifier container (change.id);
                 const auto p = pRoot.getChildWithName (container);
                 auto t = tRoot.getChildWithName (container);
-                const auto index = t.isValid() ? tRoot.indexOf (t) : -1;
+
+                /*  A CONTAINER THE TEMPLATE HAS NOT MADE YET goes before
+                    <Sync>, the last of the show's children (namespace draft
+                    §59, AHE) - appended, the template would have been written
+                    in an order no show is. -1, the end, for a template that
+                    somehow has none. */
+                const auto index = t.isValid() ? tRoot.indexOf (t)
+                                               : tRoot.indexOf (tRoot.getChildWithName ("Sync"));
 
                 if (t.isValid())
                     tRoot.removeChild (t, nullptr);
