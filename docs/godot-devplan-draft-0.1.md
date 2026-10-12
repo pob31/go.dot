@@ -1541,6 +1541,43 @@ at worst alone on its port, LTC clean over ten minutes with no drift. Found on t
 abstraction-loading guard shared by every patch's thread, now per thread. Owed to a bench: a desk or
 a timecode display chasing each, the hour-long run, and MTC beside a SysEx on a real cable.
 
+
+### Timecode chased: time groups · L
+
+*Designed 2026-10-12*, at the author's direction (PRD §3.7, §3.14, §3.29, §6.9, §6.11; namespace draft
+§60): a **time group**, a group type beside the sampler whose members start when LTC coming in, MTC
+coming in or the wall clock reaches their time, each member free-running or chasing the code by a
+jump, a varispeed catch-up or a timestretch catch-up. The tick never follows the code: Go.dot measures
+each code against its own clock and steers each chasing cue, which answers PRD §3.14's open question.
+The author's decisions are AIE-AIH; from AII they are the implementer's, the author's to overrule.
+Built before the rest of redundancy (the author, 2026-10-12), with the redundancy session's five
+constraints designed in.
+
+| Stage | What | Depends on |
+|---|---|---|
+| TG.0 | Docs: namespace §60, PRD §3.7/§3.14/§3.25/§3.29/§6.9/§6.11/§9, this | - |
+| TG.1 | The wall clock's step rule, once a day, a disabled trigger refused | TG.0 |
+| TG.2 | The document and an idle time group: rows, `GroupMode.h`, membership, warnings, the stops, Persistent | TG.0 |
+| TG.3 | The LTC decoder on the audio thread | TG.0 |
+| TG.4 | MTC in: the inbox, the arrival stamp, the reader, `rx`, `--midi-play` | TG.0 |
+| TG.5 | The code map, the watchers, `code.heard`, the gate, the position | TG.3, TG.4 |
+| TG.6 | The wall clock as a source | TG.1, TG.5 |
+| TG.7 | Firing on the code's sample | TG.2, TG.5 |
+| TG.8 | Jump and locate | TG.7 |
+| TG.9 | Catch-up by varispeed and timestretch | TG.8 |
+| TG.10 | The window | TG.9 |
+| TG.11 | `blackbox.timegroup`; M64 | TG.10 |
+| TG.12 | Close-out | all |
+
+**Done when:** a sound in a time group starts within a millisecond of the incoming LTC frame its label
+names, and within a few of MTC's; a chaser held to a code running 50 ppm fast stays within its
+tolerance for ten minutes by each method; a locate back re-seats the chasers and leaves the free
+runners; the code stopping leaves the chasers playing; a backup following fires nothing of its own and
+is locked at a takeover; a step of the wall clock fires nothing; CI is green.
+
+**Needs from the author:** the words on screen before they ship; a bench with a real source - a DAW, a
+VTR or a desk sending LTC and MTC - and a signal through a desk.
+
 ---
 
 ## Phase 11 — Integrations · M

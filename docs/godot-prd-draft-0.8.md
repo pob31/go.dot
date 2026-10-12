@@ -530,6 +530,12 @@ trigger list:
 Debounce/false-start guarding is a **user preference** (e.g. GO debounce time),
 not a hard-coded constant.
 
+*Amended 2026-10-12 (namespace draft §60):* **timecode** and **wall clock** arrive as the **time
+group** (§3.14): its members start when the code or the clock reaches their time. A wall-clock
+trigger on a single cue remains; it fires once a calendar day, and a step of the clock - the night
+summer time ends, a time-sync step - fires nothing, where before a step back fired every clock
+trigger in the show.
+
 ### 3.8 Stop cues
 
 Target by **stable ID** — never by cue number. May also target a **tag**
@@ -1106,7 +1112,9 @@ Dual-touch load-to-time (§3.17) is these two pointers, one per hand.
 **Open structural question:** the 50 Hz tick is derived from sample time, which
 is clean when master. When chasing, tick indices must remain monotonic and the
 derivation re-anchored without discontinuity. Specify before the transport is
-written.
+written. *Answered 2026-10-12 (namespace draft §60, AII, the implementer's, the author's to
+overrule): the tick never follows the code. Go.dot keeps its own clock, measures every incoming code
+against it, and steers each chasing cue to match; nothing is re-anchored.*
 
 **Generating** *(added in 0.8, at the author's direction, 2026-10-11; the mechanics are in the
 namespace draft §59)*. The author: *"We can start with the outgoing timecode modes. These can be
@@ -1129,6 +1137,30 @@ later round.
   own LTC, changed over downstream with the rest of its sound.
 
 The implementer's calls, the author's to overrule, are listed in §6.9.
+
+**Chasing** *(added in 0.8, at the author's direction, 2026-10-12; the mechanics are in the
+namespace draft §60)*. The author: *"we have to make the timecode triggered cues ... more in line
+with the other out of time triggered cues such as the sampler type to have specific time triggered
+cues with LTC, MTC and wallclock triggering"*; *"The chasing would be either: jump (tiny crossfade),
+catch up with varispeed and catch up with timestretching"*; *"Time triggered cues, can chase or free
+run too. They can be included in the permanent section. They can be either audio, video or
+timeline/automatic sequential groups."*
+
+- **A time group** *(the author's choice, 2026-10-12)*: a group type beside the sampler. The group
+  names its source - LTC coming in on an input, MTC on a MIDI port, or the wall clock - and each
+  member the time it starts at. Members are sounds, pictures, timeline groups and automatic
+  sequences. GO arms it and it stays armed until stopped, as a sampler bank does; in the Persistent
+  section it stays armed all show. A member starts on the very sample the code reaches its time; the
+  standby never moves.
+- **Each member chases or free-runs, by its own method** *(the author's choice, 2026-10-12)*: free
+  run, jump (with a short crossfade), catch up by varispeed, or catch up by timestretch.
+- **When the code stops, chasers keep playing** as if free-running, and catch up when it returns
+  *(the author's choice, 2026-10-12)*.
+- **When the code jumps, chasers are re-seated and free runners are not** *(the author's choice,
+  2026-10-12)*: chasers are put where the new time says, as load to time puts a scene; a free runner
+  starts only when the code runs into its time.
+- Incoming code is a device's (§3.15): a backup that follows keeps reading it but fires nothing of its
+  own, and is locked to it the moment it takes over.
 
 ### 3.15 Redundancy
 
@@ -2491,6 +2523,9 @@ it declared would delay the whole show.
 - **Video stays Go.dot's**, reading TE's playhead each frame (§3.19d).
 - **Timecode chase** = TE's transport following MTC (Waveform does it; verify the
   engine exposes it). LTC is decoded by Go.dot and fed to the same mechanism.
+  *Amended 2026-10-12 (namespace draft §60, AII):* Tracktion's transport follows nothing. Go.dot
+  decodes LTC and reads MTC itself, measures each against its own clock, and steers each chasing
+  cue - a jump through patch 0002's loop segments, a catch-up through the cue's speed.
 
 #### Curves never enter TE
 
@@ -2981,6 +3016,10 @@ stateless transform relaunches for free, and §4.9 holds either way *(2026-10-09
 the data process is the process cue, §3.21 and namespace draft §51; a relaunch
 opens its patch again, from its beginning)*. Persistent
 rows are not GO targets; the cursor skips the section as it skips a footer.
+
+*Amended 2026-10-12 (namespace draft §60, AIW):* a **time group** may stand in the section: asserted,
+it is armed at the first step and stays armed all show, its members starting when the code reaches
+their time; Esc stops it rather than pausing it, and the next step arms it again.
 
 **Why sampler groups, rack channels and persistent cues share one design.** Not
 economy of mechanism: it is that everything that runs has a row in a list, a
@@ -4090,6 +4129,29 @@ What the work leaves out: chasing (§3.14's open question); MTC on several ports
 outputs at once; user bits; a timecode that follows a sound's playhead rather than starting with it;
 MIDI clock and MMC.
 
+Added 2026-10-12 *(proposed)*, with time groups and chase (§3.14, namespace draft §60). The
+implementer's calls from AII in §60.2 are the author's to overrule:
+
+- **The tick never follows the code**; each chasing cue is steered on Go.dot's own clock.
+- **A member is any sound, picture, timeline group or automatic sequence**; its start is a label read
+  at the show's frame rate, the incoming rate detected and shown; it free-runs until told to chase.
+- **One input of each kind**, in the Timecode tab; a MIDI port's receive switch now governs MTC.
+- **The tolerances**: 10 ms out of step before a chaser acts; 0.25 s before a catch-up jumps instead;
+  1 % the most a catch-up adds to the speed; a 10 ms crossfade for a jump. A picture cuts.
+- **The log keeps the code's turns only** - appearing, stopping, jumping, drifting half a millisecond -
+  and the corrections are worked out from them, so a replay and a backup reproduce them.
+- **Latency compensated, a 2 s preload**: a member starts when the code is heard to reach its time,
+  loaded two seconds ahead; a free runner fired cold starts from its top, late, and says so.
+- **Reading the code**: silent four frames is stopped; a jump is believed after two frames; code
+  running backwards fires nothing; the code running into a free runner's time again restarts it.
+- **The chase method sets how the sound changes speed**, whatever the cue's own speed mode says.
+- **In the Persistent section** a time group is armed at the first step; Esc is a stop for it.
+- **Doh! re-arms a time group from the top**, as it does a sampler bank.
+- **A wall-clock trigger fires once a calendar day**; a step of the clock fires nothing.
+
+What the work leaves out: several LTC inputs or MTC ports at once; user bits; a code that only
+follows (Go.dot as a slave transport for a whole list); MIDI clock and MMC; LTC read off a sound file.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -4246,6 +4308,11 @@ Mackie vs HUI first — first week with the D700.
   3.36 ms at worst, two messages past 2 ms. LTC decoded every one of 17,983 frames with no error, its
   frames within 0.145 samples of where they belong after ten minutes. A render file cannot show the
   32 ms a 100-byte SysEx holds a real cable for; that, a reader and the hour are the bench's.
+- **Timecode chased** (§3.14, 2026-10-12, namespace draft §60): **M64** - how close to the incoming
+  frame a member of a time group starts (the median, the 99th percentile and the worst over two
+  hundred fires, from LTC and from MTC); and for each chase method over ten minutes against a code
+  running 50 ppm fast, with a 0.1 % step, a two-second stop and a thirty-second locate back: the
+  steady error, the time to catch up, the jumps and the worst error.
 
 ---
 
@@ -4309,4 +4376,5 @@ devplan's.
 3. Draft the parameter-tree namespace and node metadata schema.
 4. Draft the RELAX NG schema for the document bundle.
 5. Write `CLAUDE.md` from §4 verbatim.
-6. Settle the timecode-chase tick derivation (§3.14).
+6. Settle the timecode-chase tick derivation (§3.14). *Settled 2026-10-12 (namespace draft §60,
+   AII): the tick never follows the code.*

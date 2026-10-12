@@ -26542,3 +26542,209 @@ read for this at all.
   Timecode tab's Getting started line, written at TC.8 and not yet read by the author. Owed to a bench:
   a desk or a timecode display chasing LTC and MTC, the hour-long run, and MTC beside a SysEx on a real
   cable.
+
+## 60. Time groups and chase: cues fired by LTC, MTC and the wall clock
+
+### 60.1 What it does
+
+Written 2026-10-12, from the author's requests of the same day: *"we have to make the timecode
+triggered cues ... more in line with the other out of time triggered cues such as the sampler type
+to have specific time triggered cues with LTC, MTC and wallclock triggering"*; *"The chasing would be
+either: jump (tiny crossfade), catch up with varispeed and catch up with timestretching"*; *"Time
+triggered cues, can chase or free run too. They can be included in the permanent section. They can
+be either audio, video or timeline/automatic sequential groups."* This is the chasing half of PRD
+§3.14, and it answers §3.14's open question.
+
+**A time group** is a group whose members are started by a time rather than by GO. The group names
+its source - LTC coming in on an input, MTC coming in on a MIDI port, or the wall clock - and each
+member says the time it starts at. GO arms the group, and it stays armed until it is stopped, as a
+sampler bank does; in the Persistent section it is asserted and stays armed all show (AIE). The
+standby never moves when a member fires (PRD §3.5).
+
+**The tick never follows the code** (AII). Go.dot keeps its own clock, the interface's sample count,
+and every incoming code is measured against it: where the code is now, and how fast it runs compared
+with Go.dot. A member that chases is steered to match - one at a time, each by its own method - while
+free runners, other lists, the Persistent section and GO share the one clock. §3.14's question - how
+the tick stays monotonic when it follows a code - does not arise: it never does. Drift between the
+code's machine and the interface is a speed the chasers follow, measured and shown; the cure is one
+word clock, as for two machines (§58, AGI).
+
+**Reading.** LTC is decoded on the audio thread, on the one input `sync/ltcIn` names, right after
+the input tap is filled: each frame comes out with the sample it began on, exact in Go.dot's count.
+MTC is taken out of the MIDI input on the driver's thread - quarter frames and full frames, which the
+trigger matchers dropped - stamped with the steady clock on arrival and assembled on the tick, both
+directions, the rate code read; its moments are turned into samples through a line of its own
+(`ClockEstimate`, §59). The wall clock is read with the steady clock beside it, so a step of the
+clock is told apart from time passing. For each source a watcher fits a line through what it heard -
+position and speed - and says running, stopped or jumped.
+
+**What the log keeps** (AIO): the turns only. One record, `code.heard`, when a code appears, stops,
+comes back or locates, or drifts more than half a millisecond from the line last written - a few an
+hour at fifty parts per million - with its origin the source's own: `ltc:<input>`, `mtc:<port>`,
+`clock`. Every firing is an ordinary `run.spawn`; every re-seat at a locate is applied inside the
+`code.heard` record that says it, which hands back the run names it drew. The small constant speed
+corrections are worked out from the logged line and Go.dot's own clock, as speed curves are (§22): a
+replay reproduces them without hearing anything, and a backup derives the same.
+
+**Firing.** A member is loaded about two seconds before the code reaches its time and starts on the
+very sample the code reaches it - the frame's own sample for LTC, its mapped sample for MTC, through
+RD.8's `launchNotBefore`. A member whose time the code runs into while running starts; a jump past it
+does not start it (AIH); the code running into it a second time, after a jump back, restarts it.
+
+**Chasing**, per member (AIF): free run, jump, varispeed or timestretch.
+- **Jump**: more than `sync/chaseTolerance` (10 ms) out of step, the sound jumps to where it should be
+  over `sync/chaseCrossfade` (10 ms) - the crossfaded jump a slice move already makes inside a
+  sounding voice (§33, CD). A picture cuts.
+- **Varispeed / timestretch**: the sound runs up to `sync/chaseRate` (1 %) faster or slower than the
+  code until it is back within a millisecond - varispeed bends the pitch, timestretch keeps it; more
+  than `sync/chaseJump` (0.25 s) out, it jumps instead.
+- **The code stops** (AIG): chasers keep playing at their own speed; when it comes back they catch up
+  by their method - a return is a locate.
+- **The code jumps** (AIH): chasers are re-seated as load to time seats a scene - started at their
+  offset, or stopped - through `seatPlan` and `seekGroup`; free runners are left alone.
+- **A group as a member** (a timeline or an automatic sequence): its descendants are placed on the
+  code's samples; a jump re-seats it with `seekGroup`; a catch-up steers its sounding media.
+
+**Fixed on the way.** A backward step of the wall clock - the night summer time ends, a time-sync
+step, a hand on the clock - landed in the midnight branch of `clockCrossings` and fired every clock
+trigger in the show. A clock trigger fires once a calendar day now, a step the steady clock
+contradicts fires nothing and is said, and `trigger.fire` refuses a disabled trigger (AIY).
+
+**Redundancy** (§58; the redundancy session's five points, 2026-10-12). `pair::gateFor` names
+`ltc:`, `mtc:` and `clock` among the origins a following backup ignores (AGD), so a code reaching
+both machines fires once; the backup keeps decoding while it follows and applies the main's
+`code.heard` mapped onto its own clock, and says its own state the moment it leads, so a takeover
+finds it locked (AIP); the tick is untouched; a locate goes through `seatPlan`, so `pair.seat` carries
+it; the watchers' lines travel in RD.8's position; the wall clock is the main's alone.
+
+### 60.2 Decisions
+
+The author's, 2026-10-12, each picked from options whose words were mine:
+
+- **AIE** (the author's) **A time group.** A group type beside Sampler: the group names its source
+  (LTC in, MTC in, the wall clock) and each member the time it starts at; members are sounds,
+  pictures, timeline groups and automatic sequences; GO arms it until it is stopped, the Persistent
+  section keeps it armed; the standby never moves. Offered as "A time group".
+- **AIF** (the author's) **Every chase setting is the member's**: free run, chase by jump, by varispeed
+  or by timestretch. Offered as "Everything on each member"; the implementer had recommended on/off
+  per member with the method on the group.
+- **AIG** (the author's) **When the code stops, chasers keep playing** as if free-running, and catch
+  up when it comes back. Offered as "Keep playing"; the implementer had recommended freewheeling a
+  set time and then pausing.
+- **AIH** (the author's) **When the code jumps, chasers re-seat and free runners do not**: chasers are
+  put where the new time says, as load to time does; a free runner starts only when the code runs
+  into its time, a jump past it does not fire it, and a jump never stops it. Offered as "Chasers
+  re-seat, free-runners don't".
+
+Mine, the author's to overrule:
+
+- **AII** (mine) **The tick never follows the code**; each chasing run is steered (60.1). Tracktion's
+  transport follows nothing; PRD §3.25's "timecode chase = TE's transport following MTC" is replaced.
+- **AIJ** (mine) **The words**: mode `time`; `group/timeSource` (`ltc|mtc|clock`, not `source`, which
+  `video/source` is); owner `timed` on Media, Video and Group elements with `at` and `chase`; `chase`
+  defaults to free run.
+- **AIK** (mine) **What may be a member**: Media, Video, a timeline group, an automatic sequence. Not a
+  manual sequence, a sampler, another time group, a timecode cue or any other kind. Header and footer
+  are free, as for any group.
+- **AIL** (mine) **Labels are read at the show's rate** (`sync/frameRate`, AHA); the incoming rate is
+  detected - the MTC rate code, the LTC frame count and drop flag - and shown, with a warning when it
+  differs.
+- **AIM** (mine) **One input of each kind**: `sync/ltcIn`, a named input of one channel; `sync/mtcIn`,
+  a declared port whose `rx` is honoured (a port's `rx` did not gate MIDI triggers before; it gates
+  MTC from here). The `sync/chase` row AHE reserved is given back: chasing is the member's (AIF).
+- **AIN** (mine) **The tolerances**: 10 ms out of step before a chaser acts (under the ~20 ms where two
+  sounds flam, far above a fitted line's noise); 0.25 s before a catch-up chaser jumps instead; 1 %
+  the most a catch-up adds (17 cents under varispeed); a 10 ms crossfade (CD's).
+- **AIO** (mine) **A sparse log**: `code.heard` at the turns and on half a millisecond of drift; the
+  corrections derived, never logged.
+- **AIP** (mine) **A backup maps the main's anchors** onto its own clock - by the tick offset until
+  RD.9's map - the applied record keeping the local sample so a replay never maps; it re-says its own
+  state at `pair.lead`.
+- **AIQ** (mine) **Latency compensated and a 2 s preload**: LTC's sample is corrected by the
+  interface's input and output latency, MTC's by the output latency, so a member starts when the code
+  is heard to reach its time; a member is loaded two seconds ahead; a free runner fired cold starts
+  from its top, late, and says so.
+- **AIR** (mine) **Reading the code**: a code silent for four frames is stopped; a locate is believed
+  after two consistent frames; code running backwards fires nothing; a second crossing restarts a
+  free runner.
+- **AIS** (mine) **The steering law**: the speed is the code's speed times one plus the error over two
+  seconds, held within the 1 %, stepping from 10 ms out back in to 1 ms.
+- **AIT** (mine) **The jump**: inside one slice, a crossfaded jump on the voice; across slices, a seek,
+  with its gap warned; a picture cuts rather than crossfades.
+- **AIU** (mine) **The chase method sets the voice's mode**: `varispeed` resamples, `timestretch`
+  stretches, whatever the cue's own speed mode says - and a cue saying otherwise is warned.
+- **AIV** (mine) **A group member's descendants are placed on the code**, and steered by the member's
+  method.
+- **AIW** (mine) **In the Persistent section** a time group is asserted - armed at the first step,
+  re-armed if stopped; Esc is a stop for it, not a pause, and the next step re-arms it.
+- **AIX** (mine) **Esc, double Esc, a stop cue and footers** act as on any group; Doh! re-arms from
+  the top, as a sampler bank starts from the top (§24, L4); a second GO on an armed time group adopts
+  it.
+- **AIY** (mine) **The wall clock's step rule**: once a calendar day; a step the steady clock
+  contradicts by more than two seconds fires nothing and says so; midnight counts only when the
+  steady clock crosses it; a disabled trigger is refused at `trigger.fire`.
+- **AIZ** (mine) **`wfg serve --midi-play=<port>=<file>`** plays a `--midi-render` file into a port's
+  input at its due moments, for the drivers.
+- **AJA** (mine) **The screen words**, put to the author before they ship (TG.10).
+
+### 60.3 Rows
+
+| Address | Type | Notes |
+|---|---|---|
+| `cue/<group>/mode` | `s` | gains `time` |
+| `cue/<group>/timeSource` | `s` | `ltc`, `mtc` or `clock`; `ltc` by default |
+| `cue/<member>/at` | `s` | where a member starts: `HH:MM:SS:FF` for `ltc` and `mtc`, `HH:MM:SS` for `clock`; empty never fires |
+| `cue/<member>/chase` | `s` | `free`, `jump`, `varispeed` or `timestretch`; `free` by default |
+| `sync/ltcIn` | `s` | the named input LTC comes in on; empty is none |
+| `sync/mtcIn` | `s` | the declared port MTC comes in on; empty is none |
+| `sync/chaseTolerance` | `d` | ms out of step before a chaser acts; 10 |
+| `sync/chaseJump` | `d` | s out of step before a catch-up chaser jumps instead; 0.25 |
+| `sync/chaseRate` | `d` | % the most a catch-up adds; 1 |
+| `sync/chaseCrossfade` | `d` | ms a jump's crossfade; 10 |
+| `sync/ltcInState`, `sync/mtcInState` | `s` | read-only: `none`, `absent`, `running`, `stopped` |
+| `sync/ltcInCode`, `sync/mtcInCode` | `s` | read-only: the label the code reads now |
+| `sync/ltcInRate`, `sync/mtcInRate` | `s` | read-only: the rate detected |
+| `sync/ltcInSpeed`, `sync/mtcInSpeed` | `d` | read-only: the code's speed against Go.dot's clock |
+| `run/<id>/chaseError` | `d` | read-only: ms a chasing run is out of step |
+| `run/<id>/chaseState` | `s` | read-only: `inStep`, `catching`, `jumped`, `free` |
+
+### 60.4 Commands
+
+| Command | Arguments | Does |
+|---|---|---|
+| `code.heard` | `s:source s:what s:rate h:frame h:sample d:speed [s:run]...` | the engine's, origin `ltc:<input>`, `mtc:<port>` or `clock`: a code `jumped` (appeared, came back, located), `running` (re-anchored) or `stopped`, at this frame on this sample at this speed; on `jumped`, the chasers re-seated, the runs it drew handed back |
+
+### 60.5 Refused
+
+`bad-value` at the write door for an `at` that does not read at the parent's source, and for a
+member a time group cannot hold (AIK). Warnings in the show: a time group whose source has no input,
+a member with an empty or unreadable `at`, `mtcIn` a surface's port or the port MTC leaves on, `ltcIn`
+wider than one channel, a member's speed mode that its chase method overrides (AIU).
+
+### 60.6 Stages
+
+| Stage | What |
+|---|---|
+| TG.0 | This section; PRD §3.7, §3.14, §3.25, §3.29, §6.9, §6.11, §9; the devplan's Phase 10 |
+| TG.1 | The wall clock's step rule, once a day, a disabled trigger refused (AIY) |
+| TG.2 | The document and an idle group: rows, schema, `cue/GroupMode.h` in place of the mode compares, membership, the label judge, warnings; GO arms, nothing fires; the stops; the Persistent section |
+| TG.3 | `timecode/LtcDecoder.h` on the audio thread; `Player::setTimecodeInput` |
+| TG.4 | MTC in: `midi/MtcInbox`, the arrival stamp, `timecode/MtcReader`, `rx` honoured, `--midi-play` |
+| TG.5 | `timecode/CodeMap.h`, the watchers, `code.heard` (the map only), the readouts, the gate by name, the maps in the position, re-said at a takeover |
+| TG.6 | The wall clock as a source |
+| TG.7 | Firing: `timeTick` in `cue/RunnerTime.cpp`, the preload, the code's sample, pictures, scene descendants |
+| TG.8 | Jump and locate: the crossfaded jump, movies and locked sounds, the re-seats, a return as a locate |
+| TG.9 | Catch-up: `timecode/Chase.h`, a run's chase factor, the voice's mode, movie rate, `chaseError` |
+| TG.10 | The window: the + group line, the inspector, the Timecode tab's input and chase rows, the time column, the running pane |
+| TG.11 | `blackbox.timegroup`; M64 |
+| TG.12 | Close-out: the guides, the README |
+
+**M64** (planned): how close to the incoming frame a member starts - the median, the 99th percentile
+and the worst over two hundred fires, from LTC and from MTC; and, for each chase method over ten
+minutes against a code running 50 ppm fast, with a 0.1 % step, a two-second stop and a thirty-second
+locate back: the steady error, the time to catch up, the jumps, the worst error.
+
+### 60.7 Built so far
+
+- **TG.0**, 2026-10-12: this section; PRD §3.7, §3.14's chasing half and its open question answered,
+  §3.25, §3.29, §6.9, §6.11's M64, §9's sixth action settled; the devplan's stages under Phase 10.
