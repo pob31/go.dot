@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 20;
+    constexpr std::uint32_t version = 21;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -386,7 +386,12 @@ namespace wfg::video::region
         std::atomic<double> outline;
         std::atomic<double> outlineBlur;
         std::atomic<std::uint32_t> outlineColour;
-        std::atomic<std::uint32_t> textStyle;    ///< bold 1, italic 2, align << 2, alignV << 4
+        std::atomic<std::uint32_t> textStyle;    ///< bold 1, italic 2, align << 2, alignV << 4, embolden 64, slant 128
+
+        /*  THE FACE FILE OF A FAMILY THE SHOW CARRIES (namespace draft §62,
+            AKZ): drawn from the file itself, never found by name. */
+        char fontFile[pathChars];
+        std::atomic<std::int32_t> fontFace;
 
         /*  A mask's outline (Mask.h), written with what it is. */
         std::atomic<std::int32_t> shapeCount;
@@ -911,6 +916,10 @@ namespace wfg::video::region
             out.text.italic = (style & 2u) != 0;
             out.text.align = static_cast<TextAlign> (std::min ((style >> 2) & 3u, 2u));
             out.text.alignV = static_cast<TextAlignV> (std::min ((style >> 4) & 3u, 2u));
+            out.text.embolden = (style & 64u) != 0;
+            out.text.slant = (style & 128u) != 0;
+            out.text.fontFile = readText (slot.fontFile);
+            out.text.fontFace = std::max (0, slot.fontFace.load (std::memory_order_relaxed));
 
             out.shape.count = std::clamp (slot.shapeCount.load (std::memory_order_relaxed), 0, mask::maxPoints);
             out.shape.feather = slot.shapeFeather.load (std::memory_order_relaxed);

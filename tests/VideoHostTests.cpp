@@ -2283,6 +2283,54 @@ TEST_CASE ("video region: a layer's alpha switch and key written, read back and 
     CHECK_FALSE (layers[0].key.invert);
 }
 
+TEST_CASE ("video region: a carried font's face file, its place in a collection and the styles Go.dot adds, written, read back and restated (§62, AKZ)")
+{
+    Memory memory;
+    auto& r = *memory.region;
+    video::RegionSink sink { r };
+
+    auto spec = quarters();
+    spec.source = "text";
+    spec.text.words = "Act One";
+    spec.text.font = "DejaVu Sans Mono";
+    spec.text.bold = true;
+    spec.text.italic = true;
+    spec.text.align = video::TextAlign::right;
+    spec.text.alignV = video::TextAlignV::bottom;
+    spec.text.fontFile = "/shows/Lazzi/fonts/Pair.ttc";
+    spec.text.fontFace = 1;
+    spec.text.embolden = true;
+    spec.text.slant = true;
+    sink.show (spec);
+
+    auto layers = layersOf (r);
+    REQUIRE (layers.size() == 1);
+    CHECK (layers[0].text.fontFile == "/shows/Lazzi/fonts/Pair.ttc");
+    CHECK (layers[0].text.fontFace == 1);
+    CHECK (layers[0].text.embolden);
+    CHECK (layers[0].text.slant);
+    CHECK (layers[0].text.bold);
+    CHECK (layers[0].text.italic);
+    CHECK (layers[0].text.align == video::TextAlign::right);
+    CHECK (layers[0].text.alignV == video::TextAlignV::bottom);
+    CHECK (video::sameTextLook (layers[0].text, spec.text));
+
+    //  The family no longer carried: drawn by name, restated.
+    spec.text.fontFile.clear();
+    spec.text.fontFace = 0;
+    spec.text.embolden = false;
+    spec.text.slant = false;
+    sink.restate (spec);
+
+    layers = layersOf (r);
+    REQUIRE (layers.size() == 1);
+    CHECK (layers[0].text.fontFile.empty());
+    CHECK (layers[0].text.fontFace == 0);
+    CHECK_FALSE (layers[0].text.embolden);
+    CHECK_FALSE (layers[0].text.slant);
+    CHECK (layers[0].text.bold);
+}
+
 namespace
 {
     /*  A CANVAS OF 160 BY 90, its right half white - a white mask over the

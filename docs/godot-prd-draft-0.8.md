@@ -1803,7 +1803,7 @@ fonts.** A show folder holds the fonts its words use, put there on request, one 
 installed font carried, or a font file added - and never copied unasked, since a font is licensed. A
 font the show carries draws its words on every machine, Mac or PC, main or backup, even where one of
 the same name is installed. Proposed (§6.9): the folder `fonts/` beside `media/`; Go.dot reading a font
-file's names itself; the size of a text as the letters' em; a width of nought as no box (AKX-ALE).
+file's names itself; the size of a text as the letters' em (AKX-ALE).
 
 #### 3.19a Surfaces and mapping
 
@@ -4216,8 +4216,8 @@ namespace draft §62). The implementer's calls from AKX in §62.2 are the author
   names the same family everywhere; the renderer draws with the carried file directly and emboldens or
   slants a family that lacks the face. **Three commands** carry, add and remove a family, none an undo
   step; a face whose licence restricts it is carried only after a question.
-- **A text's size is the letters' em**, as QLab and layout programs size type; **a width of nought is no
-  box**, the lines aligned to one another and the block centred, then placed.
+- **A text's size is the letters' em**, as QLab and layout programs size type; a width of nought is
+  already QLab's own text box, as wide as the longest line.
 - **QLab, mapped**: a stage is a canvas of its size, its outputs waiting for their projector; placement
   turned into a % of the canvas, an off-centre origin folded into the offsets, a tilt, a crop, an effect
   and an unknown blend reported; a picture at its own size given the `scale` that draws it so; a movie's

@@ -38,6 +38,8 @@
 
 namespace wfg::doc { class ShowDocument; }
 
+namespace wfg::video { class ShowFonts; }
+
 namespace wfg::cue
 {
     struct PlayedMedia;
@@ -62,6 +64,14 @@ namespace wfg::cue
     video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
                                     const std::string& mediaFolder, const PlayedMedia* played,
                                     const TextFields* fields);
+
+    /*  AND A TEXT CUE'S FONT FOUND AMONG THOSE THE SHOW CARRIES (namespace
+        draft §62, AKZ): the face file that draws its family bold or italic,
+        which wins over an installed font of that name. Without them - and in
+        the forms above - the renderer asks the system for the family by name. */
+    video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
+                                    const std::string& mediaFolder, const PlayedMedia* played,
+                                    const TextFields* fields, const video::ShowFonts* fonts);
 
     /*  WHETHER TWO SPECS LOOK THE SAME, in what a playing layer is told when its
         cue is edited (`Sink::restate`): the blend, the colour, the fit, the

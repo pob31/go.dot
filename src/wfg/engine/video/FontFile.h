@@ -91,4 +91,11 @@ namespace wfg::video::fontfile
     };
 
     Pick pickFace (const std::vector<Face>& faces, bool bold, bool italic);
+
+    /*  ONE FACE OF A COLLECTION AS A FILE OF ITS OWN: its table directory
+        rewritten and its tables copied after it. JUCE loads a font's first
+        face only, so a `.ttc`'s second face is drawn from this. A single
+        face's file comes back whole for index nought; empty when the face is
+        not there or does not read. */
+    std::vector<std::uint8_t> extractFace (const std::uint8_t* bytes, std::size_t size, int index);
 }

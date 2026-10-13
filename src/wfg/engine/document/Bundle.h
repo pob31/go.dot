@@ -408,8 +408,9 @@ namespace wfg::doc
         ReadResult adoptOfferedRecovery (ShowDocument& document, DocumentSession& session,
                                          DocumentWriter& writer);
 
-        /*  `save` into `destination`, PLUS the directory copy `save` refuses to
-            make: `source`'s `namespaces/`.
+        /*  `save` into `destination`, PLUS the directory copies `save` refuses to
+            make: `source`'s `namespaces/`, and its `fonts/` (namespace draft
+            §62, AKX), the fonts the show carries, whole.
 
             SAVE-PLUS-A-COPY RATHER THAN ONE ACT, and it says so in its name.
             `save` writes exactly three files and refuses `namespaces/` as a

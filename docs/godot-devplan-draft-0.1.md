@@ -683,7 +683,7 @@ amended): **fonts carried by the show, and QLab's text and video cues imported.*
 | QF.2 | A carried font drawing a text cue, over an installed one of the same name; Save as carrying `fonts/` |
 | QF.3 | Nothing yet: an installed family's files found on each system |
 | QF.4 | The font menu: the show's fonts, Carry it in the show, Add a font file... |
-| QF.5 | A text's size as the letters' em; a width of nought as no box |
+| QF.5 | A text's size as the letters' em |
 | QF.6 | The probe workspace (the author's) |
 | QF.7 | Nothing yet: QLab's text, placement, stages and fades read |
 | QF.8 | Nothing yet: the walk to canvases, pictures, movies, texts and fades |

@@ -27855,8 +27855,8 @@ Mine, the author's to overrule:
   left, centre or right, and set at the top, middle or bottom, the top and bottom as far from the
   canvas's edges as the box is from its sides (5 % of the width when nothing wraps). Then the whole
   slide is offset, scaled, turned about the canvas's centre and flipped, as a fill is; `fit` is not read.
-  *Amended 2026-10-13 (§62, ALE, proposed):* a `wrap` of nought is no box: the block is as wide as its
-  longest line, the lines aligned to one another inside it, and the block centred, then placed.
+  *Noted 2026-10-13 (§62, ALE):* a `wrap` of nought is QLab's own text box with no fixed width - as
+  wide as its longest line, the lines aligned in it, centred, then placed - which the importer uses.
 - **AKK** (mine) **The text rows and their units.** The words are `words`, not `text`, which stays the
   fields' address word (61.3) and is a function's name in the Runner. The size is a % of the canvas's
   height, as offsets are a % of it (VQ); the outline's width and its blur are canvas pixels, as a mask's
@@ -27923,7 +27923,7 @@ Mine, the author's to overrule:
 | `cue/<id>/align` | `s` | `left`, `centre` or `right`; `centre` |
 | `cue/<id>/alignV` | `s` | `top`, `middle` or `bottom`; `middle` |
 | `cue/<id>/lineSpacing` | `d` | 50..400 %; 100 |
-| `cue/<id>/wrap` | `d` | 0..100 % of the canvas's width, the box the words wrap in; 90; nought is no box (§62, ALE) |
+| `cue/<id>/wrap` | `d` | 0..100 % of the canvas's width, the box the words wrap in; 90; nought never wraps, the box as wide as the longest line (§62, ALE) |
 | `cue/<id>/outlineColour` | `s` | `#RRGGBB`; `#000000` |
 | `cue/<id>/outline` | `d` | 0..200 canvas px, the outline's width; 0 |
 | `cue/<id>/outlineBlur` | `d` | 0..200 canvas px, how far the outline is blurred; 0 |
@@ -28240,11 +28240,11 @@ opaque. A fade that moves one of them becomes a fade of the picture. Each QLab s
 QLab 4) becomes a canvas of its size, and its outputs become video outputs waiting for a projector to
 be picked here. A camera cue stays a memo (AKT).
 
-**Two things change in a text cue** to meet QLab, and both are what anyone typing a title expects. The
+**One thing changes in a text cue** to meet QLab, and it is what anyone typing a title expects: the
 size is the letters' size as a designer means it - the em, what QLab and every layout program call
-48 points - where it was the line's height, about a fifth more (ALD). And a width of nought is no box:
-the lines are as wide as the longest one, aligned to one another, and the block is centred, then
-placed - QLab's own text box - where nought put the lines against a margin of the canvas (ALE).
+48 points - where it was the line's height, about a fifth more (ALD). A width of nought already was
+QLab's own text box with no fixed width: the box as wide as the longest line, the lines aligned in it,
+the block centred, then placed (ALE).
 
 ### 62.2 Decisions
 
@@ -28285,8 +28285,10 @@ Mine, the author's to overrule:
 - **ALA** (mine) **Three commands, on the engine's machine**: `fonts.carry <family>` copies every face
   of an installed family into `fonts/`; `fonts.add <path>` copies one font file; `fonts.remove
   <family>` deletes the family's files. None is an undo step or the show's dirt - files, as
-  `media.cleanCache`'s - and the engine reads its fonts again after each. `/godot/document/fonts`
-  lists the families carried, for every client, the console's included.
+  `media.cleanCache`'s. A command is answered at once and its work done on a thread of its own, never
+  the tick's, which runs GO; the engine then reads its fonts again. `/godot/engine/fonts` lists the
+  families carried and `/godot/engine/fontsJob` says what the last command did, for every client, the
+  console's included - the machine's, as each machine has its own copy of the show folder.
 - **ALB** (mine) **A licence that forbids it is asked about.** A face whose embedding bits say
   "restricted licence" is carried only after a question naming it, which the command learns as
   `fonts.carry <family> restricted`; one that says "no subsetting" or "bitmap only" is carried with no
@@ -28297,9 +28299,11 @@ Mine, the author's to overrule:
 - **ALD** (mine) **`fontSize` is the letters' em** (JUCE's point height), a % of the canvas's height, as
   QLab and every layout program size type, so an imported size needs no font measured. The same number
   draws about a fifth larger than on 2026-10-13's build; no show had text cues before it.
-- **ALE** (mine) **A `wrap` of nought is no box**: the block as wide as its longest line, its lines
-  aligned inside it, the block centred and then placed by the offsets - QLab's text box when it has no
-  fixed width. It was the canvas less a 5 % margin.
+- **ALE** (mine) **A `wrap` of nought stays what it is**: the block as wide as its longest line, its
+  lines aligned inside it, centred and then placed by the offsets - QLab's text box when it has no
+  fixed width, so an imported text with none is written with nought. Only the top and the bottom keep
+  a margin, 5 % of the width, which an imported text, set in the middle, never meets. *(Written first
+  as a change; the drawing already did this.)*
 - **ALF** (mine) **Stages are canvases.** Each QLab 5 stage, or QLab 4 surface, becomes a canvas of its
   name and its size in pixels; a workspace drawing straight onto a screen gets one canvas per screen, of
   the size QLab last saw it. Each of a stage's outputs becomes a video output of its name with no
@@ -28343,10 +28347,10 @@ Mine, the author's to overrule:
 
 | Address | Type | Notes |
 |---|---|---|
-| `document/fonts` | `s` | read-only: the families the show carries, one line each with the styles it has (ALA) |
+| `engine/fonts` | `s` | read-only, the machine's: the families the show carries, a line each - the family, its styles, `around` when from the folder around, `restricted` when a face's licence restricts it, a tab between (ALA) |
+| `engine/fontsJob` | `s` | read-only, the machine's: what the last `fonts.*` command did - its number, `working` or `done`, the verb, the subject, the result and the detail, a tab between (ALA, ALB) |
 | `cue/<id>/font` | `s` | a family carried or installed; the show's copy wins (AKW) |
 | `cue/<id>/fontSize` | `d` | the letters' em, a % of the canvas's height (ALD) |
-| `cue/<id>/wrap` | `d` | nought is no box (ALE) |
 
 ### 62.4 Commands
 
@@ -28417,7 +28421,7 @@ close (§60), which keeps the shared checkout.
 | QF.2 | A carried font drawing a text cue, winning over an installed one; Save as carrying `fonts/` |
 | QF.3 | Nothing yet: an installed family's files found on Windows, macOS and Linux |
 | QF.4 | The font menu: the show's fonts, Carry it in the show, Add a font file..., Remove from the show |
-| QF.5 | The size as the em, nought as no box |
+| QF.5 | The size as the em |
 | QF.6 | The probe (the author's), 62.6 filled in |
 | QF.7 | Nothing yet: QLab's words, styles, placement, stages and fades read |
 | QF.8 | Nothing yet: the walk to canvases, pictures, movies, texts and fades |
@@ -28429,3 +28433,34 @@ close (§60), which keeps the shared checkout.
 
 - **QF.0**, 2026-10-13: this section; §61's AKJ, AKK, AKL, AKR and rows amended; §46.4 and §46.7
   pointing here; PRD §3.19, §3.20, §6.9 and §6.11 (M67); the devplan's item.
+- **QF.1**, 2026-10-13: `video/FontFile.{h,cpp}` (AKY), std only. Each face's names - name 16 else 1
+  for the family, the legacy family kept, 17 else 2, 4, 6 - in American English from Windows' Unicode
+  records first, then another English, another language, the Unicode platform's, the Macintosh's in
+  Mac Roman, a symbol font's; OS/2's weight, bold, italic and oblique bits and its embedding bits,
+  head's style bits where there is no OS/2. Every read checked against the file's end, a file that does
+  not read an error in words, a collection keeping its good faces. `pickFace` takes the right slant
+  first, then the nearest weight, the heavier of two as near (as CSS takes Medium before Light), and says
+  what Go.dot must add. The tests read DejaVu Sans Mono from Pure Data's own folder, so no font file is
+  committed.
+- **QF.2**, 2026-10-13: the engine. `video/ShowFonts.{h,cpp}`: `ShowFonts` reads `<show>/fonts` and
+  `<show>/../fonts`, files by name, and `choose` turns a family, bold and italic into a face file - the
+  typographic family before Windows' four-style one, the show's own folder before the one around, a
+  family in its own folder never mixed with the one around's faces. `FontShelf` does `fonts.add`,
+  `.carry` and `.remove` on a thread of its own and says each in `/godot/engine/fontsJob`;
+  `/godot/engine/fonts` lists what is carried. `extractFace` copies a collection's face out as a file of
+  its own, since JUCE loads only a font's first face. `TextLook` gains `fontFile`, `fontFace`,
+  `embolden` and `slant`, the region the file and the face (version 21) and two style bits;
+  `pictureSpecOf` chooses the face; the Runner draws its text cues again when the fonts are read again,
+  as when a field moves; the tile too. The renderer makes one typeface per file, kept while drawn and
+  made again when the file changes on disk, and leans a missing italic about each glyph's baseline and
+  thickens a missing bold by a twenty-fourth of the size, as FreeType does. Save as copies `fonts/`
+  whole. `wfg validate` names a family neither carried nor installed, a file in `fonts/` that does not
+  read, and notes a style Go.dot draws itself without failing. Two things written in QF.0 were wrong:
+  a `wrap` of nought already was QLab's text box with no fixed width (ALE, rewritten); and the
+  readouts are the machine's, `engine/fonts` and `engine/fontsJob`, since each machine keeps its own
+  copy of the show folder, not `document/fonts`. Until QF.3, `fonts.carry` answers not-installed. Tests
+  under C and fr_FR: FontFileTests, ShowFontsTests (the folders, the choice, the shelf's jobs, the
+  commands, Save as), VideoTextTests (a carried face drawn whatever the family is called, a missing file
+  giving way to the name, Go.dot's bold and italic, a collection's second face, a file changed on disk),
+  VideoHostTests (the region), VideoTests (the Runner); 160 cases across the touched files. Nine
+  deliberate breakages each turned their own cases red.

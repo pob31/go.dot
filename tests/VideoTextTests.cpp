@@ -30,6 +30,8 @@
 #include <wfg/engine/video/TextLook.h>
 #include <wfg/engine/video/TextRaster.h>
 
+#include "FontFixture.h"
+
 #include <juce_graphics/juce_graphics.h>
 
 #include <algorithm>
@@ -517,3 +519,121 @@ TEST_CASE ("video text: how long a title takes to draw, its outline glowing - M6
              << times.back() << " ms");
 }
 
+
+namespace
+{
+    bool sameImage (const juce::Image& a, const juce::Image& b)
+    {
+        if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight())
+            return false;
+
+        for (int y = 0; y < a.getHeight(); ++y)
+            for (int x = 0; x < a.getWidth(); ++x)
+                if (a.getPixelAt (x, y) != b.getPixelAt (x, y))
+                    return false;
+
+        return true;
+    }
+
+    /*  Where the ink of row `y` starts, from the left: the first mostly solid pixel. */
+    int firstInk (const juce::Image& image, int y)
+    {
+        for (int x = 0; x < image.getWidth(); ++x)
+            if (image.getPixelAt (x, y).getAlpha() > 128)
+                return x;
+        return image.getWidth();
+    }
+
+    std::string pathOf (const juce::File& file) { return file.getFullPathName().toStdString(); }
+}
+
+TEST_CASE ("video text: a carried face draws its own letters, whatever the family is called; one that cannot be read gives way to the name (§62, AKZ)")
+{
+    auto look = lookOf ("Wim Iii");
+    look.fontSize = 10.0;
+
+    auto carried = look;
+    carried.fontFile = pathOf (test::fonts::dejaVu ("DejaVuSansMono.ttf"));
+    carried.font = "Arial";
+    auto unnamed = carried;
+    unnamed.font.clear();
+
+    const auto fromFile = drawn (carried);
+    REQUIRE (fromFile.image.isValid());
+    CHECK (sameImage (fromFile.image, drawn (unnamed).image));     // the name says nothing once there is a file
+
+    auto byName = look;
+    byName.font = "Arial";
+    const auto installed = drawn (byName);
+    REQUIRE (installed.image.isValid());
+    CHECK_FALSE (sameImage (fromFile.image, installed.image));       // the show's copy, not what the machine calls Arial
+
+    //  A face file that is not there: the family by name, as before §62.
+    auto broken = byName;
+    broken.fontFile = pathOf (test::fonts::dejaVu ("NoSuchFace.ttf"));
+    CHECK (sameImage (drawn (broken).image, installed.image));
+}
+
+TEST_CASE ("video text: what a face lacks, drawn by Go.dot - a bold thickened, an italic leaned to the right (§62, AKZ)")
+{
+    auto look = lookOf ("IIII");
+    look.fontSize = 20.0;
+    look.fontFile = pathOf (test::fonts::dejaVu ("DejaVuSansMono.ttf"));
+    const auto upright = drawn (look);
+    REQUIRE (upright.image.isValid());
+
+    auto thick = look;
+    thick.embolden = true;
+    const auto thickened = drawn (thick);
+    CHECK (pixelsNear (thickened.image, 0xFFFFFF) > pixelsNear (upright.image, 0xFFFFFF) * 11 / 10);
+    CHECK (std::abs (middleX (thickened) - middleX (upright)) < 0.01);
+
+    auto leaning = look;
+    leaning.slant = true;
+    const auto leaned = drawn (leaning);
+    REQUIRE (leaned.image.isValid());
+    CHECK ((leaned.x1 - leaned.x0) > (upright.x1 - upright.x0));
+
+    //  Leaned to the right: the letters' tops start further right than their feet.
+    const auto top = leaned.image.getHeight() / 5;
+    const auto foot = leaned.image.getHeight() * 4 / 5;
+    CHECK (firstInk (leaned.image, top) > firstInk (leaned.image, foot) + 3);
+    CHECK (std::abs (firstInk (upright.image, upright.image.getHeight() / 5)
+                     - firstInk (upright.image, upright.image.getHeight() * 4 / 5)) <= 3);
+}
+
+TEST_CASE ("video text: a collection's second face drawn from the collection, and a file changed on disk drawn again (§62, AKZ)")
+{
+    test::fonts::Folder place;
+    const auto regularFile = test::fonts::dejaVu ("DejaVuSansMono.ttf");
+    const auto boldFile = test::fonts::dejaVu ("DejaVuSansMono-Bold.ttf");
+    const auto pair = place.file.getChildFile ("Pair.ttc");
+    test::fonts::write (pair, test::fonts::collectionOf ({ test::fonts::bytesOf (regularFile), test::fonts::bytesOf (boldFile) }));
+
+    auto look = lookOf ("Bold");
+    look.fontSize = 12.0;
+
+    auto fromBold = look;
+    fromBold.fontFile = pathOf (boldFile);
+    auto fromRegular = look;
+    fromRegular.fontFile = pathOf (regularFile);
+
+    auto second = look;
+    second.fontFile = pathOf (pair);
+    second.fontFace = 1;
+    auto first = second;
+    first.fontFace = 0;
+
+    CHECK (sameImage (drawn (second).image, drawn (fromBold).image));
+    CHECK (sameImage (drawn (first).image, drawn (fromRegular).image));
+    CHECK_FALSE (sameImage (drawn (second).image, drawn (first).image));
+
+    //  The same name, another file in it: drawn from what is there now.
+    const auto changing = place.file.getChildFile ("Changing.ttf");
+    REQUIRE (regularFile.copyFileTo (changing));
+    auto fromChanging = look;
+    fromChanging.fontFile = pathOf (changing);
+    CHECK (sameImage (drawn (fromChanging).image, drawn (fromRegular).image));
+    REQUIRE (boldFile.copyFileTo (changing));
+    CHECK (sameImage (drawn (fromChanging).image, drawn (fromBold).image));
+}

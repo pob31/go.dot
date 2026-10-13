@@ -3746,6 +3746,8 @@ namespace wfg::tree
             else if (name == "patchEditorInstall") text = state.patchEditorInstall;
             else if (name == "serialPorts")    text = state.serialPorts;
             else if (name == "mediaCacheSweep") text = state.mediaCacheSweep;
+            else if (name == "fonts")           text = state.fonts;
+            else if (name == "fontsJob")        text = state.fontsJob;
             else if (name == "editRender")      text = state.editRender;
             else                               text = std::string (row->defaultText);
 

@@ -351,4 +351,55 @@ namespace wfg::video::fontfile
         pick.slant = italic && ! chosen.italic;
         return pick;
     }
+
+    std::vector<std::uint8_t> extractFace (const std::uint8_t* data, std::size_t size, int index)
+    {
+        const Bytes bytes { data, data != nullptr ? size : 0 };
+        if (index < 0 || ! bytes.has (0, 12))
+            return {};
+
+        if (bytes.u32 (0) != tag ('t', 't', 'c', 'f'))
+            return index == 0 ? std::vector<std::uint8_t> (data, data + size) : std::vector<std::uint8_t> {};
+
+        const auto count = static_cast<std::size_t> (bytes.u32 (8));
+        const auto which = static_cast<std::size_t> (index);
+        if (which >= count || count > 256 || ! bytes.has (12 + which * 4, 4))
+            return {};
+        const auto at = static_cast<std::size_t> (bytes.u32 (12 + which * 4));
+
+        const auto tables = static_cast<std::size_t> (bytes.u16 (at + 4));
+        if (tables == 0 || tables > 1000 || ! bytes.has (at, 12 + tables * 16))
+            return {};
+
+        std::vector<std::uint8_t> out (data + at, data + at + 12);    // the version and the search fields
+        out.resize (12 + tables * 16, 0);
+
+        const auto put32 = [&out] (std::size_t where, std::uint32_t v)
+        {
+            out[where] = static_cast<std::uint8_t> (v >> 24);
+            out[where + 1] = static_cast<std::uint8_t> ((v >> 16) & 0xFF);
+            out[where + 2] = static_cast<std::uint8_t> ((v >> 8) & 0xFF);
+            out[where + 3] = static_cast<std::uint8_t> (v & 0xFF);
+        };
+
+        for (std::size_t t = 0; t < tables; ++t)
+        {
+            const auto record = at + 12 + t * 16;
+            const auto offset = static_cast<std::size_t> (bytes.u32 (record + 8));
+            const auto length = static_cast<std::size_t> (bytes.u32 (record + 12));
+            if (! bytes.has (offset, length))
+                return {};
+
+            while (out.size() % 4 != 0)
+                out.push_back (0);
+
+            const auto into = 12 + t * 16;
+            put32 (into, bytes.u32 (record));            // the tag
+            put32 (into + 4, bytes.u32 (record + 4));    // the checksum, which a table moved keeps
+            put32 (into + 8, static_cast<std::uint32_t> (out.size()));
+            put32 (into + 12, static_cast<std::uint32_t> (length));
+            out.insert (out.end(), data + offset, data + offset + length);
+        }
+        return out;
+    }
 }

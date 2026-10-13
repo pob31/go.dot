@@ -22,6 +22,9 @@
     they are set - a font, a size, a fill (the cue's paint, which crosses as a
     layer's paint does), an outline and its blur.
 
+    THE FONT: a family by name, or the face file of a family the show carries
+    (namespace draft §62), which wins over an installed font of that name.
+
     THE UNITS: the size is a % of the canvas's height, as offsets are a % of it
     (VQ); the outline's width and its blur are canvas pixels, as a mask's
     feather is. The box the words wrap in is a % of the canvas's width, centred;
@@ -73,6 +76,15 @@ namespace wfg::video
         std::uint32_t outlineColour = 0x000000;
         double outline = 0.0;           ///< canvas px, its width outside the letters
         double outlineBlur = 0.0;       ///< canvas px, how far it is blurred
+
+        /*  THE FACE FILE THAT DRAWS IT, when the show carries the family
+            (namespace draft §62, AKZ): its absolute path and its place in a
+            collection, and what Go.dot draws itself that the face lacks. Empty,
+            the renderer asks the system for `font` by name, as before. */
+        std::string fontFile;
+        int fontFace = 0;
+        bool embolden = false;
+        bool slant = false;
     };
 
     /*  Two looks the same, compared by hand: a defaulted `==` on a double is
@@ -83,6 +95,7 @@ namespace wfg::video
 
         return a.words == b.words && a.font == b.font && a.bold == b.bold && a.italic == b.italic
             && a.align == b.align && a.alignV == b.alignV && a.outlineColour == b.outlineColour
+            && a.fontFile == b.fontFile && a.fontFace == b.fontFace && a.embolden == b.embolden && a.slant == b.slant
             && alike (a.fontSize, b.fontSize) && alike (a.lineSpacing, b.lineSpacing) && alike (a.wrap, b.wrap)
             && alike (a.outline, b.outline) && alike (a.outlineBlur, b.outlineBlur);
     }
