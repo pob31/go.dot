@@ -1132,6 +1132,15 @@ namespace wfg::doc
             these, and a cue that is actually fired fails its run. */
         std::vector<std::string> warnings() const;
 
+        /*  WHETHER THE SHOW HOLDS A TIME GROUP READING `source` - `ltc`, `mtc`
+            or `clock` - by its own `timeSource` or the table's default, in any
+            list or Persistent section (namespace draft §60, TG.6). Serve asks
+            it of the clock once a show revision: the wall clock is watched,
+            and its turns written to the log, only while a group exists that
+            starts members by it, so a show that never names the clock never
+            grows a record about it. */
+        bool holdsTimeGroupOn (std::string_view source) const;
+
         //======================================================================
         /** The element name for a `kind` value, or empty. "memo" is a Cue,
             "group" is a Group. */

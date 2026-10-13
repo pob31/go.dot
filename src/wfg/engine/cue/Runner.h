@@ -192,6 +192,48 @@ namespace wfg::cue
         std::string id;
     };
 
+    //==============================================================================
+    /*  WHERE A CHASER SHOULD BE (namespace draft §60, TG.8; AIF, AIN): pure, so
+        it can be asked of made-up numbers, and asked the same way by the hook
+        that steers a chasing member and by the handler that seats one at a
+        locate.
+
+        A time group's member that chases is held to its code: `seconds` of the
+        code after the moment its time comes - its time, less the pre-wait it
+        counts from there, or a scene member's offset from its scene - it should
+        be that far into its material, at its own speed (`rate`, the file's
+        seconds a second). `chasePlaceOf` says where that is: before its time,
+        past its end, or in its file - which slice, which pass of it, and which
+        second - by the arithmetic `placeInRanges` does for a load to time, but
+        with a slice that loops for ever followed pass by pass, since the code,
+        and not a person, says how long it has been playing. A cue with no
+        slices is its file from its start offset; one whose length the show
+        does not know never ends. */
+    namespace chase
+    {
+        struct Place
+        {
+            bool before = false;        // the member's time not reached yet
+            bool over = false;          // its material played out by then
+            int range = -1;             // the slice it is in, -1 for a cue with none
+            int pass = 1;               // which pass of that slice, from one
+            double file = 0.0;          // the file's second it is at
+            double progress = 0.0;      // the file's seconds played since it began, every pass counted
+
+            bool sounding() const noexcept { return ! before && ! over; }
+        };
+
+        Place chasePlaceOf (const std::vector<RangeSpec>& ranges, double startOffset,
+                            std::optional<double> fileLength, double rate, double seconds);
+
+        /*  Seconds of the code from the start of frame `frame` to where the
+            code is at Go.dot's sample `sample`, the nearer way round the day -
+            negative while the frame is still ahead. In the code's own seconds,
+            its frames at its unit's rate, the wall clock's milliseconds a
+            thousand to the second. */
+        double codeSecondsSince (const timecode::CodeMap& map, std::int64_t frame, std::int64_t sample) noexcept;
+    }
+
     /*  Everything the audio side needs to make one cue ready.
 
         A VALUE, carrying no document reference, because it crosses a thread
@@ -839,10 +881,23 @@ namespace wfg::cue
 
         /*  A TIME GROUP'S MEMBER (namespace draft §60): a cue whose parent is a
             time group - not its header's or its footer's, whose parent is the
-            section. `cue.fire` and `trigger.fire` refuse one (`needs-go`):
-            the code starts it, and until the code is read (TG.7) nothing
-            does. */
+            section. Its code starts it (TG.7, `timeTick`); `cue.fire` and
+            `trigger.fire` start it by hand while its group is armed. */
         bool isTimeMember (const std::string& cueId) const;
+
+        /*  A TIME GROUP'S MEMBER FIRED BY NAME OR BY A TRIGGER WHILE ITS GROUP
+            IS ARMED (namespace draft §60, AJB, the implementer's call): an
+            operator's manual start for when the code has failed - begun now,
+            from its top, free-running, as if the code had reached its time, its
+            pre-wait counting from the press as it counts from its time. A run
+            of its own under the armed group, named from the group's run as the
+            code's are, or `runId` when a record hands one in; empty when the
+            group is not armed - `needs-go`, TG.2's answer, as a sampler member
+            with no bank armed is `needs-strip`. The code's own loading for that
+            member is left alone: it starts again when the code reaches its time.
+            A handler's. */
+        std::string fireTimeMember (Engine& engine, std::int64_t tick, const std::string& cueId,
+                                    const std::string& runId);
 
         //======================================================================
         /*  WHERE EACH INCOMING CODE IS (namespace draft §60, TG.5; AIO, AIP):
@@ -854,10 +909,48 @@ namespace wfg::cue
             the same maps; a backup keeps its main's, moved onto its own clock
             by the follower. TG.7 fires members on it and TG.8 and TG.9 chase
             it; TG.5 keeps it and the readouts read it. Handler state, carried
-            in a position and set by a seat (RD.8). */
-        void noteCodeHeard (const std::string& source, const timecode::CodeMap& map);
+            in a position and set by a seat (RD.8).
+
+            `jumped` says the record's turn was one (TG.7): the source's count
+            of jumps moves, which is how a time group's hook learns that the
+            code appeared, came back or located since it last looked. */
+        void noteCodeHeard (const std::string& source, const timecode::CodeMap& map, bool jumped = false);
         const timecode::CodeMap* codeMapOf (const std::string& source) const;
         const std::map<std::string, timecode::CodeMap>& codeMaps() const noexcept { return codesHeard; }
+
+        /*  THE CHASERS RE-SEATED WHERE THE CODE IS (namespace draft §60, TG.8;
+            AIG, AIH): what a `jumped` turn's `code.heard` does after it keeps the
+            map - for every time group armed on `source` - and what `code.seat`
+            does for the one group `groupRun` a hook found armed while its code
+            ran. Decided at the code's place a seat's lead after `sample` (the
+            record's own: the anchor a turn names, the sample a hook read), so a
+            replay decides alike:
+
+              - a chaser that should be playing there and is: brought into step
+                where it is - a jump, a cut, a seek across slices - never
+                started again;
+              - one that should be playing and is not: seated at its offset, as
+                load to time seats a cue (`seatPlan`), a scene with its members
+                (`seekGroup`, or the round solved where none stands), a movie
+                fired and sought; what was loaded or asked for it from its top
+                let go first;
+              - one that should not be playing - its time ahead, its material
+                over - and is: ended as a jump ends what it abandons;
+              - at a locate (`locate`), a member of any kind asked for its
+                sample and not yet playing is cut, never having sounded: its
+                time on the old line no longer stands, and if it is still
+                ahead the group's hook loads it again.
+
+            Free runners playing are never touched (AIH). Answers every run name
+            it drew, in order, from `supplied` first, as a jump does. Handler
+            state only, and the document: a replay applying the records seats
+            the same runs under the same names. */
+        std::vector<std::string> seatChasersOnCode (Engine& engine, std::int64_t tick, const std::string& source,
+                                                    const std::string& groupRun, std::int64_t sample, bool locate,
+                                                    const std::vector<std::string>& supplied);
+
+        /*  Whether a group run was seated on its code already (`codeSeated`). */
+        bool seatedOnCode (const std::string& groupRun) const { return codeSeated.count (groupRun) > 0; }
 
         /*  WHAT `sync/ltcIn*` OR `sync/mtcIn*` READS for a source the show names
             (empty for none), at Go.dot's sample `now`: serve's, once a tick,
@@ -1943,7 +2036,10 @@ namespace wfg::cue
             ahead, held until then and ramped over a tick, on the run's own
             clock and the Player's alike, so the two never disagree. Between the
             launch and the range boundaries, which read that clock. `rateNow` is
-            the readout. */
+            the readout. WHAT IS PLACED IS `ownRate` TIMES THE RUN'S CHASE FACTOR
+            (namespace draft §60, TG.9): one for every run no time group steers,
+            so the speed placed is the speed decided, bit for bit, and a chaser's
+            catch-up rides on a speed fade rather than replacing it. */
         void applyRates();
 
         /*  A SLICE'S IN OR OUT EDITED WHILE IT SOUNDS (namespace draft §33,
@@ -2599,6 +2695,54 @@ namespace wfg::cue
             waiting for one. Decides and submits, as every hook does. */
         void samplerTick (Engine& engine, GroupJob& job, const juce::ValueTree& group,
                           const Run& groupRun);
+
+        /*  A TIME GROUP'S MEMBERS PHASE, every tick (namespace draft §60, TG.7;
+            cue/RunnerTime.cpp): its source's map read, and while the code runs
+            forwards each member whose time falls in the next two seconds loaded
+            (AIQ) and asked for a launch horizon and two ticks ahead of the
+            sample the code reaches it on - the launch placed on exactly that
+            sample - its crossed frame moved on, and a jump read as one. Decides
+            and submits, as every hook does. */
+        void timeTick (Engine& engine, GroupJob& job, const juce::ValueTree& group, const Run& groupRun);
+
+        /*  A SCENE PLACED ON THE CODE, every tick of its members phase (AIV):
+            each member loaded two seconds before its own start and, once the
+            scene is committed, asked for on its own sample - in place of the
+            timeline's spawn-everything and the sequence's one-after-another. */
+        void placedTick (Engine& engine, GroupJob& job, const juce::ValueTree& group, const Run& groupRun);
+
+        /*  A RUN THE CODE LOADED, ASKED FOR WHEN ITS START COMES WITHIN REACH:
+            a sound, a mic or a code fired a launch horizon and two ticks ahead
+            with its launch on `start`; a picture likewise, its appearance on
+            `start`; a placeable scene entered at once, uncommitted, and committed
+            once `start` is within a launch horizon (`mayCommit`: its parent
+            wants it now); any other scene entered within a launch horizon of
+            its start, as written. Answers whether it asked. */
+        bool askOnCode (Engine& engine, Run& pending, std::int64_t start, std::int64_t now, bool mayCommit,
+                        bool placeable);
+
+        /*  Whether a run is still waiting on the code: loaded and never fired,
+            or a scene placed on the code and not yet committed. */
+        bool awaitsTheCode (const Run& run) const;
+
+        /*  A picture the code loaded and has not asked for yet - under a time
+            group, or under a scene placed on its code - which the read-ahead
+            makes ready, as it makes the standby's (namespace draft §48). */
+        bool pictureLoadedForTheCode (const Run& run);
+
+        //  The job carrying a group run, or null.
+        GroupJob* jobOf (const std::string& runId);
+
+        /*  A TIME GROUP ARMED WHILE ITS CODE RUNS (namespace draft §60, TG.8,
+            AIH): where the group first reads a running code, the chasers whose
+            time the code has already passed - and which should be playing now -
+            are seated at their offsets, by `code.seat`, a record the hook submits
+            with the sample it read the code at, so a replay seats the same. Not
+            for a group a `jumped` turn has seated already: a locate seats inside
+            its own `code.heard` record (`seatChasersOnCode`), and the hook leaves
+            it. Free runners are never seated, only started when the code runs
+            into their time. */
+        void seatChasersAt (Engine& engine, const Run& groupRun, std::int64_t now);
 
         /*  Fader-start and fader-stop on every sampler strip whose endpoint
             is a fader: the edges of §3.9a, read off each holder's `trim` and
@@ -3293,6 +3437,163 @@ namespace wfg::cue
 
         //  Each incoming code's map, by source, as `code.heard` last said it (TG.5).
         std::map<std::string, timecode::CodeMap> codesHeard;
+
+        /*  HOW MANY TIMES EACH SOURCE HAS JUMPED (namespace draft §60, TG.7):
+            appeared, came back or located - each `jumped` record applied counts
+            one, so a time group's hook tells a jump from the code running on
+            without the record in hand. Handler state, this machine's own; a
+            seat leaves it, and the jobs it hands over take it as it stands. */
+        std::map<std::string, std::int64_t> codeJumps;
+
+        std::int64_t codeJumpsOf (const std::string& source) const;
+
+        //======================================================================
+        /*  WHAT A TIME GROUP MEANS ON ITS CODE (namespace draft §60, TG.7),
+            read once a revision of the show rather than once a tick: its
+            source, the show's frame rate its labels are read at (AIL), its
+            members - each one's `at`, pre-wait and kind - and, for every cue
+            under it whose start the walk can know, that start in seconds from
+            the moment its member's time is reached (AIV): a scene's members at
+            their offsets, a nested scene's in turn. A scene is PLACEABLE when
+            every member of it has one; the walk's own rules say when - a
+            timeline or an automatic sequence, one round, every member, in order,
+            no header, and an automatic sequence's lengths known. */
+        struct TimeMember
+        {
+            std::string cue;
+            std::string at;
+            std::string kind;
+            double preWait = 0.0;
+
+            /*  How it keeps up with the code once it plays (AIF): `free`,
+                `jump`, `varispeed` or `timestretch`, the row's word, empty read
+                as `free`. A scene member's descendants follow its word (AIV). */
+            std::string chase;
+        };
+
+        struct TimePlan
+        {
+            std::uint64_t revision = 0;
+            const std::map<std::string, double>* durations = nullptr;
+
+            std::string source;                         // `ltc:<input>`, `mtc:<port>`, `clock`, or empty
+            timecode::Rate showRate = timecode::Rate::fps25;
+            std::vector<TimeMember> members;
+
+            std::map<std::string, double> starts;       // a cue's start, seconds after its member's time
+            std::map<std::string, std::string> topOf;   // the member a cue is under (itself for a member)
+            std::set<std::string> placeable;            // the scenes placed on the code
+        };
+
+        std::map<std::string, TimePlan> timePlans;
+
+        const TimePlan& timePlanOf (const juce::ValueTree& timeGroup);
+
+        //  The time group a cue is under, at any depth, or an invalid tree.
+        juce::ValueTree timeGroupAbove (const juce::ValueTree& cue) const;
+
+        //======================================================================
+        /*  CHASING BY A JUMP (namespace draft §60, TG.8; AIF, AIN, AIT), every
+            tick after the speeds are placed: each time group's member that chases
+            by `jump` - and every run under a scene that does (AIV) - measured
+            against its code a launch horizon ahead, its error and its state
+            published; one more than `sync/chaseTolerance` out of step while the
+            code runs forwards jumps to where the code says, over
+            `sync/chaseCrossfade` (`chaseJump`). A movie cuts and its locked
+            sounds jump with it; a sound whose code lands in another of its slices
+            is sought there, with the gap a seek makes, and says so (`sought`).
+            Free runners are marked `free` and left alone; the code stopped, every
+            chaser plays on (AIG).
+            AND CATCHING UP (TG.9; AIF, AIS, AIU, AIV): a chaser by `varispeed` or
+            `timestretch` is steered instead - its run's `chaseFactor`, the code's
+            speed times the correction timecode/Chase.h's law gives, multiplied
+            into its own speed where `applyRates` and the launch place it on the
+            voice, and into a movie's rate where its time ring is placed - and
+            jumps only past `sync/chaseJump`. A movie's locked sounds take the
+            movie's factor; a scene's sounding media each their own, by the
+            member's method. The code stopped or gone, every factor is one again:
+            a chaser plays on at its own speed (AIG). */
+        void chaseTick (Engine& engine);
+
+        /*  THE SETTINGS A CHASE READS, from the show's `sync` rows, in seconds
+            and fractions; `stretchSettle` is where a stretched voice's catch-up
+            ends, one of the stretcher's chunks at the interface's rate (AJC). */
+        struct ChaseSettings
+        {
+            double tolerance = 0.010;   // out of step before a chaser acts
+            double catchUp = 0.25;      // out of step before a catch-up chaser jumps instead
+            double crossfade = 0.010;   // a jump's crossfade
+            double rate = 0.01;         // the most a catch-up adds to the code's speed
+            double stretchSettle = 0.001;
+        };
+
+        ChaseSettings chaseSettings() const;
+
+        /*  THE CHASE A RUN PLAYS UNDER (AIU, AIV): the `chase` word of the time
+            group's member it is, or is under - itself, a scene's sound under the
+            scene, a movie's locked sound under the movie - found by its runs'
+            parents, so a locked sound kept elsewhere in the show finds its movie.
+            Empty for a run no time group holds. Read at the arm, where the
+            voice's mode is chosen. */
+        std::string chaseMethodOf (const Run& run) const;
+
+        /*  Where a run that chases on behalf of `member` should be at `sample`:
+            the member's time on the map, less the run's own start under it -
+            the member's pre-wait, or a descendant's offset from the walk (AIV).
+            Nothing when its time does not read on the map, its start is not
+            known, or it plays backwards or not at all. */
+        std::optional<chase::Place> chaseTargetOf (const juce::ValueTree& cue, const TimeMember& member,
+                                                   const TimePlan& plan, const timecode::CodeMap& map,
+                                                   std::int64_t sample, double start,
+                                                   const std::map<std::string, double>* lengths) const;
+
+        /*  How far a sound is out of step at `sample`, in the code's seconds,
+            ahead when positive: its file where its clock says against where the
+            code says - inside one slice the near way round a loop, across two by
+            what each has played. Nothing for a run whose clock says nothing yet. */
+        std::optional<double> chaseErrorOf (const Run& run, std::int64_t sample, const chase::Place& target,
+                                            double rate, const std::vector<RangeSpec>& ranges) const;
+
+        /*  THE CROSSFADED JUMP (AIT; §33's CD): inside the slice the sound is
+            playing, or in a cue with no slices, the voice reads on from the
+            target over `crossfade`, from `sample` - a move on its slot's reader,
+            placed a launch horizon ahead as a slice move is - and the run's
+            clock is told where the file is from there. False when it cannot: a
+            move not reached yet on that voice (two segments only live in a
+            voice, so one jump at a time), no voice, a player that moves no
+            loops, a slice of another. */
+        bool chaseJump (Run& run, std::int64_t sample, const chase::Place& target, double crossfade);
+
+        /*  A MOVIE CUT TO THE CODE'S SECOND (AIT): a step on its time ring at
+            `sample`, as `seekMovie` places one, its playhead's range and pass
+            following. */
+        void cutMovie (VideoJob& job, std::int64_t sample, const chase::Place& target,
+                       const std::vector<RangeSpec>& ranges);
+
+        /*  One run measured against where the code says `targetCue` should be
+            - its own cue, or a locked sound's movie - and, out of step by more
+            than its method allows, brought back: a sound by a jump, a movie by
+            a cut. `byJump` is false for a catch-up method, which jumps only
+            past `catchUp` and below it is steered (TG.9): its `chaseFactor` set
+            by timecode/Chase.h's law, or, for a locked sound (`leader` its
+            movie's run), the movie's own, so the two keep together. Its error
+            and its state written, readouts both. A sound whose code is in
+            another of its slices, a second or more away, is sought there by a
+            `run.seek` the hook submits; from a handler (`inHandler`), which
+            submits nothing, it is left - the locate has sought it already if
+            its slice moved. Answers whether it moved anything. */
+        bool steerChaser (Engine& engine, Run& run, const juce::ValueTree& targetCue, const TimeMember& member,
+                          const TimePlan& plan, const timecode::CodeMap& map, double start,
+                          const ChaseSettings& settings, bool byJump, bool inHandler, const Run* leader = nullptr);
+
+        /*  A RUN A LOCATE ENDS (AIH): it, and everything under it, ended as a
+            jump ends what it abandons - no footer, its voice stopped, a picture
+            taken down a horizon ahead. */
+        void endChaser (const std::string& runId, std::int64_t tick);
+
+        /*  THE GROUP RUNS A `jumped` TURN OR A FIRST SIGHT HAS SEATED, so the
+            hook does not seat them again (`seatChasersAt`). Handler state. */
+        std::set<std::string> codeSeated;
 
         /*  EACH CANVAS AS `followCanvasLevels` READS IT, at the revision it was
             read at, and what was last handed to the video side. */

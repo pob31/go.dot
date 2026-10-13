@@ -213,6 +213,52 @@ namespace wfg::cue
             that entered the group is the same GO that fires the member. */
         std::string enterAt;
 
+        //======================================================================
+        /*  A TIME GROUP'S CODE (namespace draft §60, TG.7; AIH, AIR): the last
+            frame of the day its code has crossed while running forwards, in its
+            map's unit, -1 before a running code was first seen. A member whose
+            time falls after it and inside the next two seconds is loaded; one
+            the code crosses is started. A `jumped` turn puts it where the jump
+            landed, so a jump past a member never starts it, and the code running
+            into the time again after a jump back starts it a second time. Read
+            and moved by the hook alone (`Runner::timeTick`), and carried in a
+            position's `crossed` line (RD.8), so a follower seated while a code
+            runs fires what the leader had still to fire and nothing again. */
+        std::int64_t codeCrossed = -1;
+
+        /*  How many times the group's source had jumped when the hook last
+            looked (`Runner::codeJumps`), -1 for not yet: a count that moved is a
+            `jumped` turn applied since. THIS MACHINE'S OWN COUNT, never carried
+            - a job a seat hands over reads -1 and takes this machine's count as
+            it stands, with no jump read into it. */
+        std::int64_t codeTurns = -1;
+
+        /*  The unit the crossed frame counts in, `num / den` (CodeMap's): a code
+            whose rate became clearer is counted again from where it is. */
+        std::int64_t codeUnitNum = 0;
+        std::int64_t codeUnitDen = 0;
+
+        /*  THE MEMBERS LOADED FOR TIMES THE CODE HAS STILL TO CROSS, by cue: one
+            run each for this pass of the code, never a second while it waits -
+            and a member stays here, once crossed, until its run has been asked
+            for, so a member loaded in the very tick its time was crossed is
+            started all the same, late, and says so. */
+        std::vector<std::string> codeAhead;
+
+        /*  A SCENE PLACED ON THE CODE (namespace draft §60, TG.7, AIV): the
+            Go.dot sample it starts on - its members at their offsets from there,
+            each on its own sample - or nought for a scene that is not. A scene
+            whose every member's start the walk knows is entered as soon as it is
+            loaded, two seconds ahead, so its members are loaded ahead too; each
+            is loaded two seconds before its own start and asked for a launch
+            horizon ahead of it, once the scene is COMMITTED - its start come
+            within a launch horizon while its code still wants it. Until then
+            its sample is its parent's to move (a code re-anchored), nothing of
+            it has been heard, and a stop gives it back with no footer. */
+        std::int64_t codeSample = 0;
+        int codeRate = 0;                   // the samples a second `codeSample` counts
+        bool codeCommitted = false;
+
         /** Finished and waiting to be forgotten. */
         bool retired = false;
     };

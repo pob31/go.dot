@@ -214,6 +214,13 @@ namespace wfg::pair
         for (auto& fade : fades)
             moved (fade.stopsAtTick, 0);
 
+        /*  A SCENE THE CODE PLACED STARTS ON A SAMPLE of the leader's clock
+            (namespace draft §60, TG.7), moved with its ticks as a code map's
+            anchor is. The frame a time group crossed is the code's, and stays. */
+        for (auto& job : groups)
+            if (job.codeSample > 0)
+                job.codeSample = sampleOnThisClock (job.codeSample, by, job.codeRate);
+
         //  A CODE MAP'S ANCHOR IS A SAMPLE of the leader's clock, moved with its ticks (TG.5).
         for (auto& [source, map] : codes)
             map.sample = sampleOnThisClock (map.sample, by, map.sampleRate);
@@ -309,6 +316,23 @@ namespace wfg::pair
             list ("jobtaken", job.taken);
             list ("jobcues", job.phaseCues);
             list ("jobprepared", job.prepared);
+
+            /*  WHERE A TIME GROUP'S CODE HAS GOT TO (namespace draft §60, TG.7):
+                the frame it has crossed and the members it has loaded for times
+                still ahead - so a follower seated while a code runs starts what
+                the leader had still to start, and none of it twice - and, for a
+                scene the code placed, the sample it starts on, the rate that
+                sample counts at (which `rebase` moves it by) and whether it has
+                begun. Only for a job that has any of it: every other scene's
+                position reads as it did. */
+            if (job.codeCrossed >= 0 || job.codeSample > 0 || ! job.codeAhead.empty())
+            {
+                Line line (out, "crossed");
+                line.h (job.codeCrossed).h (job.codeSample).i (job.codeRate).b (job.codeCommitted);
+
+                for (const auto& cue : job.codeAhead)
+                    line.s (cue);
+            }
         }
 
         for (const auto& fade : at.fades)
@@ -618,6 +642,22 @@ namespace wfg::pair
                 (word == "jobruns" ? job->phaseRuns
                    : word == "jobtaken" ? job->taken
                    : word == "jobcues" ? job->phaseCues : job->prepared) = std::move (items);
+            }
+            else if (word == "crossed")
+            {
+                auto* job = lastJob();
+
+                if (job == nullptr)
+                    return bad();
+
+                job->codeCrossed = a.h();
+                job->codeSample = a.h();
+                job->codeRate = a.i();
+                job->codeCommitted = a.b();
+                job->codeAhead = a.rest();
+
+                if (! a.ok() || job->codeCrossed < -1 || job->codeSample < 0 || job->codeRate < 0)
+                    return bad();
             }
             else if (word == "fade")
             {

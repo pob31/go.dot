@@ -58,7 +58,11 @@
         leader's did (AGE);
       - each incoming code's map, as the leader's `code.heard` records left
         it (namespace draft §60, TG.5; AIP), so a follower seated while a
-        code runs is locked to it at once;
+        code runs is locked to it at once; and, on each time group's job, the
+        frame its code has crossed and the members it has loaded ahead, and on
+        each scene the code placed, the sample it starts on (`crossed`, TG.7) -
+        a new word an older build refuses by name, so the format is not moved
+        (the header's own rule below: a new thing is a new word);
       - each text cue's field (namespace draft §61, AKM), tonight's value, so
         a follower seated after the score changed shows the score;
       - the stream's counter and the tick it is true at.

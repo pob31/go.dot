@@ -183,6 +183,14 @@ namespace wfg::cue
             a failure: the cue did what it was asked, and the one thing it did
             not do is what the show said not to. */
         inline constexpr const char* leftToOperator = "left-to-operator";
+
+        /*  A TIME GROUP'S MEMBER THAT CHASES ITS CODE WAS SOUGHT, NOT JUMPED
+            (namespace draft §60, TG.8, AIT): the code was in another of its
+            slices, and a crossfaded jump moves a voice only inside the slice it
+            plays, so it was stopped and started again where the code is - with
+            the gap a seek makes, which a jump never has. The member is where the
+            code says; what is said is the gap. */
+        inline constexpr const char* sought = "sought";
     }
 
     /*  How far ahead a cue has been got ready. `/godot/cue/<id>/prepare`.
@@ -1147,8 +1155,56 @@ namespace wfg::cue
             time for its disk to answer - so it is launched here and not as soon
             as it is ready, and starts where the leader's is. Nought for every
             other run; nought again once the launch is placed. A hook's, as the
-            launch is: a replay places none. */
+            launch is: a replay places none.
+
+            AND A TIME GROUP'S MEMBER ON THE CODE'S SAMPLE (namespace draft §60,
+            TG.7): asked for a launch horizon and two ticks ahead of the sample
+            the code reaches its time on, and launched there - a picture's
+            appearance placed there too (`advanceVideo`), and a movie's locked
+            sounds with it. */
         std::int64_t launchNotBefore = 0;
+
+        /*  WHERE A CODE PLACED THIS RUN'S START (namespace draft §60, TG.7):
+            the Go.dot sample a time group's code says it begins on - a member's
+            time and its pre-wait, or a scene member's offset from there - set by
+            the hook that asks for it, before the record that fires it, and kept
+            after the launch is placed, so the launch can be measured against
+            it: one that lands later says so (`run.late`), as a cold GO does. A
+            scene placed on the code hands it to its job (`GroupJob::codeSample`)
+            when it fires. Nought for every run the code did not place - a GO, a
+            name, a seat - and on a replay, which places nothing. */
+        std::int64_t codeSample = 0;
+
+        /*  HOW A TIME GROUP'S MEMBER KEEPS UP WITH ITS CODE (namespace draft
+            §60, TG.8; `run/chaseError`, `run/chaseState`): how far it was out of
+            step when the hook last measured it, in milliseconds, ahead when
+            positive, and the word for what it is doing - `free` for a member
+            that plays on at its own speed, `inStep`, `catching`, or `jumped` on
+            the tick it jumped. READOUTS, written by the tick hook from the code's
+            line and Go.dot's own clock, never logged: a replay, which measures
+            nothing, leaves them where a run starts them. Empty and nought for a
+            run no time group holds. */
+        double chaseError = 0.0;
+        std::string chaseState;
+
+        /*  AND HOW FAST IT IS MADE TO RUN TO KEEP UP (namespace draft §60,
+            TG.9; AIF, AIG, AIS): what its own speed is multiplied by on the
+            voice - a sound's `ownRate`, a movie's rate - while it chases by
+            `varispeed` or `timestretch`: the code's speed, times a correction
+            of at most `sync/chaseRate` while it catches up (timecode/Chase.h).
+            A FACTOR AND NOT A SPEED, so that a speed fade on the cue keeps
+            moving `ownRate` as it always has and the chase rides on top of it,
+            multiplied rather than replacing it - and so that a run nobody
+            chases, at one, places exactly the speed it always did, bit for bit.
+            One for a free runner, a jump chaser and a code that has stopped
+            (AIG: a chaser keeps playing at its own speed). `chaseCorrecting` is
+            the law's hysteresis, carried from one tick to the next: whether it
+            is catching up, or holding the code's speed inside the tolerance.
+            Both derived each tick from the code's logged line and the run's own
+            clock, never logged, so a backup applying the same lines and a
+            replay (which places no speed at all) agree with what was heard. */
+        double chaseFactor = 1.0;
+        bool chaseCorrecting = false;
 
         /*  Whether the last poll saw it sounding. The edge from true to false
             is what ends a run - a launcher clip stops itself at the end of its

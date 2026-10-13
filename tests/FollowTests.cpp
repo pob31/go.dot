@@ -1161,3 +1161,335 @@ TEST_CASE ("follow: a main's code.heard goes in with its sample on this machine'
     REQUIRE (replayed.runner.codeMapOf (source) != nullptr);
     CHECK (*replayed.runner.codeMapOf (source) == *map);
 }
+
+//==============================================================================
+/*  A TIME GROUP ON A BACKUP (namespace draft §60, TG.7; AGD, AGE, AIP): the
+    main fires a member when its code crosses the member's time; the backup,
+    applying the main's GO and the main's `code.heard` - its sample moved onto
+    the backup's clock - fires the same member, under the same name, from its
+    own hook, on its own sample the same distance from the code's; its own
+    watcher's turns are the gate's. Nothing the backup fired was streamed: the
+    engine's own records are made on each machine. */
+TEST_CASE ("follow: a backup applying its main's code.heard fires the same time group member under the same name, its own code's turns ignored")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    std::string text, listId, group, rain, source;
+
+    {
+        doc::ShowDocument show;
+        listId = show.createList ("Main").id;
+        const auto input = show.createInput (1);
+        REQUIRE (input.ok);
+        REQUIRE (show.setAttribute ("/godot/sync/ltcIn", input.id).ok);
+        source = "ltc:" + input.id;
+
+        REQUIRE (show.createCue (listId, 0, "memo", "Before").ok);
+        group = show.createCue (listId, 1, "group", "On the code", {}, { { "mode", "time" } }).id;
+        REQUIRE (! group.empty());
+        rain = show.createCue (group, 0, "media", "Rain", {}, { { "at", "01:00:10:00" } }).id;
+        REQUIRE (! rain.empty());
+        REQUIRE (show.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav").ok);
+        REQUIRE (show.createCue (listId, 2, "memo", "After").ok);
+        REQUIRE (show.setAttribute ("/godot/list/goDebounce", "0").ok);
+        text = doc::CanonicalXml::write (show);
+    }
+
+    const auto heardArgs = [&source] (std::int64_t frame, std::int64_t sample)
+    {
+        return std::vector<osc::Value> { s (source), s ("jumped"), s ("25"), osc::Value::int64 (frame),
+                                         osc::Value::int64 (sample), osc::Value::float64 (1.0) };
+    };
+
+    const auto f0 = 90'000;            // 01:00:00:00 at 25
+    const auto start = 150 * 960 + 250 * 1920;
+
+    const auto runOfRain = [&rain] (const cue::RunTable& runs) -> const cue::Run*
+    {
+        for (const auto& run : runs.all())
+            if (run.cue == rain)
+                return &run;
+
+        return nullptr;
+    };
+
+    //  THE MAIN'S EVENING: a GO on the group at its tick 60, the code from its tick 150, its member fired.
+    Machine main { text };
+
+    for (std::int64_t tick = 1; tick < 800; ++tick)
+    {
+        if (tick == 59)
+            REQUIRE (main.engine.submit ("cli", "node.set", { s (cue::standbyAddressOf (listId)), s (group) }));
+
+        if (tick == 60)
+            REQUIRE (main.engine.submit ("cli", "go"));
+
+        if (tick == 150)
+            REQUIRE (main.engine.submit (source, "code.heard", heardArgs (f0, 150 * 960)));
+
+        main.tickOnce (tick);
+    }
+
+    const auto* mainRain = runOfRain (main.runs);
+    REQUIRE (mainRain != nullptr);
+    CHECK (mainRain->launchedAtSample == start);
+
+    //  THE BACKUP: the same salt (RD.8 seats it), a follower, the gate.
+    Machine backup { text };
+    backup.runIds.drawSeed();
+    backup.runner.runNames().setSalt (main.runner.runNames().salt());
+
+    pair::Follower follower { [&backup] (Event event) { return backup.engine.submit (std::move (event)); } };
+    backup.engine.setAfterRecord ([&follower] (const LogRecord& record, const Command*) { follower.applied (record); });
+    follower.setSampleRate (48000);
+
+    pair::FollowGate gate { backup.engine.commands(), [] (std::vector<std::uint8_t>) { return true; } };
+    backup.engine.setGate ([&gate] (Event& event) { return gate.take (event); });
+    backup.engine.setGated (true);
+
+    const auto mainAt = [] (std::int64_t mainTick) { return t0 + 20ms * mainTick; };
+    const auto dueAt = [] (std::int64_t local) { return t0 + 20ms * (local - 500) + 11ms; };
+
+    follower.start();
+    std::int64_t mainTick = 0;
+    std::int64_t local = 500;
+
+    const auto step = [&]
+    {
+        while (mainAt (mainTick) + 9ms <= dueAt (local))
+        {
+            follower.beat (mainTick, mainAt (mainTick) + (mainTick % 2 == 0 ? 3ms : 9ms));
+            ++mainTick;
+        }
+
+        follower.beforeTick (local, dueAt (local), 0.0004);
+        backup.tickOnce (local);
+        ++local;
+    };
+
+    while (local < 520)
+        step();
+
+    REQUIRE (follower.delayFixed());
+    REQUIRE (follower.offset() == 501);
+
+    //  The main's operator and its code, as the stream brings them: the engine's own records stay home.
+    for (const auto& record : LogFile::parse (main.engine.log().contents()).records)
+        if (record.kind == LogRecord::Kind::applied && (record.origin == "cli" || record.origin == source))
+            follower.record (record);
+
+    /*  AND THE BACKUP'S OWN WATCHER heard the code too, a little differently:
+        taken by the gate, never applied. */
+    while (local < 501 + 200)
+        step();
+
+    CHECK (backup.engine.submit (source, "code.heard", heardArgs (f0 + 7, 200 * 960)));
+
+    while (local < 501 + 800)
+        step();
+
+    CHECK (gate.ignored() == 1);
+    CHECK (follower.late() == 0);
+    CHECK (follower.differences() == 0);
+
+    //  THE SAME MEMBER, UNDER THE SAME NAME, its launch the main's moved by the offset.
+    const auto* backupRain = runOfRain (backup.runs);
+    REQUIRE (backupRain != nullptr);
+    CHECK (backupRain->id == mainRain->id);
+    CHECK (backupRain->parent == mainRain->parent);
+    CHECK (backupRain->launchedAtSample == start + 501 * 960);
+
+    std::size_t runsOfRain = 0;
+
+    for (const auto& run : backup.runs.all())
+        if (run.cue == rain)
+            ++runsOfRain;
+
+    CHECK (runsOfRain == 1u);
+}
+
+//==============================================================================
+/*  A LOCATE ON A BACKUP (namespace draft §60, TG.8; AIH, AIP): the main's code
+    jumps into the middle of a member that chases, and the main's `code.heard`
+    record seats it there, handing back the run it drew. The backup, applying
+    that record - its sample moved onto the backup's clock - seats the same
+    member under the same name, at the same second of its file, and nothing it
+    applied differs from what the main applied. */
+TEST_CASE ("follow: a main's code.heard that locates re-seats the backup's chasers under the main's names, at the main's offsets")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    std::string text, listId, group, rain, wind, source;
+
+    {
+        doc::ShowDocument show;
+        listId = show.createList ("Main").id;
+        const auto input = show.createInput (1);
+        REQUIRE (input.ok);
+        REQUIRE (show.setAttribute ("/godot/sync/ltcIn", input.id).ok);
+        source = "ltc:" + input.id;
+
+        REQUIRE (show.createCue (listId, 0, "memo", "Before").ok);
+        group = show.createCue (listId, 1, "group", "On the code", {}, { { "mode", "time" } }).id;
+        REQUIRE (! group.empty());
+        rain = show.createCue (group, 0, "media", "Rain", {}, { { "at", "01:00:10:00" } }).id;
+        wind = show.createCue (group, 1, "media", "Wind", {}, { { "at", "01:00:20:00" } }).id;
+        REQUIRE (! rain.empty());
+        REQUIRE (! wind.empty());
+        REQUIRE (show.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav").ok);
+        REQUIRE (show.setAttribute ("/godot/cue/" + wind + "/file", "wind.wav").ok);
+        REQUIRE (show.setAttribute ("/godot/cue/" + rain + "/chase", "jump").ok);
+        REQUIRE (show.setAttribute ("/godot/cue/" + wind + "/chase", "jump").ok);
+        REQUIRE (show.createCue (listId, 2, "memo", "After").ok);
+        REQUIRE (show.setAttribute ("/godot/list/goDebounce", "0").ok);
+        text = doc::CanonicalXml::write (show);
+    }
+
+    const std::map<std::string, double> lengths { { "rain.wav", 60.0 }, { "wind.wav", 60.0 } };
+
+    const auto heardArgs = [&source] (std::int64_t frame, std::int64_t sample)
+    {
+        return std::vector<osc::Value> { s (source), s ("jumped"), s ("25"), osc::Value::int64 (frame),
+                                         osc::Value::int64 (sample), osc::Value::float64 (1.0) };
+    };
+
+    const auto f0 = 90'000;            // 01:00:00:00 at 25
+
+    const auto runOf = [] (const cue::RunTable& runs, const std::string& cueId) -> const cue::Run*
+    {
+        const cue::Run* found = nullptr;
+
+        for (const auto& run : runs.all())
+            if (run.cue == cueId && ! run.isFinished())
+                found = &run;
+
+        return found;
+    };
+
+    /*  THE MAIN'S EVENING: the group armed at its tick 60, the code from 150;
+        at 600, a second before the rain's time, the code locates to
+        01:00:30:00 - the middle of both, each seated there. */
+    Machine main { text };
+    main.runner.setMediaDurations (&lengths);
+
+    for (std::int64_t tick = 1; tick < 800; ++tick)
+    {
+        if (tick == 59)
+            REQUIRE (main.engine.submit ("cli", "node.set", { s (cue::standbyAddressOf (listId)), s (group) }));
+
+        if (tick == 60)
+            REQUIRE (main.engine.submit ("cli", "go"));
+
+        if (tick == 150)
+            REQUIRE (main.engine.submit (source, "code.heard", heardArgs (f0, 150 * 960)));
+
+        if (tick == 600)
+            REQUIRE (main.engine.submit (source, "code.heard", heardArgs (f0 + 750, 600 * 960)));
+
+        main.tickOnce (tick);
+    }
+
+    const auto* mainWind = runOf (main.runs, wind);
+    REQUIRE (mainWind != nullptr);
+    CHECK (mainWind->startOffset == doctest::Approx (10.2));
+    CHECK (mainWind->launchedAtSample == 600 * 960 + 10 * 960);
+
+    //  THE BACKUP: the same salt, a follower, the gate.
+    Machine backup { text };
+    backup.runner.setMediaDurations (&lengths);
+    backup.runIds.drawSeed();
+    backup.runner.runNames().setSalt (main.runner.runNames().salt());
+
+    pair::Follower follower { [&backup] (Event event) { return backup.engine.submit (std::move (event)); } };
+    backup.engine.setAfterRecord ([&follower] (const LogRecord& record, const Command*) { follower.applied (record); });
+    follower.setSampleRate (48000);
+
+    pair::FollowGate gate { backup.engine.commands(), [] (std::vector<std::uint8_t>) { return true; } };
+    backup.engine.setGate ([&gate] (Event& event) { return gate.take (event); });
+    backup.engine.setGated (true);
+
+    const auto mainAt = [] (std::int64_t mainTick) { return t0 + 20ms * mainTick; };
+    const auto dueAt = [] (std::int64_t local) { return t0 + 20ms * (local - 500) + 11ms; };
+
+    follower.start();
+    std::int64_t mainTick = 0;
+    std::int64_t local = 500;
+
+    const auto step = [&]
+    {
+        while (mainAt (mainTick) + 9ms <= dueAt (local))
+        {
+            follower.beat (mainTick, mainAt (mainTick) + (mainTick % 2 == 0 ? 3ms : 9ms));
+            ++mainTick;
+        }
+
+        follower.beforeTick (local, dueAt (local), 0.0004);
+        backup.tickOnce (local);
+        ++local;
+    };
+
+    while (local < 520)
+        step();
+
+    REQUIRE (follower.delayFixed());
+    REQUIRE (follower.offset() == 501);
+
+    //  The main's operator and its code, as the stream brings them: the engine's own records stay home.
+    for (const auto& record : LogFile::parse (main.engine.log().contents()).records)
+        if (record.kind == LogRecord::Kind::applied && (record.origin == "cli" || record.origin == source))
+            follower.record (record);
+
+    while (local < 501 + 800)
+        step();
+
+    CHECK (follower.late() == 0);
+    CHECK (follower.differences() == 0);
+    CHECK (follower.differs().empty());
+
+    //  THE SAME MEMBER UNDER THE SAME NAME, at the same second of its file, the main's sample moved by the offset.
+    const auto* backupWind = runOf (backup.runs, wind);
+    REQUIRE (backupWind != nullptr);
+    CHECK (backupWind->id == mainWind->id);
+    CHECK (backupWind->parent == mainWind->parent);
+    CHECK (backupWind->startOffset == doctest::Approx (mainWind->startOffset));
+    CHECK (backupWind->launchedAtSample == mainWind->launchedAtSample + 501 * 960);
+
+    //  And the main's locate record names it on both machines.
+    const auto lastHeard = [] (Engine& engine)
+    {
+        LogRecord found;
+
+        for (const auto& record : LogFile::parse (engine.log().contents()).records)
+            if (record.command == "code.heard" && record.kind == LogRecord::Kind::applied)
+                found = record;
+
+        return found;
+    };
+
+    /*  Two runs drawn: the rain, loaded for its time a second away when the
+        code jumped past it, let go and seated twenty seconds in; and the wind. */
+    const auto* mainRain = runOf (main.runs, rain);
+    const auto* backupRain = runOf (backup.runs, rain);
+    REQUIRE (mainRain != nullptr);
+    REQUIRE (backupRain != nullptr);
+    CHECK (backupRain->id == mainRain->id);
+    CHECK (mainRain->startOffset == doctest::Approx (20.2));
+    CHECK (backupRain->startOffset == doctest::Approx (20.2));
+
+    const auto mainLocate = lastHeard (main.engine);
+    const auto backupLocate = lastHeard (backup.engine);
+    REQUIRE (mainLocate.args.size() == 8u);
+    REQUIRE (backupLocate.args.size() == 8u);
+    CHECK (mainLocate.args[6].getString() == mainRain->id);
+    CHECK (mainLocate.args[7].getString() == mainWind->id);
+    CHECK (backupLocate.args[6].getString() == mainRain->id);
+    CHECK (backupLocate.args[7].getString() == mainWind->id);
+
+    std::size_t windRuns = 0;
+
+    for (const auto& run : backup.runs.all())
+        if (run.cue == wind)
+            ++windRuns;
+
+    CHECK (windRuns == 1u);
+}

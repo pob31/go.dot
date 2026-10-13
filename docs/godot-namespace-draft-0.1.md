@@ -26643,8 +26643,9 @@ does not start it (AIH); the code running into it a second time, after a jump ba
   over `sync/chaseCrossfade` (10 ms) - the crossfaded jump a slice move already makes inside a
   sounding voice (§33, CD). A picture cuts.
 - **Varispeed / timestretch**: the sound runs up to `sync/chaseRate` (1 %) faster or slower than the
-  code until it is back within a millisecond - varispeed bends the pitch, timestretch keeps it; more
-  than `sync/chaseJump` (0.25 s) out, it jumps instead.
+  code until it is back within a millisecond (a stretched one within a stretcher's chunk, AJC) -
+  varispeed bends the pitch, timestretch keeps it; more than `sync/chaseJump` (0.25 s) out, it jumps
+  instead.
 - **The code stops** (AIG): chasers keep playing at their own speed; when it comes back they catch up
   by their method - a return is a locate.
 - **The code jumps** (AIH): chasers are re-seated as load to time seats a scene - started at their
@@ -26734,6 +26735,22 @@ Mine, the author's to overrule:
 - **AIZ** (mine) **`wfg serve --midi-play=<port>=<file>`** plays a `--midi-render` file into a port's
   input at its due moments, for the drivers.
 - **AJA** (mine) **The screen words**, put to the author before they ship (TG.10).
+- **AJB** (mine, TG.7) **A member fired by name or by a trigger while its group is armed is a manual
+  start**: begun now, from its top, free-running, as if the code had reached its time - its pre-wait
+  counting from the press as it counts from its time - a run of its own under the armed group, named
+  from the group's run as the code's are. The hand an operator reaches for when the code has failed, as
+  a sampler member fired by name is a press on its strip. `needs-go` while the group is not armed, TG.2's
+  answer, as a sampler member is `needs-strip` with no bank armed. The code's own loading of that member
+  is left alone: the code reaching its time starts it again, as a second crossing does (AIR).
+- **AJC** (mine, TG.9) **A timestretch chaser's catch-up ends within one of the stretcher's chunks**, not
+  a millisecond (AIS): 256 samples at the interface's rate, 5.3 ms at 48 kHz, whichever is the longer;
+  it starts at `sync/chaseTolerance` as varispeed's does, and a tolerance set below the chunk ends it
+  there instead. The steering measures the run's own clock, not the sound, so a stretcher cannot make it
+  hunt; but a stretched voice is only placed in its file to within one to three of those chunks (M14,
+  §22.10), so steering its clock closer buys nothing anyone can hear and keeps the stretcher's ratio
+  moving for longer. A timestretch chaser's steady error, as heard, is up to that chunk on its clock plus
+  the stretcher's own one to three - some 5 to 21 ms at 48 kHz - held, never hunted. Varispeed, and a
+  movie, still settle within a millisecond.
 
 ### 60.3 Rows
 
@@ -26755,12 +26772,14 @@ Mine, the author's to overrule:
 | `sync/ltcInSpeed`, `sync/mtcInSpeed` | `d` | read-only: the code's speed against Go.dot's clock |
 | `run/<id>/chaseError` | `d` | read-only: ms a chasing run is out of step |
 | `run/<id>/chaseState` | `s` | read-only: `inStep`, `catching`, `jumped`, `free` |
+| `run/<id>/warning` | `s` | gains `sought`: a chaser whose code was in another of its slices, sought there with a seek's gap (TG.8) |
 
 ### 60.4 Commands
 
 | Command | Arguments | Does |
 |---|---|---|
-| `code.heard` | `s:source s:what s:rate h:frame h:sample d:speed [s:run]...` | the engine's, origin `ltc:<input>`, `mtc:<port>` or `clock`, the same as `source`: a code `jumped` (appeared, came back, located), `running` (re-anchored) or `stopped`, at this frame of the day (counted at `rate`, `sync/frameRate`'s words, or `ms` for the wall clock's millisecond) falling on this Go.dot sample - the sample it is HEARD on, latency taken off (AIQ), this machine's on a backup (AIP) - at this speed (code seconds per Go.dot second); refused `bad-value` for a source, turn, rate or frame that is not one; on `jumped`, the chasers re-seated, the runs it drew handed back (TG.8) |
+| `code.heard` | `s:source s:what s:rate h:frame h:sample d:speed [s:run]...` | the engine's, origin `ltc:<input>`, `mtc:<port>` or `clock`, the same as `source`: a code `jumped` (appeared, came back, located), `running` (re-anchored) or `stopped`, at this frame of the day (counted at `rate`, `sync/frameRate`'s words, or `ms` for the wall clock's millisecond) falling on this Go.dot sample - the sample it is HEARD on, latency taken off (AIQ), this machine's on a backup (AIP) - at this speed (code seconds per Go.dot second); refused `bad-value` for a source, turn, rate or frame that is not one; on `jumped`, the chasers of every time group armed on the source re-seated where the code will be a seat's lead after `sample`, the runs it drew handed back (TG.8) |
+| `code.seat` | `s:run h:sample [s:run]...` | the engine's: a time group's hook found it armed on a running code with a member that chases already past its time, and read the code at this Go.dot sample; each such chaser that should be playing is seated at its offset where the code will be a seat's lead later, the runs drawn handed back; applied and nothing for a group a `jumped` turn seated already (TG.8) |
 
 ### 60.5 Refused
 
@@ -27240,6 +27259,408 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   main's last word; a replay with no `audio.settingsReady` record keeps maps whose sample rate is nought,
   the Runner's then - only the readouts and TG.7 to TG.9 read it; nothing acts on the maps yet (TG.7
   fires, TG.8 and TG.9 chase).
+- **TG.6**, 2026-10-13: the wall clock as a time group's source (AII, AIO, AIQ, AIY). **`timecode::ClockWatch`**
+  (`timecode/ClockWatch.{h,cpp}`), beside CodeWatch, the tick thread's and pure: its map is CodeMap's in the
+  `ms` unit TG.5 left for it, a frame a millisecond of the day, its speed wall-clock milliseconds per Go.dot
+  millisecond; its records are `code.heard s:clock s:<turn> s:ms h:<ms of day> h:<sample> d:<speed>`.
+  **Three clocks, read each tick.** Serve reads the steady clock either side of the wall clock and takes the
+  middle as the reading's moment (`WallReading`: the local millisecond of the day and the steady nanoseconds),
+  and does not hand the watcher a reading whose two steady reads are more than a millisecond apart - the
+  thread was interrupted between them. Go.dot's sample is not read raw beside them: the count moves a block at
+  a time. The tick's clock pair - the count and its steady moment, the one the MTC lane and reader are fed -
+  goes into a straight line of the watcher's own, THE COUNT'S LINE, least squares through the last two minutes
+  of pairs (`pairSeconds`), fitted at every pair for its first second and twice a second after, and a reading's
+  sample is that line's at the reading's moment. Readings wait a second (`quietSeconds`) while the count's line
+  is young, so the first `jumped` comes a second after the watching begins. A reading's position is its
+  millisecond plus half of one: the system clock is truncated, and without the half every map was half a
+  millisecond late. **The clock's line**: least squares through the last thirty seconds of readings
+  (`windowSeconds`), by the same arithmetic - CodeWatch's fit, moved out to `timecode/LineFit.h`, which
+  CodeWatch now uses and computes exactly as before - fitted and asked twice a second, its errors counted in
+  the larger of the readings' scatter and the scatter the long run shows (the residuals averaged a second at a
+  time), since the count's line, refitted, moves every reading after it together. **THE TURNS AS BUILT.**
+  `jumped` at the first reading heard, and at a STEP: the wall clock's advance - the near way round the dial,
+  as `clockCrossings` takes it - differing from the steady clock's by more than 50 ms in one reading
+  (`stepMilliseconds`; no slew trips it - chrony's default ceiling of 8 % is 1.7 ms between two ticks - and
+  it is five times the 10 ms a chaser acts at); the line starts again from where the step landed, at the
+  speed it had. A step of more than 5 ms and up to 50 (`nudgeMilliseconds`) starts the line again likewise
+  and is said `running`: fitted through, 20 ms inside the window would read as some thousand parts per
+  million for half a minute. A SLIP of Go.dot's own clock under the steady one (a dropped buffer, a count
+  paused or reset) is the last eight pairs, together, further from the count's line than six times the
+  scatter of their mean and than 3 ms (`slipPairs`, `slipSigmas`, `slipMilliseconds`): a block's scatter is
+  uniform, so eight pairs average to within a tenth of a block of the line, and a dropped buffer moves them
+  all a whole block.
+  The count's line starts again and is waited for, and the clock's line starts again from the first reading
+  heard after: `jumped` more than 50 ms from the line last written, `running` more than a millisecond,
+  nothing otherwise. `running` when the line at its newest reading is more than 1 ms (`driftMilliseconds`,
+  AIO's MTC threshold) from the line last written, once it has ten seconds of readings (`settleSeconds`), or
+  when the output latency changed; the speed written is the window's weighed with the long baseline's as
+  CodeWatch weighs them, snapped to exactly one within a part per million or three times its error. Never
+  `stopped`. Midnight is no turn: the readings run on unwrapped and a map is written with its millisecond
+  wrapped, which CodeMap reads the nearer way round. A slow tick is time passing on both clocks, and the
+  count's line, straight, is where it was. LATENCY (AIQ): a record's sample is the reading's less
+  `audio/outputLatency`, as MTC's is. `resay` says its own line as `jumped`. TG.1's 2 s rule for clock
+  TRIGGERS is unchanged; serve's triggers now take their steady millisecond from the same bracket's middle.
+  **Serve**: `ShowDocument::holdsTimeGroupOn (source)` - any time group at any depth, in a list or a
+  Persistent section, whose `timeSource`, or the table's default, is the source - is read once a show revision
+  beside the codes' sources; a show without a time group on the clock watches nothing and writes nothing, and
+  one whose clock group goes forgets the watcher, so one coming back is a first reading. In the block where the
+  clock triggers are read, after them: the pair, the latency, the reading, the turn submitted from origin
+  `clock`, which a following backup's gate drops (AGD) - the wall clock is the main's alone; an outage's end
+  forgets the watcher with the triggers' previous reading; a machine whose gate opens re-says it with the
+  codes' watchers. No readouts: TG.2 has no clock rows, and the window shows the clock itself.
+  Where this stage departs from its brief. The sample is read through the count's own line, not beside the
+  wall clock - and not through a `ClockEstimate`, which the first draft used: its slope is followed pair by
+  pair, and pairs a block apart in their noise walk it to its clamp of half a percent (measured at 256 and 512
+  samples), harmless a tick ahead where the MTC lane and reader use it, but milliseconds across a slow tick,
+  and a slip kicks it into ringing - a fifty-millisecond slip read through it wrote forty-five `running` in
+  half a minute at speeds up to a quarter of a percent, one dropped buffer of 512 samples sixteen. The first
+  `jumped` is a second after the watching starts rather than on the very first reading: the count's line is
+  one pair, a block off, before that. The nudge and the slip are turns the brief did not name. The output
+  latency is taken off, which the brief did not say for the clock (§60.4 says it of every `code.heard`). The
+  date is read for the triggers and not by the watcher: its map is a time of day, and midnight is the near way
+  round.
+  Measured, on a made-up interface counted a block at a time read at random moments, the tick up to 3 ms late:
+  twelve hours of a wall clock 50 ppm fast or slow against an interface 20 ppm slow, at 256- and 512-sample
+  blocks, each hour with a gap of three or ten seconds every five minutes - two to five `running` an hour, every
+  map within 1.19 ms of the clock, nothing said at any of the 24 gaps; a slip of one or two blocks, one record
+  at 256, 512 and 1024 samples (four for two blocks of 1024). The first draft - a four-second window through a
+  ClockEstimate with the textbook's errors - wrote 59 to 782 an hour from 128- to 1024-sample blocks.
+  Tests under C and fr_FR, `ClockWatchTests` (new, eleven cases): the first reading `jumped` a second on, at
+  its own millisecond on its own sample, speed exactly one, then nothing for ten minutes, every minute placed
+  to a sample; an hour at +50 and at -50 ppm against an interface at -20 through 256-sample blocks - three
+  `running` each, the map at worst 1.09 and 1.04 ms, the speed learnt to 0.24 and 0.03 ppm; a step of a second
+  back and of an hour forward each `jumped` at the new time with the speed learnt kept to the bit, a 20 ms
+  nudge one `running` moving the map 20 ms; after eight steps through 512-sample blocks nothing but the jump in
+  the ten seconds after each; midnight with one crystal (the map of 23:59:01 places 00:00:30 to the sample, its
+  readout "00:00:30") and slewed through blocks across it; a slow tick with one crystal, and an hour of gaps
+  through 512-sample blocks no different from one without; the count reset half a second back `jumped`, and
+  `forget` a first reading again; a dropped buffer of 256 and of 512 samples one `running` at the speed it had;
+  the latency taken off, a latency changed re-anchoring by exactly the change, a re-say; a show watching the
+  clock only while it holds a time group on it (none, the default `ltc`, `clock` inside a sequence, removed, in
+  a Persistent section); and `code.heard` from `clock` through the engine - the Runner's map the one said at
+  each record, placing 20:00:30 where the world has it, and a replay of the log reaching the same map with no
+  clock read. Also in both locales: `CodeWatchTests` and `CodeMapTests` whole, after the move to LineFit.h;
+  `DocumentTests`' time group cases; `wfg.replay.*`, `wfg.commands`, `client.boundary`, `source.comments`,
+  `unit.shards`. By hand, `wfg serve` on a copy of the minimal fixture for four seconds: no `code.heard`; with
+  an empty time group on the clock added, one - `A 50 0 clock code.heard s:"clock" s:"jumped" s:"ms"
+  h:40161742 h:47960 d:1`. Fourteen deliberate breakages, twelve each turning their own cases red (the step
+  rule; a nudge said as a jump; the step read off the wall clock alone; midnight not the near way round; no
+  reading middle; no latency; no waiting for the count's line; a slip never told; a slip not starting the
+  clock's line; no settling; the speed not kept across a step; the time source ignored). Two did not: the
+  long-run scatter taken out, which the hour's bounds do not see - measured, two to seven `running` an hour
+  and 1.37 ms at worst against two to five and 1.19 - and kept; and the speed it had weighed into a young
+  line's, which the first draft needed against the estimate's noise and the count's line made idle - taken
+  out.
+  Found and left: a slip that is not a whole number of blocks and under a block - which a dropped buffer never
+  is - is not told, and is fitted through: 3 and 5.3 ms at 512 samples wrote three and two `running`, at up
+  to 85 and 100 ppm off. The `ClockEstimate` the MTC lane, the MTC reader and the video renderer keep walks
+  its slope to its half-percent clamp with block-quantised pairs; none of them extrapolates it more than a
+  tick, but the MTC reader's samples just after a slow tick or a slip would carry its wander as this
+  watcher's did (reasoned, not measured for MTC), and TG.9's chasers and RD.9's map should not lean on its
+  slope. Nothing reads the clock's map yet (TG.7 fires).
+- **TG.7**, 2026-10-13: firing - a time group's members start on the code's sample (AIH, AIQ, AIR, AIV,
+  AIW, AJB). `cue/RunnerTime.cpp`, beside `RunnerSeat.cpp`. **The time group's tick** (`timeTick`, from
+  `advanceGroups`' time-group branch, its members phase, every tick): the source's map (`ltc:<sync/ltcIn>`,
+  `mtc:<sync/mtcIn>`, `clock`, read once a show revision with the members, their `at` and pre-wait, in
+  `timePlanOf`); each member's `at` read as a frame of the map's unit - a clock member's `HH:MM:SS` by
+  `secondOfDayFor` as its millisecond, a label at the show's rate (AIL), the same frame number when the two
+  rates count their labels alike (23.976 as 24, 29.97 as 30), otherwise the label's moment and the first frame
+  of the code at or after it. THE RULES AS BUILT. While the code runs forwards a member whose time falls in
+  `(codeCrossed, positionAt (now + 2 s)]` is LOADED - `run.spawn` under the group's run, named from it (RD.2):
+  a sound's voice and file armed, a picture read ahead (the read-ahead names a picture the code loaded and has
+  not asked for, `pictureLoadedForTheCode`), a scene entered (below) - once for each pass of the code
+  (`GroupJob::codeAhead`). It is ASKED FOR a launch horizon and TWO ticks before its sample: `run.fire`, which
+  skips its tick counter, with `launchNotBefore` and `Run::codeSample` (new) both the sample the code reaches
+  its time on plus its pre-wait in samples - the pre-wait counts from its time, on Go.dot's clock; `launchIfDue`
+  places it there, and `advanceVideo` puts a picture's appearance there (`launchNotBefore` read since TG.7), a
+  movie's locked sounds copying both. `GroupJob::codeCrossed` (new) moves on to `positionAt (now)` while the
+  code runs forwards, never back. A `jumped` turn - `Runner::codeJumps`, counted in `noteCodeHeard` (new
+  argument), a count per source, so the hook needs no record in hand - puts it where the jump landed, so a jump
+  past a member never starts it (AIH), and lets go, idle (`run.kill`), what was loaded for a time the code no
+  longer comes to; the code running into the time again after a jump back loads and starts it again, and the
+  run still playing from the first crossing gets `run.stop` as the new one is asked for - a restart, not a
+  second copy (AIR). Backwards or stopped, nothing is loaded or asked for, and what was loaded keeps its arm;
+  a member whose time the code crossed before it was asked for - its pre-wait still to run - is asked for on
+  the sample it was given while the code ran, so a code stopping a fifth of a second after a member's time
+  does not lose it. A member loaded too close to its time starts as soon as it can, from its top, and says by
+  how many blocks (`run.late`, measured in `launchIfDue` against `codeSample` rather than the ask's tick).
+  Armed while the code is already past a member's time, the group leaves it (AIH); `seatChasersAt (job,
+  frame)`, called where the group first reads a running code and at every jump, is TG.8's and empty.
+  **A scene as a member** (AIV): a timeline or an automatic sequence whose every member's start the walk knows
+  (`ShowWalk.h`, visited over the time group: one round, all members, in order, no header, an automatic
+  sequence's lengths known) is PLACED - each cue under it given its start in seconds from its member's time
+  (`TimePlan::starts`), a nested scene the walk could not time whole counted from its own beginning. It is
+  entered as soon as it is loaded, two seconds ahead, its start on its job (`GroupJob::codeSample`, copied from
+  the run by `fireKind`), uncommitted; `placedTick` (in place of the timeline's spawn-everything and the
+  sequence's one-after-another, which loads a member only once the one before has ENDED) loads each member two
+  seconds before its own start and, once the scene is COMMITTED - its start within a launch horizon while its
+  code still wants it - asks for each on its own sample: the scene's start plus the member's offset in samples
+  of Go.dot's clock. A nested placed scene is entered at its loading and committed by its parent the same way.
+  So no descendant is launched by a counter, and none twice: the placed job alone launches it, once. An
+  uncommitted scene stopped gives its members back with no footer - nothing of it was heard; a committed one
+  runs its footer as any. A scene the walk cannot place is started as written within a launch horizon of its
+  time, late by its entry, its members on their own counters. **Fired by name or by a trigger** while its group
+  is armed (AJB), a member is a manual start - `Runner::fireTimeMember`, a run of its own under the armed group
+  named from it, begun now from its top; `needs-go` while the group is not armed (TG.2's). "Armed" is the
+  group's live run `playing` - a run state, which a replay holds - and not the job's phase, which only the hook
+  moves. **The position**: a `crossed` line `h:codeCrossed h:codeSample i:codeRate b:committed [s:cue]...`
+  after its job's `job` line, for a job that has any of it, read by `lastJob()`; `rebase` moves a placed scene's
+  sample through `sampleOnThisClock` at its own rate and leaves the code's frame alone; a seat hands it over
+  whole, and the job takes this machine's jump count as it stands (`codeTurns` is never carried). The format is
+  NOT moved: a new word, which an older build refuses by name (the position's own rule - TG.5 moved it for its
+  `code` line so the refusal read as formats; `crossed` appears only while a time group or a placed scene is
+  live, and a format moved for it would refuse every position across the two builds, time group or none).
+  **The Persistent section** (AIW): a time group asserted there fires the same way all show - nothing of its own.
+  Where this stage departs from its brief. The ask is a launch horizon and TWO ticks ahead, not one: it is a
+  record applied in its tick's drain and the launch is placed by the next tick's hook, which must still find the
+  sample a horizon away - one tick is exact only for a sample on a tick's boundary (the breakage below showed
+  it: two cases red, the 29.97 drop-frame one among them). The `crossed` line follows the job's `job` line, not
+  the group's `run` line: the frame and the loading are the job's, the position carries jobs whole and a seat
+  puts them back whole, and `lastJob()` is the `round` pattern for jobs. A scene is entered at its loading,
+  two seconds ahead, rather than asked for at its horizon: asked for there, its first members would be loaded
+  cold (entry takes ticks, a file some 0.4 s). Members inside a placed scene that start on no sample - a memo,
+  an OSC or MIDI cue, a fade - fire on the tick their moment falls in. A second crossing stops the run of the
+  first (the restart AIR names) rather than leaving two copies. `TimeRig::goOn` now puts the standby by a
+  record, so its replay steps from the same place: the TG.2 replay case had compared runs without their cues,
+  and its replay - the standby written straight to the document and never logged - fired another cue under
+  the group's run name; the replays now compare cues too.
+  Tests under C and fr_FR, `TimeGroupTests` (TG.7's half, new; the code driven by `code.heard` records, an
+  audio side recording every launch's sample, a picture side recording each picture's first point): an LTC
+  member loaded two seconds ahead and launched on exactly its sample at 25 (480 000 samples on), at 29.97
+  drop-frame across the minute that drops two labels (96 096, by hand), and a show at 25 hearing a code at 30
+  (315 frames of 1 600 samples); MTC and the wall clock alike; the standby never moving and the group armed a
+  minute after its last member; a code stopped before a member's time firing nothing, back on firing it when
+  crossed; a jump past it never loading it, a jump back firing it, a second crossing firing it again and ending
+  the first, a member loaded for a time the code then jumps an hour away from let go idle; armed past a member,
+  that one never fired and the next one fired; a member loaded too close to its time, by a late GO and by a slow
+  disk, late by its blocks and said; a timeline scene (sounds at 0, 1.5 and 3.25 s, a memo at 0.5 s) and an
+  automatic sequence (2 s of sound, 0.5 s post-wait, 0.25 s pre-wait - the second launched while the first still
+  sounds) each launched once on its sample, each loaded two seconds before its own start; a picture read ahead
+  while it waits and up on its sample; a member's pre-wait counting from its time, and still running out when
+  the code stops just after it; a scene stopped before its time with no footer, after it with; a member fired by
+  name and by a trigger, `needs-go` unarmed and started armed; a Persistent section's group; and a replay of a
+  session with stops and jumps reaching the same runs, cues and maps. `SeatTests`: the `crossed` line by hand -
+  read back, written only for a job with something to say, its scene's sample moved by `rebase`, four that do
+  not read refused - and a follower seated while the leader's member is loaded firing it once, on the
+  follower's clock, under the leader's name. `FollowTests`: a backup applying its main's GO and `code.heard`
+  fires the main's member under the main's name, on the main's sample moved by the offset, its own watcher's
+  turn ignored. Green in both locales with the files of the code touched - TimeGroupTests, SeatTests,
+  FollowTests, CodeWatchTests, ClockWatchTests, TimecodeRunTests, TriggerTests, GoTests, SamplerTests,
+  VideoTests, RunTests, RangeTests - and `wfg.replay.*`, `wfg.commands`, `client.boundary`, `source.comments`,
+  `unit.shards`.
+  Eighteen deliberate breakages, each turning its own cases red: the ask one tick short (red only where the
+  sample falls off a tick's boundary - the 29.97 drop-frame member and the scenes' offsets - which is what the
+  second tick is for); no jump read; the first frame crossed put far behind; no scene placed; no manual start;
+  no restart's stop; nothing let go at a jump; a member pruned while still waiting; its start not kept once the
+  code stops; labels read at the code's rate; a picture off its sample; jumps not counted; lateness not said;
+  the scene's job not placed; a footer for a scene never begun; the `crossed` line not written; its sample not
+  rebased; the hand's fire refused while the group is armed.
+  Found and left: a run's `codeSample` is not carried in a position, so a member seated already asked for is
+  measured against the seat's launch, not the code's sample; a member of a nested placed scene is loaded some
+  three ticks short of its two seconds, the nested scene's entry; and nothing yet measures what a time group
+  costs the tick with hundreds of members (each tick reads each member's label and the group's runs once).
+  Chasers are fired as free runners - TG.8 seats them (`seatChasersAt`), TG.9 steers them.
+- **TG.8**, 2026-10-13: jump and locate - a member that chases is held to its code by a crossfaded jump, and
+  re-seated at a locate (AIF, AIG, AIH, AIN, AIT, AIV). **Where a chaser should be** (`chase::chasePlaceOf`,
+  `chase::codeSecondsSince`, pure, declared in `cue/Runner.h`): the code's seconds past the member's time - the
+  nearer way round the day, frames at the map's unit, the clock's milliseconds a thousand to the second - less
+  the run's own start under it (the member's pre-wait, or a scene descendant's offset from the walk, TG.7's
+  `TimePlan::starts`), times the cue's `rate`, is how far into its material it should be: before its time, past
+  its end (the file's, when the show knows it; a cue with no known length never ends), or in its file - which
+  slice, which pass and which second, by `placeInRanges`' arithmetic except that a slice looping for ever is
+  followed pass by pass, the code saying how long it has played. A cue played backwards or at nought is not
+  held. Its ERROR, ahead when positive: `fileSecondAt` - what `run/position` reads - against that, in the code's
+  seconds; inside one slice the near way round its loop (a member a whole pass out reads in step), across two
+  by what each has played. **THE JUMP** (`chaseJump`, AIT): in a cue with no slices a move on slot nought - from
+  where the reader will be, `readerSecondAt`, the file at the code's second, no loop, the crossfade - and the
+  run bent as `turnRun` bends one: its file from `turnFile` at `turnSource`; when the show knows the file's end,
+  `turned` and `endsOutside` set so Go.dot places that end (`endTurnedRuns`), the clip's own being counted in
+  reads that the jump moved the file under; with no known end the clip's own end stands, out by what the jumps
+  added up to. Inside the slice it plays, `moveSoundingSlice`'s clock with the slice's own points - the passes
+  the code says it has played counted (`passesBefore`), so the slice ends where the code's would. Never a slice
+  on its way in, a bouncing one or one played backwards. ONE MOVE AT A TIME ON A VOICE: placed only once the
+  last move's sample - a jump's or a slice move's - has been reached, since `LoopVoice` keeps two segments. The
+  reader's word on a move it met late (`loopTaken`) is read in `applySlices` for a cue with no slices too: the
+  jump is where the reader was, `turnSource` the clock's count at that reader position. A movie CUTS
+  (`cutMovie`): a step on its time ring as `seekMovie` places one, its range and pass following; its locked
+  sounds measured against the movie's second, so the same jump. **STEERING** (`chaseTick`, every tick after
+  `applySlices`, before `advanceRanges`): each armed time group's member runs - and a scene member's sounding
+  descendants, each against its own start - measured a launch horizon ahead while the code runs forwards; a
+  `jump` chaser more than `sync/chaseTolerance` out jumps over `sync/chaseCrossfade`; a catch-up chaser
+  (`varispeed`, `timestretch`) is measured and marked `catching` and left to TG.9, which calls the same jump
+  past `sync/chaseJump`; free runners are marked `free`. `run/chaseError` and `run/chaseState` are published
+  from new `Run` fields (`jumped` on the tick it jumps). A sound whose code is in another of its slices, a
+  second or more away, is sought there by a `run.seek` the hook submits - to where the code will be the launch
+  latency and the seat's lead on, launched on that sample - and says `sought`, the new `run/warning` word; under
+  a second it is left to cross into the code's slice, where it jumps. The code stopped, nothing is steered
+  (AIG). **THE LOCATE** (`seatChasersOnCode`): a `jumped` turn's `code.heard`, after keeping the map, re-seats
+  the chasers of every time group armed on its source - armed being the group's run `playing` - decided where
+  the code will be a seat's lead (`seatLeadTicks`) after the record's own sample, so live, on a backup and in a
+  replay the same members are judged playing or not; the record hands back the runs it drew after its sixth
+  argument. Per member: a chaser that should be playing there and is (heard: `playing` with `run.started`
+  applied; a scene `playing`) is brought into step where it is - into another of its slices by `seekMedia`
+  (the run's slice is handler state, so a replay seeks alike), said `sought`; in its own slice, or with none, by
+  the jump, at the live horizon; a movie by a cut, its locked sounds with it; a scene by `seekGroup` at the
+  second, its members re-made under the same scene run, or, when a seek cannot move it, ended and seated
+  afresh. One that should be playing and is not is seated at its offset - a sound by load to time's own
+  `seatPlan`, a PlannedRun under the group's run; a scene with its round solved there (`solveRound`); a movie
+  fired again and sought, as RD.8 refires one - and launched on the sample its offset is for, as a follower's
+  seated sound is (`launchNotBefore`); what was loaded or asked for it from its top is ended first. One that
+  should not be playing - its time ahead, its material over - and is, ends as a jump ends what it abandons
+  (`endChaser`: `endHere` on it and everything under it, children first, a picture taken down a horizon
+  ahead). Loaded and waiting, it is the group's hook's, as TG.7 has it. A member of any kind ASKED FOR its
+  sample on the old line and not yet heard is cut - it never sounded, and a time on the old line no longer
+  stands; still ahead, the hook loads it again. Free runners playing are never touched (AIH). A code that comes
+  back after a stop is a locate (AIG). **A GROUP ARMED WHILE ITS CODE RUNS**: where `timeTick` first reads a
+  running code and a member that chases is already past its time, the hook submits `code.seat s:run h:sample`
+  (new, 60.4) with the sample it read the code at, and its handler seats as a locate does, but seats only -
+  nothing of a member already on its way is touched - and is applied and nothing for a group a `jumped` turn
+  seated already (`codeSeated`, handler state), which is how a group armed before its code appears is seated
+  once, by the `code.heard`. TG.7's `seatChasersAt` is that hook; its call at a jump is gone, the record
+  seating instead. `bentSecondAt` going forwards bounds a run below by its `turnFile` when that is under its
+  `pieceStart`, so a chaser seated mid-file and jumped back before its seat reads where it is.
+  Where this stage departs from its brief. The stop of a chaser a locate ends is the stop a jump's sweep makes
+  - Tracktion's 40-sample de-click - and not a 10 ms crossfade: the player has no faded stop, and a stop placed
+  ten milliseconds on would leave a track given back still sounding. Inside a slice the jump moves the slice's
+  clock as a slice move does rather than bending the run as `turnRun` does: a bent ranged run's boundary would
+  still be placed by the clock it had. Every member asked for and not yet heard is cut at a locate, not only
+  one whose time is no longer ahead: on the old line its sample no longer stands, and TG.7's hook, asking a
+  member it loads again, would otherwise have launched it twice. A seat's decision is made at the record's
+  sample plus a seat's lead rather than at the handler's own now, which a replay does not have. `code.seat` is a
+  record the brief did not name: a hook cannot seat, and a group armed on a running code has no `code.heard` to
+  seat in. The catch-up methods are marked `catching` and not jumped past `sync/chaseJump` here: TG.9's.
+  Tests under C and fr_FR, `TimeGroupTests` (TG.8's part, new, fourteen cases on the TG.7 rig, whose fake
+  player now records each move on a slot's reader and can say one was met late, and whose picture side
+  records each point on a movie's time ring): a `jump` chaser 30 ms behind a re-anchored code - one move,
+  from the reader's second to the code's to the sample, over 10 ms, `endsOutside` set, then in step, its
+  playhead the code's - and 5 ms behind nothing, a free runner nothing and `free`, a `varispeed` chaser
+  `catching`; a locate forward seating the wind at 10.2 s, its run handed back, launched on its sample, the rain
+  jumping in place, the bell (free) untouched, and a locate back ending both, the rain started again on its
+  sample when the code reaches it; a free runner asked for and cut by a locate past it, never heard and never
+  started; the code stopped three seconds - nothing moves - and back, one jump of three seconds; a movie cut on
+  its ring and its locked sound jumping with it; a sound sought into its second slice by a locate and by the
+  hook's own seek on a re-anchor, the same run, `sought`, armed in slot 1 at 5.2 s and 5.26 s; a timeline scene
+  re-seated by `seekGroup`, its run kept, its members re-made at 20.2 and 18.7 s and handed back; a group armed
+  on a running code seating its chaser by `code.seat` (a free runner: no record); a group armed before its code
+  appears seated by the `code.heard` and never by `code.seat`; a jump met 40 ms late read back and followed by
+  one more; a chaser seated mid-file jumped back before its seat reading where it is; and a replay of a session
+  with a first sight, locates, a stop and a scene reaching the same runs under the same names. `FollowTests`: a
+  main's locating `code.heard` seats the backup's rain and wind under the main's names at the main's offsets,
+  nothing applied otherwise. `SeatTests`: a chaser a locate seated is carried by `pair.seat` under the leader's
+  name at the leader's playhead. Green in both locales with the files of the code touched - TimeGroupTests,
+  SeatTests, FollowTests, CodeWatchTests, ClockWatchTests, CodeMapTests, TimecodeRunTests, TriggerTests, GoTests,
+  SamplerTests, VideoTests, RunTests, RangeTests, MovieTests, MediaCueTests, TreeTests, PublishCostTests,
+  EditPlaybackTests, 815 cases - and AudioTests' slice-move, range and §41 cases (21); `wfg.replay.*`,
+  `wfg.commands`, `schema.generated`, `wfg.schema`, `schema.fixtures`, `source.comments`, `client.boundary`,
+  `unit.shards`.
+  Eighteen deliberate breakages, each turning its own cases red: no steering hook; a jump with no crossfade; the
+  tolerance ignored; free runners steered; no seat at a locate; a seat launched as soon as it is ready; asked
+  runs not cut; a playing chaser started again; a jump across slices; no `code.seat`; `code.seat` after a jump
+  had seated; locked sounds not steered; a late adoption not read; the playhead held at the seat's offset; a
+  chaser before its time not ended; a scene made again rather than sought; two moves on a voice at once; the
+  seat's lead left out of where the code will be.
+  Found and left: a member a whole pass out in a slice that loops reads in step (the error is the near way
+  round the loop); a ping-pong slice and a cue played backwards are not held to the code; a ranged chaser's
+  error across two slices counts its passes from the last tick; a scene's descendants re-seated by `seekGroup`
+  run on the timeline's tick counter from there, not on the code's samples, each pulled into step by a jump
+  once it sounds; a direction change of the code with no `jumped` turn seats nothing; a member started by hand
+  (AJB) in the tick or two between its press and its launch reads as asked and is cut by a locate landing then;
+  and nothing yet measures what steering costs a tick with hundreds of chasers.
+- **TG.9**, 2026-10-13: catch-up - a member that chases by `varispeed` or `timestretch` is run a little faster
+  or slower until it is back in step, and jumps only past `sync/chaseJump` (AIF, AIG, AIS, AIU, AIV, AJC).
+  **THE LAW** (`timecode/Chase.h`, pure, `chaseStep`): the factor is the code's speed times one less the error
+  over two seconds, held to `sync/chaseRate` - `codeSpeed * (1 - clamp (error / 2 s, -rate, +rate))`, the error
+  ahead when positive (TG.8's sign), so a member ahead runs slower and one behind faster. Begun past
+  `sync/chaseTolerance`, ended back within a millisecond, the code's speed held exactly in between; past
+  `sync/chaseJump`, "jump", at the code's speed with nothing carried on. A settle wider than the start is held
+  to it, so the band is never inside out. Proportional and nothing more: an exponential with a two-second time
+  constant, never changing sign on the way - fifty milliseconds closes in about nine seconds (three at the 1 %
+  clamp down to twenty, then two times the log of twenty), ten and a half in 4.7. The hook's own lag - decided
+  on one tick, placed by the next tick's speed pass a launch horizon ahead and ramped over a tick, so first
+  measured two ticks on - is a fiftieth of the time constant, too short to make it ring. **A STRETCHED VOICE**
+  lets go within one of the stretcher's 256-sample chunks at the interface's rate, 5.3 ms at 48 kHz (AJC,
+  `chaseSettleFor`). **THE FACTOR** (`Run::chaseFactor`, the law's hysteresis in `Run::chaseCorrecting`):
+  multiplied into the run's own speed wherever a speed reaches the voice - `applyRates` and the launch, both
+  through `voiceRateOf` (Runner.cpp), a stretched voice held to the stretcher's limit after it as before it -
+  and `ratePlaced` is now the speed placed, own times factor. One for every run no time group steers, and a
+  double times exactly one changes no bit, so every run that does not chase places exactly the speed it did and
+  its clock keeps the integer branch at one. A speed fade still moves `ownRate`, and the factor rides on it:
+  multiplied, not replaced. Set in `chaseTick` (TG.8's hook, after `applyRates`) from the error measured a launch
+  horizon ahead - where every speed placed before already holds - and placed by the next tick's `applyRates`, a
+  breakpoint a horizon ahead as any speed change; a speed is placed only when the factor moves, so a chaser in
+  step places nothing tick after tick. Before its launch (and before its time) a catch-up chaser is given the
+  code's speed, and starts with it; just jumped, the same. A jump chaser and a free runner are at one, and so is a
+  member not held to its code at all - played backwards, bouncing in a slice, a movie bouncing or standing (TG.8
+  holds none of them). **THE CODE STOPS** (AIG), turns back or is gone: every chaser of the group, and
+  everything under it, at one - its own speed - with no correction under way; its return is TG.8's locate,
+  which jumps a catch-up chaser past `sync/chaseJump` and, in the same `code.heard` handler, steers one inside
+  it from there. **MOVIES**: `advanceMovie` places the time ring at the job's rate - its speed fade's as ever -
+  times the movie run's factor, the steering measures the movie at that speed, and `run/rate` reads the
+  product. Its locked sounds run at the movie's factor and hysteresis (`steerChaser`'s new `leader`), their
+  own error still measured and published and, past `sync/chaseJump`, still jumped. **SCENES** (AIV): each
+  sounding sound or movie under a chasing scene member is steered from its own error, by the member's method.
+  **THE VOICE'S MODE** (AIU, `Runner::chaseMethodOf`): read in `armMedia`, where `stretch` is chosen and
+  `requestArmOn` carries it, by walking the runs up to the one whose parent is a time group's run - so a locked
+  sound kept anywhere in the show finds its movie and a scene's sound its scene: `varispeed` resamples and
+  `timestretch` stretches whatever `rateMode` says; `jump` and `free` keep the cue's. A seek keeps it (DV).
+  **READOUTS**: `run/chaseState` `catching` while the law corrects, `inStep` otherwise, `jumped` on the tick it
+  jumps; `run/chaseError` as TG.8; `run/rate` the speed placed, factor and all.
+  Where this stage departs from its brief. The law is written with TG.8's sign, the error ahead positive, so the
+  correction is subtracted - the brief's "1 + error / 2 s" with the error counted behind; the same law. A
+  stretched voice lets go at a chunk rather than a millisecond (AJC, §60.2): the steering reads the run's clock,
+  so no stretcher can make it hunt, but closer than a chunk buys nothing heard. Locked sounds take the movie's
+  factor and hysteresis rather than their own, so picture and sound move together whatever floating point their
+  two measures differ by (the breakage below that steered them apart turned their case red). A speed decided is
+  placed by the next tick's speed pass rather than by the hook itself: the hook runs after `applyRates`, and one
+  place that places speeds keeps the fade's and the chase's ramps joined end to end. Members not held to the code
+  are put at one, which the brief did not name. TG.8's "30 ms behind, a varispeed chaser" case read the error
+  unmoved two seconds on; it now reads it closer, still behind, never moved.
+  Tests under C and fr_FR. `ChaseTests` (new, six cases, the law alone): in step it is the code's speed exactly
+  at five speeds and one for a code not running forwards; out of step the error over two seconds, clamped at 1 %
+  (and at half a percent and nought when the row says so), on the code's speed; the band - nine milliseconds out
+  holds, eleven begins, five carries on once begun and does not start, under one ends - and one set inside out
+  held the right way round; past the jump at 0.26 s and not at 0.24, and at a second when the row says so; a
+  stretched voice's settle at 48, 44.1 and 384 kHz and with no rate, and round the loop letting go sooner, at
+  its chunk; and the law round the hook's loop (a decision first heard half a tick later and wholly two):
+  fifty milliseconds either way closed between eight and ten seconds, the error never crossing the code nor
+  growing, then still for fifty seconds at the code's speed exactly; ten and a half in 2 ln 10.5 s; nine never
+  starting. `TimeGroupTests` (TG.9's part, nine cases on the TG.8 rig, whose fake player now records each speed
+  placed): a `varispeed` chaser against a code 50 ppm fast, re-anchored every ten seconds at 48 and 52 ppm, in
+  step for ten simulated minutes (30 000 ticks, within a millisecond throughout, never moved, its factor and
+  its voice the speed last said, at most 123 speeds placed), while a `jump` chaser beside it jumps twice or more
+  at one; a code a tenth of a percent fast said fifteen seconds late - measured -15.06 ms, caught up in
+  2 ln 15.06 s, never ahead, closer every tick from the third, at most 0.76 % over the code's new speed, then
+  at 1.001 exactly; a code at 1.0005 - launched at it, stopped (one, its own speed), back two seconds later (one
+  jump of -2 s), then at 1.0005 again and in step; the mode - `timestretch` stretched on a varispeed cue,
+  `varispeed` resampled on a timestretch cue, `jump` and `free` the cue's own - and both catch-up methods 100 ms
+  behind at exactly 1.01 and no more, the stretched one letting go between 4 and 5.33 ms, the resampled one
+  within one, the jump chaser one jump at one; a speed fade to 0.98 on a chaser at 1.0005, the voice at
+  0.98 x 1.0005 x 1.01; a movie 50 ms behind - its time ring's last stretch at 1.01 to 1e-9, its locked sound
+  stretched as the movie's method says, at the movie's factor bit for bit every tick, both back in step, no
+  cut; a timeline scene by varispeed and by timestretch, both its sounds at the clamp and back in step, their
+  modes the member's; 0.3 s out one jump of 0.3 s and no speed placed, 0.2 s out a second at 1.01 and 190 ms
+  behind; and a replay of a session with a re-anchor, a stop, a return and a locate back reaching the same runs.
+  Green in both locales with the files of the code touched - TimeGroupTests, ChaseTests, SeatTests,
+  FollowTests, CodeWatchTests, ClockWatchTests, CodeMapTests, TimecodeRunTests, TriggerTests, GoTests,
+  SamplerTests, VideoTests, RunTests, RangeTests, MovieTests, MediaCueTests, TreeTests, PublishCostTests,
+  EditPlaybackTests, RateClockTests, LaneRecordTests, LevelLaneTests, SendLaneTests, 869 cases - and AudioTests'
+  speed, stretch, slice-move and backwards cases (21); `wfg.replay.*`, `wfg.commands`, `source.comments`,
+  `unit.shards`. clang-tidy's stand-in for the strict job: nothing in RunnerTime.cpp, Runner.cpp, ChaseTests.cpp
+  or TimeGroupTests.cpp (its run proved by a planted shadow).
+  Fifteen deliberate breakages, each turning its own cases red: no factor where speeds are placed; the launch
+  ignoring it; no code's speed while unmeasured; the cue's own mode; the method read from the direct parent only
+  (the scene's and the locked sound's cases); a stretched voice settling at a millisecond; a stopped code keeping
+  the factor; locked sounds steered on their own; a movie ignoring the factor; never jumping past
+  `sync/chaseJump`; no clamp; no hysteresis; the chase replacing a fade; jump chasers at the code's speed; the
+  factor not on the code's speed.
+  Found and left: the factor and the hysteresis are not carried in RD.8's position, so a run seated by
+  `pair.seat` begins its catch-up afresh from its own next measure; a ranged chaser 0.25 to 1 s out across a
+  slice boundary is left to cross (TG.8's rule) and keeps the factor it had; a stretched voice already at the
+  stretcher's limit cannot be sped up; the `timed/chase` row's words in the parameter CSV say `wfg validate`
+  warns of a chase against the cue's mode, which AIU and §60.5 say it does not - the row's description is the
+  one to correct, with the schema regenerated (TG.10); nothing has listened to a stretcher whose ratio moves
+  every tick, nor measured what that costs it (M46 measured steady speeds) - M64 owes the render; and nothing
+  measures what steering costs a tick with hundreds of chasers.
 
 ## 61. Keys, text and blur
 
