@@ -845,10 +845,17 @@ def judge_ltc(report: Report, word: str, rate: Rate, sample_rate: int, tone, lin
                  f"{word}: and runs on from there frame by frame, each where its count puts it",
                  why or f"{len(second_run)} frames read")
 
+    # WHERE THE SPLICE WAS: the first frame read of the second code is
+    # `skipped_second` frames into its count when a reader relocked on the
+    # takeover's first frame (above), so the splice is that many frames
+    # before it - the checks of the cut and of the bit errors are about the
+    # splice, not about the first frame a reader happened to read.
+    splice = takeover - (skipped_second or 0) * frame_len
+
     cut = first_run[-1].end if first_run else zero
-    report.check(cut <= takeover + 2.0 and takeover - cut < frame_len,
+    report.check(cut <= splice + 2.0 and splice - cut < frame_len,
                  f"{word}: the song's code drawn up to the second's first sample, a frame cut short at most (AHL)",
-                 f"the last whole frame ended at {cut:.2f}, the second code began at {takeover:.2f}")
+                 f"the last whole frame ended at {cut:.2f}, the second code began at {splice:.2f}")
 
     quiet_before = [q for q in decoder.quiets if q < quiet_at]
     rose = [s for s in decoder.starts if s > zero + 2]
@@ -857,7 +864,7 @@ def judge_ltc(report: Report, word: str, rate: Rate, sample_rate: int, tone, lin
                  f"quiet at {quiet_before}, rising again at {rose}")
 
     bit = decoder.bit
-    errors = [e for e in decoder.errors if not (takeover - 1.5 * bit <= e[0] <= takeover + 1.5 * bit)]
+    errors = [e for e in decoder.errors if not (splice - 1.5 * bit <= e[0] <= takeover + 1.5 * bit)]
     report.check(not errors, f"{word}: not one bit error in either code, the takeover's own edge aside",
                  "; ".join(f"at {at:.1f}: {what}" for at, what in errors[:6]))
 
