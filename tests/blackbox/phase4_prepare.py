@@ -499,9 +499,22 @@ def run(locale: "str | None") -> int:
                 #  log rather than of a node, because the run it would make
                 #  might come and go between two polls: nothing the GO wrote
                 #  down may name that cue at all.
+                #
+                #  BOTH READS WAIT FOR THE LOG TO CATCH UP (2026-10-13). It is
+                #  written by a thread of low priority, so on a busy machine the
+                #  GO's own records - its run.round, which lists the scene's
+                #  members, this cue among them - were still on their way when
+                #  the first count was taken, and arrived "since": the check
+                #  read a listing as a run, in both locales at once, under
+                #  sixteen parallel ctest entries. The window is the 25 ticks
+                #  after what the GO wrote has landed, as it always was on a
+                #  machine that kept up; the second wait makes sure those ticks'
+                #  records are in the file before it is read.
+                server.wait_for_log()
                 after_go = len(log.read_text(encoding="utf-8").splitlines())
                 wait_ticks(server, 25)
 
+                server.wait_for_log()
                 since = log.read_text(encoding="utf-8").splitlines()[after_go:]
                 named = [line for line in since if PRESET in line]
 

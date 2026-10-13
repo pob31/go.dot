@@ -269,15 +269,31 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             dead_from, dead_to = killed_at + int(RATE * 1.0), down_at + int(RATE * 1.0)
             dead = level(left, dead_from, (dead_to - dead_from) / RATE)
 
-            report.check(rising < STEADY * 0.5,
-                         "it rises over its half-second fade-in rather than stepping",
-                         f"{rising:.4f} in its first forty milliseconds against {STEADY:.4f}")
             # WHAT THE BLOCKS VOX 1'S PLUGIN ANSWERED IN TIME ARE AT: a late block
             # is silent and its neighbours fade (decision CV), which slid a plain
             # median off the level on Windows CI (e20beff: a quarter of the blocks
             # late). Void, not failed, if the runner took the whole window and the
             # engine failed the plugin for lateness on its own before the kill.
             starved = common.logged_before(log, "plugin.failed", '/p1"', containing="stopped answering")
+            # THE FADE-IN IS READ OFF THE FIRST SOUND, which is the fade-in's start
+            # only if the plugin answered from GO. One the engine failed for
+            # lateness is silent until its relaunch two seconds on (decision CU),
+            # so the first sound is wherever the relaunch landed - after Esc, under
+            # sixteen parallel ctest entries (2026-10-13), where the level was the
+            # panic fade's and read as a step. Void then, as the levels are: the
+            # engine said why the voice was silent, and a run whose child keeps up
+            # judges the shape.
+            if starved and start > went_at + int(RATE * 0.1):
+                report.void("it rises over its half-second fade-in rather than stepping",
+                            f"the runner starved the child: the first sound at frame {start},"
+                            f" {(start - went_at) / RATE:.2f} s after GO was seen (Esc at {stopped_at}),"
+                            f" so no fade-in was heard; the engine failed it for lateness {starved} time(s)"
+                            f" on its own")
+            else:
+                report.check(rising < STEADY * 0.5,
+                             "it rises over its half-second fade-in rather than stepping",
+                             f"{rising:.4f} in its first forty milliseconds against {STEADY:.4f};"
+                             f" the first sound at frame {start}, GO seen at {went_at}")
             for side, words in ((left, "through Vox 1's plugin at a half"),
                                 (right, "on both sides: the plugin made the mono voice stereo")):
                 common.check_level(report, common.answered_level(side, steady_from, steady_to, BLOCK), STEADY,

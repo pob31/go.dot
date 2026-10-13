@@ -178,6 +178,11 @@ the code.
   strict `-Werror` build, the spikes, a pin gate, and a job running Clang's
   real-time sanitizer, the second net under PRD §4.2's rule that the audio
   thread never allocates, locks or calls the system.
+- **The tests run side by side**, as many at once as the machine keeps up
+  with: the unit suite is cut into shards, and `unit.shards` asks the binary
+  that every case still runs exactly once a locale. What cannot share a machine
+  — the real audio interface, the desktop the window tests open on — takes its
+  turn on a ctest lock rather than slowing everything else down.
 
 ---
 
@@ -481,18 +486,27 @@ the blanket recursive command below cannot bite you later, and checks the pins.
 cmake --preset dev              # Ninja Multi-Config -> build/dev/
 cmake --build --preset dev-debug
 cmake --build --preset dev-release
-ctest --test-dir build/dev -C Debug --output-on-failure
+ctest --test-dir build/dev -C Debug --output-on-failure -j 8
 ```
 
 Note the last line: there is deliberately **no `dev` test preset**. The three
-test presets (`ci-linux`, `ci-macos`, `ci-windows`) belong to the matching
+CI test presets (`ci-linux`, `ci-macos`, `ci-windows`) belong to the matching
 configure presets and run in *their* build trees, so `ctest --preset ci-linux`
 after `cmake --preset dev` looks for `build/ci-linux/` and reports that there is
-no test project there. Locally, point `ctest` at the tree you built.
+no test project there. Locally, point `ctest` at the tree you built, and give
+it `-j` about three quarters of your cores: every black-box driver starts a
+`wfg serve` of its own, some with a plugin child beside it, so one entry is
+more than one busy core. On Windows, `ctest --preset vs-debug` does exactly
+that for `build/vs`, twelve at once: about six minutes on the author's
+sixteen-core box against some forty one entry at a time (the preset's
+description says why not sixteen, and what sets the floor).
 
-The suite runs the unit binary twice (once under `C`, once under `fr_FR`); the
-product binary once per serialising verb per locale (`canon`, `replay`, `schema`,
-`tree`, `validate`, `commands`) plus `--version`, `selftest`, `midi` and the
+The suite runs the unit binary under `C` and under `fr_FR`, each cut into shards
+(`unit.C.audio-1` … `unit.fr_FR.rest`, listed in `tests/CMakeLists.txt` with how
+they were balanced) that ctest runs side by side; `unit.shards` fails if a case
+is in no shard or in two, or if a shard names a file that holds nothing. It
+runs the product binary once per serialising verb per locale (`canon`, `replay`,
+`schema`, `tree`, `validate`, `commands`) plus `--version`, `selftest`, `midi` and the
 plugin scans; every replay fixture; the black-box drivers against the shipped
 binary, most of them under both locales; and the Python gates — the generated
 schema header against the parameter table, every show fixture against the
@@ -547,6 +561,11 @@ without telling anyone.
 | `rtsan` | Clang's real-time sanitizer, the second net under PRD §4.2. **Clang 20 or newer only** — `-fsanitize=realtime` does not exist before it, so this preset fails to configure on MSVC and on Apple Clang, and that is not a defect. Its own CI job installs the toolchain; the suppression list goes in at run time through `RTSAN_OPTIONS`, never in the preset |
 
 Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …).
+
+Test presets: `ci-linux`, `ci-macos` and `ci-windows` are what each CI job's
+test step runs, four, three and four entries at once — each runner's cores.
+`vs-debug` runs the whole suite in `build/vs`, twelve at once, and
+`ci-windows` inherits it, as the `ci-windows` configure preset inherits `vs`.
 
 ### Targets
 

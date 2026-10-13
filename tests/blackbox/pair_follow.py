@@ -241,7 +241,22 @@ def run() -> int:
 
             # --- in step ------------------------------------------------------------
             report.equal(read_backup("/godot/pair/differs"), "", "every record came out on the backup as on the main")
-            report.equal(read_backup("/godot/pair/late"), "0", "none came late")
+            # A RECORD THAT MISSES ITS SLOT still goes in, at once, and is only
+            # counted (pair/Follow.h): what this counts is whether every beat
+            # arrived within the margin the backup measured at link-up, which
+            # is the two tick threads' punctuality - timing, so held to nought
+            # off CI and only there (lane_level's rule, as MOST_DELAY is). With
+            # ctest running entries side by side (2026-10-13), one record came
+            # late in one run under a runner-like load, twenty entries at once
+            # with GITHUB_ACTIONS set; on CI a nonzero count is said and
+            # voided, never counted as a pass.
+            late = read_backup("/godot/pair/late")
+            if ON_CI and late != "0":
+                report.void("none came late", f"{late} came late, on a shared runner whose tick threads"
+                                              f" are held back; the records themselves went in, and"
+                                              f" `differs` above says they came out the same")
+            else:
+                report.equal(late, "0", "none came late")
             report.equal(read_backup("/godot/pair/state"), "following", "and the backup is following still")
         finally:
             if client is not None:

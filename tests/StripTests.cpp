@@ -191,8 +191,9 @@ TEST_CASE ("strip: a HAP movie of three shots read from its file - its cuts on t
 {
     using namespace wfg::testing::hapmovie;
 
+    //  Its own name in this process: the C and fr_FR shards run this case side by side (2026-10-13).
     auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                    .getNonexistentChildFile ("wfg-strip", {}, false);
+                    .getChildFile ("wfg-strip-" + juce::Uuid().toDashedString());
     REQUIRE (folder.createDirectory());
 
     //  Ten frames a second: red for 1.3 s, blue for 1.0 s, green for 1.2 s.

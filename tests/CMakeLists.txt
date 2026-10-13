@@ -229,17 +229,39 @@ if(WIN32)
     # presets (the Network tab's chooser, namespace draft 57, DP.4): the same
     # definition wfg_tests carries, and the one the CI's whole build missed.
     target_compile_definitions(wfg_audio_ui_tests PRIVATE WFG_REPO_ROOT="${CMAKE_SOURCE_DIR}")
-    add_test(NAME ui.show-settings.C COMMAND wfg_audio_ui_tests --wfg-locale=C)
-    add_test(NAME ui.show-settings.fr_FR COMMAND wfg_audio_ui_tests --wfg-locale=${WFG_LOCALE_FR})
+    #
+    # SIDE BY SIDE WITH THE REST, NOT ALONE (2026-10-13). These were RUN_SERIAL
+    # from the day the binary was one panel on a live device: nothing else ran
+    # while they did, which was free while ctest ran one entry at a time and is
+    # a minute and a half of an idle machine once it runs twelve. What they
+    # share with other tests is two things, and each is now a lock: the
+    # desktop, where they make real windows (`desktop`, so the two locales and
+    # ui.cue-errors take turns), and the machine's audio interface, which ONE
+    # case opens live - its own entry, ui.live-device.<locale>, holding the
+    # `audio-device` lock that unit.<locale>.devices and blackbox.device.C hold
+    # (the unit shards' comment says why). Its name is excluded from the
+    # whole-binary entries, so it still runs once a locale, and its entry
+    # passes only on doctest's own count of one case run and passed: a rename
+    # would otherwise leave it green over nothing. The other cases hand their
+    # key presses and mouse events to the components directly, so nothing in
+    # them needs the keyboard focus or the pointer another program could take.
+    set(WFG_UI_LIVE_DEVICE "audio settings UI: opening and rescanning cannot stop the ASIO callback")
+    add_test(NAME ui.show-settings.C COMMAND wfg_audio_ui_tests --wfg-locale=C "--test-case-exclude=${WFG_UI_LIVE_DEVICE}")
+    add_test(NAME ui.show-settings.fr_FR COMMAND wfg_audio_ui_tests --wfg-locale=${WFG_LOCALE_FR} "--test-case-exclude=${WFG_UI_LIVE_DEVICE}")
     set_tests_properties(ui.show-settings.C ui.show-settings.fr_FR PROPERTIES
-                         RUN_SERIAL TRUE TIMEOUT 120)
+                         RESOURCE_LOCK desktop TIMEOUT 120 COST 70)
+    add_test(NAME ui.live-device.C COMMAND wfg_audio_ui_tests --wfg-locale=C "--test-case=${WFG_UI_LIVE_DEVICE}")
+    add_test(NAME ui.live-device.fr_FR COMMAND wfg_audio_ui_tests --wfg-locale=${WFG_LOCALE_FR} "--test-case=${WFG_UI_LIVE_DEVICE}")
+    set_tests_properties(ui.live-device.C ui.live-device.fr_FR PROPERTIES
+                         RESOURCE_LOCK "desktop;audio-device" TIMEOUT 120
+                         PASS_REGULAR_EXPRESSION "test cases: +1 [|] +1 passed [|] +0 failed")
     add_test(NAME ui.cue-errors.C COMMAND wfg_audio_ui_tests "--test-case=active cue errors:*" --wfg-locale=C)
     add_test(NAME ui.cue-errors.fr_FR COMMAND wfg_audio_ui_tests "--test-case=active cue errors:*" --wfg-locale=${WFG_LOCALE_FR})
-    set_tests_properties(ui.cue-errors.C ui.cue-errors.fr_FR PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
+    set_tests_properties(ui.cue-errors.C ui.cue-errors.fr_FR PROPERTIES RESOURCE_LOCK desktop TIMEOUT 30)
 endif()
 
 # -----------------------------------------------------------------------------
-# The unit suite, run once per locale.
+# The unit suite, run once per locale, in shards.
 #
 # The locale NAME is never spelled in a test source. The Windows UCRT does not
 # accept the glibc spelling "fr_FR.UTF-8" and glibc does not accept the Windows
@@ -258,10 +280,133 @@ endif()
 # unit suite died twice with a bus error (runs 38227264401 at 493 s in C,
 # 38299523050 at 361 s in fr_FR) with nothing to say which case was running.
 # The last name printed is the case before the one that died. ctest shows the
-# output only when a suite fails, so a green run's log is unchanged.
+# output only when a suite fails, so a green run's log is unchanged. Every
+# shard below keeps it.
+#
+# SHARDS, AND WHY (2026-10-13). The author: "The tests are now over an hour
+# long slowing down the development to a grind". The suite in one process was
+# ten minutes a locale on the Windows box, twelve on the Windows runner, nine on
+# macOS - half of every run, and one core of the machine busy while the others
+# waited for it. So the binary is run as several entries a locale, unit.C.<name>
+# and unit.fr_FR.<name>, each given a slice of the cases by doctest's own
+# filters, and ctest runs them side by side with everything else (the test
+# presets' `jobs`, CMakePresets.json). The same cases, the same assertions, the
+# same two locales: only the process each runs in has changed.
+#
+# A SHARD IS <name>=<files>, the files comma-separated, matched against the
+# path each case was compiled from as `*tests?<file>` - anchored on the folder,
+# because `*RunTests.cpp` would also catch TimecodeRunTests.cpp. One file may
+# be cut by its cases' order, `<file>@<first>-<last>` (the last left open for
+# the rest of the file): doctest numbers the cases that pass the other filters,
+# and a file's cases run in the order of their lines. AudioTests.cpp is cut so,
+# into four, because it was 257 of the 616 seconds alone - and one of its cases,
+# the 64-track graph whose every node needs an identity, is a minute on its own,
+# which is the floor of how short a shard can be. EVERYTHING NOT NAMED runs in
+# unit.<locale>.rest: a new test file runs there from its first build, and is
+# moved into a shard when its time says it should be.
+#
+# BALANCED BY WHAT EACH FILE TOOK, measured with `wfg_tests --duration=true`
+# under C on the Windows box in Debug (616 s, 2585 cases) and checked against
+# the Linux runner's figures (277 s): each shard is near a minute here, from
+# 53 to 83 s, which is about the longest single case. To balance them again,
+# run the suite that way, add up each file's lines, and move files between the
+# lists; adding cases to a file only makes its shard longer, never wrong.
+#
+# NOTHING CAN FALL BETWEEN THEM: unit.shards (after the entries) asks the binary
+# which cases each shard's own arguments select, and fails if a case is in no
+# shard or in two, or if a file a shard names holds nothing it runs - a rename,
+# a typo, or a cut whose numbers no longer meet. It is a ctest entry rather than
+# a configure check because the binary is the only thing that knows its cases.
+#
+# devices holds the one file that opens the machine's real audio interfaces:
+# its two locales, blackbox.device.C and the window suites take turns on the
+# `audio-device` lock rather than open one card from two processes at once,
+# which a device in exclusive mode refuses and the case would read as a fault.
+# Every shard is given a COST so a fresh build tree - every CI run - starts the
+# shards early, after only the few drivers that are longer still (the end of
+# this file): started last, they would be the tail everything else waits
+# behind.
 # -----------------------------------------------------------------------------
-add_test(NAME unit.C     COMMAND wfg_tests --wfg-locale=C "--test-case-exclude=video gpu:*" --duration=true)
-add_test(NAME unit.fr_FR COMMAND wfg_tests --wfg-locale=${WFG_LOCALE_FR} "--test-case-exclude=video gpu:*" --duration=true)
+set(WFG_UNIT_SHARDS
+    "audio-1=AudioTests.cpp@1-20"
+    "audio-2=AudioTests.cpp@21-27"
+    "audio-3=AudioTests.cpp@28-78"
+    "audio-4=AudioTests.cpp@79-"
+    "devices=DeviceTests.cpp"
+    "presets=PresetTests.cpp,AnalysisTests.cpp,SeatTests.cpp,OscQueryTests.cpp,TimbreTests.cpp"
+    "proxy=ProxyTests.cpp,GoTests.cpp,SurfaceBridgeTests.cpp,BundleTests.cpp,SerialTests.cpp"
+    "video-host=VideoHostTests.cpp,AuthoringTests.cpp,MountTests.cpp,MediaEditRenderTests.cpp,PeerLinkTests.cpp"
+    "editor-helper=EditorHelperTests.cpp,ClientTests.cpp,VerifiedCueTests.cpp,TimecodeTests.cpp,MidiTests.cpp")
+
+# What every shard is run with, and the check with it: the GPU cases have their
+# own entry below.
+set(WFG_UNIT_EVERY "--test-case-exclude=video gpu:*")
+
+set(WFG_UNIT_SHARD_NAMES "")
+set(WFG_UNIT_NAMED_FILES "")
+
+foreach(shard IN LISTS WFG_UNIT_SHARDS)
+    if(NOT shard MATCHES "^([a-z0-9-]+)=(.+)$")
+        message(FATAL_ERROR "tests/CMakeLists.txt: a unit shard is <name>=<files>, not \"${shard}\"")
+    endif()
+
+    set(shard_name "${CMAKE_MATCH_1}")
+    set(shard_files "${CMAKE_MATCH_2}")
+    set(shard_range "")
+
+    if(shard_files MATCHES "^([^@,]+)@([0-9]+)-([0-9]*)$")
+        set(shard_files "${CMAKE_MATCH_1}")
+        set(shard_range "--first=${CMAKE_MATCH_2}")
+
+        if(NOT "${CMAKE_MATCH_3}" STREQUAL "")
+            list(APPEND shard_range "--last=${CMAKE_MATCH_3}")
+        endif()
+    endif()
+
+    string(REPLACE "," ";" shard_files "${shard_files}")
+    set(shard_patterns "")
+
+    foreach(file IN LISTS shard_files)
+        list(APPEND shard_patterns "*tests?${file}")
+    endforeach()
+
+    list(APPEND WFG_UNIT_NAMED_FILES ${shard_patterns})
+    list(JOIN shard_patterns "," shard_filter)
+    set(WFG_UNIT_SHARD_ARGS_${shard_name} "--source-file=${shard_filter}" ${shard_range})
+    list(APPEND WFG_UNIT_SHARD_NAMES ${shard_name})
+endforeach()
+
+list(REMOVE_DUPLICATES WFG_UNIT_NAMED_FILES)
+list(JOIN WFG_UNIT_NAMED_FILES "," WFG_UNIT_REST_FILTER)
+set(WFG_UNIT_SHARD_ARGS_rest "--source-file-exclude=${WFG_UNIT_REST_FILTER}")
+list(APPEND WFG_UNIT_SHARD_NAMES rest)
+
+set(WFG_UNIT_SHARD_CHECK "")
+
+foreach(shard_name IN LISTS WFG_UNIT_SHARD_NAMES)
+    foreach(locale IN ITEMS C fr_FR)
+        if(locale STREQUAL "C")
+            set(spelling C)
+        else()
+            set(spelling ${WFG_LOCALE_FR})
+        endif()
+
+        add_test(NAME unit.${locale}.${shard_name}
+                 COMMAND wfg_tests --wfg-locale=${spelling} ${WFG_UNIT_SHARD_ARGS_${shard_name}}
+                         ${WFG_UNIT_EVERY} --duration=true)
+        set_tests_properties(unit.${locale}.${shard_name} PROPERTIES LABELS unit COST 60)
+    endforeach()
+
+    list(JOIN WFG_UNIT_SHARD_ARGS_${shard_name} "|" shard_joined)
+    list(APPEND WFG_UNIT_SHARD_CHECK "--shard=${shard_name}|${shard_joined}")
+endforeach()
+
+set_tests_properties(unit.C.devices unit.fr_FR.devices PROPERTIES RESOURCE_LOCK audio-device)
+
+add_test(NAME unit.shards
+         COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/check-unit-shards.py"
+                 $<TARGET_FILE:wfg_tests> "--common=${WFG_UNIT_EVERY}" ${WFG_UNIT_SHARD_CHECK})
+set_tests_properties(unit.shards PROPERTIES LABELS unit TIMEOUT 300)
 
 # THE VIDEO RENDERER ON THE GRAPHICS DEVICE (namespace draft §44), in a process
 # of its own: the system's software rasteriser where there is no card - WARP,
@@ -1297,11 +1442,18 @@ set_tests_properties(blackbox.first-sound.fr_FR PROPERTIES
 # SKIPS ITSELF on a machine with no audio device, which is every CI runner, and
 # that is honest rather than convenient: what it checks cannot be checked
 # without one. It runs where the configuration it covers is actually used.
+#
+# THE AUDIO-DEVICE LOCK (2026-10-13): it opens the machine's own interface, as
+# unit.<locale>.devices and the window suites do, and an interface held by one
+# process is one another cannot open - or opens and never ticks: on 2026-09-18
+# this failed whenever a --hosted window held "Primary Sound Driver". So they
+# take turns, and the rest of the suite runs beside them.
 add_test(NAME blackbox.device.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/device_serve.py"
                  --wfg-locale=C)
 set_tests_properties(blackbox.device.C PROPERTIES
-                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300
+                     RESOURCE_LOCK audio-device)
 
 # PHASE 3'S DONE-WHEN CLAUSE, on the shipped binary, over a socket, and read
 # back off the WAV that came out. The devplan states it in one sentence - "a
@@ -1833,4 +1985,38 @@ if(WFG_NODE)
 else()
     message(STATUS "console.unit: skipped - no node on this machine; the console's pure modules "
                    "are tested where Node.js 22.7 or later is installed")
+endif()
+
+# -----------------------------------------------------------------------------
+# THE LONGEST DRIVERS START FIRST (2026-10-13), once ctest runs several entries
+# at once. ctest starts the costliest first, and on a build tree that has never
+# run - every CI run - the only costs it knows are these: a COST of what each
+# took on the slowest runner in the last green CI run (38287091845), so they are
+# under way while the short ones fill the gaps, rather than starting last and
+# being the tail everything waits behind. macOS is where they are long - the
+# wires driver 222 s there against 17 s on Windows, the hold 151 s against 8 s.
+# The unit shards' COST is set where they are made. A COST set here stays as
+# set; an entry with none is costed by ctest's own measurement of its last run
+# (Testing/Temporary/CTestCostData.txt), which a CI build tree never has.
+# -----------------------------------------------------------------------------
+set_tests_properties(blackbox.wires.C blackbox.wires.fr_FR PROPERTIES COST 225)
+set_tests_properties(blackbox.hold.C blackbox.hold.fr_FR PROPERTIES COST 150)
+set_tests_properties(blackbox.crash-write.C blackbox.crash-write.fr_FR PROPERTIES COST 110)
+set_tests_properties(blackbox.doh.C blackbox.doh.fr_FR PROPERTIES COST 95)
+set_tests_properties(blackbox.first-sound.C blackbox.first-sound.fr_FR PROPERTIES COST 80)
+
+# THE AUDIO-DEVICE CHAIN STARTS FIRST OF ALL. The entries that take turns on the
+# `audio-device` lock - unit.<locale>.devices, ui.live-device.<locale> and
+# blackbox.device.C - are a chain no number of jobs can overlap, and on a box
+# with interfaces it is the longest thing in the suite: at twelve jobs on the
+# Windows box (2026-10-13) it was 318 s of a 341 s run when it started 24 s in,
+# behind drivers costed above it. Costed above everything, it starts at once
+# and the suite runs beside it. How long it is is the interfaces' doing - the
+# devices file alone took 83 s there in the morning and 209 s two hours later,
+# on the same build, every enumeration of the machine's interfaces three
+# times slower - so on that box the local run takes as long as the chain. On a
+# runner, with no interface, it is a few seconds and its place costs nothing.
+set_tests_properties(unit.C.devices unit.fr_FR.devices blackbox.device.C PROPERTIES COST 300)
+if(WIN32)
+    set_tests_properties(ui.live-device.C ui.live-device.fr_FR PROPERTIES COST 300)
 endif()

@@ -252,6 +252,10 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             length = number(server, "takeLength")
             report.check(0.5 <= length <= 5.0, "the take is as long as it was recorded for",
                          f"{length:.3f} s")
+            # The record is applied before the length is published, and written
+            # to the file by the log's own low-priority thread some time after:
+            # read once that thread has caught up (common.Server.wait_for_log).
+            server.wait_for_log()
             closes = logged_closes(log)
             report.check(len(closes) == 1 and f'"{CHANNEL}"' in closes[0] and '"pressed"' in closes[0],
                          "the engine logs the length it closed at, as take.closed ... pressed",

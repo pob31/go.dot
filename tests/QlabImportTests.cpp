@@ -172,8 +172,9 @@ TEST_CASE ("qlab import: the plan written - groups, a sound and its routes, a de
 
 TEST_CASE ("qlab import: a QLab 4 sound found from the folder above the workspace, or from its own")
 {
+    //  Its own name in this process: the C and fr_FR shards run this case side by side (2026-10-13).
     const auto room = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                        .getNonexistentChildFile ("wfg-qlab-media", "", false);
+                        .getChildFile ("wfg-qlab-media-" + juce::Uuid().toDashedString());
     const auto workspaceFolder = room.getChildFile ("Show");
     REQUIRE (workspaceFolder.getChildFile ("audio").createDirectory());
 

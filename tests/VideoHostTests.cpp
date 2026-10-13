@@ -2468,8 +2468,9 @@ TEST_CASE ("video host: the analyser reads a picture's size and a movie's, for t
         frame in its own shape: the analyser, which every file a video cue
         names now reaches, reads a still's size by decoding it and a movie's
         from its index. */
+    //  Its own name in this process: the C and fr_FR shards run this case side by side (2026-10-13).
     auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                    .getNonexistentChildFile ("wfg-picture-sizes", {}, false);
+                    .getChildFile ("wfg-picture-sizes-" + juce::Uuid().toDashedString());
     REQUIRE (folder.createDirectory());
 
     {

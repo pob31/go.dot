@@ -1012,8 +1012,9 @@ TEST_CASE ("video read-ahead: a file the show does not have is not sent and is s
 {
     VideoRig rig;
 
+    //  Its own name in this process: the C and fr_FR shards run this case side by side (2026-10-13).
     const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                            .getChildFile ("wfg-read-ahead-" + juce::String (juce::Time::currentTimeMillis()));
+                            .getChildFile ("wfg-read-ahead-" + juce::Uuid().toDashedString());
     REQUIRE (folder.createDirectory());
     REQUIRE (folder.getChildFile ("there.png").replaceWithText ("not really a picture"));
     rig.runner.setMediaFolder (folder.getFullPathName().toStdString());
@@ -1148,8 +1149,9 @@ TEST_CASE ("video read-ahead: the rows say what is got ready - a missing picture
 {
     VideoRig rig;
 
+    //  Its own name in this process: the C and fr_FR shards run this case side by side (2026-10-13).
     const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                            .getChildFile ("wfg-read-ahead-rows-" + juce::String (juce::Time::currentTimeMillis()));
+                            .getChildFile ("wfg-read-ahead-rows-" + juce::Uuid().toDashedString());
     REQUIRE (folder.createDirectory());
     REQUIRE (folder.getChildFile ("there.png").replaceWithText ("not really a picture"));
     rig.runner.setMediaFolder (folder.getFullPathName().toStdString());

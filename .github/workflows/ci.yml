@@ -226,6 +226,14 @@ jobs:
         # juce_MessageManager.cpp). If a "cannot open display" error ever appears
         # here, the fix is to prefix this line with `xvfb-run -a` and note the
         # date in scripts/install-linux-deps.sh next to the xvfb entry.
+        #
+        # FOUR AT ONCE (2026-10-13), from the preset: the runner's four CPUs.
+        # The author: "CI push tests have also grown over an hour" - every
+        # entry ran alone until then, the unit suite ten minutes of it in one
+        # process. The jobs number lives in CMakePresets.json rather than here
+        # so that the three platforms' numbers sit side by side with the reason
+        # for each, and what must not share the machine is held back by its own
+        # ctest properties (tests/CMakeLists.txt), never by a smaller number.
         run: ctest --preset ci-linux
 
       - name: Build (Release)
@@ -343,6 +351,8 @@ jobs:
         run: cmake --build --preset ci-macos-debug
 
       - name: Test (Debug — C and fr_FR)
+        # Three at once, from the preset: macos-latest is a three-CPU M1. The
+        # Linux job's test step says why the number lives in the preset.
         run: ctest --preset ci-macos
 
       - name: ccache statistics
@@ -417,6 +427,9 @@ jobs:
         # fr-FR, not fr_FR.UTF-8: the Windows UCRT does not accept the glibc
         # spelling. WFG_LOCALE_FR carries the right name per platform, which is
         # why no test hard-codes it.
+        #
+        # Four at once, from the preset: windows-2025 has four CPUs. The Linux
+        # job's test step says why the number lives in the preset.
         run: ctest --preset ci-windows
 
   # ---------------------------------------------------------------------------
@@ -574,9 +587,19 @@ jobs:
         # the files never appeared and the gate was green because it was deaf.
         # The step after this one is the gate; tests/RtsanControl.cpp proves it
         # can hear.
+        #
+        # FOUR AT ONCE (2026-10-13), as the Linux job's preset runs: this job
+        # has no test preset of its own, so the number is here. Its tests took
+        # 28 minutes one at a time, which would have left it the longest job
+        # once the others ran side by side - and a workflow takes as long as
+        # its longest job. The gate below is unchanged by it: ctest writes
+        # each test's whole block into LastTest.log when the test ends, header
+        # and output together, whatever ran beside it - checked against ctest
+        # 4.3 with three overlapping tests - so a report is still named by its
+        # own test.
         env:
           RTSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/rtsan-suppressions.txt:halt_on_error=0
-        run: ctest --test-dir build/rtsan -C Debug --output-on-failure
+        run: ctest --test-dir build/rtsan -C Debug --output-on-failure --parallel 4
 
       - name: Fail on any sanitizer report
         # ctest writes the whole output of EVERY test to LastTest.log, passed or

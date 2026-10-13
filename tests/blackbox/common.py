@@ -35,6 +35,7 @@ OscCodecTests.cpp are hand-written.
 
 from __future__ import annotations
 
+import atexit
 import base64
 import json
 import os
@@ -44,6 +45,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -471,6 +473,43 @@ def find_binary() -> Path:
         "cannot find a wfg binary. Build one, or set WFG_BINARY to its path.")
 
 
+_driver_engine_folder: "Path | None" = None
+
+
+def driver_engine_folder() -> Path:
+    """This driver's own engine folder, made the first time a serve asks.
+
+    THE MACHINE'S FOLDER IS NOT A TEST'S TO SHARE (2026-10-13, when ctest began
+    running the suite in parallel). A serve given no --engine-folder works in
+    the user's own - %APPDATA%\\Go.dot\\engine, ~/.config/Go.dot/engine - and
+    writes there: Tracktion's settings, the second of silence every resident
+    clip sits on (written once, by whichever serve gets there first, and read
+    by the others while it may still be half written), a process cue's patch as
+    <cue>.pd - the same name in both locales' runs of one driver, since they
+    play the same fixture - and the audio defaults beside it. One driver at a
+    time, that was only untidy; two at once, it is two processes writing one
+    file. So every serve a driver starts without naming a folder gets this one:
+    in a temporary folder of its own, with the folder's siblings (the pairing,
+    the audio defaults, the show to reopen) inside it too, gone when the driver
+    exits.
+
+    ONE PER DRIVER, NOT ONE PER SERVE: a driver that starts a second serve, as
+    several do to read back what the first one kept, finds what the first wrote
+    - as it did in the shared folder. A driver that wants a folder of its own
+    making (pairing.py, the plugin scans, a main and its backup) still passes
+    one, and that one stands.
+    """
+    global _driver_engine_folder
+
+    if _driver_engine_folder is None:
+        machine = Path(tempfile.mkdtemp(prefix="wfg-machine-"))
+        atexit.register(shutil.rmtree, machine, True)
+        _driver_engine_folder = machine / "engine"
+        _driver_engine_folder.mkdir()
+
+    return _driver_engine_folder
+
+
 class Server:
     """A running `wfg serve`, on ports the OS chose.
 
@@ -539,9 +578,10 @@ class Server:
 
         # --engine-folder keeps the machine's own folder - the known plugin
         # list above all - out of the developer's real one (2026-09-26). A
-        # driver that scans must pass one: a scan WRITES the list.
-        if engine_folder is not None:
-            argv.append(f"--engine-folder={engine_folder}")
+        # driver that scans must pass one: a scan WRITES the list. One that
+        # passes none gets the driver's own (driver_engine_folder says why),
+        # never the user's: ctest runs drivers side by side.
+        argv.append(f"--engine-folder={engine_folder if engine_folder is not None else driver_engine_folder()}")
 
         # --window opens the compiled client over this same engine, in this
         # same process (namespace draft section 14.16). Off by default here as
@@ -583,7 +623,10 @@ class Server:
         # RD.5). A serve not given --engine-folder reads the developer's own
         # pairing.xml, and from RD.5 a machine whose file says `backup` dials
         # the peers in it - so a driver run on the author's paired machine
-        # would ring his other computer from a test. --role=none for this run,
+        # would ring his other computer from a test. Every serve here is given
+        # a folder of the tests' own now (above), so that file is never read;
+        # the role is still said, because a folder a driver passes may hold a
+        # pairing a serve before it wrote there. --role=none for this run,
         # never written; `role="main"` or `role="backup"` for a driver that
         # pairs, and `role=None` for one that wants the file read (pairing.py).
         # A --role a driver puts in extra_args is its own word, and stands.
@@ -683,6 +726,35 @@ class Server:
             print(report, flush=True)
             raise HarnessError("serve printed a real-time sanitizer report (above)")
 
+
+    def wait_for_log(self, timeout: float = REPLY_TIMEOUT) -> bool:
+        """Waits until what the engine has applied is on disk in its log, for
+        a driver that reads the log while the server is still running.
+
+        A record the engine applied is not yet a line in the file: the log is
+        written by a thread of low priority (2026-10-06), and on a machine that
+        is busy with other work - a runner, or ctest running the suite side by
+        side - that thread can be seconds behind the published tree. A driver
+        that saw a value change and then read the file found the record "none
+        logged" (phase9c_take.py under sixteen parallel entries, 2026-10-13),
+        though the line arrived a moment later. True once two ticks have passed
+        and `/godot/engine/logPending` reads nought; False at the deadline.
+        """
+        def value(address):
+            reply = http_json(self.http_port, address + "?VALUE")
+            return int(reply["VALUE"][0])
+
+        # In a list, so that a tick of nought is an answer too.
+        answered = wait_until(lambda: [value("/godot/engine/tick")], timeout=timeout)
+
+        if not answered:
+            return False
+
+        first = answered[0]
+
+        return bool(wait_until(lambda: value("/godot/engine/tick") >= first + 2
+                                       and value("/godot/engine/logPending") == 0,
+                               timeout=timeout))
 
     def _let_the_log_catch_up(self, timeout: float = 3.0) -> None:
         """Waits until the engine log's lines are on disk, before a stop.

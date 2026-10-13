@@ -636,8 +636,9 @@ TEST_CASE ("authoring: a fetched description is adopted, loaded and answered; a 
     const auto file = tree::MountFetcher::fileFor (deviceId);
 
     //  The bundle as the fetcher leaves it: the description beside the show.
+    //  Its own name in this process: the C and fr_FR shards run this case side by side (2026-10-13).
     const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                            .getNonexistentChildFile ("wfg-authoring", {}, false);
+                            .getChildFile ("wfg-authoring-" + juce::Uuid().toDashedString());
     REQUIRE (folder.getChildFile ("namespaces").createDirectory());
     REQUIRE (folder.getChildFile (file).replaceWithText (R"JSON({ "FULL_PATH": "/proc", "CONTENTS": {
                  "go": { "FULL_PATH": "/proc/go", "ACCESS": 2 },

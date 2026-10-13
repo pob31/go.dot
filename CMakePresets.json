@@ -225,24 +225,45 @@
       "name": "ci-linux",
       "configurePreset": "ci-linux",
       "configuration": "Debug",
+      "description": "What the Linux CI job runs. Four at once because ubuntu-latest has four CPUs for a public repository, which this one is (GitHub's runner table, read 2026-10-13: a private repository's runner has two, and this would then be 2). Until 2026-10-13 every entry ran alone, and the whole suite was 23 minutes there, 45 on Windows and 65 on macOS; the unit suite is cut into shards (tests/CMakeLists.txt) so that there is something to run side by side. What cannot share a machine says so in its own properties - RESOURCE_LOCK, RUN_SERIAL - and is held back by ctest, never by a lower number here.",
       "output": {
         "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4
       }
     },
     {
       "name": "ci-macos",
       "configurePreset": "ci-macos",
       "configuration": "Debug",
+      "description": "What the macOS CI job runs. Three at once because macos-latest is an M1 with three CPUs and 7 GB (GitHub's runner table, read 2026-10-13, the same for public and private repositories). Its Debug build is the slowest of the three runners by far, so it gains the most.",
       "output": {
         "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 3
+      }
+    },
+    {
+      "name": "vs-debug",
+      "configurePreset": "vs",
+      "configuration": "Debug",
+      "description": "The whole suite on a Windows box, after cmake --build --preset vs-debug: ctest --preset vs-debug. Twelve at once, measured on the author's sixteen-core box (2026-10-13): the whole suite green in about six minutes, against some forty one entry at a time. The floor is the entries that take turns on the real audio interface (tests/CMakeLists.txt), a chain as long as the interfaces make it - it grew to eleven minutes over a morning of runs as the machine's audio engine slowed. Sixteen was no faster and not green: the chain is as long whatever the number, and so many at once starved the tick thread and plugins' children enough to fail the checks that are judged off CI because they time the tick. An entry is more than one busy core - a driver is a Python process, a wfg serve and sometimes a plugin's child - which is why the number is below the cores. On another machine, ctest -j with about three quarters of its cores.",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 12
       }
     },
     {
       "name": "ci-windows",
+      "inherits": "vs-debug",
       "configurePreset": "ci-windows",
-      "configuration": "Debug",
-      "output": {
-        "outputOnFailure": true
+      "description": "What the Windows CI job runs. It inherits vs-debug, as the ci-windows configure preset inherits vs, so the job exercises the local preset's settings too. Four at once because windows-2025 has four CPUs for a public repository (GitHub's runner table, read 2026-10-13; two for a private one, and this would then be 2).",
+      "execution": {
+        "jobs": 4
       }
     }
   ]

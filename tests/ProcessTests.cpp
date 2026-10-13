@@ -61,8 +61,10 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <thread>
 #include <string>
+#include <system_error>
 #include <vector>
 
 using namespace wfg::process;
@@ -91,13 +93,35 @@ namespace
         "#X connect 1 0 2 0;\n"
         "#X connect 5 0 2 0;\n";
 
-    /*  ONE FOLDER PER LOCALE RUN: ctest runs this binary under C and fr-FR at
-        once, and two processes writing one patch file would open each other's. */
+    /*  ONE FOLDER PER RUN OF THIS BINARY: ctest runs it under C and fr-FR at
+        once, and two processes writing one patch file would open each other's.
+        The locale alone named it until 2026-10-13, which held while there was
+        one process a locale; a number drawn once per process as well, so a
+        second ctest on the same machine - another build tree, a shard run by
+        hand beside the whole suite - has a folder of its own too. Taken away
+        when the process ends, since no later run will reuse it. */
+    struct ScratchRoot
+    {
+        std::filesystem::path path;
+
+        ~ScratchRoot()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all (path, ignored);
+        }
+    };
+
     std::filesystem::path scratch (const std::string& name)
     {
-        std::string run = wfgtest::appliedLocaleName();
-        std::replace_if (run.begin(), run.end(), [] (char c) { return ! std::isalnum (static_cast<unsigned char> (c)); }, '-');
-        return std::filesystem::temp_directory_path() / ("wfg-process-tests-" + run) / name;
+        static const ScratchRoot root = []
+        {
+            std::string run = wfgtest::appliedLocaleName();
+            std::replace_if (run.begin(), run.end(), [] (char c) { return ! std::isalnum (static_cast<unsigned char> (c)); }, '-');
+            return ScratchRoot { std::filesystem::temp_directory_path()
+                                   / ("wfg-process-tests-" + run + "-" + std::to_string (std::random_device {}())) };
+        }();
+
+        return root.path / name;
     }
 
     PdInstance::Settings settingsFor (const std::string& name)
