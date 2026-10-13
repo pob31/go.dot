@@ -27,6 +27,7 @@
 #include <wfg/engine/import/QlabWalk.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -420,7 +421,7 @@ TEST_CASE ("qlab walk: start, stop, goto, arm and the kinds with no equivalent (
     lost.target = "nowhere";
     auto script = cue ("Script", "a script");
     script.source = "tell application \"QLab\"";
-    auto video = cue ("Video", "Projection");
+    auto video = cue ("Camera", "Projection");
     video.notes = "Act 2";
     video.hotkeyTrigger = true;
     video.midiTrigger = true;
@@ -447,7 +448,7 @@ TEST_CASE ("qlab walk: start, stop, goto, arm and the kinds with no equivalent (
     CHECK (said (plan, "a script is never run"));
 
     CHECK (items[7].name == "[QLab] Projection");
-    CHECK (attribute (items[7], "notes").find ("Go.dot has no Video cue") != std::string::npos);
+    CHECK (attribute (items[7], "notes").find ("a camera cue stays a memo") != std::string::npos);
     CHECK (attribute (items[7], "notes").find ("Act 2") != std::string::npos);
     CHECK (attribute (items[7], "enabled") == "false");
     CHECK (said (plan, "QLab fired it by a hotkey and a MIDI trigger"));
@@ -481,4 +482,332 @@ TEST_CASE ("qlab walk: a message split and typed as QLab spells it")
     CHECK (decibels (gain (-81.0), -80.0) == doctest::Approx (-120.0));
     CHECK (decibels (gain (-30.0), -80.0) == doctest::Approx (-30.0));
     CHECK (decibels (gain (20.0), -80.0) == doctest::Approx (12.0));
+}
+
+//==============================================================================
+/*  QF.8: QLAB'S PICTURES AND WORDS WALKED (namespace draft §62, ALF-ALK):
+    stages to canvases, video cues to pictures and movies, text cues to text
+    cues, their fades to fades of the picture. Units, signs and numbers the
+    probe workspace (§62.6) is to settle are as §62 writes them, provisional. */
+
+namespace
+{
+    Cue picture (const std::string& file, const std::string& stage)
+    {
+        auto c = cue ("Video");
+        c.file.relativePath = file;
+        c.file.absolutePath = "/Volumes/Show/" + file;
+        c.stage = stage;
+        return c;
+    }
+
+    Workspace withStages (std::vector<Cue> top)
+    {
+        auto w = workspaceOf (std::move (top));
+        w.stages = { { "VIEW-1", "Stage 1", 1920, 1080, { "Output 1" }, false, false },
+                     { "VIEW-T", "triptyque", 5760, 1080, { "Gauche", "Centre", "Droite" }, true, false } };
+        return w;
+    }
+
+    std::array<double, 4> aboutTheScreen (double degrees)
+    {
+        const auto half = degrees * 3.14159265358979323846 / 360.0;
+        return { 0.0, 0.0, std::sin (half), std::cos (half) };
+    }
+
+    std::string n (double value, int decimals) { return wfg::import::number (value, decimals); }
+}
+
+TEST_CASE ("qlab walk: every stage a canvas of its size with its outputs; a picture on its stage, or on a screen's canvas (§62, ALF)")
+{
+    auto still = picture ("video/black.png", "VIEW-T");
+    still.placement.fillStyle = 2;
+    auto onScreen = picture ("video/a.png", "");
+    onScreen.lastSeenScreen = "Built-in Retina Display";
+    onScreen.lastSeenWidth = 3024;
+    onScreen.lastSeenHeight = 1964;
+    auto lost = picture ("video/b.png", "NOWHERE");
+
+    const auto plan = walk (withStages ({ still, onScreen, lost }));
+
+    REQUIRE (plan.canvases.size() == 4);
+    CHECK (plan.canvases[0].key == "stage:VIEW-1");
+    CHECK (plan.canvases[0].name == "Stage 1");
+    CHECK (plan.canvases[0].width == 1920);
+    CHECK (plan.canvases[0].outputs == std::vector<std::string> { "Output 1" });
+    CHECK (plan.canvases[1].name == "triptyque");
+    CHECK (plan.canvases[1].width == 5760);
+    CHECK (plan.canvases[1].outputs.size() == 3u);
+    CHECK (plan.canvases[2].key == "screen:Built-in Retina Display");
+    CHECK (plan.canvases[2].width == 3024);
+    CHECK (plan.canvases[2].height == 1964);
+    CHECK (plan.canvases[3].key == "screen:Screen");
+    CHECK (plan.canvases[3].width == 1920);
+
+    const auto& items = top (plan);
+    CHECK (items[0].kind == "video");
+    CHECK (attribute (items[0], "source") == "picture");
+    CHECK (items[0].canvas == "stage:VIEW-T");
+    CHECK (attribute (items[0], "fit") == "stretch");
+    CHECK (items[0].file.relativePath == "video/black.png");
+    CHECK (items[1].canvas == "screen:Built-in Retina Display");
+    CHECK (items[2].canvas == "screen:Screen");
+
+    CHECK (said (plan, "a canvas of 1920 by 1080 called Screen"));
+    CHECK (said (plan, "triptyque's edge blends are not imported"));
+    CHECK (said (plan, "each QLab stage is a canvas"));
+
+    SUBCASE ("QLab 4: a cue on no surface the workspace has is on its default surface")
+    {
+        auto w = workspaceOf ({ picture ("video/c.png", "0") }, 4);
+        w.stages = { { "77", "Surface 1", 1680, 1050, { "Color LCD" }, false, false } };
+        w.defaultStage = "77";
+        const auto four = walk (w);
+        REQUIRE (four.canvases.size() == 1);
+        CHECK (top (four)[0].canvas == "stage:77");
+    }
+}
+
+TEST_CASE ("qlab walk: a picture placed - offsets a % of its canvas, a picture at its own size scaled from it, a turn, opacity, layer; what Go.dot has not got said (§62, ALG)")
+{
+    auto native = picture ("video/tableau.mov", "VIEW-1");
+    native.placement.fullScreen = false;
+    native.placement.scaleX = native.placement.scaleY = 0.81;
+    native.placement.translationX = 10.0;
+    native.placement.translationY = 30.0;
+    native.placement.opacity = 0.0;
+    native.placement.layer = 0.0;
+
+    auto half = native;
+    half.id = "Q-half";
+
+    auto unread = native;
+    unread.id = "Q-unread";
+
+    auto turned = picture ("video/still.png", "VIEW-1");
+    turned.placement.quaternion = aboutTheScreen (30.0);
+    turned.placement.layer = 1000.0;
+    turned.placement.opacity = 0.5;
+    turned.placement.blendMode = 3;
+    turned.placement.originX = 12.0;
+    turned.placement.cropLeft = 4.0;
+    turned.hasEffects = true;
+
+    auto tilted = picture ("video/still.png", "VIEW-1");
+    tilted.placement.quaternion = std::array<double, 4> { 0.2, 0.0, 0.0, 0.98 };
+    tilted.placement.scaleX = 1.0;
+    tilted.placement.scaleY = 0.5;
+
+    WalkOptions options;
+    options.pictureSizes[native.id] = { 1920, 1080 };
+    options.pictureSizes[half.id] = { 960, 540 };
+
+    const auto plan = walk (withStages ({ native, half, unread, turned, tilted }), options);
+    const auto& items = top (plan);
+
+    CHECK (attribute (items[0], "source") == "movie");
+    CHECK (attribute (items[0], "offsetX") == n (10.0 / 1920.0 * 100.0, 4));
+    CHECK (attribute (items[0], "offsetY") == n (30.0 / 1080.0 * 100.0, 4));
+    CHECK (attribute (items[0], "scale") == n (81.0, 4));             // its own size is the canvas's: 0.81 of it
+    CHECK (attribute (items[0], "opacity") == "0");
+    CHECK (attribute (items[0], "layer").empty());
+    CHECK (attribute (items[0], "fit").empty());
+    CHECK (attribute (items[1], "scale") == n (40.5, 4));             // half the canvas, fitted to it twice over
+    CHECK (attribute (items[2], "scale") == n (81.0, 4));
+    CHECK (said (plan, "its own size, which is not known here"));
+
+    CHECK (attribute (items[3], "rotation") == n (-30.0, 3));         // QLab counter-clockwise, Go.dot clockwise
+    CHECK (attribute (items[3], "layer") == "999");
+    CHECK (attribute (items[3], "opacity") == "50");
+    CHECK (said (plan, "QLab's blend mode 3 is drawn normally"));
+    CHECK (said (plan, "QLab moved its origin"));
+    CHECK (said (plan, "QLab cropped it"));
+    CHECK (said (plan, "its video effects are not imported"));
+
+    CHECK (said (plan, "QLab tilted it in depth"));
+    CHECK (said (plan, "% across and 50 % up and down"));
+}
+
+TEST_CASE ("qlab walk: a movie's timing its Ranges, its held last frame and its sound said (§62, ALH)")
+{
+    auto movie = picture ("video/CH1.mov", "VIEW-1");
+    movie.startTime = 2.5;
+    movie.endTime = 30.0;
+    movie.playCount = 3;
+    movie.holdLastFrame = true;
+    movie.rate = 0.5;
+    movie.levels = { { 0, 0, gain (-6.0) } };
+
+    const auto plan = walk (withStages ({ movie }));
+    const auto& item = top (plan)[0];
+    CHECK (attribute (item, "source") == "movie");
+    CHECK (attribute (item, "rate") == "0.5");
+    REQUIRE (item.ranges.size() == 1u);
+    CHECK (item.ranges[0].in == doctest::Approx (2.5));
+    CHECK (item.ranges[0].out == doctest::Approx (30.0));
+    CHECK (item.ranges[0].loops == 3);
+    CHECK (said (plan, "QLab held its last frame"));
+    CHECK (said (plan, "its sound played in QLab, at -6 dB"));
+}
+
+TEST_CASE ("qlab walk: a text cue - its words, braces doubled; its first run's font found here or read from its name, size, colour, alignment, spacing, width, outline (§62, ALI, ALK)")
+{
+    auto title = cue ("Titles", "Score");
+    title.stage = "VIEW-1";
+    title.words = "Score {home}";
+    TextRun run;
+    run.length = 12;
+    run.font = "HelveticaNeue-Bold";
+    run.size = 96.0;
+    run.colour = { 1.0, 0.5, 0.0, 0.5, true };
+    run.alignment = 0;
+    run.lineHeightMultiple = 1.5;
+    run.strokeWidth = -3.0;
+    run.strokeColour = { 0.0, 0.0, 0.0, 1.0, true };
+    title.runs = { run };
+    title.fixedWidth = 960.0;
+    title.lastSeenFontNames = { "Helvetica Neue Bold" };
+
+    auto glow = cue ("Titles", "Glow");
+    glow.stage = "VIEW-1";
+    glow.words = "Act One, Act Two";
+    TextRun arial;
+    arial.length = 7;
+    arial.font = "Arial-BoldMT";
+    arial.size = 48.0;
+    arial.colour = { 1.0, 1.0, 1.0, 1.0, true };
+    arial.alignment = 2;
+    arial.shadow = true;
+    arial.shadowBlur = 6.0;
+    arial.shadowX = 3.0;
+    arial.shadowY = -3.0;
+    arial.background = { 0.0, 0.0, 1.0, 1.0, true };
+    auto red = arial;
+    red.start = 7;
+    red.length = 9;
+    red.colour = { 1.0, 0.0, 0.0, 1.0, true };
+    glow.runs = { arial, red };
+
+    auto four = cue ("Titles", "Four");
+    four.stage = "VIEW-1";
+    four.words = "Fin";
+    TextRun avenir;
+    avenir.length = 3;
+    avenir.font = "Avenir-HeavyOblique";
+    avenir.size = 54.0;
+    four.runs = { avenir };
+
+    WalkOptions options;
+    options.fontOf = [] (const std::string& postScript) -> std::optional<FontFace>
+    {
+        if (postScript == "Arial-BoldMT")
+            return FontFace { "Arial", true, false };
+        return std::nullopt;
+    };
+
+    const auto plan = walk (withStages ({ title, glow, four }), options);
+    const auto& items = top (plan);
+
+    const auto& t = items[0];
+    CHECK (t.kind == "video");
+    CHECK (t.canvas == "stage:VIEW-1");
+    CHECK (attribute (t, "source") == "text");
+    CHECK (attribute (t, "words") == "Score {{home}}");
+    CHECK (attribute (t, "font") == "Helvetica Neue");
+    CHECK (attribute (t, "bold") == "true");
+    CHECK (attribute (t, "italic").empty());
+    CHECK (attribute (t, "fontSize") == n (96.0 / 1080.0 * 100.0, 4));
+    CHECK (attribute (t, "paint") == "#FF8000");
+    CHECK (attribute (t, "opacity") == "50");                         // its colour's alpha
+    CHECK (attribute (t, "align") == "left");
+    CHECK (attribute (t, "lineSpacing") == "150");
+    CHECK (attribute (t, "wrap") == "50");
+    CHECK (attribute (t, "outline") == n (3.0 / 100.0 * 96.0 / 2.0, 2));
+    CHECK (attribute (t, "outlineColour") == "#000000");
+    CHECK (said (plan, "its font HelveticaNeue-Bold is not installed on this machine"));
+
+    const auto& g = items[1];
+    CHECK (attribute (g, "font") == "Arial");
+    CHECK (attribute (g, "bold") == "true");
+    CHECK (attribute (g, "align").empty());                           // centre, Go.dot's own
+    CHECK (attribute (g, "wrap") == "0");                             // no fixed width: no box
+    CHECK (attribute (g, "outline") == "1");
+    CHECK (attribute (g, "outlineBlur") == "6");
+    CHECK (said (plan, "its offset of 3, -3 points is not imported"));
+    CHECK (said (plan, "its background colour is not imported"));
+    CHECK (said (plan, "the first run's look is used for all of them"));
+
+    const auto& f = items[2];
+    CHECK (attribute (f, "font") == "Avenir");
+    CHECK (attribute (f, "bold") == "true");
+    CHECK (attribute (f, "italic") == "true");
+    CHECK (attribute (f, "paint") == "#000000");
+
+    REQUIRE (plan.fonts.size() == 3u);
+    CHECK (plan.fonts[0].postScript == "HelveticaNeue-Bold");
+    CHECK (plan.fonts[0].family == "Helvetica Neue");
+    CHECK (plan.fonts[0].where == "missing");
+    CHECK (plan.fonts[1].family == "Arial");
+    CHECK (plan.fonts[1].where == "installed");
+    CHECK (plan.fonts[2].family == "Avenir");
+}
+
+TEST_CASE ("qlab walk: a fade of a picture - its opacity, a move, a scale from its own size, a turn; a relative move added; one that moves nothing a memo (§62, ALJ)")
+{
+    auto movie = picture ("video/CH2.mov", "VIEW-1");
+    movie.placement.fullScreen = false;
+    movie.placement.scaleX = movie.placement.scaleY = 0.81;
+    movie.placement.translationX = 10.0;
+    movie.placement.translationY = 30.0;
+    movie.placement.opacity = 0.0;
+
+    auto in = cue ("Fade");
+    in.target = movie.id;
+    in.duration = 4.0;
+    in.fadesOpacity = true;
+    in.fadesTranslation = true;
+    in.fadesScale = true;
+    in.fadesRotation = true;
+    in.placement.opacity = 1.0;
+    in.placement.translationX = 96.0;
+    in.placement.translationY = -54.0;
+    in.placement.scaleX = 0.5;
+    in.placement.quaternion = aboutTheScreen (90.0);
+    in.shape.type = 3;
+    in.stopTargetWhenDone = true;
+
+    auto nudge = cue ("Fade");
+    nudge.target = movie.id;
+    nudge.fadesTranslation = true;
+    nudge.geoMode = 1;
+    nudge.placement.translationX = 86.0;
+    nudge.placement.translationY = 24.0;
+    nudge.fadeLevels = { { 0, 0, 1.0, gain (-20.0) } };
+
+    auto effects = cue ("Fade");
+    effects.target = movie.id;
+    effects.fadesEffects = true;
+
+    WalkOptions options;
+    options.pictureSizes[movie.id] = { 1920, 1080 };
+
+    const auto plan = walk (withStages ({ movie, in, nudge, effects }), options);
+    const auto& items = top (plan);
+
+    CHECK (items[1].kind == "fade");
+    CHECK (items[1].target == "cue:" + movie.id);
+    CHECK (attribute (items[1], "video") == "offsetX:" + n (5.0, 4) + " offsetY:" + n (-5.0, 4) + " opacity:100 rotation:"
+                                             + n (-90.0, 3) + " scale:50");
+    CHECK (attribute (items[1], "stopWhenDone") == "true");
+    CHECK (attribute (items[1], "curve").empty());                     // linear
+    CHECK (attribute (items[1], "duration") == "4");
+
+    //  Relative: added to where the movie was put, 10 and 30.
+    CHECK (attribute (items[2], "video") == "offsetX:" + n (5.0, 4) + " offsetY:" + n (5.0, 4));
+    CHECK (attribute (items[2], "curve") == "sCurve");
+    CHECK (said (plan, "a relative move in QLab"));
+    CHECK (said (plan, "it fades the movie's sound too"));
+
+    CHECK (items[3].kind == "memo");
+    CHECK (said (plan, "it moves nothing a Go.dot fade of a picture moves"));
 }

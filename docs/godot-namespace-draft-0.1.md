@@ -28323,7 +28323,11 @@ Mine, the author's to overrule:
   a picture's extension makes a picture cue, anything else a movie cue. Its rate, start and end, slices
   and play counts are Ranges, as a sound's are (ZT). Holding the last frame is reported, since a Go.dot
   movie ends with its last pass. A movie whose sound QLab plays - its main above the workspace's
-  minimum - gets its locked sound cue (WN), its levels routed as a sound cue's are (ZU).
+  minimum - gets its locked sound cue (WN), its levels routed as a sound cue's are (ZU). *Amended
+  2026-10-13 at QF.8 (proposed):* the import makes no locked sound itself. A movie Go.dot cannot play as
+  it is - H.264 or ProRes, QLab's usual - is a preview until converted to HAP (WF), and the conversion
+  rewrites the cue and makes its locked sound (WH); a second path would make two. The report names each
+  movie whose sound QLab played, at what level, to be set on that sound once converted.
 - **ALI** (mine) **Text cues.** The words are the plain string, `{` and `}` doubled, since a Go.dot text
   reads `{name}` as a field (§61, AKM). The font is the family behind QLab's PostScript name: one the show
   carries, then one installed here, then the name QLab last saw split into family and style; bold and
@@ -28521,3 +28525,31 @@ close (§60), which keeps the shared checkout.
   a triptych; a QLab 5 workspace drawing on a screen and a turn unread; and, with WFG_QLAB_CORPUS, every
   picture cue of the author's shows on a stage they have. Two deliberate breakages - the run lengths
   read high byte first, a stage named by its own id - each turned their cases red.
+- **QF.8**, 2026-10-13: the walk (ALF-ALK). Every QLab stage a canvas of its name and size, its outputs
+  video outputs with no display chosen - a display never chosen draws nothing (`findDisplay`), so an
+  imported rig opens no window - QLab 4's default surface for a cue naming none it has, and a canvas per
+  screen for QLab 5 drawing on one directly, of the size it last saw; stages' edge blends and masks
+  said. A video cue a picture or, by its file's extension, a movie, its rate and Ranges as a sound's
+  (ZT), a held last frame said, its sound's level said for the sound its conversion makes (ALH as
+  amended). Placement (ALG): QLab's pixels a % of the canvas; a picture QLab drew at its own size scaled
+  from its own size over what fits the canvas, known from the file (QF.9) or said; one filling its stage
+  by its fill style; unequal scales, a tilt, an origin, a crop, effects and an unknown blend said; layer
+  999 at most. A text cue (ALI): its words with braces doubled, its first run's font - the family this
+  machine has under QLab's PostScript name, through a lookup the importer gives the walk, or one read
+  from the name QLab last saw or the PostScript name itself ("Avenir-HeavyOblique": Avenir, bold,
+  italic) - its size over the canvas's height, colour and its alpha in the opacity, alignment (Cocoa's 0
+  left, 1 right, 2 centre, provisional), line height, fixed width as `wrap` or nought, a stroke as the
+  outline - half its width, Cocoa stroking both ways - a shadow as a glow; a background, underline,
+  kerning and changes of style said; each font once in the plan for the report (ALK). A fade of either
+  (ALJ): its `video` pairs from QLab's switches, sorted - opacity, offsets, a scale converted as its
+  target's, a turn from its quaternion - a relative move added to the target's own values, a fade of
+  effects or of the movie's sound said, one moving nothing a memo. Provisional until the probe, in the
+  code as here: Y up and turns counter-clockwise in QLab, fill styles 0 fit 1 fill 2 stretch, a point a
+  stage pixel, geometry mode 1 relative. A camera cue stays a memo (AKT). Tests under C and fr_FR
+  (QlabWalkTests): canvases and screens, QLab 4's default surface; placement - a movie at its own size
+  and at half of it, a size unknown, a turn, a tilt, unequal scales, layer, opacity and what is said; a
+  movie's Ranges, last frame and sound; three text cues - a missing font, an installed one, one read from
+  its PostScript name - with braces, colour and alpha, stroke, shadow and runs; fades absolute and
+  relative, one moving nothing; the ZX case now a camera's memo. 28 QLab cases. Four deliberate
+  breakages - the turn's sign, the own-size factor, the braces, the relative move - each turned their
+  cases red.

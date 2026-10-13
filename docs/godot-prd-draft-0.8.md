@@ -4221,7 +4221,7 @@ namespace draft §62). The implementer's calls from AKX in §62.2 are the author
 - **QLab, mapped**: a stage is a canvas of its size, its outputs waiting for their projector; placement
   turned into a % of the canvas, an off-centre origin folded into the offsets, a tilt, a crop, an effect
   and an unknown blend reported; a picture at its own size given the `scale` that draws it so; a movie's
-  sound its locked sound cue; a text's font found carried, then installed, then by the name QLab saw;
+  sound the locked sound its conversion to HAP makes, QLab's level for it reported; a text's font found carried, then installed, then by the name QLab saw;
   its stroke the outline; relative fades added to the target's imported values; every font listed in
   the report, none copied.
 

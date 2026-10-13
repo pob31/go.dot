@@ -43,6 +43,12 @@
       their Go.dot verbs; any kind with no equivalent a memo in its place,
       named `[QLab] ...`, the original in its notes - one GO stays one GO.
 
+    - PICTURES AND WORDS (namespace draft §62, ALF-ALK): each QLab stage (a
+      surface in QLab 4, or a screen drawn on directly) a canvas of its size,
+      its outputs video outputs with no display chosen; a video cue a picture
+      or a movie, a text cue a text cue, placed as QLab placed them; a fade of
+      either a fade of the picture. A camera cue stays a memo (AKT).
+
     Nothing is approximated silently: every choice that changes what plays is a
     `Note` for the report (ZZ).
 */
@@ -50,7 +56,9 @@
 #include <wfg/engine/import/ImportCommon.h>
 #include <wfg/engine/import/QlabReader.h>
 
+#include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -102,6 +110,39 @@ namespace wfg::import::qlab
         std::vector<std::pair<double, double>> points;     ///< seconds and the value itself
     };
 
+    /*  A CANVAS for one QLab stage, surface or screen (§62, ALF): `key`
+        "stage:<id>" or "screen:<name>", its size in pixels, the outputs it was
+        drawn to - each a video output with no display chosen, which draws
+        nothing until somebody picks one here. */
+    struct Canvas
+    {
+        std::string key;
+        std::string name;
+        int width = 1920;
+        int height = 1080;
+        std::vector<std::string> outputs;
+    };
+
+    /*  A FONT A TEXT CUE NAMES (§62, ALK): QLab's PostScript name, the family
+        it was taken to be, and where that family is - "installed" on this
+        machine, or "missing", its family read from the name QLab last saw. */
+    struct FontUse
+    {
+        std::string postScript;
+        std::string family;
+        std::string where;
+    };
+
+    /*  WHAT A POSTSCRIPT NAME IS ON THIS MACHINE: its family, bold, italic -
+        the importer's lookup (InstalledFonts.h), given to the walk so that it
+        asks no system itself. */
+    struct FontFace
+    {
+        std::string family;
+        bool bold = false;
+        bool italic = false;
+    };
+
     /*  ONE CUE OF THE PLAN. `kind` is what `ShowDocument::createCue` takes:
         "group", "media", "mic", "fade", "osc", "start", "transport", "memo".
         `attributes` are its rows as the document spells them; `target` names
@@ -124,6 +165,9 @@ namespace wfg::import::qlab
         //  An OSC cue's curves.
         std::vector<Curve> curves;
 
+        //  A picture, a movie or a text (§62): the canvas it is on, a `Canvas::key`.
+        std::string canvas;
+
         std::vector<Item> children;
     };
 
@@ -139,6 +183,8 @@ namespace wfg::import::qlab
         std::vector<List> lists;
         std::vector<Bus> buses;
         std::vector<Device> devices;
+        std::vector<Canvas> canvases;
+        std::vector<FontUse> fonts;
         std::vector<Note> notes;
 
         int cues = 0;               ///< QLab cues walked, lists not counted
@@ -155,6 +201,15 @@ namespace wfg::import::qlab
             row for every input it might have. A sound missing here gets no
             route. */
         std::map<std::string, int> channels;
+
+        /*  EACH PICTURE'S AND MOVIE'S OWN SIZE IN PIXELS, by QLab cue UUID, where
+            its file was found and read: what a cue QLab drew at its own size is
+            scaled from (§62, ALG). */
+        std::map<std::string, std::pair<int, int>> pictureSizes;
+
+        /*  A POSTSCRIPT NAME TURNED INTO A FAMILY, as this machine has it; none
+            when it is not installed. Without one, every font is "missing". */
+        std::function<std::optional<FontFace> (const std::string& postScript)> fontOf;
     };
 
     Plan walk (const Workspace&, const WalkOptions& = {});
