@@ -56,6 +56,9 @@
       - the run-name salt and counts (RD.2's `Position`), less what the
         horizon made, so the follower's own horizon names what it makes as the
         leader's did (AGE);
+      - each incoming code's map, as the leader's `code.heard` records left
+        it (namespace draft §60, TG.5; AIP), so a follower seated while a
+        code runs is locked to it at once;
       - the stream's counter and the tick it is true at.
 
     THE LOG'S OWN ATOM GRAMMAR, ONE LINE A THING. Not JSON: a position carries
@@ -71,13 +74,21 @@
     leader writes its ticks, and the follower moves them by the offset its
     records are applied at (AGF's slot, RD.6) before it submits the seat - so
     the record it logs speaks this machine's ticks, and a replay of it needs
-    nothing else.
+    nothing else. And every SAMPLE with them - a code map's anchor (TG.5) -
+    through `sampleOnThisClock`, the one place a leader's sample is read on a
+    follower's clock.
+
+    A NEW THING IS A NEW WORD, never a new atom on a line an older build
+    writes (TG.5's `code`), and a word this build does not know is refused in
+    a sentence; a change of what a line means is a new `format`, refused
+    whole across builds.
 */
 
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/GroupJob.h>
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/RunNames.h>
+#include <wfg/engine/timecode/CodeMap.h>
 
 #include <cstdint>
 #include <map>
@@ -88,6 +99,17 @@
 
 namespace wfg::pair
 {
+    /*  A LEADER'S SAMPLE ON THIS MACHINE'S CLOCK (namespace draft §60, AIP):
+        the sample moved by the ticks the follower applies the leader's records
+        behind - the same offset `Position::rebase` moves a tick by - at the
+        map's own rate. The record clock RD.8 seats sounds on: a code map the
+        leader heard lands here as far behind as every record of the leader's
+        does, so a chaser on the follower sits that far late until RD.9's
+        `ClockMap` maps the two sound clocks properly. THE ONE FUNCTION RD.9
+        swaps: the follower's `code.heard` (pair/Follow.cpp) and a position's
+        code maps both come through here. */
+    std::int64_t sampleOnThisClock (std::int64_t leaderSample, std::int64_t byTicks, int sampleRate) noexcept;
+
     /*  ONE RUN, as the leader holds it. Every tick is absolute, on the clock of
         the machine the position is in; `position` and `slicePlayed` are the
         readouts at the position's tick. */
@@ -152,8 +174,10 @@ namespace wfg::pair
     struct Position
     {
         /*  THE TEXT'S OWN FORMAT: a position from a build that writes another is
-            refused, not half read. */
-        static constexpr int format = 1;
+            refused, not half read. 2 since TG.5, whose `code` lines a format-1
+            reader would refuse as a word it does not know - so the refusal is
+            said for what it is, the two builds' formats. */
+        static constexpr int format = 2;
 
         std::uint64_t counter = 0;          // the last of the leader's stream applied by then
         std::int64_t tick = 0;              // the tick it is true at, after that tick ran
@@ -206,7 +230,12 @@ namespace wfg::pair
 
         cue::RunNames::Position names;
 
-        /** Every tick in it moved by `by`: the leader's clock read as this machine's. */
+        /*  EACH INCOMING CODE'S MAP (namespace draft §60, TG.5), by its source
+            - `ltc:<input>`, `mtc:<port>`, `clock` - as the Runner holds it:
+            one top-level `code` line each, beside the trims. */
+        std::map<std::string, timecode::CodeMap> codes;
+
+        /** Every tick in it moved by `by`, and every sample with it: the leader's clock read as this machine's. */
         void rebase (std::int64_t by);
 
         const SeatedRun* runNamed (const std::string& id) const;

@@ -97,6 +97,8 @@ add_executable(wfg_tests
     LtcReader.h
     TimecodeRunTests.cpp
     TimeGroupTests.cpp
+    CodeMapTests.cpp
+    CodeWatchTests.cpp
     SerialTests.cpp
     WireTests.cpp
     TrafficTapTests.cpp

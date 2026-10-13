@@ -116,6 +116,7 @@ namespace wfg::midi
 
         current = settingNow;
         reading.forget();
+        lastHeardNanos = 0;
     }
 
     void MtcInput::feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate) noexcept
@@ -137,6 +138,7 @@ namespace wfg::midi
             }
 
             ++readSoFar;
+            lastHeardNanos = std::max (lastHeardNanos, entry.arrivalNanos);
             reading.read (entry.bytes.data(), entry.size, entry.arrivalNanos, heard);
         }
     }

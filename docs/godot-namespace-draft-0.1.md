@@ -26747,7 +26747,7 @@ Mine, the author's to overrule:
 
 | Command | Arguments | Does |
 |---|---|---|
-| `code.heard` | `s:source s:what s:rate h:frame h:sample d:speed [s:run]...` | the engine's, origin `ltc:<input>`, `mtc:<port>` or `clock`: a code `jumped` (appeared, came back, located), `running` (re-anchored) or `stopped`, at this frame on this sample at this speed; on `jumped`, the chasers re-seated, the runs it drew handed back |
+| `code.heard` | `s:source s:what s:rate h:frame h:sample d:speed [s:run]...` | the engine's, origin `ltc:<input>`, `mtc:<port>` or `clock`, the same as `source`: a code `jumped` (appeared, came back, located), `running` (re-anchored) or `stopped`, at this frame of the day (counted at `rate`, `sync/frameRate`'s words, or `ms` for the wall clock's millisecond) falling on this Go.dot sample - the sample it is HEARD on, latency taken off (AIQ), this machine's on a backup (AIP) - at this speed (code seconds per Go.dot second); refused `bad-value` for a source, turn, rate or frame that is not one; on `jumped`, the chasers re-seated, the runs it drew handed back (TG.8) |
 
 ### 60.5 Refused
 
@@ -27115,3 +27115,115 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   rule refuses a first piece that is not 0 or 7 as well, so the breakage needed both, and with both
   it turned red; and the label's range check taken out - it was redundant with `normalise`, so the
   judge is `normalise` alone now, and the noise gained the labels only it refuses.
+- **TG.5**, 2026-10-13: the code map, the watchers, `code.heard`, the gate by name, the maps in the
+  position (AII, AIL, AIO, AIP, AIQ, AIR). **The map**, `timecode::CodeMap` (`timecode/CodeMap.h`, pure,
+  header-only): an anchor - a whole frame of the day and the Go.dot sample it falls on, the first at or
+  after its moment - a speed (code seconds per Go.dot second, negative backwards, nought standing), a
+  state (`absent`, `running`, `stopped`) and a unit. `positionAt (sample)` gives the frame and its
+  fraction, `sampleOf (frame)` the sample, each the other's inverse to the sample: at a speed of exactly
+  one (read by its bits) FrameClock's rule itself in whole numbers, at any other in doubles mended a
+  sample either way by `positionAt`. The day wraps, a frame is taken the nearer way round from the anchor
+  (half a day or more off is the past), and backwards a frame is reached from above, at its start, as LTC
+  read backwards places one. THE UNIT IS GENERIC: a timecode rate's fraction, its frames a day and its
+  labels - or the wall clock's millisecond of the day, the word `ms`, 1000/1 and 86 400 000 a day, which
+  TG.6 uses (the implementer's call the brief left). `readoutOf` says what the show publishes of a map.
+  **The watcher**, `timecode::CodeWatch` (`timecode/CodeWatch.{h,cpp}`), one a source, the tick thread's
+  and pure: fed LTC frames (a `lost` entry says nothing, a new generation forgets the line), MTC
+  observations, and the sample any piece last arrived on (`heardAt`, from `MtcInput::lastHeardSample`
+  through `MtcReader::sampleAt`, now public) - so a code whose cycles are still being put together is not
+  taken for silence; a least-squares line of frame against sample through what it believes of the last
+  second, its jitter the residual. THE RULES AS BUILT. A frame more than two frames off the line
+  (`locateFrames`) waits as a candidate, and is believed only when a second frame agrees with it - further
+  on by a speed between a quarter and four times nominal, the same way as the step before, a whole frame
+  from the first - when the code `jumped` (appeared, came back after a stop, located); a frame back on the
+  line forgets the candidate, and two candidates that disagree start the wait again. `stopped` when
+  nothing has been heard for four frames beyond the next one due - LTC's next frame ends a frame after the
+  last one's end, MTC's next piece a quarter frame after the last - plus a grace for how late a code
+  reaches the tick (serve gives a tick and a block), frames at the speed the code ran at. `running` when
+  the line, at its newest point, is more than 0.5 ms (LTC) or 1 ms (MTC) of code from the line last
+  written, when the rate it is read at becomes clearer, or when the latency changes. THE SPEED WRITTEN is
+  the last second's, or - when the two agree within three times their errors - that weighed by inverse
+  variance with the speed the drift since the last write shows, measured from where the line put the
+  anchor before its sample was rounded up; a locate keeps the speed the code ran at when its two new
+  frames cannot tell it from that; and a speed within a part per million of one, or three times its own
+  error, whichever is more, is written as exactly one - assuming 0.05 sample of jitter for two LTC frames
+  and 0.5 ms for MTC's first pieces, and never less than 0.005 sample or 0.05 ms. THE RATE (AIL): frames
+  are numbered at the rate the labels count by - MTC's rate code; LTC's drop flag, the largest frame
+  number beside a second's wrap, and until a wrap the show's rate when its labels allow every frame heard,
+  else the least nominal that does - and a counting that turns out otherwise is read again from the next
+  two frames, a `jumped`; the map's rate is `detectRate` on the frames' measured period once the speed is
+  known to 100 ppm (23.976 from 24, 29.97 from 30), a rate written kept while the frames run within 600 ppm
+  of it, else the show's when it counts alike, else the counting's own. LATENCY (AIQ): a record's sample is
+  the one HEARD - LTC's less `audio/inputLatency` and `audio/outputLatency`, MTC's less the output's -
+  while the watcher's own line stays on the samples it heard. Each watcher keeps its own copy of what it
+  last wrote; `resay` says, for a takeover, `jumped` with its own line, `stopped` where it stopped, and
+  nothing of a code never heard.
+  **`code.heard`** (60.4), registered beside `trigger.fire`: `readCodeHeard` refuses `bad-value` a source
+  that is not `ltc:<id>`, `mtc:<id>` or `clock`, a turn or a rate that is not one, `ms` on a timecode
+  source or a rate on the clock, a frame outside the day, a speed that is not a number; the handler keeps
+  the map (`Runner::noteCodeHeard`, `codeMapOf`, `codeMaps`), its sample rate the Runner's, and seats
+  nothing - the run names after the sixth argument are TG.8's. `Runner::codeReadout` reads
+  `sync/{ltc,mtc}In{State,Code,Rate,Speed}` from a source's map at a sample: `none` for no source,
+  `absent` for one never heard, a running code's label now, a stopped one's where it stopped.
+  **Serve**: the sources read once a show revision beside MTC's port - `ltc:` and the input `sync/ltcIn`
+  names when it is an `<Input>`, `mtc:` and the port - a source changed forgetting its watcher, the show's
+  rate handed to both; every tick in the before-tick hook, after the MTC drain, the audio side's LTC frames
+  taken (`takeHeardLtc`), both watchers fed and given the sample rate, the grace and the latencies from the
+  audio side's logged settings, and each turn submitted as `code.heard` from the source's own origin,
+  where the clock triggers are; the readouts copied into `EngineState::ltcIn` and `mtcIn` after the tick
+  for a named source only, and published in the `sync` loop. A show naming no source pays an empty take of
+  the LTC outbox and two string tests; PublishCostTests unchanged.
+  **The gate** (AGD): `pair::gateFor` names `ltc:`, `mtc:` and `clock` and ignores them while following,
+  ahead of the clients' check - ignored only as unknown until now.
+  **The backup** (AIP): it keeps decoding and watching, its own turns taken by the gate; the main's
+  `code.heard`, `main:ltc:...`, has its sample moved by the FOLLOWER at its slot (`Follower::setSampleRate`;
+  the slot offset in ticks through `pair::sampleOnThisClock`, the one function RD.9's ClockMap replaces),
+  in the record kept to compare as well as in the event - so the record the backup logs holds its own
+  sample, compares equal to the main's (nothing in `pair/differs`), and a replay of it never maps. A
+  machine whose gate opens - a follower taking over - re-says its watchers' state on its next tick, so a
+  takeover finds the codes locked.
+  **The position** (RD.8): `Position::format` 2; a new top-level word, `code s:source s:state s:rate
+  h:frame h:sample d:speed i:sampleRate`, one a map, after the `dca` lines; `rebase` moves its sample with
+  the ticks through `sampleOnThisClock`, at the line's own sample rate; `positionNow` carries the maps and
+  `seatAt` replaces this machine's with the leader's; a format-1 text is refused "a position of format 1;
+  this build reads 2", and a word no position says is refused as before. The reader's `lastRun()` is
+  there for TG.7's `crossed` line.
+  Where this stage departs from its brief. The main's sample is moved by the follower before it submits,
+  not by the handler: the brief's own conditions hold - the applied record holds this machine's sample, a
+  replay never maps, one function to swap - and the follower's comparison of what it applied with what the
+  main applied needs the same mapping, which in the handler would have counted every `code.heard` as
+  applied otherwise. The `code` line carries `i:sampleRate`, beyond the brief's example, so `rebase` moves
+  a sample without knowing the follower's rate. MTC's liveness comes from any piece arriving and not only
+  from the whole cycles' observations: a three-frame dropout can break two cycles, which would read as a
+  stop.
+  Tests under C and fr_FR: `CodeMapTests` (new, six cases: FrameClock's rule to the sample at all six
+  rates at 44.1, 48 and 96 kHz, hours either side of the anchor, any sample's frame and fraction; the
+  inverse at speeds from 0.5 to 1.5; 0.999 and -1 worked by hand; midnight both ways and drop-frame; a
+  stopped and an absent map; the readouts and the units), `CodeWatchTests` (new, ten cases: a lock with
+  one `jumped` at all six rates, each frame on its own sample; an hour at +50 ppm - one `running`, the map
+  at worst 0.46 ms from the code, the speed learnt to 0.2 ppm; ten minutes of MTC at +50 ppm with ±0.5 ms
+  of jitter - three `running`, at worst 0.94 ms, the jitter measured 0.28 ms; a three-frame dropout
+  invisible, a twelve-frame one `stopped` on the last frame heard and `jumped` back on the second frame;
+  one corrupt frame and two that disagree never locating, a locate said on its second frame; backwards;
+  half speed; the latency shift and a latency changed; 29.97 told from 30 and 23.976 from 24 with the show
+  at 25, and MTC's 29.97 through jitter; the re-say; and `code.heard` through the engine - the maps, the
+  readouts, seven refusals, a replay reaching the same maps), `FollowTests` (the table's rows, the gate in
+  front of an engine, and a main's `code.heard` moved by the offset - 28 900 + 501 × 960 - compared equal,
+  a replay of the backup's log reaching the same map), `SeatTests` (the `code` line read back to the bit,
+  moved by `rebase`, format 1 refused in its sentence, an unknown word and a line that does not read
+  refused, a seat handing the maps over in place of the follower's own), `TreeTests` (the readouts as
+  serve copies them). Whole in both locales: those five, `TimeGroupTests`, `TimecodeRunTests`,
+  `LeadershipTests`, `MachineScopeTests`, `PublishCostTests`, `PeerLinkTests`, `MidiTests`' "mtc in";
+  `wfg.replay.*`, `wfg.commands`, `client.boundary`, `source.comments`. Eleven deliberate breakages, each
+  turning its own cases red: a locate on one frame; the follower not moving the sample; the readouts not
+  copied; a stop after one frame (the dropout case, and the MTC case, whose cycles come two frames
+  apart); `rebase` not moving a map; the latency not taken off; a seat keeping the follower's own maps;
+  every speed written as one (360 `running` in the hour, and the MTC, half-speed and rate cases); a
+  format-1 text read; no detection by period; the handler keeping nothing. The gate naming the code
+  origins cannot be broken visibly: they were ignored as unknown before.
+  Found and left: a `code.heard` from a device's origin opens an undo transaction, as `trigger.fire` from
+  `clock` and `mount.heard` do, so one landing during a drag ends that drag's step - alike on both
+  machines; a backup whose watcher never heard the code says nothing at a takeover, and its map stays the
+  main's last word; a replay with no `audio.settingsReady` record keeps maps whose sample rate is nought,
+  the Runner's then - only the readouts and TG.7 to TG.9 read it; nothing acts on the maps yet (TG.7
+  fires, TG.8 and TG.9 chase).

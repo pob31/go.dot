@@ -30,7 +30,10 @@
     tick for two hundred ticks, in step by the summaries - and a run stopped on
     it by hand puts it out of step, said in a sentence, until a realign seats
     it again; the summary's wire and its sentences; a position of two hundred
-    runs in parts and whole again; what it all costs.
+    runs in parts and whole again; what it all costs. And (namespace draft
+    §60, TG.5) each incoming code's map as a `code` line of its own, moved
+    with the ticks, the format bumped and an older one refused in a sentence,
+    and handed over by a seat.
 
     Every case runs under fr_FR as well as C: a position's numbers are text.
 */
@@ -411,9 +414,10 @@ TEST_CASE ("seat: a position reads back as it was written - lists, runs, rounds,
 
     //  REFUSED, never half read: a text cut short, a format this build does not write, a line that is not one.
     CHECK_FALSE (pair::readPosition (text.substr (0, text.size() / 2)).has_value());
-    CHECK_FALSE (pair::readPosition ("position i:2 h:1 h:1\nend\n").has_value());
-    CHECK_FALSE (pair::readPosition ("position i:1 h:1 h:1\nrun s:\"A\"\nend\n").has_value());
-    CHECK (pair::readPosition ("position i:1 h:1 h:1\nend\n").has_value());
+    const auto format = std::to_string (pair::Position::format);
+    CHECK_FALSE (pair::readPosition ("position i:" + std::to_string (pair::Position::format + 1) + " h:1 h:1\nend\n").has_value());
+    CHECK_FALSE (pair::readPosition ("position i:" + format + " h:1 h:1\nrun s:\"A\"\nend\n").has_value());
+    CHECK (pair::readPosition ("position i:" + format + " h:1 h:1\nend\n").has_value());
 }
 
 //==============================================================================
@@ -1078,7 +1082,7 @@ TEST_CASE ("seat: the leader's position asked for - by a follow from now, by a r
     stream.setPositionMaker ([&made] (std::int64_t tick, std::uint64_t counter)
                              {
                                  ++made;
-                                 return "position i:1 h:" + std::to_string (counter) + " h:" + std::to_string (tick) + "\nend\n";
+                                 return "position i:" + std::to_string (pair::Position::format) + " h:" + std::to_string (counter) + " h:" + std::to_string (tick) + "\nend\n";
                              });
 
     std::vector<osc::Packet> frames;
@@ -1356,4 +1360,109 @@ TEST_CASE ("seat: a follower seated while the leader's timecode runs starts its 
     REQUIRE (run != nullptr);
     CHECK (run->state == cue::runState::playing);
     CHECK (run->timecode == leader.runs.find (runId)->timecode);
+}
+
+//==============================================================================
+/*  AN INCOMING CODE'S MAP IN THE POSITION (namespace draft §60, TG.5; AIP): a
+    top-level line of its own, `code`, beside the trims - a new word, never an
+    atom on an old line - read back exactly in any locale, its anchor's sample
+    moved with the ticks by `rebase`, a position of the format before TG.5
+    refused in a sentence; and a seat hands the leader's maps over in place of
+    the follower's own. */
+TEST_CASE ("seat: each incoming code's map rides the position as a code line - read back exactly, its sample moved with the ticks, another format refused in a sentence, and a seat hands it over")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const Show show;
+    Machine leader { show.text }, follower { show.text };
+
+    const auto heard = [] (const std::string& source, const char* what, const char* rate, std::int64_t frame,
+                           std::int64_t sample, double speed)
+    {
+        return std::vector<osc::Value> { s (source), s (what), s (rate), osc::Value::int64 (frame),
+                                         osc::Value::int64 (sample), osc::Value::float64 (speed) };
+    };
+
+    //  THE LEADER HEARD TWO CODES: LTC at 29.97 drop-frame a little fast, MTC standing.
+    REQUIRE (leader.engine.submit ("ltc:IN000001", "code.heard",
+                                   heard ("ltc:IN000001", "jumped", "29.97df", 107'892, 4'800'123, 1.00005)));
+    REQUIRE (leader.engine.submit ("mtc:P0000001", "code.heard",
+                                   heard ("mtc:P0000001", "stopped", "25", 90'000, 2'400'000, 0.0)));
+    leader.tickOnce (100);
+    REQUIRE (leader.runner.codeMaps().size() == 2u);
+
+    const auto at = leader.runner.positionNow (100, 3);
+    CHECK (at.codes == leader.runner.codeMaps());
+
+    const auto text = pair::toText (at);
+    INFO (text);
+
+    //  One line a map, its unit in `code.heard`'s words, a point and never a comma.
+    CHECK (text.find ("\ncode s:\"ltc:IN000001\" s:\"running\" s:\"29.97df\" h:107892 h:4800123 d:1.00005 i:48000\n")
+             != std::string::npos);
+    CHECK (text.find ("\ncode s:\"mtc:P0000001\" s:\"stopped\" s:\"25\" h:90000 h:2400000 d:") != std::string::npos);
+    CHECK (text.find ("d:1,00005") == std::string::npos);
+
+    //  READ BACK EXACTLY: the same maps, the speed to the bit.
+    std::string why;
+    const auto read = pair::readPosition (text, &why);
+    INFO (why);
+    REQUIRE (read.has_value());
+    CHECK (read->codes == at.codes);
+    CHECK (pair::toText (*read) == text);
+
+    //  MOVED WITH THE TICKS: a thousand ticks are 960 000 samples at 48 kHz; nothing else of a map moves.
+    {
+        auto moved = *read;
+        moved.rebase (1000);
+        const auto& ltc = moved.codes.at ("ltc:IN000001");
+        CHECK (ltc.sample == 4'800'123 + 960'000);
+        CHECK (ltc.frame == 107'892);
+        CHECK (std::bit_cast<std::uint64_t> (ltc.speed) == std::bit_cast<std::uint64_t> (1.00005));
+        CHECK (moved.codes.at ("mtc:P0000001").sample == 2'400'000 + 960'000);
+        CHECK (pair::sampleOnThisClock (2'400'000, -3, 44100) == 2'400'000 - 3 * 882);
+    }
+
+    /*  ANOTHER BUILD'S FORMAT, REFUSED WHOLE AND SAID: the format before TG.5
+        read no `code` line, and this build reads no position without one's
+        format. A word no position says, and a code line that does not read,
+        refused too. */
+    {
+        auto older = text;
+        const auto formatAtom = "position i:" + std::to_string (pair::Position::format) + " ";
+        REQUIRE (older.rfind (formatAtom, 0) == 0);
+        older.replace (0, formatAtom.size(), "position i:1 ");
+
+        std::string refused;
+        CHECK_FALSE (pair::readPosition (older, &refused).has_value());
+        CHECK (refused == "a position of format 1; this build reads " + std::to_string (pair::Position::format));
+
+        const auto head = "position i:" + std::to_string (pair::Position::format) + " h:1 h:1\n";
+        CHECK_FALSE (pair::readPosition (head + "unheard s:\"A\"\nend\n", &refused).has_value());
+        CHECK (refused.find ("which no position says") != std::string::npos);
+
+        CHECK_FALSE (pair::readPosition (head + "code s:\"ltc:IN000001\" s:\"paused\" s:\"25\" h:1 h:1 d:1 i:48000\nend\n").has_value());
+        CHECK_FALSE (pair::readPosition (head + "code s:\"ltc:IN000001\" s:\"running\" s:\"25\" h:2160000 h:1 d:1 i:48000\nend\n").has_value());
+        CHECK (pair::readPosition (head + "code s:\"ltc:IN000001\" s:\"running\" s:\"25\" h:1 h:1 d:1 i:48000\nend\n").has_value());
+    }
+
+    /*  A SEAT HANDS THE MAPS OVER: the follower had a map of its own for the
+        LTC - its own watcher's, before it followed - and is left with the
+        leader's, on its own clock. */
+    REQUIRE (follower.engine.submit ("ltc:IN000001", "code.heard",
+                                     heard ("ltc:IN000001", "jumped", "25", 5, 77, 1.0)));
+    follower.tickOnce (2999);
+    REQUIRE (follower.runner.codeMapOf ("ltc:IN000001") != nullptr);
+
+    const std::int64_t local = 3000;
+    auto rebased = at;
+    rebased.rebase (local - 100);
+
+    REQUIRE (follower.engine.submit (std::string (origin::engine), "pair.seat", { s (pair::toText (rebased)) }));
+    follower.tickOnce (local, false);
+
+    CHECK (follower.runner.codeMaps() == rebased.codes);
+    REQUIRE (follower.runner.codeMapOf ("ltc:IN000001") != nullptr);
+    CHECK (follower.runner.codeMapOf ("ltc:IN000001")->sample == 4'800'123 + (local - 100) * 960);
+    CHECK (follower.runner.codeReadout ("mtc:P0000001", local * 960).state == "stopped");
 }

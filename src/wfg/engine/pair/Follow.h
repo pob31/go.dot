@@ -108,12 +108,15 @@ namespace wfg::pair
                      remote app speaks WebSocket), a device's report and
                      answer (`mount:`), a serial port (`serial:`), a device
                      over a connection (`link:`), MIDI (`midi:`), a time-of-day
-                     trigger (`clock`) - and, beyond §58.2's list, a process
-                     cue's patch (`process:`), which each machine runs on its
-                     own threads at its own moments, so its commands are a
-                     device's: the main's arrive in the stream. And anything
-                     this table does not know: a follower changes nothing on
-                     its own word.
+                     trigger and the wall clock as a code (`clock`), an
+                     incoming code's turns (`ltc:`, `mtc:`; namespace draft
+                     §60, TG.5) - a code reaching both machines fires once,
+                     from the main's records - and, beyond §58.2's list, a
+                     process cue's patch (`process:`), which each machine runs
+                     on its own threads at its own moments, so its commands
+                     are a device's: the main's arrive in the stream. And
+                     anything this table does not know: a follower changes
+                     nothing on its own word.
 
         Decided from the origin and, for `isMachineLocal`, the command and its
         arguments - never from anything a machine holds - so it reads alike on
@@ -240,6 +243,14 @@ namespace wfg::pair
         /** The length of one tick, in seconds: the sample clock's, 0.02 at 50 Hz. */
         void setTickSeconds (double seconds) noexcept;
 
+        /*  THIS MACHINE'S SAMPLES A SECOND, which a main's `code.heard` sample
+            is moved onto this clock at (namespace draft §60, TG.5; AIP): by
+            the offset the records are applied at, through
+            `sampleOnThisClock`, before it is submitted - so the record this
+            machine logs holds its own sample, a replay of it never maps, and
+            what the main sent compares equal to what was applied. */
+        void setSampleRate (int rate) noexcept { sampleRate = rate; }
+
         /*  How many of the main's beats are measured before the offset is
             fixed: a fifth of a second of them at 50 Hz, enough to see the
             jitter of an ordinary network and short enough that a show started
@@ -334,6 +345,7 @@ namespace wfg::pair
 
         Submit submit;
         double tickSeconds = 0.02;
+        int sampleRate = 0;
 
         bool following = false;
         bool fixed = false;

@@ -16,6 +16,7 @@
 
 #include <wfg/engine/pair/Position.h>
 
+#include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <cmath>
@@ -155,6 +156,17 @@ namespace wfg::pair
     }
 
     //==========================================================================
+    std::int64_t sampleOnThisClock (std::int64_t leaderSample, std::int64_t byTicks, int sampleRate) noexcept
+    {
+        /*  A tick is a fiftieth of a second's samples, exactly, at every rate a
+            show can run at (TickClock.h); a rate that is not a sound clock's
+            moves nothing rather than a guess. */
+        if (sampleRate <= 0)
+            return leaderSample;
+
+        return leaderSample + byTicks * static_cast<std::int64_t> (sampleRate) / TickClock::rateHz;
+    }
+
     void Position::rebase (std::int64_t by)
     {
         /*  A TICK THAT IS SET STAYS SET: moved onto a clock that started later,
@@ -199,6 +211,10 @@ namespace wfg::pair
 
         for (auto& fade : fades)
             moved (fade.stopsAtTick, 0);
+
+        //  A CODE MAP'S ANCHOR IS A SAMPLE of the leader's clock, moved with its ticks (TG.5).
+        for (auto& [source, map] : codes)
+            map.sample = sampleOnThisClock (map.sample, by, map.sampleRate);
     }
 
     const SeatedRun* Position::runNamed (const std::string& id) const
@@ -325,6 +341,15 @@ namespace wfg::pair
 
         for (const auto& [dca, trim] : at.dcas)
             Line (out, "dca").s (dca).d (trim);
+
+        /*  EACH INCOMING CODE'S MAP (TG.5), a top-level line of its own beside
+            the trims - tonight's numbers, which no show holds - its unit in
+            `code.heard`'s words and its clock's rate last, which is what
+            `rebase` moves its sample by. */
+        for (const auto& [source, map] : at.codes)
+            Line (out, "code")
+                .s (source).s (std::string (timecode::wordOf (map.state))).s (timecode::unitWordOf (map.unit))
+                .h (map.frame).h (map.sample).d (map.speed).i (map.sampleRate);
 
         if (! at.laneCue.empty())
         {
@@ -656,6 +681,26 @@ namespace wfg::pair
                     return bad();
 
                 at.dcas[dca] = trim;
+            }
+            else if (word == "code")
+            {
+                const auto source = a.s();
+                const auto state = timecode::codeStateFromWord (a.s());
+                const auto unit = timecode::unitFromWord (a.s());
+
+                timecode::CodeMap map;
+                map.frame = a.h();
+                map.sample = a.h();
+                map.speed = a.d();
+                map.sampleRate = a.i();
+
+                if (! a.ok() || source.empty() || ! state.has_value() || ! unit.has_value()
+                      || map.frame < 0 || map.frame >= unit->perDay)
+                    return bad();
+
+                map.state = *state;
+                map.unit = *unit;
+                at.codes[source] = map;
             }
             else if (word == "lane")
             {

@@ -3992,7 +3992,12 @@ namespace wfg::tree
             leave - the MIDI sender's lane and the audio side's generator - and
             copied into the state each tick (TC.6). Nought wherever nothing has
             sent a code, which is the true answer then. The worst to a
-            hundredth of a millisecond: finer is the clock's noise. */
+            hundredth of a millisecond: finer is the clock's noise.
+
+            AND WHAT THE CODES COMING IN ARE DOING (namespace draft §60, TG.5),
+            from the Runner's maps as serve copied them: `none` and nothing
+            else where the show names no source, which is the state's own
+            default. */
         for (const auto* row : doc::Schema::rowsForOwner ("sync"))
         {
             if (row->persist != doc::Persist::none)
@@ -4001,9 +4006,28 @@ namespace wfg::tree
             const auto name = std::string (row->name);
             std::string text;
 
+            const auto incoming = [&name, &text] (const char* prefix, const timecode::CodeReadout& readout)
+            {
+                const auto size = std::char_traits<char>::length (prefix);
+
+                if (name.compare (0, size, prefix) != 0)
+                    return false;
+
+                const auto field = std::string_view (name).substr (size);
+
+                if (field == "State")       text = readout.state;
+                else if (field == "Code")   text = readout.code;
+                else if (field == "Rate")   text = readout.rate;
+                else if (field == "Speed")  text = osc::formatDouble (readout.speed);
+                else                        return false;
+
+                return true;
+            };
+
             if (name == "mtcLate")       text = std::to_string (state.mtcLate);
             else if (name == "mtcWorst") text = osc::formatDouble (std::round (state.mtcWorstMs * 100.0) / 100.0);
             else if (name == "ltcLate")  text = std::to_string (state.ltcLate);
+            else if (incoming ("ltcIn", state.ltcIn) || incoming ("mtcIn", state.mtcIn)) {}
             else                         text = std::string (row->defaultText);
 
             engineValue (*row, "sync", text);

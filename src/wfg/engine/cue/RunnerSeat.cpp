@@ -302,6 +302,12 @@ namespace wfg::cue
         if (dcas != nullptr)
             at.dcas = dcas->all();
 
+        /*  EACH INCOMING CODE'S MAP (namespace draft §60, TG.5; AIP), as this
+            machine's `code.heard` records left it: a follower seated while a
+            code runs is locked to it from the seat, as if it had applied every
+            turn the leader heard. */
+        at.codes = codesHeard;
+
         if (lanes != nullptr && lanes->flipped())
         {
             at.laneCue = lanes->cue();
@@ -965,6 +971,13 @@ namespace wfg::cue
             for (const auto& [dca, trim] : at.dcas)
                 dcas->set (dca, trim);
         }
+
+        /*  THE CODES' MAPS, THE LEADER'S (TG.5), their samples on this
+            machine's clock already - the follower moved them with the ticks -
+            in place of whatever this machine had: its own watchers' turns are
+            the gate's while it follows, and the leader's from here on arrive as
+            records. */
+        codesHeard = at.codes;
 
         if (lanes != nullptr)
         {

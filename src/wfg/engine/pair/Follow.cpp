@@ -21,6 +21,7 @@
 #include <wfg/engine/command/Recovery.h>
 #include <wfg/engine/pair/MachineLocal.h>
 #include <wfg/engine/pair/Position.h>
+#include <wfg/engine/timecode/CodeWatch.h>
 
 #include <algorithm>
 #include <chrono>
@@ -69,14 +70,24 @@ namespace wfg::pair
         if (command != nullptr && isMachineLocal (*command, args))
             return Gate::apply;
 
+        /*  AN INCOMING CODE'S TURNS, BY NAME (namespace draft §60, TG.5; AGD,
+            AIP): `ltc:<input>`, `mtc:<port>` and the wall clock - named here
+            rather than left to the unknown below, where they were ignored only
+            for want of a name until TG.5 gave them records. The code reaches
+            both machines: the backup keeps watching it, so a takeover finds it
+            locked, but applies only the main's turns, so a code fires a member
+            once. */
+        if (startsWith (from, "ltc:") || startsWith (from, "mtc:") || from == "clock")
+            return Gate::ignore;
+
         /*  THIS MACHINE'S CLIENTS (AFT): applied on the main, streamed back. */
         if (from == origin::window || from == origin::cli || from == "pd"
               || startsWith (from, "ws:") || startsWith (from, "surface:"))
             return Gate::passOn;
 
         /*  A DEVICE'S, AND ANYTHING UNKNOWN (AGD): `udp:`, `mount:`, `serial:`,
-            `link:`, `midi:`, `clock`, a patch's `process:` - the main heard it
-            too, and its copy arrives in the stream. */
+            `link:`, `midi:`, a patch's `process:` - the main heard it too, and
+            its copy arrives in the stream. */
         return Gate::ignore;
     }
 
@@ -383,6 +394,20 @@ namespace wfg::pair
                     submit ({ std::string (origin::engine), "pair.seat", { osc::Value::string (std::move (*rebased)) } });
 
                 continue;
+            }
+
+            /*  A MAIN'S CODE MAP, ON THIS MACHINE'S CLOCK (namespace draft §60,
+                TG.5; AIP): its anchor's sample moved as the record's tick is,
+                in the record kept to compare too, so the record logged here
+                holds this machine's sample - a replay of it never maps - and
+                is what the main's says, mapped. Not when no offset was ever
+                fixed: the main's ticks cannot be read as this machine's then. */
+            if (next.command == timecode::codeheard::command && fixed
+                  && next.args.size() > timecode::codeheard::sampleArg
+                  && next.args[timecode::codeheard::sampleArg].isInt64())
+            {
+                auto& sample = next.args[timecode::codeheard::sampleArg];
+                sample = osc::Value::int64 (sampleOnThisClock (sample.getInt64(), slotOffset, sampleRate));
             }
 
             Event event;

@@ -75,6 +75,7 @@
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
+#include <wfg/engine/timecode/CodeMap.h>
 #include <wfg/engine/timecode/LtcDecoder.h>
 #include <wfg/engine/timecode/Timecode.h>
 #include <wfg/engine/video/VideoSink.h>
@@ -832,6 +833,27 @@ namespace wfg::cue
             the code starts it, and until the code is read (TG.7) nothing
             does. */
         bool isTimeMember (const std::string& cueId) const;
+
+        //======================================================================
+        /*  WHERE EACH INCOMING CODE IS (namespace draft §60, TG.5; AIO, AIP):
+            its map - an anchor frame, the sample it fell on, a speed, a state
+            (timecode/CodeMap.h) - by its source, `ltc:<input>`, `mtc:<port>`
+            or `clock`. `code.heard` is the ONE place it is learnt: a watcher
+            in serve says a turn, the record's handler keeps the map it says,
+            and a replay applying the records - no decoder, no MIDI - reaches
+            the same maps; a backup keeps its main's, moved onto its own clock
+            by the follower. TG.7 fires members on it and TG.8 and TG.9 chase
+            it; TG.5 keeps it and the readouts read it. Handler state, carried
+            in a position and set by a seat (RD.8). */
+        void noteCodeHeard (const std::string& source, const timecode::CodeMap& map);
+        const timecode::CodeMap* codeMapOf (const std::string& source) const;
+        const std::map<std::string, timecode::CodeMap>& codeMaps() const noexcept { return codesHeard; }
+
+        /*  WHAT `sync/ltcIn*` OR `sync/mtcIn*` READS for a source the show names
+            (empty for none), at Go.dot's sample `now`: serve's, once a tick,
+            only for a source that is named - the publish of a show with none
+            is what it was. */
+        timecode::CodeReadout codeReadout (const std::string& source, std::int64_t now) const;
 
         /*  The sampler strips of every surface, in the order a group fills
             them: surfaces in document order, then each strip's index. Read
@@ -3254,6 +3276,9 @@ namespace wfg::cue
             the logical input of the show's one-channel `sync/ltcIn`, -1 for
             none or one wider than a channel. */
         int ltcInChannel = -1;
+
+        //  Each incoming code's map, by source, as `code.heard` last said it (TG.5).
+        std::map<std::string, timecode::CodeMap> codesHeard;
 
         /*  EACH CANVAS AS `followCanvasLevels` READS IT, at the revision it was
             read at, and what was last handed to the video side. */

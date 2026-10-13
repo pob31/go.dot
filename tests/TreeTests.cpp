@@ -406,6 +406,52 @@ TEST_CASE ("tree: a time group publishes its source, a member its time and chase
     CHECK (state->access == Access::read);
 }
 
+TEST_CASE ("tree: the incoming codes' readouts as serve copies them from the maps - state, label, rate and speed")
+{
+    /*  Namespace draft §60 (TG.5): serve copies each named source's readout
+        into the state once a tick (`Runner::codeReadout`), and the publish
+        reads it - a running LTC code and a stopped MTC one here, the speed a
+        number whatever the locale. */
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+
+    EngineState state;
+    state.ltcIn = { "running", "10:00:00:12", "29.97df", 1.00005 };
+    state.mtcIn = { "stopped", "01:02:03:04", "25", 0.0 };
+
+    const auto snapshot = rig.parameters.publish (1, state);
+
+    const auto text = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "missing " << address);
+        REQUIRE (node->values.size() == 1u);
+        return node->values.front().getString();
+    };
+
+    const auto number = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "missing " << address);
+        REQUIRE (node->soleValue().has_value());
+        return node->soleValue()->asDouble();
+    };
+
+    CHECK (text ("/godot/sync/ltcInState") == "running");
+    CHECK (text ("/godot/sync/ltcInCode") == "10:00:00:12");
+    CHECK (text ("/godot/sync/ltcInRate") == "29.97df");
+    CHECK (number ("/godot/sync/ltcInSpeed") == doctest::Approx (1.00005).epsilon (1e-12));
+
+    CHECK (text ("/godot/sync/mtcInState") == "stopped");
+    CHECK (text ("/godot/sync/mtcInCode") == "01:02:03:04");
+    CHECK (text ("/godot/sync/mtcInRate") == "25");
+    CHECK (number ("/godot/sync/mtcInSpeed") == doctest::Approx (0.0));
+
+    //  The rest of the owner as it was: the outgoing code's counters untouched.
+    CHECK (number ("/godot/sync/ltcLate") == doctest::Approx (0.0));
+}
+
 TEST_CASE ("tree: the root holds one of each subtree, and every address exactly once")
 {
     Rig rig;

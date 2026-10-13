@@ -82,6 +82,7 @@
 #include <wfg/engine/midi/MidiSender.h>
 #include <wfg/engine/midi/MtcInbox.h>
 #include <wfg/engine/midi/PortBinder.h>
+#include <wfg/engine/timecode/CodeWatch.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/SectionCommands.h>
 #include <wfg/engine/audio/EditRenderer.h>
@@ -5943,6 +5944,20 @@ namespace
         wfg::midi::MtcInput mtcInput;
         std::optional<std::uint64_t> mtcRevisionSeen;
 
+        /*  AND EACH CODE COMING IN, WATCHED (namespace draft §60, TG.5): a
+            watcher a source, the source as its records name it - `ltc:<input>`,
+            `mtc:<port>`, empty while the show names none - the frames the audio
+            side read, taken each tick into a vector reserved once, and whether
+            a machine that has just stopped following owes its own state (AIP).
+            The tick thread's alone; the flag is raised by the after-tick hook,
+            on the same thread. */
+        wfg::timecode::CodeWatch ltcWatch { wfg::timecode::CodeWatch::Kind::ltc };
+        wfg::timecode::CodeWatch mtcWatch { wfg::timecode::CodeWatch::Kind::mtc };
+        std::string ltcSource, mtcSource;
+        std::vector<wfg::timecode::LtcHeard> ltcHeard;
+        ltcHeard.reserve (64);
+        bool codeResayOwed = false;
+
         ticks.setBeforeTick ([&] (std::int64_t tickIndex)
                              {
                                  /*  THE PAIR BEFORE ANYTHING (namespace draft §58,
@@ -6014,6 +6029,9 @@ namespace
 
                                      if (follower.isFollowing())
                                      {
+                                         //  The samples a main's code map is moved onto this clock at (TG.5).
+                                         follower.setSampleRate (ticks.sampleRate());
+
                                          /*  WHEN THIS TICK WAS DUE, not when it ran: a
                                              tick run late reads the beats against
                                              the clock's own tick, not its lateness. */
@@ -6375,10 +6393,116 @@ namespace
                                      const auto setting = wfg::midi::mtcInOf (document);
                                      midiIn.listenForMtcOn (setting.port);
                                      mtcInput.configure (setting);
+
+                                     /*  AND THE SOURCES THE WATCHERS NAME (TG.5): the
+                                         input `sync/ltcIn` names when it is an
+                                         `<Input>`, the port MTC is read on; a source
+                                         changed starts its watcher afresh. And the
+                                         show's rate, which a code is read at when
+                                         nothing better says (AIL). */
+                                     const auto ltcIn = document.getAttribute ("/godot/sync/ltcIn").value_or (std::string {});
+                                     const auto input = ltcIn.empty() ? juce::ValueTree {} : document.findById (ltcIn);
+                                     const auto ltcNow = input.isValid() && input.hasType ("Input") ? "ltc:" + ltcIn : std::string {};
+                                     const auto mtcNow = setting.port.empty() ? std::string {} : "mtc:" + setting.port;
+
+                                     if (ltcNow != ltcSource)
+                                     {
+                                         ltcSource = ltcNow;
+                                         ltcWatch.forget();
+                                     }
+
+                                     if (mtcNow != mtcSource)
+                                     {
+                                         mtcSource = mtcNow;
+                                         mtcWatch.forget();
+                                     }
+
+                                     const auto showRate = wfg::timecode::rateFromWord (
+                                                               document.getAttribute ("/godot/sync/frameRate").value_or (std::string {}))
+                                                               .value_or (wfg::timecode::Rate::fps25);
+                                     ltcWatch.setShowRate (showRate);
+                                     mtcWatch.setShowRate (showRate);
                                  }
 
                                  mtcInput.feedClock (clockSample, clockNanos, clockRate);
                                  mtcInput.drain (midiIn.mtcInbox());
+
+                                 /*  THE CODES COMING IN, WATCHED, AND THEIR TURNS
+                                     SAID (namespace draft §60, TG.5; AIO, AIQ,
+                                     AIR). What the audio side read of LTC since
+                                     the last tick, and what the MTC reader made of
+                                     its port, fed to their watchers in order, each
+                                     on Go.dot's own samples; then each says its
+                                     turn, if this tick has one, as `code.heard`
+                                     from the source's own origin - submitted here,
+                                     where the clock triggers are, so it is applied
+                                     in the tick it was decided at. Latency as the
+                                     audio side's logged record says it: an LTC
+                                     frame is heard the input's and the output's
+                                     latency before the sample it came in on, an
+                                     MTC piece the output's (AIQ). The grace a
+                                     silence is given is a tick and a block: how
+                                     late a frame can reach this hook. A machine
+                                     that has just stopped following says its own
+                                     state first, whatever it last said, so a
+                                     takeover finds the codes locked (AIP). A show
+                                     naming no source pays an empty take of the
+                                     audio side's frames and two string tests. */
+                                 {
+                                     const auto rate = runner.videoSampleRate();
+                                     const auto grace = static_cast<std::int64_t> (ticks.samplesPerTick())
+                                                          + (runner.player() != nullptr ? runner.player()->blockSize() : 0);
+
+                                     ltcWatch.setSampleRate (rate);
+                                     ltcWatch.setGrace (grace);
+                                     ltcWatch.setLatency (static_cast<std::int64_t> (audioState.inputLatency)
+                                                            + static_cast<std::int64_t> (audioState.outputLatency));
+                                     mtcWatch.setSampleRate (rate);
+                                     mtcWatch.setGrace (grace);
+                                     mtcWatch.setLatency (static_cast<std::int64_t> (audioState.outputLatency));
+
+                                     if (auto* const audioSide = runner.player(); audioSide != nullptr)
+                                     {
+                                         audioSide->takeHeardLtc (ltcHeard);
+
+                                         if (! ltcSource.empty())
+                                             for (const auto& ltcFrame : ltcHeard)
+                                                 ltcWatch.hear (ltcFrame);
+                                     }
+
+                                     if (! mtcSource.empty())
+                                     {
+                                         for (const auto& observation : mtcInput.observations())
+                                             mtcWatch.hear (observation);
+
+                                         mtcWatch.heardAt (mtcInput.lastHeardSample());
+                                     }
+
+                                     const auto say = [&engine] (const std::string& source,
+                                                                 const std::optional<wfg::timecode::CodeSaid>& said)
+                                     {
+                                         if (said.has_value())
+                                             engine.submit (source, wfg::timecode::codeheard::command,
+                                                            wfg::timecode::codeHeardArgs (source, *said));
+                                     };
+
+                                     if (codeResayOwed)
+                                     {
+                                         codeResayOwed = false;
+
+                                         if (! ltcSource.empty())
+                                             say (ltcSource, ltcWatch.resay());
+
+                                         if (! mtcSource.empty())
+                                             say (mtcSource, mtcWatch.resay());
+                                     }
+
+                                     if (! ltcSource.empty())
+                                         say (ltcSource, ltcWatch.update (clockSample));
+
+                                     if (! mtcSource.empty())
+                                         say (mtcSource, mtcWatch.update (clockSample));
+                                 }
 
                                  if (audioState.outputLatency != mtcLatencyTold)
                                  {
@@ -6665,6 +6789,15 @@ namespace
                                     engine.setGated (wfg::pair::gated (seated.seat));
                                     linkStream.setLeading (seated.role != wfg::pair::Role::none
                                                              && wfg::pair::sends (seated.seat));
+
+                                    /*  A MACHINE WHOSE GATE OPENS - it stopped
+                                        following - says what its own watchers
+                                        hear of the codes on its next tick, in
+                                        place of the leader's last word: they
+                                        watched all along, their records dropped
+                                        by the gate (namespace draft §60, AIP). */
+                                    if (wfg::pair::gated (seatBefore) && ! wfg::pair::gated (seated.seat))
+                                        codeResayOwed = true;
 
                                     /*  AND A MACHINE THAT NOW FOLLOWS AND DID NOT
                                         (RD.8) is seated where its leader is: one
@@ -7307,6 +7440,14 @@ namespace
                                 state.mtcLate = midiOut.timecodeLate();
                                 state.mtcWorstMs = midiOut.timecodeWorstMs();
                                 state.ltcLate = runner.player() != nullptr ? runner.player()->timecodeLate() : 0u;
+
+                                /*  AND WHAT THE CODES COMING IN ARE DOING
+                                    (namespace draft §60, TG.5), from the maps
+                                    `code.heard` keeps, at the sample now: at
+                                    rest, `none`, for a source the show does
+                                    not name - no map is looked for then. */
+                                state.ltcIn = runner.codeReadout (ltcSource, runner.videoClockNow());
+                                state.mtcIn = runner.codeReadout (mtcSource, runner.videoClockNow());
 
                                 /*  WHAT A PATCH IS EDITED IN, looked for every five
                                     seconds - a Pd installed or downloaded meanwhile is

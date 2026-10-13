@@ -146,6 +146,15 @@ namespace wfg::midi
         std::uint64_t readCount() const noexcept     { return readSoFar; }
         std::uint64_t ignoredCount() const noexcept  { return ignoredSoFar; }
 
+        /*  THE SAMPLE THE LAST MESSAGE READ ARRIVED ON, or -1: a piece of code
+            still coming, whether or not it has completed a cycle yet - what
+            keeps TG.5's watcher from calling a running code stopped while
+            its cycles are being put together (namespace draft §60, AIR). */
+        std::int64_t lastHeardSample() const noexcept
+        {
+            return lastHeardNanos > 0 ? reading.sampleAt (lastHeardNanos) : -1;
+        }
+
     private:
         MtcInSetting current;
         timecode::MtcReader reading;
@@ -153,5 +162,6 @@ namespace wfg::midi
         std::vector<timecode::MtcObservation> heard;
         std::uint64_t readSoFar = 0;
         std::uint64_t ignoredSoFar = 0;
+        std::int64_t lastHeardNanos = 0;
     };
 }

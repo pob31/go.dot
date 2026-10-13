@@ -62,6 +62,7 @@
 #include <wfg/engine/plugin/ScanTable.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
+#include <wfg/engine/timecode/CodeMap.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -309,6 +310,14 @@ namespace wfg::tree
         std::uint32_t mtcLate = 0;
         double mtcWorstMs = 0.0;
         std::uint32_t ltcLate = 0;
+
+        /*  WHAT THE INCOMING CODES ARE DOING (namespace draft §60, TG.5):
+            `sync/ltcIn{State,Code,Rate,Speed}` and the MTC four, from the
+            Runner's maps, which serve copies here each tick for a source the
+            show names - and leaves at rest, `none`, for one it does not, so a
+            show with no code in publishes what it always did. */
+        timecode::CodeReadout ltcIn;
+        timecode::CodeReadout mtcIn;
     };
 
     /*  WHAT THE LAST SORT OF ONE HALF OF THE TREE CAME TO (2026-10-11, §31.5):

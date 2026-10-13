@@ -46,6 +46,7 @@
 #include <wfg/engine/video/DcaOpacity.h>
 #include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/timecode/CodeWatch.h>
 #include <wfg/engine/timecode/FrameClock.h>
 #include <wfg/engine/timecode/Timecode.h>
 
@@ -13077,6 +13078,26 @@ namespace wfg::cue
                  && isTimeGroup (groupMode (parent));
     }
 
+    //==========================================================================
+    void Runner::noteCodeHeard (const std::string& source, const timecode::CodeMap& map)
+    {
+        codesHeard[source] = map;
+    }
+
+    const timecode::CodeMap* Runner::codeMapOf (const std::string& source) const
+    {
+        const auto found = codesHeard.find (source);
+        return found != codesHeard.end() ? &found->second : nullptr;
+    }
+
+    timecode::CodeReadout Runner::codeReadout (const std::string& source, std::int64_t now) const
+    {
+        if (source.empty())
+            return {};
+
+        return timecode::readoutOf (codeMapOf (source), now);
+    }
+
     std::string Runner::pressMember (Engine& engine, std::int64_t tick, const std::string& cueId,
                                      const std::string& origin)
     {
@@ -23532,6 +23553,38 @@ namespace wfg::cue
                             return Outcome::ok (withRun (args, 1,
                                                          runner.fire (engine, context.tick,
                                                                       cueId, id)));
+                        } });
+
+        /*  AN INCOMING CODE TURNED (namespace draft §60, TG.5; AIO, AIP): it
+            appeared, came back or located (`jumped`), drifted from the line
+            last written (`running`) or fell silent (`stopped`) - at this frame,
+            on this sample, at this speed. The engine's watchers in serve say
+            it, origin `ltc:<input>`, `mtc:<port>` or `clock`; a backup applies
+            its main's, `main:ltc:...`, their sample already moved onto its own
+            clock by the follower, and ignores its own (AGD). THE ONE PLACE THE
+            RUNNER LEARNS A CODE, so a replay applying these records reaches the
+            same maps with no decoder. TG.5 keeps the map and seats nothing;
+            TG.8's re-seats will hand back the runs they draw after the sixth
+            argument, as `go` and `seekGroup` hand back theirs. */
+        registry.add ({ timecode::codeheard::command,
+                        "An incoming code turned: it appeared, came back or located (jumped), was re-anchored"
+                        " on Go.dot's clock (running), or stopped - at this frame of the day, counted at this"
+                        " rate, falling on this Go.dot sample, at this speed (code seconds per Go.dot second)."
+                        " The engine's, origin ltc:<input>, mtc:<port> or clock; it keeps the code's map, which"
+                        " sync/ltcIn* and sync/mtcIn* read and the time groups fire and chase on.",
+                        { { "source", 's', false }, { "what", 's', false }, { "rate", 's', false },
+                          { "frame", 'h', false }, { "sample", 'h', false }, { "speed", 'd', false },
+                          { "runs", 's', true, true } },
+                        true,
+                        [&runner] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto heard = timecode::readCodeHeard (args, runner.videoSampleRate());
+
+                            if (! heard.has_value())
+                                return Outcome::rejected (reason::badValue);
+
+                            runner.noteCodeHeard (heard->source, heard->map);
+                            return Outcome::ok (args);
                         } });
 
         //----------------------------------------------------------------------

@@ -28,7 +28,10 @@
     does being a step of its own; and two engines on one show joined by the
     real stream and receiver over a link with jitter, the backup refusing
     exactly what the main refused, its run table the main's on every tick
-    after the delay, and its undo history the main's after an `undo`.
+    after the delay, and its undo history the main's after an `undo`. And
+    (namespace draft §60, TG.5) an incoming code's turns - `ltc:`, `mtc:`,
+    `clock` - ignored by name while following, and a main's `code.heard`
+    applied with its sample moved onto this machine's clock by the offset.
 
     Every case runs under fr_FR as well as C: a record's numbers are text.
 */
@@ -51,9 +54,11 @@
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/log/Replay.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/pair/Follow.h>
 #include <wfg/engine/pair/PeerLink.h>
+#include <wfg/engine/timecode/CodeMap.h>
 
 #include <algorithm>
 #include <chrono>
@@ -137,8 +142,23 @@ TEST_CASE ("follow: the gate's table - a client's passed on, a device's ignored,
         CHECK (pair::gateFor (from, &go, {}) == pair::Gate::ignore);
     }
 
+    /*  AN INCOMING CODE'S TURNS, BY NAME (namespace draft §60, TG.5): LTC on an
+        input, MTC on a port and the wall clock are the backup's own hearing of
+        a code the main heard too - whatever the command, and a `code.heard`
+        above all; the main's own are applied. */
+    const auto heard = plain ("code.heard");
+
+    for (const auto* from : { "ltc:IN000001", "mtc:P0000001", "clock" })
+    {
+        INFO (from);
+        CHECK (pair::gateFor (from, &heard, {}) == pair::Gate::ignore);
+        CHECK (pair::gateFor (from, &go, {}) == pair::Gate::ignore);
+        CHECK (pair::gateFor (from, nullptr, {}) == pair::Gate::ignore);
+    }
+
     //  The engine's, the main's and a replay's: applied here.
-    for (const auto* from : { "engine", "replay", "main:cli", "main:udp:10.0.0.9:9000", "main:peer:ws:10.0.0.5:51000" })
+    for (const auto* from : { "engine", "replay", "main:cli", "main:udp:10.0.0.9:9000", "main:peer:ws:10.0.0.5:51000",
+                              "main:ltc:IN000001", "main:mtc:P0000001", "main:clock" })
     {
         INFO (from);
         CHECK (pair::gateFor (from, &go, {}) == pair::Gate::apply);
@@ -178,7 +198,8 @@ TEST_CASE ("follow: the gate in front of the engine - taken while following, and
 
     const std::vector<std::string> clients { "window", "cli", "pd", "ws:10.0.0.5:51000", "surface:K4QW8YSC" };
     const std::vector<std::string> devices { "udp:10.0.0.9:9000", "midi:P0000001", "mount:K3PV7WRB",
-                                             "serial:S0000001", "link:E0HQDX01", "clock" };
+                                             "serial:S0000001", "link:E0HQDX01", "clock",
+                                             "ltc:IN000001", "mtc:P0000001" };
     const std::vector<std::string> here { "engine", "main:cli", "replay" };
 
     const auto submitAll = [&]
@@ -1031,4 +1052,112 @@ TEST_CASE ("follow: what following costs a backup's tick - sixty-four of the mai
     CHECK (follower.late() == 0);
     CHECK (follower.waiting() == 0u);
     CHECK (busy[busy.size() / 2] < 5000.0);
+}
+
+//==============================================================================
+/*  AN INCOMING CODE ON A BACKUP (namespace draft §60, TG.5; AGD, AIP): its
+    own watcher's turn is ignored by the gate, and the main's goes in at its
+    slot with the anchor's sample moved onto this machine's clock by the same
+    offset as the record's tick - the backup's log holding its own sample, so
+    the follower compares it equal to the main's and a replay of it, which has
+    no follower, never moves it again. */
+TEST_CASE ("follow: a main's code.heard goes in with its sample on this machine's clock - the backup's own ignored, compared equal, a replay never maps")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    std::string text;
+    {
+        doc::ShowDocument show;
+        REQUIRE (! show.createList ("Main").id.empty());
+        text = doc::CanonicalXml::write (show);
+    }
+
+    Machine backup { text };
+
+    pair::Follower follower { [&backup] (Event event) { return backup.engine.submit (std::move (event)); } };
+    backup.engine.setAfterRecord ([&follower] (const LogRecord& record, const Command*) { follower.applied (record); });
+    follower.setSampleRate (48000);
+
+    pair::FollowGate gate { backup.engine.commands(), [] (std::vector<std::uint8_t>) { return true; } };
+    backup.engine.setGate ([&gate] (Event& event) { return gate.take (event); });
+    backup.engine.setGated (true);
+
+    const std::string source = "ltc:IN000001";
+    const auto heardArgs = [&source] (std::int64_t frame, std::int64_t sample)
+    {
+        return std::vector<osc::Value> { s (source), s ("jumped"), s ("25"), osc::Value::int64 (frame),
+                                         osc::Value::int64 (sample), osc::Value::float64 (1.0) };
+    };
+
+    //  THE OFFSET, fixed as the case above fixes it: 501, the backup's clock 500 ticks after the main's.
+    const auto mainAt = [] (std::int64_t mainTick) { return t0 + 20ms * mainTick; };
+    const auto dueAt = [] (std::int64_t local) { return t0 + 20ms * (local - 500) + 11ms; };
+
+    follower.start();
+    std::int64_t mainTick = 0;
+    std::int64_t local = 500;
+
+    const auto step = [&]
+    {
+        while (mainAt (mainTick) + 9ms <= dueAt (local))
+        {
+            follower.beat (mainTick, mainAt (mainTick) + (mainTick % 2 == 0 ? 3ms : 9ms));
+            ++mainTick;
+        }
+
+        follower.beforeTick (local, dueAt (local), 0.0004);
+        backup.tickOnce (local);
+        ++local;
+    };
+
+    while (local < 520)
+        step();
+
+    REQUIRE (follower.delayFixed());
+    REQUIRE (follower.offset() == 501);
+
+    //  The backup's own watcher heard the code as well: taken by the gate, never applied.
+    CHECK (backup.engine.submit (source, "code.heard", heardArgs (90'000, 123'456)));
+    step();
+    CHECK (gate.ignored() == 1);
+    CHECK (backup.runner.codeMapOf (source) == nullptr);
+
+    //  The main's turn of its tick 30, on its sample 28 900: applied at 531, 501 ticks of samples on.
+    follower.record (mainRecord (30, "code.heard", heardArgs (90'000, 28'900), source));
+
+    while (local < 540)
+        step();
+
+    const auto* map = backup.runner.codeMapOf (source);
+    REQUIRE (map != nullptr);
+    CHECK (map->state == timecode::CodeState::running);
+    CHECK (map->frame == 90'000);
+    CHECK (map->sample == 28'900 + 501 * 960);
+    CHECK (follower.late() == 0);
+    CHECK (follower.differences() == 0);
+    CHECK (follower.differs().empty());
+
+    //  In the backup's log: the main's origin behind `main:`, and this machine's sample.
+    const auto log = LogFile::parse (backup.engine.log().contents());
+    REQUIRE (log.errors.empty());
+
+    const auto found = std::find_if (log.records.begin(), log.records.end(),
+                                     [] (const LogRecord& record) { return record.command == "code.heard"; });
+    REQUIRE (found != log.records.end());
+    CHECK (found->kind == LogRecord::Kind::applied);
+    CHECK (found->origin == "main:" + source);
+    CHECK (found->tick == 531);
+    REQUIRE (found->args.size() == 6u);
+    CHECK (found->args[4].getInt64() == 28'900 + 501 * 960);
+
+    //  A replay of the backup's log - no follower, no gate - reaches the same map.
+    Machine replayed { text };
+    const auto result = replay (replayed.engine, log);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+    REQUIRE (replayed.runner.codeMapOf (source) != nullptr);
+    CHECK (*replayed.runner.codeMapOf (source) == *map);
 }

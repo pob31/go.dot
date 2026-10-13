@@ -157,6 +157,12 @@ namespace wfg::timecode
         std::uint64_t cyclesRead() const noexcept    { return whole; }
         std::uint64_t cyclesBroken() const noexcept  { return broken; }
 
+        /*  Go.dot's sample at a moment of the steady clock, on the reader's own
+            line, or -1 before it has had a pair: where a piece that completed
+            nothing yet arrived, which keeps a code alive for TG.5's watcher
+            while its cycle is being put together. */
+        std::int64_t sampleAt (std::int64_t nanos) const noexcept { return estimate.sampleAt (nanos); }
+
         /*  A piece arriving this long after the one before it does not
             continue a cycle: the code stopped and started again between them,
             and a label put together across that pause would be two codes'
@@ -173,8 +179,6 @@ namespace wfg::timecode
 
         //  A cycle broken: counted when it had begun, and the reader looks for the next start.
         void drop() noexcept;
-
-        std::int64_t sampleAt (std::int64_t nanos) const noexcept { return estimate.sampleAt (nanos); }
 
         enum class Direction { unknown, forward, reverse };
 

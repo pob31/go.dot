@@ -333,6 +333,9 @@ add_library(wfg_engine STATIC
     wfg/engine/timecode/MtcSchedule.cpp
     wfg/engine/timecode/MtcReader.h
     wfg/engine/timecode/MtcReader.cpp
+    wfg/engine/timecode/CodeMap.h
+    wfg/engine/timecode/CodeWatch.h
+    wfg/engine/timecode/CodeWatch.cpp
     wfg/engine/TemplateChanges.h
     wfg/engine/document/Template.cpp
     wfg/engine/document/Template.h
