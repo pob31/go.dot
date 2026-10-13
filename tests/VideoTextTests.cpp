@@ -32,6 +32,8 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -489,3 +491,29 @@ TEST_CASE ("video blur cue: a radius fading through the place one more halving i
         }
     }
 }
+
+TEST_CASE ("video text: how long a title takes to draw, its outline glowing - M65's drawing share, said (§61, AKL)")
+{
+    /*  NOT A BOUND BUT A NUMBER: a forty-character title with an outline and
+        its glow on a 1080p canvas, drawn twenty times, the median and the
+        worst said. What VFX.10 asks - whether a text cue must be drawn ahead
+        of GO - is answered by it; a Debug build's number is an upper bound. */
+    auto look = lookOf ("Act One - The forest, a night in summer.");
+    look.outline = 4.0;
+    look.outlineBlur = 20.0;
+
+    std::vector<double> times;
+
+    for (int n = 0; n < 20; ++n)
+    {
+        const auto began = std::chrono::steady_clock::now();
+        const auto title = video::rasteriseText (look, 0xFFFFFF, 1920, 1080, 1.0);
+        times.push_back (std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - began).count());
+        REQUIRE (title.image.isValid());
+    }
+
+    std::sort (times.begin(), times.end());
+    MESSAGE ("a title with a glowing outline at 1080p: median " << times[times.size() / 2] << " ms, worst "
+             << times.back() << " ms");
+}
+

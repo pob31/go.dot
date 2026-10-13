@@ -27664,3 +27664,26 @@ tiles cost the renderer's message thread with a blur in them.
   canvas said by its button, A shape writing a square and Whole canvas clearing it; the page as a
   picture, looked at - the first showed the outline filled in the cue's unused paint, now a faint wash);
   `console.unit`, `client.boundary`, `source.comments`; the clang-tidy stand-in clean.
+- **VFX.10**, 2026-10-13: NOT BUILT, as its condition said. A forty-character title with a 4 px outline and
+  a 20 px glow on a 1080p canvas draws in 5.3 ms median, 13.5 ms at worst, in a Release build on this
+  machine (44 and 64 ms in Debug): under a frame at 60 Hz. A text cue fired before its first drawing comes
+  up a frame late at worst, as a still not read ahead does (AAN); read ahead it would need the region to
+  carry the standby's words, which is not worth a frame. The case that measures it stays
+  (`VideoTextTests`, "how long a title takes to draw").
+- **VFX.11**, 2026-10-13: M65 and M66, measured (Release, Windows, 6.11).
+  **M65**, the renderer's share, from the words written to the region to the frame that shows them, a
+  renderer with no window: 20.4 ms median, 22.2 ms at the 95th percentile, 22.8 ms at worst over forty
+  changes of a title with a glowing outline - the renderer's poll, the drawing and the frame. The engine's
+  own share is in front: a datagram waits for the next tick, 20 ms at most. And a projector's frame after
+  it. The whole road, datagram to light, is the bench's.
+  **M66**, on this laptop's NVIDIA RTX PRO 2000 (the default adapter here; the author's projectors are on
+  the Intel Arc beside it, which is the bench's): a frame with no blur 0.53 ms at 1080p and 2.05 ms at 4K;
+  one blur cue adds 0.04 to 0.38 ms at 1080p and 0.14 to 1.72 ms at 4K, three add up to 1.2 ms and 5.6 ms.
+  The dearest radius is the middle one, 20 px, the largest drawn without a halving; 100 and 400 px are
+  drawn small and cost less. The monitor's share, on the processor: 3 to 9 ms a preview of 256 by 144 and
+  12 to 23 ms a tile of 512 by 288, each drawn a tenth of a second apart. Both cases run with
+  `WFG_VIDEO_BENCH` set (`WFG_GPU_HARDWARE=1` for the card): `VideoGpuTests` "M66",
+  `VideoHostTests` "M65" and "M66, what a blur cue costs the monitor".
+- **VFX.12**, 2026-10-13: the tester guides, in English and French - keys, text cues with their fields,
+  blur cues - and the README's status; a summary for the author beside the build. The full suite ran once,
+  at the plan's end.

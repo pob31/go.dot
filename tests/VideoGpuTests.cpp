@@ -46,6 +46,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -1350,4 +1351,91 @@ TEST_CASE ("video gpu: a Hap Q frame turned back from YCoCg, and a preview's str
     INFO ("Hap Q reads " << middleOf (fromQ) << ", the preview " << middleOf (fromPreview));
     CHECK (near (middleOf (fromQ), 0x82827Au));
     CHECK (near (middleOf (fromPreview), 0xC86432u));
+}
+
+namespace
+{
+    /*  A CANVAS COMPOSITED `frames` TIMES, each at a sample of its own so it
+        is drawn again, and waited for once at the end (a read back): the
+        milliseconds a frame, the device's work included. */
+    double millisecondsAFrame (const Pictures& pictures, const std::vector<region::LayerReading>& layers,
+                               int width, int height, int frames)
+    {
+        region::ConfigReading config;
+        config.canvases.push_back ({ "C1", width, height });
+
+        video::render::Painter painter (pictures);
+        std::string why;
+        REQUIRE_MESSAGE (painter.make (why), why);
+
+        const auto frame = [&] (std::int64_t sample)
+        {
+            painter.beginFrame (config, layers, [] (const std::string&) { return 1.0; });
+            painter.canvas ("C1", sample);
+            sg_commit();
+            painter.endFrame();
+        };
+
+        std::vector<float> rgba;
+        int w = 0, h = 0;
+
+        for (int n = 0; n < 3; ++n)
+            frame (100 + n);
+
+        REQUIRE (video::gpu::readBack (painter.canvasImage ("C1"), rgba, w, h));
+
+        const auto began = std::chrono::steady_clock::now();
+
+        for (int n = 0; n < frames; ++n)
+            frame (1000 + n);
+
+        REQUIRE (video::gpu::readBack (painter.canvasImage ("C1"), rgba, w, h));
+        return std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - began).count() / frames;
+    }
+}
+
+TEST_CASE ("video gpu: M66, what a blur cue costs the renderer - a canvas of 1080p and of 4K, radii of 5 to 400, one blur cue and three (bench, §61)")
+{
+    /*  A MEASUREMENT, NOT A CHECK: run with WFG_VIDEO_BENCH set, on the card
+        with WFG_GPU_HARDWARE=1 as well. The cost of a blur is the frame with
+        it less the same frame without; the monitor's share, the processor's,
+        is its own case in VideoHostTests. */
+    if (juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_BENCH", {}).isEmpty())
+        return;
+
+    Device device;
+
+    if (! device.open)
+        return;
+
+    Pictures pictures;
+    pictures.images["picture.png"] = gradientPicture (40, 30);
+
+    auto ground = layerOf ("L1", region::Source::fill, 1.0, 1);
+    ground.paint = 0x204080u;
+    auto shown = layerOf ("L2", region::Source::picture, 1.0, 2);
+    shown.file = "picture.png";
+
+    const auto blurOf = [] (const std::string& id, double radius, std::uint64_t order)
+    {
+        auto blur = layerOf (id, region::Source::blur, 1.0, order);
+        blur.layer = 1;
+        blur.blur = radius;
+        return blur;
+    };
+
+    for (const auto& [width, height] : { std::pair { 1920, 1080 }, std::pair { 3840, 2160 } })
+    {
+        const auto plain = millisecondsAFrame (pictures, { ground, shown }, width, height, 30);
+        MESSAGE ("M66 " << width << "x" << height << " on " << video::gpu::describe() << ": no blur " << plain << " ms a frame");
+
+        for (const auto radius : { 5.0, 20.0, 100.0, 400.0 })
+        {
+            const auto one = millisecondsAFrame (pictures, { ground, shown, blurOf ("B1", radius, 3) }, width, height, 30);
+            const auto three = millisecondsAFrame (pictures, { ground, shown, blurOf ("B1", radius, 3), blurOf ("B2", radius, 4),
+                                                               blurOf ("B3", radius, 5) }, width, height, 30);
+            MESSAGE ("M66 " << width << "x" << height << ", radius " << radius << " px: one blur cue +" << (one - plain)
+                     << " ms, three +" << (three - plain) << " ms");
+        }
+    }
 }

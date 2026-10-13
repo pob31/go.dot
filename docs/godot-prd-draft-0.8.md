@@ -4362,6 +4362,12 @@ Mackie vs HUI first — first week with the D700.
 - **A blur's cost** (§3.19, 2026-10-13, namespace draft §61): **M66** - what a blur cue costs the
   renderer on a 1080p and a 4K canvas, at radii of 5, 20, 100 and 400 pixels, one blur cue and three,
   on the author's graphics card and on WARP; and what the monitor's tiles cost with a blur in them.
+  *Measured 2026-10-13* (namespace draft §61.7, VFX.11), Release, Windows. M65's renderer share - the
+  words written to the frame that shows them - 20.4 ms median, 22.8 ms at worst over forty changes; a tick
+  (20 ms at most) before it and a projector's frame after it. M66 on the laptop's NVIDIA card: one blur cue
+  adds 0.04-0.38 ms a frame at 1080p and 0.14-1.72 ms at 4K, three up to 1.2 and 5.6 ms, the 20 px radius
+  the dearest; the monitor's previews 3-9 ms and its tile 12-23 ms on the processor, a tenth of a second
+  apart. The Intel Arc the projectors run on, and the whole road from a datagram to light, are the bench's.
 
 ---
 

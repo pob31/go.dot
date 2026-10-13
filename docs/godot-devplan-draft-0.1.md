@@ -667,6 +667,11 @@ finish on `main` (namespace draft §61.7):
 | VFX.11 | M65, M66 |
 | VFX.12 | The guides, the README, the screen words |
 
+All built on 2026-10-13 but VFX.10, which its own condition left out: a title draws in 5 ms, under a
+frame. Owed to the bench: a real green screen through a camera; text and blur on a projector; the glow at
+4K; M66 on the Intel Arc; the Metal compile of the new shaders, on the Mac. The screen words wait for the
+author (AKS).
+
 ---
 
 ## Phase 9 — Plugins and the rack · L

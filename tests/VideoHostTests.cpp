@@ -75,6 +75,7 @@
 #include <juce_core/juce_core.h>
 #include <juce_graphics/juce_graphics.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -85,6 +86,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -1205,6 +1207,76 @@ namespace
 
         return -1;
     }
+}
+
+TEST_CASE ("video host: M65, how long new words take from the region to a frame drawn by a renderer with no window (bench, §61)")
+{
+    /*  A MEASUREMENT, NOT A CHECK: run with WFG_VIDEO_BENCH set. A text
+        cue's words changed - as a field moved, restated - and the time until
+        the renderer's probe sees them: its poll, the drawing, the frame. The
+        engine's own share, a tick at most, is in front of it. */
+    if (juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_BENCH", {}).isEmpty())
+        return;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-m65-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+    std::vector<double> lags;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "text";
+        layer.paint = 0xFFFFFF;
+        layer.text.fontSize = 80.0;
+        layer.text.bold = true;
+        layer.text.outline = 4.0;
+        layer.text.outlineBlur = 20.0;
+        layer.text.words = "I";
+
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { clock.now(), 1.0 });
+
+        std::int64_t seen = -1;
+        REQUIRE (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFFFFFFu; }));
+
+        //  Forty changes: a space, then the I again - black, then white, on the middle.
+        for (int n = 0; n < 40; ++n)
+        {
+            const auto lit = n % 2 == 1;
+            layer.text.words = lit ? std::string ("I") : std::string ("  .");
+            const auto at = clock.now();
+            host.sink().restate (layer);
+            const auto lag = lagToFirstSight (host, clock, r, at, lit ? 0xFFFFFFu : 0x000000u);
+            REQUIRE (lag >= 0);
+            lags.push_back (static_cast<double> (lag) / 48.0);
+        }
+    }
+
+    folder.deleteRecursively();
+
+    std::sort (lags.begin(), lags.end());
+    MESSAGE ("M65, new words to the frame that shows them: median " << lags[lags.size() / 2] << " ms, 95th "
+             << lags[lags.size() * 95 / 100] << " ms, worst " << lags.back() << " ms over " << lags.size() << " changes");
 }
 
 TEST_CASE ("video host: a renderer with no window reads ahead what it is named, says what it holds, and shows a still read ahead at once")
@@ -2395,6 +2467,36 @@ TEST_CASE ("video compositor: a blur cue's radius moved by a fade's points, and 
     const auto once = drawnWhole ({ rightHalf ("RUN00001", 1), blurCue ("RUN00002", 1, 2, 30.0) });
     const auto twice = drawnWhole ({ rightHalf ("RUN00001", 1), blurCue ("RUN00002", 1, 2, 30.0), blurCue ("RUN00003", 1, 3, 30.0) });
     CHECK (twice.red (70, 45) > once.red (70, 45));
+}
+
+TEST_CASE ("video compositor: M66, what a blur cue costs the monitor - a preview and a tile drawn whole on the processor (bench, §61)")
+{
+    //  A MEASUREMENT, NOT A CHECK: run with WFG_VIDEO_BENCH set.
+    if (juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_BENCH", {}).isEmpty())
+        return;
+
+    for (const auto radius : { 20.0, 100.0, 400.0 })
+        for (const auto& [width, height] : { std::pair { 256, 144 }, std::pair { 512, 288 } })
+        {
+            Memory memory;
+            video::RegionSink sink { *memory.region };
+            sink.show (rightHalf ("RUN00001", 1));
+            sink.opacity ("RUN00001", { 0, 1.0 });
+            sink.show (blurCue ("RUN00002", 1, 2, radius));
+            sink.opacity ("RUN00002", { 0, 1.0 });
+
+            const auto layers = layersOf (*memory.region);
+            const auto stack = video::stackOf (layers, "C1");
+            std::vector<double> rgb;
+
+            const auto began = std::chrono::steady_clock::now();
+
+            for (int n = 0; n < 10; ++n)
+                video::compositeInto (stack, 10, 1920.0, 1080.0, width, height, nullptr, rgb);
+
+            const auto each = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - began).count() / 10.0;
+            MESSAGE ("M66 monitor, " << width << "x" << height << " of a 1080p canvas, radius " << radius << " px: " << each << " ms");
+        }
 }
 
 TEST_CASE ("video compositor: normal, add, screen and multiply, in display space")

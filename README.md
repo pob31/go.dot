@@ -95,7 +95,9 @@ has stood in front of the thing.
   one cue to record its level and sends in one pass. A virtual surface panel
   plays the same groups with a mouse.
 - **Video.** Canvases shown on outputs; fills, masks, stills and HAP movies with
-  their sound locked to them; placement, grade, curves and blends; several
+  their sound locked to them; placement, grade, curves and blends; keys by
+  alpha, brightness or a green screen; text cues whose words hold fields filled
+  over OSC; blur cues over what lies beneath them; several
   canvases on one output, each bent onto a wall that is not flat by a mesh, and
   a CDL per output to match projectors. Pictures are drawn by a separate process
   on Direct3D 11, Metal or OpenGL, which Go.dot restarts if it dies, so a slow
@@ -210,7 +212,7 @@ and says afterwards what was built against what was drawn.
 | Phase 10, in part | The stop levels held to PRD §4.4, the panic fade and GO debounce, Doh! | §21, §23, §24 |
 | Shows | Shows and performances, Enable/Disable/Jump, Save as | §25, §27, §32 |
 | Imports | Ableton Live and QLab | §29, §46 |
-| Phase 8 | Video: stills, movies, the native renderer, NDI/Spout/Syphon, read-ahead, pictures in sampler groups, the DCA knob | §35–§37, §40, §44, §47–§50 |
+| Phase 8 | Video: stills, movies, the native renderer, NDI/Spout/Syphon, read-ahead, pictures in sampler groups, the DCA knob; keys, text cues and blur | §35–§37, §40, §44, §47–§50, §61 |
 | OSC cues | Several messages, bundles, recorded curves | §45 |
 | Process cues | Pure Data inside a cue, serial ports | §51 |
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
