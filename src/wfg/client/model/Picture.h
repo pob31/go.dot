@@ -117,6 +117,8 @@ namespace wfg::client::model
 
         std::string paint;              ///< #RRGGBB
 
+        double blur = 20.0;             ///< a blur cue's radius, canvas px (61, AKN)
+
         /*  ITS OWN ALPHA AND ITS KEY (namespace draft 61): whether its alpha is
             read; for a capture whether its input sends one at all (AKF); the
             key and its numbers. */
@@ -154,8 +156,9 @@ namespace wfg::client::model
             a mask an outline. */
         bool graded() const noexcept  { return source == "picture" || source == "movie" || source == "capture"; }
         bool painted() const noexcept { return source == "fill" || source == "mask"; }
-        bool masked() const noexcept  { return source == "mask"; }
+        bool masked() const noexcept  { return source == "mask" || source == "blur"; }
         bool texted() const noexcept  { return source == "text"; }
+        bool blurred() const noexcept { return source == "blur"; }
 
         /*  A picture, a movie and a capture can be keyed and have their alpha
             switched (61, AKA) - what is graded. Keyed: a key on, or its alpha

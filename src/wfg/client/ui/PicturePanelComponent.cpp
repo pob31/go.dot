@@ -87,7 +87,8 @@ namespace wfg::client::ui
             g.setColour (juce::Colours::black);
             g.fillRect (canvas);
 
-            if (picture.isValid() && ! r.masked())
+            //  A blur cue's picture too: its canvas beneath it, blurred, under its outline (61).
+            if (picture.isValid() && (! r.masked() || r.blurred()))
                 g.drawImage (picture, canvas, juce::RectanglePlacement::centred);
 
             g.setColour (Look::colour (owner.theme, "rule"));
@@ -423,8 +424,9 @@ namespace wfg::client::ui
             {
                 g.setColour (Look::colour (owner.theme, "ink-dim"));
                 g.setFont (Look::font (owner.theme, 12.0f));
-                g.drawFittedText ("No outline yet: double-click to start one", canvasRect().toNearestInt(),
-                                  juce::Justification::centred, 2);
+                g.drawFittedText (r.blurred() ? "Blurs the whole canvas: double-click to draw an outline"
+                                              : "No outline yet: double-click to start one",
+                                  canvasRect().toNearestInt(), juce::Justification::centred, 2);
                 return;
             }
 
@@ -441,7 +443,13 @@ namespace wfg::client::ui
             }
 
             outline.closeSubPath();
-            g.setColour (paintColour (r.paint).withAlpha (r.invert ? 0.15f : 0.45f));
+
+            //  A mask's outline in its colour; a blur cue's has none, only a faint wash over the picture (61).
+            if (r.blurred())
+                g.setColour (ink.withAlpha (r.invert ? 0.05f : 0.12f));
+            else
+                g.setColour (paintColour (r.paint).withAlpha (r.invert ? 0.15f : 0.45f));
+
             g.fillPath (outline);
             g.setColour (ink);
             g.strokePath (outline, juce::PathStrokeType (1.5f));
@@ -817,6 +825,21 @@ namespace wfg::client::ui
         outlineSwatch.onClick = [this] { chooseColour ("outlineColour", reading.outlineColour, outlineSwatch); };
         addAndMakeVisible (outlineSwatch);
 
+        /*  A BLUR CUE'S AMOUNT AND ITS OUTLINE OR NONE (61, AKN). */
+        build (blurAmount, blurAmountLabel, "blur", "blur", 0.0, 500.0, 40.0, false, " px", 0);
+        blurAmount.setTooltip ("How far it blurs, a radius in canvas pixels; a fade moves it");
+
+        for (auto* button : { &wholeCanvas, &aShape })
+        {
+            button->setWantsKeyboardFocus (false);
+            addAndMakeVisible (*button);
+        }
+
+        wholeCanvas.setTooltip ("Blur everything beneath it, no outline");
+        aShape.setTooltip ("Blur inside an outline, a square to start from");
+        wholeCanvas.onClick = [this] { write ("shape", ""); };
+        aShape.onClick = [this] { write ("shape", "0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75"); };
+
         /*  ITS FIELDS (61, AKM), a page of the column picked beside the font. */
         fieldsPick.setWantsKeyboardFocus (false);
         fieldsPick.setTooltip ("The blanks in the words, {name}, and what fills them tonight");
@@ -1047,6 +1070,9 @@ namespace wfg::client::ui
         setValue (wrap, reading.wrap);
         setValue (outlineWidth, reading.outline);
         setValue (outlineBlur, reading.outlineBlur);
+        setValue (blurAmount, reading.blur);
+        wholeCanvas.setToggleState (reading.shape.size() < 3, juce::dontSendNotification);
+        aShape.setToggleState (reading.shape.size() >= 3, juce::dontSendNotification);
 
         //  THE WORDS UNDER A HAND ARE THE HAND'S, as a slider's number is.
         if (! wordsBox.hasKeyboardFocus (true))
@@ -1157,7 +1183,10 @@ namespace wfg::client::ui
             part->setVisible (texted);
 
         for (auto& button : fitButtons)
-            button.setVisible (! texted);
+            button.setVisible (! texted && ! reading.blurred());
+
+        for (auto* part : std::initializer_list<juce::Component*> { &blurAmount, &blurAmountLabel, &wholeCanvas, &aShape })
+            part->setVisible (reading.blurred());
 
         //  THE STYLE OR THE FIELDS, picked beside the font (61).
         refreshFields();
@@ -1198,7 +1227,7 @@ namespace wfg::client::ui
                                                                     &italic, &fontSize, &lineSpacing, &wrap, &outlineWidth,
                                                                     &outlineBlur, &letterSwatch, &outlineSwatch,
                                                                     &alignButtons[0], &alignButtons[1], &alignButtons[2],
-                                                                    &alignVMenu })
+                                                                    &alignVMenu, &blurAmount, &wholeCanvas, &aShape })
             part->setEnabled (open);
 
         wordsBox.setReadOnly (! open);
@@ -1260,7 +1289,8 @@ namespace wfg::client::ui
         for (auto* label : { &scaleLabel, &offsetXLabel, &offsetYLabel, &rotationLabel, &contrastLabel,
                              &saturationLabel, &gammaLabel, &hueLabel, &featherLabel, &paintLabel,
                              &keyLevelLabel, &keySoftnessLabel, &keySpillLabel, &keyColourLabel,
-                             &fontSizeLabel, &lineSpacingLabel, &wrapLabel, &outlineLabel, &outlineBlurLabel })
+                             &fontSizeLabel, &lineSpacingLabel, &wrapLabel, &outlineLabel, &outlineBlurLabel,
+                             &blurAmountLabel })
         {
             label->setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
             label->setFont (Look::font (theme, 12.0f));
@@ -1282,8 +1312,8 @@ namespace wfg::client::ui
         view->setBounds (area);
 
         const auto row = 26;
-        auto placeColumn = controls.removeFromLeft (reading.graded() || reading.texted() ? controls.getWidth() / 2
-                                                                                         : controls.getWidth())
+        auto placeColumn = controls.removeFromLeft (reading.graded() || reading.texted() || reading.blurred()
+                                                        ? controls.getWidth() / 2 : controls.getWidth())
                                    .reduced (8, 6);
         auto colourColumn = controls.reduced (8, 6);
 
@@ -1292,6 +1322,10 @@ namespace wfg::client::ui
             if (reading.texted())
             {
                 wordsBox.setBounds (placeColumn.removeFromTop (row * 3).reduced (2, 2));
+            }
+            else if (reading.blurred())
+            {
+                //  A blur cue has no fit: its frame is the canvas, as a mask's is.
             }
             else
             {
@@ -1322,7 +1356,7 @@ namespace wfg::client::ui
                 paintLabel.setBounds (line);
             }
 
-            if (reading.masked())
+            if (reading.masked() && ! reading.blurred())
             {
                 auto line = placeColumn.removeFromTop (row);
                 featherLabel.setBounds (line.removeFromLeft (64));
@@ -1338,6 +1372,26 @@ namespace wfg::client::ui
             const auto half = picks.getWidth() / 2;
             colourPages[0].setBounds (picks.removeFromLeft (half).reduced (2, 1));
             colourPages[1].setBounds (picks.reduced (2, 1));
+        }
+
+        /*  A BLUR CUE (61, AKN): how far, the whole canvas or an outline, and
+            the outline's feather and inside-out. */
+        if (reading.blurred())
+        {
+            auto amount = colourColumn.removeFromTop (row);
+            blurAmountLabel.setBounds (amount.removeFromLeft (72));
+            blurAmount.setBounds (amount);
+
+            auto choice = colourColumn.removeFromTop (row);
+            const auto half = choice.getWidth() / 2;
+            wholeCanvas.setBounds (choice.removeFromLeft (half).reduced (2, 1));
+            aShape.setBounds (choice.reduced (2, 1));
+
+            auto line = colourColumn.removeFromTop (row);
+            featherLabel.setBounds (line.removeFromLeft (72));
+            feather.setBounds (line);
+            invert.setBounds (colourColumn.removeFromTop (row));
+            return;
         }
 
         //  A TEXT CUE'S STYLE (61): the font, the letters, the alignments, the box, the outline.

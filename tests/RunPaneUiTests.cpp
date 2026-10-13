@@ -3289,6 +3289,64 @@ TEST_CASE ("picture panel: a text cue's fields picked beside the font, each type
     MESSAGE ("wrote " << file.getFullPathName().toStdString());
 }
 
+TEST_CASE ("picture panel: a blur cue's amount, its whole canvas or a shape, its outline's feather and inside-out (§61, AKN)")
+{
+    std::vector<std::pair<std::string, std::string>> sent;
+
+    ui::PicturePanelComponent::Actions actions;
+    actions.set = [&sent] (const std::string& address, const std::string& text) { sent.emplace_back (address, text); };
+
+    ui::PicturePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+
+    auto reading = keyedPicture ("none");
+    reading.picture.source = "blur";
+    reading.picture.blur = 45.0;
+    panel.show (reading, nullptr);
+
+    //  No fit, no grade: the amount, the choice of outline, its feather and inside-out.
+    CHECK_FALSE (childSaying<juce::TextButton> (panel, "fit")->isVisible());
+    REQUIRE (childSaying<juce::Label> (panel, "blur") != nullptr);
+    CHECK (childSaying<juce::Label> (panel, "blur")->isVisible());
+    CHECK (childSaying<juce::Label> (panel, "feather")->isVisible());
+
+    //  No outline: the whole canvas, said by its button; a shape asked for writes a square.
+    auto* whole = childSaying<juce::TextButton> (panel, "Whole canvas");
+    auto* shape = childSaying<juce::TextButton> (panel, "A shape");
+    REQUIRE (whole != nullptr);
+    REQUIRE (shape != nullptr);
+    CHECK (whole->getToggleState());
+    CHECK_FALSE (shape->getToggleState());
+
+    shape->onClick();
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent.back().first == "/godot/cue/CUE00001/shape");
+    CHECK (sent.back().second == "0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75");
+
+    reading.picture.shape = { { 0.25, 0.25 }, { 0.75, 0.25 }, { 0.75, 0.75 }, { 0.25, 0.75 } };
+    panel.show (reading, nullptr);
+    CHECK (shape->getToggleState());
+    whole->onClick();
+    CHECK (sent.back().second.empty());
+
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isEmpty())
+        return;
+
+    const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+    const juce::File file { juce::File (dir).getChildFile ("picture-panel-blur.png") };
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    juce::FileOutputStream out { file };
+    REQUIRE (out.openedOk());
+
+    juce::PNGImageFormat png;
+    CHECK (png.writeImageToStream (picture, out));
+    MESSAGE ("wrote " << file.getFullPathName().toStdString());
+}
+
 TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 {
     /*  NOT AN ASSERTION BUT AN EYE. With WFG_SNAPSHOT_DIR set, the panel is

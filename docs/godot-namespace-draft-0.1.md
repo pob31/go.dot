@@ -27650,3 +27650,17 @@ tiles cost the renderer's message thread with a blur in them.
   masks now drawn over the whole canvas; `VideoHostTests` whole in both locales; `video.gpu.C`; the
   shader header's stamp; the clang-tidy stand-in clean. A deliberate breakage, the Painter passing the
   blur over, turned every blur scene red - a mean error up to 27 of 255.
+- **VFX.9**, 2026-10-13: blur in the window. "+ video" offers **Blur** on each canvas, born on layer 150 -
+  over pictures and masks - with no outline, so the whole canvas. A blur cue's picture panel: its outline
+  drawn and dragged on the canvas as a mask's (`masked()` covers it, `blurred()` says which), over the
+  monitor's tile of the canvas beneath it and with only a faint wash in the outline - a mask's paint
+  means nothing for it; with no outline the canvas says it **blurs the whole canvas** and that a double
+  click draws one; no fit, the frame being the canvas; the column beside the place: **blur** (the radius),
+  **Whole canvas** or **A shape** (a square to start from), the outline's **feather** and **Inside out**.
+  The radius leaves the inspector for the panel; the browser console lists it. Screen words the
+  implementer's (AKS). Tests under C and fr_FR: `ClientTests` (Blur offered with its born rows; the
+  panel's reading - blurred and masked, neither painted nor graded, its radius, outline and inside-out;
+  the radius gone from the inspector), `RunPaneUiTests` (no fit, the amount and feather shown, the whole
+  canvas said by its button, A shape writing a square and Whole canvas clearing it; the page as a
+  picture, looked at - the first showed the outline filled in the cue's unused paint, now a faint wash);
+  `console.unit`, `client.boundary`, `source.comments`; the clang-tidy stand-in clean.

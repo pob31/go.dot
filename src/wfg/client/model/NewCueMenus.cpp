@@ -272,6 +272,12 @@ namespace wfg::client::model
                                    { "shape", "0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75" } },
                                  "On " + canvas.label(), false, false, {} });
 
+            /*  A BLUR (namespace draft 61): over pictures and masks, the whole
+                canvas until an outline is drawn. */
+            choices.push_back ({ "Blur", "everything beneath it blurred, inside an outline or not", "video",
+                                 { { "source", "blur" }, { "canvas", canvas.id }, { "layer", "150" } },
+                                 "On " + canvas.label(), false, false, {} });
+
             /*  WORDS (namespace draft 61): born white, above pictures and
                 masks, saying something so they are seen at once. */
             choices.push_back ({ "Text", "words laid on the canvas, a title or a slide", "video",

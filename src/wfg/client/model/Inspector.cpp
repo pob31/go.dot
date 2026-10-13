@@ -107,7 +107,7 @@ namespace wfg::client::model
                                "contrast", "saturation", "gamma", "hue",
                                "curveLuma", "curveRed", "curveGreen", "curveBlue",
                                "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill",
-                               "shape", "feather", "invert",
+                               "blur", "shape", "feather", "invert",
                                "strip", "initialLevel", "release", "secondPress", "velocity", "velocityFloor",
                                "pressure", "releaseFade" } },
 

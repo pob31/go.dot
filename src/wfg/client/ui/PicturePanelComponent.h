@@ -150,6 +150,11 @@ namespace wfg::client::ui
             juce::TextButton copy { "Copy" };
         };
 
+        /*  A BLUR CUE'S (61, AKN): how far, and whether an outline limits it. */
+        juce::Slider blurAmount;
+        juce::Label blurAmountLabel;
+        juce::TextButton wholeCanvas { "Whole canvas" }, aShape { "A shape" };
+
         juce::TextButton fieldsPick;
         juce::Label noFields;
         std::vector<std::unique_ptr<FieldRow>> fieldRows;

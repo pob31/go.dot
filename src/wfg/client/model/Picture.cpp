@@ -87,7 +87,7 @@ namespace wfg::client::model
             "shape", "feather", "invert", "paint",
             "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill",
             "words", "font", "fontSize", "bold", "italic", "align", "alignV", "lineSpacing", "wrap",
-            "outlineColour", "outline", "outlineBlur" };
+            "outlineColour", "outline", "outlineBlur", "blur" };
 
         return rows;
     }
@@ -145,6 +145,7 @@ namespace wfg::client::model
         out.feather = numberAt (snapshot, base + "feather", 0.0);
         out.invert = isYes (flag (snapshot, base + "invert"));
         out.paint = text (snapshot, base + "paint");
+        out.blur = numberAt (snapshot, base + "blur", 20.0);
 
         out.useAlpha = flag (snapshot, base + "useAlpha") != Flag::no;
         out.inputAlpha = isYes (flag (snapshot, "/godot/videoInput/" + text (snapshot, base + "videoInput") + "/alpha"));

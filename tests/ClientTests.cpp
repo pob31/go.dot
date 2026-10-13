@@ -11608,6 +11608,47 @@ TEST_CASE ("client: a text cue's panel reads its fields - each blank once, in or
     CHECK (model::readFoot (*rig.publish (2), { model::Subject::Kind::picture, still.id }).picture.fields.empty());
 }
 
+TEST_CASE ("client: a blur cue is offered on each canvas, and its panel reads its radius and outline as a mask's (§61, AKN)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto canvas = rig.document.createCanvas ("Stage");
+    REQUIRE (canvas.ok);
+
+    const auto choices = model::videoChoices (*rig.publish (1));
+    const auto blur = std::find_if (choices.begin(), choices.end(), [] (const model::Choice& c) { return c.label == "Blur"; });
+    REQUIRE (blur != choices.end());
+    CHECK (blur->section == "On Stage");
+    CHECK (std::find (blur->settings.begin(), blur->settings.end(),
+                      std::pair<std::string, std::string> { "source", "blur" }) != blur->settings.end());
+    CHECK (std::find (blur->settings.begin(), blur->settings.end(),
+                      std::pair<std::string, std::string> { "layer", "150" }) != blur->settings.end());
+
+    const auto cue = rig.document.createCue (list, 0, "video", "", {},
+                                             { { "source", "blur" }, { "canvas", canvas.id }, { "blur", "45" },
+                                               { "shape", "0.1 0.1 0.9 0.1 0.5 0.9" }, { "invert", "true" } });
+    REQUIRE (cue.ok);
+    rig.parameters.markStale();
+
+    const auto reading = model::readFoot (*rig.publish (2), { model::Subject::Kind::picture, cue.id }).picture;
+    CHECK (reading.blurred());
+    CHECK (reading.masked());               // its outline drawn and dragged as a mask's
+    CHECK_FALSE (reading.painted());
+    CHECK_FALSE (reading.graded());
+    CHECK (reading.blur == doctest::Approx (45.0));
+    CHECK (reading.shape.size() == 3u);
+    CHECK (reading.invert);
+
+    std::vector<std::string> names;
+
+    for (const auto& block : model::inspect (*rig.publish (2), cue.id).blocks)
+        for (const auto& field : block.fields)
+            names.push_back (field.name);
+
+    CHECK (std::find (names.begin(), names.end(), "blur") == names.end());
+}
+
 TEST_CASE ("client: a new insert is numbered by kind and given both its names once; what Go.dot sends is never offered back (§47, AAK)")
 {
     std::vector<model::VideoInsertRow> inserts;
