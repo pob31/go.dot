@@ -19,10 +19,12 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <algorithm>
 #include <functional>
+#include <initializer_list>
 #include <chrono>
 #include <cstddef>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 #include <windows.h>
@@ -1792,9 +1794,11 @@ TEST_CASE ("show settings UI: the Timecode tab sits before Playback, and each of
     };
     collect (*page);
 
-    //  Three menus and a number, in the order the rows stand.
-    REQUIRE (menus.size() == 3u);
-    REQUIRE (boxes.size() == 1u);
+    /*  Three menus and a number, in the order the rows stand - then, since
+        TG.10, the Coming in part's two menus and four numbers after them
+        (namespace draft §60; their own case below). */
+    REQUIRE (menus.size() == 5u);
+    REQUIRE (boxes.size() == 5u);
     auto* rate = menus[0];
     auto* mtc = menus[1];
     auto* ltc = menus[2];
@@ -1926,4 +1930,180 @@ TEST_CASE ("show settings UI: the Timecode tab sits before Playback, and each of
     CHECK_FALSE (mtc->isEnabled());
     CHECK_FALSE (ltc->isEnabled());
     CHECK_FALSE (level->isEnabled());
+}
+
+TEST_CASE ("show settings UI: the Timecode tab's Coming in part sends a node.set for each row, LTC offered one-channel inputs only")
+{
+    /*  Namespace draft §60 (AIM, AIN; TG.10): the input LTC comes in on, the
+        port MTC comes in on, and the four chase settings - each a `node.set`
+        on its /godot/sync row that lands at once - and a line for each code
+        the show names. The words were the implementer's, accepted by the
+        author as offered (2026-10-12/13). */
+    Rig rig;
+
+    const auto port = rig.document.createPort ("Desk");
+    const auto mono = rig.document.createInput (1);
+    const auto stereo = rig.document.createInput (2);
+    REQUIRE (port.ok);
+    REQUIRE (mono.ok);
+    REQUIRE (stereo.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/input/" + mono.id + "/name", "Code in").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/input/" + stereo.id + "/name", "Keys").ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    const auto names = tabs->getTabNames();
+    REQUIRE (names.contains ("Timecode"));
+    tabs->setCurrentTabIndex (names.indexOf ("Timecode"));
+
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    std::vector<juce::ComboBox*> menus;
+    std::vector<juce::TextEditor*> boxes;
+    std::vector<juce::Label*> labels;
+
+    std::function<void (juce::Component&)> collect = [&] (juce::Component& at)
+    {
+        if (auto* menu = dynamic_cast<juce::ComboBox*> (&at))
+            menus.push_back (menu);
+        else if (auto* box = dynamic_cast<juce::TextEditor*> (&at))
+            boxes.push_back (box);
+        else if (auto* label = dynamic_cast<juce::Label*> (&at))
+            labels.push_back (label);
+
+        for (auto* child : at.getChildren())
+            collect (*child);
+    };
+    collect (*page);
+
+    //  After the outgoing rows: two menus and four numbers, in the order the rows stand.
+    REQUIRE (menus.size() == 5u);
+    REQUIRE (boxes.size() == 5u);
+    auto* ltcIn = menus[3];
+    auto* mtcIn = menus[4];
+    auto* tolerance = boxes[1];
+    auto* jumpPast = boxes[2];
+    auto* catchUp = boxes[3];
+    auto* crossfade = boxes[4];
+
+    const auto shownLabel = [&labels] (const juce::String& text) -> juce::Label*
+    {
+        for (auto* label : labels)
+            if (label->getText() == text)
+                return label;
+
+        return nullptr;
+    };
+
+    for (const auto* row : { "Coming in", "LTC comes in on", "MTC comes in on", "in step within", "jumps past",
+                             "catches up by at most", "jump crossfade", "ms", "s", "%" })
+    {
+        INFO (row);
+        CHECK (shownLabel (row) != nullptr);
+    }
+
+    //  What a show nobody has set shows: no input, no port, the engine's four defaults.
+    CHECK (ltcIn->getText() == "None");
+    CHECK (mtcIn->getText() == "None");
+    CHECK (tolerance->getText().getDoubleValue() == doctest::Approx (10.0));
+    CHECK (jumpPast->getText().getDoubleValue() == doctest::Approx (0.25));
+    CHECK (catchUp->getText().getDoubleValue() == doctest::Approx (1.0));
+    CHECK (crossfade->getText().getDoubleValue() == doctest::Approx (10.0));
+
+    //  The inputs: one channel enabled, wider listed and disabled, saying why - as the LTC output menu does.
+    auto codeItem = 0;
+    auto keysItem = 0;
+
+    for (int at = 0; at < ltcIn->getNumItems(); ++at)
+    {
+        const auto text = ltcIn->getItemText (at);
+        const auto item = ltcIn->getItemId (at);
+        INFO (text);
+
+        if (text == "Code in")
+        {
+            codeItem = item;
+            CHECK (ltcIn->isItemEnabled (item));
+        }
+        else if (text == "Keys (2 channels: LTC needs one)")
+        {
+            keysItem = item;
+            CHECK_FALSE (ltcIn->isItemEnabled (item));
+        }
+        else if (text != "None")
+        {
+            //  Anything else the show has is enabled only if it is one channel.
+            CHECK (text.contains ("channels: LTC needs one") != ltcIn->isItemEnabled (item));
+        }
+    }
+
+    REQUIRE (codeItem > 0);
+    REQUIRE (keysItem > 0);
+    REQUIRE (mtcIn->getNumItems() == 2);
+    CHECK (mtcIn->getItemText (1) == "Desk");
+
+    //  Each control sends its own row.
+    rig.sent.clear();
+    ltcIn->setSelectedId (codeItem, juce::sendNotificationSync);
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent.back().command == "node.set");
+    CHECK (rig.sent.back().args[0].getString() == "/godot/sync/ltcIn");
+    CHECK (rig.sent.back().args[1].getString() == mono.id);
+
+    //  A disabled input is never sent, however it came to be picked.
+    ltcIn->setSelectedId (keysItem, juce::sendNotificationSync);
+    CHECK (rig.sent.size() == 1u);
+
+    mtcIn->setSelectedId (2, juce::sendNotificationSync);
+    REQUIRE (rig.sent.size() == 2u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/sync/mtcIn");
+    CHECK (rig.sent.back().args[1].getString() == port.id);
+
+    //  The four numbers, a comma read as a point, each to its row.
+    for (auto [box, typed, address, sent] : { std::tuple { tolerance, "12,5", "/godot/sync/chaseTolerance", "12.5" },
+                                              std::tuple { jumpPast, "0,5", "/godot/sync/chaseJump", "0.5" },
+                                              std::tuple { catchUp, "2", "/godot/sync/chaseRate", "2" },
+                                              std::tuple { crossfade, "20", "/godot/sync/chaseCrossfade", "20" } })
+    {
+        INFO (address);
+        const auto before = rig.sent.size();
+        box->setText (typed, juce::dontSendNotification);
+        box->onReturnKey();
+        REQUIRE (rig.sent.size() == before + 1);
+        CHECK (rig.sent.back().args[0].getString() == address);
+        CHECK (rig.sent.back().args[1].getString() == sent);
+    }
+
+    //  The value a row already has is not an edit.
+    {
+        const auto before = rig.sent.size();
+        tolerance->setText ("10", juce::dontSendNotification);
+        tolerance->onFocusLost();
+        CHECK (rig.sent.size() == before);
+    }
+
+    //  Once the show names both sources, the tab shows them - and a line for each, as the machine hears it.
+    REQUIRE (rig.document.setAttribute ("/godot/sync/ltcIn", mono.id).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/sync/mtcIn", port.id).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/sync/chaseJump", "0.5").ok);
+    rig.state.ltcIn = timecode::CodeReadout { "running", "01:02:03:04", "25", 1.000012 };
+    rig.state.mtcIn = timecode::CodeReadout { "absent", {}, {}, 0.0 };
+    panel.refresh (*rig.publish());
+
+    CHECK (ltcIn->getText() == "Code in");
+    CHECK (mtcIn->getText() == "Desk");
+    CHECK (jumpPast->getText().getDoubleValue() == doctest::Approx (0.5));
+    CHECK (shownLabel ("LTC in: running, 01:02:03:04 at 25, +12 ppm") != nullptr);
+    CHECK (shownLabel ("MTC in: absent") != nullptr);
+
+    //  Locked, nothing in the part can be changed.
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+
+    for (auto* control : std::initializer_list<juce::Component*> { ltcIn, mtcIn, tolerance, jumpPast, catchUp, crossfade })
+        CHECK_FALSE (control->isEnabled());
 }

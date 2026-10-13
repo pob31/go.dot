@@ -16,10 +16,12 @@
 
 #include <wfg/client/model/Timecode.h>
 
+#include <wfg/client/model/InputList.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/timecode/Timecode.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -46,6 +48,38 @@ namespace wfg::client::model
             const auto value = osc::parseDouble (reading);
             return value.has_value() && *value > 0.0 ? static_cast<long long> (std::llround (*value)) : 0;
         }
+
+        /*  ONE CHANNEL OR NOT AT ALL, for both ends of the code: LTC replaces
+            one output channel (AHI) and is decoded from one input channel
+            (AIM). An output or an input wider than that is listed - marked
+            rather than filtered, so the one somebody expected is there - and
+            says why it cannot be picked, in the same words either way. */
+        SyncChoice oneChannel (const std::string& id, const std::string& name, int width)
+        {
+            if (width > 1)
+                return { id, name + " (" + std::to_string (width) + " channels: LTC needs one)", false };
+
+            return { id, name, true };
+        }
+
+        /*  HOW FAR A CODE'S SPEED IS FROM GO.DOT'S CLOCK, in parts per million
+            - "+12 ppm", "-3 ppm", "0 ppm" - which is the size a drift between
+            two crystals comes in. A code a hundredth or more away is not
+            drifting but running at another speed, a deck wound or a DAW
+            varispeeded, and says so as the window says any speed: "×0.5". */
+        std::string speedFromOne (double speed)
+        {
+            const auto off = (speed - 1.0) * 1.0e6;
+
+            if (! (std::abs (off) < 10000.0))
+                return speedText (speed);
+
+            const auto ppm = std::llround (off);
+            return (ppm > 0 ? "+" : "") + std::to_string (ppm) + " ppm";
+        }
+
+        //  The separator the pane's words use between two readings: a middle dot, as UTF-8.
+        constexpr const char* separator = " \xc2\xb7 ";
     }
 
     SyncRow readSync (const tree::TreeSnapshot& snapshot)
@@ -74,7 +108,39 @@ namespace wfg::client::model
         row.ltcLate = count (at ("ltcLate"));
         row.mtcWorstMs = osc::parseDouble (at ("mtcWorst")).value_or (0.0);
 
+        /*  AND THE CODES COMING IN (namespace draft §60, TG.10), asked by name
+            as the rest: where each comes in, the four chase settings - kept as
+            the tree wrote them, so a box shows "0.25" and not a double's tail -
+            and what the machine hears of each. */
+        row.ltcIn = at ("ltcIn");
+        row.mtcIn = at ("mtcIn");
+
+        for (auto [stored, name] : { std::pair { &row.chaseTolerance, "chaseTolerance" },
+                                     std::pair { &row.chaseJump, "chaseJump" },
+                                     std::pair { &row.chaseRate, "chaseRate" },
+                                     std::pair { &row.chaseCrossfade, "chaseCrossfade" } })
+            if (const auto value = at (name); ! value.empty())
+                *stored = value;
+
+        row.ltcHeard = readCodeIn (snapshot, "ltc");
+        row.mtcHeard = readCodeIn (snapshot, "mtc");
+
         return row;
+    }
+
+    SyncRow::CodeIn readCodeIn (const tree::TreeSnapshot& snapshot, std::string_view source)
+    {
+        const auto base = std::string (syncPrefix) + std::string (source) + "In";
+        SyncRow::CodeIn heard;
+
+        if (const auto state = text (snapshot, base + "State"); ! state.empty())
+            heard.state = state;
+
+        heard.code = text (snapshot, base + "Code");
+        heard.rate = text (snapshot, base + "Rate");
+        heard.speed = osc::parseDouble (text (snapshot, base + "Speed")).value_or (0.0);
+
+        return heard;
     }
 
     const std::vector<std::pair<std::string, std::string>>& rateChoices()
@@ -131,20 +197,25 @@ namespace wfg::client::model
         choices.reserve (outputs.size() + 1);
         choices.push_back ({ {}, timecodeWords::none, true });
 
+        /*  MARKED RATHER THAN FILTERED, as a cue's direct out marks a busy
+            output (PRD 3.9b): the output somebody expected is there, and says
+            why it cannot be picked. A direct out and a mix channel alike - the
+            engine takes either, so long as it is one channel. */
         for (const auto& output : outputs)
-        {
-            const auto name = output.name.empty() ? output.id : output.name;
+            choices.push_back (oneChannel (output.id, output.name.empty() ? output.id : output.name, output.width));
 
-            /*  MARKED RATHER THAN FILTERED, as a cue's direct out marks a busy
-                output (PRD 3.9b): the output somebody expected is there, and
-                says why it cannot be picked. A direct out and a mix channel
-                alike - the engine takes either, so long as it is one channel. */
-            if (output.width > 1)
-                choices.push_back ({ output.id, name + " (" + std::to_string (output.width)
-                                                  + " channels: LTC needs one)", false });
-            else
-                choices.push_back ({ output.id, name, true });
-        }
+        return choices;
+    }
+
+    std::vector<SyncChoice> ltcInputChoices (const std::vector<InputRow>& inputs)
+    {
+        std::vector<SyncChoice> choices;
+        choices.reserve (inputs.size() + 1);
+        choices.push_back ({ {}, timecodeWords::none, true });
+
+        //  The output menu's rule, from the other side (namespace draft §60, AIM).
+        for (const auto& input : inputs)
+            choices.push_back (oneChannel (input.id, input.name.empty() ? input.id : input.name, input.width));
 
         return choices;
     }
@@ -221,5 +292,142 @@ namespace wfg::client::model
         return wfg::timecode::formatLabel (wfg::timecode::labelOf (wfg::timecode::frameOf (*start, *code) + frames,
                                                                    *code),
                                            *code, true);
+    }
+
+    //==========================================================================
+    std::string codeInLine (std::string_view source, const SyncRow::CodeIn& heard)
+    {
+        if (heard.state.empty() || heard.state == "none")
+            return {};
+
+        /*  THE ENGINE'S OWN STATE WORD, as the readout spells it - running,
+            stopped, absent - then only what that state has to say: a code
+            nobody hears has no label, a stopped one no speed. */
+        auto line = std::string (source == "mtc" ? timeGroupWords::mtcIn : timeGroupWords::ltcIn) + ": " + heard.state;
+
+        if (heard.state == "absent")
+            return line;
+
+        if (! heard.code.empty())
+            line += ", " + shownLabel (heard.code, heard.rate);
+
+        if (! heard.rate.empty())
+            line += (heard.code.empty() ? ", at " : " at ") + rateWord (heard.rate);
+
+        if (heard.state == "running")
+            line += ", " + speedFromOne (heard.speed);
+
+        return line;
+    }
+
+    std::vector<std::string> comingInLines (const SyncRow& row)
+    {
+        std::vector<std::string> lines;
+
+        for (const auto& line : { codeInLine ("ltc", row.ltcHeard), codeInLine ("mtc", row.mtcHeard) })
+            if (! line.empty())
+                lines.push_back (line);
+
+        return lines;
+    }
+
+    const std::vector<std::pair<std::string, std::string>>& timeSourceChoices()
+    {
+        static const std::vector<std::pair<std::string, std::string>> choices {
+            { "ltc",   timeGroupWords::ltcIn },
+            { "mtc",   timeGroupWords::mtcIn },
+            { "clock", timeGroupWords::clock },
+        };
+
+        return choices;
+    }
+
+    const std::vector<std::pair<std::string, std::string>>& chaseChoices()
+    {
+        static const std::vector<std::pair<std::string, std::string>> choices {
+            { "free",        timeGroupWords::freeRun },
+            { "jump",        timeGroupWords::jump },
+            { "varispeed",   timeGroupWords::varispeed },
+            { "timestretch", timeGroupWords::timestretch },
+        };
+
+        return choices;
+    }
+
+    std::string groupModeWord (std::string_view mode)
+    {
+        //  The engine's own question (cue/GroupMode.h), so the two cannot disagree about what a time group is.
+        if (cue::isTimeGroup (cue::GroupMode { std::string (mode), {} }))
+            return timeGroupWords::kind;
+
+        return std::string (mode);
+    }
+
+    std::string memberTime (std::string_view at, std::string_view source, std::string_view rate)
+    {
+        /*  A CLOCK MEMBER'S TIME IS ALREADY HOW A PERSON READS IT, `HH:MM:SS`
+            - the judge keeps it as typed (TG.2) - and a label is a label at
+            the show's rate (AIL), its drop-frame semicolon shown as the
+            timecode cue's start is. */
+        if (source == "clock")
+            return std::string (at);
+
+        return shownLabel (at, rate);
+    }
+
+    std::string clockLabel (long long millisecondOfDay)
+    {
+        if (millisecondOfDay < 0)
+            return {};
+
+        const auto second = millisecondOfDay % 86400000 / 1000;
+
+        //  By hand, as every number here: no locale groups or pads it differently.
+        const auto two = [] (long long value)
+        {
+            return std::string (value < 10 ? "0" : "") + std::to_string (value);
+        };
+
+        return two (second / 3600) + ":" + two (second / 60 % 60) + ":" + two (second % 60);
+    }
+
+    std::string followsWords (std::string_view source, const SyncRow::CodeIn& heard, long long clockMilliseconds)
+    {
+        if (source == "clock")
+        {
+            const auto now = clockLabel (clockMilliseconds);
+            return now.empty() ? std::string (timeGroupWords::clockCode)
+                               : std::string (timeGroupWords::clockCode) + " " + now;
+        }
+
+        /*  LTC BY DEFAULT, as the row's table has it: an empty word read raw
+            is the default. A running code is its label alone - the state the
+            label moving says - and any other says its state word first. */
+        auto words = std::string (source == "mtc" ? timeGroupWords::mtcCode : timeGroupWords::ltcCode);
+
+        if (heard.state != "running" && ! heard.state.empty())
+            words += " " + heard.state;
+
+        if (! heard.code.empty())
+            words += " " + shownLabel (heard.code, heard.rate);
+
+        return words;
+    }
+
+    std::string chaseWords (std::string_view state, double errorMilliseconds)
+    {
+        if (state.empty() || state == "free")
+            return {};
+
+        /*  WHOLE MILLISECONDS, AND NO SIDE: what an operator wants of a chaser
+            is whether it is with its code, and a millisecond is the finest a
+            catch-up settles to (AIS). The two states worth a word are the ones
+            that are doing something about it. */
+        auto words = std::to_string (std::llround (std::abs (errorMilliseconds))) + " " + timeGroupWords::msOut;
+
+        if (state == "catching" || state == "jumped")
+            words += separator + std::string (state);
+
+        return words;
     }
 }

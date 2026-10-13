@@ -33,7 +33,9 @@
     its second an empty one where any new cue goes. The sampler joins the
     first part only when a sampler could hold every picked cue - a sound or a
     picture, a sound locked to a movie only with its movie (namespace draft
-    §49) - because a sampler plays those members and nothing else.
+    §49) - because a sampler plays those members and nothing else. The time
+    group likewise, only when every picked cue is a sound, a picture, a
+    timeline or an automatic sequence (§60, AIK).
 
     A TRANSPORT OR START CUE IS BORN AIMED at the picked cue, when there is
     one: a stop with no target stops nothing, and the cue somebody has just
@@ -136,6 +138,7 @@ namespace wfg::client::model
         std::vector<std::string> cues;  ///< the picked ids, as picked
         int count = 0;
         bool allPlayable = false;       ///< every one a sampler could hold (§49)
+        bool allTimeable = false;       ///< every one a time group could hold (§60, AIK)
         std::string why;
 
         bool possible() const noexcept  { return count > 0 && why.empty(); }

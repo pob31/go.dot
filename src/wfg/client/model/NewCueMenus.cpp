@@ -21,6 +21,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Timecode.h>
 #include <wfg/client/model/Video.h>
+#include <wfg/engine/cue/GroupMode.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -132,7 +133,8 @@ namespace wfg::client::model
         /*  FIVE, the author's number (2026-09-27): the automatic sequence and
             the one on GO behave too differently in a show to share a line, and
             a shuffle is an automatic sequence in a fresh order - automatic by
-            force, since a manual group ignores `selection`. */
+            force, since a manual group ignores `selection`. A sixth since the
+            time group (namespace draft §60), last. */
         static const std::vector<Choice> choices {
             { "Timeline group", "members start together, each after its own pre-wait", "group",
               { { "mode", "timeline" } }, {}, false, false, {} },
@@ -144,6 +146,13 @@ namespace wfg::client::model
               { { "mode", "sequence" }, { "advance", "auto" }, { "selection", "shuffle" } }, {}, false, false, {} },
             { "Sampler group", "faders and pads start its members", "group",
               { { "mode", "sampler" } }, {}, true, false, {} },
+
+            /*  AND THE GROUP A CODE STARTS (namespace draft §60, AIE; TG.10's
+                words, accepted as offered): beside the sampler, the other group
+                whose members no GO starts. Born on LTC, the row's default; its
+                inspector says which code it follows. */
+            { timeGroupWords::line, timeGroupWords::explanation, "group",
+              { { "mode", std::string (cue::timeMode) } }, {}, false, false, {} },
         };
 
         return choices;
@@ -459,6 +468,7 @@ namespace wfg::client::model
 
         std::string list;
         bool allPlayable = true;
+        bool allTimeable = true;
 
         for (const auto& id : picked)
         {
@@ -498,9 +508,23 @@ namespace wfg::client::model
                                                 || std::find (picked.begin(), picked.end(), lockedTo) != picked.end()));
 
             allPlayable = allPlayable && playable;
+
+            /*  WHAT A TIME GROUP COULD HOLD (namespace draft §60, AIK), as
+                `groupSelection` asks it of each cue it would move: a sound, a
+                picture, or a scene the machine paces - a timeline or an
+                automatic sequence - by the group's own two words. A locked
+                sound needs no movie here: a code starts each on its time. */
+            const auto base = "/godot/cue/" + id + "/";
+            const auto timeable = kind == "media" || kind == "video"
+                                    || (kind == "group"
+                                          && cue::pacedByMachine (cue::GroupMode { text (snapshot, base + "mode"),
+                                                                                   text (snapshot, base + "advance") }));
+
+            allTimeable = allTimeable && timeable;
         }
 
         out.allPlayable = out.count > 0 && allPlayable;
+        out.allTimeable = out.count > 0 && allTimeable;
         return out;
     }
 
@@ -516,8 +540,25 @@ namespace wfg::client::model
                                                : "Put the " + std::to_string (wrap.count) + " picked cues in a new…",
                                -1, false });
 
+            /*  A LINE IS OFFERED AROUND THEM ONLY WHEN ITS GROUP COULD HOLD
+                EVERY ONE: the sampler by its flag, a time group by the mode it
+                is born with - which is the word `groupSelection` itself reads
+                to refuse (§60, AIK), so the list and the engine ask the same
+                question of the same settings. */
+            const auto offered = [&wrap] (const Choice& choice)
+            {
+                const auto timeGroup = std::any_of (choice.settings.begin(), choice.settings.end(),
+                                                    [] (const auto& setting)
+                                                    {
+                                                        return setting.first == "mode"
+                                                                 && cue::isTimeGroup (cue::GroupMode { setting.second, {} });
+                                                    });
+
+                return (! choice.playableOnly || wrap.allPlayable) && (! timeGroup || wrap.allTimeable);
+            };
+
             for (std::size_t at = 0; at < choices.size(); ++at)
-                if (! choices[at].playableOnly || wrap.allPlayable)
+                if (offered (choices[at]))
                     lines.push_back ({ MenuLine::Kind::item, lineText (choices[at]), static_cast<int> (at), true });
 
             lines.push_back ({ MenuLine::Kind::separator, {}, -1, false });

@@ -168,6 +168,12 @@ namespace wfg::client::model
         bool soundBelow = false;
         bool rateOn = false;         ///< a fade that moves its target's speed
         bool memberOfSampler = false;  ///< a member (not header or footer) of a sampler group (§39)
+
+        /*  A MEMBER (not header or footer) OF A TIME GROUP (namespace draft
+            §60, TG.10): its time column is its `at`, the time its code starts
+            it - `duration` carries that, shown as `memberTime` shows it - and
+            the column's cell writes `at`. */
+        bool memberOfTimeGroup = false;
         bool stopWhenDone = false;   ///< a fade that stops what it faded, once it arrives
 
         int depth = 0;           ///< 0 at the top of the list; a group's members are one deeper

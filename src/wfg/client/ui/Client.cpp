@@ -2179,7 +2179,15 @@ namespace wfg::client
                     owns, which is what §14.16's second rule is about. */
                 const auto mediaTable = host.media != nullptr ? host.media->snapshot() : nullptr;
 
-                shell->runs.show (model::readRuns (*snapshot), mediaTable);
+                /*  THE WALL CLOCK, for a time group that follows it (namespace
+                    draft §60, TG.10): the engine publishes no clock row, and
+                    this window runs on the engine's own machine, so its local
+                    time of day is the one the group's members are started by. */
+                const auto wall = juce::Time::getCurrentTime();
+                const auto clockMilliseconds = ((static_cast<long long> (wall.getHours()) * 60 + wall.getMinutes()) * 60
+                                                  + wall.getSeconds()) * 1000 + wall.getMilliseconds();
+
+                shell->runs.show (model::readRuns (*snapshot, clockMilliseconds), mediaTable);
 
                 /*  AND THE PANEL AT THE FOOT, on the ONE subject it is open on.
                     Handed the table taken just above rather than asking for its

@@ -17,6 +17,7 @@
 #include <wfg/client/model/RunModel.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/Timecode.h>
 #include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -143,9 +144,10 @@ namespace wfg::client::model
             if (cue::isManual (group))
                 return "A manual sequence is played by GO \xe2\x80\x94 it cannot be scrubbed";
 
-            /*  A TIME GROUP IS PLAYED BY ITS CODE (namespace draft §60), and its
-                words are the window's round (TG.10, AJA): until then it says
-                nothing, rather than the round below it never begins. */
+            /*  A TIME GROUP IS PLAYED BY ITS CODE (namespace draft §60). Its row
+                says the code it follows (TG.10), and a sentence for why it will
+                not scrub was not among the words the author accepted, so it
+                says nothing here rather than that its round never begins. */
             if (cue::isTimeGroup (group))
                 return {};
 
@@ -431,7 +433,7 @@ namespace wfg::client::model
         return out.size() == rows.size() ? out : rows;
     }
 
-    std::vector<RunRow> readRuns (const tree::TreeSnapshot& snapshot)
+    std::vector<RunRow> readRuns (const tree::TreeSnapshot& snapshot, long long clockMilliseconds)
     {
         const auto order = words (text (snapshot, "/godot/run/order"));
 
@@ -508,6 +510,30 @@ namespace wfg::client::model
 
             if (row.kind == "timecode")
                 row.timecode = at (snapshot, id, "timecode");
+
+            /*  A TIME GROUP'S RUN SAYS THE CODE IT FOLLOWS, and a member that
+                chases how far out of step it is (namespace draft §60, TG.10):
+                the source from the group's cue, its readouts from the show's
+                `sync` rows - asked only for a time group, so a pane with none
+                pays a string test - and the chase from the run's own two. */
+            if (row.kind == "group" && ! row.cueId.empty())
+            {
+                const auto cue = "/godot/cue/" + row.cueId + "/";
+
+                if (cue::isTimeGroup (cue::GroupMode { text (snapshot, cue + "mode"), {} }))
+                {
+                    const auto source = text (snapshot, cue + "timeSource");
+                    const auto heard = source == "clock" ? SyncRow::CodeIn {}
+                                                         : readCodeIn (snapshot, source == "mtc" ? "mtc" : "ltc");
+
+                    row.liveWords = followsWords (source, heard, clockMilliseconds);
+                }
+            }
+
+            if (const auto chase = chaseWords (at (snapshot, id, "chaseState"),
+                                               osc::parseDouble (at (snapshot, id, "chaseError")).value_or (0.0));
+                ! chase.empty())
+                row.liveWords = row.liveWords.empty() ? chase : row.liveWords + separator + chase;
 
             if (! row.cueId.empty())
                 row.scrubRefusal = refusalOf (snapshot, row);

@@ -33,13 +33,16 @@ namespace wfg::client::model
         {
             const cue::GroupMode group { mode, {} };
 
-            if (cue::isTimeline (group)) return Icon::timeline;
-            if (cue::isSampler (group))  return Icon::sampler;
+            if (cue::isTimeline (group))  return Icon::timeline;
+            if (cue::isSampler (group))   return Icon::sampler;
+
+            /*  A TIME GROUP (namespace draft §60, TG.10): the plain group's
+                frames with a clock in the front one - a group whose members a
+                time starts. */
+            if (cue::isTimeGroup (group)) return Icon::timeGroup;
 
             /*  A WORD, NOT ITS DEFAULT: the new-cue bar's group button asks
-                with none, and is the plain group. A time group draws the plain
-                group too until the window's round gives it one (namespace
-                draft §60, TG.10). */
+                with none, and is the plain group. */
             if (! mode.empty() && cue::isSequence (group)) return Icon::sequence;
 
             return Icon::group;
@@ -80,8 +83,14 @@ namespace wfg::client::model
         return Icon::none;
     }
 
-    std::string accentFor (const std::string& kind)
+    std::string accentFor (const std::string& kind, const std::string& mode)
     {
+        /*  A TIME GROUP'S OWN (namespace draft §60, TG.10): the one group whose
+            members no GO and no hand start, which the list should find at a
+            glance among groups that otherwise all wear the ink's grey. */
+        if (kind == "group" && cue::isTimeGroup (cue::GroupMode { mode, {} }))
+            return "kind-timegroup";
+
         /*  ONE TOKEN PER KIND THAT HAS ONE, named after it, so a kind's accent
             is found in the theme file under the kind's own word. A start cue
             is one of the cues that act on a cue, and shares the transport's. */

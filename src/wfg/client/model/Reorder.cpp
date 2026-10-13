@@ -622,6 +622,14 @@ namespace wfg::client::model
         return {};
     }
 
+    std::string editAttributeFor (EditCell cell, const Row& row)
+    {
+        if (cell == EditCell::duration && row.memberOfTimeGroup)
+            return "at";
+
+        return editAttributeFor (cell, row.kind);
+    }
+
     std::string describe (const Drop& drop, const Row& over, bool intoTimeline)
     {
         /*  THE PERSISTENT BAND IS NAMED FOR WHAT IT IS, whether or not the

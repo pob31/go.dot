@@ -166,6 +166,11 @@ namespace wfg::client::model
 
     std::string editAttributeFor (EditCell cell, const std::string& kind);
 
+    /*  AND FOR A ROW, which knows more than its kind: a time group's member's
+        time column is its `at` (namespace draft §60, TG.10), so its cell
+        writes that, whatever kind of cue it is. Every other row as its kind. */
+    std::string editAttributeFor (EditCell cell, const Row& row);
+
     /*  What letting go of `dragged` over `over` would do, `fraction` being how
         far down the row the pointer is (0 at the top, 1 at the bottom).
 

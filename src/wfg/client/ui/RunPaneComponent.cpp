@@ -568,6 +568,39 @@ namespace wfg::client::ui
         return clockFor (rows[static_cast<std::size_t> (index)]);
     }
 
+    juce::String RunPaneComponent::besideOf (int index) const
+    {
+        if (index < 0 || index >= static_cast<int> (rows.size()))
+            return {};
+
+        return juce::String (besideFor (rows[static_cast<std::size_t> (index)]));
+    }
+
+    std::string RunPaneComponent::besideFor (const model::RunRow& entry)
+    {
+        /*  A SAMPLER RUN'S OWN WORDS, at the right end of its line beside the
+            position: a group's count of its members, a member's strip and what
+            the strip is doing (§16.7). AND A MIC RUN'S (Phase 9b): the channel
+            it is on, or that it waits for one or rings out - in the same place,
+            by the same rule; and a time group's code and a chaser's step
+            (namespace draft §60, TG.10), which the model puts in the same words. */
+        auto beside = entry.samplerWords.empty() ? entry.liveWords : entry.samplerWords;
+
+        /*  AND ITS COUNTS (2026-10-05, namespace draft §30.6; PRD §3.6 and
+            §3.24, "current count visible on the strip"): "R2 2/2" on a sound
+            with ranges, "round 2/3" on a scene - so a head that leaps back to
+            a slice's in-point, or a scene's to its round's start, is read as
+            the next pass and not as a fault. */
+        if (const auto counts = model::countWords (entry); ! counts.empty())
+            beside = beside.empty() ? counts : beside + " \xc2\xb7 " + counts;
+
+        //  AND A SPEED THAT IS NOT ONE (namespace draft §22.7), after whatever else the run says: "×0.5".
+        if (const auto speed = model::speedText (entry.rate); ! speed.empty())
+            beside = beside.empty() ? speed : beside + " \xc2\xb7 " + speed;
+
+        return beside;
+    }
+
     bool RunPaneComponent::drawsHead (int index) const
     {
         if (index < 0 || index >= static_cast<int> (rows.size()))
@@ -967,26 +1000,10 @@ namespace wfg::client::ui
 
         area.removeFromLeft (entry.depth * unit);
 
-        /*  A SAMPLER RUN'S OWN WORDS, at the right end of its line beside the
-            position: a group's count of its members, a member's strip and what
-            the strip is doing (§16.7). Measured, and never more than half the
-            line, so the name keeps the room it is read by. */
-        /*  AND A MIC RUN'S (Phase 9b): the channel it is on, or that it waits
-            for one or rings out - in the same place, by the same rule. */
-        /*  AND A SPEED THAT IS NOT ONE (namespace draft §22.7), after
-            whatever else the run says: "×0.5". */
-        auto beside = entry.samplerWords.empty() ? entry.liveWords : entry.samplerWords;
-
-        /*  AND ITS COUNTS (2026-10-05, namespace draft §30.6; PRD §3.6 and
-            §3.24, "current count visible on the strip"): "R2 2/2" on a sound
-            with ranges, "round 2/3" on a scene - so a head that leaps back to
-            a slice's in-point, or a scene's to its round's start, is read as
-            the next pass and not as a fault. */
-        if (const auto counts = model::countWords (entry); ! counts.empty())
-            beside = beside.empty() ? counts : beside + " \xc2\xb7 " + counts;
-
-        if (const auto speed = model::speedText (entry.rate); ! speed.empty())
-            beside = beside.empty() ? speed : beside + " \xc2\xb7 " + speed;
+        /*  THE RUN'S OWN WORDS beside its position (`besideFor`, which a test
+            reads too). Measured, and never more than half the line, so the
+            name keeps the room it is read by. */
+        const auto beside = besideFor (entry);
 
         if (! beside.empty())
         {

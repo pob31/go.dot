@@ -222,7 +222,13 @@ namespace wfg::client::model
             draft §18.9): the channel it plays through - "on Vox 1" - or why it
             is not playing yet, or any more: "waiting for Vox 1" while another
             cue holds the channel, "ringing out" after its stop while the
-            channel's plugins decay. Empty for every other run. */
+            channel's plugins decay. Empty for every other run.
+
+            AND A TIME GROUP'S AND ITS CHASERS' (namespace draft §60, TG.10),
+            in the same place: the group's run says the code it follows - "LTC
+            01:02:03:04", "clock 20:15:03" - and a member that chases how far
+            out of step it is, "3 ms out", with the engine's word while it is
+            catching up (model/Timecode.h's `followsWords`, `chaseWords`). */
         std::string liveWords;
 
         /*  THE SPEED IT PLAYS AT NOW (namespace draft §22.7), the run's own
@@ -265,7 +271,12 @@ namespace wfg::client::model
         not scatter up the pane among things that started between them - the
         structure is what the indent is drawing, and an order that broke it
         would be two claims about the same rows. */
-    std::vector<RunRow> readRuns (const tree::TreeSnapshot& snapshot);
+    /*  `clockMilliseconds` is the wall clock's millisecond of the day as the
+        window reads it, for a time group on the clock to say where the clock
+        is (namespace draft §60): the engine publishes no clock row - the
+        window's clock is the engine machine's - and below nought the row says
+        "clock" alone. Handed in, so a test says what the clock reads. */
+    std::vector<RunRow> readRuns (const tree::TreeSnapshot& snapshot, long long clockMilliseconds = -1);
 
     /*  The ordering `readRuns` finishes with, on its own so a test can hand it
         rows and assert the rule rather than building a tree to imply it. */

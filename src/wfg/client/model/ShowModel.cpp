@@ -17,6 +17,7 @@
 #include <wfg/client/model/ShowModel.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/Timecode.h>
 #include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -378,6 +379,20 @@ namespace wfg::client::model
         row.section = section;
         row.memberOfSampler = section == Section::member && ! parent.empty()
                                 && cue::isSampler (cue::GroupMode { attribute (snapshot, parent, "mode"), {} });
+
+        /*  A TIME GROUP'S MEMBER'S TIME IS WHEN ITS CODE STARTS IT (namespace
+            draft §60, TG.10): the column says its `at` - a label at the show's
+            rate, with its semicolon at drop-frame, or the clock's `HH:MM:SS` -
+            in place of how long it plays, which the inspector still says. Only
+            on a cue that carries the row: a member a hand-edited file put there
+            against the rules keeps its own time. */
+        row.memberOfTimeGroup = section == Section::member && ! parent.empty()
+                                  && cue::isTimeGroup (cue::GroupMode { attribute (snapshot, parent, "mode"), {} })
+                                  && snapshot.find ("/godot/cue/" + cueId + "/at") != nullptr;
+
+        if (row.memberOfTimeGroup)
+            row.duration = memberTime (attribute (snapshot, cueId, "at"), attribute (snapshot, parent, "timeSource"),
+                                       text (snapshot, "/godot/sync/frameRate"));
         row.parent = parent;
         row.indexInParent = indexInParent;
         row.enabled = flag (snapshot, "/godot/cue/" + cueId + "/enabled") != Flag::no;
