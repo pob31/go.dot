@@ -20219,6 +20219,141 @@ next tick's too.
 - **A runtime row's value still goes to text and back**: `osc::formatDouble`, then the schema's
   parser. That keeps the value the file would hold, at the cost of a parse a leaf.
 
+**2026-10-13: what an evening's runs cost the tick (M68).** M64 (§60.6) heard a time group's members launch
+late more and more as a Debug session went on - none for its first eight passes, then nearly every one, the
+tick up to 133 ms behind its audio, and 400 to 520 ms with members 1.32 s apart. TG.11 named a candidate, read
+and not proven: the run table keeps every run of the session (`retentionTicks` retires a run from the tree,
+not from the table, so a replay agrees), and the tick's passes walked them all, looking each one up again by
+a walk. Measured, it was that.
+
+**M68** is what the tick costs as the table grows. `PublishCostTests`, case "M68": an evening on the
+first-sound show served as the tick thread serves it - the Runner's hook, the engine's tick and the publish,
+each timed alone - a GO every eight ticks, each cue made ready two ticks before (the fixture's sound, its fade,
+and a scene of a memo, an OSC cue and a fade), six runs every 24 ticks. Between stretches the evening's
+finished runs are copied under new names, each family with its parent and children, until the table holds
+100, 1000, 2500 and 5000; each stretch times 96 ticks. Reported and never asserted (M18's reason); what the
+mend guarantees is asserted by what the tick reads, in RunTests. Debug, the author's box, medians in ms; the
+spread is over the runs named below the table:
+
+| runs in the table | the hook, before | the tick, before | the hook, `find` indexed alone | the hook, after | the tick, after |
+|---|---|---|---|---|---|
+| 128 (the evening's own) | 1.23 to 1.27 (2.08) | 20.1 to 20.9 (21.3) | 0.71 | 0.49 to 0.61 | 19.5 to 21.8 |
+| 158 | 1.59 to 1.64 (2.94) | 20.6 to 21.8 (22.6) | 0.79 | 0.50 to 0.60 | 19.7 to 21.1 |
+| 1006 | 34.8 to 36.1 (87.0) | 54.9 to 57.4 (108) | 1.92 | 0.51 to 0.61 | 19.5 to 21.8 |
+| 2506 | 207 to 210 (510) | 228 to 232 (533) | 4.10 | 0.51 to 0.60 | 19.3 to 21.1 |
+| 5006 | 806 to 809 (2006) | 826 to 832 (2031) | 7.96 | 0.51 to 0.59 | 20.0 to 22.1 |
+
+Before: HEAD's engine (`9263767`) with this case added, three runs - two three minutes apart on a quiet
+machine (CPU 13 to 29 %, nothing running from the other worktree, no compiler), and one with temporary timers
+round each of the hook's passes, alike - and, in brackets, the first run of all, two and a half times slower
+at 5000, taken at an hour when the machine was not watched; a memory-bound walk is what another session's
+build slows most. After: three runs, two on a quiet machine (CPU 7 to 15 %). The engine's tick is 0.03 to
+0.25 ms throughout, and the publish 18.8 to 21.4 ms, after as before: it walked every run only to retire it
+from the tree. The tick reads 64 runs after, at every size of the table: what is live and what ended in the
+last five seconds.
+
+**Where it went.** The timers, since taken out, at 5006 runs before: six passes - `applyLevels`,
+`updatePositions`, `launchIfDue`, `observeEdges`, `deClickLaunched` and `advanceRanges` - 130 ms each,
+`mirrorRound` 22 ms, every other pass under half a millisecond. Each of the six walked `runs.all()` and looked
+every run up again with `RunTable::find`, itself a walk: quadratic in the runs of the session, some twelve
+million string comparisons a pass at five thousand. With `find` indexed and nothing else changed (the column
+above), the hook was linear instead: forty-odd passes still walking every run of the evening to skip the
+finished ones, 8 ms at 5006.
+
+**What was done.**
+
+- **`RunTable` keeps an index beside its vector**: where each run is by name, so `find` is not a walk (the
+  first made under a name, as the walk found it); the newest run of each cue; and `current()`, the runs the
+  tick reads - every unfinished one, and each finished one until it settles. The vector stays: creation order
+  is the slots' queue and the order every pass walks in, and `all()` hands it out as before.
+- **`RunTable::settle (tick)`**, called by the Runner at the end of its hook, takes out of `current` every
+  finished run that ended more than `retentionTicks` before - the tree's own rule, so the tree never publishes
+  a run the view has lost. At the end of the hook and never at its start: every pass has then seen a run
+  finished at least once before it settles, however long the hook went unrun (an apply, a seat).
+- **The table still keeps every run.** Handlers, a replay, Doh!'s history (`rootFor`, `goDoh`), a seat
+  (`positionNow`, `carriedRuns`) and `killedSinceLift` read `all()` as before. A replay runs no hooks and so
+  never settles: what it reads in `current` is every run - the same answers, more slowly.
+- **A settled run is frozen.** Every way to change a run is a `find` on a table that is not const, and that
+  `find` puts a settled run back into `current` before handing it over; the next `settle` takes it out again
+  if it is still over. The case that needs it: a Doh! bringing back an act that ended six seconds ago, inside
+  its window and past its retention. A run put back while a pass walks `current` goes on the end, and that
+  pass still reaches it; the order is mended before the next walk. Since nothing changes a settled run without
+  putting it back, the settled children of each run are filed by parent as they settle, and `childrenOf`,
+  `descendantsOf`, `askedForUnder` and `hasChildFor` answer without a walk of every run, finished children
+  and all.
+- **The passes walk `current`**: the 29 of the Runner's hook that walked `all()`, serve's count of live runs
+  for the pair, `summaryNow`, and the publish's run order and run rows. Each was read for what it does to a
+  finished run: nothing, or one thing once - a flag put down, a meter set to silence, a round's readout
+  zeroed - done many times over in the retention a run spends in `current`. `liveRunOf`, `preparedRunOf`,
+  `isTrackBusy`, `lowestFreeTrack`, `holderOf`, `waitersFor` and `allChildrenFinished`, which only ever
+  answered with unfinished runs, read it too, the newest or the first chosen by place in the vector rather
+  than by where it is met; so do the GO path's `liveUntakenRunOf` and `liveOtherRunOf`.
+- **The preparedness** reads the newest run of each cue from the table rather than a map of every run made
+  every tick; a failed arm still ahead that has settled is read where the table keeps it.
+- **A seat** takes out every run the leader's position does not hold at once (`RunTable::remove` of a set),
+  the index made again once, not once a run.
+
+**M64's firing case again** (§60.6), `m64_chase.py --firing-only --spacing=33 --passes=34`: a time group on
+LTC and one on MTC, ten members each 1.32 s apart, 34 passes of 17.8 s - ten minutes, 340 fires a code - on
+the Debug binary, the machine quiet (CPU 7 to 33 % at the start, no compiler running, nothing from the other
+worktree):
+
+| session | fires after their map's sample, LTC / MTC | the tick noted two ticks or more behind | at worst | on time, median and worst: LTC / MTC |
+|---|---|---|---|---|
+| before (HEAD's engine) | 155 / 133 of 340 | 212 times | 15.8 s | +0.022, 0.48 / +0.430, 0.84 ms |
+| after | 25 / 26 | twice, in the first 30 s | 44 ms | +0.022, 0.48 / +0.478, 0.87 ms |
+| after, its tick probed | 19 / 21 | - (one tick or more: 158 seconds) | 43 ms | +0.022, 0.48 / +0.478, 0.92 ms |
+| after, the show half rebuilt only on a show edit (an experiment) | 4 / 4, each within a block | never one tick | 14.7 ms | +0.022, 0.48 / +0.478, 0.90 ms |
+
+Before, no fire was late in the first ten passes, then more every pass - two in the eleventh, twenty of twenty
+from the thirty-first - and the tick fell 15.8 s behind: the run table's growth, as M68 found it. After, the
+late fires do not grow: by 0.06 to 16 ms, in passes 15 to 21 and 32, none in the last.
+
+WHAT IS LEFT OF THEM IS NOT THE RUN TABLE. The probed session carried a temporary note (since taken out) of
+every second in which the tick ran one tick or more behind, with the longest tick and the longest publish in
+it: 158 such seconds over the ten minutes, from the first pass to the last, the tick 20 to 43 ms behind, its
+longest tick 23 to 45 ms, of which the publish 18 to 35 ms. Serve rebuilds the show half on every tick that
+applies a command (`outcome.applied > 0`, M62's "left" above), and a time group's members apply one every few
+ticks - `run.spawn`, `audio.armed`, `run.fire`, `run.started`, `run.ended`, `code.heard` - each a rebuild of
+the show half in Debug. Rebuilt only when the show's revision moved (the experiment, taken out again), the
+tick was never one tick behind, and the eight fires after their map's sample were each within a block (2.66 ms
+at worst), which `run.late` does not count. Whether the show half may be left alone on a tick that applied
+only engine records - what it publishes that moves with no show revision - is a question for the author, and
+not answered here.
+
+**Tests**, in C and fr_FR. RunTests: four run-table cases asking every question the table answers - children,
+descendants, the live, prepared and newest run of a cue, a slot's holder and waiters, whether a track is busy,
+whether all of a group's children are finished, `find` - of a table whose settled runs it no longer looks at,
+against the walk of every run written out again in the test: settled at the tree's edge (read through 250
+ticks, gone at 251), a run not over kept whatever its ending tick, a settled run found to be changed read again
+in its place and filed under a new parent when it settles again, a run found during a walk reached by that walk
+and the next walk in order, `settle` refused under a walk, runs taken out at once as one at a time takes them.
+And one on the Runner: six hundred memos fired over twelve hundred ticks, the tick reading at most 130 of them,
+the table all six hundred, the tree's run order the walk's, and five quiet seconds later nothing read and
+nothing published. GoTests: "go.doh: the last cue of an act taken back" gains the press six seconds after the
+act ended, when the tick no longer reads it - the act read again and everything after as before, the session
+replayed record for record. VideoTests: the read-ahead rows' failed arm still ahead speaks once it has settled.
+Five deliberate breakages, each turning its own cases red: no thaw in `find` (the act brought back is not read
+by the tick, and after the corrected GO it never ends; the table's answers wrong besides), a run not over
+settled, `childrenOf` without the settled children, a run put back in its place under a walk, and the
+preparedness without the settled failed arm. Green: the 50 test files that use the run table or the Runner,
+2026 cases; the run pane's and the show settings' UI cases (95); the `wfg.replay.*` gates and
+`source.comments`; `blackbox.timegroup` (101 of 101), `.doh`, `.pair-seat`, `.pair-follow` and `.first-sound`.
+The clang-tidy stand-in clean on every changed file, its run proved by a planted shadow.
+
+**Left.**
+
+- **The show half rebuilt on every applied command** (M62's "left"), which is what M64 still hears in Debug:
+  20 to 45 ms ticks whenever a time group's members apply their records, and a fire in one of them late by a
+  few milliseconds (above). Not the run table's, and a change to what the publish promises - the author's.
+- **The publish of the evening above is 19 to 21 ms in Debug**, a tick's worth, and flat in the session: most
+  of it is the 64 runs on the tree, some forty rows each (M62's idle publish of the same show with five runs
+  is 1.7 to 2.0 ms) - what the last five seconds made, not the evening. M62's next step, making only what
+  changed, would reach it.
+- **A handler that walks `all()`** still walks the evening, once a press: `pausePersistent`, `loadToTime`,
+  `endGo`, `goDoh`, `resumeStandby`, `pressMember`, `seatChasersOnCode` and the rest. Some milliseconds at five
+  thousand runs in Debug, on the GO path, never on every tick.
+
 ## 32. A copy that would not find its sounds
 
 Written 2026-10-06, when the author asked: *"When saving outside the workfolder (show) warn the user
@@ -28146,6 +28281,19 @@ real interface's clock against MTC from a cable, and a code from a VTR or a desk
   a runner, so left; a count that moves for a reason serve does not raise `clockForget` at waits the two seconds'
   hold before MTC's line follows it, where the `ClockEstimate` started again at once from a quarter of a second off -
   none is known; the MTC lane's and the renderer's `ClockEstimate`, a tick ahead.
+- **TG.11's faults, part 3: the tick that fell behind**, 2026-10-13 - what TG.11 saw beside its four faults and
+  M64 measured (60.6): a Debug tick falling further behind its audio as a session made runs, members launched
+  late. MEASURED AND MENDED IN §31.5 (M68): the cause was the one TG.11 read - the run table keeps every run of
+  the session, and six of the hook's passes walked them all looking each one up again by a walk, quadratic in
+  the runs made: the hook 1.2 ms at 128 runs, 35 at 1000, 208 at 2500 and 806 ms at 5000. Not a time group's
+  fault: any show that fires thousands of cues an evening paid it. Now `RunTable` finds by an index and the
+  passes walk `current()`, the unfinished runs and those ended in the last five seconds, the rest settling out
+  of it and staying in the table for handlers, a replay, Doh! and a seat: the hook 0.5 to 0.6 ms at every size.
+  M64's firing case, members 1.32 s apart for ten minutes: before, 155 and 133 of 340 fires late from the
+  eleventh pass, the tick 15.8 s behind at worst; after, 25 and 26 by at most 16 ms that do not grow, the tick
+  noted two ticks behind only twice, in its first 30 s. What is left of those late fires, the probe in §31.5
+  finds, is the show half rebuilt on every tick that applies a command, not the run table.
+  `blackbox.timegroup` 101 of 101 in C and fr_FR on the final binary, as before. Left: that rebuild (§31.5).
 
 ## 61. Keys, text and blur
 

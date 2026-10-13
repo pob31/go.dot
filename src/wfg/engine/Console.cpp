@@ -7091,7 +7091,7 @@ namespace
                                 {
                                     std::int64_t live = 0;
 
-                                    for (const auto& run : runs.all())
+                                    for (const auto& run : runs.current())
                                         if (! run.isFinished() && run.state != wfg::cue::runState::preparing
                                               && run.prepare.empty())
                                             ++live;

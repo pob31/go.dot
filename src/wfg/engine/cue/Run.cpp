@@ -17,9 +17,48 @@
 #include <wfg/engine/cue/Run.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace wfg::cue
 {
+    RunTable::Current::Current (const RunTable& owner)
+        : table (&owner)
+    {
+        /*  THE ORDER MENDED BEFORE A WALK BEGINS, and only when no other walk
+            is under way: a run put back during the last one went on the end,
+            and a walk in progress must not have its places moved under it. */
+        if (table->viewsOut == 0)
+            table->reorder();
+
+        ++table->viewsOut;
+    }
+
+    RunTable::Current::Current (const Current& other)
+        : table (other.table)
+    {
+        ++table->viewsOut;
+    }
+
+    RunTable::Current::~Current()
+    {
+        --table->viewsOut;
+    }
+
+    void RunTable::reorder() const
+    {
+        if (! unsorted)
+            return;
+
+        std::sort (open.begin(), open.end());
+        unsorted = false;
+    }
+
     void RunTable::create (std::string id, std::string cueId, std::string kind,
                            std::string parentRun)
     {
@@ -37,31 +76,182 @@ namespace wfg::cue
             if (auto* parent = find (run.parent))
                 parent->children.push_back (run.id);
 
+        /*  THE NEWEST OF ALL, so its place is the end of `current` as it is of
+            the vector; and the first made under its name keeps the name, as
+            the walk `find` replaced answered with the first. */
+        const auto place = runs.size();
+        placeOf.emplace (run.id, place);
+        newestPlaceOf[run.cue] = place;
+        settled.push_back (0);
+        open.push_back (place);
+
         runs.push_back (std::move (run));
+    }
+
+    void RunTable::clear()
+    {
+        runs.clear();
+        placeOf.clear();
+        newestPlaceOf.clear();
+        open.clear();
+        unsorted = false;
+        settled.clear();
+        settledChildren.clear();
     }
 
     void RunTable::remove (const std::string& id)
     {
-        const auto found = std::find_if (runs.begin(), runs.end(), [&id] (const Run& run) { return run.id == id; });
+        remove (std::set<std::string> { id });
+    }
 
-        if (found == runs.end())
+    void RunTable::remove (const std::set<std::string>& ids)
+    {
+        std::vector<char> going (runs.size(), 0);
+
+        for (const auto& id : ids)
+            if (const auto found = placeOf.find (id); found != placeOf.end())
+                going[found->second] = 1;
+
+        std::vector<std::pair<std::string, std::string>> taken;
+        std::vector<char> settledBefore;
+        std::size_t to = 0;
+
+        for (std::size_t from = 0; from < runs.size(); ++from)
+        {
+            if (going[from] != 0)
+            {
+                taken.emplace_back (runs[from].id, runs[from].parent);
+                continue;
+            }
+
+            settledBefore.push_back (settled[from]);
+
+            if (to != from)
+                runs[to] = std::move (runs[from]);
+
+            ++to;
+        }
+
+        runs.erase (runs.begin() + static_cast<std::ptrdiff_t> (to), runs.end());
+        reindex (settledBefore);
+
+        for (const auto& [id, parentRun] : taken)
+            if (auto* parent = find (parentRun))
+                parent->children.erase (std::remove (parent->children.begin(), parent->children.end(), id),
+                                        parent->children.end());
+    }
+
+    void RunTable::reindex (const std::vector<char>& settledBefore)
+    {
+        placeOf.clear();
+        newestPlaceOf.clear();
+        open.clear();
+        unsorted = false;
+        settled = settledBefore;
+        settledChildren.clear();
+
+        for (std::size_t place = 0; place < runs.size(); ++place)
+        {
+            const auto& run = runs[place];
+
+            placeOf.emplace (run.id, place);
+            newestPlaceOf[run.cue] = place;
+
+            if (settled[place] != 0)
+                settledChildren[run.parent].push_back (place);
+            else
+                open.push_back (place);
+        }
+    }
+
+    void RunTable::settle (std::int64_t tick)
+    {
+        //  Never under a walk: it would take places out from under it.
+        if (viewsOut > 0)
             return;
 
-        const auto parentRun = found->parent;
-        runs.erase (found);
+        reorder();
 
-        if (auto* parent = find (parentRun))
-            parent->children.erase (std::remove (parent->children.begin(), parent->children.end(), id),
-                                    parent->children.end());
+        std::size_t to = 0;
+
+        for (const auto place : open)
+        {
+            const auto& run = runs[place];
+
+            /*  THE TREE'S OWN RULE, and a finished run's only: a run that is not
+                over is the tick's whatever its ending tick says - one brought
+                back without that tick cleared, or given one in the past to hide
+                it from the tree. */
+            if (run.isFinished() && run.endedAtTick >= 0 && tick - run.endedAtTick > retentionTicks)
+            {
+                settled[place] = 1;
+
+                auto& under = settledChildren[run.parent];
+                under.insert (std::upper_bound (under.begin(), under.end(), place), place);
+                continue;
+            }
+
+            open[to++] = place;
+        }
+
+        open.resize (to);
+    }
+
+    void RunTable::thaw (std::size_t place)
+    {
+        settled[place] = 0;
+
+        if (const auto under = settledChildren.find (runs[place].parent); under != settledChildren.end())
+        {
+            auto& places = under->second;
+            places.erase (std::remove (places.begin(), places.end(), place), places.end());
+
+            if (places.empty())
+                settledChildren.erase (under);
+        }
+
+        /*  ON THE END WHILE A WALK IS UNDER WAY, which then still reaches it;
+            in its place otherwise. */
+        if (viewsOut > 0)
+        {
+            open.push_back (place);
+            unsorted = true;
+            return;
+        }
+
+        reorder();
+        open.insert (std::lower_bound (open.begin(), open.end(), place), place);
     }
 
     std::vector<const Run*> RunTable::childrenOf (const std::string& parentRun) const
     {
-        std::vector<const Run*> out;
+        /*  THE ONES THE TICK STILL READS, by looking - a parent can be moved
+            on a run that has not settled (an adoption, a Doh! putting a run
+            back where it was) - and the settled ones from where they were
+            filed when they settled, which nothing can have moved since.
+            Creation order across both. */
+        std::vector<std::size_t> places;
 
-        for (const auto& run : runs)
-            if (run.parent == parentRun)
-                out.push_back (&run);
+        for (const auto place : open)
+            if (runs[place].parent == parentRun)
+                places.push_back (place);
+
+        std::sort (places.begin(), places.end());
+
+        if (const auto under = settledChildren.find (parentRun); under != settledChildren.end())
+        {
+            std::vector<std::size_t> merged;
+            merged.reserve (places.size() + under->second.size());
+            std::merge (places.begin(), places.end(), under->second.begin(), under->second.end(),
+                        std::back_inserter (merged));
+            places = std::move (merged);
+        }
+
+        std::vector<const Run*> out;
+        out.reserve (places.size());
+
+        for (const auto place : places)
+            out.push_back (&runs[place]);
 
         return out;
     }
@@ -76,24 +266,40 @@ namespace wfg::cue
 
     bool RunTable::allChildrenFinished (const std::string& parentRun) const
     {
-        return std::all_of (runs.begin(), runs.end(),
-                            [&parentRun] (const Run& run)
+        //  A settled run is finished, so only the ones the tick still reads can say no.
+        return std::all_of (open.begin(), open.end(),
+                            [this, &parentRun] (std::size_t place)
                             {
+                                const auto& run = runs[place];
                                 return run.parent != parentRun || run.isFinished();
                             });
     }
 
     Run* RunTable::find (const std::string& id)
     {
-        const auto found = std::find_if (runs.begin(), runs.end(),
-                                         [&id] (const Run& run) { return run.id == id; });
+        const auto found = placeOf.find (id);
 
-        return found == runs.end() ? nullptr : &*found;
+        if (found == placeOf.end())
+            return nullptr;
+
+        if (settled[found->second] != 0)
+            thaw (found->second);
+
+        return &runs[found->second];
     }
 
     const Run* RunTable::find (const std::string& id) const
     {
-        return const_cast<RunTable*> (this)->find (id);
+        const auto found = placeOf.find (id);
+
+        return found == placeOf.end() ? nullptr : &runs[found->second];
+    }
+
+    const Run* RunTable::newestOf (const std::string& cueId) const
+    {
+        const auto found = newestPlaceOf.find (cueId);
+
+        return found == newestPlaceOf.end() ? nullptr : &runs[found->second];
     }
 
     const Run* RunTable::liveRunOf (const std::string& cueId) const
@@ -102,13 +308,26 @@ namespace wfg::cue
             Phase 2 - a cue has at most one live run - but when Phase 3 makes
             them plural the newest is the one a stop or a fade means, and
             answering with the oldest would be the wrong answer arrived at
-            quietly. */
-        for (auto run = runs.rbegin(); run != runs.rend(); ++run)
-            if (run->cue == cueId && ! run->isFinished()
-                 && run->state != runState::preparing)
-                return &*run;
+            quietly.
 
-        return nullptr;
+            THE NEWEST BY ITS PLACE, not by where it is met: `open` is out of
+            order for as long as a walk that put a run back is under way. */
+        const Run* newest = nullptr;
+        std::size_t newestPlace = 0;
+
+        for (const auto place : open)
+        {
+            const auto& run = runs[place];
+
+            if (run.cue == cueId && ! run.isFinished() && run.state != runState::preparing
+                  && (newest == nullptr || place > newestPlace))
+            {
+                newest = &run;
+                newestPlace = place;
+            }
+        }
+
+        return newest;
     }
 
     const Run* RunTable::preparedRunOf (const std::string& cueId) const
@@ -116,11 +335,22 @@ namespace wfg::cue
         /*  Newest first, for the reason above: a second prepare of the same cue
             supersedes the first, and answering with the older one would adopt
             a run the horizon had already moved past. */
-        for (auto run = runs.rbegin(); run != runs.rend(); ++run)
-            if (run->cue == cueId && run->state == runState::preparing)
-                return &*run;
+        const Run* newest = nullptr;
+        std::size_t newestPlace = 0;
 
-        return nullptr;
+        for (const auto place : open)
+        {
+            const auto& run = runs[place];
+
+            if (run.cue == cueId && run.state == runState::preparing
+                  && (newest == nullptr || place > newestPlace))
+            {
+                newest = &run;
+                newestPlace = place;
+            }
+        }
+
+        return newest;
     }
 
     std::vector<const Run*> RunTable::descendantsOf (const std::string& parentRun) const
@@ -140,18 +370,18 @@ namespace wfg::cue
 
     bool RunTable::hasChildFor (const std::string& parentRun, const std::string& cueId) const
     {
-        return std::any_of (runs.begin(), runs.end(),
-                            [&parentRun, &cueId] (const Run& run)
-                            {
-                                return run.parent == parentRun && run.cue == cueId;
-                            });
+        const auto children = childrenOf (parentRun);
+
+        return std::any_of (children.begin(), children.end(),
+                            [&cueId] (const Run* run) { return run->cue == cueId; });
     }
 
     bool RunTable::isTrackBusy (int track) const
     {
-        return std::any_of (runs.begin(), runs.end(),
-                            [track] (const Run& run)
+        return std::any_of (open.begin(), open.end(),
+                            [this, track] (std::size_t place)
                             {
+                                const auto& run = runs[place];
                                 return run.holdsTrack() && run.track == track;
                             });
     }
@@ -178,11 +408,22 @@ namespace wfg::cue
         if (slotId.empty())
             return nullptr;
 
-        for (const auto& run : runs)
-            if (! run.isFinished() && holds (run, slotId))
-                return &run;
+        //  The first in creation order, as the walk of every run met it.
+        const Run* first = nullptr;
+        std::size_t firstPlace = 0;
 
-        return nullptr;
+        for (const auto place : open)
+        {
+            const auto& run = runs[place];
+
+            if (! run.isFinished() && holds (run, slotId) && (first == nullptr || place < firstPlace))
+            {
+                first = &run;
+                firstPlace = place;
+            }
+        }
+
+        return first;
     }
 
     std::vector<const Run*> RunTable::waitersFor (const std::string& slotId) const
@@ -192,11 +433,22 @@ namespace wfg::cue
         if (slotId.empty())
             return waiting;
 
-        for (const auto& run : runs)
+        std::vector<std::size_t> places;
+
+        for (const auto place : open)
+        {
+            const auto& run = runs[place];
+
             if (! run.isFinished()
-                  && std::find (run.pending.begin(), run.pending.end(), slotId)
-                       != run.pending.end())
-                waiting.push_back (&run);
+                  && std::find (run.pending.begin(), run.pending.end(), slotId) != run.pending.end())
+                places.push_back (place);
+        }
+
+        //  Creation order is the queue, whatever order `open` is in.
+        std::sort (places.begin(), places.end());
+
+        for (const auto place : places)
+            waiting.push_back (&runs[place]);
 
         return waiting;
     }

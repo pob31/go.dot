@@ -55,11 +55,15 @@
 #include <bit>
 #include <utility>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace wfg::cue
@@ -1495,6 +1499,17 @@ namespace wfg::cue
         else can tell the difference - `liveRunOf` and `lowestFreeTrack` both
         skip finished runs already - so what is left is a tree that stops
         growing, which was the only real problem.
+
+        AND FROM THE TICK'S VIEW, still not from the table (2026-10-13, namespace
+        draft §31.5, M68). The tree stopped growing; the tick did not. Every
+        pass the Runner's hook makes walked every run of the session, and six
+        of them looked each one up again by a linear search - quadratic in the
+        runs an evening makes, two seconds a tick at five thousand in the Debug
+        build, which is what M64 heard as members launching late. A run that
+        ended more than this long ago now leaves `RunTable::current`, the runs
+        the tick reads, at the end of the hook's pass (`RunTable::settle`), and
+        stays in `all`, where every handler, a replay, Doh!'s history and a seat
+        still find it.
     */
     inline constexpr int retentionTicks = 250;
 
@@ -1507,11 +1522,127 @@ namespace wfg::cue
         publish needs, and an ordering computed per tick from a map would be the
         thing that showed up in a profile.
 
+        A VECTOR WITH AN INDEX BESIDE IT (2026-10-13, namespace draft §31.5,
+        M68). The count is small at any moment and not over an evening: every
+        fade, member and OSC cue makes a run, a show makes thousands, and the
+        table keeps them all, so a replay agrees. The vector stays - creation
+        order is the slots' queue and the order every pass walks in - and three
+        things are kept in step with it: where each run is by name, so `find`
+        is not a walk; the newest run of each cue; and `current`, the runs the
+        tick still reads - every unfinished one and each finished one for its
+        retention - which `settle` trims and which every per-tick pass walks in
+        place of `all`.
+
+        A SETTLED RUN IS FROZEN. Every road to changing a run is a `find` on a
+        table that is not const (the vector itself is handed out const), so
+        that `find` puts a settled run back into `current` before handing it
+        over - a Doh! that revives a group ended six seconds ago, a seat, an
+        adoption - and the next `settle` takes it out again if it is still
+        over. Which is what lets the children of a run be kept by parent for
+        the settled ones: nothing moves a settled run's parent without
+        thawing it first.
+
         Tick thread only.
     */
     class RunTable
     {
     public:
+        /*  THE RUNS THE TICK STILL READS, in creation order: a view, walked
+            with a range-for as `all()` is, of every run that is not finished
+            and of each finished one until it settles.
+
+            WHAT IT GUARANTEES IS THE UNFINISHED ONES, and nothing about which
+            finished ones it still holds - one ended a minute ago and found by
+            name since is back in it until the next `settle`. So a pass that
+            walks it in place of `all()` must do nothing for a finished run that
+            it would not already have done in the retention the run spent in
+            here: skip finished runs, or settle something about them once.
+
+            A RUN PUT BACK WHILE A VIEW IS BEING WALKED (a `find` of a settled
+            one from inside the loop) goes on the end, and this loop still
+            reaches it - its end is read as it is reached - and the order is
+            mended for the next view. Making a run inside the loop is as unsafe
+            as it is inside a walk of `all()`: the vector moves. */
+        class Current
+        {
+        public:
+            class Iterator
+            {
+            public:
+                using iterator_category = std::forward_iterator_tag;
+                using value_type = Run;
+                using difference_type = std::ptrdiff_t;
+                using pointer = const Run*;
+                using reference = const Run&;
+
+                Iterator() = default;
+
+                const Run& operator*() const { return table->runs[table->open[at]]; }
+                const Run* operator->() const { return &**this; }
+
+                Iterator& operator++()
+                {
+                    ++at;
+                    return *this;
+                }
+
+                Iterator operator++ (int)
+                {
+                    auto was = *this;
+                    ++at;
+                    return was;
+                }
+
+                bool operator== (const Iterator& other) const { return position() == other.position(); }
+                bool operator!= (const Iterator& other) const { return position() != other.position(); }
+
+            private:
+                friend class Current;
+
+                Iterator (const RunTable* owner, std::size_t place, bool last)
+                    : table (owner), at (place), isEnd (last) {}
+
+                //  The end is wherever `open` ends when it is compared, so a run put back during the walk is reached.
+                std::size_t position() const { return isEnd ? table->open.size() : at; }
+
+                const RunTable* table = nullptr;
+                std::size_t at = 0;
+                bool isEnd = false;
+            };
+
+            explicit Current (const RunTable& owner);
+            Current (const Current& other);
+            Current& operator= (const Current&) = delete;
+            ~Current();
+
+            Iterator begin() const { return { table, 0, false }; }
+            Iterator end() const { return { table, 0, true }; }
+            std::size_t size() const noexcept { return table->open.size(); }
+
+        private:
+            const RunTable* table;
+        };
+
+        Current current() const { return Current { *this }; }
+
+        /*  SETTLES WHAT IS OVER: takes out of `current` every finished run that
+            ended more than `retentionTicks` before this tick - the rule the
+            tree retires a run's address by, so the tree never asks for one
+            the view has lost.
+
+            CALLED BY THE RUNNER AT THE END OF ITS HOOK'S PASS, never at its
+            start: every pass has then seen a run finished at least once before
+            it settles, so what a pass does once for an ended run - a flag put
+            down, a readout zeroed - is done, however long the hook was not
+            run. Nothing else calls it, so a replay, which runs no hooks, walks
+            every run in `current` - the same answers, more slowly. */
+        void settle (std::int64_t tick);
+
+        /*  The newest run of this cue - finished or not, prepared or not - or
+            nothing: the last one `create` made, which is what the tree's
+            preparedness reads to tell whether a failed arm still speaks for
+            its cue. */
+        const Run* newestOf (const std::string& cueId) const;
         /*  Adds a run in `armed` with no track. The caller supplies the id,
             because generating it is the command layer's business and the log
             has to carry it.
@@ -1562,6 +1693,13 @@ namespace wfg::cue
             running either way. */
         bool hasChildFor (const std::string& parentRun, const std::string& cueId) const;
 
+        /*  The run of that name, or null - by the index, not by a walk. The
+            first made under the name if a name was ever made twice, as the
+            walk answered.
+
+            THE ONE THAT IS NOT CONST THAWS: a settled run handed out to be
+            changed goes back into `current` first (the class's note says
+            why). The const one hands out what it finds and moves nothing. */
         Run* find (const std::string& id);
         const Run* find (const std::string& id) const;
 
@@ -1637,7 +1775,7 @@ namespace wfg::cue
 
         const std::vector<Run>& all() const noexcept { return runs; }
 
-        void clear() { runs.clear(); }
+        void clear();
 
         /*  A RUN TAKEN OUT OF THE TABLE, and out of its parent's children - what
             no road but one takes (namespace draft §58, RD.8): a follower seated
@@ -1650,7 +1788,39 @@ namespace wfg::cue
             is pruned would. */
         void remove (const std::string& id);
 
+        /*  Every one of these taken out, as `remove` takes one, and the index
+            made again once rather than once a run: a seat takes out every run
+            the leader's position does not hold, thousands of an evening's. */
+        void remove (const std::set<std::string>& ids);
+
     private:
+        //  Back into `current`, and out of its parent's settled children.
+        void thaw (std::size_t place);
+
+        //  The indexes made again from the vector, keeping which runs had settled.
+        void reindex (const std::vector<char>& settledBefore);
+
+        //  `open` in creation order again, after a run was put back while a view was out.
+        void reorder() const;
+
         std::vector<Run> runs;
+
+        //  Where each run is in `runs`, by name: the first made under it.
+        std::unordered_map<std::string, std::size_t> placeOf;
+
+        //  Where the newest run of each cue is.
+        std::unordered_map<std::string, std::size_t> newestPlaceOf;
+
+        /*  The places `current` holds: every run not settled, in creation order
+            but while a view is out and a run was put back (`unsorted`). */
+        mutable std::vector<std::size_t> open;
+        mutable bool unsorted = false;
+        mutable int viewsOut = 0;
+
+        //  Per place: whether that run has settled.
+        std::vector<char> settled;
+
+        //  The settled runs under each parent, in creation order.
+        std::unordered_map<std::string, std::vector<std::size_t>> settledChildren;
     };
 }
