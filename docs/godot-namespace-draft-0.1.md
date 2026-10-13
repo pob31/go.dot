@@ -26734,6 +26734,13 @@ Mine, the author's to overrule:
 - **AIZ** (mine) **`wfg serve --midi-play=<port>=<file>`** plays a `--midi-render` file into a port's
   input at its due moments, for the drivers.
 - **AJA** (mine) **The screen words**, put to the author before they ship (TG.10).
+- **AJB** (mine, TG.7) **A member fired by name or by a trigger while its group is armed is a manual
+  start**: begun now, from its top, free-running, as if the code had reached its time - its pre-wait
+  counting from the press as it counts from its time - a run of its own under the armed group, named
+  from the group's run as the code's are. The hand an operator reaches for when the code has failed, as
+  a sampler member fired by name is a press on its strip. `needs-go` while the group is not armed, TG.2's
+  answer, as a sampler member is `needs-strip` with no bank armed. The code's own loading of that member
+  is left alone: the code reaching its time starts it again, as a second crossing does (AIR).
 
 ### 60.3 Rows
 
@@ -27339,3 +27346,105 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   tick, but the MTC reader's samples just after a slow tick or a slip would carry its wander as this
   watcher's did (reasoned, not measured for MTC), and TG.9's chasers and RD.9's map should not lean on its
   slope. Nothing reads the clock's map yet (TG.7 fires).
+- **TG.7**, 2026-10-13: firing - a time group's members start on the code's sample (AIH, AIQ, AIR, AIV,
+  AIW, AJB). `cue/RunnerTime.cpp`, beside `RunnerSeat.cpp`. **The time group's tick** (`timeTick`, from
+  `advanceGroups`' time-group branch, its members phase, every tick): the source's map (`ltc:<sync/ltcIn>`,
+  `mtc:<sync/mtcIn>`, `clock`, read once a show revision with the members, their `at` and pre-wait, in
+  `timePlanOf`); each member's `at` read as a frame of the map's unit - a clock member's `HH:MM:SS` by
+  `secondOfDayFor` as its millisecond, a label at the show's rate (AIL), the same frame number when the two
+  rates count their labels alike (23.976 as 24, 29.97 as 30), otherwise the label's moment and the first frame
+  of the code at or after it. THE RULES AS BUILT. While the code runs forwards a member whose time falls in
+  `(codeCrossed, positionAt (now + 2 s)]` is LOADED - `run.spawn` under the group's run, named from it (RD.2):
+  a sound's voice and file armed, a picture read ahead (the read-ahead names a picture the code loaded and has
+  not asked for, `pictureLoadedForTheCode`), a scene entered (below) - once for each pass of the code
+  (`GroupJob::codeAhead`). It is ASKED FOR a launch horizon and TWO ticks before its sample: `run.fire`, which
+  skips its tick counter, with `launchNotBefore` and `Run::codeSample` (new) both the sample the code reaches
+  its time on plus its pre-wait in samples - the pre-wait counts from its time, on Go.dot's clock; `launchIfDue`
+  places it there, and `advanceVideo` puts a picture's appearance there (`launchNotBefore` read since TG.7), a
+  movie's locked sounds copying both. `GroupJob::codeCrossed` (new) moves on to `positionAt (now)` while the
+  code runs forwards, never back. A `jumped` turn - `Runner::codeJumps`, counted in `noteCodeHeard` (new
+  argument), a count per source, so the hook needs no record in hand - puts it where the jump landed, so a jump
+  past a member never starts it (AIH), and lets go, idle (`run.kill`), what was loaded for a time the code no
+  longer comes to; the code running into the time again after a jump back loads and starts it again, and the
+  run still playing from the first crossing gets `run.stop` as the new one is asked for - a restart, not a
+  second copy (AIR). Backwards or stopped, nothing is loaded or asked for, and what was loaded keeps its arm;
+  a member whose time the code crossed before it was asked for - its pre-wait still to run - is asked for on
+  the sample it was given while the code ran, so a code stopping a fifth of a second after a member's time
+  does not lose it. A member loaded too close to its time starts as soon as it can, from its top, and says by
+  how many blocks (`run.late`, measured in `launchIfDue` against `codeSample` rather than the ask's tick).
+  Armed while the code is already past a member's time, the group leaves it (AIH); `seatChasersAt (job,
+  frame)`, called where the group first reads a running code and at every jump, is TG.8's and empty.
+  **A scene as a member** (AIV): a timeline or an automatic sequence whose every member's start the walk knows
+  (`ShowWalk.h`, visited over the time group: one round, all members, in order, no header, an automatic
+  sequence's lengths known) is PLACED - each cue under it given its start in seconds from its member's time
+  (`TimePlan::starts`), a nested scene the walk could not time whole counted from its own beginning. It is
+  entered as soon as it is loaded, two seconds ahead, its start on its job (`GroupJob::codeSample`, copied from
+  the run by `fireKind`), uncommitted; `placedTick` (in place of the timeline's spawn-everything and the
+  sequence's one-after-another, which loads a member only once the one before has ENDED) loads each member two
+  seconds before its own start and, once the scene is COMMITTED - its start within a launch horizon while its
+  code still wants it - asks for each on its own sample: the scene's start plus the member's offset in samples
+  of Go.dot's clock. A nested placed scene is entered at its loading and committed by its parent the same way.
+  So no descendant is launched by a counter, and none twice: the placed job alone launches it, once. An
+  uncommitted scene stopped gives its members back with no footer - nothing of it was heard; a committed one
+  runs its footer as any. A scene the walk cannot place is started as written within a launch horizon of its
+  time, late by its entry, its members on their own counters. **Fired by name or by a trigger** while its group
+  is armed (AJB), a member is a manual start - `Runner::fireTimeMember`, a run of its own under the armed group
+  named from it, begun now from its top; `needs-go` while the group is not armed (TG.2's). "Armed" is the
+  group's live run `playing` - a run state, which a replay holds - and not the job's phase, which only the hook
+  moves. **The position**: a `crossed` line `h:codeCrossed h:codeSample i:codeRate b:committed [s:cue]...`
+  after its job's `job` line, for a job that has any of it, read by `lastJob()`; `rebase` moves a placed scene's
+  sample through `sampleOnThisClock` at its own rate and leaves the code's frame alone; a seat hands it over
+  whole, and the job takes this machine's jump count as it stands (`codeTurns` is never carried). The format is
+  NOT moved: a new word, which an older build refuses by name (the position's own rule - TG.5 moved it for its
+  `code` line so the refusal read as formats; `crossed` appears only while a time group or a placed scene is
+  live, and a format moved for it would refuse every position across the two builds, time group or none).
+  **The Persistent section** (AIW): a time group asserted there fires the same way all show - nothing of its own.
+  Where this stage departs from its brief. The ask is a launch horizon and TWO ticks ahead, not one: it is a
+  record applied in its tick's drain and the launch is placed by the next tick's hook, which must still find the
+  sample a horizon away - one tick is exact only for a sample on a tick's boundary (the breakage below showed
+  it: two cases red, the 29.97 drop-frame one among them). The `crossed` line follows the job's `job` line, not
+  the group's `run` line: the frame and the loading are the job's, the position carries jobs whole and a seat
+  puts them back whole, and `lastJob()` is the `round` pattern for jobs. A scene is entered at its loading,
+  two seconds ahead, rather than asked for at its horizon: asked for there, its first members would be loaded
+  cold (entry takes ticks, a file some 0.4 s). Members inside a placed scene that start on no sample - a memo,
+  an OSC or MIDI cue, a fade - fire on the tick their moment falls in. A second crossing stops the run of the
+  first (the restart AIR names) rather than leaving two copies. `TimeRig::goOn` now puts the standby by a
+  record, so its replay steps from the same place: the TG.2 replay case had compared runs without their cues,
+  and its replay - the standby written straight to the document and never logged - fired another cue under
+  the group's run name; the replays now compare cues too.
+  Tests under C and fr_FR, `TimeGroupTests` (TG.7's half, new; the code driven by `code.heard` records, an
+  audio side recording every launch's sample, a picture side recording each picture's first point): an LTC
+  member loaded two seconds ahead and launched on exactly its sample at 25 (480 000 samples on), at 29.97
+  drop-frame across the minute that drops two labels (96 096, by hand), and a show at 25 hearing a code at 30
+  (315 frames of 1 600 samples); MTC and the wall clock alike; the standby never moving and the group armed a
+  minute after its last member; a code stopped before a member's time firing nothing, back on firing it when
+  crossed; a jump past it never loading it, a jump back firing it, a second crossing firing it again and ending
+  the first, a member loaded for a time the code then jumps an hour away from let go idle; armed past a member,
+  that one never fired and the next one fired; a member loaded too close to its time, by a late GO and by a slow
+  disk, late by its blocks and said; a timeline scene (sounds at 0, 1.5 and 3.25 s, a memo at 0.5 s) and an
+  automatic sequence (2 s of sound, 0.5 s post-wait, 0.25 s pre-wait - the second launched while the first still
+  sounds) each launched once on its sample, each loaded two seconds before its own start; a picture read ahead
+  while it waits and up on its sample; a member's pre-wait counting from its time, and still running out when
+  the code stops just after it; a scene stopped before its time with no footer, after it with; a member fired by
+  name and by a trigger, `needs-go` unarmed and started armed; a Persistent section's group; and a replay of a
+  session with stops and jumps reaching the same runs, cues and maps. `SeatTests`: the `crossed` line by hand -
+  read back, written only for a job with something to say, its scene's sample moved by `rebase`, four that do
+  not read refused - and a follower seated while the leader's member is loaded firing it once, on the
+  follower's clock, under the leader's name. `FollowTests`: a backup applying its main's GO and `code.heard`
+  fires the main's member under the main's name, on the main's sample moved by the offset, its own watcher's
+  turn ignored. Green in both locales with the files of the code touched - TimeGroupTests, SeatTests,
+  FollowTests, CodeWatchTests, ClockWatchTests, TimecodeRunTests, TriggerTests, GoTests, SamplerTests,
+  VideoTests, RunTests, RangeTests - and `wfg.replay.*`, `wfg.commands`, `client.boundary`, `source.comments`,
+  `unit.shards`.
+  Eighteen deliberate breakages, each turning its own cases red: the ask one tick short (red only where the
+  sample falls off a tick's boundary - the 29.97 drop-frame member and the scenes' offsets - which is what the
+  second tick is for); no jump read; the first frame crossed put far behind; no scene placed; no manual start;
+  no restart's stop; nothing let go at a jump; a member pruned while still waiting; its start not kept once the
+  code stops; labels read at the code's rate; a picture off its sample; jumps not counted; lateness not said;
+  the scene's job not placed; a footer for a scene never begun; the `crossed` line not written; its sample not
+  rebased; the hand's fire refused while the group is armed.
+  Found and left: a run's `codeSample` is not carried in a position, so a member seated already asked for is
+  measured against the seat's launch, not the code's sample; a member of a nested placed scene is loaded some
+  three ticks short of its two seconds, the nested scene's entry; and nothing yet measures what a time group
+  costs the tick with hundreds of members (each tick reads each member's label and the group's runs once).
+  Chasers are fired as free runners - TG.8 seats them (`seatChasersAt`), TG.9 steers them.

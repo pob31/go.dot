@@ -1466,3 +1466,164 @@ TEST_CASE ("seat: each incoming code's map rides the position as a code line - r
     CHECK (follower.runner.codeMapOf ("ltc:IN000001")->sample == 4'800'123 + (local - 100) * 960);
     CHECK (follower.runner.codeReadout ("mtc:P0000001", local * 960).state == "stopped");
 }
+
+//==============================================================================
+/*  A TIME GROUP'S CODE IN A POSITION (namespace draft §60, TG.7): its job's
+    `crossed` line - the frame the code has crossed and the members it has
+    loaded for times still ahead; for a scene the code placed, the sample it
+    starts on, that sample's rate and whether it has begun - read back as it
+    was written, its sample moved with the ticks, refused when it does not
+    read; and a follower seated while the leader's member is loaded and waiting
+    fires that member once, on the sample the code gives it on the follower's
+    clock, under the leader's name. */
+TEST_CASE ("seat: a time group's crossed line rides the position - read back, its scene's sample moved with the ticks - and a follower seated while a member waits fires it once")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    //  BY HAND: a time group's job and a placed scene's, and a plain one with neither.
+    {
+        pair::Position at;
+        at.tick = 40;
+
+        cue::GroupJob time;
+        time.run = "R8M2K4Q1";
+        time.phase = cue::groupPhase::members;
+        time.codeCrossed = 90'249;
+        time.codeAhead = { "C0000001", "C0000002" };
+        at.groups.push_back (time);
+
+        cue::GroupJob scene;
+        scene.run = "R8M2K4Q2";
+        scene.phase = cue::groupPhase::members;
+        scene.codeSample = 576'000;
+        scene.codeRate = 48000;
+        scene.codeCommitted = true;
+        at.groups.push_back (scene);
+
+        cue::GroupJob plain;
+        plain.run = "R8M2K4Q3";
+        at.groups.push_back (plain);
+
+        const auto text = pair::toText (at);
+        INFO (text);
+        CHECK (text.find ("\ncrossed h:90249 h:0 i:0 ") != std::string::npos);
+        CHECK (text.find (" s:\"C0000001\" s:\"C0000002\"\n") != std::string::npos);
+        CHECK (text.find ("\ncrossed h:-1 h:576000 i:48000 ") != std::string::npos);
+
+        //  One line for each job that has any of it, and none for the plain one.
+        auto lines = 0;
+
+        for (auto from = text.find ("\ncrossed "); from != std::string::npos; from = text.find ("\ncrossed ", from + 1))
+            ++lines;
+
+        CHECK (lines == 2);
+
+        std::string why;
+        const auto read = pair::readPosition (text, &why);
+        INFO (why);
+        REQUIRE (read.has_value());
+        REQUIRE (read->groups.size() == 3u);
+        CHECK (read->groups[0].codeCrossed == 90'249);
+        CHECK (read->groups[0].codeAhead == time.codeAhead);
+        CHECK (read->groups[0].codeSample == 0);
+        CHECK (read->groups[1].codeCrossed == -1);
+        CHECK (read->groups[1].codeSample == 576'000);
+        CHECK (read->groups[1].codeRate == 48000);
+        CHECK (read->groups[1].codeCommitted);
+        CHECK (read->groups[2].codeCrossed == -1);
+        CHECK (read->groups[2].codeSample == 0);
+        CHECK (read->groups[2].codeAhead.empty());
+        CHECK_FALSE (read->groups[2].codeCommitted);
+        CHECK (pair::toText (*read) == text);
+
+        //  MOVED WITH THE TICKS: the scene's sample, never the code's frame.
+        auto moved = *read;
+        moved.rebase (1000);
+        CHECK (moved.groups[1].codeSample == 576'000 + 960'000);
+        CHECK (moved.groups[0].codeCrossed == 90'249);
+        CHECK (moved.groups[0].codeSample == 0);
+
+        //  A crossed line with no job before it, or that does not read, refused.
+        const auto head = "position i:" + std::to_string (pair::Position::format) + " h:1 h:1\n";
+        CHECK_FALSE (pair::readPosition (head + "crossed h:1 h:0 i:0 F\nend\n").has_value());
+        CHECK_FALSE (pair::readPosition (head + "job s:\"R1\" s:\"members\" h:0 h:0 s:\"\" s:\"\"\ncrossed h:1 h:0\nend\n")
+                       .has_value());
+        CHECK_FALSE (pair::readPosition (head + "job s:\"R1\" s:\"members\" h:0 h:0 s:\"\" s:\"\"\ncrossed h:1 h:-5 i:0 F\nend\n")
+                       .has_value());
+        CHECK (pair::readPosition (head + "job s:\"R1\" s:\"members\" h:0 h:0 s:\"\" s:\"\"\ncrossed h:1 h:0 i:0 F\nend\n")
+                 .has_value());
+    }
+
+    //  END TO END: the leader's group armed, its member loaded for a time still ahead.
+    std::string text, listId, group, rain, source;
+
+    {
+        doc::ShowDocument show;
+        listId = show.createList ("Sound").id;
+        const auto input = show.createInput (1);
+        REQUIRE (input.ok);
+        REQUIRE (show.setAttribute ("/godot/sync/ltcIn", input.id).ok);
+        source = "ltc:" + input.id;
+        REQUIRE (show.createCue (listId, 0, "memo", "Before").ok);
+        group = show.createCue (listId, 1, "group", "On the code", {}, { { "mode", "time" } }).id;
+        REQUIRE (! group.empty());
+        rain = show.createCue (group, 0, "media", "Rain", {}, { { "at", "01:00:10:00" } }).id;
+        REQUIRE (! rain.empty());
+        REQUIRE (show.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav").ok);
+        REQUIRE (show.createCue (listId, 2, "memo", "After").ok);
+        REQUIRE (show.setAttribute ("/godot/list/goDebounce", "0").ok);
+        text = doc::CanonicalXml::write (show);
+    }
+
+    Machine leader { text }, follower { text };
+    leader.go (10, listId, group);
+
+    for (std::int64_t tick = 12; tick < 520; ++tick)
+    {
+        if (tick == 100)
+            REQUIRE (leader.engine.submit (source, "code.heard",
+                                           { s (source), s ("jumped"), s ("25"), osc::Value::int64 (90'000),
+                                             osc::Value::int64 (100 * 960), osc::Value::float64 (1.0) }));
+
+        leader.tickOnce (tick);
+    }
+
+    const auto loaded = leader.runOf (rain);
+    REQUIRE (! loaded.empty());
+    REQUIRE (leader.runs.find (loaded)->launchRequestedAtTick == 0);
+
+    const auto at = leader.runner.positionNow (519, 7);
+    const auto text519 = pair::toText (at);
+    INFO (text519);
+    CHECK (text519.find ("\ncrossed h:") != std::string::npos);
+    CHECK (text519.find (" s:\"" + rain + "\"\n") != std::string::npos);
+
+    //  SEATED 2481 ticks later on the follower's clock.
+    const std::int64_t local = 3000;
+    auto rebased = at;
+    rebased.rebase (local - 519);
+    REQUIRE (follower.engine.submit (std::string (origin::engine), "pair.seat", { s (pair::toText (rebased)) }));
+    follower.tickOnce (local, false);
+    REQUIRE (follower.runOf (rain) == loaded);
+
+    //  THE LEADER AND THE FOLLOWER EACH FIRE IT ONCE, the follower its offset later.
+    const auto start = 100 * 960 + 250 * 1920;
+
+    for (std::int64_t tick = 520; tick < 700; ++tick)
+        leader.tickOnce (tick);
+
+    for (std::int64_t tick = local + 1; tick < local + 200; ++tick)
+        follower.tickOnce (tick);
+
+    CHECK (leader.runs.find (loaded)->launchedAtSample == start);
+    REQUIRE (follower.runs.find (loaded) != nullptr);
+    CHECK (follower.runs.find (loaded)->launchedAtSample == start + (local - 519) * 960);
+
+    std::size_t onTheFollower = 0;
+
+    for (const auto& run : follower.runs.all())
+        if (run.cue == rain)
+            ++onTheFollower;
+
+    CHECK (onTheFollower == 1u);
+}

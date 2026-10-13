@@ -125,6 +125,7 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/Runner.h
     wfg/engine/cue/Runner.cpp
     wfg/engine/cue/RunnerSeat.cpp
+    wfg/engine/cue/RunnerTime.cpp
     wfg/engine/cue/PictureSpec.h
     wfg/engine/cue/PictureSpec.cpp
     wfg/engine/cue/InsertChain.h

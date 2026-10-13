@@ -1147,8 +1147,25 @@ namespace wfg::cue
             time for its disk to answer - so it is launched here and not as soon
             as it is ready, and starts where the leader's is. Nought for every
             other run; nought again once the launch is placed. A hook's, as the
-            launch is: a replay places none. */
+            launch is: a replay places none.
+
+            AND A TIME GROUP'S MEMBER ON THE CODE'S SAMPLE (namespace draft §60,
+            TG.7): asked for a launch horizon and two ticks ahead of the sample
+            the code reaches its time on, and launched there - a picture's
+            appearance placed there too (`advanceVideo`), and a movie's locked
+            sounds with it. */
         std::int64_t launchNotBefore = 0;
+
+        /*  WHERE A CODE PLACED THIS RUN'S START (namespace draft §60, TG.7):
+            the Go.dot sample a time group's code says it begins on - a member's
+            time and its pre-wait, or a scene member's offset from there - set by
+            the hook that asks for it, before the record that fires it, and kept
+            after the launch is placed, so the launch can be measured against
+            it: one that lands later says so (`run.late`), as a cold GO does. A
+            scene placed on the code hands it to its job (`GroupJob::codeSample`)
+            when it fires. Nought for every run the code did not place - a GO, a
+            name, a seat - and on a replay, which places nothing. */
+        std::int64_t codeSample = 0;
 
         /*  Whether the last poll saw it sounding. The edge from true to false
             is what ends a run - a launcher clip stops itself at the end of its

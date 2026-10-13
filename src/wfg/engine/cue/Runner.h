@@ -829,10 +829,23 @@ namespace wfg::cue
 
         /*  A TIME GROUP'S MEMBER (namespace draft §60): a cue whose parent is a
             time group - not its header's or its footer's, whose parent is the
-            section. `cue.fire` and `trigger.fire` refuse one (`needs-go`):
-            the code starts it, and until the code is read (TG.7) nothing
-            does. */
+            section. Its code starts it (TG.7, `timeTick`); `cue.fire` and
+            `trigger.fire` start it by hand while its group is armed. */
         bool isTimeMember (const std::string& cueId) const;
+
+        /*  A TIME GROUP'S MEMBER FIRED BY NAME OR BY A TRIGGER WHILE ITS GROUP
+            IS ARMED (namespace draft §60, AJB, the implementer's call): an
+            operator's manual start for when the code has failed - begun now,
+            from its top, free-running, as if the code had reached its time, its
+            pre-wait counting from the press as it counts from its time. A run
+            of its own under the armed group, named from the group's run as the
+            code's are, or `runId` when a record hands one in; empty when the
+            group is not armed - `needs-go`, TG.2's answer, as a sampler member
+            with no bank armed is `needs-strip`. The code's own loading for that
+            member is left alone: it starts again when the code reaches its time.
+            A handler's. */
+        std::string fireTimeMember (Engine& engine, std::int64_t tick, const std::string& cueId,
+                                    const std::string& runId);
 
         //======================================================================
         /*  WHERE EACH INCOMING CODE IS (namespace draft §60, TG.5; AIO, AIP):
@@ -844,8 +857,12 @@ namespace wfg::cue
             the same maps; a backup keeps its main's, moved onto its own clock
             by the follower. TG.7 fires members on it and TG.8 and TG.9 chase
             it; TG.5 keeps it and the readouts read it. Handler state, carried
-            in a position and set by a seat (RD.8). */
-        void noteCodeHeard (const std::string& source, const timecode::CodeMap& map);
+            in a position and set by a seat (RD.8).
+
+            `jumped` says the record's turn was one (TG.7): the source's count
+            of jumps moves, which is how a time group's hook learns that the
+            code appeared, came back or located since it last looked. */
+        void noteCodeHeard (const std::string& source, const timecode::CodeMap& map, bool jumped = false);
         const timecode::CodeMap* codeMapOf (const std::string& source) const;
         const std::map<std::string, timecode::CodeMap>& codeMaps() const noexcept { return codesHeard; }
 
@@ -2590,6 +2607,50 @@ namespace wfg::cue
         void samplerTick (Engine& engine, GroupJob& job, const juce::ValueTree& group,
                           const Run& groupRun);
 
+        /*  A TIME GROUP'S MEMBERS PHASE, every tick (namespace draft §60, TG.7;
+            cue/RunnerTime.cpp): its source's map read, and while the code runs
+            forwards each member whose time falls in the next two seconds loaded
+            (AIQ) and asked for a launch horizon and two ticks ahead of the
+            sample the code reaches it on - the launch placed on exactly that
+            sample - its crossed frame moved on, and a jump read as one. Decides
+            and submits, as every hook does. */
+        void timeTick (Engine& engine, GroupJob& job, const juce::ValueTree& group, const Run& groupRun);
+
+        /*  A SCENE PLACED ON THE CODE, every tick of its members phase (AIV):
+            each member loaded two seconds before its own start and, once the
+            scene is committed, asked for on its own sample - in place of the
+            timeline's spawn-everything and the sequence's one-after-another. */
+        void placedTick (Engine& engine, GroupJob& job, const juce::ValueTree& group, const Run& groupRun);
+
+        /*  A RUN THE CODE LOADED, ASKED FOR WHEN ITS START COMES WITHIN REACH:
+            a sound, a mic or a code fired a launch horizon and two ticks ahead
+            with its launch on `start`; a picture likewise, its appearance on
+            `start`; a placeable scene entered at once, uncommitted, and committed
+            once `start` is within a launch horizon (`mayCommit`: its parent
+            wants it now); any other scene entered within a launch horizon of
+            its start, as written. Answers whether it asked. */
+        bool askOnCode (Engine& engine, Run& pending, std::int64_t start, std::int64_t now, bool mayCommit,
+                        bool placeable);
+
+        /*  Whether a run is still waiting on the code: loaded and never fired,
+            or a scene placed on the code and not yet committed. */
+        bool awaitsTheCode (const Run& run) const;
+
+        /*  A picture the code loaded and has not asked for yet - under a time
+            group, or under a scene placed on its code - which the read-ahead
+            makes ready, as it makes the standby's (namespace draft §48). */
+        bool pictureLoadedForTheCode (const Run& run);
+
+        //  The job carrying a group run, or null.
+        GroupJob* jobOf (const std::string& runId);
+
+        /*  A CHASER THE CODE HAS ALREADY PASSED, seated at its offset (namespace
+            draft §60, AIH) - TG.8's. Called where a time group first reads a
+            running code and wherever the code jumps, with the frame it is at;
+            free runners are never seated, only started when the code runs into
+            their time. Nothing yet. */
+        void seatChasersAt (GroupJob& job, std::int64_t frame);
+
         /*  Fader-start and fader-stop on every sampler strip whose endpoint
             is a fader: the edges of §3.9a, read off each holder's `trim` and
             the touch table, and submitted as `strip.press` / `strip.release`. */
@@ -3279,6 +3340,55 @@ namespace wfg::cue
 
         //  Each incoming code's map, by source, as `code.heard` last said it (TG.5).
         std::map<std::string, timecode::CodeMap> codesHeard;
+
+        /*  HOW MANY TIMES EACH SOURCE HAS JUMPED (namespace draft §60, TG.7):
+            appeared, came back or located - each `jumped` record applied counts
+            one, so a time group's hook tells a jump from the code running on
+            without the record in hand. Handler state, this machine's own; a
+            seat leaves it, and the jobs it hands over take it as it stands. */
+        std::map<std::string, std::int64_t> codeJumps;
+
+        std::int64_t codeJumpsOf (const std::string& source) const;
+
+        //======================================================================
+        /*  WHAT A TIME GROUP MEANS ON ITS CODE (namespace draft §60, TG.7),
+            read once a revision of the show rather than once a tick: its
+            source, the show's frame rate its labels are read at (AIL), its
+            members - each one's `at`, pre-wait and kind - and, for every cue
+            under it whose start the walk can know, that start in seconds from
+            the moment its member's time is reached (AIV): a scene's members at
+            their offsets, a nested scene's in turn. A scene is PLACEABLE when
+            every member of it has one; the walk's own rules say when - a
+            timeline or an automatic sequence, one round, every member, in order,
+            no header, and an automatic sequence's lengths known. */
+        struct TimeMember
+        {
+            std::string cue;
+            std::string at;
+            std::string kind;
+            double preWait = 0.0;
+        };
+
+        struct TimePlan
+        {
+            std::uint64_t revision = 0;
+            const std::map<std::string, double>* durations = nullptr;
+
+            std::string source;                         // `ltc:<input>`, `mtc:<port>`, `clock`, or empty
+            timecode::Rate showRate = timecode::Rate::fps25;
+            std::vector<TimeMember> members;
+
+            std::map<std::string, double> starts;       // a cue's start, seconds after its member's time
+            std::map<std::string, std::string> topOf;   // the member a cue is under (itself for a member)
+            std::set<std::string> placeable;            // the scenes placed on the code
+        };
+
+        std::map<std::string, TimePlan> timePlans;
+
+        const TimePlan& timePlanOf (const juce::ValueTree& timeGroup);
+
+        //  The time group a cue is under, at any depth, or an invalid tree.
+        juce::ValueTree timeGroupAbove (const juce::ValueTree& cue) const;
 
         /*  EACH CANVAS AS `followCanvasLevels` READS IT, at the revision it was
             read at, and what was last handed to the video side. */

@@ -4907,6 +4907,18 @@ namespace wfg::cue
             GroupJob job;
             job.run = runId;
             job.enterAt = run->enterAt;
+
+            /*  A SCENE A TIME GROUP'S CODE PLACED (namespace draft §60, TG.7,
+                AIV): its start, which the hook set on the run before the record
+                that fires it, is its job's - its members are placed from it. A
+                run the code did not place reads nought, and so does every run
+                on a replay, which runs no hooks and so never reads it. */
+            if (run->codeSample > 0)
+            {
+                job.codeSample = run->codeSample;
+                job.codeRate = videoSampleRate();
+            }
+
             scheduled.push_back (job);
             return;
         }
@@ -13079,9 +13091,18 @@ namespace wfg::cue
     }
 
     //==========================================================================
-    void Runner::noteCodeHeard (const std::string& source, const timecode::CodeMap& map)
+    void Runner::noteCodeHeard (const std::string& source, const timecode::CodeMap& map, bool jumped)
     {
         codesHeard[source] = map;
+
+        if (jumped)
+            ++codeJumps[source];
+    }
+
+    std::int64_t Runner::codeJumpsOf (const std::string& source) const
+    {
+        const auto found = codeJumps.find (source);
+        return found != codeJumps.end() ? found->second : 0;
     }
 
     const timecode::CodeMap* Runner::codeMapOf (const std::string& source) const
@@ -16088,7 +16109,20 @@ namespace wfg::cue
             }
 
             if (const auto made = spawnChild (engine, movieRun, soundCue, id, tick); ! made.empty())
+            {
+                /*  ON THE SAMPLE THE CODE PUT ITS MOVIE ON (namespace draft §60,
+                    TG.7): a time group's movie comes up where the code reaches its
+                    time, and its sounds start with it there - the hook's numbers,
+                    copied, so a replay, which has none, launches nothing either. */
+                if (const auto* movie = runs.find (movieRun); movie != nullptr && movie->codeSample > 0)
+                    if (auto* sound = runs.find (made))
+                    {
+                        sound->launchNotBefore = movie->launchNotBefore;
+                        sound->codeSample = movie->codeSample;
+                    }
+
                 launchRun (engine, tick, made);
+            }
         }
     }
 
@@ -16840,7 +16874,15 @@ namespace wfg::cue
                     /*  AND A SCENE DOH! TOOK BACK RUNS NO FOOTER (§24): a
                         Doh is a pause, not an end. Never `skipFooter`, which
                         since H1 means cut: its members came down the Esc way. */
-                    if (! graceful || run->takenBack || ! beginPhase (engine, job, group, groupPhase::footer))
+                    /*  NOR A SCENE THE CODE LOADED AND NEVER STARTED (namespace
+                        draft §60, TG.7): entered two seconds ahead so its
+                        members could load, and stopped before its start came -
+                        nothing of it was heard, and it has nothing to release
+                        but the voices its members held, which they let go of. */
+                    const auto neverStarted = job.codeSample > 0 && ! job.codeCommitted;
+
+                    if (! graceful || run->takenBack || neverStarted
+                          || ! beginPhase (engine, job, group, groupPhase::footer))
                     {
                         engine.submit (origin::engine, "run.ended", one (job.run));
                         job.retired = true;
@@ -16988,13 +17030,26 @@ namespace wfg::cue
 
             /*  A TIME GROUP'S MEMBERS ARE NOT A ROUND EITHER (namespace draft
                 §60, AIE): GO armed it, and its code starts each member at the
-                time the member names - TG.7's `timeTick`, here, once a code is
-                read. Until then the phase spawns nothing, launches nothing and
-                waits on nothing, and the group stays armed until it is stopped:
-                Esc and a stop cue end it through its footer, a double Esc and a
-                kill without, as they end any group (AIX). */
+                time the member names - `timeTick` (TG.7, cue/RunnerTime.cpp)
+                loads one two seconds ahead and starts it on the sample the code
+                reaches its time on. Nothing is drawn and nothing waited on in
+                order, and the group stays armed until it is stopped, after its
+                last member too: Esc and a stop cue end it through its footer, a
+                double Esc and a kill without, as they end any group (AIX). */
             if (job.phase == groupPhase::members && isTimeGroup (groupMode (group)))
+            {
+                timeTick (engine, job, group, *run);
                 continue;
+            }
+
+            /*  AND A SCENE THE CODE PLACED (AIV): its members on the code's
+                samples, each at its offset - `placedTick`, in place of the
+                timeline's and the sequence's own pace below. */
+            if (job.phase == groupPhase::members && job.codeSample > 0)
+            {
+                placedTick (engine, job, group, *run);
+                continue;
+            }
 
             if (job.phase == groupPhase::members && run->iteration > 0)
                 job.phaseCues = run->round;
@@ -17303,8 +17358,15 @@ namespace wfg::cue
             NOR A TIME GROUP (namespace draft §60, AIE): its code starts each
             member at its own time, in no order a round could draw, and the
             phase is its members as written - nothing spawned, nothing drawn,
-            nothing logged as a round. */
-        const auto sampler = phase == groupPhase::members && armedUntilStopped (groupMode (group));
+            nothing logged as a round.
+
+            NOR A SCENE THE CODE PLACED (namespace draft §60, TG.7, AIV): its
+            members are its as written, and each is loaded two seconds before its
+            own start by `placedTick` - not all at entry, which for a scene
+            entered two seconds early would hold every voice of a long one from
+            its start. */
+        const auto sampler = phase == groupPhase::members
+                               && (armedUntilStopped (groupMode (group)) || job.codeSample > 0);
 
         auto cues = sampler ? membersOf (group)
                   : phase == groupPhase::members
@@ -18698,6 +18760,18 @@ namespace wfg::cue
 
         for (const auto& run : runs.all())
         {
+            /*  AND A PICTURE A TIME GROUP'S CODE HAS LOADED (namespace draft §60,
+                TG.7): read ahead from when it is loaded to when it is asked for,
+                so the list is made again at both. */
+            if (run.kind == "video" && pictureLoadedForTheCode (run))
+            {
+                for (const auto character : run.id)
+                    mix (static_cast<unsigned char> (character));
+
+                mix (3u);
+                continue;
+            }
+
             if (run.kind != "group" || run.isFinished() || run.state == runState::preparing)
                 continue;
 
@@ -18837,6 +18911,13 @@ namespace wfg::cue
                     readAhead (document.findById (member.cue));
         }
 
+        /*  A TIME GROUP'S PICTURES THE CODE HAS LOADED (namespace draft §60,
+            TG.7, AIQ): two seconds before the code reaches each one's time, and
+            until it is asked for - after the banks, before the other lists. */
+        for (const auto& loaded : runs.all())
+            if (loaded.kind == "video" && pictureLoadedForTheCode (loaded))
+                readAhead (document.findById (loaded.cue));
+
         for (const auto& list : document.root().getChildWithName ("Lists"))
         {
             if (list == focused)
@@ -18958,7 +19039,22 @@ namespace wfg::cue
                 placed, as a clip's launch is - the record a replay reads. */
             if (! job.placed)
             {
-                const auto at = videoSampleAhead();
+                /*  OR ON THE CODE'S SAMPLE (namespace draft §60, TG.7): a time
+                    group's picture comes up where the code reaches its time,
+                    asked for far enough ahead to be placed there - and one asked
+                    too late comes up as soon as it can, and says by how much, in
+                    the blocks a sound's late launch is counted in. */
+                auto at = videoSampleAhead();
+
+                if (run->launchNotBefore > 0 && run->launchNotBefore > at)
+                    at = run->launchNotBefore;
+
+                if (run->codeSample > 0 && at > run->codeSample && audio != nullptr && audio->blockSize() > 0)
+                    if (const auto blocks = (at - run->codeSample) / audio->blockSize(); blocks > 0)
+                        engine.submit (origin::engine, "run.late",
+                                       { osc::Value::string (run->id),
+                                         osc::Value::int32 (static_cast<std::int32_t> (std::min<std::int64_t> (blocks, 1'000'000))) });
+
                 const auto rise = videoSamplesFor (job.fadeInSeconds);
 
                 job.points.clear();
@@ -19940,16 +20036,28 @@ namespace wfg::cue
                     Reported only when there is something to report - a `late 0`
                     record for every cue in a show would be a log of the clock. */
                 const auto lateTicks = tick - run->launchRequestedAtTick - 1;
+                std::int64_t blocks = 0;
 
-                if (lateTicks > 0 && blockSize > 0)
+                /*  A LAUNCH THE CODE PLACED (namespace draft §60, TG.7, AIQ) is
+                    measured against the sample the code reaches its time on, not
+                    the tick it was asked on: on time it lands there exactly, and
+                    a member loaded too close to its time to be ready - the group
+                    armed, or the code jumped, just before it - starts from its
+                    top as soon as it can, and this says by how much. */
+                if (run->codeSample > 0)
                 {
-                    const auto blocks = (lateTicks * samplesPerTick) / blockSize;
-
-                    if (blocks > 0)
-                        engine.submit (origin::engine, "run.late",
-                                       { osc::Value::string (run->id),
-                                         osc::Value::int32 (static_cast<std::int32_t> (blocks)) });
+                    if (target > run->codeSample && blockSize > 0)
+                        blocks = (target - run->codeSample) / blockSize;
                 }
+                else if (lateTicks > 0 && blockSize > 0)
+                {
+                    blocks = (lateTicks * samplesPerTick) / blockSize;
+                }
+
+                if (blocks > 0)
+                    engine.submit (origin::engine, "run.late",
+                                   { osc::Value::string (run->id),
+                                     osc::Value::int32 (static_cast<std::int32_t> (std::min<std::int64_t> (blocks, 1'000'000))) });
             }
         }
 
@@ -23277,25 +23385,37 @@ namespace wfg::cue
                                 return Outcome::rejected (reason::needsGo);
 
                             /*  A TIME GROUP'S MEMBER IS STARTED BY ITS CODE
-                                (namespace draft §60, AIE), and nothing reads a
-                                code yet: refused, armed or not, with the word
-                                a cue only its group's own pace may start already
-                                carries - `needs-go`, since what it needs first
-                                is a GO on its group. The time group itself is
-                                fired: GO, a name or a trigger arms it.
-
-                                WHAT TG.7 SHOULD MAKE OF IT (the implementer's
-                                call, the author's to overrule): a member fired
-                                by name while its group is armed is a manual
-                                start - begun now, from its top, free-running, as
-                                if the code had reached its time; the hand an
-                                operator reaches for when the code has failed,
-                                as a sampler member fired by name is a press on
-                                its strip. Still `needs-go` while its group is
-                                not armed, as a sampler member is `needs-strip`
-                                with no bank armed. */
+                                (namespace draft §60, AIE) - and BY HAND while its
+                                group is armed (TG.7, AJB, the implementer's
+                                call, the author's to overrule): a manual start,
+                                begun now, from its top, free-running, as if the
+                                code had reached its time - the hand an operator
+                                reaches for when the code has failed, as a
+                                sampler member fired by name is a press on its
+                                strip. Its own run under the armed group, named
+                                from the group's run, or the record's when a
+                                replay hands it in. Refused `needs-go` while its
+                                group is not armed, as a sampler member is
+                                `needs-strip` with no bank armed: what it needs
+                                first is a GO on its group. A fire by name, so a
+                                step on its list and the last GO played on, as
+                                any. */
                             if (runner.isTimeMember (cueId))
-                                return Outcome::rejected (reason::needsGo);
+                            {
+                                const auto made = runner.fireTimeMember (engine, context.tick, cueId,
+                                                                         args.size() > 1 ? args[1].getString()
+                                                                                         : std::string {});
+
+                                if (made.empty())
+                                    return Outcome::rejected (reason::needsGo);
+
+                                runner.noteFireOnList (cueId, from, cause);
+
+                                if (const auto listId = runner.listOfCue (cueId); ! listId.empty())
+                                    runner.listState().stepped (listId, { context.tick, cueId, 'f', cause });
+
+                                return Outcome::ok (withRun (args, 1, made));
+                            }
 
                             /*  A SAMPLER MEMBER FIRED BY NAME IS A PRESS on the
                                 strip it holds (plan decision 10) - which is what
@@ -23509,17 +23629,34 @@ namespace wfg::cue
                                   && runner.isManualGroup (cue))
                                 return Outcome::rejected (reason::needsGo);
 
-                            /*  NOR A TIME GROUP'S MEMBER, which its code starts
-                                (namespace draft §60): `cue.fire`'s refusal, and
-                                its reason. A trigger on the time group itself
-                                arms it, as GO does. */
-                            if (runner.isTimeMember (cueId))
-                                return Outcome::rejected (reason::needsGo);
-
                             /*  A trigger on a sampler member presses its strip,
                                 as `cue.fire` does. A trigger has no release, so
                                 a hold clip it starts plays out (§3.27). */
                             const auto from = context.origin != nullptr ? *context.origin : std::string {};
+
+                            /*  A TIME GROUP'S MEMBER, which its code starts
+                                (namespace draft §60): started by the trigger, as
+                                by name, while its group is armed (TG.7, AJB) -
+                                `cue.fire`'s manual start - and refused
+                                `needs-go`, `cue.fire`'s word, while it is not. A
+                                trigger on the time group itself arms it, as GO
+                                does. */
+                            if (runner.isTimeMember (cueId))
+                            {
+                                const auto made = runner.fireTimeMember (engine, context.tick, cueId,
+                                                                         args.size() > 1 ? args[1].getString()
+                                                                                         : std::string {});
+
+                                if (made.empty())
+                                    return Outcome::rejected (reason::needsGo);
+
+                                runner.noteFireOnList (cueId, from, 0);
+
+                                if (const auto listId = runner.listOfCue (cueId); ! listId.empty())
+                                    runner.listState().stepped (listId, { context.tick, cueId, 't' });
+
+                                return Outcome::ok (withRun (args, 1, made));
+                            }
 
                             if (runner.isSamplerMember (cueId))
                             {
@@ -23583,7 +23720,7 @@ namespace wfg::cue
                             if (! heard.has_value())
                                 return Outcome::rejected (reason::badValue);
 
-                            runner.noteCodeHeard (heard->source, heard->map);
+                            runner.noteCodeHeard (heard->source, heard->map, heard->what == timecode::CodeTurn::jumped);
                             return Outcome::ok (args);
                         } });
 
