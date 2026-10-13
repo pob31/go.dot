@@ -121,7 +121,11 @@ const KIND_ORDER = {
             "eqB4On", "eqB4Shape", "eqB4Freq", "eqB4Gain", "eqB4Q"],
   // A video cue (Phase 8a) in the desktop's order - and last, as a sound's, what a hand on its
   // strip does (namespace draft §49).
-  video:   ["source", "canvas", "videoInput", "file", "fit", "layer", "blend", "opacity", "dca",
+  video:   ["source", "canvas", "videoInput", "file",
+            // A text cue's words and style (namespace draft 61).
+            "words", "font", "fontSize", "bold", "italic", "align", "alignV", "lineSpacing", "wrap",
+            "outlineColour", "outline", "outlineBlur",
+            "fit", "layer", "blend", "opacity", "dca",
             "dcaCurve", "dcaOffset", "videoInsert", "paint", "fadeIn", "startOffset", "rate",
             "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
             "contrast", "saturation", "gamma", "hue", "curveLuma", "curveRed", "curveGreen", "curveBlue",

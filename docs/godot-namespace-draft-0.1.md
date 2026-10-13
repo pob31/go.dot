@@ -27533,3 +27533,19 @@ tiles cost the renderer's message thread with a blur in them.
   drawn yet, nothing), `AutoNameTests`; `schema.*`, `unit.shards`, `client.boundary`, `source.comments`,
   `video.gpu.C`; the clang-tidy stand-in clean. Two deliberate breakages each turned their own cases red:
   a part's corners not mirrored by a flip, and the words left out of what a live edit compares.
+- **VFX.4**, 2026-10-13: text in the window. "+ video" offers **Text** on each canvas, born white, on layer
+  200 and saying "Title", so it is seen at once (as a mask is born with its square). The picture panel
+  of a text cue has its **words** in a box where the fit is - typed, a line break a line, written when the
+  hand leaves the box, Escape putting them back, the box left alone while it is being typed in - and
+  its style in the colour column: the **font**, from this machine's families with "System sans-serif"
+  first and the cue's own last, said "(not on this machine)", the menu made again only when the cue's
+  font changes; the **letters'** colour as a swatch before their size; **Bold**, **Italic** and where the
+  block lies (**At the top**, **In the middle**, **At the bottom**); **Left**, **Centre**, **Right**;
+  **spacing**; **wrap at**; the **outline**'s colour, width and **glow**. The first layout put six
+  alignment buttons in one row and cut their words; looked at, they were rearranged. The rows leave the
+  inspector for the panel - `words` a long text where the inspector still shows it - and the browser
+  console lists them. Every screen word here is the implementer's (AKS). Tests under C and fr_FR:
+  `ClientTests` (Text offered on the canvas with its born rows; the panel reading words and style; the
+  rows gone from the inspector), `RunPaneUiTests` (the words where the fit was, the style in the column,
+  Left toggled, a picture bringing the fit back; under `WFG_SNAPSHOT_DIR` the page as a picture, looked
+  at), `console.unit`, `client.boundary`, `source.comments`; the clang-tidy stand-in clean.

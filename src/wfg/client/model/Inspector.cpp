@@ -97,7 +97,9 @@ namespace wfg::client::model
                     the stack, how solid and in what colour, then how it comes
                     in - and last, as a sound's, what a hand on its strip does
                     (namespace draft §49). */
-                { "video",   { "source", "canvas", "videoInput", "file", "fit", "layer", "blend", "opacity", "dca",
+                { "video",   { "source", "canvas", "videoInput", "file", "words", "font", "fontSize", "bold", "italic",
+                               "align", "alignV", "lineSpacing", "wrap", "outlineColour", "outline", "outlineBlur",
+                               "fit", "layer", "blend", "opacity", "dca",
                                "dcaCurve", "dcaOffset",
                                "videoInsert", "paint", "fadeIn",
                                "startOffset", "rate",
@@ -200,6 +202,13 @@ namespace wfg::client::model
                 { "keySoftness", "key softness" },
                 { "keyInvert", "key turned round" },
                 { "keySpill", "key spill" },
+                /*  A TEXT CUE'S (namespace draft 61, AKS). */
+                { "fontSize", "letter size" },
+                { "alignV", "align vertically" },
+                { "lineSpacing", "line spacing" },
+                { "wrap", "wrap at" },
+                { "outlineColour", "outline colour" },
+                { "outlineBlur", "outline blur" },
                 { "doh", "on Doh!" },
                 /*  A MOVIE'S SOUND (namespace draft 37.5, WJ). */
                 { "lockedTo", "locked to movie" },
@@ -284,7 +293,7 @@ namespace wfg::client::model
             else if (name == "loops")      field.control = Control::loopCount;
             else if (name == "file")       field.control = Control::file;
             else if (name == "target")     field.control = Control::cueRef;
-            else if (name == "notes" || name == "patch") field.control = Control::longText;
+            else if (name == "notes" || name == "patch" || name == "words") field.control = Control::longText;
             else                           field.control = Control::text;
 
             return field;

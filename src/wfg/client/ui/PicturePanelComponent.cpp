@@ -35,6 +35,16 @@ namespace wfg::client::ui
         constexpr const char* keyRows[4] { "none", "luma", "matte", "colour" };
         constexpr const char* keyWords[4] { "No key", "Brightness", "Brightness as a shape", "A colour (green screen)" };
 
+        /*  A TEXT'S ALIGNMENTS (61, AKJ): the rows' words and the buttons'. */
+        constexpr const char* alignRows[3] { "left", "centre", "right" };
+        constexpr const char* alignWords[3] { "Left", "Centre", "Right" };
+        constexpr const char* alignVRows[3] { "top", "middle", "bottom" };
+        constexpr const char* alignVWords[3] { "At the top", "In the middle", "At the bottom" };
+
+        //  The font menu's first line: the font a cue with none is set in.
+        constexpr int defaultFontId = 1;
+        constexpr int missingFontId = 1000000;
+
         //  A number as a row takes it: four decimals at most, in no locale's spelling.
         std::string numberText (double value)
         {
@@ -730,6 +740,83 @@ namespace wfg::client::ui
         addAndMakeVisible (keyColourSwatch);
         addAndMakeVisible (keyColourLabel);
 
+        /*  A TEXT CUE'S WORDS (61): typed here, written when the hand leaves
+            them, as the inspector's long rows are; a line break is a line. */
+        wordsBox.setMultiLine (true, true);
+        wordsBox.setReturnKeyStartsNewLine (true);
+        wordsBox.setTooltip ("The words; written when you leave the box");
+        wordsBox.onFocusLost = [this] { writeWords(); };
+        wordsBox.onEscapeKey = [this]
+        {
+            wordsBox.setText (juce::String::fromUTF8 (reading.words.c_str()), false);
+            unfocusAllComponents();
+        };
+        addAndMakeVisible (wordsBox);
+
+        fontMenu.setWantsKeyboardFocus (false);
+        fontMenu.setTooltip ("The font, one this machine has");
+        fontMenu.onChange = [this]
+        {
+            const auto id = fontMenu.getSelectedId();
+
+            if (id == defaultFontId)
+                write ("font", "");
+            else if (id > defaultFontId && id - 2 < fonts.size())
+                write ("font", fonts[id - 2].toStdString());
+        };
+        addAndMakeVisible (fontMenu);
+        fonts = juce::Font::findAllTypefaceNames();
+        fonts.sortNatural();
+
+        for (auto* toggle : { &bold, &italic })
+        {
+            toggle->setWantsKeyboardFocus (false);
+            addAndMakeVisible (*toggle);
+        }
+
+        bold.onClick = [this] { write ("bold", bold.getToggleState() ? "true" : "false"); };
+        italic.onClick = [this] { write ("italic", italic.getToggleState() ? "true" : "false"); };
+
+        for (int at = 0; at < 3; ++at)
+        {
+            alignButtons[at].setButtonText (alignWords[at]);
+            alignButtons[at].setWantsKeyboardFocus (false);
+            alignButtons[at].setTooltip ("Each line to the " + juce::String (alignRows[at]) + " of the box the words wrap in");
+            alignButtons[at].onClick = [this, at] { write ("align", alignRows[at]); };
+            addAndMakeVisible (alignButtons[at]);
+            alignVMenu.addItem (alignVWords[at], at + 1);
+        }
+
+        alignVMenu.setWantsKeyboardFocus (false);
+        alignVMenu.setTooltip ("Where the block of lines lies on the canvas");
+        alignVMenu.onChange = [this]
+        {
+            const auto picked = alignVMenu.getSelectedId() - 1;
+
+            if (picked >= 0 && picked < 3)
+                write ("alignV", alignVRows[picked]);
+        };
+        addAndMakeVisible (alignVMenu);
+
+        build (fontSize, fontSizeLabel, "letters", "fontSize", 0.1, 100.0, 8.0, false, " %", 1);
+        build (lineSpacing, lineSpacingLabel, "spacing", "lineSpacing", 50.0, 400.0, 100.0, false, " %", 0);
+        build (wrap, wrapLabel, "wrap at", "wrap", 0.0, 100.0, 50.0, false, " %", 0);
+        build (outlineWidth, outlineLabel, "outline", "outline", 0.0, 200.0, 8.0, false, " px", 1);
+        build (outlineBlur, outlineBlurLabel, "glow", "outlineBlur", 0.0, 200.0, 20.0, false, " px", 1);
+        fontSize.setTooltip ("How tall the letters are, in % of the canvas's height");
+        wrap.setTooltip ("How wide the box the words wrap in is, in % of the canvas's width; nought never wraps");
+        outlineBlur.setTooltip ("How far the outline is blurred into a glow");
+
+        letterSwatch.setWantsKeyboardFocus (false);
+        letterSwatch.setTooltip ("The letters' colour");
+        letterSwatch.onClick = [this] { chooseColour ("paint", reading.paint, letterSwatch); };
+        addAndMakeVisible (letterSwatch);
+
+        outlineSwatch.setWantsKeyboardFocus (false);
+        outlineSwatch.setTooltip ("The outline's colour");
+        outlineSwatch.onClick = [this] { chooseColour ("outlineColour", reading.outlineColour, outlineSwatch); };
+        addAndMakeVisible (outlineSwatch);
+
         applyTheme (theme);
     }
 
@@ -787,6 +874,40 @@ namespace wfg::client::ui
         actions.setMany (rows);
     }
 
+    void PicturePanelComponent::writeWords()
+    {
+        const auto typed = wordsBox.getText().toStdString();
+
+        if (typed != reading.words)
+            write ("words", typed);
+    }
+
+    /*  THE FONT MENU: the default first, then this machine's families, and the
+        cue's own last, said as missing, when this machine has not got it (61,
+        AKL) - kept in the menu so it is not lost by looking. */
+    void PicturePanelComponent::refreshFonts()
+    {
+        fontsFilled = true;
+        fontShown = reading.font;
+        fontMenu.clear (juce::dontSendNotification);
+        fontMenu.addItem ("System sans-serif", defaultFontId);
+
+        for (int at = 0; at < fonts.size(); ++at)
+            fontMenu.addItem (fonts[at], at + 2);
+
+        const auto own = juce::String::fromUTF8 (reading.font.c_str());
+
+        if (own.isEmpty())
+            fontMenu.setSelectedId (defaultFontId, juce::dontSendNotification);
+        else if (const auto found = fonts.indexOf (own, true); found >= 0)
+            fontMenu.setSelectedId (found + 2, juce::dontSendNotification);
+        else
+        {
+            fontMenu.addItem (own + " (not on this machine)", missingFontId);
+            fontMenu.setSelectedId (missingFontId, juce::dontSendNotification);
+        }
+    }
+
     void PicturePanelComponent::writeCurve (int which, const model::CurvePoints& points)
     {
         write (curveRows[which], model::curveText (points));
@@ -839,6 +960,33 @@ namespace wfg::client::ui
         setValue (keyLevel, reading.keyLevel);
         setValue (keySoftness, reading.keySoftness);
         setValue (keySpill, reading.keySpill);
+        setValue (fontSize, reading.fontSize);
+        setValue (lineSpacing, reading.lineSpacing);
+        setValue (wrap, reading.wrap);
+        setValue (outlineWidth, reading.outline);
+        setValue (outlineBlur, reading.outlineBlur);
+
+        //  THE WORDS UNDER A HAND ARE THE HAND'S, as a slider's number is.
+        if (! wordsBox.hasKeyboardFocus (true))
+            wordsBox.setText (juce::String::fromUTF8 (reading.words.c_str()), false);
+
+        bold.setToggleState (reading.bold, juce::dontSendNotification);
+        italic.setToggleState (reading.italic, juce::dontSendNotification);
+
+        for (int at = 0; at < 3; ++at)
+        {
+            alignButtons[at].setToggleState (reading.align == alignRows[at], juce::dontSendNotification);
+
+            if (reading.alignV == alignVRows[at])
+                alignVMenu.setSelectedId (at + 1, juce::dontSendNotification);
+        }
+
+        letterSwatch.setColour (juce::TextButton::buttonColourId, paintColour (reading.paint));
+        outlineSwatch.setColour (juce::TextButton::buttonColourId, paintColour (reading.outlineColour));
+
+        //  The menu made again only when the cue's font is another: never under an open menu.
+        if (reading.texted() && (! fontsFilled || reading.font != fontShown))
+            refreshFonts();
 
         flipH.setToggleState (reading.flipH, juce::dontSendNotification);
         flipV.setToggleState (reading.flipV, juce::dontSendNotification);
@@ -915,6 +1063,20 @@ namespace wfg::client::ui
         for (auto* part : std::initializer_list<juce::Component*> { &keySpill, &keySpillLabel })
             part->setVisible (keying && colourKey);
 
+        //  A TEXT CUE'S PAGE (61): its words where the fit is, its style beside them.
+        const auto texted = reading.texted();
+
+        for (auto* part : std::initializer_list<juce::Component*> { &wordsBox, &fontMenu, &bold, &italic, &fontSize,
+                                                                    &fontSizeLabel, &lineSpacing, &lineSpacingLabel,
+                                                                    &wrap, &wrapLabel, &outlineWidth, &outlineLabel,
+                                                                    &outlineBlur, &outlineBlurLabel, &letterSwatch,
+                                                                    &outlineSwatch, &alignButtons[0], &alignButtons[1],
+                                                                    &alignButtons[2], &alignVMenu })
+            part->setVisible (texted);
+
+        for (auto& button : fitButtons)
+            button.setVisible (! texted);
+
         paintSwatch.setVisible (painted);
         paintLabel.setVisible (painted);
 
@@ -929,8 +1091,14 @@ namespace wfg::client::ui
                                                                     &invert, &paintSwatch, &curveReset,
                                                                     &fitButtons[0], &fitButtons[1], &fitButtons[2],
                                                                     &keyMode, &keyLevel, &keySoftness, &keySpill,
-                                                                    &keyInvert, &keyColourSwatch })
+                                                                    &keyInvert, &keyColourSwatch, &fontMenu, &bold,
+                                                                    &italic, &fontSize, &lineSpacing, &wrap, &outlineWidth,
+                                                                    &outlineBlur, &letterSwatch, &outlineSwatch,
+                                                                    &alignButtons[0], &alignButtons[1], &alignButtons[2],
+                                                                    &alignVMenu })
             part->setEnabled (open);
+
+        wordsBox.setReadOnly (! open);
 
         useAlpha.setEnabled (open && ! inputSaysNone);
 
@@ -988,7 +1156,8 @@ namespace wfg::client::ui
 
         for (auto* label : { &scaleLabel, &offsetXLabel, &offsetYLabel, &rotationLabel, &contrastLabel,
                              &saturationLabel, &gammaLabel, &hueLabel, &featherLabel, &paintLabel,
-                             &keyLevelLabel, &keySoftnessLabel, &keySpillLabel, &keyColourLabel })
+                             &keyLevelLabel, &keySoftnessLabel, &keySpillLabel, &keyColourLabel,
+                             &fontSizeLabel, &lineSpacingLabel, &wrapLabel, &outlineLabel, &outlineBlurLabel })
         {
             label->setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
             label->setFont (Look::font (theme, 12.0f));
@@ -1010,17 +1179,25 @@ namespace wfg::client::ui
         view->setBounds (area);
 
         const auto row = 26;
-        auto placeColumn = controls.removeFromLeft (reading.graded() ? controls.getWidth() / 2 : controls.getWidth())
+        auto placeColumn = controls.removeFromLeft (reading.graded() || reading.texted() ? controls.getWidth() / 2
+                                                                                         : controls.getWidth())
                                    .reduced (8, 6);
         auto colourColumn = controls.reduced (8, 6);
 
-        //  WHERE IT LIES: the fit, the flips, then its numbers.
+        //  WHERE IT LIES: the fit - a text cue's words instead (61) - the flips, then its numbers.
         {
-            auto fits = placeColumn.removeFromTop (row);
-            const auto width = fits.getWidth() / 3;
+            if (reading.texted())
+            {
+                wordsBox.setBounds (placeColumn.removeFromTop (row * 3).reduced (2, 2));
+            }
+            else
+            {
+                auto fits = placeColumn.removeFromTop (row);
+                const auto width = fits.getWidth() / 3;
 
-            for (auto& button : fitButtons)
-                button.setBounds (fits.removeFromLeft (width).reduced (2, 1));
+                for (auto& button : fitButtons)
+                    button.setBounds (fits.removeFromLeft (width).reduced (2, 1));
+            }
 
             auto flips = placeColumn.removeFromTop (row);
             flipH.setBounds (flips.removeFromLeft (flips.getWidth() / 2));
@@ -1060,8 +1237,49 @@ namespace wfg::client::ui
             colourPages[1].setBounds (picks.reduced (2, 1));
         }
 
+        //  A TEXT CUE'S STYLE (61): the font, the letters, the alignments, the box, the outline.
+        if (reading.texted())
+        {
+            fontMenu.setBounds (colourColumn.removeFromTop (row).reduced (2, 2));
+
+            const auto sliderLine = [&] (juce::Slider& slider, juce::Label& label)
+            {
+                auto line = colourColumn.removeFromTop (row);
+                label.setBounds (line.removeFromLeft (72));
+                slider.setBounds (line);
+            };
+
+            //  The letters' colour a swatch before their size, as the outline's is.
+            auto letters = colourColumn.removeFromTop (row);
+            letterSwatch.setBounds (letters.removeFromLeft (24).reduced (2, 3));
+            fontSizeLabel.setBounds (letters.removeFromLeft (48));
+            fontSize.setBounds (letters);
+
+            auto styles = colourColumn.removeFromTop (row);
+            const auto quarter = styles.getWidth() / 4;
+            bold.setBounds (styles.removeFromLeft (quarter));
+            italic.setBounds (styles.removeFromLeft (quarter));
+            alignVMenu.setBounds (styles.reduced (2, 2));
+
+            auto aligns = colourColumn.removeFromTop (row);
+            const auto width = aligns.getWidth() / 3;
+
+            for (auto& button : alignButtons)
+                button.setBounds (aligns.removeFromLeft (width).reduced (1, 1));
+
+            sliderLine (lineSpacing, lineSpacingLabel);
+            sliderLine (wrap, wrapLabel);
+
+            auto outlined = colourColumn.removeFromTop (row);
+            outlineSwatch.setBounds (outlined.removeFromLeft (24).reduced (2, 3));
+            outlineLabel.setBounds (outlined.removeFromLeft (48));
+            outlineWidth.setBounds (outlined);
+
+            sliderLine (outlineBlur, outlineBlurLabel);
+        }
+
         //  THE KEY: its alpha and its turn, the key, then what that key reads.
-        if (keyPage())
+        else if (keyPage())
         {
             auto toggles = colourColumn.removeFromTop (row);
             useAlpha.setBounds (toggles.removeFromLeft (toggles.getWidth() / 2));

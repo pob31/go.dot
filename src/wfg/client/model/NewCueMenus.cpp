@@ -272,6 +272,13 @@ namespace wfg::client::model
                                    { "shape", "0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75" } },
                                  "On " + canvas.label(), false, false, {} });
 
+            /*  WORDS (namespace draft 61): born white, above pictures and
+                masks, saying something so they are seen at once. */
+            choices.push_back ({ "Text", "words laid on the canvas, a title or a slide", "video",
+                                 { { "source", "text" }, { "canvas", canvas.id }, { "layer", "200" },
+                                   { "paint", "#FFFFFF" }, { "words", "Title" } },
+                                 "On " + canvas.label(), false, false, {} });
+
             /*  A CAPTURE OF EACH VIDEO INPUT (namespace draft §44, YC): the
                 picture another program sends, born showing it. */
             for (const auto& input : readVideoInputs (snapshot))

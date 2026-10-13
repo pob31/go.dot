@@ -120,6 +120,21 @@ namespace wfg::client::model
         double keySpill = 50.0;
         bool keyInvert = false;
 
+        /*  A TEXT CUE'S WORDS AND THEIR STYLE (namespace draft 61, AKJ, AKK),
+            its letters the paint above. */
+        std::string words;
+        std::string font;
+        double fontSize = 8.0;
+        bool bold = false;
+        bool italic = false;
+        std::string align = "centre";
+        std::string alignV = "middle";
+        double lineSpacing = 100.0;
+        double wrap = 90.0;
+        std::string outlineColour = "#000000";
+        double outline = 0.0;
+        double outlineBlur = 0.0;
+
         bool locked = false;
 
         /*  WHAT THIS SOURCE HAS: every source a place on its canvas (VW); a
@@ -128,6 +143,7 @@ namespace wfg::client::model
         bool graded() const noexcept  { return source == "picture" || source == "movie" || source == "capture"; }
         bool painted() const noexcept { return source == "fill" || source == "mask"; }
         bool masked() const noexcept  { return source == "mask"; }
+        bool texted() const noexcept  { return source == "text"; }
 
         /*  A picture, a movie and a capture can be keyed and have their alpha
             switched (61, AKA) - what is graded. Keyed: a key on, or its alpha

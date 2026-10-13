@@ -39,7 +39,11 @@
     capture's KEY (namespace draft 61) shares the grade's column, picked
     above it - Grade or Key, the pick saying in words when a key is on: its
     alpha switch, the key by name, where it cuts and how softly, the screen's
-    colour or the shape's, the spill, turned round.
+    colour or the shape's, the spill, turned round. A TEXT CUE (61) has its
+    words where the fit is, typed and written when the hand leaves them, and
+    their style in the colour column: the font, the letters' size, bold and
+    italic, their colour, the alignments, the spacing, the box they wrap in,
+    the outline's colour, width and blur.
 
     A drag is a run of `node.set` on one address, which the document folds
     into one undo step - the offsets one `node.setMany`, their two addresses
@@ -121,6 +125,19 @@ namespace wfg::client::ui
         juce::Label keyLevelLabel, keySoftnessLabel, keySpillLabel, keyColourLabel;
         juce::TextButton keyColourSwatch;
 
+        /*  A TEXT CUE'S WORDS AND STYLE (namespace draft 61). */
+        juce::TextEditor wordsBox;
+        juce::ComboBox fontMenu;
+        juce::StringArray fonts;
+        juce::ToggleButton bold { "Bold" }, italic { "Italic" };
+        juce::TextButton alignButtons[3];
+        juce::ComboBox alignVMenu;
+        juce::Slider fontSize, lineSpacing, wrap, outlineWidth, outlineBlur;
+        juce::Label fontSizeLabel, lineSpacingLabel, wrapLabel, outlineLabel, outlineBlurLabel;
+        juce::TextButton letterSwatch, outlineSwatch;
+        bool fontsFilled = false;
+        std::string fontShown;
+
         void build (juce::Slider& slider, juce::Label& label, const char* words, const char* row,
                     double low, double high, double mid, bool symmetric, const char* suffix, int decimals);
         void write (const char* row, const std::string& text);
@@ -129,6 +146,8 @@ namespace wfg::client::ui
         void refresh();
         void chooseColour (const char* row, const std::string& current, juce::Component& from);
         bool keyPage() const noexcept { return reading.keyable() && colourPage == 1; }
+        void writeWords();
+        void refreshFonts();
         juce::Rectangle<int> controlsArea() const;
 
         friend class View;

@@ -11478,6 +11478,75 @@ TEST_CASE ("client: a picture's alpha switch and key are its picture panel's; a 
     CHECK (model::readVideoInputs (*snapshot).front().alpha);
 }
 
+TEST_CASE ("client: a text cue is offered on each canvas, born white and saying Title, and its words and style are its picture panel's (§61)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto canvas = rig.document.createCanvas ("Stage");
+    REQUIRE (canvas.ok);
+
+    auto snapshot = rig.publish (1);
+
+    //  "+ video" offers Text on the canvas, born to be seen at once.
+    const auto choices = model::videoChoices (*snapshot);
+    const auto text = std::find_if (choices.begin(), choices.end(),
+                                    [] (const model::Choice& c) { return c.label == "Text"; });
+    REQUIRE (text != choices.end());
+    CHECK (text->kind == "video");
+    CHECK (text->section == "On Stage");
+
+    const auto said = [&text] (const char* row)
+    {
+        for (const auto& [name, value] : text->settings)
+            if (name == row)
+                return value;
+
+        return std::string {};
+    };
+
+    CHECK (said ("source") == "text");
+    CHECK (said ("canvas") == canvas.id);
+    CHECK (said ("paint") == "#FFFFFF");
+    CHECK (said ("words") == "Title");
+    CHECK (said ("layer") == "200");
+
+    //  Born so, its panel reads its words and style; the rows leave the inspector.
+    const auto cue = rig.document.createCue (list, 0, "video", "", {},
+                                             { { "source", "text" }, { "canvas", canvas.id }, { "words", "Act One\nThe forest" },
+                                               { "font", "Georgia" }, { "fontSize", "12" }, { "bold", "true" },
+                                               { "align", "left" }, { "alignV", "bottom" }, { "wrap", "60" },
+                                               { "outlineColour", "#102030" }, { "outline", "4" }, { "outlineBlur", "10" } });
+    REQUIRE (cue.ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+
+    const auto reading = model::readFoot (*snapshot, { model::Subject::Kind::picture, cue.id }).picture;
+    CHECK (reading.texted());
+    CHECK_FALSE (reading.keyable());
+    CHECK (reading.words == "Act One\nThe forest");
+    CHECK (reading.font == "Georgia");
+    CHECK (reading.fontSize == doctest::Approx (12.0));
+    CHECK (reading.bold);
+    CHECK_FALSE (reading.italic);
+    CHECK (reading.align == "left");
+    CHECK (reading.alignV == "bottom");
+    CHECK (reading.lineSpacing == doctest::Approx (100.0));
+    CHECK (reading.wrap == doctest::Approx (60.0));
+    CHECK (reading.outlineColour == "#102030");
+    CHECK (reading.outline == doctest::Approx (4.0));
+    CHECK (reading.outlineBlur == doctest::Approx (10.0));
+
+    std::vector<std::string> names;
+
+    for (const auto& block : model::inspect (*snapshot, cue.id).blocks)
+        for (const auto& field : block.fields)
+            names.push_back (field.name);
+
+    for (const auto* gone : { "words", "font", "fontSize", "bold", "align", "wrap", "outline", "outlineBlur" })
+        CHECK (std::find (names.begin(), names.end(), gone) == names.end());
+}
+
 TEST_CASE ("client: a new insert is numbered by kind and given both its names once; what Go.dot sends is never offered back (§47, AAK)")
 {
     std::vector<model::VideoInsertRow> inserts;

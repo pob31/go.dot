@@ -84,7 +84,9 @@ namespace wfg::client::model
             "contrast", "saturation", "gamma", "hue",
             "curveLuma", "curveRed", "curveGreen", "curveBlue",
             "shape", "feather", "invert", "paint",
-            "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill" };
+            "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill",
+            "words", "font", "fontSize", "bold", "italic", "align", "alignV", "lineSpacing", "wrap",
+            "outlineColour", "outline", "outlineBlur" };
 
         return rows;
     }
@@ -159,6 +161,30 @@ namespace wfg::client::model
         out.keySoftness = numberAt (snapshot, base + "keySoftness", 100.0);
         out.keySpill = numberAt (snapshot, base + "keySpill", 50.0);
         out.keyInvert = isYes (flag (snapshot, base + "keyInvert"));
+
+        out.words = text (snapshot, base + "words");
+        out.font = text (snapshot, base + "font");
+        out.fontSize = numberAt (snapshot, base + "fontSize", 8.0);
+        out.bold = isYes (flag (snapshot, base + "bold"));
+        out.italic = isYes (flag (snapshot, base + "italic"));
+        out.align = text (snapshot, base + "align");
+        out.alignV = text (snapshot, base + "alignV");
+
+        if (out.align.empty())
+            out.align = "centre";
+
+        if (out.alignV.empty())
+            out.alignV = "middle";
+
+        out.lineSpacing = numberAt (snapshot, base + "lineSpacing", 100.0);
+        out.wrap = numberAt (snapshot, base + "wrap", 90.0);
+        out.outlineColour = text (snapshot, base + "outlineColour");
+
+        if (out.outlineColour.empty())
+            out.outlineColour = "#000000";
+
+        out.outline = numberAt (snapshot, base + "outline", 0.0);
+        out.outlineBlur = numberAt (snapshot, base + "outlineBlur", 0.0);
 
         out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 

@@ -3151,6 +3151,68 @@ TEST_CASE ("picture panel: a keyed picture's pick says so in words, and its Key 
     }
 }
 
+TEST_CASE ("picture panel: a text cue's words where the fit is, and its style in the colour column (§61)")
+{
+    ui::PicturePanelComponent::Actions actions;
+    ui::PicturePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+
+    auto reading = keyedPicture ("none");
+    reading.cueName = "Title";
+    reading.picture.source = "text";
+    reading.picture.words = "Act One\nThe forest";
+    reading.picture.paint = "#FFFFFF";
+    reading.picture.outline = 4.0;
+    reading.picture.outlineColour = "#102030";
+    reading.picture.align = "left";
+    panel.show (reading, nullptr);
+
+    //  No fit, no grade, no key: the words and their style.
+    REQUIRE (childSaying<juce::TextButton> (panel, "fit") != nullptr);
+    CHECK_FALSE (childSaying<juce::TextButton> (panel, "fit")->isVisible());
+    const auto* keyPick = childSaying<juce::TextButton> (panel, "Key");
+    CHECK ((keyPick == nullptr || ! keyPick->isVisible()));
+    CHECK_FALSE (childSaying<juce::Label> (panel, "contrast")->isVisible());
+    CHECK (childSaying<juce::Label> (panel, "letters")->isVisible());
+    CHECK (childSaying<juce::Label> (panel, "glow")->isVisible());
+    REQUIRE (childSaying<juce::TextButton> (panel, "Left") != nullptr);
+    CHECK (childSaying<juce::TextButton> (panel, "Left")->getToggleState());
+    CHECK_FALSE (childSaying<juce::TextButton> (panel, "Centre")->getToggleState());
+
+    juce::TextEditor* words = nullptr;
+
+    for (auto* child : panel.getChildren())
+        if (auto* editor = dynamic_cast<juce::TextEditor*> (child))
+            words = editor;
+
+    REQUIRE (words != nullptr);
+    CHECK (words->isVisible());
+    CHECK (words->getText() == "Act One\nThe forest");
+
+    //  A picture again: the fit back, the words gone.
+    panel.show (keyedPicture ("none"), nullptr);
+    CHECK (childSaying<juce::TextButton> (panel, "fit")->isVisible());
+    CHECK_FALSE (words->isVisible());
+
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isEmpty())
+        return;
+
+    panel.show (reading, nullptr);
+    const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+    const juce::File file { juce::File (dir).getChildFile ("picture-panel-text.png") };
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    juce::FileOutputStream out { file };
+    REQUIRE (out.openedOk());
+
+    juce::PNGImageFormat png;
+    CHECK (png.writeImageToStream (picture, out));
+    MESSAGE ("wrote " << file.getFullPathName().toStdString());
+}
+
 TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 {
     /*  NOT AN ASSERTION BUT AN EYE. With WFG_SNAPSHOT_DIR set, the panel is
