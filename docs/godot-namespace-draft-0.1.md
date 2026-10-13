@@ -28475,3 +28475,16 @@ close (§60), which keeps the shared checkout.
   read, a face of it again by its PostScript name, and one of each system's usual families' bold by
   name, then carry the family into a show; here that family is an AutoCAD one, carried. The macOS and
   Linux halves are compiled first by CI's jobs: this machine builds neither.
+- **QF.4**, 2026-10-13: the font menu. A text cue's menu lists the default, then the families the show
+  carries under *In this show*, then this machine's others under *On this machine*, the cue's own last
+  when neither has it ("not in the show, not on this machine"); under them *Carry it in the show* - its
+  installed font, not carried yet - *Add a font file...* and *Remove it from the show* - its font, carried
+  in its own folder - none under the lock. Carrying and adding answer in the panel's head as the engine
+  works ("Carrying Arial in the show...", "Arial carried in the show"), only for the job this panel
+  asked; a restricted licence asks "Carry it all the same?" and asks again with yes; taking a family out
+  asks first, since its files are deleted. The words are the implementer's, listed for the author with
+  the others at QF.11. The console's inspector keeps the font as a text row: carrying is the window's.
+  Tests under C and fr_FR: ClientTests (the families and the job read, every outcome in words, the three
+  commands), RunPaneUiTests (the menu's order and what it offers, the carry asked and followed,
+  another's job not said, the lock); 219 client cases and 5 panel cases. Three deliberate breakages each
+  turned their own cases red.

@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 
 namespace wfg::client::model
@@ -90,6 +91,84 @@ namespace wfg::client::model
             "outlineColour", "outline", "outlineBlur", "blur" };
 
         return rows;
+    }
+
+    namespace
+    {
+        std::vector<std::string> tabbed (const std::string& line)
+        {
+            std::vector<std::string> parts { std::string {} };
+            for (const char c : line)
+            {
+                if (c == '\t')
+                    parts.emplace_back();
+                else
+                    parts.back() += c;
+            }
+            return parts;
+        }
+    }
+
+    std::vector<CarriedFamily> carriedFamilies (const std::string& listing)
+    {
+        std::vector<CarriedFamily> families;
+        std::string line;
+        for (std::size_t at = 0; at <= listing.size(); ++at)
+        {
+            if (at < listing.size() && listing[at] != '\n')
+            {
+                line += listing[at];
+                continue;
+            }
+            if (! line.empty())
+            {
+                auto parts = tabbed (line);
+                parts.resize (4);
+                if (! parts[0].empty())
+                    families.push_back ({ parts[0], parts[1], parts[2] == "around", parts[3] == "restricted" });
+            }
+            line.clear();
+        }
+        return families;
+    }
+
+    FontsJob fontsJobOf (const std::string& text)
+    {
+        FontsJob job;
+        if (text.empty())
+            return job;
+
+        auto parts = tabbed (text);
+        parts.resize (6);
+        job.number = static_cast<unsigned> (std::strtoul (parts[0].c_str(), nullptr, 10));
+        job.state = parts[1];
+        job.verb = parts[2];
+        job.subject = parts[3];
+        job.result = parts[4];
+        job.detail = parts[5];
+        return job;
+    }
+
+    std::string fontsJobWords (const FontsJob& job)
+    {
+        //  A file by its name, a family as it is.
+        auto subject = job.subject;
+        if (job.verb == "add")
+            if (const auto slash = subject.find_last_of ("/\\"); slash != std::string::npos)
+                subject = subject.substr (slash + 1);
+
+        if (job.state == "working")
+            return (job.verb == "remove" ? "Taking " + subject + " out of the show..." : "Carrying " + subject + " in the show...");
+
+        if (job.result == "carried")     return (job.verb == "add" ? job.detail : subject) + " carried in the show";
+        if (job.result == "removed")     return subject + " taken out of the show";
+        if (job.result == "restricted")  return subject + ": its licence restricts carrying it";
+        if (job.result == "not-a-font")  return "Not carried: " + (job.detail.empty() ? subject : job.detail) + " is not a font Go.dot reads";
+        if (job.result == "not-installed") return "Not carried: " + subject + " is not installed on the engine's machine";
+        if (job.result == "not-carried") return subject + " is not in the show's fonts";
+        if (job.result == "no-folder")   return "The show has no folder yet: save it, then carry the font";
+        if (job.result == "failed")      return "Not done: " + job.detail;
+        return {};
     }
 
     PictureReading readPicture (const tree::TreeSnapshot& snapshot, const std::string& cueId)
@@ -195,6 +274,9 @@ namespace wfg::client::model
                 const auto address = "/godot/text/" + name;
                 out.fields.push_back ({ name, text (snapshot, address), address });
             }
+
+        out.carried = carriedFamilies (text (snapshot, "/godot/engine/fonts"));
+        out.fontsJob = text (snapshot, "/godot/engine/fontsJob");
 
         out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 

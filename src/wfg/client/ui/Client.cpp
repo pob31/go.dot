@@ -575,6 +575,15 @@ namespace wfg::client
                 footActions.unfreezeEdit = [this] (const std::string& cueId)
                                            { send (gesture::unfreezeEdit (cueId)); };
 
+                /*  THE SHOW'S FONTS (namespace draft §62, ALA): carried, added and
+                    taken out on the engine's machine, which says what it did. */
+                footActions.carryFont = [this] (const std::string& family, bool restricted)
+                                        { send (gesture::carryFont (family, restricted)); };
+                footActions.addFontFile = [this] (const std::string& path, bool restricted)
+                                          { send (gesture::addFontFile (path, restricted)); };
+                footActions.removeFont = [this] (const std::string& family)
+                                         { send (gesture::removeFont (family)); };
+
                 footActions.createSend = [this] (const std::string& cueId, const std::string& busId,
                                                  double level)
                                          { send (gesture::createSend (cueId, busId, level)); };

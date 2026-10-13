@@ -3213,6 +3213,137 @@ TEST_CASE ("picture panel: a text cue's words where the fit is, and its style in
     MESSAGE ("wrote " << file.getFullPathName().toStdString());
 }
 
+namespace
+{
+    juce::ComboBox* fontMenuOf (juce::Component& panel)
+    {
+        for (auto* child : panel.getChildren())
+            if (auto* menu = dynamic_cast<juce::ComboBox*> (child))
+                for (int at = 0; at < menu->getNumItems(); ++at)
+                    if (menu->getItemText (at) == "System sans-serif")
+                        return menu;
+        return nullptr;
+    }
+
+    int itemNamed (const juce::ComboBox& menu, const juce::String& text)
+    {
+        for (int at = 0; at < menu.getNumItems(); ++at)
+            if (menu.getItemText (at) == text)
+                return at;
+        return -1;
+    }
+}
+
+TEST_CASE ("picture panel: a text cue's font menu lists the show's fonts above this machine's, carries the cue's font through its action, and follows the job in its head (§62, ALA)")
+{
+    std::vector<std::pair<std::string, bool>> carried;
+    std::vector<juce::String> said;
+
+    ui::PicturePanelComponent::Actions actions;
+    actions.carryFont = [&carried] (const std::string& family, bool restricted) { carried.emplace_back (family, restricted); };
+    actions.say = [&said] (const juce::String& sentence) { said.push_back (sentence); };
+
+    ui::PicturePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+
+    auto installed = juce::Font::findAllTypefaceNames();
+    installed.sortNatural();
+    REQUIRE_FALSE (installed.isEmpty());
+    const auto family = installed[0].toStdString();
+
+    auto reading = keyedPicture ("none");
+    reading.picture.source = "text";
+    reading.picture.words = "Act One";
+    reading.picture.font = family;
+    reading.picture.carried = { { "Stage Sans Carried", "Regular, Bold", false, false } };
+    panel.show (reading, nullptr);
+
+    auto* menu = fontMenuOf (panel);
+    REQUIRE (menu != nullptr);
+
+    //  The show's fonts first, under their heading; this machine's after; the cue's font picked.
+    const auto inShow = itemNamed (*menu, "Stage Sans Carried");
+    const auto here = itemNamed (*menu, installed[0]);
+    REQUIRE (inShow >= 0);
+    REQUIRE (here >= 0);
+    CHECK (inShow < here);
+    CHECK (menu->getText() == installed[0]);
+
+    //  Its installed font can be carried; it cannot be taken out, the show not carrying it.
+    const auto carryAt = itemNamed (*menu, "Carry it in the show");
+    const auto removeAt = itemNamed (*menu, "Remove it from the show");
+    REQUIRE (carryAt >= 0);
+    REQUIRE (removeAt >= 0);
+    REQUIRE (itemNamed (*menu, "Add a font file...") >= 0);
+    CHECK (menu->isItemEnabled (menu->getItemId (carryAt)));
+    CHECK_FALSE (menu->isItemEnabled (menu->getItemId (removeAt)));
+
+    //  Carried: the action asked, the cue's font picked again, nothing written to the cue.
+    menu->setSelectedId (menu->getItemId (carryAt), juce::sendNotificationSync);
+    REQUIRE (carried.size() == 1u);
+    CHECK (carried[0].first == family);
+    CHECK_FALSE (carried[0].second);
+    CHECK (menu->getText() == installed[0]);
+
+    //  Another's job done first - another client's - is not this panel's to say.
+    reading.picture.fontsJob = "1\tdone\tadd\tsomebody else's.ttf\tcarried\tx.ttf";
+    panel.show (reading, nullptr);
+    CHECK (said.empty());
+
+    //  The engine at work on this one, then done: said in the head, and the family now the show's.
+    reading.picture.fontsJob = "2\tworking\tcarry\t" + family + "\t\t";
+    panel.show (reading, nullptr);
+    REQUIRE_FALSE (said.empty());
+    CHECK (said.back() == juce::String ("Carrying ") + installed[0] + " in the show...");
+
+    reading.picture.fontsJob = "2\tdone\tcarry\t" + family + "\tcarried\tone.ttf";
+    reading.picture.carried.push_back ({ family, "Regular", false, false });
+    panel.show (reading, nullptr);
+    CHECK (said.back() == installed[0] + " carried in the show");
+
+    menu = fontMenuOf (panel);
+    REQUIRE (menu != nullptr);
+    //  Listed once, now among the show's (a heading is no item: it follows the show's first family).
+    CHECK (itemNamed (*menu, installed[0]) == itemNamed (*menu, "Stage Sans Carried") + 1);
+    int times = 0;
+    for (int at = 0; at < menu->getNumItems(); ++at)
+        times += menu->getItemText (at) == installed[0] ? 1 : 0;
+    CHECK (times == 1);
+    CHECK_FALSE (menu->isItemEnabled (menu->getItemId (itemNamed (*menu, "Carry it in the show"))));
+    CHECK (menu->isItemEnabled (menu->getItemId (itemNamed (*menu, "Remove it from the show"))));
+
+    //  And a later one, this panel waiting for nothing, is not said either.
+    const auto before = said.size();
+    reading.picture.fontsJob = "3\tdone\tadd\tsomebody else's.ttf\tcarried\tx.ttf";
+    panel.show (reading, nullptr);
+    CHECK (said.size() == before);
+
+    //  Under the lock nothing is done with fonts.
+    reading.picture.locked = true;
+    reading.picture.font = "Elsewhere Grotesk";
+    panel.show (reading, nullptr);
+    menu = fontMenuOf (panel);
+    CHECK_FALSE (menu->isItemEnabled (menu->getItemId (itemNamed (*menu, "Add a font file..."))));
+    CHECK (itemNamed (*menu, "Elsewhere Grotesk (not in the show, not on this machine)") >= 0);
+
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+    if (dir.isEmpty())
+        return;
+
+    reading.picture.locked = false;
+    reading.picture.font = family;
+    panel.show (reading, nullptr);
+    const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+    const juce::File file { juce::File (dir).getChildFile ("picture-panel-fonts.png") };
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+    juce::FileOutputStream out { file };
+    REQUIRE (out.openedOk());
+    juce::PNGImageFormat png;
+    CHECK (png.writeImageToStream (picture, out));
+    MESSAGE ("wrote " << file.getFullPathName().toStdString());
+}
+
 TEST_CASE ("picture panel: a text cue's fields picked beside the font, each typed and sent at once, under the lock too (§61, AKM)")
 {
     std::vector<std::pair<std::string, std::string>> sent;

@@ -83,6 +83,13 @@ namespace wfg::client::ui
 
             /** A sentence for the panel's head. */
             std::function<void (const juce::String&)> say;
+
+            /*  THE SHOW'S FONTS (namespace draft §62, ALA): an installed family
+                carried, a file added, a family taken out - `restricted` once
+                the operator has said yes to a licence restricting it. */
+            std::function<void (const std::string& family, bool restricted)> carryFont;
+            std::function<void (const std::string& path, bool restricted)> addFontFile;
+            std::function<void (const std::string& family)> removeFont;
         };
 
         PicturePanelComponent (const model::Theme&, Actions);
@@ -140,6 +147,17 @@ namespace wfg::client::ui
         juce::TextButton letterSwatch, outlineSwatch;
         bool fontsFilled = false;
         std::string fontShown;
+
+        /*  THE FONTS THE SHOW CARRIES (namespace draft §62) as the menu last
+            listed them, and the fonts.* job this panel is waiting for: its
+            subject, and the job number seen when it was asked. */
+        std::string carriedShown;
+        std::string fontJobWaiting;
+        unsigned fontJobSeen = 0;
+        std::unique_ptr<juce::FileChooser> fontChooser;
+        void askFontJob (const std::string& verb, const std::string& subject, bool restricted);
+        void followFontJob();
+        bool carries (const std::string& family) const;
 
         /*  A TEXT CUE'S FIELDS (61, AKM), picked beside the font. */
         struct FieldRow

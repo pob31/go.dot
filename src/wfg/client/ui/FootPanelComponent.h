@@ -98,6 +98,11 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId)> freezeEdit;
             std::function<void (const std::string& cueId)> unfreezeEdit;
 
+            /*  THE SHOW'S FONTS (namespace draft §62, ALA), from a text cue's font menu. */
+            std::function<void (const std::string& family, bool restricted)> carryFont;
+            std::function<void (const std::string& path, bool restricted)> addFontFile;
+            std::function<void (const std::string& family)> removeFont;
+
             /*  AN OSC CUE'S MESSAGES AND CURVES (namespace draft 45): one more
                 message, the second made the cue's own, a curve on a value. */
             std::function<void (const std::string& cueId, const std::string& address,

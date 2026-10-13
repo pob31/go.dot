@@ -337,6 +337,21 @@ namespace wfg::client::gesture
         return { origin::window, "media.unfreeze", { osc::Value::string (cueId) } };
     }
 
+    Event carryFont (const std::string& family, bool restricted)
+    {
+        return { origin::window, "fonts.carry", { osc::Value::string (family), osc::Value::boolean (restricted) } };
+    }
+
+    Event addFontFile (const std::string& path, bool restricted)
+    {
+        return { origin::window, "fonts.add", { osc::Value::string (path), osc::Value::boolean (restricted) } };
+    }
+
+    Event removeFont (const std::string& family)
+    {
+        return { origin::window, "fonts.remove", { osc::Value::string (family) } };
+    }
+
     Event fireCue (const std::string& cueId)
     {
         return { origin::window, "cue.fire", { osc::Value::string (cueId) } };

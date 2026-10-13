@@ -75,6 +75,38 @@ namespace wfg::client::model
         std::string address;
     };
 
+    /*  A FONT FAMILY THE SHOW CARRIES (namespace draft §62, AKV), as the
+        engine's machine lists it at `/godot/engine/fonts`: its name, its styles
+        in words, whether it comes from the folder around the show's, whether
+        a face's licence restricts carrying it. */
+    struct CarriedFamily
+    {
+        std::string family;
+        std::string styles;
+        bool around = false;
+        bool restricted = false;
+    };
+
+    std::vector<CarriedFamily> carriedFamilies (const std::string& listing);
+
+    /*  WHAT THE LAST OF fonts.add, .carry AND .remove DID (namespace draft §62,
+        ALA), as `/godot/engine/fontsJob` says it. `number` counts them; nought
+        before any. */
+    struct FontsJob
+    {
+        unsigned number = 0;
+        std::string state;          ///< working, done
+        std::string verb;           ///< add, carry, remove
+        std::string subject;        ///< the file or the family
+        std::string result;         ///< carried, removed, restricted, not-a-font, not-installed, not-carried, no-folder, failed
+        std::string detail;
+    };
+
+    FontsJob fontsJobOf (const std::string& text);
+
+    /** The job in a sentence, for the panel's head. */
+    std::string fontsJobWords (const FontsJob& job);
+
     /** A curve's point: what comes in, what goes out, each 0..1. */
     using CurvePoints = std::vector<std::pair<double, double>>;
 
@@ -148,6 +180,11 @@ namespace wfg::client::model
 
         /*  Its blanks, in the order the words first hold them, with tonight's values. */
         std::vector<FieldReading> fields;
+
+        /*  THE FONTS THE SHOW CARRIES on the engine's machine, and what the last
+            fonts.* command did there (namespace draft §62): the font menu's. */
+        std::vector<CarriedFamily> carried;
+        std::string fontsJob;
 
         bool locked = false;
 

@@ -163,6 +163,9 @@ namespace wfg::client::ui
                 PicturePanelComponent::Actions placing;
                 placing.set = actions.set;
                 placing.setMany = actions.setMany;
+                placing.carryFont = actions.carryFont;
+                placing.addFontFile = actions.addFontFile;
+                placing.removeFont = actions.removeFont;
                 placing.say = [this] (const juce::String& sentence)
                 {
                     note = sentence;
