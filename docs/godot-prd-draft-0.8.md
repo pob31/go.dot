@@ -1786,6 +1786,18 @@ cut into sections and edited as a sound is (§3.24, *Editing a sound*): the
 cuts on its frame grid, a linear dissolve at each join, its locked sound in
 step, the pair frozen together to new files the cues play.
 
+*Amended 2026-10-13, at the author's direction* (namespace draft §61, AKA-AKD): **keys, text and
+blur.** A picture's own alpha - already used - gets a switch to turn it off. A picture, a movie or a
+capture can be **keyed**: by its brightness, keeping its colours; by its brightness as a shape painted
+in the cue's colour; or by a chosen colour, a blue or green screen, its spill taken off the edges. A
+**text cue** lays words on a canvas as on a slide, in a font, a size and a fill colour, with an outline
+of its own colour that can be blurred; the words may hold **named fields**, `{score}`, filled from
+outside by OSC (`/godot/text/score`) at once and under the lock, never saved in the show (§4.10). A
+**blur cue** blurs everything beneath it on its canvas, inside or outside an outline of its own, and a
+fade moves how far. Proposed (§6.9): the switch on by default; a capture's alpha read only when its
+input says it sends one; the key read before the grade; a text's frame the canvas; fields left alone by
+Esc and Doh!; a blur with no outline covering the whole canvas (AKE-AKS).
+
 #### 3.19a Surfaces and mapping
 
 *Amended 2026-10-06, at the author's direction:* **one canvas may feed several outputs**, each with
@@ -1842,6 +1854,12 @@ Faster and correct.
 *Amended 2026-10-08* (namespace draft §44, YF, *proposed*): an insert takes the cue's picture after
 its grade and before its geometry, opacity and blend, so Go.dot places what comes back and a move or
 a fade never waits on the round trip.
+
+*Amended 2026-10-13* (namespace draft §61, AKG, *proposed*): before the per-cue grade come **the
+alpha switch and the key**, measured on the source's own colour so a grade never moves the cut; a
+key's shape painted in the cue's colour skips the grade. A **blur cue** is a step of the composite:
+the canvas as composited beneath it is blurred and laid back through its outline, before the layers
+above it are composited.
 
 *Amended 2026-10-07* (namespace draft §40): with zones (§3.19a), each canvas is still composited in
 its own undistorted space and warped once into its zone; the zones are then laid over one another
@@ -4152,6 +4170,30 @@ implementer's calls from AII in §60.2 are the author's to overrule:
 What the work leaves out: several LTC inputs or MTC ports at once; user bits; a code that only
 follows (Go.dot as a slave transport for a whole list); MIDI clock and MMC; LTC read off a sound file.
 
+Added 2026-10-13 *(proposed)*, with keys, text cues and blur (§3.19, namespace draft §61). The
+implementer's calls from AKE in §61.2 are the author's to overrule:
+
+- **A picture's own alpha stays on by default**; off, it is drawn solid, black where a PNG was
+  transparent. **A capture's alpha is read only when its input says it sends one.**
+- **One set of key rows for the three modes** - level, softness, invert, and a spill for the colour
+  key - at defaults where brightness is exactly the opacity; the panel moves them to suit a green
+  screen the first time the colour key is chosen. **The key is read before the grade**; a key on a cue
+  with an insert keys what is sent, and the transparency does not come back.
+- **A text cue is a slide**: its frame the canvas, its words wrapped in a box 90 % of its width,
+  aligned in it, then moved, scaled and turned as a fill is. The size is a % of the canvas's height,
+  the outline and its blur in canvas pixels; the words row is `words`. The renderer draws the words
+  itself and keeps the last drawing up until the next is ready; the font is checked on each machine.
+- **Fields**: `/godot/text/<name>`, accepted under the lock, never an undo step, never saved, logged
+  for a replay, the main's applied by a backup and handed to one seated late; left alone by Esc, a
+  double Esc and Doh!; forgotten when the show closes.
+- **A blur cue's radius is in canvas pixels, 20 by default**; with no outline it covers the whole
+  canvas; its opacity mixes blurred with sharp; a large blur is made on a halved canvas without a jump
+  as it fades. **An inverted mask that has been moved covers outside its moved frame** on the
+  projector, as it already did on the monitor.
+
+What the work leaves out: a QLab text cue imported; the old OpenGL renderer; font files carried in
+the show's media; a fade of a key, a text's style or its colours; a blur of one picture's own image.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -4313,6 +4355,13 @@ Mackie vs HUI first — first week with the D700.
   hundred fires, from LTC and from MTC); and for each chase method over ten minutes against a code
   running 50 ppm fast, with a 0.1 % step, a two-second stop and a thirty-second locate back: the
   steady error, the time to catch up, the jumps and the worst error.
+- **A text field shown** (§3.19, 2026-10-13, namespace draft §61): **M65** - how long a field takes
+  from its datagram to the frame that shows it (the median, the 99th percentile and the worst over two
+  hundred changes of a forty-character title with an outline and its blur at 1080p), split into the
+  tick, the restate, the drawing, the upload and the frame.
+- **A blur's cost** (§3.19, 2026-10-13, namespace draft §61): **M66** - what a blur cue costs the
+  renderer on a 1080p and a 4K canvas, at radii of 5, 20, 100 and 400 pixels, one blur cue and three,
+  on the author's graphics card and on WARP; and what the monitor's tiles cost with a blur in them.
 
 ---
 

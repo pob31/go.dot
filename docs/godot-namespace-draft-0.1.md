@@ -27227,3 +27227,212 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   main's last word; a replay with no `audio.settingsReady` record keeps maps whose sample rate is nought,
   the Runner's then - only the readouts and TG.7 to TG.9 read it; nothing acts on the maps yet (TG.7
   fires, TG.8 and TG.9 chase).
+
+## 61. Keys, text and blur
+
+### 61.1 What it does
+
+Written 2026-10-13, from the author's list of the same day, four things the video cues were missing:
+*"The still image should be able to use the alpha channel if present as its own mask. This should be
+a toggle."*; *"A still image should have a toggle to use the RGB or grayscale value as a mask or a
+specific colour (think blue/green screen)"*; *"We need text cues to write slides, titles... If the
+text could be dynamic, changed by OSC it would be really great. Text should have a fill colour, an
+outline colour and a possible blur on the outline."*; *"We need a blur effect with the possibility of
+a mask and also that fade effects can act on it."*
+
+**A picture's own alpha was already used.** A PNG's transparent parts let what is beneath show
+through, on the projector (`picture_fs`) and on the monitor (`Compositor.h`), since V.2; over nothing
+they show the canvas's black, which is how it went unseen. What the author asked for is the switch:
+`useAlpha`, on by default, so every show keeps its look, and off draws the picture solid (AKE).
+
+**Keys.** A picture, a movie or a capture (AKA) can be made see-through by what it shows. *Brightness*
+(`luma`): it keeps its own colours, and how bright each point is says how solid it is - black clear,
+white solid, the other way round with `keyInvert`. *Brightness as a shape* (`matte`): the picture is
+used only for its outline, filled with the cue's Colour (`paint`), as a mask cue whose shape a picture
+draws. *A colour* (`colour`): the points near `keyColour` are cleared - a blue or green screen - and the
+colour the screen spilled onto the edges is taken off (AKB). `keyLevel` says where the cut falls,
+`keySoftness` how gradual it is. The key is read from the picture as it arrives, before its grade, so
+grading a keyed picture never moves the cut (AKG).
+
+**Text cues** are a video cue whose source is `text`: words laid out on the canvas as on a slide -
+aligned left, centre or right, top, middle or bottom, inside a box that wraps them - in a font, a size,
+a fill colour (`paint`), with an outline of its own colour and width, which may be blurred into a glow.
+The slide then moves, scales, turns and fades as any picture does (AKJ, AKK). The renderer draws the
+words itself, off its drawing thread, and keeps the last drawing up until the new one is ready (AKL).
+
+**Fields** make the words live (AKC). Words may hold blanks - `Score: {home} - {away}`, or just
+`{line}` - and a message from outside, `/godot/text/home 3`, fills every text cue showing that blank,
+at once, under the lock too. A value can arrive before the cue it feeds is up, and it is there when the
+cue comes up. The values are never saved in the show: the document holds what someone decided, and a
+score is what the evening did (PRD §4.10). They are logged, so a replay shows the same words, and a
+backup machine receives the main's (AKM).
+
+**The blur cue** is a video cue whose source is `blur` (AKD). It blurs everything beneath it on its
+canvas, as a sheet of frosted glass laid on the stack - nothing above it. Its own outline, drawn as a
+mask's is (`shape`, `feather`, `invert`), limits it to an area or to everything outside one; with no
+outline it covers the whole canvas (AKN). `blur` says how far, in canvas pixels, and a fade moves it
+(`fade/video` gains `blur:`) as it moves a picture's opacity or scale. Laid just above the bottom
+picture of a canvas, it blurs that picture alone.
+
+### 61.2 Decisions
+
+The author's, 2026-10-13, each picked from options whose words were mine:
+
+- **AKA** (the author's) **Keys and the alpha switch apply to pictures, movies and captures.** Offered
+  as "Pictures, movies, cameras"; the other option was pictures only.
+- **AKB** (the author's) **Brightness works both ways, beside the colour key**: as the picture's own
+  transparency (`luma`) and as a shape painted in the cue's Colour (`matte`). Offered as "Both, as two
+  choices", between "Its own colours, dark parts clear" and "A colour, cut by the picture".
+- **AKC** (the author's) **Live text through named fields** in the words, filled from outside, under
+  the lock too, never saved. Offered as "Named fields in the words"; the other options were the cue's
+  own words replaced live under the lock and kept or dropped at the unlock, or both.
+- **AKD** (the author's) **The blur is a cue that blurs what lies beneath it**, limited by its own
+  outline, its amount moved by a fade. Offered as "Everything beneath it"; the other options were a
+  blur on each picture's own image, or both.
+
+Mine, the author's to overrule:
+
+- **AKE** (mine) **`useAlpha` is on by default**, so no show changes its look. Off, a picture is drawn
+  solid; where a PNG was transparent it shows black, because the colour under a transparent point is
+  lost once the file is read (JUCE keeps pictures premultiplied). A HAP movie with alpha keeps its
+  colour there.
+- **AKF** (mine) **A capture's alpha is read only when its input says it sends one**: `videoInput/alpha`,
+  off by default. Captures were drawn opaque because many programs send a fourth byte that means
+  nothing (YO); a show-wide switch on by default would have read it on every capture.
+- **AKG** (mine) **The order** for one cue, amending PRD §3.19b: source, the alpha switch, the key
+  (measured on the source's own colour), the grade (skipped by a matte, which shows its Colour), the
+  insert, the opacity and the DCA, the blend. A blur cue is a step of compositing the canvas.
+- **AKH** (mine) **The key's rows and arithmetic.** One set of rows for the three modes: `keyLevel` 50 %,
+  `keySoftness` 100 %, `keyInvert`, `keySpill` 50 % (the colour key's alone), `keyColour` green. A point's
+  measure is its brightness (Rec. 709) for `luma` and `matte`, and for `colour` its distance from the key
+  colour in the colour plane (Cb, Cr), counted so that the key colour is nought and grey is one; the
+  ramp is `clamp ((m - level) / softness + 1/2)`, a step at softness nought. At the defaults, `luma` is
+  exactly "brightness is opacity" and `matte` exactly "the greyscale is the shape". The first time a cue
+  is set to `colour` with level and softness at those defaults, the picture panel moves them to 40 % and
+  10 %, one undo. The spill is taken off along the key colour's own direction in the colour plane, its
+  brightness kept, so it works for any key colour, not only green and blue.
+- **AKI** (mine) **A key on a cue with an insert keys what is sent out**; what comes back is drawn as it
+  came, opaque, so the transparency does not return, and `wfg validate` says so.
+- **AKJ** (mine) **A text cue is laid out as a slide.** Its frame is the canvas; its words are set in a
+  box `wrap` % of the canvas's width, centred - nought never wraps, lines as typed - aligned in it
+  left, centre or right, and set at the top, middle or bottom, the top and bottom as far from the
+  canvas's edges as the box is from its sides (5 % of the width when nothing wraps). Then the whole
+  slide is offset, scaled, turned about the canvas's centre and flipped, as a fill is; `fit` is not read.
+- **AKK** (mine) **The text rows and their units.** The words are `words`, not `text`, which stays the
+  fields' address word (61.3) and is a function's name in the Runner. The size is a % of the canvas's
+  height, as offsets are a % of it (VQ); the outline's width and its blur are canvas pixels, as a mask's
+  feather is. The fill is `paint`, whose description widens; the window makes a new text cue white,
+  as it makes a new mask with a square.
+- **AKL** (mine) **The renderer draws the words** on a thread of its own: the glyphs' outlines filled,
+  the outline stroked beneath the fill and blurred on the processor, only the words' own bounds drawn,
+  at the canvas's pixels times the cue's scale (one to four times). The last drawing stays up until the
+  new one is ready, so a field changing never flashes; a text cue fired before its first drawing comes
+  up a frame or two late (as AAN for a picture not read ahead). The font is a family installed on the
+  machine, checked by `wfg validate` on that machine - a main and a backup can differ - and a missing
+  one draws in the default sans-serif.
+- **AKM** (mine) **Fields.** Addressed `/godot/text/<name>`, a name of letters, digits, `-` and `_`, at
+  most 32; written by any client, OSC included, the first argument taken, a number written as text
+  without the locale. A blank no value has reached shows nothing; `{{` and `}}` are a brace; a blank
+  that does not read is shown as written, and warned. A value is cut at 1024 bytes, the words once
+  filled at 4096, each at a character's boundary; at most 256 names. Accepted under the lock; never an
+  undo step, never saved, never the show's dirt. Logged as the write it is, so a replay fills the same
+  blanks; a following backup ignores its own `udp:` input and applies the main's records (AGD), and a
+  backup seated late is handed the values in the position, beside the DCA trims (RD.8). Esc, a double
+  Esc and Doh! leave them as they are: they are the outside world's, not a cue's. Closing the show or
+  the engine forgets them.
+- **AKN** (mine) **The blur cue's rules.** `blur` is a radius in canvas pixels, 20 by default, the
+  Gaussian's spread a third of it; nought blurs nothing. With fewer than three corners its outline is
+  the whole canvas and `invert` means nothing - the opposite of a mask cue, whose empty outline covers
+  nothing. The canvas's edges are held, so a blur never darkens the frame. Its opacity mixes the blurred
+  canvas with the sharp one; several blur cues on a canvas each blur what is beneath them. A blur cue
+  shows no picture of its own: its geometry moves its outline.
+- **AKO** (mine) **A large blur is made small**: the canvas halved as often as it takes to leave a
+  spread of eight points or less, blurred there, and laid back; the same arithmetic in the renderer and
+  the monitor, chosen so a fading radius never jumps where the halving changes.
+- **AKP** (mine) **An inverted mask moved or shrunk covers outside its moved frame too**, on the
+  projector as on the monitor. The two disagreed: the renderer covered only inside the moved canvas;
+  the outline is what is outside, wherever the frame went.
+- **AKQ** (mine) **The picked cue's tile** shows a blur cue with its canvas beneath it, and a text cue's
+  tile is drawn again when a field changes.
+- **AKR** (mine) **Left out**: a QLab text cue imported (still a memo, 46.4); the old OpenGL renderer
+  (`--renderer=gl`, to be deleted in R.4), which draws nothing for the three new things; font files
+  carried in the show's media; a fade of a key, a text's style or its colours; a blur on one picture's
+  own image (the option not taken in AKD).
+- **AKS** (mine) **The screen words** - the key's modes, the panel's labels, the automatic names - are
+  put to the author before they ship (VFX.12).
+
+### 61.3 Rows
+
+| Address | Type | Notes |
+|---|---|---|
+| `cue/<id>/source` | `s` | gains `text` and `blur` |
+| `cue/<id>/useAlpha` | `T` | a picture's, a movie's or a capture's own alpha makes it see-through; `true` (AKE) |
+| `cue/<id>/key` | `s` | `none`, `luma`, `matte` or `colour`; `none` |
+| `cue/<id>/keyColour` | `s` | `#RRGGBB`, the colour a `colour` key clears; `#00FF00` |
+| `cue/<id>/keyLevel` | `d` | 0..100 %, where the cut falls; 50 |
+| `cue/<id>/keySoftness` | `d` | 0..100 %, how gradual it is; 100 |
+| `cue/<id>/keyInvert` | `T` | keep what the key would clear; `false` |
+| `cue/<id>/keySpill` | `d` | 0..100 %, how much of the key colour's spill is taken off; 50 |
+| `videoInput/<id>/alpha` | `T` | the program sending it sends a meaningful alpha; `false` (AKF) |
+| `cue/<id>/words` | `s` | a text cue's words, lines split by a line break, `{name}` a field |
+| `cue/<id>/font` | `s` | an installed family; empty is the default sans-serif |
+| `cue/<id>/fontSize` | `d` | 0.1..100 % of the canvas's height; 8 |
+| `cue/<id>/bold`, `cue/<id>/italic` | `T` | `false` |
+| `cue/<id>/align` | `s` | `left`, `centre` or `right`; `centre` |
+| `cue/<id>/alignV` | `s` | `top`, `middle` or `bottom`; `middle` |
+| `cue/<id>/lineSpacing` | `d` | 50..400 %; 100 |
+| `cue/<id>/wrap` | `d` | 0..100 % of the canvas's width, the box the words wrap in; 90; nought never wraps |
+| `cue/<id>/outlineColour` | `s` | `#RRGGBB`; `#000000` |
+| `cue/<id>/outline` | `d` | 0..200 canvas px, the outline's width; 0 |
+| `cue/<id>/outlineBlur` | `d` | 0..200 canvas px, how far the outline is blurred; 0 |
+| `cue/<id>/blur` | `d` | 0..500 canvas px, a blur cue's radius; 20 (AKN) |
+| `cue/<fade>/video` | `s` | the pairs gain `blur` |
+| `text/<name>` | `s` | a field's value, read and written, never saved (AKM); published for every blank the show's words hold and every name written |
+
+`paint` is a text's fill as well as a fill's and a mask's colour; `shape`, `feather` and `invert` are
+read by a blur cue as by a mask. The video region's version goes 17 to 18 (VFX.1), 19 (VFX.3) and 20
+(VFX.7).
+
+### 61.4 Commands
+
+None new. A field is written with `node.set` on `/godot/text/<name>`, which is also what a datagram to
+that address becomes; the write is answered in front of the document, as a run's trim is.
+
+### 61.5 Refused
+
+`bad-address` for `/godot/text/<name>` whose name does not read. Warnings in the show: a text cue whose
+words are empty, longer than 4096 bytes or hold a blank that does not read; a key on a cue with an
+insert (AKI); a blur cue with an insert. `wfg validate`, on the machine it runs on: a font not installed.
+
+### 61.6 Stages
+
+Built on the branch `vfx`, in a worktree of its own, while the time groups (§60) finish on `main`.
+
+| Stage | What |
+|---|---|
+| VFX.0 | This section; PRD §3.19, §3.19b, §6.9, §6.11; the devplan's Phase 8b |
+| VFX.1 | The alpha switch and the keys: rows, region 18, the shader, the monitor's reference, a playing cue's key edited at once |
+| VFX.2 | The keys in the window: the picture panel's Key block, the key colour's swatch, an input's "sends alpha" |
+| VFX.3 | The text cue drawn: rows, region 19, the renderer's text store, the outline and its blur, the tile, the warnings |
+| VFX.4 | Text in the window: + video's Text, the words, the panel's Text section |
+| VFX.5 | Fields: the table, `/godot/text/<name>`, the blanks filled, playing cues redrawn, the log, the backup, the position |
+| VFX.6 | Fields in the window: each blank of a text cue, its value live and editable, its address |
+| VFX.7 | The blur cue on the monitor: rows, region 20, `Property::blur`, the fade, the reference compositor by buffer |
+| VFX.8 | The blur cue on the projector: the canvas's pass split at a blur, the halving, the inverted mask (AKP) |
+| VFX.9 | Blur in the window: + video's Blur, the amount, the outline |
+| VFX.10 | Text read ahead, if VFX.3's timings ask for it |
+| VFX.11 | M65, M66 |
+| VFX.12 | The guides, the README, the screen words put to the author |
+
+**M65** (planned): how long a field takes from its datagram to the frame that shows it - the median,
+the 99th percentile and the worst over two hundred changes of a forty-character title with an outline
+and its blur at 1080p, split into the tick, the restate, the drawing, the upload and the frame.
+
+**M66** (planned): what a blur costs the renderer - a canvas at 1080p and at 4K, radii of 5, 20, 100
+and 400 px, one blur cue and three, on the author's graphics card and on WARP - and what the monitor's
+tiles cost the renderer's message thread with a blur in them.
+
+### 61.7 Built so far
+
+- **VFX.0**, 2026-10-13: this section; PRD §3.19, §3.19b, §6.9's proposals, §6.11's M65 and M66; the
+  devplan's stages under Phase 8b.

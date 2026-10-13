@@ -644,6 +644,29 @@ stage its own commit on main (namespace draft §50.7):
 Owed to the bench: the detents and the screen's words with the D700 in hand; a
 movie and its sound on one D700 DCA, both turned.
 
+*Added 2026-10-13, at the author's direction* (namespace draft §61; PRD §3.19,
+§3.19b, §6.9 and §6.11 amended): **keys, text cues and blur** - a picture's alpha
+switched, pictures, movies and captures keyed by brightness or by a colour, text
+cues whose words hold fields filled by OSC, and a blur cue over what lies beneath
+it. Built on the branch `vfx`, in a worktree of its own, while the time groups
+finish on `main` (namespace draft §61.7):
+
+| Stage | What the author sees |
+|---|---|
+| VFX.0 | Namespace draft §61 |
+| VFX.1 | A picture keyed by brightness, as a shape, or by a green screen, on the projector and the monitor |
+| VFX.2 | The Key block in the picture panel; an input that sends alpha |
+| VFX.3 | A text cue drawn, its outline and the outline's glow |
+| VFX.4 | + video's Text; the words and their style in the panel |
+| VFX.5 | A field sent by OSC changes the words at once, under the lock too |
+| VFX.6 | A text cue's fields in the panel, their values live, their addresses |
+| VFX.7 | A blur cue on the monitor, inside or outside its outline, faded |
+| VFX.8 | The same blur on the projector |
+| VFX.9 | + video's Blur; its amount and outline in the panel |
+| VFX.10 | Text read ahead, if the timings ask for it |
+| VFX.11 | M65, M66 |
+| VFX.12 | The guides, the README, the screen words |
+
 ---
 
 ## Phase 9 — Plugins and the rack · L
