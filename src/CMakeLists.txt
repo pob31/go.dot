@@ -189,6 +189,8 @@ add_library(wfg_engine STATIC
     wfg/engine/process/PatchText.cpp
     wfg/engine/process/PdInstance.h
     wfg/engine/process/PdInstance.cpp
+    wfg/engine/process/PatchThread.h
+    wfg/engine/process/PatchThread.cpp
     wfg/engine/process/ProcessHost.h
     wfg/engine/process/ProcessHost.cpp
     wfg/engine/process/PatchEditor.h

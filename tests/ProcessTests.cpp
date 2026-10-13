@@ -40,6 +40,7 @@
 #include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/engine/process/PdInstance.h>
+#include <wfg/engine/process/PatchThread.h>
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/tree/Mount.h>
@@ -52,9 +53,12 @@
 #include <cctype>
 #include <clocale>
 #include <cmath>
+#include <condition_variable>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -1808,4 +1812,259 @@ TEST_CASE ("hold: a patch's own [netsend] sends nothing while the machine holds,
     CHECK (waitForHeard (2, 2000ms));
 
     listener.stop();
+}
+
+//==============================================================================
+/*  PD'S LOAD LIST, ITS LOAD STACK, AND THE STACK ITS THREADS RUN ON (namespace
+    draft §51.9, found 2026-10-13).
+
+    Pd keeps a list of the abstractions it has loaded, so that none is loaded
+    twice, and it is one list for the process, as the classes it mirrors are.
+    Pd 0.56-5 kept each entry as the address of the symbol the loading
+    instance made for the name, and compared addresses: once that instance was
+    freed, and its symbols with it, the list held dead addresses, and a later
+    instance's NEW name could be given one of them - read as loaded, nothing
+    registered, asked again, a thousand deep (Linux's depth message) or off
+    the end of the thread's stack (macOS, Windows). The runs it reddened met
+    it by chance, in the ready-made cases; the first case below meets it on
+    purpose. The build's copy of s_loader.c keeps the names themselves. */
+namespace
+{
+    /*  An abstraction where the instance's search path finds it: [inlet],
+        each of `boxes` in a row, [outlet]. */
+    void writeAbstraction (const std::filesystem::path& folder, const std::string& name, const std::vector<std::string>& boxes)
+    {
+        std::filesystem::create_directories (folder);
+        std::string text = "#N canvas 0 0 450 300 12;\n#X obj 10 10 inlet;\n";
+        for (std::size_t i = 0; i < boxes.size(); ++i)
+            text += "#X obj 10 " + std::to_string (40 + 30 * i) + " " + boxes[i] + ";\n";
+        text += "#X obj 10 " + std::to_string (40 + 30 * boxes.size()) + " outlet;\n";
+        for (std::size_t i = 0; i <= boxes.size(); ++i)
+            text += "#X connect " + std::to_string (i) + " 0 " + std::to_string (i + 1) + " 0;\n";
+
+        std::ofstream out (folder / (name + ".pd"), std::ios::binary | std::ios::trunc);
+        out << text;
+        REQUIRE (out.good());
+    }
+
+    /*  [r /in] -> [box] -> [s /out]. */
+    std::string through (const std::string& box)
+    {
+        return "#N canvas 0 0 450 300 12;\n"
+               "#X obj 10 10 r /in;\n"
+               "#X obj 10 40 " + box + ";\n"
+               "#X obj 10 70 s /out;\n"
+               "#X connect 0 0 1 0;\n"
+               "#X connect 1 0 2 0;\n";
+    }
+
+    bool onCi()
+    {
+        return juce::SystemStats::getEnvironmentVariable ("GITHUB_ACTIONS", {}) == "true";
+    }
+}
+
+TEST_CASE ("process: an abstraction a freed instance loaded never stands for a later instance's new one")
+{
+    /*  One instance after another, each opening an abstraction no instance of
+        this process has opened before, and freed before the next is made -
+        the order that leaves a freed instance's addresses on the list - three
+        hundred times. A new name read as loaded prints the depth message and
+        "couldn't create", and its patch answers nothing. */
+    const auto folder = scratch ("fresh-abstractions");
+    constexpr int patches = 300;
+    int answered = 0;
+    std::string firstTrouble;
+
+    for (int i = 0; i < patches && firstTrouble.empty(); ++i)
+    {
+        const auto name = "wfgfresh" + std::to_string (i);
+        writeAbstraction (folder, name, { "+ " + std::to_string (i) });
+
+        auto settings = settingsFor ("fresh");
+        settings.searchPaths.push_back (folder.string());
+        PdInstance pd (settings);
+        makeAndOpen (pd, through (name));
+
+        const auto opened = pd.takeOutbox();
+        if (! troubleIn (opened).empty())
+        {
+            firstTrouble = "patch " + std::to_string (i) + ", " + name + ":\n" + joined (opened.printed);
+            break;
+        }
+
+        const auto out = numbersSentTo (tickOnce (pd, { { "/in", { Atom::of (1.0) } } }), "/out");
+        if (out.size() == 1u && sameNumber (out[0], 1.0 + i))
+            ++answered;
+        else
+            firstTrouble = "patch " + std::to_string (i) + ", " + name + ", answered nothing";
+    }
+
+    INFO (firstTrouble);
+    CHECK (firstTrouble.empty());
+    CHECK (answered == patches);
+}
+
+TEST_CASE ("process: a patch's thread has eight megabytes of stack, whatever a thread is given here")
+{
+    struct Seen
+    {
+        std::mutex lock;
+        std::condition_variable done;
+        bool ran = false;
+        std::size_t bytes = 0;
+    };
+    const auto seen = std::make_shared<Seen>();
+
+    REQUIRE (startPatchThread ([seen]
+    {
+        const auto bytes = stackBytesOfThisThread();
+        const std::lock_guard<std::mutex> held (seen->lock);
+        seen->bytes = bytes;
+        seen->ran = true;
+        seen->done.notify_all();
+    }));
+    {
+        std::unique_lock<std::mutex> held (seen->lock);
+        REQUIRE (seen->done.wait_for (held, 5s, [&seen] { return seen->ran; }));
+    }
+
+    std::size_t plain = 0;
+    std::thread ([&plain] { plain = stackBytesOfThisThread(); }).join();
+    MESSAGE ("a patch's thread has " << seen->bytes << " bytes of stack; a std::thread here has " << plain);
+
+    CHECK (patchThreadStackBytes >= std::size_t { 8 } * 1024 * 1024);
+   #if defined (_WIN32) || defined (__APPLE__) || defined (__linux__)
+    CHECK (seen->bytes >= patchThreadStackBytes);
+   #endif
+}
+
+TEST_CASE ("process: a patch nesting abstractions deep opens on its thread, where a plain thread's stack would end")
+{
+    /*  Abstraction 0 holds 1, which holds 2, and so on: each level a patch
+        read inside the reading of the one above, which is Pd's own recursion,
+        well inside its guard of a thousand - and deeper than a std::thread's
+        stack holds on macOS or Windows, so this case ends the test program
+        if a patch's thread is ever made the plain way again. Measured
+        2026-10-13 (MSVC, Debug): about 6 kB of stack a level, a std::thread's
+        megabyte ending between 150 and 200 deep; three hundred is about two
+        megabytes of the eight. */
+    const auto folder = scratch ("deep-abstractions");
+    constexpr int depth = 300;
+    for (int level = 0; level < depth; ++level)
+        writeAbstraction (folder, "wfgdeep" + std::to_string (level),
+                          { level + 1 < depth ? "wfgdeep" + std::to_string (level + 1) : std::string ("+ 1") });
+
+    auto settings = settingsFor ("deep");
+    settings.searchPaths.push_back (folder.string());
+    PdInstance pd (settings);
+    makeAndOpen (pd, through ("wfgdeep0"));
+    const auto opened = pd.takeOutbox();
+    INFO (joined (opened.printed));
+    CHECK (troubleIn (opened).empty());
+    CHECK (numbersSentTo (tickOnce (pd, { { "/in", { Atom::of (41.0) } } }), "/out") == std::vector<double> { 42.0 });
+}
+
+TEST_CASE ("process: two patches loading abstractions and making objects at once never take each other's place")
+{
+    /*  PD'S LOAD STACK - which canvas is loading, so that what is read lands
+        in it - was one for the process in Pd 0.56-5, and each instance's
+        thread pushes and pops it: whenever a patch opens, and whenever an
+        object is made, at a tick too. Two patches did that at once whenever a
+        first load let go of Pd's shared lock part-way, as it does, and
+        whenever two ticks made objects, which they do under the read lock
+        both hold - each could pop the other's canvas. The build's copy of
+        m_pd.c keeps it per thread.
+
+        Two instances, each round both opening at once a patch whose
+        abstraction holds another, both new to the process, beside a
+        ready-made one; then both ticked at once, each tick making and
+        clearing a hundred pairs of objects in a subpatch, and a value sent
+        through the abstractions. Fewer rounds on CI, whose machines are
+        slower and where the case is a guard rather than a hunt. */
+    const int rounds = onCi() ? 10 : 40;
+    constexpr int ticksPerRound = 5;
+    const auto folder = scratch ("together-abstractions");
+
+    const auto settingsOf = [&folder] (const std::string& side)
+    {
+        auto settings = settingsFor ("together-" + side);
+        settings.searchPaths.push_back (folder.string());
+        settings.searchPaths.push_back (readyMadeFolder().string());
+        return settings;
+    };
+    PdInstance a (settingsOf ("a"));
+    PdInstance b (settingsOf ("b"));
+    REQUIRE (a.make());
+    REQUIRE (b.make());
+    REQUIRE (a.finished (10s));
+    REQUIRE (b.finished (10s));
+    REQUIRE (a.made());
+    REQUIRE (b.made());
+
+    const auto patchFor = [&folder] (const std::string& side, int round)
+    {
+        const auto outer = "wfgtogether" + side + std::to_string (round);
+        const auto inner = outer + "in";
+        writeAbstraction (folder, inner, { "+ 1" });
+        writeAbstraction (folder, outer, { inner, inner });
+        return "#N canvas 0 0 450 300 12;\n"
+               "#X obj 10 10 r /in;\n"
+               "#X obj 10 40 " + outer + ";\n"
+               "#X obj 10 70 go.change;\n"
+               "#X obj 10 100 s /out;\n"
+               "#X obj 200 10 r /make;\n"
+               "#X obj 200 40 until;\n"
+               "#X msg 200 70 \\; pd-sub clear \\; pd-sub obj 10 10 f \\; pd-sub obj 10 40 + 1;\n"
+               "#N canvas 0 0 450 300 sub 0;\n"
+               "#X restore 200 100 pd sub;\n"
+               "#X connect 0 0 1 0;\n"
+               "#X connect 1 0 2 0;\n"
+               "#X connect 2 0 3 0;\n"
+               "#X connect 4 0 5 0;\n"
+               "#X connect 5 0 6 0;\n";
+    };
+
+    std::string firstTrouble;
+    const auto look = [&firstTrouble] (const char* side, int round, const char* when, const Outbox& outbox)
+    {
+        if (firstTrouble.empty() && ! troubleIn (outbox).empty())
+            firstTrouble = std::string (side) + ", round " + std::to_string (round) + ", " + when + ":\n" + joined (outbox.printed);
+    };
+    int answered = 0;
+
+    for (int round = 0; round < rounds && firstTrouble.empty(); ++round)
+    {
+        REQUIRE (a.open (patchFor ("a", round)));
+        REQUIRE (b.open (patchFor ("b", round)));
+        REQUIRE (a.finished (10s));
+        REQUIRE (b.finished (10s));
+        INFO ("round " << round << ": " << a.problem() << " / " << b.problem());
+        REQUIRE (a.opened());
+        REQUIRE (b.opened());
+        look ("a", round, "opening", a.takeOutbox());
+        look ("b", round, "opening", b.takeOutbox());
+
+        for (int tick = 0; tick < ticksPerRound; ++tick)
+        {
+            const auto value = static_cast<double> (round * 100 + tick);
+            const std::vector<Input> inputs { { "/in", { Atom::of (value) } }, { "/make", { Atom::of (100.0) } } };
+            REQUIRE (a.tick (inputs));
+            REQUIRE (b.tick (inputs));
+            REQUIRE (a.finished (10s));
+            REQUIRE (b.finished (10s));
+
+            for (auto* side : { &a, &b })
+            {
+                const auto outbox = side->takeOutbox();
+                look (side == &a ? "a" : "b", round, "ticking", outbox);
+                const auto out = numbersSentTo (outbox, "/out");
+                answered += out.size() == 1u && sameNumber (out[0], value + 2.0) ? 1 : 0;
+            }
+        }
+    }
+
+    INFO (firstTrouble);
+    CHECK (firstTrouble.empty());
+    CHECK (answered == rounds * ticksPerRound * 2);
 }

@@ -23897,6 +23897,35 @@ made before it may hold one, and a patch cannot fire that cue by its id.
   firing a memo under the patch's own origin, Esc ending the run so that a later report is answered
   by nothing, and the session's log replayed record for record. M56, M58 and M59 measured (§51.6). The
   driver found the heard rule unpublished until the show's first edit, fixed in PC.11.
+- **Found 2026-10-13: Pd's load list, its load stack, and the stack a patch's thread runs on.** The
+  unit suite printed `maximum object loading depth 1000 reached` and "couldn't create" in the
+  ready-made cases on Linux (runs 38209202452 and 38317983400), and the macOS suite ended in a bus error
+  (runs 38227264401 and 38299523050, the case unnamed then). One fault, and a show can meet it. Pd
+  keeps a list of the abstractions it has loaded - one for the process, as the classes it stands for
+  are, a class any instance loads being in every instance's object maker - and Pd 0.56-5 kept each entry
+  as the address of the symbol the loading instance had made for the name, comparing addresses. An
+  instance's symbols are freed with it, and a later instance's NEW name could be given a freed address:
+  read as loaded, no class registered, the load asked for again and again, a thousand deep - which a
+  Linux thread's eight megabytes survive to print, and macOS's half megabyte or Windows' one do not,
+  ending Go.dot. In a show: a cue whose patch used an abstraction ends, and a later cue opens an
+  abstraction no patch has opened yet. The build's copy of `s_loader.c` keeps a copy of each name and
+  compares with `strcmp`. Found beside it: Pd's stack of which canvas is loading (`m_pd.c`:
+  `gstack_head`, `lastpopped`, `pd_loadingabstraction`) was one for the process too, pushed and popped
+  by every patch opened and every object made, a tick's included, so two patches doing either at once -
+  a first load lets go of Pd's shared lock part-way, two ticks run together under its read lock - popped
+  each other's canvases ("consistency check failed: gstack_pop", or a crash); the build's copy keeps it
+  per thread, which is exact because every call into an instance is made on the instance's own thread.
+  And each patch's thread is now started with the eight megabytes of stack Pd's depth guards were
+  written for (`process/PatchThread`: `_beginthreadex` reserving it on Windows, pthread attributes on
+  Linux and macOS), so a recursion Pd guards against ends with a line in its console, never with Go.dot.
+  The per-thread count of loading depth (`m_class.c`'s `tryingalready`, 2026-10-12) was made believing
+  two patches opening at once raced on it; they did not - the thousand was the stale load list - and it
+  stays, a recursion guard being right per thread. ProcessTests: three hundred instances one after
+  another, each opening an abstraction new to the process (red at the fifth with the address list - the
+  depth message on an eight-megabyte thread, the program ended on a plain one); a patch nesting
+  abstractions three hundred deep (the program ended on a plain thread); two instances opening and
+  ticking at once, forty rounds, ten on CI (red in the first round with the shared load stack); a
+  patch's thread asked how much stack it has.
 
 ## 52. The analysis cache swept
 

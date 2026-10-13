@@ -16,6 +16,7 @@
 
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/PatchText.h>
+#include <wfg/engine/process/PatchThread.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/pair/Hold.h>
 
@@ -31,7 +32,6 @@
 #include <fstream>
 #include <initializer_list>
 #include <mutex>
-#include <thread>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -494,7 +494,15 @@ namespace wfg::process
         : shared (std::make_shared<Shared>())
     {
         shared->settings = std::move (settings);
-        std::thread (threadMain, shared).detach();
+
+        /*  On a thread with the stack Pd was written for (PatchThread.h), so a
+            recursion Pd guards against is stopped by Pd, with a line in its
+            console, before it runs off the end of the stack and ends Go.dot.
+            Detached as before; and a thread the system will not start is the
+            exception a std::thread would have thrown. */
+        if (! startPatchThread ([s = shared] { threadMain (s); }))
+            throw std::system_error (std::make_error_code (std::errc::resource_unavailable_try_again),
+                                     "a patch's thread could not be started");
     }
 
     PdInstance::~PdInstance()

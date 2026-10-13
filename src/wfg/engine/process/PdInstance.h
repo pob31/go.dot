@@ -28,6 +28,12 @@
     French locale "2.5" would read as 2 - while the rest of Go.dot, and the
     fr_FR run of every test, keep theirs (ACQ).
 
+    The thread is started with the eight megabytes of stack Pd's depth guards
+    were written for (PatchThread.h), and since nothing else ever calls into
+    the instance, it is the one thread that pushes and pops the canvases the
+    instance is loading - a stack the build's copy of Pd keeps per thread for
+    that reason (cmake/WfgThirdParty.cmake, §51.9).
+
     WHO WAITS FOR WHOM. The tick asks for a job - make, open, a tick, close -
     and gets an answer at once: started, or not, because the last job has not
     finished. It then waits for it at most as long as it chooses (`finished`)

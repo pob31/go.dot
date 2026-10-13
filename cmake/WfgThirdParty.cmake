@@ -653,31 +653,59 @@ unset(_hidapi)
 # Pd's sources come from ThirdParty/pure-data, never from libpd's own nested
 # pure-data, which stays empty as TE's JUCE does: scripts/check-pins.py (h) holds
 # the two gitlinks equal. Nothing of libpd's own CMake: its source list transcribed,
-# its settings with three changes -
+# its settings with two changes -
 #   * one Pd instance per patch, each bound to its own thread (PDINSTANCE,
 #     PDTHREADS; namespace draft §51, ACT), and libpd's extras left out;
 #   * LIBPD_NO_NUMERIC: libpd_init would otherwise set the WHOLE process's number
-#     format to C - each patch's thread sets its own instead (ACQ);
-#   * no compiled externals (ACP): Pd's loader tries a binary first, with
-#     LoadLibrary or dlopen; the build compiles a copy of s_loader.c whose first
-#     loader refuses, so only .pd patches are ever found;
-#   * a patch cannot end Go.dot (ACP): "pd quit" calls exit() and "pd exit" sets
-#     a quit flag every instance's scheduler stops on, so one message box would
-#     end the show or freeze every patch's clocks; the copy of s_inter.c refuses
+#     format to C - each patch's thread sets its own instead (ACQ).
+# And six of Pd's files are built from amended copies, each for a reason of its own:
+#   * s_loader.c, no compiled externals (ACP): Pd's loader tries a binary first,
+#     with LoadLibrary or dlopen, and the copy's first loader refuses, so only .pd
+#     patches are ever found. And its list of what has been loaded keeps NAMES
+#     (§51.9): Pd 0.56-5 kept the address of the symbol the loading instance
+#     made for each name, and compared addresses, but an instance's symbols are
+#     freed with it, and a later instance's new name given a freed address read
+#     as loaded - no class registered, the load asked for again and again, a
+#     thousand deep: `maximum object loading depth 1000 reached` on Linux (runs
+#     38209202452 and 38317983400), and on macOS's smaller thread the end of the
+#     stack first - the likeliest reading of the unit suite's bus errors (runs
+#     38227264401 and 38299523050, which named no case) - as it ends a Windows
+#     build here, measured. A show meets it as soon as a cue whose patch used an
+#     abstraction has ended and a later one opens another. The list stays one for
+#     the process, as the classes it stands for are: a class any instance loads
+#     is in every instance's object maker, the ones made later included;
+#   * s_inter.c, a patch cannot end Go.dot (ACP): "pd quit" calls exit() and "pd
+#     exit" sets a quit flag every instance's scheduler stops on, so one message
+#     box would end the show or freeze every patch's clocks; the copy refuses
 #     both, in Pd's console's words;
-#   * nothing printed behind the show's back: Pd 0.56-5's [expr] still prints a
-#     debugging line to stdout whenever it makes a long expression, which the
-#     copy of x_vexp.c does not;
-#   * a patch's own [netsend] holds with the machine (namespace draft §58, RD.1):
-#     the copy of x_net.c asks a hook of Go.dot's before it sends;
-#   * how deep an object's loading has gone is counted per thread: Pd 0.56-5
-#     keeps that guard against an abstraction that holds itself in one integer
-#     for the whole process, while each patch here loads on a thread of its own,
-#     so two patches opening at once raced on it - and a count that drifts past
-#     a thousand makes every abstraction after it fail to load, `maximum object
-#     loading depth 1000 reached`, as a ready-made patch did on the real-time
-#     job of 2026-10-12 (run 38209202452). The copy of m_class.c marks it
-#     PERTHREAD, Pd's own word for state each instance's thread keeps.
+#   * x_vexp.c, nothing printed behind the show's back: Pd 0.56-5's [expr] still
+#     prints a debugging line to stdout whenever it makes a long expression,
+#     which the copy does not;
+#   * x_net.c, a patch's own [netsend] holds with the machine (namespace draft
+#     §58, RD.1): the copy asks a hook of Go.dot's before it sends;
+#   * m_pd.c, which canvas is loading is kept per thread (§51.9): Pd 0.56-5 keeps
+#     that stack - gstack_head, lastpopped, pd_loadingabstraction - once for the
+#     process, and every patch opened and every object made, at a tick as well,
+#     pushes and pops it. With each patch on a thread of its own, two did it at
+#     once - a first load lets go of Pd's shared lock part-way, and two ticks run
+#     together under the read lock both hold - and popped each other's canvases.
+#     The copy marks the three PERTHREAD, Pd's own word for state each
+#     instance's thread keeps, which is exact here because Go.dot makes every
+#     call into an instance on that instance's own thread (process/PdInstance.h):
+#     canvas_new, glist_glist, canvas_pop, canvas_popabstraction, canvas_objtext,
+#     do_create_abstraction, pd_doloadbang, canvas_realizedollar and the rest
+#     all run inside a libpd call made there, so whatever one of them pushes is
+#     popped on the same thread, and only ever there;
+#   * m_class.c, how deep an object's loading has gone is counted per thread
+#     (tryingalready). It was made PERTHREAD on 2026-10-12 believing that two
+#     patches opening at once raced on the count and drove it past a thousand.
+#     They did not: the thousand was the stale load list above, one load asking
+#     for itself on one thread. It stays per thread because that is right for a
+#     guard against a recursion, which is a fact about the stack it runs on, and
+#     here that stack is one patch's thread - and since every patch's thread is
+#     given the eight megabytes Pd's guards were written for
+#     (process/PatchThread.h), a recursion Pd stops is stopped with a line in its
+#     console, not by the end of the stack.
 # Each copy is made at configure time - line endings made LF first, so a checkout
 # with CRLF matches too - and the submodule is left as pinned. If a text the build
 # replaces ever moves, configure stops here rather than building a Pd without
@@ -693,7 +721,7 @@ foreach(_file d_arithmetic d_array d_ctl d_dac d_delay d_fft d_fft_fftsg d_filte
               g_clone g_editor g_editor_extras g_graph g_guiconnect g_io g_mycanvas g_numbox
               g_radio g_readwrite g_rtext g_scalar g_slider g_template g_text g_toggle
               g_traversal g_undo g_vumeter m_atom m_binbuf m_conf m_glob m_memory
-              m_obj m_pd m_sched s_audio s_audio_dummy s_inter_gui s_main s_net
+              m_obj m_sched s_audio s_audio_dummy s_inter_gui s_main s_net
               s_path s_print s_utf8 x_acoustics x_arithmetic x_array x_connective x_file
               x_gui x_interface x_list x_midi x_misc x_scalar x_text x_time
               x_vexp_fun x_vexp_if)
@@ -723,6 +751,19 @@ endfunction()
 _wfg_pd_amend(s_loader.c
     "static loader_queue_t loaders = {sys_do_load_lib, NULL};"
     "static int wfg_refuse_compiled_externals(t_canvas *canvas, const char *objectname, const char *path)\n{ (void)canvas; (void)objectname; (void)path; return 0; }\nstatic loader_queue_t loaders = {wfg_refuse_compiled_externals, NULL};")
+# The load list by name (see above, §51.9): each entry owns a copy of the name it
+# was put on the list with, made by Pd's own allocator as the entry is, and the
+# list is read with strcmp - never through a symbol, which belongs to one
+# instance and dies with it. Entries are never taken off, as before.
+_wfg_pd_amend(s_loader.c
+    "    struct _loadedlist *ll_next;\n    t_symbol *ll_name;\n} t_loadlist;"
+    "    struct _loadedlist *ll_next;\n    char *ll_name;\n} t_loadlist;")
+_wfg_pd_amend(s_loader.c
+    "    t_symbol *s = gensym(classname);\n    t_loadlist *ll;\n    for (ll = sys_loaded; ll; ll = ll->ll_next)\n        if (ll->ll_name == s)\n            return (1);"
+    "    t_loadlist *ll;\n    for (ll = sys_loaded; ll; ll = ll->ll_next)\n        if (!strcmp(ll->ll_name, classname))\n            return (1);")
+_wfg_pd_amend(s_loader.c
+    "    ll->ll_name = gensym(classname);\n"
+    "    ll->ll_name = (char *)copybytes(classname, strlen(classname) + 1);\n")
 _wfg_pd_amend(s_inter.c
     "void glob_exit(void *dummy, t_floatarg status)\n{\n    sys_exit(status);\n}"
     "void glob_exit(void *dummy, t_floatarg status)\n{\n    (void)dummy; (void)status;\n    pd_error(0, \"Go.dot: a patch cannot end Go.dot - [pd exit( is refused\");\n}")
@@ -742,11 +783,17 @@ _wfg_pd_amend(x_net.c
     "static int netsend_dosend(t_netsend *x, int sockfd, int argc, t_atom *argv)\n{\n    char *buf, *bp;\n    int length, sent, fail = 0;\n    t_binbuf *b = 0;\n"
     "int (*wfg_pd_netsend_held)(void) = 0;\n\nstatic int netsend_dosend(t_netsend *x, int sockfd, int argc, t_atom *argv)\n{\n    char *buf, *bp;\n    int length, sent, fail = 0;\n    t_binbuf *b = 0;\n    int (*wfg_held)(void) = wfg_pd_netsend_held;\n    if (wfg_held && wfg_held())\n        return (0);\n")
 # The loading depth per thread (see above): a recursion guard, which is a fact
-# about the stack it guards, and that stack is one patch's thread.
+# about the stack it guards, and that stack is one patch's thread. Not what
+# printed the depth message - that was the load list's stale addresses.
 _wfg_pd_amend(m_class.c
     "#define MAXOBJDEPTH 1000\nstatic int tryingalready;"
     "#define MAXOBJDEPTH 1000\nstatic PERTHREAD int tryingalready;")
-foreach(_file s_loader.c s_inter.c x_vexp.c x_net.c m_class.c)
+# The load stack per thread (see above, §51.9): which canvas each instance's
+# thread is loading, pushed and popped only by that thread.
+_wfg_pd_amend(m_pd.c
+    "static t_gstack *gstack_head = 0;\nstatic t_pd *lastpopped;\nstatic t_symbol *pd_loadingabstraction;"
+    "static PERTHREAD t_gstack *gstack_head = 0;\nstatic PERTHREAD t_pd *lastpopped;\nstatic PERTHREAD t_symbol *pd_loadingabstraction;")
+foreach(_file s_loader.c s_inter.c x_vexp.c x_net.c m_class.c m_pd.c)
     file(WRITE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${_wfg_pd_${_file}}")
     configure_file("${CMAKE_BINARY_DIR}/wfg_pd/${_file}.in" "${CMAKE_BINARY_DIR}/wfg_pd/${_file}" COPYONLY)
     target_sources(wfg_pd PRIVATE "${CMAKE_BINARY_DIR}/wfg_pd/${_file}")
