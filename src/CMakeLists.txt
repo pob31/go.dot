@@ -470,6 +470,8 @@ add_library(wfg_engine STATIC
     wfg/engine/video/Displays.cpp
     wfg/engine/video/Displays.h
     wfg/engine/video/Ffmpeg.cpp
+    wfg/engine/video/FontFile.cpp
+    wfg/engine/video/FontFile.h
     wfg/engine/video/Ffmpeg.h
     wfg/engine/video/FfmpegInstall.cpp
     wfg/engine/video/FfmpegInstall.h
