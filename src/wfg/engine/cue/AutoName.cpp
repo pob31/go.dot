@@ -19,6 +19,7 @@
 
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/video/TextLook.h>
 
 #include <algorithm>
 #include <cctype>
@@ -394,6 +395,26 @@ namespace wfg::cue
             {
                 const auto input = nameOf (own (cue, "videoInput"));
                 return input.empty() ? std::string ("Capture") : input;
+            }
+
+            /*  A TEXT CUE (namespace draft 61): its first line as written - a
+                blank as its name, {score} - cut at about thirty-two
+                characters; "Text" while it has no words. */
+            if (source == "text")
+            {
+                const auto words = own (cue, "words");
+                auto line = words.substr (0, words.find ('\n'));
+                const auto first = line.find_first_not_of (" \t\r");
+                line = first == std::string::npos ? std::string {} : line.substr (first);
+
+                while (! line.empty() && std::isspace (static_cast<unsigned char> (line.back())) != 0)
+                    line.pop_back();
+
+                if (line.empty())
+                    return "Text";
+
+                const auto cut = video::cutAtCharacter (line, 32);
+                return cut.size() < line.size() ? cut + "..." : cut;
             }
 
             return source == "mask" ? std::string ("Mask") : std::string ("Fill");

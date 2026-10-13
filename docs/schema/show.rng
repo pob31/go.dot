@@ -1383,6 +1383,26 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="align">
+          <a:documentation>How each line lies in the box the words wrap in (namespace draft 61, AKJ).</a:documentation>
+          <choice>
+            <value>left</value>
+            <value>centre</value>
+            <value>right</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="alignV">
+          <a:documentation>Where the block of lines lies on the canvas: at the top or the bottom as far from that edge as the box is from the sides, or in the middle (namespace draft 61, AKJ).</a:documentation>
+          <choice>
+            <value>top</value>
+            <value>middle</value>
+            <value>bottom</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="at">
           <a:documentation>A time group&apos;s member: the time it starts at (namespace draft 60, AIJ, AIL). HH:MM:SS:FF when its group reads LTC or MTC - a label at the show&apos;s frame rate, stored with colons whatever it was typed with - and HH:MM:SS when it reads the wall clock. Judged against the group&apos;s timeSource when it is written, and refused as bad-value when it does not read there. Empty is a member that never fires, which wfg validate says. Carried by every sound, picture and group, and read only on a member of a time group.</a:documentation>
           <data type="string"/>
@@ -1396,6 +1416,15 @@
             <value>add</value>
             <value>screen</value>
             <value>multiply</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="bold">
+          <a:documentation>Whether the words are bold.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
           </choice>
         </attribute>
       </optional>
@@ -1561,6 +1590,21 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="font">
+          <a:documentation>The font the words are set in, by the name of a family installed on the machine; empty is the system&apos;s sans-serif. A family a machine has not got draws in that sans-serif, and wfg validate on that machine says so: a main and a backup can differ (namespace draft 61, AKL).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fontSize">
+          <a:documentation>How tall the letters are, in % of the canvas&apos;s height, as offsets are a % of it (namespace draft 61, AKK).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="gamma">
           <a:documentation>Its gamma: above one brightens the middle tones, below one darkens them; the ends stay where they are. Applied first.</a:documentation>
           <data type="double">
@@ -1590,6 +1634,15 @@
       <optional>
         <attribute name="invert">
           <a:documentation>Whether a mask covers what is outside its outline rather than inside - the spill round a set, with the set left clear.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="italic">
+          <a:documentation>Whether the words are italic.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>
@@ -1659,6 +1712,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="lineSpacing">
+          <a:documentation>How far apart the lines are, in % of the letters&apos; height.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">50</param>
+            <param name="maxInclusive">400</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
           <data type="string"/>
@@ -1704,8 +1766,32 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="outline">
+          <a:documentation>How wide the outline is outside the letters, in canvas pixels, as a mask&apos;s feather is (namespace draft 61, AKK); nought is none. It lies beneath the letters.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">200</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="outlineBlur">
+          <a:documentation>How far the outline is blurred, in canvas pixels - a soft glow round the letters (namespace draft 61, AKL); nought is a sharp outline.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">200</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="outlineColour">
+          <a:documentation>The colour of the outline round the letters, as #RRGGBB.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="paint">
-          <a:documentation>The colour of a fill or a mask, as #RRGGBB, which the inspector calls Colour (VG): cue/colour is the cue&apos;s tint in the list, and every row of a cue shares its address. Black by default - a mask&apos;s usual colour, and a fill of black is the plate that covers what is under it.</a:documentation>
+          <a:documentation>The colour of a fill or a mask, a text&apos;s letters, or the shape a matte key cuts (namespace draft 61), as #RRGGBB, which the inspector calls Colour (VG): cue/colour is the cue&apos;s tint in the list, and every row of a cue shares its address. Black by default - a mask&apos;s usual colour, and a fill of black is the plate that covers what is under it.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -1821,13 +1907,14 @@
       </optional>
       <optional>
         <attribute name="source">
-          <a:documentation>What the cue puts on its canvas (namespace draft 35, the author&apos;s words): a fill, one flat colour over the whole canvas, sitting behind; a mask, a shape laid over what is under it; a picture, an image file; a movie; a capture, the picture a video input brings in from another program (namespace draft 44, YC). One element for every source (VE), because the canvas, the layer, the opacity and the blend are the same whatever it shows.</a:documentation>
+          <a:documentation>What the cue puts on its canvas (namespace draft 35, the author&apos;s words): a fill, one flat colour over the whole canvas, sitting behind; a mask, a shape laid over what is under it; a picture, an image file; a movie; a capture, the picture a video input brings in from another program (namespace draft 44, YC); text, words laid on the canvas as on a slide (namespace draft 61). One element for every source (VE), because the canvas, the layer, the opacity and the blend are the same whatever it shows.</a:documentation>
           <choice>
             <value>fill</value>
             <value>mask</value>
             <value>picture</value>
             <value>movie</value>
             <value>capture</value>
+            <value>text</value>
           </choice>
         </attribute>
       </optional>
@@ -1882,6 +1969,21 @@
         <attribute name="videoInsert">
           <a:documentation>The video insert the cue&apos;s picture goes through, by identifier, or empty for none (namespace draft 44, YE): the picture after its source and grade, at its own size, sent to another program, and what comes back shown in its place - placed, faded and blended as the cue says (YF). Switched on and off by this row, as a sound switches in a plugin of the set. One cue at a time: of two through one insert the later has it and the other shows black (YG); black too while nothing comes back. Not `insert`, a sound&apos;s plugin&apos;s.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="words">
+          <a:documentation>A text cue&apos;s words, lines split by a line break, as the canvas shows them (namespace draft 61, AKJ, AKK): laid out as on a slide whose frame is the canvas, then moved, scaled and turned by the cue&apos;s geometry as a fill is. A slide&apos;s worth - 4096 bytes - is shown, cut at a character. Not text, which is where the fields are (61.3).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="wrap">
+          <a:documentation>How wide the box the words wrap in is, in % of the canvas&apos;s width, centred; nought never wraps, the lines as typed (namespace draft 61, AKJ).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">100</param>
+          </data>
         </attribute>
       </optional>
       <zeroOrMore>
@@ -4382,13 +4484,15 @@
       </attribute>
       <optional>
         <attribute name="kind">
-          <a:documentation>What kind of cue the template makes, fixed when it is saved from a cue: a media cue, or a video cue of one source - a movie, a picture, a fill or a mask. The Add menu offers it beside cues of that kind.</a:documentation>
+          <a:documentation>What kind of cue the template makes, fixed when it is saved from a cue: a media cue, or a video cue of one source - a movie, a picture, a fill, a mask, a capture or a text. The Add menu offers it beside cues of that kind.</a:documentation>
           <choice>
             <value>media</value>
             <value>movie</value>
             <value>picture</value>
             <value>fill</value>
             <value>mask</value>
+            <value>capture</value>
+            <value>text</value>
           </choice>
         </attribute>
       </optional>

@@ -126,6 +126,31 @@ namespace wfg::video::render
             return quadFor (x, y, u, v);
         }
 
+        /*  PART OF A FRAME: the rectangle `x0`..`x1`, `y0`..`y1` of a placed
+            frame, 0..1 from its top-left, showing a whole picture whose rows
+            run from the top - a text cue's words where they were drawn on the
+            canvas's frame (namespace draft 61, AKJ). A flip mirrors where the
+            part lies in the frame, and so the picture with it. */
+        video_corners_t quadOfPart (const Placement& place, double x0, double y0, double x1, double y1) noexcept
+        {
+            //  Bottom-left, bottom-right, top-left, top-right: the frame's -1..1, y up.
+            const double frameX[4] { 2.0 * x0 - 1.0, 2.0 * x1 - 1.0, 2.0 * x0 - 1.0, 2.0 * x1 - 1.0 };
+            const double frameY[4] { 1.0 - 2.0 * y1, 1.0 - 2.0 * y1, 1.0 - 2.0 * y0, 1.0 - 2.0 * y0 };
+            const double u[4] { 0.0, 1.0, 0.0, 1.0 };
+            const double v[4] { 1.0, 1.0, 0.0, 0.0 };
+            double x[4], y[4];
+
+            for (int n = 0; n < 4; ++n)
+            {
+                double cx = 0.0, cy = 0.0;
+                place.toCanvas (place.flipH ? -frameX[n] : frameX[n], place.flipV ? -frameY[n] : frameY[n], cx, cy);
+                x[n] = cx / (0.5 * place.canvasWidth);
+                y[n] = cy / (0.5 * place.canvasHeight);
+            }
+
+            return quadFor (x, y, u, v);
+        }
+
         /*  A rectangle of the target, -1..1 with y up, showing nothing in
             particular: a fill's, the test pattern's bars. */
         video_corners_t rectangle (double left, double bottom, double right, double top) noexcept
@@ -419,11 +444,24 @@ namespace wfg::video::render
         {
             std::uint64_t version = 0;
             const auto image = sources.picture (path, version);
+            return upload (path, image, version);
+        }
 
+        /*  A TEXT LAYER'S WORDS ON THE DEVICE (namespace draft 61), under a key
+            of their own beside the pictures', let go when not drawn. */
+        HeldPicture* text (const std::string& layerId, const TextPicture& shown)
+        {
+            return upload ("text:" + layerId, shown.image, shown.version);
+        }
+
+        /*  ANY SOFTWARE ARGB IMAGE ON THE DEVICE under `key`, made again when
+            `version` moves. */
+        HeldPicture* upload (const std::string& key, const juce::Image& image, std::uint64_t version)
+        {
             if (! image.isValid() || image.getFormat() != juce::Image::ARGB)
                 return nullptr;
 
-            auto& held = pictures[path];
+            auto& held = pictures[key];
 
             if (held.image.id == SG_INVALID_ID || held.version != version)
             {
@@ -626,7 +664,9 @@ namespace wfg::video::render
 
         /*  NO GRADE, at an opacity: what came back through an insert, its
             grade already in it, drawn opaque as a capture is. */
-        static video_grade_t neutralGrade (double opacity) noexcept
+        /*  NO GRADE AND NO KEY: an insert's return, drawn opaque; a text cue's
+            words, whose alpha is the letters (namespace draft 61). */
+        static video_grade_t neutralGrade (double opacity, bool readAlpha = false) noexcept
         {
             video_grade_t uniforms {};
             uniforms.grade_a[0] = 1.0f;
@@ -634,7 +674,7 @@ namespace wfg::video::render
             uniforms.grade_a[2] = 1.0f;
             uniforms.grade_b[0] = 1.0f;
             uniforms.grade_b[2] = static_cast<float> (opacity);
-            uniforms.grade_b[3] = 1.0f;
+            uniforms.grade_b[3] = readAlpha ? 0.0f : 1.0f;
             return uniforms;
         }
 
@@ -767,6 +807,21 @@ namespace wfg::video::render
                     apply (UB_video_corners, quadOf (whole, static_cast<double> (held->width) / held->paddedWidth,
                                                   static_cast<double> (held->height) / held->paddedHeight, 0.0));
                     apply (UB_video_grade, gradeOf (layer, 1.0));
+                    sg_draw (0, 4, 1);
+                }
+            }
+            else if (layer.source == region::Source::text)
+            {
+                const auto shown = sources.text (layer.id);
+                auto* held = text (layer.id, shown);
+                drawn = held != nullptr;
+
+                if (drawn)
+                {
+                    sg_apply_pipeline (pipeline (Program::picture, Lay::normal, format));
+                    bindPicture (held->view, layer);
+                    apply (UB_video_corners, quadOfPart (whole, shown.x0, shown.y0, shown.x1, shown.y1));
+                    apply (UB_video_grade, neutralGrade (1.0, true));
                     sg_draw (0, 4, 1);
                 }
             }
@@ -956,6 +1011,25 @@ namespace wfg::video::render
                                                                static_cast<double> (in.width), static_cast<double> (in.height)),
                                                   1.0, 1.0, 0.0));
                     apply (UB_video_grade, gradeOf (*layer, a));
+                    sg_draw (0, 4, 1);
+                }
+                else if (layer->source == region::Source::text)
+                {
+                    /*  A TEXT CUE (namespace draft 61, AKJ): its words as the
+                        renderer drew them, where they lie on the canvas's frame,
+                        the frame moved as a fill's. Nothing until they are drawn. */
+                    const auto shown = sources.text (layer->id);
+                    auto* held = text (layer->id, shown);
+
+                    if (held == nullptr)
+                        continue;
+
+                    sg_apply_pipeline (pipeline (Program::picture, lay, format));
+                    bindPicture (held->view, *layer);
+                    apply (UB_video_corners, quadOfPart (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                                                      canvasWidth, canvasHeight),
+                                                         shown.x0, shown.y0, shown.x1, shown.y1));
+                    apply (UB_video_grade, neutralGrade (a, true));
                     sg_draw (0, 4, 1);
                 }
                 else if (layer->source == region::Source::mask)

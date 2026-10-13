@@ -37,6 +37,7 @@
 
 #include <wfg/engine/video/Geometry.h>
 #include <wfg/engine/video/Key.h>
+#include <wfg/engine/video/TextLook.h>
 #include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/video/VideoRegion.h>
 
@@ -131,6 +132,13 @@ namespace wfg::video
 
         virtual bool movieColourAt (const std::string&, double, double, double,
                                     double&, double&, double&, double&) const  { return false; }
+
+        /*  AND A TEXT CUE'S WORDS (namespace draft 61, AKJ): the colour of the
+            layer's drawing at (u, v) of the canvas's frame, 0..1 from its
+            bottom-left, straight 0..255 and its alpha - false where no word is,
+            or none is drawn yet. None by default. */
+        virtual bool textAt (const region::LayerReading&, double, double,
+                             double&, double&, double&, double&) const  { return false; }
     };
 
     /*  A CANVAS'S COLOUR TAKEN DOWN BY ITS LEVEL (namespace draft §38, WT):
@@ -219,6 +227,16 @@ namespace wfg::video
 
                 if (! place.toTexture (x, y, u, v)
                       || ! pictures->movieColourAt (layer->file, seconds, u, v, r, g, b, alpha))
+                    continue;
+            }
+            else if (layer->source == region::Source::text)
+            {
+                /*  A TEXT CUE (namespace draft 61, AKJ): the canvas's frame,
+                    moved as a fill's, and on it the words where they were drawn. */
+                const auto place = placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight);
+
+                if (pictures == nullptr || ! place.toTexture (x, y, u, v)
+                      || ! pictures->textAt (*layer, u, v, r, g, b, alpha))
                     continue;
             }
             else

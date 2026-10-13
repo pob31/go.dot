@@ -23,6 +23,7 @@
 #include <wfg/engine/video/Grade.h>
 #include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Mask.h>
+#include <wfg/engine/video/TextLook.h>
 #include <wfg/engine/video/VideoRamp.h>
 
 #include <algorithm>
@@ -168,6 +169,24 @@ namespace wfg::cue
         spec.key.spill = std::clamp (numberOf ("keySpill"), 0.0, 100.0);
         spec.key.invert = textOf ("keyInvert") == "true";
 
+        /*  A TEXT CUE'S WORDS AND STYLE (namespace draft 61, AKJ, AKK): read
+            whatever the source, so an edit that makes a cue text has them. */
+        auto& text = spec.text;
+        text.words = video::cutAtCharacter (textOf ("words"), video::wordsBytes - 1);
+        text.font = textOf ("font");
+        text.fontSize = std::clamp (numberOf ("fontSize"), 0.1, 100.0);
+        text.bold = textOf ("bold") == "true";
+        text.italic = textOf ("italic") == "true";
+        text.align = video::textAlignFrom (textOf ("align"));
+        text.alignV = video::textAlignVFrom (textOf ("alignV"));
+        text.lineSpacing = std::clamp (numberOf ("lineSpacing"), 50.0, 400.0);
+        text.wrap = std::clamp (numberOf ("wrap"), 0.0, 100.0);
+        text.outline = std::clamp (numberOf ("outline"), 0.0, 200.0);
+        text.outlineBlur = std::clamp (numberOf ("outlineBlur"), 0.0, 200.0);
+
+        const auto outlineColour = textOf ("outlineColour");
+        text.outlineColour = video::paintFromText (outlineColour.data(), outlineColour.size());
+
         //  A mask's outline (UY, VF): x, y pairs, at most `maxPoints`.
         const auto corners = numbersIn (textOf ("shape"));
         const auto count = std::min<std::size_t> (corners.size() / 2, video::mask::maxPoints);
@@ -200,7 +219,7 @@ namespace wfg::cue
               || a.grade.hasCurves != b.grade.hasCurves || a.grade.tables != b.grade.tables)
             return false;
 
-        if (a.useAlpha != b.useAlpha || ! video::sameKey (a.key, b.key))
+        if (a.useAlpha != b.useAlpha || ! video::sameKey (a.key, b.key) || ! video::sameTextLook (a.text, b.text))
             return false;
 
         if (a.shape.count != b.shape.count || a.shape.invert != b.shape.invert
@@ -225,6 +244,7 @@ namespace wfg::cue
         into.grade = from.grade;
         into.useAlpha = from.useAlpha;
         into.key = from.key;
+        into.text = from.text;
         into.shape = from.shape;
     }
 }

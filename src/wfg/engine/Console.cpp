@@ -73,6 +73,7 @@
 #include <wfg/engine/plugin/ScanJob.h>
 #include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/video/FfmpegInstall.h>
+#include <wfg/engine/video/TextRaster.h>
 #include <wfg/engine/video/VideoCommands.h>
 #include <wfg/engine/video/VideoHost.h>
 #include <wfg/engine/video/VideoRenderChild.h>
@@ -2151,6 +2152,39 @@ namespace
             };
 
             walk (document.root());
+        }
+
+        /*  A TEXT CUE'S FONT THIS MACHINE HAS NOT GOT (namespace draft 61,
+            AKL): its words draw in the system's sans-serif instead. Asked here,
+            of the machine the show is validated on, and never by the document,
+            which knows no machine - a main and a backup can differ, and each is
+            validated where it runs. */
+        {
+            std::vector<std::pair<juce::ValueTree, std::string>> texts;
+            std::function<void (const juce::ValueTree&)> find = [&] (const juce::ValueTree& node)
+            {
+                if (node.hasType ("Video") && node.getProperty ("source").toString() == "text")
+                    texts.emplace_back (node, node.getProperty ("font").toString().toStdString());
+
+                for (const auto& child : node)
+                    find (child);
+            };
+
+            find (document.root());
+
+            std::vector<std::string> families;
+
+            for (const auto& [cue, family] : texts)
+                families.push_back (family);
+
+            const auto missing = wfg::video::fontsNotInstalled (families);
+
+            for (const auto& [cue, family] : texts)
+                if (std::find (missing.begin(), missing.end(), family) != missing.end())
+                    result.problems.push_back ("cue " + cue.getProperty ("number").toString().toStdString() + " \""
+                                               + wfg::cue::AutoNames { cue.getRoot() }.shownAs (cue) + "\": its font "
+                                               + family + " is not installed on this machine - its words draw in the"
+                                                 " system's sans-serif");
         }
 
         for (const auto& problem : result.problems)

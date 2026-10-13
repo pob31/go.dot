@@ -138,6 +138,7 @@ add_executable(wfg_tests
     MicTests.cpp
     VideoTests.cpp
     VideoHostTests.cpp
+    VideoTextTests.cpp
     VideoGpuTests.cpp
     VideoNdiTests.cpp
     MovieTests.cpp

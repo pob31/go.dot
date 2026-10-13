@@ -44,6 +44,7 @@
 #include <wfg/engine/video/Grade.h>
 #include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Mask.h>
+#include <wfg/engine/video/TextLook.h>
 
 #include <cmath>
 #include <cstddef>
@@ -77,7 +78,7 @@ namespace wfg::video
         std::string canvas;         ///< the canvas it lies on, by identifier
         int layer = 0;              ///< higher is on top (VI)
         std::uint64_t order = 0;    ///< which came up later, for two on one layer
-        std::string source;         ///< fill, mask, picture, movie or capture
+        std::string source;         ///< fill, mask, picture, movie, capture or text
         std::string blend = "normal";   ///< normal, add, screen or multiply (VD)
 
         /*  The fill's or the mask's colour as 0xRRGGBB - the cue's `paint`,
@@ -109,6 +110,10 @@ namespace wfg::video
             switch. Before the grade (AKG). */
         bool useAlpha = true;
         Key key;
+
+        /*  A TEXT CUE'S WORDS AND THEIR STYLE (namespace draft 61, AKJ, AKK),
+            its fill the paint above. */
+        TextLook text;
 
         /*  A MASK'S OUTLINE, its feather and whether it is turned inside out
             (UY, VF), parsed once here. */

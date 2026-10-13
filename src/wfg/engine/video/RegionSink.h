@@ -45,7 +45,8 @@ namespace wfg::video
     /*  WHAT A LAYER LOOKS LIKE, written into a slot: everything a playing
         cue's edit may change at once (namespace draft 47, AAE) - its colour,
         blend, fit and geometry's own numbers, its grade, its alpha switch and
-        key, its mask - and not what it is or shows. One list for the first
+        key, a text's words and style (61), its mask - and not what it is or
+        what file it shows. One list for the first
         write and every restate, so neither can miss a field the other writes.
         The caller holds the slot's `seq`. */
     inline void writeLook (region::Layer& slot, const LayerSpec& spec)
@@ -75,6 +76,19 @@ namespace wfg::video
         slot.keyLevel.store (spec.key.level, std::memory_order_relaxed);
         slot.keySoftness.store (spec.key.softness, std::memory_order_relaxed);
         slot.keySpill.store (spec.key.spill, std::memory_order_relaxed);
+
+        region::writeText (slot.words, cutAtCharacter (spec.text.words, sizeof (slot.words) - 1));
+        region::writeText (slot.font, spec.text.font);
+        slot.fontSize.store (spec.text.fontSize, std::memory_order_relaxed);
+        slot.lineSpacing.store (spec.text.lineSpacing, std::memory_order_relaxed);
+        slot.wrap.store (spec.text.wrap, std::memory_order_relaxed);
+        slot.outline.store (spec.text.outline, std::memory_order_relaxed);
+        slot.outlineBlur.store (spec.text.outlineBlur, std::memory_order_relaxed);
+        slot.outlineColour.store (spec.text.outlineColour, std::memory_order_relaxed);
+        slot.textStyle.store ((spec.text.bold ? 1u : 0u) | (spec.text.italic ? 2u : 0u)
+                                | (static_cast<std::uint32_t> (spec.text.align) << 2)
+                                | (static_cast<std::uint32_t> (spec.text.alignV) << 4),
+                              std::memory_order_relaxed);
 
         slot.shapeCount.store (spec.shape.count, std::memory_order_relaxed);
         slot.shapeFeather.store (spec.shape.feather, std::memory_order_relaxed);

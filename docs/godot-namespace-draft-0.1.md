@@ -27498,3 +27498,38 @@ tiles cost the renderer's message thread with a blur in them.
   `WFG_SNAPSHOT_DIR`, the green screen's page and the shape's as pictures); `console.unit`,
   `client.boundary`, `source.comments`; the clang-tidy stand-in clean on every file touched but two
   findings already there before it.
+- **VFX.3**, 2026-10-13: the text cue drawn, on the projector and the monitor (AKJ-AKL, AKN's tile).
+  `video,source` gains `text`; the rows `words`, `font`, `fontSize`, `bold`, `italic`, `align`, `alignV`,
+  `lineSpacing`, `wrap`, `outlineColour`, `outline`, `outlineBlur`; `paint` is the letters' colour too;
+  `cueTemplate,kind` gains `capture`, which `templateKindOf` already wrote, and `text`; `show.rng`
+  regenerated. `video/TextLook.h`, pure: the look as it crosses, `sameTextLook`, `cutAtCharacter` (back
+  over continuation bytes). `LayerSpec::text`, and the region's layer a text block - the words, a slide's
+  worth (`wordsBytes`, 4096), the font, five numbers and the style's bits - in `writeLook`, so a playing
+  cue's words or style edited are restated at once (region version 19). `video/Blur.h`, pure: a plane
+  blurred to a radius by three running averages each way (Kovesi's boxes; the spread a third of the
+  radius), its edges held. `video/TextRaster.{h,cpp}`: the words set by JUCE's `GlyphArrangement` in a box
+  `wrap` % of the frame wide - nothing wrapping, the longest line's width and a pixel over - the block at
+  the top, middle or bottom as far from that edge as the box from the sides; their outlines a `Path`;
+  the outline a stroke twice its width about the letters' edge, drawn alone into one plane, blurred,
+  laid in its colour; the letters filled over it in the paint; only the ink's bounds plus the blur's
+  reach drawn, at the canvas's pixels times the layer's scale (one to four), at most 8192 a side, and
+  where they lie said as fractions of the frame; `fontsNotInstalled` for `wfg validate`, which names a
+  text cue's font the machine has not got. The renderer: `TextStore`, a thread beside the pictures',
+  wanted each pass for every text layer and the picked cue's tile (keyed `tile`), drawing what changed
+  and keeping the last drawing until the next; the Painter's `Sources::text`, `upload` for any image
+  (a picture's path or `text:<layer>`), `quadOfPart` - a rectangle of a placed frame, a flip mirroring
+  where it lies - and a text layer drawn by `picture_fs` with no grade and no key, through an insert too;
+  the reference compositor's `PictureSampler::textAt`, the frame moved as a fill's. The automatic name is
+  the first line as written, cut at thirty-two characters ("Text" with none); `words` feeds it.
+  Warnings: a text cue with no words; words past 4096 bytes. Tests under C and fr_FR: `VideoTextTests`
+  (new: nothing for no words; a title in the middle, its bounds only, letters in the fill and the rest
+  clear; left and right in the box and top and bottom on the canvas; wrapping, lines, spacing; the
+  outline round the letters and its blur wider and softer; drawn at more pixels when scaled, four at
+  most; cuts at a character; the plane blurred - nothing at nought, the sum kept, a wider radius further,
+  the edges held; a font not installed named once), `VideoTests` (the rows to the picture side, words
+  edited while playing restated, an alignment that is none refused; the warnings), `VideoHostTests` (a
+  renderer with no window draws a capital I white on the canvas's middle, moved aside, then red),
+  `VideoGpuTests` (a drawing as drawn, moved and scaled, turned and flipped, against the reference; not
+  drawn yet, nothing), `AutoNameTests`; `schema.*`, `unit.shards`, `client.boundary`, `source.comments`,
+  `video.gpu.C`; the clang-tidy stand-in clean. Two deliberate breakages each turned their own cases red:
+  a part's corners not mirrored by a flip, and the words left out of what a live edit compares.

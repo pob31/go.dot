@@ -468,12 +468,17 @@ add_library(wfg_engine STATIC
     wfg/engine/video/FfmpegInstall.h
     wfg/engine/video/Geometry.h
     wfg/engine/video/Grade.h
+    wfg/engine/video/Blur.h
     wfg/engine/video/Hap.h
     wfg/engine/video/HapEncoder.h
     wfg/engine/video/Mapping.h
+    wfg/engine/video/Key.h
     wfg/engine/video/Mask.h
     wfg/engine/video/Movie.cpp
     wfg/engine/video/Strip.h
+    wfg/engine/video/TextLook.h
+    wfg/engine/video/TextRaster.cpp
+    wfg/engine/video/TextRaster.h
     wfg/engine/video/Strip.cpp
     wfg/engine/video/StripAnalysis.h
     wfg/engine/video/StripAnalysis.cpp

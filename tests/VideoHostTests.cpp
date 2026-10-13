@@ -1011,6 +1011,62 @@ TEST_CASE ("video host: a picture read off the disk by a renderer with no window
     folder.deleteRecursively();
 }
 
+TEST_CASE ("video host: a text cue drawn by a renderer with no window, its words moved by its geometry and restated in a new colour (§61)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-text-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        /*  A CAPITAL I, bold and most of the canvas tall: its stroke lies on
+            the canvas's middle, where the probe looks, whatever the font. */
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "text";
+        layer.paint = 0xFFFFFF;
+        layer.text.words = "I";
+        layer.text.fontSize = 80.0;
+        layer.text.bold = true;
+
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { clock.now(), 1.0 });
+
+        std::int64_t seen = -1;
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFFFFFFu; }));
+
+        //  Moved a third of the canvas aside: the middle is black.
+        host.sink().move ("RUN00001", video::Property::offsetX, { clock.now(), 33.0 });
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x000000u; }));
+
+        //  Back, and its colour changed while it is up: drawn again, red.
+        host.sink().move ("RUN00001", video::Property::offsetX, { clock.now(), 0.0 });
+        layer.paint = 0xFF0000;
+        host.sink().restate (layer);
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
+    }
+
+    folder.deleteRecursively();
+}
+
 namespace
 {
     /*  A STILL THE SIZE OF A PROJECTOR'S PICTURE, noise all over - a real

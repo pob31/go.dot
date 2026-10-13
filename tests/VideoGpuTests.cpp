@@ -154,8 +154,44 @@ namespace
             return true;
         }
 
+        /*  A TEXT LAYER'S WORDS (namespace draft 61), made up, by layer: the
+            same drawing both sides read, the reference nearest pixel. */
+        video::render::TextPicture text (const std::string& layerId) const override
+        {
+            const auto found = texts.find (layerId);
+            return found != texts.end() ? found->second : video::render::TextPicture {};
+        }
+
+        bool textAt (const region::LayerReading& layer, double u, double v,
+                     double& red, double& green, double& blue, double& alpha) const override
+        {
+            const auto found = texts.find (layer.id);
+
+            if (found == texts.end() || ! found->second.image.isValid())
+                return false;
+
+            const auto& shown = found->second;
+            const auto fx = u, fy = 1.0 - v;
+
+            if (fx < shown.x0 || fx >= shown.x1 || fy < shown.y0 || fy >= shown.y1)
+                return false;
+
+            const auto& image = shown.image;
+            const auto x = std::clamp (static_cast<int> ((fx - shown.x0) / (shown.x1 - shown.x0) * image.getWidth()),
+                                       0, image.getWidth() - 1);
+            const auto y = std::clamp (static_cast<int> ((fy - shown.y0) / (shown.y1 - shown.y0) * image.getHeight()),
+                                       0, image.getHeight() - 1);
+            const auto colour = image.getPixelAt (x, y);
+            red = colour.getRed();
+            green = colour.getGreen();
+            blue = colour.getBlue();
+            alpha = colour.getFloatAlpha();
+            return true;
+        }
+
         std::map<std::string, juce::Image> images;
         std::map<std::string, std::shared_ptr<const video::render::MovieFrame>> frames;
+        std::map<std::string, video::render::TextPicture> texts;
     };
 
     region::LayerReading layerOf (const std::string& id, region::Source source, double opacity, std::uint64_t order)
@@ -568,6 +604,55 @@ TEST_CASE ("video gpu: a picture keyed by brightness, as a shape and by a colour
         CHECK (result.far * 100 <= result.pixels);
         CHECK (result.mean < 1.5);
     }
+}
+
+TEST_CASE ("video gpu: a text cue's words drawn where they lie on the canvas's frame, moved, turned and flipped as a fill, as the reference says (§61)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    //  A drawing as the renderer makes one: a gradient, see-through at one end.
+    Pictures pictures;
+    pictures.texts["L2"] = video::render::TextPicture { gradientPicture (40, 30), 1, 0.2, 0.3, 0.7, 0.6 };
+
+    auto ground = layerOf ("L1", region::Source::fill, 1.0, 1);
+    ground.paint = 0x204080u;
+
+    auto words = layerOf ("L2", region::Source::text, 0.9, 2);
+    words.paint = 0xFFFFFFu;
+
+    std::vector<std::pair<std::string, region::LayerReading>> scenes;
+    scenes.push_back ({ "as drawn", words });
+
+    auto moved = words;
+    moved.offsetX = 15.0;
+    moved.offsetY = -10.0;
+    moved.scale = 80.0;
+    scenes.push_back ({ "moved and scaled", moved });
+
+    auto turned = words;
+    turned.rotation = 25.0;
+    scenes.push_back ({ "turned", turned });
+
+    auto flipped = words;
+    flipped.flipH = true;
+    scenes.push_back ({ "flipped", flipped });
+
+    for (const auto& [name, layer] : scenes)
+    {
+        const auto result = drawAndCompare (pictures, { ground, layer }, 1.0);
+
+        INFO (name << ": worst " << result.worst << ", mean " << result.mean << ", " << result.far
+              << " of " << result.pixels << " pixels off by more than 6 on " << video::gpu::describe());
+        CHECK (result.far * 100 <= result.pixels);
+        CHECK (result.mean < 1.5);
+    }
+
+    //  Not drawn yet: nothing, the ground showing.
+    const auto none = drawAndCompare (Pictures {}, { ground, layerOf ("L3", region::Source::text, 1.0, 2) }, 1.0);
+    CHECK (none.far == 0);
 }
 
 TEST_CASE ("video gpu: a movie's frame keyed by its green, and its alpha read or not (§61)")

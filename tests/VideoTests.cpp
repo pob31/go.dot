@@ -61,6 +61,7 @@
 #include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Movie.h>
 #include <wfg/engine/video/PipedChild.h>
+#include <wfg/engine/video/TextLook.h>
 #include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/video/VideoSink.h>
 
@@ -1539,6 +1540,80 @@ TEST_CASE ("video: a capture reads its alpha only when its input says it sends o
                                               osc::Value::string ("false") }).applied == 1);
     rig.ticks (2);
     CHECK_FALSE (rig.sink.restated.back().useAlpha);
+}
+
+TEST_CASE ("video: a text cue's words and style reach the picture side, and words edited while it plays are restated (§61)")
+{
+    VideoRig rig;
+    const auto set = [&rig] (const char* row, osc::Value value)
+    {
+        return rig.submitAndTick ("node.set", { osc::Value::string (std::string ("/godot/cue/VD000002/") + row),
+                                                std::move (value) }).applied;
+    };
+
+    REQUIRE (set ("source", osc::Value::string ("text")) == 1);
+    REQUIRE (set ("words", osc::Value::string ("Act One\nThe forest")) == 1);
+    REQUIRE (set ("font", osc::Value::string ("Georgia")) == 1);
+    REQUIRE (set ("fontSize", osc::Value::float64 (12.0)) == 1);
+    REQUIRE (set ("bold", osc::Value::string ("true")) == 1);
+    REQUIRE (set ("align", osc::Value::string ("left")) == 1);
+    REQUIRE (set ("alignV", osc::Value::string ("bottom")) == 1);
+    REQUIRE (set ("lineSpacing", osc::Value::float64 (120.0)) == 1);
+    REQUIRE (set ("wrap", osc::Value::float64 (60.0)) == 1);
+    REQUIRE (set ("outlineColour", osc::Value::string ("#102030")) == 1);
+    REQUIRE (set ("outline", osc::Value::float64 (4.0)) == 1);
+    REQUIRE (set ("outlineBlur", osc::Value::float64 (10.0)) == 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (3);
+
+    REQUIRE (rig.sink.shown.size() == 1);
+    const auto shown = rig.sink.shown.front();
+    CHECK (shown.source == "text");
+    CHECK (shown.text.words == "Act One\nThe forest");
+    CHECK (shown.text.font == "Georgia");
+    CHECK (shown.text.fontSize == doctest::Approx (12.0));
+    CHECK (shown.text.bold);
+    CHECK_FALSE (shown.text.italic);
+    CHECK (shown.text.align == video::TextAlign::left);
+    CHECK (shown.text.alignV == video::TextAlignV::bottom);
+    CHECK (shown.text.lineSpacing == doctest::Approx (120.0));
+    CHECK (shown.text.wrap == doctest::Approx (60.0));
+    CHECK (shown.text.outlineColour == 0x102030u);
+    CHECK (shown.text.outline == doctest::Approx (4.0));
+    CHECK (shown.text.outlineBlur == doctest::Approx (10.0));
+    CHECK (shown.paint == 0x2040A0u);         // the fixture's paint: the letters' colour
+
+    //  The words changed while it plays: restated, never shown again.
+    REQUIRE (set ("words", osc::Value::string ("Act Two")) == 1);
+    rig.ticks (2);
+    REQUIRE_FALSE (rig.sink.restated.empty());
+    CHECK (rig.sink.restated.back().text.words == "Act Two");
+    CHECK (rig.sink.shown.size() == 1);
+
+    //  An alignment that is none is refused at the door.
+    CHECK (set ("align", osc::Value::string ("justified")) == 0);
+}
+
+TEST_CASE ("video: wfg validate says a text cue with no words shows nothing, and words past a slide's worth are cut (§61)")
+{
+    Rig rig;
+
+    REQUIRE (rig.applied ("cue.create", { text ("VD000001"), osc::Value::int32 (2), text ("video"),
+                                          text ("Title"), text ("VD000031"), text ("canvas"), text ("VD000011"),
+                                          text ("source"), text ("text") }));
+
+    auto problems = rig.problemsAbout ("Video[VD000031]");
+    REQUIRE (problems.size() == 1);
+    CHECK (problems.front().find ("no words") != std::string::npos);
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000031/words"), text ("Hello") }));
+    CHECK (rig.problemsAbout ("Video[VD000031]").empty());
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000031/words"), text (std::string (5000, 'w')) }));
+    problems = rig.problemsAbout ("Video[VD000031]");
+    REQUIRE (problems.size() == 1);
+    CHECK (problems.front().find ("4096") != std::string::npos);
 }
 
 //==============================================================================

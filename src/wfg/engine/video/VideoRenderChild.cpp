@@ -24,6 +24,8 @@
 #include <wfg/engine/video/Movie.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/video/PipedChild.h>
+#include <wfg/engine/video/TextLook.h>
+#include <wfg/engine/video/TextRaster.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoRegion.h>
 #include <wfg/engine/video/render/Gpu.h>
@@ -243,6 +245,116 @@ namespace wfg::video
 
             mutable std::mutex lock;
             std::vector<std::string> wanted;
+            std::map<std::string, Held> held;
+            std::uint64_t versions = 0;
+        };
+
+        //==============================================================================
+        /*  THE WORDS THE RENDERER HAS DRAWN (namespace draft 61, AKL): each text
+            layer's - and the picked cue's tile's - drawn on a thread of their
+            own, as pictures are read on theirs, so a title with a blurred outline
+            never holds a window's next frame; and held while the layer is up. THE
+            LAST DRAWING STAYS until the next is ready, so words changing never
+            flash; a layer whose words were never drawn shows nothing meanwhile. */
+        class TextStore final : private juce::Thread
+        {
+        public:
+            struct Want
+            {
+                std::string key;                ///< the layer's identifier, or the tile's word
+                TextLook look;
+                std::uint32_t fill = 0;
+                int canvasWidth = 0;
+                int canvasHeight = 0;
+                double scale = 1.0;
+            };
+
+            TextStore() : juce::Thread ("video text")  { startThread(); }
+            ~TextStore() override                       { stopThread (4000); }
+
+            /*  The words wanted now; any other drawing is let go. */
+            void want (std::vector<Want> wants)
+            {
+                {
+                    const std::lock_guard<std::mutex> hold (lock);
+                    wanted = std::move (wants);
+
+                    for (auto at = held.begin(); at != held.end();)
+                    {
+                        const auto stillWanted = std::any_of (wanted.begin(), wanted.end(),
+                                                              [&at] (const Want& w) { return w.key == at->first; });
+                        at = stillWanted ? std::next (at) : held.erase (at);
+                    }
+                }
+
+                notify();
+            }
+
+            render::TextPicture get (const std::string& key) const
+            {
+                const std::lock_guard<std::mutex> hold (lock);
+                const auto found = held.find (key);
+                return found != held.end() ? found->second.picture : render::TextPicture {};
+            }
+
+        private:
+            struct Held
+            {
+                Want drawnFor;
+                render::TextPicture picture;
+            };
+
+            static bool same (const Want& a, const Want& b) noexcept
+            {
+                return a.key == b.key && sameTextLook (a.look, b.look) && a.fill == b.fill
+                    && a.canvasWidth == b.canvasWidth && a.canvasHeight == b.canvasHeight
+                    && std::abs (a.scale - b.scale) < 1.0e-9;
+            }
+
+            void run() override
+            {
+                while (! threadShouldExit())
+                {
+                    Want next;
+                    auto found = false;
+
+                    {
+                        const std::lock_guard<std::mutex> hold (lock);
+
+                        for (const auto& w : wanted)
+                        {
+                            const auto drawn = held.find (w.key);
+
+                            if (drawn == held.end() || ! same (drawn->second.drawnFor, w))
+                            {
+                                next = w;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (! found)
+                    {
+                        wait (100);
+                        continue;
+                    }
+
+                    //  DRAWN OUTSIDE THE LOCK: the windows ask for the others meanwhile.
+                    const auto drawing = rasteriseText (next.look, next.fill, next.canvasWidth, next.canvasHeight, next.scale);
+
+                    const std::lock_guard<std::mutex> hold (lock);
+                    const auto stillWanted = std::any_of (wanted.begin(), wanted.end(),
+                                                          [&next] (const Want& w) { return same (w, next); });
+
+                    if (stillWanted)
+                        held[next.key] = Held { next, render::TextPicture { drawing.image, ++versions, drawing.x0, drawing.y0,
+                                                                            drawing.x1, drawing.y1 } };
+                }
+            }
+
+            mutable std::mutex lock;
+            std::vector<Want> wanted;
             std::map<std::string, Held> held;
             std::uint64_t versions = 0;
         };
@@ -776,8 +888,39 @@ namespace wfg::video
             movie's, from the frame its playhead is on. */
         struct StoreSampler final : PictureSampler
         {
-            StoreSampler (const PictureStore& storeToRead, const MovieStore& moviesToRead)
-                : store (storeToRead), movies (moviesToRead) {}
+            StoreSampler (const PictureStore& storeToRead, const MovieStore& moviesToRead, const TextStore& textsToRead,
+                          std::string textKeyToUse = {})
+                : store (storeToRead), movies (moviesToRead), texts (textsToRead), textKey (std::move (textKeyToUse)) {}
+
+            /*  A TEXT LAYER'S WORDS (61): where the frame point (u, v) - from its
+                bottom-left - falls on the drawing, nearest pixel, straight colour;
+                nothing outside it. The tile's are drawn under a key of their own. */
+            bool textAt (const region::LayerReading& layer, double u, double v,
+                         double& red, double& green, double& blue, double& alpha) const override
+            {
+                const auto shown = texts.get (textKey.empty() ? layer.id : textKey);
+
+                if (! shown.image.isValid() || ! (shown.x1 > shown.x0) || ! (shown.y1 > shown.y0))
+                    return false;
+
+                const auto fx = u, fy = 1.0 - v;
+
+                if (fx < shown.x0 || fx >= shown.x1 || fy < shown.y0 || fy >= shown.y1)
+                    return false;
+
+                const auto& image = shown.image;
+                const auto x = std::clamp (static_cast<int> ((fx - shown.x0) / (shown.x1 - shown.x0) * image.getWidth()),
+                                           0, image.getWidth() - 1);
+                const auto y = std::clamp (static_cast<int> ((fy - shown.y0) / (shown.y1 - shown.y0) * image.getHeight()),
+                                           0, image.getHeight() - 1);
+                const auto colour = image.getPixelAt (x, y);
+
+                red = colour.getRed();
+                green = colour.getGreen();
+                blue = colour.getBlue();
+                alpha = colour.getFloatAlpha();
+                return true;
+            }
 
             bool movieSizeOf (const std::string& path, int& width, int& height) const override
             {
@@ -851,6 +994,8 @@ namespace wfg::video
 
             const PictureStore& store;
             const MovieStore& movies;
+            const TextStore& texts;
+            std::string textKey;
         };
 
         /*  The canvases the configuration holds, by identifier, with their
@@ -2067,8 +2212,13 @@ namespace wfg::video
         /*  THE STORES AS THE NEW RENDERER READS THEM (render/Painter.h). */
         struct StoreSources final : render::Sources
         {
-            StoreSources (const PictureStore& picturesToRead, const MovieStore& moviesToRead)
-                : pictures (picturesToRead), movies (moviesToRead) {}
+            StoreSources (const PictureStore& picturesToRead, const MovieStore& moviesToRead, const TextStore& textsToRead)
+                : pictures (picturesToRead), movies (moviesToRead), texts (textsToRead) {}
+
+            render::TextPicture text (const std::string& layerId) const override
+            {
+                return texts.get (layerId);
+            }
 
             juce::Image picture (const std::string& path, std::uint64_t& version) const override
             {
@@ -2082,6 +2232,7 @@ namespace wfg::video
 
             const PictureStore& pictures;
             const MovieStore& movies;
+            const TextStore& texts;
         };
 
         /*  A PROJECTOR'S WINDOW ON THE NEW RENDERER (namespace draft §44.4):
@@ -2188,8 +2339,9 @@ namespace wfg::video
         class RenderLoop final : private juce::Thread
         {
         public:
-            RenderLoop (region::Region& regionToDraw, const PictureStore& pictures, const MovieStore& movies)
-                : juce::Thread ("video render"), r (regionToDraw), sources (pictures, movies)
+            RenderLoop (region::Region& regionToDraw, const PictureStore& pictures, const MovieStore& movies,
+                        const TextStore& texts)
+                : juce::Thread ("video render"), r (regionToDraw), sources (pictures, movies, texts)
             {
                 startThread (juce::Thread::Priority::high);
             }
@@ -2976,7 +3128,7 @@ namespace wfg::video
         {
         public:
             Session (region::Region& regionToServe, std::int64_t parentPidToWatch, bool windowedToUse, bool nativeToUse)
-                : r (regionToServe), parentPid (parentPidToWatch), windowed (windowedToUse), sampler (pictures, movies)
+                : r (regionToServe), parentPid (parentPidToWatch), windowed (windowedToUse), sampler (pictures, movies, texts)
             {
                 /*  THE NEW RENDERER (namespace draft §44), unless the old
                     OpenGL one is asked for (`--renderer=gl`) - kept until the
@@ -2984,7 +3136,7 @@ namespace wfg::video
                 /*  Without windows too: a sending output needs no display, and
                     a renderer with none (`--no-window`) still sends. */
                 if (nativeToUse)
-                    loop = std::make_unique<RenderLoop> (r, pictures, movies);
+                    loop = std::make_unique<RenderLoop> (r, pictures, movies, texts);
 
                 /*  HOLDING NOTHING YET (namespace draft §48), said before this
                     renderer says it is up: a renderer started again must not be
@@ -3129,6 +3281,32 @@ namespace wfg::video
                 }
 
                 movies.want (moviesWanted);
+
+                /*  THE WORDS EACH TEXT LAYER SHOWS (61, AKL), and the tile's: drawn at
+                    the canvas's pixels times the layer's own scale, one to four. */
+                std::vector<TextStore::Want> textsWanted;
+
+                const auto textWant = [&config] (const region::LayerReading& layer, std::string key)
+                {
+                    const auto* canvas = canvasIn (config, layer.canvas);
+                    TextStore::Want w;
+                    w.key = std::move (key);
+                    w.look = layer.text;
+                    w.fill = layer.paint;
+                    w.canvasWidth = canvas != nullptr ? std::max (1, canvas->width) : 1920;
+                    w.canvasHeight = canvas != nullptr ? std::max (1, canvas->height) : 1080;
+                    w.scale = std::clamp (layer.scale / 100.0, 1.0, 4.0);
+                    return w;
+                };
+
+                for (const auto& layer : layers)
+                    if (layer.source == region::Source::text)
+                        textsWanted.push_back (textWant (layer, layer.id));
+
+                if (tileUp && tileLayer.source == region::Source::text)
+                    textsWanted.push_back (textWant (tileLayer, "tile"));
+
+                texts.want (std::move (textsWanted));
 
                 if (tileUp && tileLayer.source == region::Source::picture)
                     want (tileLayer.file);
@@ -3566,11 +3744,12 @@ namespace wfg::video
             std::vector<DisplayInfo> displays;
             PictureStore pictures;
             MovieStore movies;
+            TextStore texts;
             StoreSampler sampler;
 
-            //  The picked cue's movie, read apart from what plays (§47, AAH).
+            //  The picked cue's movie, read apart from what plays (§47, AAH), and its words (61).
             MovieStore tileMovies;
-            StoreSampler tileSampler { pictures, tileMovies };
+            StoreSampler tileSampler { pictures, tileMovies, texts, "tile" };
             std::vector<std::string> lastWanted;
             std::vector<std::unique_ptr<OutputWindow>> windows;
             std::unique_ptr<RenderLoop> loop;

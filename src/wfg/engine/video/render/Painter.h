@@ -68,6 +68,17 @@ namespace wfg::video::render
     };
 
     /*  WHERE THE PICTURES COME FROM: the renderer's stores, or a test's own. */
+    /*  A TEXT CUE'S WORDS AS THE RENDERER DREW THEM (namespace draft 61, AKL):
+        a software ARGB image (premultiplied, rows from the top), invalid while
+        none is drawn, and where it lies on the canvas's frame, 0..1 from its
+        top-left; `version` moves when it is drawn again. */
+    struct TextPicture
+    {
+        juce::Image image;
+        std::uint64_t version = 0;
+        double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
+    };
+
     struct Sources
     {
         virtual ~Sources() = default;
@@ -80,6 +91,9 @@ namespace wfg::video::render
         /*  The frame of the movie at `path` showing at `seconds` of its file,
             or the nearest read before it; null while none is. */
         virtual std::shared_ptr<const MovieFrame> movieFrame (const std::string& path, double seconds) const = 0;
+
+        /*  The words of the text layer `id` (61), as drawn. None by default. */
+        virtual TextPicture text (const std::string&) const  { return {}; }
     };
 
     /*  WHERE AN OUTPUT IS DRAWN: an offscreen picture's colour attachment, or a

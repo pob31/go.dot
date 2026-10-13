@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 18;
+    constexpr std::uint32_t version = 19;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -114,7 +114,7 @@ namespace wfg::video::region
     /** "Not going": a layer whose removal has not been placed. */
     constexpr std::int64_t notRemoved = std::numeric_limits<std::int64_t>::max();
 
-    enum class Source : std::uint32_t { fill = 0, mask = 1, picture = 2, movie = 3, capture = 4 };
+    enum class Source : std::uint32_t { fill = 0, mask = 1, picture = 2, movie = 3, capture = 4, text = 5 };
 
     inline Source sourceFrom (std::string_view word) noexcept
     {
@@ -122,6 +122,7 @@ namespace wfg::video::region
         if (word == "picture") return Source::picture;
         if (word == "movie")   return Source::movie;
         if (word == "capture") return Source::capture;
+        if (word == "text")    return Source::text;
         return Source::fill;
     }
 
@@ -370,6 +371,18 @@ namespace wfg::video::region
         std::atomic<double> keyLevel;
         std::atomic<double> keySoftness;
         std::atomic<double> keySpill;
+
+        /*  A TEXT CUE'S WORDS AND THEIR STYLE (TextLook.h; namespace draft 61),
+            written with what it is: the words as shown, a slide's worth. */
+        char words[wordsBytes];
+        char font[nameChars];
+        std::atomic<double> fontSize;
+        std::atomic<double> lineSpacing;
+        std::atomic<double> wrap;
+        std::atomic<double> outline;
+        std::atomic<double> outlineBlur;
+        std::atomic<std::uint32_t> outlineColour;
+        std::atomic<std::uint32_t> textStyle;    ///< bold 1, italic 2, align << 2, alignV << 4
 
         /*  A mask's outline (Mask.h), written with what it is. */
         std::atomic<std::int32_t> shapeCount;
@@ -821,6 +834,7 @@ namespace wfg::video::region
         Grade grade;
         bool useAlpha = true;
         Key key;
+        TextLook text;
         mask::Shape shape;
         std::string input;
         std::string insert;
@@ -876,6 +890,21 @@ namespace wfg::video::region
             out.key.level = slot.keyLevel.load (std::memory_order_relaxed);
             out.key.softness = slot.keySoftness.load (std::memory_order_relaxed);
             out.key.spill = slot.keySpill.load (std::memory_order_relaxed);
+
+            out.text.words = readText (slot.words);
+            out.text.font = readText (slot.font);
+            out.text.fontSize = slot.fontSize.load (std::memory_order_relaxed);
+            out.text.lineSpacing = slot.lineSpacing.load (std::memory_order_relaxed);
+            out.text.wrap = slot.wrap.load (std::memory_order_relaxed);
+            out.text.outline = slot.outline.load (std::memory_order_relaxed);
+            out.text.outlineBlur = slot.outlineBlur.load (std::memory_order_relaxed);
+            out.text.outlineColour = slot.outlineColour.load (std::memory_order_relaxed);
+
+            const auto style = slot.textStyle.load (std::memory_order_relaxed);
+            out.text.bold = (style & 1u) != 0;
+            out.text.italic = (style & 2u) != 0;
+            out.text.align = static_cast<TextAlign> (std::min ((style >> 2) & 3u, 2u));
+            out.text.alignV = static_cast<TextAlignV> (std::min ((style >> 4) & 3u, 2u));
 
             out.shape.count = std::clamp (slot.shapeCount.load (std::memory_order_relaxed), 0, mask::maxPoints);
             out.shape.feather = slot.shapeFeather.load (std::memory_order_relaxed);

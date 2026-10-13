@@ -31,6 +31,7 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/timecode/Timecode.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/video/TextLook.h>
 
 #include <map>
 #include <functional>
@@ -1725,7 +1726,7 @@ namespace wfg::doc
 
             if (element == "Media") return row == "file";
             if (element == "Mic")   return row == "input";
-            if (element == "Video") return any ({ "file", "source", "videoInput" });
+            if (element == "Video") return any ({ "file", "source", "videoInput", "words" });
             if (element == "Start") return row == "target";
             if (element == "Osc")   return any ({ "address", "value" });
             if (element == "Midi")  return any ({ "port", "type", "channel", "data1", "data2", "sysex" });
@@ -6517,6 +6518,21 @@ namespace wfg::doc
                 if (node.hasType ("Video") && node["canvas"].toString().isEmpty())
                     problems.push_back ("/Show/.../Video[" + node[idProperty].toString().toStdString()
                                           + "]: is laid onto no canvas - pick one, or it shows nothing");
+
+                /*  A TEXT CUE WITH NO WORDS, or more than a slide's worth
+                    (namespace draft 61, AKM): the first shows nothing, the
+                    second is cut at 4096 bytes. */
+                if (node.hasType ("Video") && node["source"].toString() == "text")
+                {
+                    const auto words = node["words"].toString().toStdString();
+                    const auto here = "/Show/.../Video[" + node[idProperty].toString().toStdString() + "]";
+
+                    if (words.find_first_not_of (" \t\r\n") == std::string::npos)
+                        problems.push_back (here + ": a text cue with no words shows nothing");
+                    else if (words.size() >= video::wordsBytes)
+                        problems.push_back (here + ": its words are longer than a slide's worth, 4096 bytes"
+                                                   " - the rest is not shown");
+                }
 
                 for (const auto& child : node)
                     visit (child);

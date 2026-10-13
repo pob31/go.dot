@@ -1,0 +1,282 @@
+/*
+    This file is part of Go.dot — https://github.com/pob31/go.dot
+
+    Copyright (C) 2026 Pierre-Olivier Boulant
+
+    Go.dot is free software: you can redistribute it and/or modify it under the
+    terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later
+    version. Go.dot is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+    or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+    (LICENSE, at the repository root) for more details.
+
+    SPDX-License-Identifier: GPL-3.0-or-later
+*/
+
+/*
+    A TEXT CUE'S WORDS DRAWN (namespace draft 61, VFX.3): where they lie on the
+    canvas's frame, their outline and its blur, how they wrap - asked of what
+    does not depend on which fonts a machine has, so the same cases hold on
+    Windows, a Mac and a Linux runner: positions within a few percent, colours
+    by kind rather than by pixel.
+*/
+
+#include <3rd_party/doctest/tracktion_doctest.hpp>
+
+#include <wfg/engine/video/Blur.h>
+#include <wfg/engine/video/TextLook.h>
+#include <wfg/engine/video/TextRaster.h>
+
+#include <juce_graphics/juce_graphics.h>
+
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+using namespace wfg;
+
+namespace
+{
+    video::TextLook lookOf (const std::string& words)
+    {
+        video::TextLook look;
+        look.words = words;
+        return look;
+    }
+
+    video::TextRaster drawn (const video::TextLook& look, double scale = 1.0)
+    {
+        return video::rasteriseText (look, 0xFFFFFF, 1920, 1080, scale);
+    }
+
+    double middleX (const video::TextRaster& r) { return (r.x0 + r.x1) / 2.0; }
+    double middleY (const video::TextRaster& r) { return (r.y0 + r.y1) / 2.0; }
+
+    /*  How many of the drawing's pixels are near `rgb` and mostly solid. */
+    int pixelsNear (const juce::Image& image, std::uint32_t rgb)
+    {
+        int count = 0;
+
+        for (int y = 0; y < image.getHeight(); ++y)
+            for (int x = 0; x < image.getWidth(); ++x)
+            {
+                const auto c = image.getPixelAt (x, y);
+
+                if (c.getAlpha() > 200
+                      && std::abs (static_cast<int> (c.getRed()) - static_cast<int> ((rgb >> 16) & 0xffu)) < 24
+                      && std::abs (static_cast<int> (c.getGreen()) - static_cast<int> ((rgb >> 8) & 0xffu)) < 24
+                      && std::abs (static_cast<int> (c.getBlue()) - static_cast<int> (rgb & 0xffu)) < 24)
+                    ++count;
+            }
+
+        return count;
+    }
+
+    /*  How many are partly see-through: the soft edge of a blur. */
+    int pixelsPartlyClear (const juce::Image& image)
+    {
+        int count = 0;
+
+        for (int y = 0; y < image.getHeight(); ++y)
+            for (int x = 0; x < image.getWidth(); ++x)
+            {
+                const auto alpha = image.getPixelAt (x, y).getAlpha();
+
+                if (alpha > 8 && alpha < 247)
+                    ++count;
+            }
+
+        return count;
+    }
+}
+
+TEST_CASE ("video text: no words draw nothing; a title is drawn in the middle of the canvas, only its own bounds (§61)")
+{
+    CHECK_FALSE (drawn (lookOf ("")).image.isValid());
+    CHECK_FALSE (drawn (lookOf ("  \n ")).image.isValid());
+
+    const auto title = drawn (lookOf ("Title"));
+    REQUIRE (title.image.isValid());
+
+    //  In the middle, its bounds and not the canvas.
+    CHECK (middleX (title) == doctest::Approx (0.5).epsilon (0.02));
+    CHECK (middleY (title) == doctest::Approx (0.5).epsilon (0.03));
+    CHECK (title.x1 - title.x0 < 0.6);
+    CHECK (title.y1 - title.y0 < 0.3);
+
+    //  Its picture is its bounds at the canvas's pixels.
+    CHECK (title.image.getWidth() == doctest::Approx ((title.x1 - title.x0) * 1920.0).epsilon (0.01));
+    CHECK (title.image.getHeight() == doctest::Approx ((title.y1 - title.y0) * 1080.0).epsilon (0.01));
+
+    //  Letters in the fill's colour, the rest clear.
+    CHECK (pixelsNear (title.image, 0xFFFFFF) > 100);
+    CHECK (title.image.getPixelAt (0, 0).getAlpha() == 0);
+
+    //  Bigger letters, bigger bounds.
+    auto big = lookOf ("Title");
+    big.fontSize = 16.0;
+    const auto bigger = drawn (big);
+    CHECK (bigger.y1 - bigger.y0 > 1.6 * (title.y1 - title.y0));
+}
+
+TEST_CASE ("video text: left, centre and right in the box; top, middle and bottom on the canvas (§61, AKJ)")
+{
+    auto look = lookOf ("Left or right");
+
+    look.align = video::TextAlign::left;
+    const auto left = drawn (look);
+    look.align = video::TextAlign::right;
+    const auto right = drawn (look);
+
+    //  The box is 90 % of the width, centred: its sides at 5 % and 95 %.
+    CHECK (left.x0 == doctest::Approx (0.05).epsilon (0.4));
+    CHECK (right.x1 == doctest::Approx (0.95).epsilon (0.02));
+    CHECK (left.x0 < right.x0);
+
+    look.align = video::TextAlign::centre;
+    look.alignV = video::TextAlignV::top;
+    const auto top = drawn (look);
+    look.alignV = video::TextAlignV::bottom;
+    const auto bottom = drawn (look);
+
+    /*  As far from the top and bottom as the box is from the sides: 5 % of
+        1920 is 96 pixels, 8.9 % of 1080. */
+    CHECK (top.y0 < 0.12);
+    CHECK (top.y0 > 0.05);
+    CHECK (bottom.y1 > 0.88);
+    CHECK (bottom.y1 < 0.95);
+    CHECK (middleY (top) < 0.5);
+    CHECK (middleY (bottom) > 0.5);
+}
+
+TEST_CASE ("video text: words wrap in their box, lines stack, and the spacing spreads them (§61)")
+{
+    const std::string sentence = "A sentence long enough to need more than one line when its box is narrow";
+
+    auto look = lookOf (sentence);
+    look.wrap = 90.0;
+    const auto wide = drawn (look);
+    look.wrap = 30.0;
+    const auto narrow = drawn (look);
+
+    CHECK (narrow.y1 - narrow.y0 > 2.0 * (wide.y1 - wide.y0));
+    CHECK (narrow.x1 - narrow.x0 < 0.31);
+
+    //  Nought never wraps: as wide as it is.
+    look.wrap = 0.0;
+    const auto unwrapped = drawn (look);
+    CHECK (unwrapped.y1 - unwrapped.y0 < 1.2 * (wide.y1 - wide.y0));
+
+    //  Two lines are taller than one; spaced at twice, taller again.
+    const auto one = drawn (lookOf ("One"));
+    auto twoLines = lookOf ("One\nTwo");
+    const auto two = drawn (twoLines);
+    twoLines.lineSpacing = 200.0;
+    const auto spaced = drawn (twoLines);
+
+    CHECK (two.y1 - two.y0 > 1.7 * (one.y1 - one.y0));
+    CHECK (spaced.y1 - spaced.y0 > 1.3 * (two.y1 - two.y0));
+}
+
+TEST_CASE ("video text: an outline of its own colour round the letters, and its blur a glow wider than it (§61, AKK, AKL)")
+{
+    auto look = lookOf ("Outlined");
+    const auto plain = drawn (look);
+    CHECK (pixelsNear (plain.image, 0xFF0000) == 0);
+
+    look.outline = 6.0;
+    look.outlineColour = 0xFF0000;
+    const auto outlined = drawn (look);
+
+    //  Red round white: both there, and the bounds wider by the outline.
+    CHECK (pixelsNear (outlined.image, 0xFF0000) > 100);
+    CHECK (pixelsNear (outlined.image, 0xFFFFFF) > 100);
+    CHECK ((outlined.x1 - outlined.x0) * 1920.0 > (plain.x1 - plain.x0) * 1920.0 + 10.0);
+
+    //  Blurred, the bounds reach further and the edge is soft.
+    look.outlineBlur = 20.0;
+    const auto glowing = drawn (look);
+    CHECK ((glowing.x1 - glowing.x0) * 1920.0 > (outlined.x1 - outlined.x0) * 1920.0 + 30.0);
+    CHECK (pixelsPartlyClear (glowing.image) > 2 * pixelsPartlyClear (outlined.image));
+
+    //  The letters stay on top, in their own colour.
+    CHECK (pixelsNear (glowing.image, 0xFFFFFF) > 100);
+}
+
+TEST_CASE ("video text: a title scaled up is drawn at more pixels, where it was (§61, AKL)")
+{
+    const auto once = drawn (lookOf ("Sharp"), 1.0);
+    const auto twice = drawn (lookOf ("Sharp"), 2.0);
+    const auto capped = drawn (lookOf ("Sharp"), 9.0);
+
+    CHECK (twice.image.getWidth() == doctest::Approx (2.0 * once.image.getWidth()).epsilon (0.03));
+    CHECK (middleX (twice) == doctest::Approx (middleX (once)).epsilon (0.01));
+    CHECK (twice.y1 - twice.y0 == doctest::Approx (once.y1 - once.y0).epsilon (0.03));
+
+    //  Four times at most.
+    CHECK (capped.image.getWidth() == doctest::Approx (4.0 * once.image.getWidth()).epsilon (0.03));
+}
+
+TEST_CASE ("video text: words cut at a character, never half of one (§61, AKM)")
+{
+    CHECK (video::cutAtCharacter ("abc", 5) == "abc");
+    CHECK (video::cutAtCharacter ("abcdef", 3) == "abc");
+
+    //  "é" is two bytes: a cut through it leaves it out whole.
+    CHECK (video::cutAtCharacter ("a\xc3\xa9", 2) == "a");
+    CHECK (video::cutAtCharacter ("a\xc3\xa9", 3) == "a\xc3\xa9");
+
+    //  A three-byte character cut after its first or second byte.
+    CHECK (video::cutAtCharacter ("x\xe2\x80\x94y", 2) == "x");
+    CHECK (video::cutAtCharacter ("x\xe2\x80\x94y", 3) == "x");
+    CHECK (video::cutAtCharacter ("x\xe2\x80\x94y", 4) == "x\xe2\x80\x94");
+}
+
+TEST_CASE ("video blur: nothing at nought, a point spread and its sum kept, a wider radius further, the edges held (§61)")
+{
+    constexpr int size = 101;
+    std::vector<float> plane (size * size, 0.0f);
+    plane[50 * size + 50] = 1.0f;
+
+    auto same = plane;
+    video::blurPlane (same, size, size, 0.0);
+    CHECK (same == plane);
+
+    auto narrow = plane;
+    video::blurPlane (narrow, size, size, 6.0);
+    auto wide = plane;
+    video::blurPlane (wide, size, size, 24.0);
+
+    double sum = 0.0;
+
+    for (const auto value : narrow)
+        sum += value;
+
+    CHECK (sum == doctest::Approx (1.0).epsilon (1.0e-3));
+    CHECK (narrow[50 * size + 50] < 0.2f);
+    CHECK (narrow[50 * size + 50] > wide[50 * size + 50]);
+    CHECK (narrow[50 * size + 60] < 1.0e-4f);          // past its radius, nothing
+    CHECK (wide[50 * size + 60] > 1.0e-4f);            // inside the wider one's
+
+    //  A plane all one value stays that value, its edges held.
+    std::vector<float> flat (size * size, 0.75f);
+    video::blurPlane (flat, size, size, 30.0);
+    CHECK (flat[0] == doctest::Approx (0.75f));
+    CHECK (flat[size * size - 1] == doctest::Approx (0.75f));
+}
+
+TEST_CASE ("video text: a font this machine has not got is named, once; the default is never (§61, AKL)")
+{
+    const auto missing = video::fontsNotInstalled ({ "", "No Such Font Sixty-One", "No Such Font Sixty-One" });
+    REQUIRE (missing.size() == 1);
+    CHECK (missing.front() == "No Such Font Sixty-One");
+
+    //  A family the machine does have is not named: any one it lists.
+    const auto installed = juce::Font::findAllTypefaceNames();
+
+    if (! installed.isEmpty())
+        CHECK (video::fontsNotInstalled ({ installed[0].toStdString() }).empty());
+}

@@ -244,6 +244,15 @@ TEST_CASE ("auto name: a picture, a movie, a capture and a mic are called by the
     show.set (still, "videoInput", input.id);
     CHECK (show.automatic (still) == "Stage camera");
 
+    /*  A TEXT CUE (namespace draft 61): its first line, as written, its
+        blanks too; cut about thirty-two characters in; "Text" with no words. */
+    show.set (still, "source", "text");
+    CHECK (show.automatic (still) == "Text");
+    show.set (still, "words", "  Welcome, {guest}  \nto the show");
+    CHECK (show.automatic (still) == "Welcome, {guest}");
+    show.set (still, "words", "A first line far longer than any name should be");
+    CHECK (show.automatic (still) == "A first line far longer than any...");
+
     const auto voice = show.document.createInput (1);
     REQUIRE (voice.ok);
     REQUIRE (show.document.setAttribute ("/godot/input/" + voice.id + "/name", "Voix solo").ok);
