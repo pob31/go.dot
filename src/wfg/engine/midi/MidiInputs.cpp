@@ -21,9 +21,34 @@
 #include <wfg/engine/Engine.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <utility>
 
 namespace wfg::midi
 {
+    std::int64_t steadyNanosNow() noexcept
+    {
+        return std::chrono::duration_cast<std::chrono::nanoseconds> (
+                   std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    std::int64_t arrivalStamp (std::int64_t steadyNanos, double counterNowMs, double messageStampSeconds) noexcept
+    {
+        /*  HOW LONG JUCE HELD THE MESSAGE: its counter now less the message's
+            stamp, which JUCE puts on that same counter's scale. Kept between
+            nought - a stamp ahead of now, or one that is not a time at all
+            (a CoreMIDI packet stamped nought reads as hours ahead) - and
+            100 ms, past which a stamp is not a delay to believe but a driver
+            clock that wandered: an arrival is never moved back further than a
+            MIDI path plausibly holds a message. */
+        constexpr double mostHeldMs = 100.0;
+
+        const auto heldMs = std::clamp (counterNowMs - messageStampSeconds * 1000.0, 0.0, mostHeldMs);
+
+        return steadyNanos - static_cast<std::int64_t> (std::llround (heldMs * 1.0e6));
+    }
+
     namespace
     {
         std::vector<std::string> namesOf (const juce::Array<juce::MidiDeviceInfo>& devices)
@@ -205,7 +230,21 @@ namespace wfg::midi
 
     void MidiInputs::inject (const std::string& portId, const Bytes& message)
     {
-        route (portId, message);
+        route (portId, message, steadyNanosNow());
+    }
+
+    void MidiInputs::inject (const std::string& portId, const Bytes& message, std::int64_t arrivalNanos)
+    {
+        route (portId, message, arrivalNanos);
+    }
+
+    void MidiInputs::listenForMtcOn (const std::string& portId)
+    {
+        //  Copied before the lock and swapped under it: the input thread waits for a swap, not an allocation.
+        auto next = portId;
+
+        const std::lock_guard<std::mutex> lock { triggerMutex };
+        std::swap (mtcPort, next);
     }
 
     void MidiInputs::closeAll()
@@ -264,6 +303,42 @@ namespace wfg::midi
     void MidiInputs::handleIncomingMidiMessage (juce::MidiInput* source,
                                                 const juce::MidiMessage& message)
     {
+        /*  THE ARRIVAL, STAMPED FIRST (namespace draft §60, TG.4): the steady
+            clock now, less how long JUCE held the message before this call.
+            MIDI Time Code is read from when each piece came as much as from
+            what it says, so the moment is taken before anything else here
+            spends any time.
+
+            A DURATION ON ONE COUNTER, which is why no common base is
+            needed. JUCE stamps a message with
+            `getMillisecondCounterHiRes` (or `getMillisecondCounter`, its
+            whole-millisecond reading) as it stood when the driver connection
+            opened, plus the time the driver itself counted since: on Windows
+            the WinMM path adds the driver's milliseconds since `midiInStart`
+            to the hi-res counter read when the device was made, and the
+            Windows MIDI Services path its own clock's ticks to the millisecond
+            counter (juce_Midi_windows.cpp, `convertTimeStamp` and the
+            `MessageReceived` handler); CoreMIDI the host time since a start
+            read beside the millisecond counter (juce_CoreMidi_mac.mm,
+            `TimeConverter`); ALSA the queue's real time since its start, or
+            the millisecond counter itself for a direct event
+            (juce_Midi_linux.cpp). So the stamp is a reading of JUCE's
+            counter plus a duration, and the counter now less the stamp is a
+            duration too - the time since the driver took the message - with
+            the counter's origin cancelling out; it is subtracted from a
+            steady reading, whose own origin is never compared with JUCE's.
+            What does not cancel is constant for a device's life: the start
+            read in whole milliseconds, the moments between WinMM's device
+            being made and started, and on Windows MIDI Services the gap
+            between the interrupt-time millisecond counter and the
+            performance counter the hi-res one reads - a millisecond or two of
+            latency the line takes up as an offset. A stamp further out than
+            a MIDI path ever holds a message - a driver clock that wandered, a
+            stamp that is no time at all - is not believed (`arrivalStamp`
+            keeps the correction within nought and 100 ms). */
+        const auto arrival = arrivalStamp (steadyNanosNow(), juce::Time::getMillisecondCounterHiRes(),
+                                           message.getTimeStamp());
+
         /*  THE PORT THE SHOW DECLARES, not the cable it arrived on
             (2026-09-22). A trigger names "Lights"; which socket that is
             changes when somebody moves a cable, and every trigger in the show
@@ -289,10 +364,10 @@ namespace wfg::midi
             watching->record (monitor::Direction::in, monitor::Medium::midi, monitor::Road::midi,
                               device, raw, size > 0 ? static_cast<std::size_t> (size) : 0u);
 
-        route (port, size > 0 ? Bytes (raw, raw + size) : Bytes {});
+        route (port, size > 0 ? Bytes (raw, raw + size) : Bytes {}, arrival);
     }
 
-    void MidiInputs::route (const std::string& port, const Bytes& bytes)
+    void MidiInputs::route (const std::string& port, const Bytes& bytes, std::int64_t arrivalNanos)
     {
         /*  SOMEBODY ELSE'S THREAD, so this does what every outside input does:
             reads an immutable index, matches, submits. It never touches the
@@ -301,11 +376,30 @@ namespace wfg::midi
             same one the OSC socket already makes. */
         std::shared_ptr<const Consumer> taker;
         std::shared_ptr<const cue::TriggerIndex> index;
+        auto onMtcPort = false;
 
         {
             const std::lock_guard<std::mutex> lock { triggerMutex };
             taker = consumer;
             index = triggers;
+            onMtcPort = ! mtcPort.empty() && port == mtcPort;
+        }
+
+        /*  MIDI TIME CODE ON ITS PORT IS THE TIME GROUPS' (§60, TG.4): kept
+            for the tick with its arrival, ahead of the consumer, so a surface
+            or a patch listening on the same port never takes it first - and
+            never offered to the triggers, which have no event for it (see
+            `eventFrom`). Only the inbox's mutex is taken, for one copy.
+
+            `rx` IS NOT ASKED HERE, nor anywhere on this road. The tick asks
+            it for the code (AIM, MtcInbox.h); a port's triggers have never
+            asked it, though its row says "whether events arriving on this
+            port's input fire triggers" - an older gap than this, left for the
+            author to decide, not mended in passing. */
+        if (onMtcPort && isMtcMessage (bytes.data(), bytes.size()))
+        {
+            inbox.push (port, bytes.data(), bytes.size(), arrivalNanos);
+            return;
         }
 
         /*  A SURFACE'S PORT IS THE SURFACE'S, and nothing on it is a trigger. */

@@ -26965,3 +26965,124 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   `lost` never said, or two frames late; no fall into rest; parity not counted - which nothing caught
   until the hand-drawn odd frame; the backwards start at the first edge; `prepare` keeping the
   generation), the tap read before it is filled, and the input's width ignored.
+- **TG.4**, 2026-10-13: MTC in - the inbox, the arrival stamp, the reader, `rx`, `--midi-play` (AIL, AIM,
+  AIR, AIZ). **The inbox**, `midi::MtcInbox` (`midi/MtcInbox.h`): a ring of 256 entries - the port, the
+  bytes in a fixed array of ten (a full frame), their size, the arrival on the steady clock - under a
+  mutex that is a leaf, held for one push or one take; the tick takes everything at once into a vector
+  it reserved, and a full ring drops the OLDEST, counted (`droppedCount`): the newest is where the code
+  is now. `MidiInputs` keeps one (`mtcInbox()`) and is told the port at each show revision
+  (`listenForMtcOn`, the string copied outside its lock and swapped under it); `route` takes every
+  quarter frame (`F1 xx`) and full frame (`F0 7F <device> 01 01 hh mm ss ff F7`) arriving on that port
+  into the inbox AHEAD of the consumer, so a surface or a patch listening on the same port never takes
+  the code first, and never offers it to the triggers, which had no event for it; everything else on
+  the port goes the road it always went. **The arrival stamp**: `handleIncomingMidiMessage` reads the
+  steady clock first and takes off how long JUCE held the message, `arrivalStamp (steady,
+  Time::getMillisecondCounterHiRes(), message.getTimeStamp())` - the counter now less the stamp, kept
+  between nought and 100 ms. Base-free because JUCE's stamp is a reading of its own counter, taken when
+  the driver connection opened, plus a duration the driver counted since - WinMM's milliseconds since
+  `midiInStart` on the hi-res counter read when the device was made, Windows MIDI Services' clock ticks
+  on the millisecond counter, CoreMIDI's host time since a start read beside the millisecond counter,
+  ALSA's queue time likewise or the counter itself for a direct event - so the counter now less the
+  stamp is a duration, its origin cancelling, subtracted from a steady reading whose origin is never
+  compared with JUCE's. What is left is constant for a device's life (the start read in whole
+  milliseconds, WinMM's device made a moment before it starts, the interrupt-time counter beside the
+  performance counter on Windows MIDI Services) and is a millisecond or two the line takes as an
+  offset; a stamp ahead of now (or no time at all, a CoreMIDI packet stamped nought) reads nought, and
+  one further out than a MIDI path holds a message reads 100 ms. `MidiInputs::inject` gains an overload
+  that keeps the arrival it is given; the old one stamps now (`midi::steadyNanosNow`).
+  **The reader**, `timecode::MtcReader` (`timecode/MtcReader.h`), pure and the tick's, fed `(bytes,
+  arrivalNanos)` in order. A cycle begins on piece 0 forwards and piece 7 backwards and on nothing
+  else; the second piece says which way (0 then 1 forwards, 7 then 6 backwards; 0 then 7 the end of a
+  reversed cycle and the start of the next, 7 then 0 the end of a forward one), and every piece after
+  must be one on (or one back). A cycle names the frame its piece 0 was sent on (TC.2's rule, §59.7), so
+  once it is whole each piece `p` is an observation of its own - frame `F + p / 4`, quarter `p % 4`, its
+  own arrival - eight points a cycle, said when piece 7 (forwards) or piece 0 (backwards) completes it,
+  in the order they came, the frames descending backwards. **The observation** is the brief's `frame`,
+  `label`, `rateCode`, `reverse`, `locate`, `arrivalNanos`, `sample`, and one field beyond it,
+  `quarter` (0-3, the piece's quarter inside its frame), without which a piece's position is a frame
+  to within three quarters; the frame is counted from 00:00:00:00 at the rate the code says and wrapped
+  into the day. Backwards, piece `p` still stands at `F + p` quarters - the mirror of the forward rule,
+  where it would be on a tape played forwards; the MTC specification is not explicit about a reversed
+  cycle's quarter and senders differ by one, and code running backwards fires nothing (AIR), so the
+  direction is what matters there (the implementer's call; a bench with a desk running backwards owes
+  the check). **No observation** from a cycle with a piece missing, a piece repeated, a turn of direction
+  or a pause of more than a quarter of a second between two pieces (`staleNanos`, the lane's stall) -
+  each counted in `cyclesBroken` - and the reader starts again at the next piece that can begin a
+  cycle; a code joined part way through a cycle is ignored until a whole one has passed. A lone piece
+  0 or 7 that turns out not to begin one is not counted. **A full frame is a locate**: any device
+  number, an observation `locate` at its frame, standing - `reverse` false, no direction until quarter
+  frames follow - and the cycle part-read forgotten, not counted broken. **The rate** is the code in
+  piece 7 or the full frame's hours byte - 24, 25, 29.97 drop-frame, 30 (`rateOfMtcCode`) - reported as
+  read; 23.976 and 29.97 non-drop come as 24 and 30, for TG.5 to tell apart by the period (AIL). A label
+  the code's rate does not have - hours past 23, minutes or seconds past 59, frames past the rate, a
+  name drop-frame leaves out - is no observation (a full frame ignored, a cycle counted broken): what
+  `normalise` would change, which is right for a label someone typed (AHF) and wrong for one a machine
+  sent. Anything else - another SysEx, MTC's user bits, a note, a clock, a quarter frame cut short or
+  whose data byte is not data - is ignored and breaks nothing. **The moment becomes a sample** through
+  the reader's own `ClockEstimate`, fed the very pair the tick hands the MTC lane, never shared (one
+  estimate a reader, §59's TC.5).
+  **The tick's side**, `midi::MtcInput` beside the inbox: `mtcInOf (document)` reads `sync/mtcIn` -
+  empty when it names nothing or something that is not a `<Port>`, as `Runner::mtcPortOf` reads
+  `mtcOut` - and the port's `rx`, on unless the show turned it off (AIM); `configure` takes it and, at
+  a change of either, forgets the cycle part-read; `feedClock`; `drain` takes everything the inbox
+  kept and reads what came on the port while it listens, in order - what came while `rx` was off, or
+  on a port the show has since moved from, is taken and dropped, so a port switched back on reads from
+  then and not from what queued meanwhile; `observations()` is what the last drain read (TG.5's),
+  `readCount` and `ignoredCount` the totals. **In serve's before-tick hook**, beside `midiOut.feedClock`:
+  the one pair computed once and handed to the lane and the reader; at a new show revision the setting
+  read, the input told the port and the reader configured; then the drain. Nothing is published,
+  nothing logged, nothing submitted: TG.5 takes the observations.
+  **`rx` for MIDI triggers is not changed.** A port's row says "whether events arriving on this port's
+  input fire triggers", and nothing on the trigger road has ever asked it - an older gap than §60,
+  written as a comment in `MidiInputs::route` and left for the author.
+  **`wfg serve --midi-play=<port>=<file>`** (AIZ), and **`--midi-play-loop=<port>=<file>`** to play it
+  again and again, repeatable, the port by the show's name as `--midi-render`'s: a `--midi-render` file
+  played into the port's INPUT through `inject`, MTC to the inbox and anything else to the surfaces and
+  the triggers. `midi/MidiPlay.h`: `parseRender` (`from_chars`, so no locale changes it; blank lines and
+  `\r` skipped; a line that is not two whole numbers and at least one hex byte refused by its number),
+  `loadRender` (the path against where serve was started; a file that is not there, cannot be read, does
+  not parse or holds no message refused), `offsetsOf` (a line's moment is its `due_ns`, or `sent_ns`
+  when the due is nought; the first at once, each next one the difference of their moments after it,
+  never before the one before), `loopGapOf` (the last positive step between two moments, a second if
+  none), and `MidiPlayer`: a thread raised as the tick's, each line due at the pass's start plus its
+  offset - kept, not accumulated, so a late line does not push the rest - waited for on a condition
+  variable to 1.5 ms short and then on the MTC lane's clock (`MtcLane::Clock::sleepUntil`), stamped
+  with the moment it went in. Read with the show's ports, after `--midi-render`'s; an undeclared port or
+  a file it cannot play exits 2 with a sentence; the input is told the MTC port before the ticks start,
+  so nothing played before the first tick takes the triggers' road; the players start after the ticks
+  and stop before them. `serve`'s help names both forms.
+  Tests under C and fr_FR, thirteen cases in `MidiTests`, "mtc in: ...": Go.dot's own `MtcCursor` read
+  back at all six rates from 00:00:59:10 across a minute (two dropped labels at 29.97 drop-frame) and
+  at 25 across midnight - every piece's frame, quarter, label, rate code, arrival and sample (within a
+  sample) on a 1:1 line, 45 whole cycles and none broken; the cursor's stream played backwards in time
+  at 25, 29.97 drop-frame and 24, every quarter one before the last; a full frame mid-stream after
+  three pieces of a cycle - the locate standing on its sample, the part-read cycle silent and not
+  broken, the quarters after it from the new frame; a piece missing, a piece repeated and a half-second
+  pause inside a cycle, each that cycle silent and counted broken, the next read; a code joined at
+  piece 5 forwards and at piece 3 backwards; ten messages that are not code a cycle can use, one after
+  each piece (an identity request, user bits, full frames for hour 24, for a name drop-frame leaves
+  out, for frame 27 at 25 and for minute 60, a note, a clock, two broken quarter frames), breaking
+  nothing, and a whole cycle naming frame 26 at 25
+  silent and broken; samples on a line fed every 20 ms, 1:1 within a sample and with Go.dot's clock
+  50 ppm fast within two, over ten seconds; the inbox taking F1 and full frames only on the named port,
+  before a consumer claiming that port, the rest of the port and every other port reaching it, nothing
+  in the engine's queue, nothing once the port is named away; a full ring dropping the oldest five and
+  counting them, nothing longer than a full frame kept; `rx` through the document - read while on,
+  taken and dropped while off, read again from a full frame once on, another port's code not read;
+  `inject` keeping its arrival and stamping now without one, and `arrivalStamp` on five stamps; the
+  render read with its moments, offsets, loop gap and four refusals; `MidiPlayer` playing a six-line
+  file (one line due nought) into a port's input in order, never before each moment and within 15 ms
+  of it (150 ms under `GITHUB_ACTIONS`), and looped, each pass 120 ms after the last. MidiTests whole
+  (74 cases) in both locales; unit.C (613 s) and unit.fr_FR (617 s) whole; `source.comments`, `client.boundary`. By hand, `wfg serve` on a copy of the timecode fixture with
+  `sync/mtcIn` named: an undeclared port, a missing file, a file that does not parse and an option with
+  no file each exit 2 with their sentence; `--midi-play-loop` into `sync/mtcIn` beside `--midi-play` into
+  another port ran six seconds, and a probe in the hook (taken out again) read every whole cycle, the
+  locate at each pass, nothing ignored. Seventeen deliberate breakages each turned their own cases red
+  (every piece read as its cycle's frame; no backwards start; a locate keeping the cycle; no stale
+  pause; a cycle begun on any piece; noise breaking a cycle; a full ring dropping the newest; the
+  consumer asked first; `rx` not asked, or not read; the stamp unclamped, in the wrong unit, or ignored
+  by `inject`; a line's moment its `sent_ns`; a loop with no gap; the clock line fed wrong; labels a rate
+  lacks believed). Two did not: a cycle begun on any piece, made at the start alone - the direction
+  rule refuses a first piece that is not 0 or 7 as well, so the breakage needed both, and with both
+  it turned red; and the label's range check taken out - it was redundant with `normalise`, so the
+  judge is `normalise` alone now, and the noise gained the labels only it refuses.

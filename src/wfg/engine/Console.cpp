@@ -78,7 +78,9 @@
 #include <wfg/engine/video/VideoRenderChild.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/midi/MidiInputs.h>
+#include <wfg/engine/midi/MidiPlay.h>
 #include <wfg/engine/midi/MidiSender.h>
+#include <wfg/engine/midi/MtcInbox.h>
 #include <wfg/engine/midi/PortBinder.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/SectionCommands.h>
@@ -3346,6 +3348,44 @@ namespace
             midiRenderBindings.push_back ({ port, file });
         }
 
+        /*  `--midi-play=<port>=<file>`, and `--midi-play-loop=<port>=<file>`
+            to play it again and again, repeatable (namespace draft §60, TG.4,
+            AIZ): a `--midi-render` file played into the port's INPUT, each
+            line at its moment, down the road a message from a cable takes -
+            how a driver on a machine with no MIDI port feeds MTC to a time
+            group. The port is the show's name for it, as `--midi-render`'s
+            is; the file is read once the show is, below. */
+        struct MidiPlayWish
+        {
+            std::string port;
+            std::string file;
+            bool loop = false;
+        };
+
+        std::vector<MidiPlayWish> midiPlayWishes;
+
+        for (const auto& argument : args.arguments)
+        {
+            const auto looped = argument.text.startsWith ("--midi-play-loop=");
+
+            if (! looped && ! argument.text.startsWith ("--midi-play="))
+                continue;
+
+            const auto option = looped ? "--midi-play-loop" : "--midi-play";
+            const auto pair = argument.text.fromFirstOccurrenceOf ("=", false, false);
+            const auto port = pair.upToFirstOccurrenceOf ("=", false, false).toStdString();
+            const auto file = pair.fromFirstOccurrenceOf ("=", false, false).toStdString();
+
+            if (port.empty() || file.empty() || ! pair.contains ("="))
+            {
+                std::cerr << "wfg serve: " << option << " wants <port>=<file>, and \""
+                          << pair << "\" is not that" << std::endl;
+                return 2;
+            }
+
+            midiPlayWishes.push_back ({ port, file, looped });
+        }
+
         /*  WHICH MACHINE THIS IS IN A PAIR (namespace draft §58, RD.4, AGC):
             `pairing.xml` in Go.dot's own folder, read leniently - a file that
             cannot be read is a machine not paired, said once here, never a
@@ -4688,7 +4728,7 @@ namespace
             port has whatever the show or `--midi-out` put behind it. A file
             that cannot be written is the command line's mistake, and fatal as
             a device it names and this machine lacks is. */
-        for (const auto& binding : midiRenderBindings)
+        const auto declaredPortNamed = [&document] (const std::string& name)
         {
             std::string portId;
 
@@ -4698,9 +4738,16 @@ namespace
                     continue;
 
                 for (const auto& port : ports)
-                    if (port[juce::Identifier ("name")].toString().toStdString() == binding.first)
+                    if (port[juce::Identifier ("name")].toString().toStdString() == name)
                         portId = port[juce::Identifier ("id")].toString().toStdString();
             }
+
+            return portId;
+        };
+
+        for (const auto& binding : midiRenderBindings)
+        {
+            const auto portId = declaredPortNamed (binding.first);
 
             if (portId.empty())
             {
@@ -4719,6 +4766,44 @@ namespace
 
             midiOut.attach (portId, std::move (render));
             midiPorts.setBinding (portId, { true, {}, "render" });
+        }
+
+        /*  AND WHAT `--midi-play` PLAYS, read now and played once the ticks
+            run (AIZ). A port the show does not declare, or a file that cannot
+            be read, is the command line's mistake and fatal, as a render's
+            is; the port needs no device - the bytes go into its input as if a
+            cable had brought them. */
+        struct MidiPlayJob
+        {
+            std::string portId;
+            std::vector<wfg::midi::PlayLine> lines;
+            bool loop = false;
+        };
+
+        std::vector<MidiPlayJob> midiPlayJobs;
+
+        for (const auto& wish : midiPlayWishes)
+        {
+            const auto option = wish.loop ? "--midi-play-loop" : "--midi-play";
+            const auto portId = declaredPortNamed (wish.port);
+
+            if (portId.empty())
+            {
+                std::cerr << "wfg serve: " << option << ": this show declares no MIDI port called \""
+                          << wish.port << "\"" << std::endl;
+                return 2;
+            }
+
+            std::string why;
+            auto lines = wfg::midi::loadRender (wish.file, why);
+
+            if (! lines.has_value())
+            {
+                std::cerr << "wfg serve: " << option << ": " << why << std::endl;
+                return 2;
+            }
+
+            midiPlayJobs.push_back ({ portId, std::move (*lines), wish.loop });
         }
 
         if (! midiOut.problems().empty())
@@ -5850,6 +5935,14 @@ namespace
         std::atomic<bool> clockForget { false };
         const wfg::cue::TriggerIndex noTriggers;
 
+        /*  MIDI TIME CODE COMING IN (namespace draft §60, TG.4): the tick's
+            reader and its clock line, and the show revision its port and `rx`
+            were last read at - the tick thread's alone, as the clock's
+            reading above is. Nothing read until the first tick reads the
+            show. */
+        wfg::midi::MtcInput mtcInput;
+        std::optional<std::uint64_t> mtcRevisionSeen;
+
         ticks.setBeforeTick ([&] (std::int64_t tickIndex)
                              {
                                  /*  THE PAIR BEFORE ANYTHING (namespace draft §58,
@@ -6256,10 +6349,36 @@ namespace
                                      `audio/outputLatency` the audio side's
                                      record writes, handed over when it changes
                                      (TC.6). A store each; nothing waits. */
-                                 midiOut.feedClock (runner.videoClockNow(),
-                                                    std::chrono::duration_cast<std::chrono::nanoseconds> (
-                                                        std::chrono::steady_clock::now().time_since_epoch()).count(),
-                                                    runner.videoSampleRate());
+                                 const auto clockSample = runner.videoClockNow();
+                                 const auto clockNanos = std::chrono::duration_cast<std::chrono::nanoseconds> (
+                                                             std::chrono::steady_clock::now().time_since_epoch()).count();
+                                 const auto clockRate = runner.videoSampleRate();
+
+                                 midiOut.feedClock (clockSample, clockNanos, clockRate);
+
+                                 /*  AND MTC COMING IN (namespace draft §60, TG.4;
+                                     AIM): the port `sync/mtcIn` names and whether
+                                     its `rx` is on, read once a show revision -
+                                     the input told which port to take the code
+                                     off, the reader whether to read it - then the
+                                     reader's own clock line fed the very pair the
+                                     lane was, and everything the input took since
+                                     the last tick read in order, each moment a
+                                     sample on that line. TG.4 keeps what it read
+                                     and does nothing more with it: TG.5's watcher
+                                     fits its line through it. Nothing is logged,
+                                     and nothing waits but for the inbox's one
+                                     take. */
+                                 if (const auto revision = document.showRevision(); revision != mtcRevisionSeen)
+                                 {
+                                     mtcRevisionSeen = revision;
+                                     const auto setting = wfg::midi::mtcInOf (document);
+                                     midiIn.listenForMtcOn (setting.port);
+                                     mtcInput.configure (setting);
+                                 }
+
+                                 mtcInput.feedClock (clockSample, clockNanos, clockRate);
+                                 mtcInput.drain (midiIn.mtcInbox());
 
                                  if (audioState.outputLatency != mtcLatencyTold)
                                  {
@@ -8113,7 +8232,34 @@ namespace
             // Device callbacks may already have run while the UI was built.
             // Start session time here rather than catching up those samples.
             sessionClock.use (*blockSource, 0);
+
+            /*  THE PORT MTC COMES IN ON, told to the input before anything is
+                played into it (§60, TG.4): the first tick tells it too, but a
+                quarter frame `--midi-play` sent before that tick would take
+                the triggers' road and be lost. Read here, before the ticks
+                start, while the document is still this thread's to read. */
+            if (! midiPlayJobs.empty())
+                midiIn.listenForMtcOn (wfg::midi::mtcInOf (document).port);
+
             ticks.start();
+
+            /*  AND WHAT `--midi-play` PLAYS, from now (AIZ): each file on a
+                thread of its own, into its port's input as if a cable had
+                brought it, stamped as it goes in. Stopped before the ticks
+                are, and before anything it reaches through the input goes. */
+            std::vector<std::unique_ptr<wfg::midi::MidiPlayer>> midiPlayers;
+
+            for (auto& job : midiPlayJobs)
+            {
+                midiPlayers.push_back (std::make_unique<wfg::midi::MidiPlayer> (
+                    std::move (job.lines), job.loop,
+                    [&midiIn, port = job.portId] (const wfg::midi::Bytes& bytes, std::int64_t arrivalNanos)
+                    {
+                        midiIn.inject (port, bytes, arrivalNanos);
+                    }));
+
+                midiPlayers.back()->start();
+            }
 
             /*  STARTED: whatever goes wrong from here is said in the window,
                 not in a box after it (app/StartupReport.h). */
@@ -8130,6 +8276,9 @@ namespace
                 application->onOpen = nullptr;
                 application->onQuit = nullptr;
             }
+
+            for (auto& playing : midiPlayers)
+                playing->stop();
 
             ticks.stop();
 
@@ -8411,6 +8560,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       "serve <bundle> --sample-rate=N --buffer=N [--proxy-deadline-us=N]"
                       " [--hosted [--render=<wav>] [--input-wav=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>] [--midi-render=<port>=<file>]"
+                      " [--midi-play=<port>=<file>] [--midi-play-loop=<port>=<file>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
                       " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember]] [--engine-folder=<dir>]"
                       " [--no-video-window] [--presets=<dir>] [--hold]"

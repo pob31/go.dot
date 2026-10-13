@@ -3574,3 +3574,743 @@ TEST_CASE ("midi render: a port's messages written one a line, when they left, w
 
     file.deleteFile();
 }
+
+//==============================================================================
+/*  MIDI TIME CODE COMING IN (namespace draft §60, TG.4; AIL, AIM, AIR, AIZ):
+    the reader that turns quarter frames and full frames into observations -
+    this frame, at this moment, this way, at this rate - the inbox that takes
+    them off the input before anything else on the port sees them, the port's
+    `rx`, the arrival stamp, and `--midi-play`.
+
+    THE SENDING SIDE IS THE REFERENCE. Go.dot's own MtcCursor (TC.2) says what
+    each message is and on which sample it is due; the reader must read what
+    it sends, as it must read any sender. Arrivals are those due samples on a
+    made-up clock - sample `s` at `base + s / 48000` seconds - and the reader's
+    clock line is fed pairs on the same line, so a piece's sample can be held
+    to the sample it was due on. */
+#include <wfg/engine/midi/MidiPlay.h>
+#include <wfg/engine/midi/MtcInbox.h>
+#include <wfg/engine/timecode/MtcReader.h>
+
+namespace
+{
+    constexpr std::int64_t mtcInBase = 1'000'000'000'000;      // a thousand seconds into the machine's day
+
+    //  The 1:1 line: sample `s` at 48 kHz is this many nanoseconds past the base.
+    std::int64_t nanosOfSample (std::int64_t sample)
+    {
+        return mtcInBase + static_cast<std::int64_t> (std::llround (static_cast<double> (sample) * 1.0e9 / 48000.0));
+    }
+
+    //  What the reader must say of one message the cursor sent.
+    struct Expected
+    {
+        std::int64_t frame = 0;
+        int quarter = 0;
+        bool locate = false;
+        std::int64_t arrival = 0;
+        std::int64_t sample = 0;
+    };
+
+    //  One message as it arrives: its bytes, its moment, and what it must be read as.
+    struct Arrival
+    {
+        midi::Bytes bytes;
+        std::int64_t nanos = 0;
+        Expected expected;
+    };
+
+    /*  `count` messages a cursor sends from `from` at `rate`, zero on sample
+        `zero`, each with what it says: the frame and quarter it was sent on
+        (a full frame, the frame it names, standing). */
+    std::vector<Arrival> mtcArrivals (timecode::Rate rate, const timecode::Label& from, std::int64_t zero, int count)
+    {
+        const auto first = timecode::frameOf (from, rate);
+        const auto day = timecode::framesPerDay (rate);
+        timecode::MtcCursor cursor { rate, 48000, first, zero };
+        std::vector<Arrival> out;
+
+        for (int n = 0; n < count; ++n)
+        {
+            const auto message = cursor.next();
+            const auto quarter = cursor.quarter();
+
+            Arrival arrival;
+            arrival.bytes = { message.bytes.begin(), message.bytes.begin() + message.size };
+            arrival.nanos = nanosOfSample (message.dueSample);
+            arrival.expected.locate = message.isFullFrame();
+            arrival.expected.frame = (first + quarter / timecode::mtcQuartersPerFrame) % day;
+            arrival.expected.quarter = message.isFullFrame() ? 0 : static_cast<int> (quarter % timecode::mtcQuartersPerFrame);
+            arrival.expected.arrival = arrival.nanos;
+            arrival.expected.sample = message.dueSample;
+            out.push_back (std::move (arrival));
+            cursor.advance();
+        }
+
+        return out;
+    }
+
+    //  A reader on the 1:1 line, fed everything in order.
+    std::vector<timecode::MtcObservation> readAll (timecode::MtcReader& reader, const std::vector<Arrival>& arrivals)
+    {
+        reader.feedClock (0, nanosOfSample (0), 48000);
+        reader.feedClock (480000, nanosOfSample (480000), 48000);
+
+        std::vector<timecode::MtcObservation> seen;
+
+        for (const auto& arrival : arrivals)
+            reader.read (arrival.bytes.data(), arrival.bytes.size(), arrival.nanos, seen);
+
+        return seen;
+    }
+
+    void checkSeen (const std::vector<timecode::MtcObservation>& seen, const std::vector<Expected>& wanted,
+                    timecode::Rate rate, bool reverse)
+    {
+        REQUIRE (seen.size() == wanted.size());
+
+        for (std::size_t n = 0; n < seen.size(); ++n)
+        {
+            INFO ("observation " << n << " of " << seen.size() << ", " << timecode::wordOf (rate));
+            CHECK (seen[n].frame == wanted[n].frame);
+            CHECK (seen[n].quarter == wanted[n].quarter);
+            CHECK (seen[n].locate == wanted[n].locate);
+            CHECK (seen[n].reverse == (reverse && ! wanted[n].locate));
+            CHECK (seen[n].rateCode == timecode::mtcCodeOf (rate));
+            CHECK (seen[n].label == timecode::labelOf (wanted[n].frame, timecode::rateOfMtcCode (seen[n].rateCode)));
+            CHECK (seen[n].arrivalNanos == wanted[n].arrival);
+            CHECK (std::llabs (seen[n].sample - wanted[n].sample) <= 1);
+        }
+    }
+
+    std::vector<Expected> expectationsOf (const std::vector<Arrival>& arrivals)
+    {
+        std::vector<Expected> out;
+
+        for (const auto& arrival : arrivals)
+            out.push_back (arrival.expected);
+
+        return out;
+    }
+
+    constexpr std::array<timecode::Rate, 6> everyRate { timecode::Rate::fps23976, timecode::Rate::fps24, timecode::Rate::fps25,
+                                                        timecode::Rate::fps2997df, timecode::Rate::fps2997, timecode::Rate::fps30 };
+}
+
+TEST_CASE ("mtc in: what Go.dot's own cursor sends is read back at every rate - each piece's frame and quarter, at its moment, the rate's code")
+{
+    /*  Three seconds from 00:00:59:10 - across a minute, which drops two
+        labels at 29.97 drop-frame - and at 25 from 23:59:59:10, across
+        midnight. A full frame first (a locate), then every piece of every
+        whole cycle, in the order sent. 23.976 and 29.97 non-drop come as 24
+        and 30 (AIL): the code cannot say otherwise, and their labels count
+        alike. */
+    for (const auto rate : everyRate)
+    {
+        const auto arrivals = mtcArrivals (rate, { 0, 0, 59, 10 }, 4800, 1 + 8 * 45);
+
+        timecode::MtcReader reader;
+        const auto seen = readAll (reader, arrivals);
+
+        checkSeen (seen, expectationsOf (arrivals), rate, false);
+        CHECK (reader.cyclesRead() == 45u);
+        CHECK (reader.cyclesBroken() == 0u);
+    }
+
+    const auto midnight = mtcArrivals (timecode::Rate::fps25, { 23, 59, 59, 10 }, 0, 1 + 8 * 20);
+    timecode::MtcReader reader;
+    const auto seen = readAll (reader, midnight);
+    checkSeen (seen, expectationsOf (midnight), timecode::Rate::fps25, false);
+
+    //  Past midnight: frame 0 onwards, never a frame of a day and more.
+    CHECK (seen.back().frame < 40);
+    CHECK (seen.back().label.hours == 0);
+}
+
+TEST_CASE ("mtc in: a code running backwards is read with its pieces descending, reverse set, its frames descending")
+{
+    /*  The cursor's stream played backwards in time: the pieces arrive 7 to
+        0, each at the mirror of its moment, and each still stands where it
+        was sent - the frames come out descending, the same frames and
+        quarters as forwards. */
+    for (const auto rate : { timecode::Rate::fps25, timecode::Rate::fps2997df, timecode::Rate::fps24 })
+    {
+        auto forwards = mtcArrivals (rate, { 1, 0, 0, 0 }, 0, 1 + 8 * 12);
+        forwards.erase (forwards.begin());                     // no full frame in a tape played backwards
+
+        const auto last = forwards.back().expected.sample;
+        std::vector<Arrival> backwards (forwards.rbegin(), forwards.rend());
+
+        for (auto& arrival : backwards)
+        {
+            const auto mirrored = last - arrival.expected.sample;
+            arrival.nanos = nanosOfSample (mirrored);
+            arrival.expected.arrival = arrival.nanos;
+            arrival.expected.sample = mirrored;
+        }
+
+        timecode::MtcReader reader;
+        const auto seen = readAll (reader, backwards);
+
+        checkSeen (seen, expectationsOf (backwards), rate, true);
+
+        for (std::size_t n = 1; n < seen.size(); ++n)
+        {
+            const auto before = seen[n - 1].frame * 4 + seen[n - 1].quarter;
+            const auto now = seen[n].frame * 4 + seen[n].quarter;
+            CHECK (now == before - 1);
+        }
+    }
+}
+
+TEST_CASE ("mtc in: a full frame mid-stream is a locate, standing, and the quarter frames after it read from the new frame")
+{
+    /*  Five whole cycles from 01:00:00:00 and three pieces of a sixth, then
+        a jump: a full frame for 02:00:00:00 and the code from there. The
+        part-read cycle says nothing - its pieces belong to before the jump -
+        and is not counted broken: a locate is the code saying where it is. */
+    const auto rate = timecode::Rate::fps25;
+    auto before = mtcArrivals (rate, { 1, 0, 0, 0 }, 0, 1 + 8 * 5 + 3);
+    const auto after = mtcArrivals (rate, { 2, 0, 0, 0 }, 48000, 1 + 8 * 6);
+
+    std::vector<Expected> wanted;
+
+    for (std::size_t n = 0; n < 1 + 8 * 5; ++n)
+        wanted.push_back (before[n].expected);
+
+    for (const auto& arrival : after)
+        wanted.push_back (arrival.expected);
+
+    before.insert (before.end(), after.begin(), after.end());
+
+    timecode::MtcReader reader;
+    const auto seen = readAll (reader, before);
+
+    checkSeen (seen, wanted, rate, false);
+    CHECK (reader.cyclesBroken() == 0u);
+
+    //  The locate: standing on 02:00:00:00, no direction, on the sample the full frame came on.
+    const auto locate = std::find_if (seen.begin() + 1, seen.end(), [] (const auto& one) { return one.locate; });
+    REQUIRE (locate != seen.end());
+    CHECK ((locate->label == timecode::Label { 2, 0, 0, 0 }));
+    CHECK (locate->quarter == 0);
+    CHECK (! locate->reverse);
+    CHECK (locate->sample == 48000);
+
+    //  And what follows it is the new code, from its own frame.
+    CHECK ((locate + 1)->frame == timecode::frameOf ({ 2, 0, 0, 0 }, rate));
+    CHECK ((locate + 1)->quarter == 0);
+}
+
+TEST_CASE ("mtc in: a cycle with a piece missing says nothing and the reader resyncs at the next piece 0; a duplicate and a pause do the same")
+{
+    const auto rate = timecode::Rate::fps30;
+    const auto whole = mtcArrivals (rate, { 0, 10, 0, 0 }, 0, 1 + 8 * 8);
+
+    //  Piece 3 of cycle 2 lost (message 1 + 16 + 3).
+    {
+        auto broken = whole;
+        broken.erase (broken.begin() + 1 + 16 + 3);
+
+        std::vector<Expected> wanted;
+
+        for (std::size_t n = 0; n < whole.size(); ++n)
+            if (n < 1 + 16 || n >= 1 + 24)
+                wanted.push_back (whole[n].expected);
+
+        timecode::MtcReader reader;
+        checkSeen (readAll (reader, broken), wanted, rate, false);
+        CHECK (reader.cyclesBroken() == 1u);
+        CHECK (reader.cyclesRead() == 7u);
+    }
+
+    //  Piece 5 of cycle 4 sent twice.
+    {
+        auto doubled = whole;
+        doubled.insert (doubled.begin() + 1 + 32 + 5, whole[1 + 32 + 5]);
+
+        std::vector<Expected> wanted;
+
+        for (std::size_t n = 0; n < whole.size(); ++n)
+            if (n < 1 + 32 || n >= 1 + 40)
+                wanted.push_back (whole[n].expected);
+
+        timecode::MtcReader reader;
+        checkSeen (readAll (reader, doubled), wanted, rate, false);
+        CHECK (reader.cyclesBroken() == 1u);
+    }
+
+    //  A pause of half a second inside cycle 3, the code going on where it was: not a cycle.
+    {
+        auto paused = whole;
+
+        for (std::size_t n = 1 + 24 + 4; n < paused.size(); ++n)
+        {
+            paused[n].nanos += 500'000'000;
+            paused[n].expected.arrival = paused[n].nanos;
+            paused[n].expected.sample += 24000;
+        }
+
+        std::vector<Expected> wanted;
+
+        for (std::size_t n = 0; n < paused.size(); ++n)
+            if (n < 1 + 24 || n >= 1 + 32)
+                wanted.push_back (paused[n].expected);
+
+        timecode::MtcReader reader;
+        checkSeen (readAll (reader, paused), wanted, rate, false);
+        CHECK (reader.cyclesBroken() == 1u);
+    }
+}
+
+TEST_CASE ("mtc in: a code joined part way through a cycle is read from the next whole one")
+{
+    const auto rate = timecode::Rate::fps24;
+    const auto whole = mtcArrivals (rate, { 0, 0, 10, 0 }, 0, 1 + 8 * 4);
+
+    //  From piece 5 of the first cycle, no full frame: nothing until cycle 1 is whole.
+    const std::vector<Arrival> joined (whole.begin() + 1 + 5, whole.end());
+    std::vector<Expected> wanted;
+
+    for (std::size_t n = 1 + 8; n < whole.size(); ++n)
+        wanted.push_back (whole[n].expected);
+
+    timecode::MtcReader reader;
+    const auto seen = readAll (reader, joined);
+    checkSeen (seen, wanted, rate, false);
+    CHECK (reader.cyclesBroken() == 0u);
+    CHECK (seen.front().frame == timecode::frameOf ({ 0, 0, 10, 2 }, rate));
+
+    //  Backwards from piece 3 of the last cycle: nothing until a piece 7 begins one.
+    const std::vector<Arrival> backwards (whole.rbegin(), whole.rend() - 1);
+    const std::vector<Arrival> joinedBack (backwards.begin() + 4, backwards.end());
+
+    timecode::MtcReader backReader;
+    const auto seenBack = readAll (backReader, joinedBack);
+    REQUIRE (seenBack.size() == 8u * 3);                       // cycles 2, 1 and 0, each read from its 7
+    CHECK (seenBack.front().reverse);
+    CHECK (seenBack.front().frame == timecode::frameOf ({ 0, 0, 10, 5 }, rate));
+    CHECK (seenBack.front().quarter == 3);
+    CHECK (backReader.cyclesBroken() == 0u);
+}
+
+TEST_CASE ("mtc in: a SysEx that is not a full frame, a note and a clock between the pieces are ignored and break nothing")
+{
+    const auto rate = timecode::Rate::fps25;
+    const auto whole = mtcArrivals (rate, { 10, 20, 30, 0 }, 0, 1 + 8 * 5);
+
+    const std::vector<midi::Bytes> noise {
+        { 0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7 },                                                    // an identity request
+        { 0xF0, 0x7F, 0x7F, 0x01, 0x02, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0xF7 },    // MTC's user bits
+        { 0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x18, 0x00, 0x00, 0x00, 0xF7 },                            // hour 24: no such frame
+        { 0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x40, 0x01, 0x00, 0x00, 0xF7 },                            // 00:01:00:00 at 29.97 drop: a name it drops
+        { 0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x20, 0x00, 0x00, 0x1B, 0xF7 },                            // frame 27 at 25
+        { 0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x20, 0x3C, 0x00, 0x00, 0xF7 },                            // minute 60
+        { 0x90, 0x3C, 0x64 },                                                                      // a note
+        { 0xF8 },                                                                                  // a clock
+        { 0xF1 },                                                                                  // a quarter frame cut short
+        { 0xF1, 0x80 },                                                                            // one whose data byte is not data
+    };
+
+    std::vector<Arrival> noisy;
+
+    for (std::size_t n = 0; n < whole.size(); ++n)
+    {
+        noisy.push_back (whole[n]);
+
+        Arrival extra;
+        extra.bytes = noise[n % noise.size()];
+        extra.nanos = whole[n].nanos + 1000;
+        noisy.push_back (extra);
+    }
+
+    timecode::MtcReader reader;
+    checkSeen (readAll (reader, noisy), expectationsOf (whole), rate, false);
+    CHECK (reader.cyclesBroken() == 0u);
+
+    /*  AND A WHOLE CYCLE NAMING A FRAME ITS RATE DOES NOT HAVE - frame 26 at
+        25 - is no observation, and counted broken: a sender to disbelieve,
+        not a label to round up. */
+    timecode::MtcReader strict;
+    std::vector<timecode::MtcObservation> seen;
+    const std::array<std::uint8_t, 8> pieces { 0x0A, 0x11, 0x20, 0x30, 0x40, 0x50, 0x60, 0x72 };
+
+    for (std::size_t p = 0; p < pieces.size(); ++p)
+    {
+        const std::array<std::uint8_t, 2> quarter { 0xF1, pieces[p] };
+        strict.read (quarter.data(), quarter.size(), mtcInBase + static_cast<std::int64_t> (p) * 10'000'000, seen);
+    }
+
+    CHECK (seen.empty());
+    CHECK (strict.cyclesRead() == 0u);
+    CHECK (strict.cyclesBroken() == 1u);
+}
+
+TEST_CASE ("mtc in: observations' samples follow the clock line fed, 1:1 and with Go.dot's clock 50 ppm fast")
+{
+    /*  Ten seconds at 25. The code's own moments are the steady clock's;
+        Go.dot's samples run `ppm` fast against it, and the reader's line is
+        fed the tick's pair every 20 ms - before the pieces that arrived since
+        the last tick are read, as serve's hook does - so each piece's sample
+        is the line's, read back for a moment up to a tick old. */
+    for (const auto ppm : { 0.0, 50.0 })
+    {
+        INFO (ppm << " ppm");
+
+        const auto goDotSample = [ppm] (std::int64_t nanos)
+        {
+            return static_cast<double> (nanos - mtcInBase) * 48000.0e-9 * (1.0 + ppm * 1.0e-6);
+        };
+
+        const auto arrivals = mtcArrivals (timecode::Rate::fps25, { 1, 0, 0, 0 }, 0, 1 + 8 * 125);
+
+        timecode::MtcReader reader;
+        std::vector<timecode::MtcObservation> seen;
+        std::size_t next = 0;
+
+        for (std::int64_t tick = mtcInBase; next < arrivals.size(); tick += 20'000'000)
+        {
+            reader.feedClock (static_cast<std::int64_t> (std::llround (goDotSample (tick))), tick, 48000);
+
+            for (; next < arrivals.size() && arrivals[next].nanos <= tick; ++next)
+                reader.read (arrivals[next].bytes.data(), arrivals[next].bytes.size(), arrivals[next].nanos, seen);
+        }
+
+        REQUIRE (seen.size() == arrivals.size());
+
+        double worst = 0.0;
+
+        for (const auto& one : seen)
+            if (one.arrivalNanos > mtcInBase + 2'000'000'000)
+                worst = std::max (worst, std::abs (static_cast<double> (one.sample) - goDotSample (one.arrivalNanos)));
+
+        INFO ("worst " << worst << " samples");
+        CHECK (worst <= (ppm > 0.0 ? 2.0 : 1.0));
+    }
+}
+
+TEST_CASE ("mtc in: quarter frames and full frames on sync/mtcIn are taken into the inbox before a surface's consumer; other ports and messages go on as before")
+{
+    Engine engine;
+    midi::MidiInputs inputs;
+    inputs.sendTo (engine);
+
+    std::vector<std::pair<std::string, midi::Bytes>> consumed;
+
+    //  A consumer that claims everything on the MTC port, as a surface claims its own.
+    inputs.setConsumer ([&consumed] (const std::string& portId, const midi::Bytes& message)
+                        {
+                            consumed.push_back ({ portId, message });
+                            return portId == "PRTMTC01";
+                        });
+
+    const midi::Bytes quarter { 0xF1, 0x23 };
+    const midi::Bytes full { 0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x21, 0x00, 0x00, 0x00, 0xF7 };
+    const midi::Bytes otherSysex { 0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7 };
+    const midi::Bytes note { 0x90, 0x3C, 0x64 };
+
+    //  No port named yet: nothing taken, and the consumer sees all.
+    inputs.inject ("PRTMTC01", quarter, 10);
+    std::vector<midi::MtcEntry> taken;
+    inputs.mtcInbox().takeAll (taken);
+    CHECK (taken.empty());
+    CHECK (consumed.size() == 1u);
+    consumed.clear();
+
+    inputs.listenForMtcOn ("PRTMTC01");
+
+    inputs.inject ("PRTMTC01", quarter, 100);
+    inputs.inject ("PRTMTC01", full, 200);
+    inputs.inject ("PRTMTC01", otherSysex, 300);
+    inputs.inject ("PRTMTC01", note, 400);
+    inputs.inject ("PRTOTHER", quarter, 500);
+    inputs.inject ("PRTOTHER", full, 600);
+
+    inputs.mtcInbox().takeAll (taken);
+    REQUIRE (taken.size() == 2u);
+    CHECK (taken[0].portId == "PRTMTC01");
+    CHECK (taken[0].size == 2u);
+    CHECK (taken[0].bytes[0] == 0xF1);
+    CHECK (taken[0].bytes[1] == 0x23);
+    CHECK (taken[0].arrivalNanos == 100);
+    CHECK (taken[1].size == 10u);
+    CHECK (taken[1].bytes[5] == 0x21);
+    CHECK (taken[1].arrivalNanos == 200);
+
+    //  The surface never saw the code on its port; it saw the rest, and every other port's.
+    REQUIRE (consumed.size() == 4u);
+    CHECK (consumed[0].second == otherSysex);
+    CHECK (consumed[1].second == note);
+    CHECK (consumed[2].first == "PRTOTHER");
+    CHECK (consumed[3].first == "PRTOTHER");
+
+    //  The triggers' road is untouched: nothing reached the engine's queue.
+    const auto result = engine.processTick (1);
+    CHECK (result.applied + result.rejected + result.dropped == 0u);
+
+    //  Named away: nothing more taken.
+    inputs.listenForMtcOn ({});
+    inputs.inject ("PRTMTC01", quarter, 700);
+    inputs.mtcInbox().takeAll (taken);
+    CHECK (taken.empty());
+}
+
+TEST_CASE ("mtc in: a full inbox drops the oldest and counts each one")
+{
+    midi::MtcInbox inbox;
+    const std::array<std::uint8_t, 2> quarter { 0xF1, 0x00 };
+
+    for (std::size_t n = 0; n < midi::MtcInbox::capacity + 5; ++n)
+        inbox.push ("PRTMTC01", quarter.data(), quarter.size(), static_cast<std::int64_t> (n));
+
+    CHECK (inbox.droppedCount() == 5u);
+
+    std::vector<midi::MtcEntry> taken;
+    taken.reserve (midi::MtcInbox::capacity);
+    inbox.takeAll (taken);
+
+    REQUIRE (taken.size() == midi::MtcInbox::capacity);
+    CHECK (taken.front().arrivalNanos == 5);
+    CHECK (taken.back().arrivalNanos == static_cast<std::int64_t> (midi::MtcInbox::capacity + 4));
+
+    //  What was taken is gone; a message longer than a full frame is never kept.
+    inbox.takeAll (taken);
+    CHECK (taken.empty());
+
+    const std::array<std::uint8_t, 11> tooLong {};
+    inbox.push ("PRTMTC01", tooLong.data(), tooLong.size(), 1);
+    inbox.takeAll (taken);
+    CHECK (taken.empty());
+}
+
+TEST_CASE ("mtc in: the code is read only while the port's rx is on; off, it is taken and dropped; on again, read")
+{
+    doc::ShowDocument document;
+    const auto port = document.createPort ("Timecode in").id;
+    const auto other = document.createPort ("Desk").id;
+
+    midi::MidiInputs inputs;
+    midi::MtcInput input;
+
+    //  What serve's hook does at each show revision.
+    const auto retell = [&]
+    {
+        const auto setting = midi::mtcInOf (document);
+        inputs.listenForMtcOn (setting.port);
+        input.configure (setting);
+    };
+
+    //  Nothing named: none.
+    retell();
+    CHECK (input.setting().port.empty());
+    CHECK (! input.setting().listening);
+
+    REQUIRE (document.setAttribute ("/godot/sync/mtcIn", port).ok);
+    retell();
+    CHECK (input.setting().port == port);
+    CHECK (input.setting().listening);
+
+    const auto cycles = mtcArrivals (timecode::Rate::fps25, { 1, 0, 0, 0 }, 0, 1 + 8 * 2);
+    const auto play = [&] (std::size_t from, std::size_t to)
+    {
+        for (auto n = from; n < to; ++n)
+            inputs.inject (port, cycles[n].bytes, cycles[n].nanos);
+    };
+
+    input.feedClock (0, nanosOfSample (0), 48000);
+
+    play (0, 1 + 8);
+    input.drain (inputs.mtcInbox());
+    REQUIRE (input.observations().size() == 9u);
+    CHECK (input.observations().front().locate);
+    CHECK (std::llabs (input.observations().back().sample - cycles[8].expected.sample) <= 1);
+
+    //  rx off: taken off the input, and read by nobody.
+    REQUIRE (document.setAttribute ("/godot/port/" + port + "/rx", "false").ok);
+    retell();
+    CHECK (! input.setting().listening);
+
+    play (1 + 8, 1 + 16);
+    input.drain (inputs.mtcInbox());
+    CHECK (input.observations().empty());
+    CHECK (input.ignoredCount() == 8u);
+
+    //  On again: read from what comes now - what came while it was off is not read late.
+    REQUIRE (document.setAttribute ("/godot/port/" + port + "/rx", "true").ok);
+    retell();
+    CHECK (input.setting().listening);
+
+    const auto more = mtcArrivals (timecode::Rate::fps25, { 1, 0, 0, 4 }, 7680, 1 + 8);
+
+    for (const auto& arrival : more)
+        inputs.inject (port, arrival.bytes, arrival.nanos);
+
+    input.drain (inputs.mtcInbox());
+    REQUIRE (input.observations().size() == 9u);                  // a full frame, then a whole cycle
+    CHECK (input.observations().front().locate);
+    CHECK (input.observations().back().frame == timecode::frameOf ({ 1, 0, 0, 5 }, timecode::Rate::fps25));
+    CHECK (input.readCount() == 9u + 9u);
+
+    //  Another port named: its own rx, and the first port's code no longer read.
+    REQUIRE (document.setAttribute ("/godot/sync/mtcIn", other).ok);
+    retell();
+    CHECK (input.setting().port == other);
+    CHECK (input.setting().listening);
+
+    play (0, 1 + 8);
+    input.drain (inputs.mtcInbox());
+    CHECK (input.observations().empty());
+}
+
+TEST_CASE ("mtc in: inject keeps the arrival it is given, and without one stamps now; JUCE's hold is taken off, within 0 and 100 ms")
+{
+    midi::MidiInputs inputs;
+    inputs.listenForMtcOn ("PRTMTC01");
+
+    inputs.inject ("PRTMTC01", { 0xF1, 0x00 }, 123'456'789);
+
+    const auto before = midi::steadyNanosNow();
+    inputs.inject ("PRTMTC01", { 0xF1, 0x10 });
+    const auto after = midi::steadyNanosNow();
+
+    std::vector<midi::MtcEntry> taken;
+    inputs.mtcInbox().takeAll (taken);
+    REQUIRE (taken.size() == 2u);
+    CHECK (taken[0].arrivalNanos == 123'456'789);
+    CHECK (taken[1].arrivalNanos >= before);
+    CHECK (taken[1].arrivalNanos <= after);
+
+    //  The stamp: the steady reading, less JUCE's counter now less the message's own stamp.
+    CHECK (midi::arrivalStamp (10'000'000'000, 5000.0, 4.997) == 10'000'000'000 - 3'000'000);
+    CHECK (midi::arrivalStamp (10'000'000'000, 5000.0, 5.0) == 10'000'000'000);
+    CHECK (midi::arrivalStamp (10'000'000'000, 5000.0, 5.002) == 10'000'000'000);             // a stamp ahead of now
+    CHECK (midi::arrivalStamp (10'000'000'000, 5000.0, 4.5) == 10'000'000'000 - 100'000'000);  // held more than 100 ms
+    CHECK (midi::arrivalStamp (10'000'000'000, 5000.0, 1.0e9) == 10'000'000'000);             // a stamp that is no time
+}
+
+TEST_CASE ("mtc in: a render file is read line by line - its moments, its bytes - and a line that is not one is refused by number")
+{
+    std::string why;
+
+    const auto lines = midi::parseRender ("100 0 90 3C 64\r\n\n  200 250 F1 12\n300 0 f0 7f 7f 01 01 00 00 00 00 f7\n", why);
+    REQUIRE (lines.has_value());
+    REQUIRE (lines->size() == 3u);
+    CHECK ((*lines)[0].moment == 100);
+    CHECK (((*lines)[0].bytes == midi::Bytes { 0x90, 0x3C, 0x64 }));
+    CHECK ((*lines)[1].moment == 250);                          // its due, not when it left
+    CHECK ((*lines)[2].moment == 300);
+    CHECK ((*lines)[2].bytes.size() == 10u);
+
+    CHECK ((midi::offsetsOf (*lines) == std::vector<std::int64_t> { 0, 150, 200 }));
+    CHECK (midi::loopGapOf (*lines) == 50);
+
+    //  Moments that step back play in their order, at once.
+    const std::vector<midi::PlayLine> stepBack { { 500, { 0xF8 } }, { 400, { 0xF8 } }, { 450, { 0xF8 } } };
+    CHECK ((midi::offsetsOf (stepBack) == std::vector<std::int64_t> { 0, 0, 50 }));
+    CHECK (midi::loopGapOf ({ { 7, { 0xF8 } } }) == 1'000'000'000);
+
+    CHECK (! midi::parseRender ("1 2\n", why).has_value());
+    CHECK (why.find ("line 1") != std::string::npos);
+    CHECK (! midi::parseRender ("1 2 F1 00\n1 2 F1 ZZ\n", why).has_value());
+    CHECK (why.find ("line 2") != std::string::npos);
+    CHECK (why.find ("ZZ") != std::string::npos);
+    CHECK (! midi::parseRender ("1,5 2 F1\n", why).has_value());
+    CHECK (! midi::parseRender ("1 2 1F1\n", why).has_value());
+
+    CHECK (! midi::loadRender ("no such render, surely.txt", why).has_value());
+    CHECK (why.find ("does not exist") != std::string::npos);
+}
+
+TEST_CASE ("mtc in: --midi-play plays a render file into a port's input, in order, at about its spacing, and loops when asked")
+{
+    /*  Real threads on the real clock: the order is the claim, the spacing a
+        sanity check with loose bounds, looser on CI, whose runners share
+        their cores. */
+    const auto onCi = juce::SystemStats::getEnvironmentVariable ("GITHUB_ACTIONS", {}) == "true";
+    const std::int64_t slack = onCi ? 150'000'000 : 15'000'000;
+
+    const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("godot-midi-play-" + juce::String (juce::Random::getSystemRandom().nextInt64()) + ".txt");
+
+    //  Six quarter frames 20 ms apart; the fourth a queue's line, due nought, timed by when it left.
+    juce::String text;
+
+    for (int n = 0; n < 6; ++n)
+    {
+        const auto moment = 5'000'000'000LL + n * 20'000'000LL;
+        const auto due = n == 3 ? 0LL : moment;
+        text << juce::String (n == 3 ? moment : moment + 300'000) << " " << juce::String (due) << " F1 "
+             << juce::String::toHexString (n << 4).paddedLeft ('0', 2).toUpperCase() << "\n";
+    }
+
+    REQUIRE (file.replaceWithText (text));
+
+    std::string why;
+    const auto lines = midi::loadRender (file.getFullPathName().toStdString(), why);
+    INFO (why);
+    REQUIRE (lines.has_value());
+    REQUIRE (lines->size() == 6u);
+
+    midi::MidiInputs inputs;
+    inputs.listenForMtcOn ("PRTMTC01");
+
+    const auto inject = [&inputs] (const midi::Bytes& bytes, std::int64_t at) { inputs.inject ("PRTMTC01", bytes, at); };
+
+    {
+        const auto began = midi::steadyNanosNow();
+        midi::MidiPlayer player { *lines, false, inject };
+        player.start();
+
+        for (int wait = 0; wait < 400 && ! player.finished(); ++wait)
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+
+        REQUIRE (player.finished());
+        CHECK (player.playedCount() == 6u);
+
+        std::vector<midi::MtcEntry> taken;
+        inputs.mtcInbox().takeAll (taken);
+        REQUIRE (taken.size() == 6u);
+
+        for (std::size_t n = 0; n < taken.size(); ++n)
+        {
+            INFO ("line " << n);
+            CHECK (taken[n].bytes[1] == static_cast<std::uint8_t> (n << 4));
+
+            //  Never before its moment - the play began after `began` - and not long after it.
+            const auto offset = taken[n].arrivalNanos - began;
+            const auto wanted = static_cast<std::int64_t> (n) * 20'000'000;
+            CHECK (offset >= wanted);
+            CHECK (offset <= wanted + slack);
+        }
+    }
+
+    {
+        const auto began = midi::steadyNanosNow();
+        midi::MidiPlayer looped { *lines, true, inject };
+        looped.start();
+
+        for (int wait = 0; wait < 400 && looped.playedCount() < 15; ++wait)
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+
+        looped.stop();
+        CHECK (! looped.finished());
+
+        std::vector<midi::MtcEntry> taken;
+        inputs.mtcInbox().takeAll (taken);
+        REQUIRE (taken.size() >= 15u);
+
+        /*  The file again and again, in order, each pass 120 ms after the
+            one before - its last line at 100 ms, and one spacing after it. */
+        for (std::size_t n = 0; n < taken.size(); ++n)
+        {
+            INFO ("message " << n);
+            CHECK (taken[n].bytes[1] == static_cast<std::uint8_t> ((n % 6) << 4));
+
+            const auto wanted = static_cast<std::int64_t> (n / 6) * 120'000'000 + static_cast<std::int64_t> (n % 6) * 20'000'000;
+            CHECK (taken[n].arrivalNanos - began >= wanted);
+            CHECK (taken[n].arrivalNanos - began <= wanted + slack);
+        }
+    }
+
+    file.deleteFile();
+}

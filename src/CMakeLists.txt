@@ -174,6 +174,10 @@ add_library(wfg_engine STATIC
     wfg/engine/midi/PortBinder.cpp
     wfg/engine/midi/MtcLane.h
     wfg/engine/midi/MtcLane.cpp
+    wfg/engine/midi/MtcInbox.h
+    wfg/engine/midi/MtcInbox.cpp
+    wfg/engine/midi/MidiPlay.h
+    wfg/engine/midi/MidiPlay.cpp
     wfg/engine/surface/McuCodec.h
     wfg/engine/surface/McuCodec.cpp
     wfg/engine/surface/FaderCurve.h
@@ -325,6 +329,8 @@ add_library(wfg_engine STATIC
     wfg/engine/timecode/LtcGenerator.h
     wfg/engine/timecode/MtcSchedule.h
     wfg/engine/timecode/MtcSchedule.cpp
+    wfg/engine/timecode/MtcReader.h
+    wfg/engine/timecode/MtcReader.cpp
     wfg/engine/TemplateChanges.h
     wfg/engine/document/Template.cpp
     wfg/engine/document/Template.h

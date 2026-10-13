@@ -39,12 +39,14 @@
 
 #include <wfg/engine/cue/TriggerIndex.h>
 #include <wfg/engine/midi/MidiSink.h>
+#include <wfg/engine/midi/MtcInbox.h>
 #include <wfg/engine/midi/PortTable.h>
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
 #include <functional>
 #include <atomic>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -75,6 +77,18 @@ namespace wfg::midi
 
         Public so it can be tested without a port. */
     cue::MidiEvent eventFrom (const juce::MidiMessage& message, const std::string& port);
+
+    //  The steady clock in nanoseconds: what every arrival is stamped on, and what the clock line is fed.
+    std::int64_t steadyNanosNow() noexcept;
+
+    /*  WHEN A MESSAGE ARRIVED, on the steady clock (namespace draft §60,
+        TG.4): `steadyNanos` - the steady clock read as the callback runs -
+        less how long JUCE held the message before calling, which is the JUCE
+        counter now (`counterNowMs`, `Time::getMillisecondCounterHiRes`) less
+        the message's own time stamp (`messageStampSeconds`), kept between
+        nought and 100 ms. Public so the arithmetic can be tested with no
+        port; MidiInputs.cpp says why the difference needs no common base. */
+    std::int64_t arrivalStamp (std::int64_t steadyNanos, double counterNowMs, double messageStampSeconds) noexcept;
 
     //==========================================================================
     /*  Opens the named inputs and turns matching events into `trigger.fire`.
@@ -138,9 +152,27 @@ namespace wfg::midi
             same road an arriving one takes - the consumer first, then the
             triggers. It is what lets bytes from a surface be followed through
             the bridge, the commands, the Runner and back out to bytes with no
-            hardware in the room, which is every CI runner. Nothing in the
-            product calls it. */
+            hardware in the room, which is every CI runner. Stamped as having
+            arrived now; the second form keeps a moment of the caller's, for a
+            test that places MTC on a clock of its own. `wfg serve
+            --midi-play` (MidiPlay.h) is the one product caller: a driver's
+            MIDI played into an input on a machine with no port. */
         void inject (const std::string& portId, const Bytes& message);
+        void inject (const std::string& portId, const Bytes& message, std::int64_t arrivalNanos);
+
+        /*  THE PORT MIDI TIME CODE COMES IN ON (namespace draft §60, TG.4):
+            the show's `sync/mtcIn`, told by the tick at each show revision;
+            empty for none. Every quarter frame and full frame arriving on it
+            goes to `mtcInbox()`, stamped, BEFORE the consumer - a surface
+            that claims the port would otherwise take the code - and never
+            reaches the triggers, which never matched it anyway. Everything
+            else on that port takes the road it always took. Whether the port
+            listens (`rx`) is the tick's question, asked where the inbox is
+            drained (midi/MtcInbox.h). */
+        void listenForMtcOn (const std::string& portId);
+
+        //  Where that code is kept until the tick takes it.
+        MtcInbox& mtcInbox() noexcept { return inbox; }
 
         const std::vector<std::string>& problems() const noexcept { return refusals; }
         std::size_t count() const noexcept { return open_.size(); }
@@ -162,8 +194,11 @@ namespace wfg::midi
 
         std::atomic<monitor::TrafficTap*> tap { nullptr };
 
-        /** The one road every message takes: consumer, then triggers. */
-        void route (const std::string& portId, const Bytes& message);
+        /*  The one road every message takes: MTC on its port, then the
+            consumer, then the triggers. */
+        void route (const std::string& portId, const Bytes& message, std::int64_t arrivalNanos);
+
+        MtcInbox inbox;
 
         /*  Swapped whole under `triggerMutex` and called outside it, so a slow
             consumer never holds the lock a republished trigger index waits on. */
@@ -176,6 +211,9 @@ namespace wfg::midi
 
         mutable std::mutex triggerMutex;
         std::shared_ptr<const cue::TriggerIndex> triggers;
+
+        //  `sync/mtcIn`'s port, under `triggerMutex`: compared on the input thread, never copied there.
+        std::string mtcPort;
 
         /*  Which declared port each opened device belongs to, by the device's
             own name - the only thing the callback is handed. Written while
