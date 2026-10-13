@@ -627,6 +627,7 @@ namespace wfg::client::model
             else if (name == "kind")       row.kind = text (node).empty() ? std::string ("ndi") : text (node);
             else if (name == "sender")     row.sender = text (node);
             else if (name == "enabled")    row.enabled = truthOf (node, true);
+            else if (name == "alpha")      row.alpha = truthOf (node, false);
             else if (name == "connected")  row.connected = truthOf (node, false);
             else if (name == "width")      row.width = static_cast<int> (integerOf (node, 0));
             else if (name == "height")     row.height = static_cast<int> (integerOf (node, 0));

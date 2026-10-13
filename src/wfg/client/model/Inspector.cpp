@@ -104,6 +104,7 @@ namespace wfg::client::model
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
                                "contrast", "saturation", "gamma", "hue",
                                "curveLuma", "curveRed", "curveGreen", "curveBlue",
+                               "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill",
                                "shape", "feather", "invert",
                                "strip", "initialLevel", "release", "secondPress", "velocity", "velocityFloor",
                                "pressure", "releaseFade" } },
@@ -191,6 +192,14 @@ namespace wfg::client::model
                 { "curveRed", "red curve" },
                 { "curveGreen", "green curve" },
                 { "curveBlue", "blue curve" },
+                /*  ITS OWN ALPHA AND ITS KEY (namespace draft 61): the screen's
+                    words are the implementer's, for the author (AKS). */
+                { "useAlpha", "use its alpha" },
+                { "keyColour", "key colour" },
+                { "keyLevel", "key cut at" },
+                { "keySoftness", "key softness" },
+                { "keyInvert", "key turned round" },
+                { "keySpill", "key spill" },
                 { "doh", "on Doh!" },
                 /*  A MOVIE'S SOUND (namespace draft 37.5, WJ). */
                 { "lockedTo", "locked to movie" },

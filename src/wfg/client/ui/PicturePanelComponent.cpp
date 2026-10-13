@@ -30,6 +30,11 @@ namespace wfg::client::ui
         constexpr const char* curveRows[4] { "curveLuma", "curveRed", "curveGreen", "curveBlue" };
         constexpr const char* curveWords[4] { "L", "R", "G", "B" };
 
+        /*  THE KEYS BY NAME (namespace draft 61, AKB): the rows' words and the
+            menu's, the latter the implementer's, for the author (AKS). */
+        constexpr const char* keyRows[4] { "none", "luma", "matte", "colour" };
+        constexpr const char* keyWords[4] { "No key", "Brightness", "Brightness as a shape", "A colour (green screen)" };
+
         //  A number as a row takes it: four decimals at most, in no locale's spelling.
         std::string numberText (double value)
         {
@@ -666,9 +671,64 @@ namespace wfg::client::ui
 
         paintSwatch.setWantsKeyboardFocus (false);
         paintSwatch.setTooltip ("The colour of the fill or the mask");
-        paintSwatch.onClick = [this] { choosePaint(); };
+        paintSwatch.onClick = [this] { chooseColour ("paint", reading.paint, paintSwatch); };
         addAndMakeVisible (paintSwatch);
         addAndMakeVisible (paintLabel);
+
+        //  THE GRADE OR THE KEY (namespace draft 61).
+        for (int at = 0; at < 2; ++at)
+        {
+            auto& button = colourPages[at];
+            button.setWantsKeyboardFocus (false);
+            button.setTooltip (at == 0 ? "Contrast, saturation, gamma, hue and the curves"
+                                       : "What makes it see-through: its own alpha, its brightness or a colour");
+            button.onClick = [this, at]
+            {
+                colourPage = at;
+                refresh();
+            };
+            addAndMakeVisible (button);
+        }
+
+        useAlpha.setWantsKeyboardFocus (false);
+        useAlpha.onClick = [this] { write ("useAlpha", useAlpha.getToggleState() ? "true" : "false"); };
+        keyInvert.setWantsKeyboardFocus (false);
+        keyInvert.setTooltip ("Keep what the key would clear");
+        keyInvert.onClick = [this] { write ("keyInvert", keyInvert.getToggleState() ? "true" : "false"); };
+        addAndMakeVisible (useAlpha);
+        addAndMakeVisible (keyInvert);
+
+        for (int at = 0; at < 4; ++at)
+            keyMode.addItem (keyWords[at], at + 1);
+
+        keyMode.setWantsKeyboardFocus (false);
+        keyMode.onChange = [this]
+        {
+            const auto picked = keyMode.getSelectedId() - 1;
+
+            if (picked >= 0 && picked < 4 && reading.key != keyRows[picked])
+                writeMany (model::keyChoice (reading, keyRows[picked]));
+        };
+        addAndMakeVisible (keyMode);
+
+        build (keyLevel, keyLevelLabel, "cut at", "keyLevel", 0.0, 100.0, 50.0, false, " %", 0);
+        build (keySoftness, keySoftnessLabel, "softness", "keySoftness", 0.0, 100.0, 50.0, false, " %", 0);
+        build (keySpill, keySpillLabel, "spill", "keySpill", 0.0, 100.0, 50.0, false, " %", 0);
+        keyLevel.setTooltip ("Where the cut falls: the brightness, or how far from the screen's colour, at which a point is half solid");
+        keySoftness.setTooltip ("How gradual the cut is: nought a hard edge");
+        keySpill.setTooltip ("How much of the screen's colour is taken off what is kept - the green on hair and shoulders");
+
+        /*  ONE SWATCH, two colours: a colour key's screen, a shape's paint. */
+        keyColourSwatch.setWantsKeyboardFocus (false);
+        keyColourSwatch.onClick = [this]
+        {
+            if (reading.key == "matte")
+                chooseColour ("paint", reading.paint, keyColourSwatch);
+            else
+                chooseColour ("keyColour", reading.keyColour, keyColourSwatch);
+        };
+        addAndMakeVisible (keyColourSwatch);
+        addAndMakeVisible (keyColourLabel);
 
         applyTheme (theme);
     }
@@ -708,6 +768,23 @@ namespace wfg::client::ui
             return;
 
         actions.set ("/godot/cue/" + reading.cueId + "/" + row, text);
+    }
+
+    void PicturePanelComponent::writeMany (const std::vector<std::pair<std::string, std::string>>& rows)
+    {
+        if (reading.cueId.empty() || reading.locked || rows.empty())
+            return;
+
+        if (rows.size() == 1 || actions.setMany == nullptr)
+        {
+            if (actions.set != nullptr)
+                for (const auto& [address, text] : rows)
+                    actions.set (address, text);
+
+            return;
+        }
+
+        actions.setMany (rows);
     }
 
     void PicturePanelComponent::writeCurve (int which, const model::CurvePoints& points)
@@ -759,10 +836,41 @@ namespace wfg::client::ui
         setValue (gamma, reading.gamma);
         setValue (hue, reading.hue);
         setValue (feather, reading.feather);
+        setValue (keyLevel, reading.keyLevel);
+        setValue (keySoftness, reading.keySoftness);
+        setValue (keySpill, reading.keySpill);
 
         flipH.setToggleState (reading.flipH, juce::dontSendNotification);
         flipV.setToggleState (reading.flipV, juce::dontSendNotification);
         invert.setToggleState (reading.invert, juce::dontSendNotification);
+        useAlpha.setToggleState (reading.useAlpha, juce::dontSendNotification);
+        keyInvert.setToggleState (reading.keyInvert, juce::dontSendNotification);
+
+        for (int at = 0; at < 4; ++at)
+            if (reading.key == keyRows[at])
+                keyMode.setSelectedId (at + 1, juce::dontSendNotification);
+
+        /*  THE PICK SAYS A KEY IS ON IN WORDS, never by a colour alone (§4.8),
+            so a cue keyed and left on the Grade page is not keyed unseen. */
+        colourPages[0].setButtonText ("Grade");
+        colourPages[1].setButtonText (reading.keyed() ? "Key (on)" : "Key");
+
+        for (int at = 0; at < 2; ++at)
+            colourPages[at].setToggleState (at == colourPage, juce::dontSendNotification);
+
+        /*  A CAPTURE'S ALPHA only when its input sends one (AKF): the switch is
+            the cue's, and says why it changes nothing. */
+        const auto inputSaysNone = reading.source == "capture" && ! reading.inputAlpha;
+        useAlpha.setTooltip (inputSaysNone ? "Its video input sends no alpha: say so in the Video tab, then this reads it"
+                                           : "Where the picture says it is see-through, it is");
+
+        const auto shape = reading.key == "matte";
+        keyColourSwatch.setColour (juce::TextButton::buttonColourId,
+                                   paintColour (shape ? reading.paint : reading.keyColour));
+        keyColourSwatch.setTooltip (shape ? "The colour the shape is painted in" : "The screen's colour, which is cleared");
+        keyColourLabel.setText (shape ? "colour " + juce::String (reading.paint.empty() ? std::string ("#000000") : reading.paint)
+                                      : "screen " + juce::String (reading.keyColour),
+                                juce::dontSendNotification);
 
         for (int at = 0; at < 3; ++at)
             fitButtons[at].setToggleState (reading.fit == fitWords[at], juce::dontSendNotification);
@@ -779,11 +887,33 @@ namespace wfg::client::ui
         const auto painted = reading.painted();
         const auto masked = reading.masked();
 
+        const auto keying = keyPage();
+
         for (auto* part : std::initializer_list<juce::Component*> { &contrast, &contrastLabel, &saturation, &saturationLabel,
                                                                     &gamma, &gammaLabel, &hue, &hueLabel, curves.get(),
                                                                     &curveReset, &curvePicks[0], &curvePicks[1],
                                                                     &curvePicks[2], &curvePicks[3] })
-            part->setVisible (graded);
+            part->setVisible (graded && ! keying);
+
+        for (auto* part : std::initializer_list<juce::Component*> { &colourPages[0], &colourPages[1] })
+            part->setVisible (reading.keyable());
+
+        //  THE KEY'S PAGE: what the key in use reads, and nothing it does not.
+        const auto keyOn = reading.key != "none";
+        const auto colourKey = reading.key == "colour";
+
+        for (auto* part : std::initializer_list<juce::Component*> { &useAlpha, &keyMode })
+            part->setVisible (keying);
+
+        for (auto* part : std::initializer_list<juce::Component*> { &keyLevel, &keyLevelLabel, &keySoftness,
+                                                                    &keySoftnessLabel, &keyInvert })
+            part->setVisible (keying && keyOn);
+
+        for (auto* part : std::initializer_list<juce::Component*> { &keyColourSwatch, &keyColourLabel })
+            part->setVisible (keying && (colourKey || shape));
+
+        for (auto* part : std::initializer_list<juce::Component*> { &keySpill, &keySpillLabel })
+            part->setVisible (keying && colourKey);
 
         paintSwatch.setVisible (painted);
         paintLabel.setVisible (painted);
@@ -797,26 +927,31 @@ namespace wfg::client::ui
         for (auto* part : std::initializer_list<juce::Component*> { &scale, &offsetX, &offsetY, &rotation, &contrast,
                                                                     &saturation, &gamma, &hue, &feather, &flipH, &flipV,
                                                                     &invert, &paintSwatch, &curveReset,
-                                                                    &fitButtons[0], &fitButtons[1], &fitButtons[2] })
+                                                                    &fitButtons[0], &fitButtons[1], &fitButtons[2],
+                                                                    &keyMode, &keyLevel, &keySoftness, &keySpill,
+                                                                    &keyInvert, &keyColourSwatch })
             part->setEnabled (open);
+
+        useAlpha.setEnabled (open && ! inputSaysNone);
 
         resized();
     }
 
-    void PicturePanelComponent::choosePaint()
+    void PicturePanelComponent::chooseColour (const char* row, const std::string& current, juce::Component& from)
     {
         if (reading.cueId.empty() || reading.locked)
             return;
 
         /*  A SWATCH THAT WRITES AS IT IS MOVED: each change a `node.set` on the
-            one row, which the document folds into one undo step. */
+            one row - the paint, or a key's screen colour (namespace draft 61) -
+            which the document folds into one undo step. */
         class Picker final : public juce::ColourSelector, private juce::Timer
         {
         public:
-            Picker (PicturePanelComponent& ownerToUse, juce::Colour start)
+            Picker (PicturePanelComponent& ownerToUse, const char* rowToWrite, juce::Colour start)
                 : juce::ColourSelector (juce::ColourSelector::showColourAtTop | juce::ColourSelector::showSliders
                                         | juce::ColourSelector::showColourspace),
-                  owner (&ownerToUse), written (start)
+                  owner (&ownerToUse), row (rowToWrite), written (start)
             {
                 setCurrentColour (start, juce::dontSendNotification);
                 setSize (300, 320);
@@ -827,6 +962,7 @@ namespace wfg::client::ui
 
         private:
             juce::Component::SafePointer<PicturePanelComponent> owner;
+            const char* row;
             juce::Colour written;
 
             //  The colour looked at twenty times a second, and written when it moved.
@@ -838,12 +974,12 @@ namespace wfg::client::ui
                     return;
 
                 written = now;
-                owner->write ("paint", paintText (now));
+                owner->write (row, paintText (now));
             }
         };
 
-        juce::CallOutBox::launchAsynchronously (std::make_unique<Picker> (*this, paintColour (reading.paint)),
-                                                paintSwatch.getScreenBounds(), nullptr);
+        juce::CallOutBox::launchAsynchronously (std::make_unique<Picker> (*this, row, paintColour (current)),
+                                                from.getScreenBounds(), nullptr);
     }
 
     void PicturePanelComponent::applyTheme (const model::Theme& themeToUse)
@@ -851,7 +987,8 @@ namespace wfg::client::ui
         theme = themeToUse;
 
         for (auto* label : { &scaleLabel, &offsetXLabel, &offsetYLabel, &rotationLabel, &contrastLabel,
-                             &saturationLabel, &gammaLabel, &hueLabel, &featherLabel, &paintLabel })
+                             &saturationLabel, &gammaLabel, &hueLabel, &featherLabel, &paintLabel,
+                             &keyLevelLabel, &keySoftnessLabel, &keySpillLabel, &keyColourLabel })
         {
             label->setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
             label->setFont (Look::font (theme, 12.0f));
@@ -914,8 +1051,47 @@ namespace wfg::client::ui
             }
         }
 
+        //  THE GRADE OR THE KEY, picked above the column (namespace draft 61).
+        if (reading.keyable())
+        {
+            auto picks = colourColumn.removeFromTop (row);
+            const auto half = picks.getWidth() / 2;
+            colourPages[0].setBounds (picks.removeFromLeft (half).reduced (2, 1));
+            colourPages[1].setBounds (picks.reduced (2, 1));
+        }
+
+        //  THE KEY: its alpha and its turn, the key, then what that key reads.
+        if (keyPage())
+        {
+            auto toggles = colourColumn.removeFromTop (row);
+            useAlpha.setBounds (toggles.removeFromLeft (toggles.getWidth() / 2));
+            keyInvert.setBounds (toggles);
+            keyMode.setBounds (colourColumn.removeFromTop (row).reduced (2, 2));
+
+            for (auto [slider, label] : { std::pair { &keyLevel, &keyLevelLabel }, std::pair { &keySoftness, &keySoftnessLabel } })
+            {
+                auto line = colourColumn.removeFromTop (row);
+                label->setBounds (line.removeFromLeft (72));
+                slider->setBounds (line);
+            }
+
+            if (reading.key == "colour" || reading.key == "matte")
+            {
+                auto line = colourColumn.removeFromTop (row);
+                keyColourSwatch.setBounds (line.removeFromLeft (72).reduced (2, 2));
+                keyColourLabel.setBounds (line);
+            }
+
+            if (reading.key == "colour")
+            {
+                auto line = colourColumn.removeFromTop (row);
+                keySpillLabel.setBounds (line.removeFromLeft (72));
+                keySpill.setBounds (line);
+            }
+        }
+
         //  ITS COLOUR: the four numbers, then the curves with their letters.
-        if (reading.graded())
+        else if (reading.graded())
         {
             for (auto [slider, label] : { std::pair { &contrast, &contrastLabel }, std::pair { &saturation, &saturationLabel },
                                           std::pair { &gamma, &gammaLabel }, std::pair { &hue, &hueLabel } })

@@ -89,6 +89,7 @@ namespace wfg::client::model
         std::string kind = "ndi";
         std::string sender;
         bool enabled = true;
+        bool alpha = false;             ///< the program sends a meaningful alpha (61, AKF)
         bool connected = false;
         int width = 0;
         int height = 0;

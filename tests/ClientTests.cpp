@@ -11397,6 +11397,87 @@ TEST_CASE ("client: a video cue's place, colour and mask are its picture panel's
     CHECK (points == "0 0 1 -120");
 }
 
+TEST_CASE ("client: a picture's alpha switch and key are its picture panel's; a green screen chosen first takes tighter numbers in one step (§61)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto picture = rig.document.createCue (list, 0, "video", "Logo", {}, { { "source", "picture" } });
+    REQUIRE (picture.ok);
+    const auto fill = rig.document.createCue (list, 1, "video", "Wash", {}, { { "source", "fill" } });
+    REQUIRE (fill.ok);
+    const auto input = rig.document.createVideoInput ("Camera", "ndi", "");
+    REQUIRE (input.ok);
+    const auto camera = rig.document.createCue (list, 2, "video", "Camera", {},
+                                                { { "source", "capture" }, { "videoInput", input.id } });
+    REQUIRE (camera.ok);
+
+    auto snapshot = rig.publish (1);
+
+    //  At rest: its alpha read, no key - not keyed - and a fill has no key to give.
+    auto reading = model::readFoot (*snapshot, { model::Subject::Kind::picture, picture.id }).picture;
+    CHECK (reading.useAlpha);
+    CHECK (reading.key == "none");
+    CHECK (reading.keyColour == "#00FF00");
+    CHECK (reading.keyLevel == doctest::Approx (50.0));
+    CHECK (reading.keySoftness == doctest::Approx (100.0));
+    CHECK (reading.keySpill == doctest::Approx (50.0));
+    CHECK (reading.keyable());
+    CHECK_FALSE (reading.keyed());
+    CHECK_FALSE (model::readFoot (*snapshot, { model::Subject::Kind::picture, fill.id }).picture.keyable());
+
+    //  The key's rows leave the inspector for the panel.
+    std::vector<std::string> names;
+
+    for (const auto& block : model::inspect (*snapshot, picture.id).blocks)
+        for (const auto& field : block.fields)
+            names.push_back (field.name);
+
+    for (const auto* gone : { "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill" })
+        CHECK (std::find (names.begin(), names.end(), gone) == names.end());
+
+    /*  A GREEN SCREEN CHOSEN FIRST: the key, and the tighter cut beside it, one
+        step. Chosen again after the cut was moved, or for brightness: the key alone. */
+    const auto base = "/godot/cue/" + picture.id + "/";
+    auto rows = model::keyChoice (reading, "colour");
+    REQUIRE (rows.size() == 3);
+    CHECK (rows[0] == std::pair<std::string, std::string> { base + "key", "colour" });
+    CHECK (rows[1] == std::pair<std::string, std::string> { base + "keyLevel", "40" });
+    CHECK (rows[2] == std::pair<std::string, std::string> { base + "keySoftness", "10" });
+    CHECK (model::keyChoice (reading, "luma").size() == 1);
+
+    REQUIRE (rig.document.setAttribute (base + "key", "colour").ok);
+    REQUIRE (rig.document.setAttribute (base + "keyLevel", "35").ok);
+    REQUIRE (rig.document.setAttribute (base + "useAlpha", "false").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+    reading = model::readFoot (*snapshot, { model::Subject::Kind::picture, picture.id }).picture;
+    CHECK (reading.key == "colour");
+    CHECK (reading.keyLevel == doctest::Approx (35.0));
+    CHECK_FALSE (reading.useAlpha);
+    CHECK (reading.keyed());
+
+    REQUIRE (rig.document.setAttribute (base + "key", "luma").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (3);
+    reading = model::readFoot (*snapshot, { model::Subject::Kind::picture, picture.id }).picture;
+    CHECK (model::keyChoice (reading, "colour").size() == 1);
+
+    /*  A CAPTURE: its input's alpha read beside its own switch (AKF), and the
+        Video tab's row says whether the input sends one. */
+    auto captured = model::readFoot (*snapshot, { model::Subject::Kind::picture, camera.id }).picture;
+    CHECK (captured.keyable());
+    CHECK_FALSE (captured.inputAlpha);
+    CHECK_FALSE (model::readVideoInputs (*snapshot).front().alpha);
+
+    REQUIRE (rig.document.setAttribute ("/godot/videoInput/" + input.id + "/alpha", "true").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (4);
+    captured = model::readFoot (*snapshot, { model::Subject::Kind::picture, camera.id }).picture;
+    CHECK (captured.inputAlpha);
+    CHECK (model::readVideoInputs (*snapshot).front().alpha);
+}
+
 TEST_CASE ("client: a new insert is numbered by kind and given both its names once; what Go.dot sends is never offered back (§47, AAK)")
 {
     std::vector<model::VideoInsertRow> inserts;

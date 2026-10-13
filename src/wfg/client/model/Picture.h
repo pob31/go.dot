@@ -108,6 +108,18 @@ namespace wfg::client::model
 
         std::string paint;              ///< #RRGGBB
 
+        /*  ITS OWN ALPHA AND ITS KEY (namespace draft 61): whether its alpha is
+            read; for a capture whether its input sends one at all (AKF); the
+            key and its numbers. */
+        bool useAlpha = true;
+        bool inputAlpha = false;
+        std::string key = "none";       ///< none, luma, matte or colour
+        std::string keyColour = "#00FF00";
+        double keyLevel = 50.0;
+        double keySoftness = 100.0;
+        double keySpill = 50.0;
+        bool keyInvert = false;
+
         bool locked = false;
 
         /*  WHAT THIS SOURCE HAS: every source a place on its canvas (VW); a
@@ -116,7 +128,19 @@ namespace wfg::client::model
         bool graded() const noexcept  { return source == "picture" || source == "movie" || source == "capture"; }
         bool painted() const noexcept { return source == "fill" || source == "mask"; }
         bool masked() const noexcept  { return source == "mask"; }
+
+        /*  A picture, a movie and a capture can be keyed and have their alpha
+            switched (61, AKA) - what is graded. Keyed: a key on, or its alpha
+            switched off, which the panel says in words. */
+        bool keyable() const noexcept { return graded(); }
+        bool keyed() const noexcept   { return key != "none" || ! useAlpha; }
     };
+
+    /*  THE ROWS A KEY'S CHOICE WRITES (namespace draft 61, AKH): the key; and
+        the first time a cue is keyed by colour with its level and softness
+        untouched - brightness's defaults, as wide as the whole scale - a green
+        screen's tighter ones beside it, so it is one undo step. */
+    std::vector<std::pair<std::string, std::string>> keyChoice (const PictureReading& reading, const std::string& key);
 
     /*  THE ROWS EACH HALF OF THE PANEL EDITS, by name: what leaves the
         inspector for it. */

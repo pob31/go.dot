@@ -5,6 +5,7 @@
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
+#include <wfg/client/ui/PicturePanelComponent.h>
 #include <wfg/client/ui/TakePanelComponent.h>
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/SendMixerComponent.h>
@@ -60,6 +61,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <type_traits>
 #include <vector>
 
 using namespace wfg::client;
@@ -3044,6 +3046,109 @@ TEST_CASE ("eq panel: two fingers pinch a band's width, closing them narrows it,
     panel.fingerUp (0);
 
     CHECK (panel.editedHandle() == 1);
+}
+
+namespace
+{
+    /*  A CHILD OF THE PICTURE PANEL found by what it says, the way a hand finds it. */
+    template <typename Kind>
+    Kind* childSaying (juce::Component& parent, const juce::String& words)
+    {
+        for (auto* child : parent.getChildren())
+            if (auto* found = dynamic_cast<Kind*> (child))
+            {
+                if constexpr (std::is_base_of_v<juce::Button, Kind>)
+                {
+                    if (found->getButtonText() == words)
+                        return found;
+                }
+                else if constexpr (std::is_base_of_v<juce::Label, Kind>)
+                {
+                    if (found->getText() == words)
+                        return found;
+                }
+            }
+
+        return nullptr;
+    }
+
+    model::FootReading keyedPicture (const std::string& key)
+    {
+        model::FootReading reading;
+        reading.subject = { model::Subject::Kind::picture, "CUE00001" };
+        reading.cueName = "Actor on green";
+        reading.cueKind = "video";
+        reading.picture.cueId = "CUE00001";
+        reading.picture.source = "picture";
+        reading.picture.canvas = "CANVAS01";
+        reading.picture.key = key;
+        reading.picture.keyLevel = 40.0;
+        reading.picture.keySoftness = 10.0;
+        reading.picture.paint = "#FF8000";
+        return reading;
+    }
+}
+
+TEST_CASE ("picture panel: a keyed picture's pick says so in words, and its Key page shows what that key reads (§61)")
+{
+    ui::PicturePanelComponent::Actions actions;
+    ui::PicturePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+
+    //  Not keyed: the pick says Key, and the Grade page is the one showing.
+    panel.show (keyedPicture ("none"), nullptr);
+    REQUIRE (childSaying<juce::TextButton> (panel, "Key") != nullptr);
+    REQUIRE (childSaying<juce::Label> (panel, "contrast") != nullptr);
+    CHECK (childSaying<juce::Label> (panel, "contrast")->isVisible());
+
+    //  A green screen: the pick says so in words (§4.8), and its page reads the screen and the spill.
+    panel.show (keyedPicture ("colour"), nullptr);
+    auto* pick = childSaying<juce::TextButton> (panel, "Key (on)");
+    REQUIRE (pick != nullptr);
+    pick->onClick();
+
+    CHECK_FALSE (childSaying<juce::Label> (panel, "contrast")->isVisible());
+    REQUIRE (childSaying<juce::Label> (panel, "spill") != nullptr);
+    CHECK (childSaying<juce::Label> (panel, "spill")->isVisible());
+    CHECK (childSaying<juce::Label> (panel, "cut at")->isVisible());
+    REQUIRE (childSaying<juce::Label> (panel, "screen #00FF00") != nullptr);
+    CHECK (childSaying<juce::Label> (panel, "screen #00FF00")->isVisible());
+
+    //  Brightness as a shape: its colour is the paint, and there is no spill.
+    panel.show (keyedPicture ("matte"), nullptr);
+    CHECK_FALSE (childSaying<juce::Label> (panel, "spill")->isVisible());
+    REQUIRE (childSaying<juce::Label> (panel, "colour #FF8000") != nullptr);
+    CHECK (childSaying<juce::Label> (panel, "colour #FF8000")->isVisible());
+
+    //  Its alpha switched off and no key: still keyed, still said.
+    auto solid = keyedPicture ("none");
+    solid.picture.useAlpha = false;
+    panel.show (solid, nullptr);
+    CHECK (childSaying<juce::TextButton> (panel, "Key (on)") != nullptr);
+    CHECK_FALSE (childSaying<juce::Label> (panel, "cut at")->isVisible());
+
+    /*  A PICTURE OF IT, when somebody asks (WFG_SNAPSHOT_DIR): the green
+        screen's page and the shape's. */
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isEmpty())
+        return;
+
+    for (const auto* key : { "colour", "matte" })
+    {
+        panel.show (keyedPicture (key), nullptr);
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile (juce::String ("picture-panel-key-") + key + ".png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
 }
 
 TEST_CASE ("eq panel: a picture of it, when somebody asks for one")

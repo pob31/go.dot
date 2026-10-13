@@ -35,7 +35,11 @@
     turn; for a picture, a movie or a capture the grade - contrast,
     saturation, gamma, hue - and its four curves, drawn, one picked by its
     letter; for a fill or a mask its colour, from a swatch; for a mask its
-    feather and whether it is turned inside out.
+    feather and whether it is turned inside out. A picture's, a movie's or a
+    capture's KEY (namespace draft 61) shares the grade's column, picked
+    above it - Grade or Key, the pick saying in words when a key is on: its
+    alpha switch, the key by name, where it cuts and how softly, the screen's
+    colour or the shape's, the spill, turned round.
 
     A drag is a run of `node.set` on one address, which the document folds
     into one undo step - the offsets one `node.setMany`, their two addresses
@@ -108,12 +112,23 @@ namespace wfg::client::ui
         juce::TextButton curveReset { "Straight" };
         int curvePicked = 0;
 
+        /*  THE GRADE OR THE KEY, in the one column (namespace draft 61). */
+        juce::TextButton colourPages[2];
+        int colourPage = 0;
+        juce::ToggleButton useAlpha { "Use its alpha" }, keyInvert { "Turned round" };
+        juce::ComboBox keyMode;
+        juce::Slider keyLevel, keySoftness, keySpill;
+        juce::Label keyLevelLabel, keySoftnessLabel, keySpillLabel, keyColourLabel;
+        juce::TextButton keyColourSwatch;
+
         void build (juce::Slider& slider, juce::Label& label, const char* words, const char* row,
                     double low, double high, double mid, bool symmetric, const char* suffix, int decimals);
         void write (const char* row, const std::string& text);
+        void writeMany (const std::vector<std::pair<std::string, std::string>>& rows);
         void writeCurve (int which, const model::CurvePoints& points);
         void refresh();
-        void choosePaint();
+        void chooseColour (const char* row, const std::string& current, juce::Component& from);
+        bool keyPage() const noexcept { return reading.keyable() && colourPage == 1; }
         juce::Rectangle<int> controlsArea() const;
 
         friend class View;

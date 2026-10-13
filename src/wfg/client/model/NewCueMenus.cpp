@@ -343,6 +343,9 @@ namespace wfg::client::model
         if (has ("contrast") || has ("saturation") || has ("gamma") || has ("hue"))
             said.push_back ("grade");
 
+        if (has ("key") || has ("useAlpha"))
+            said.push_back ("key");
+
         if (parts.find (" eq") != std::string::npos && kind == "media")
             said.push_back ("EQ");
 

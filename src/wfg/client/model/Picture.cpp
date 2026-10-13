@@ -83,7 +83,8 @@ namespace wfg::client::model
             "fit", "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
             "contrast", "saturation", "gamma", "hue",
             "curveLuma", "curveRed", "curveGreen", "curveBlue",
-            "shape", "feather", "invert", "paint" };
+            "shape", "feather", "invert", "paint",
+            "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill" };
 
         return rows;
     }
@@ -141,9 +142,43 @@ namespace wfg::client::model
         out.feather = numberAt (snapshot, base + "feather", 0.0);
         out.invert = isYes (flag (snapshot, base + "invert"));
         out.paint = text (snapshot, base + "paint");
+
+        out.useAlpha = flag (snapshot, base + "useAlpha") != Flag::no;
+        out.inputAlpha = isYes (flag (snapshot, "/godot/videoInput/" + text (snapshot, base + "videoInput") + "/alpha"));
+        out.key = text (snapshot, base + "key");
+
+        if (out.key.empty())
+            out.key = "none";
+
+        out.keyColour = text (snapshot, base + "keyColour");
+
+        if (out.keyColour.empty())
+            out.keyColour = "#00FF00";
+
+        out.keyLevel = numberAt (snapshot, base + "keyLevel", 50.0);
+        out.keySoftness = numberAt (snapshot, base + "keySoftness", 100.0);
+        out.keySpill = numberAt (snapshot, base + "keySpill", 50.0);
+        out.keyInvert = isYes (flag (snapshot, base + "keyInvert"));
+
         out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 
         return out;
+    }
+
+    std::vector<std::pair<std::string, std::string>> keyChoice (const PictureReading& reading, const std::string& key)
+    {
+        const auto base = "/godot/cue/" + reading.cueId + "/";
+        std::vector<std::pair<std::string, std::string>> rows { { base + "key", key } };
+
+        const auto untouched = std::abs (reading.keyLevel - 50.0) < 1.0e-9 && std::abs (reading.keySoftness - 100.0) < 1.0e-9;
+
+        if (key == "colour" && reading.key != "colour" && untouched)
+        {
+            rows.emplace_back (base + "keyLevel", "40");
+            rows.emplace_back (base + "keySoftness", "10");
+        }
+
+        return rows;
     }
 
     video::Placement placementOf (const PictureReading& reading)

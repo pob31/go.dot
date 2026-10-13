@@ -125,6 +125,8 @@ const KIND_ORDER = {
             "dcaCurve", "dcaOffset", "videoInsert", "paint", "fadeIn", "startOffset", "rate",
             "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
             "contrast", "saturation", "gamma", "hue", "curveLuma", "curveRed", "curveGreen", "curveBlue",
+            // Its own alpha and its key (namespace draft 61).
+            "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill",
             "shape", "feather", "invert",
             "strip", "initialLevel", "release", "secondPress", "velocity", "velocityFloor", "pressure", "releaseFade"],
   // Each thing a fade moves is a switch, then where it goes: level, then speed (§22.7).

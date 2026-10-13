@@ -5965,9 +5965,9 @@ namespace wfg::client::ui
                 g.drawText ("Warp, zones", outputCells[7], juce::Justification::centredLeft);
 
                 const auto inputCells = inputCellsFor (inputHeading.withWidth (inputList.getWidth()));
-                const char* inputNames[] { "Input", "Kind", "Takes in from", "On", "State" };
+                const char* inputNames[] { "Input", "Kind", "Takes in from", "On", "Alpha", "State" };
 
-                for (auto at = 0; at < 5; ++at)
+                for (auto at = 0; at < 6; ++at)
                     g.drawText (inputNames[at], inputCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
 
                 const auto insertCells = insertCellsFor (insertHeading.withWidth (insertList.getWidth()));
@@ -6003,15 +6003,18 @@ namespace wfg::client::ui
                 return { area, shows, display, on, identify, state, cross, warp };
             }
 
-            static std::array<juce::Rectangle<int>, 6> inputCellsFor (juce::Rectangle<int> row)
+            /*  ALPHA (namespace draft 61, AKF): whether the program sends a
+                meaningful one, which a capture of it then reads. */
+            static std::array<juce::Rectangle<int>, 7> inputCellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
                 const auto cross = area.removeFromRight (24);
                 const auto state = area.removeFromRight (260);
+                const auto alpha = area.removeFromRight (56);
                 const auto on = area.removeFromRight (48);
                 const auto sender = area.removeFromRight (260);
                 const auto kind = area.removeFromRight (90);
-                return { area, kind, sender, on, state, cross };
+                return { area, kind, sender, on, alpha, state, cross };
             }
 
             static std::array<juce::Rectangle<int>, 6> insertCellsFor (juce::Rectangle<int> row)
@@ -6259,18 +6262,21 @@ namespace wfg::client::ui
                     g.setColour (Look::colour (page.theme, entry.enabled ? "ink" : "ink-off"));
                     g.drawText (entry.enabled ? "ON" : "OFF", cells[3], juce::Justification::centredLeft);
 
+                    g.setColour (Look::colour (page.theme, entry.alpha ? "ink" : "ink-off"));
+                    g.drawText (entry.alpha ? "SENT" : "NONE", cells[4], juce::Justification::centredLeft);
+
                     //  In words, never a colour alone (§4.8).
                     const auto arriving = entry.connected && entry.problem.empty();
                     g.setColour (Look::colour (page.theme, arriving || ! entry.enabled ? "ink-dim" : "failed"));
                     g.drawText (arriving ? juce::String (entry.width) + juce::String::fromUTF8 (" \xc3\x97 ") + juce::String (entry.height)
                                              + ", " + juce::String (entry.frameRate, 0) + " a second"
                                          : juce::String (entry.problem.empty() ? std::string ("nothing arriving") : entry.problem),
-                                cells[4], juce::Justification::centredLeft, true);
+                                cells[5], juce::Justification::centredLeft, true);
 
                     if (! page.locked)
                     {
                         g.setColour (Look::colour (page.theme, "ink-dim"));
-                        g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[5], juce::Justification::centred);
+                        g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[6], juce::Justification::centred);
                     }
                 }
 
@@ -6285,13 +6291,14 @@ namespace wfg::client::ui
                     const auto& entry = page.inputs[static_cast<std::size_t> (row)];
                     const auto base = "/godot/videoInput/" + entry.id + "/";
 
-                    switch (cellIndexAt (cells.data(), 6, event.x))
+                    switch (cellIndexAt (cells.data(), 7, event.x))
                     {
                         case 0: page.editCell (page.inputList, row, cells[0], base + "name", entry.name); return;
                         case 1: page.chooseKind (base + "kind", entry.kind); return;
                         case 2: page.chooseSender (page.inputList, row, cells[2], base + "sender", entry.kind, entry.sender); return;
                         case 3: page.send (gesture::setNode (base + "enabled", entry.enabled ? "false" : "true")); return;
-                        case 5: page.send (gesture::deleteObject (entry.id)); return;
+                        case 4: page.send (gesture::setNode (base + "alpha", entry.alpha ? "false" : "true")); return;
+                        case 6: page.send (gesture::deleteObject (entry.id)); return;
                         default: return;
                     }
                 }

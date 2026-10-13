@@ -27477,3 +27477,24 @@ tiles cost the renderer's message thread with a blur in them.
   `client.boundary`, `source.comments`, `video.gpu.C`. Two deliberate breakages, each turning its own
   cases red: the shader never told the key (six of the eight scenes and the movie; the blue key on a
   picture with nothing blue in it is alike either way), and a capture's input not asked.
+- **VFX.2**, 2026-10-13: the keys in the window. The picture panel's colour column is picked between
+  **Grade** and **Key** above it - the panel is eight rows tall and holds one of them - and the pick says
+  **Key (on)** in words while a key is on or the alpha is switched off (§4.8), so a cue keyed and left on
+  its Grade page is never keyed unseen. The Key page: **Use its alpha** and **Turned round** side by
+  side; the key named in a menu - **No key**, **Brightness**, **Brightness as a shape**, **A colour
+  (green screen)**; then what that key reads - **cut at** and **softness**; the screen's colour
+  (**screen #00FF00**) or the shape's paint (**colour #FF8000**) from one swatch, the picker generalised
+  from the paint's to any colour row; **spill** for a colour key alone. A capture's switch is disabled,
+  saying why, while its input says it sends no alpha. Choosing the colour key the first time, with the
+  cut and softness untouched, writes the key with 40 % and 10 % in one `node.setMany`
+  (`model::keyChoice`, AKH). The rows leave the inspector for the panel and are labelled there for a
+  show opened without it; the browser console's inspector lists them; a template carrying them says
+  "key". The Video tab's inputs gain an **Alpha** column, SENT or NONE in words, a click turning it.
+  Every one of these screen words is the implementer's, for the author (AKS). Tests under C and fr_FR:
+  `ClientTests` (the panel's reading at rest and keyed, a fill with no key to give, the rows gone from
+  the inspector, the first green screen in one step and not the second, a capture's input alpha read
+  and the Video tab's row); `RunPaneUiTests` (the pick saying Key, then Key (on), the Key page showing
+  what each key reads and nothing else, its alpha switched off still said - and, under
+  `WFG_SNAPSHOT_DIR`, the green screen's page and the shape's as pictures); `console.unit`,
+  `client.boundary`, `source.comments`; the clang-tidy stand-in clean on every file touched but two
+  findings already there before it.
