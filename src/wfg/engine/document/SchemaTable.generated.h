@@ -65,7 +65,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode" };
     inline constexpr std::string_view enum_run_phase[] = { "entering", "preparing", "prepared", "header", "members", "footer" };
     inline constexpr std::string_view enum_run_state[] = { "preparing", "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
-    inline constexpr std::string_view enum_run_warning[] = { "no-channel", "revoked", "not-sent", "left-to-operator" };
+    inline constexpr std::string_view enum_run_warning[] = { "no-channel", "revoked", "not-sent", "left-to-operator", "sought" };
     inline constexpr std::string_view enum_run_processState[] = { "starting", "running", "late", "stuck" };
     inline constexpr std::string_view enum_run_chaseState[] = { "free", "inStep", "catching", "jumped" };
     inline constexpr std::string_view enum_group_mode[] = { "timeline", "sequence", "sampler", "time" };
@@ -2622,10 +2622,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
           false, 0.0, false, 0.0,
-          enum_run_warning, 4,
+          enum_run_warning, 5,
           "", 50.0, false, "park",
           "",
-          "Something this run did less of than it meant to, while still going. NOT a weaker `error`: an error is a run that did not do what it said, and a warning is a run that carried on. `no-channel` is a cue that lost an exclusive rack channel and played dry, which PRD 3.9e calls DEGRADE and which is the whole point of that policy - reporting it as a failure would either stop the scene or teach an operator to ignore the state that means stopped. not-sent is a cue aimed at a device whose tx is off, or a MIDI cue on a port whose tx is off: it ran, it was applied, and nothing left the machine. left-to-operator is a cue a corrected GO ran without sending, because the GO that Doh! took back had already sent it to a device left to its operator (PRD 3.32). In words, never colour alone (4.8)." },
+          "Something this run did less of than it meant to, while still going. NOT a weaker `error`: an error is a run that did not do what it said, and a warning is a run that carried on. `no-channel` is a cue that lost an exclusive rack channel and played dry, which PRD 3.9e calls DEGRADE and which is the whole point of that policy - reporting it as a failure would either stop the scene or teach an operator to ignore the state that means stopped. not-sent is a cue aimed at a device whose tx is off, or a MIDI cue on a port whose tx is off: it ran, it was applied, and nothing left the machine. left-to-operator is a cue a corrected GO ran without sending, because the GO that Doh! took back had already sent it to a device left to its operator (PRD 3.32). sought is a time group's member that chases its code and was sought rather than jumped, the code being in another of its slices: it is where the code says, after the gap a seek makes (namespace draft 60, TG.8). In words, never colour alone (4.8)." },
         { "run", "asserted",
           ValueType::boolean, 'T', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "false",

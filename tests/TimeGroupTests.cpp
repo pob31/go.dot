@@ -49,6 +49,19 @@
     offset; a picture comes up on its sample, read ahead while it waits; a
     Persistent section's group fires all show; and a replay reaches the same
     runs and maps.
+
+    AND THE MEMBERS THAT CHASE (TG.8, the third part): a member whose `chase`
+    is `jump`, put out of step by a re-anchored code, jumps once over the
+    crossfade to the code's second - a move on its slot's reader the fake
+    records - and not at all when it is inside the tolerance, nor when it is a
+    free runner; a locate seats a chaser at its offset, the runs handed back on
+    the record, ends one whose time is ahead, jumps one still in range, cuts a
+    free runner asked for on the old line and leaves one playing; a code that
+    stops leaves its chasers playing and its return jumps them; a movie cuts and
+    its locked sound jumps with it; a sound whose code is in another slice is
+    sought there, and says so; a scene is re-seated around the second; a group
+    armed while its code runs seats a chaser past its time by `code.seat`; and a
+    replay seats the same.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
@@ -546,8 +559,51 @@ namespace
         stopped. */
     struct TimePlayer final : cue::Player
     {
+        //  A MOVE ON A SLOT'S READER (TG.8's jump), each numbered as the voice numbers them.
+        struct Loop
+        {
+            int track = -1;
+            int slot = -1;
+            cue::Player::LoopMove move;
+        };
+
+        std::uint64_t placeLoop (int track, int slot, const LoopMove& move) override
+        {
+            loops.push_back ({ track, slot, move });
+            return loops.size();
+        }
+
+        void endsOutside (int track, bool outside) override
+        {
+            if (outside)
+                endedOutside.insert (track);
+            else
+                endedOutside.erase (track);
+        }
+
+        /*  A READER THAT MET MOVE `adoptMove` LATE, `adoptLateBy` seconds past
+            where it was placed, the file there where the move put it: what a
+            stretcher reading further ahead than the horizon reports. */
+        std::optional<LoopTaken> loopTaken (int track, int slot) override
+        {
+            if (adoptMove == 0 || adoptMove > loops.size())
+                return std::nullopt;
+
+            const auto& loop = loops[adoptMove - 1];
+
+            if (loop.track != track || loop.slot != slot)
+                return std::nullopt;
+
+            return LoopTaken { adoptMove, loop.move.from + adoptLateBy, loop.move.fileAt };
+        }
+
+        std::vector<Loop> loops;
+        std::set<int> endedOutside;
+        std::uint64_t adoptMove = 0;
+        double adoptLateBy = 0.0;
+
         int trackCount() const override                 { return 16; }
-        int slotCount() const override                  { return 1; }
+        int slotCount() const override                  { return 4; }
         int sampleRate() const override                 { return 48000; }
         int blockSize() const override                  { return 128; }
         int channelsPerTrack() const override           { return 2; }
@@ -616,6 +672,9 @@ namespace
         {
             if (property == video::Property::opacity)
                 firstPoint.emplace (id, point.sample);
+
+            if (property == video::Property::time)
+                times[id].push_back (point);
         }
 
         void remove (const std::string&, std::int64_t) override {}
@@ -637,6 +696,7 @@ namespace
 
         std::vector<std::string> shown;
         std::map<std::string, std::int64_t> firstPoint;
+        std::map<std::string, std::vector<video::Point>> times;
         std::vector<std::string> readAhead;
     };
 
@@ -1380,4 +1440,783 @@ TEST_CASE ("time group on its code: a scene entered ahead and stopped before its
     CHECK (rig.runsOf (thunder).front()->isFinished());
     CHECK (rig.countOf (release) == (footerRuns ? 1u : 0u));
     CHECK (rig.audio.launches.size() == (footerRuns ? 1u : 0u));
+}
+
+//==============================================================================
+/*  TG.8: THE MEMBERS THAT CHASE (namespace draft §60; AIF, AIG, AIH, AIN, AIT,
+    AIV). The code is driven by `code.heard` as above; a member's `chase` row
+    says how it keeps up. The fake audio side records each move placed on a
+    slot's reader - where from, where to, over what crossfade - and the picture
+    side each point on a movie's time ring. 48 kHz, 960 samples a tick, 128-sample
+    blocks: a launch horizon of two ticks, 1920 samples, and a seat's lead of ten
+    ticks, 9600 samples, after the record's sample.
+*/
+namespace
+{
+    constexpr std::int64_t horizonSamples = 2 * perTick;
+    constexpr std::int64_t seatLeadSamples = 10 * perTick;
+
+    //  The applied records of a command, oldest first.
+    std::vector<LogRecord> appliedOf (Engine& engine, const std::string& command)
+    {
+        std::vector<LogRecord> out;
+
+        for (auto& record : LogFile::parse (engine.log().contents()).records)
+            if (record.command == command && record.kind == LogRecord::Kind::applied)
+                out.push_back (std::move (record));
+
+        return out;
+    }
+
+    //  A sound in the group at `at`, chasing by `chase`, of a file `seconds` long.
+    std::string chaser (CodeRig& rig, int index, const std::string& name, const std::string& at,
+                        const std::string& file, const std::string& chase, double seconds = 60.0)
+    {
+        const auto id = rig.sound (rig.group, index, name, at, file);
+        rig.set ("/godot/cue/" + id + "/chase", chase);
+        rig.lengths[file] = seconds;
+        return id;
+    }
+
+    //  The moves placed on one track's reader.
+    std::vector<TimePlayer::Loop> loopsOn (const CodeRig& rig, int track)
+    {
+        std::vector<TimePlayer::Loop> out;
+
+        for (const auto& loop : rig.audio.loops)
+            if (loop.track == track)
+                out.push_back (loop);
+
+        return out;
+    }
+
+    //  The arm last asked for a run.
+    std::optional<cue::ArmRequest> armOf (const CodeRig& rig, const std::string& runId)
+    {
+        std::optional<cue::ArmRequest> found;
+
+        for (const auto& arm : rig.audio.asked)
+            if (arm.runId == runId)
+                found = arm;
+
+        return found;
+    }
+
+    const cue::Run* liveOf (const CodeRig& rig, const std::string& cueId)
+    {
+        const cue::Run* found = nullptr;
+
+        for (const auto& run : rig.runs.all())
+            if (run.cue == cueId && ! run.isFinished())
+                found = &run;
+
+        return found;
+    }
+
+    constexpr double toTheSample = 1.0e-9;
+}
+
+TEST_CASE ("time group chasing: a jump chaser 30 ms behind its code jumps once, over the 10 ms crossfade, to the code's second - 5 ms behind it does nothing, nor does a free runner 30 ms behind")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    std::int64_t shift = 1440;          // 30 ms at 48 kHz
+    std::string chase = "jump";
+    auto jumps = true;
+
+    SUBCASE ("30 ms behind, chasing by jump") {}
+
+    SUBCASE ("5 ms behind, inside the tolerance")
+    {
+        shift = 240;
+        jumps = false;
+    }
+
+    SUBCASE ("30 ms behind, a free runner")
+    {
+        chase = "free";
+        jumps = false;
+    }
+
+    /*  A CATCH-UP METHOD jumps only past `sync/chaseJump`: under it, it is
+        catching - TG.9's to steer. */
+    SUBCASE ("30 ms behind, a varispeed chaser")
+    {
+        chase = "varispeed";
+        jumps = false;
+    }
+
+    CodeRig rig;
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", chase);
+    rig.goOn (rig.group);
+
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    const std::int64_t anchor = 100 * perTick;
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, anchor);
+
+    //  STARTED ON ITS SAMPLE, by TG.7, and in step: nothing moved.
+    const auto start = anchor + 480'000;
+    rig.ticksUntil (start / perTick + 50);
+    REQUIRE (rig.countOf (rain) == 1);
+    const auto runId = rig.runsOf (rain).front()->id;
+    const auto track = rig.runs.find (runId)->track;
+    REQUIRE (rig.runs.find (runId)->launchedAtSample == start);
+    CHECK (rig.audio.loops.empty());
+    CHECK (rig.runs.find (runId)->chaseState == (chase == "free" ? "free" : "inStep"));
+    CHECK (std::abs (rig.runs.find (runId)->chaseError) < 0.001);
+
+    /*  THE CODE RE-ANCHORED: the frame twenty seconds on heard `shift` samples
+        sooner than the line had it, so the member is that far behind. Applied
+        in tick 1000's drain; measured by tick 1001's hook, a launch horizon
+        ahead. */
+    rig.ticksUntil (1000);
+    rig.heard ("running", "25", f0 + 500, anchor + 960'000 - shift);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto* run = rig.runs.find (runId);
+    REQUIRE (run != nullptr);
+
+    if (! jumps)
+    {
+        rig.ticksUntil (1100);
+        CHECK (rig.audio.loops.empty());
+        CHECK (rig.runs.find (runId)->chaseState == (chase == "free" ? "free" : chase == "jump" ? "inStep" : "catching"));
+
+        if (chase != "free")
+            CHECK (rig.runs.find (runId)->chaseError == doctest::Approx (-1000.0 * static_cast<double> (shift) / 48000.0).epsilon (1e-6));
+        else
+            CHECK (rig.runs.find (runId)->chaseError == doctest::Approx (0.0));
+
+        CHECK_FALSE (rig.runs.find (runId)->isFinished());
+        return;
+    }
+
+    //  ONE MOVE ON ITS READER, from where the reader is to the code's second, over 10 ms.
+    REQUIRE (rig.audio.loops.size() == 1u);
+    const auto loop = rig.audio.loops.front();
+    const auto at = 1001 * perTick + horizonSamples;
+
+    CHECK (loop.track == track);
+    CHECK (loop.slot == 0);
+    CHECK (loop.move.crossfade == doctest::Approx (0.010));
+    CHECK (loop.move.loopIn == doctest::Approx (0.0));
+    CHECK (loop.move.loopOut == doctest::Approx (0.0));
+    CHECK (loop.move.direction == 1);
+    CHECK (loop.move.from == doctest::Approx (static_cast<double> (at - start) / 48000.0).epsilon (toTheSample));
+    CHECK (loop.move.fileAt == doctest::Approx (static_cast<double> (at - start + shift) / 48000.0).epsilon (toTheSample));
+    CHECK (run->chaseState == "jumped");
+    CHECK (run->chaseError == doctest::Approx (-30.0).epsilon (1e-6));
+
+    //  The file's end the show knows is Go.dot's to place now: the clip's own is counted in reads.
+    CHECK (rig.audio.endedOutside.count (track) == 1u);
+
+    //  AND THEN IN STEP: no second move, the same run, its playhead where the code says.
+    rig.ticksUntil (1100);
+    CHECK (rig.audio.loops.size() == 1u);
+    CHECK (rig.countOf (rain) == 1);
+    CHECK (rig.audio.launches.size() == 1u);
+    run = rig.runs.find (runId);
+    CHECK_FALSE (run->isFinished());
+    CHECK (run->chaseState == "inStep");
+    CHECK (std::abs (run->chaseError) < 0.05);
+    CHECK (run->position == doctest::Approx (static_cast<double> (1099 * perTick - start + shift) / 48000.0).epsilon (toTheSample));
+}
+
+TEST_CASE ("time group chasing: a locate seats a chaser at its offset and hands its run back on the record, jumps one still in range, ends one whose time is ahead, and leaves a free runner playing")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", "jump");
+    const auto wind = chaser (rig, 1, "Wind", "01:00:20:00", "wind.wav", "jump");
+    const auto bell = chaser (rig, 2, "Bell", "01:00:12:00", "bell.wav", "free");
+    rig.goOn (rig.group);
+    const auto armedAs = rig.runs.liveRunOf (rig.group)->id;
+
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, 100 * perTick);
+
+    //  Rain from tick 600 and the bell from tick 650; at tick 800, the wind still ten seconds off.
+    rig.ticksUntil (800);
+    REQUIRE (rig.countOf (rain) == 1);
+    REQUIRE (rig.countOf (bell) == 1);
+    REQUIRE (rig.countOf (wind) == 0);
+    const auto rainRun = rig.runsOf (rain).front()->id;
+    const auto bellRun = rig.runsOf (bell).front()->id;
+    const auto rainTrack = rig.runs.find (rainRun)->track;
+    const auto bellTrack = rig.runs.find (bellRun)->track;
+    const auto rainStart = rig.runs.find (rainRun)->launchedAtSample;
+    REQUIRE (rainStart == 100 * perTick + 480'000);
+    const auto armsBefore = rig.audio.asked.size();
+
+    //------------------------------------------------------------------------
+    /*  A LOCATE FORWARD to 01:00:30:00. The wind is ten seconds into its file
+        there - and ten and a fifth where a seated sound starts, a seat's lead
+        on: seated at that offset, its run handed back. The rain, twenty in and
+        still sounding, jumps there, never started again. The bell plays on. */
+    rig.heard ("jumped", "25", f0 + 750, 800 * perTick);
+    rig.tickOnce();
+
+    const auto heard = appliedOf (rig.engine, "code.heard");
+    REQUIRE (heard.size() == 2u);
+    REQUIRE (heard.back().args.size() == 7u);
+    const auto windRun = heard.back().args[6].getString();
+
+    const auto* seated = rig.runs.find (windRun);
+    REQUIRE (seated != nullptr);
+    CHECK (seated->cue == wind);
+    CHECK (seated->parent == armedAs);
+    CHECK (seated->launchNotBefore == 800 * perTick + seatLeadSamples);
+
+    const auto windArm = armOf (rig, windRun);
+    REQUIRE (windArm.has_value());
+    CHECK (windArm->startOffset == doctest::Approx (10.2).epsilon (toTheSample));
+
+    //  The rain jumped: one move, to where the code is a launch horizon on; the same run, no new arm.
+    const auto rainLoops = loopsOn (rig, rainTrack);
+    REQUIRE (rainLoops.size() == 1u);
+    CHECK (rainLoops.front().move.crossfade == doctest::Approx (0.010));
+    CHECK (rainLoops.front().move.fileAt == doctest::Approx (20.0 + static_cast<double> (horizonSamples) / 48000.0).epsilon (toTheSample));
+    CHECK (rainLoops.front().move.from
+             == doctest::Approx (static_cast<double> (800 * perTick + horizonSamples - rainStart) / 48000.0).epsilon (toTheSample));
+    CHECK (rig.countOf (rain) == 1);
+    CHECK_FALSE (rig.runs.find (rainRun)->isFinished());
+    CHECK (rig.runs.find (rainRun)->chaseState == "jumped");
+
+    //  The free runner untouched: no move, no stop.
+    CHECK (loopsOn (rig, bellTrack).empty());
+    CHECK (std::count (rig.audio.stops.begin(), rig.audio.stops.end(), bellTrack) == 0);
+    CHECK_FALSE (rig.runs.find (bellRun)->isFinished());
+
+    //  The wind starts on the sample its offset was worked out for, and nothing moves again.
+    rig.ticksUntil (850);
+    CHECK (rig.runs.find (windRun)->launchedAtSample == 800 * perTick + seatLeadSamples);
+    CHECK (rig.runs.find (windRun)->late == 0);
+    CHECK (rig.runs.find (windRun)->chaseState == "inStep");
+    CHECK (rig.audio.loops.size() == 1u);
+    CHECK (rig.audio.asked.size() == armsBefore + 1);
+    CHECK (rig.countOf (wind) == 1);
+
+    //------------------------------------------------------------------------
+    /*  A LOCATE BACK to 01:00:05:00: the rain's and the wind's times are ahead
+        there - both end, as a jump ends what it abandons, their voices stopped;
+        nothing is seated, and the bell, a free runner, plays on. */
+    rig.heard ("jumped", "25", f0 + 125, 850 * perTick);
+    rig.tickOnce();
+
+    CHECK (appliedOf (rig.engine, "code.heard").back().args.size() == 6u);
+    CHECK (rig.runs.find (rainRun)->state == cue::runState::done);
+    CHECK (rig.runs.find (windRun)->state == cue::runState::done);
+    CHECK (std::count (rig.audio.stops.begin(), rig.audio.stops.end(), rainTrack) >= 1);
+    CHECK_FALSE (rig.runs.find (bellRun)->isFinished());
+    CHECK (std::count (rig.audio.stops.begin(), rig.audio.stops.end(), bellTrack) == 0);
+
+    //  And when the code runs into the rain's time again, five seconds on, it starts there, on its sample.
+    const auto again = 850 * perTick + 5 * 48'000;
+    rig.ticksUntil (again / perTick + 30);
+    REQUIRE (rig.countOf (rain) == 2);
+    CHECK (rig.runsOf (rain).back()->launchedAtSample == again);
+    CHECK (rig.rejected == 0);
+}
+
+TEST_CASE ("time group chasing: a member asked for its sample and not yet heard is cut by a locate past its time - it never sounded, and is not started")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto bell = chaser (rig, 0, "Bell", "01:00:10:00", "bell.wav", "free");
+    rig.goOn (rig.group);
+
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, 100 * perTick);
+
+    //  Until the code asks for it: a launch horizon and two ticks before its sample.
+    REQUIRE (rig.tickUntil ([&rig, &bell]
+                            {
+                                return rig.countOf (bell) == 1 && rig.runsOf (bell).front()->launchRequestedAtTick != 0;
+                            }, 1000));
+
+    const auto askedId = rig.runsOf (bell).front()->id;
+    const auto track = rig.runs.find (askedId)->track;
+    REQUIRE (rig.runs.find (askedId)->state != cue::runState::playing);
+
+    //  A LOCATE PAST ITS TIME, in the drain before its launch is said: cut.
+    rig.heard ("jumped", "25", f0 + 500, rig.tick * perTick);
+    rig.tickOnce();
+
+    const auto* cut = rig.runs.find (askedId);
+    CHECK (cut->state == cue::runState::done);
+    CHECK (cut->startedAtTick == -1);
+    CHECK (std::count (rig.audio.stops.begin(), rig.audio.stops.end(), track) >= 1);
+
+    //  And never started again: the code jumped past its time (AIH).
+    rig.ticksUntil (rig.tick + 300);
+    CHECK (rig.countOf (bell) == 1);
+    CHECK (rig.rejected == 0);
+}
+
+TEST_CASE ("time group chasing: the code stopped, a chaser plays on; the code back three seconds later is a locate, and the chaser jumps to it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", "jump");
+    rig.goOn (rig.group);
+
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, 100 * perTick);
+
+    rig.ticksUntil (800);
+    REQUIRE (rig.countOf (rain) == 1);
+    const auto runId = rig.runsOf (rain).front()->id;
+    const auto track = rig.runs.find (runId)->track;
+    const auto start = rig.runs.find (runId)->launchedAtSample;
+
+    //  STOPPED at 01:00:14:00, four seconds into the rain: it plays on, nothing moves it (AIG).
+    rig.heard ("stopped", "25", f0 + 350, 800 * perTick, 0.0);
+    rig.ticksUntil (950);
+    CHECK_FALSE (rig.runs.find (runId)->isFinished());
+    CHECK (rig.audio.loops.empty());
+    CHECK (std::count (rig.audio.stops.begin(), rig.audio.stops.end(), track) == 0);
+
+    //  BACK from where it stopped, three seconds on: the rain is three seconds ahead, and jumps back to the code.
+    rig.heard ("jumped", "25", f0 + 350, 950 * perTick);
+    rig.tickOnce();
+
+    REQUIRE (rig.audio.loops.size() == 1u);
+    const auto at = 950 * perTick + horizonSamples;
+    CHECK (rig.audio.loops.front().move.fileAt == doctest::Approx (4.0 + static_cast<double> (horizonSamples) / 48000.0).epsilon (toTheSample));
+    CHECK (rig.audio.loops.front().move.from == doctest::Approx (static_cast<double> (at - start) / 48000.0).epsilon (toTheSample));
+    CHECK (rig.runs.find (runId)->chaseError == doctest::Approx (3000.0).epsilon (1e-6));
+
+    rig.ticksUntil (1050);
+    CHECK (rig.audio.loops.size() == 1u);
+    CHECK (rig.countOf (rain) == 1);
+    CHECK_FALSE (rig.runs.find (runId)->isFinished());
+    CHECK (rig.runs.find (runId)->chaseState == "inStep");
+}
+
+TEST_CASE ("time group chasing: a movie that chases cuts on its time ring, and its locked sound jumps with it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto moon = rig.make (rig.group, 0, "video", "Moon", { { "at", "01:00:10:00" } });
+    rig.set ("/godot/cue/" + moon + "/source", "movie");
+    rig.set ("/godot/cue/" + moon + "/file", "moon.mov");
+    rig.set ("/godot/cue/" + moon + "/chase", "jump");
+    const auto voice = rig.make (rig.group, 1, "media", "Moon sound");
+    rig.set ("/godot/cue/" + voice + "/file", "moon.wav");
+    rig.set ("/godot/cue/" + voice + "/lockedTo", moon);
+    rig.lengths["moon.mov"] = 60.0;
+    rig.lengths["moon.wav"] = 60.0;
+
+    rig.goOn (rig.group);
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    const std::int64_t anchor = 100 * perTick;
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, anchor);
+
+    rig.ticksUntil (800);
+    REQUIRE (rig.countOf (moon) == 1);
+    REQUIRE (rig.countOf (voice) == 1);
+    const auto movieRun = rig.runsOf (moon).front()->id;
+    const auto soundRun = rig.runsOf (voice).front()->id;
+    REQUIRE (rig.runs.find (soundRun)->parent == movieRun);
+    const auto soundTrack = rig.runs.find (soundRun)->track;
+    CHECK (rig.audio.loops.empty());
+
+    //  THE CODE RE-ANCHORED 300 ms sooner: the movie and its sound are that far behind.
+    rig.heard ("running", "25", f0 + 500, anchor + 960'000 - 14'400);
+    rig.ticksUntil (830);
+
+    /*  THE MOVIE CUT: two points on its time ring on one sample - where it
+        was, then the code's second - a launch horizon after tick 801. */
+    const auto at = 801 * perTick + horizonSamples;
+    std::vector<double> there;
+
+    for (const auto& point : rig.pictures.times[movieRun])
+        if (point.sample == at)
+            there.push_back (point.value);
+
+    REQUIRE (there.size() >= 2u);
+    CHECK (there.back() == doctest::Approx (static_cast<double> (at - anchor - 480'000 + 14'400) / 48000.0).epsilon (toTheSample));
+    CHECK (there.back() - there.front() == doctest::Approx (0.3).epsilon (1e-6));
+    CHECK (rig.runs.find (movieRun)->chaseState == "inStep");
+
+    //  ITS LOCKED SOUND, the same jump on its reader.
+    const auto soundLoops = loopsOn (rig, soundTrack);
+    REQUIRE (soundLoops.size() == 1u);
+    CHECK (soundLoops.front().move.crossfade == doctest::Approx (0.010));
+    CHECK (soundLoops.front().move.fileAt - soundLoops.front().move.from == doctest::Approx (0.3).epsilon (1e-6));
+    CHECK (rig.audio.loops.size() == 1u);
+    CHECK_FALSE (rig.runs.find (movieRun)->isFinished());
+    CHECK_FALSE (rig.runs.find (soundRun)->isFinished());
+}
+
+TEST_CASE ("time group chasing: a chaser whose code lands in another of its slices is sought there - the same run, with the gap a seek makes, and it says so")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", "jump");
+    REQUIRE (rig.document.createRange (rain, 0.0, 10.0).ok);
+    REQUIRE (rig.document.createRange (rain, 20.0, 40.0).ok);
+    rig.goOn (rig.group);
+
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, 100 * perTick);
+
+    rig.ticksUntil (800);
+    REQUIRE (rig.countOf (rain) == 1);
+    const auto runId = rig.runsOf (rain).front()->id;
+    const auto track = rig.runs.find (runId)->track;
+    REQUIRE (rig.runs.find (runId)->range == 0);
+    CHECK (rig.runs.find (runId)->warning.empty());
+
+    /*  THE CODE AT 01:00:25:00 ON TICK 800: fifteen seconds in, in the
+        second slice. Not a jump: a slice's move stays inside the slice.
+
+        By a locate, the handler seeks it at once, to where the code will be
+        a seat's lead after the record's sample - fifteen and a fifth seconds
+        in, 25.2 s of the file. By a re-anchor - no locate - the hook that
+        measures it, on the next tick, finds it eleven seconds out across a
+        slice and asks for the seek itself, to where the code will be the
+        launch latency and the seat's lead on: 25.26 s. */
+    std::int64_t launchAt = 800 * perTick + seatLeadSamples;
+    double offset = 5.2;
+
+    SUBCASE ("by a locate") { rig.heard ("jumped", "25", f0 + 625, 800 * perTick); }
+
+    SUBCASE ("by a re-anchor, the hook's own seek")
+    {
+        rig.heard ("running", "25", f0 + 625, 800 * perTick);
+        launchAt = 801 * perTick + horizonSamples + seatLeadSamples;
+        offset = 5.0 + static_cast<double> (launchAt - 800 * perTick) / 48000.0;
+        rig.tickOnce();
+    }
+
+    rig.tickOnce();
+
+    const auto* sought = rig.runs.find (runId);
+    CHECK (rig.countOf (rain) == 1);
+    CHECK (sought->range == 1);
+    CHECK (sought->warning == "sought");
+    CHECK (sought->launchNotBefore == launchAt);
+    CHECK (std::count (rig.audio.stops.begin(), rig.audio.stops.end(), track) >= 1);
+    CHECK (loopsOn (rig, track).empty());
+
+    const auto arm = armOf (rig, runId);
+    REQUIRE (arm.has_value());
+    CHECK (arm->startSlot == 1);
+    CHECK (arm->sliceOffset == doctest::Approx (offset).epsilon (toTheSample));
+
+    //  Launched again where its offset is for, and sought once.
+    rig.ticksUntil (850);
+    CHECK (rig.runs.find (runId)->launchedAtSample == launchAt);
+    CHECK_FALSE (rig.runs.find (runId)->isFinished());
+    CHECK (appliedOf (rig.engine, "run.seek").size() <= 1u);
+    CHECK (loopsOn (rig, track).empty());
+}
+
+TEST_CASE ("time group chasing: a timeline scene that chases is re-seated around the code's second at a locate - its members sought within it, handed back")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto storm = rig.make (rig.group, 0, "group", "Storm", { { "mode", "timeline" }, { "at", "01:00:10:00" } });
+    rig.set ("/godot/cue/" + storm + "/chase", "jump");
+    const auto thunder = rig.sound (storm, 0, "Thunder", "", "thunder.wav");
+    const auto rain = rig.sound (storm, 1, "Rain", "", "rain.wav");
+    rig.set ("/godot/cue/" + rain + "/preWait", "1.5");
+    rig.lengths["thunder.wav"] = 30.0;
+    rig.lengths["rain.wav"] = 30.0;
+
+    rig.goOn (rig.group);
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, 100 * perTick);
+
+    //  Four seconds into the scene: both sounding, each on its sample.
+    rig.ticksUntil (800);
+    REQUIRE (rig.countOf (storm) == 1);
+    REQUIRE (rig.countOf (thunder) == 1);
+    REQUIRE (rig.countOf (rain) == 1);
+    const auto sceneRun = rig.runsOf (storm).front()->id;
+
+    //  A LOCATE to 01:00:30:00: twenty seconds into the scene.
+    rig.heard ("jumped", "25", f0 + 750, 800 * perTick);
+    rig.tickOnce();
+
+    //  The scene's own run stands; its members are made again under it, at their offsets.
+    CHECK (rig.countOf (storm) == 1);
+    CHECK_FALSE (rig.runs.find (sceneRun)->isFinished());
+    REQUIRE (rig.countOf (thunder) == 2);
+    REQUIRE (rig.countOf (rain) == 2);
+    CHECK (rig.runsOf (thunder).front()->isFinished());
+    CHECK (rig.runsOf (rain).front()->isFinished());
+
+    const auto* newThunder = liveOf (rig, thunder);
+    const auto* newRain = liveOf (rig, rain);
+    REQUIRE (newThunder != nullptr);
+    REQUIRE (newRain != nullptr);
+    CHECK (newThunder->parent == sceneRun);
+    CHECK (newRain->parent == sceneRun);
+
+    const auto heard = appliedOf (rig.engine, "code.heard").back();
+    REQUIRE (heard.args.size() == 8u);
+    CHECK (heard.args[6].getString() == newThunder->id);
+    CHECK (heard.args[7].getString() == newRain->id);
+
+    const auto thunderArm = armOf (rig, newThunder->id);
+    const auto rainArm = armOf (rig, newRain->id);
+    REQUIRE (thunderArm.has_value());
+    REQUIRE (rainArm.has_value());
+    CHECK (thunderArm->startOffset == doctest::Approx (20.2).epsilon (toTheSample));
+    CHECK (rainArm->startOffset == doctest::Approx (18.7).epsilon (toTheSample));
+
+    //  Each launched on the sample its offset is for.
+    const auto newThunderId = newThunder->id;
+    const auto newRainId = newRain->id;
+    rig.ticksUntil (850);
+    CHECK (rig.runs.find (newThunderId)->launchedAtSample == 800 * perTick + seatLeadSamples);
+    CHECK (rig.runs.find (newRainId)->launchedAtSample == 800 * perTick + seatLeadSamples);
+    CHECK (rig.rejected == 0);
+}
+
+TEST_CASE ("time group chasing: a group armed while its code runs seats a chaser already past its time at its offset, by code.seat - and leaves a free runner")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    std::string chase = "jump";
+
+    SUBCASE ("a chaser") {}
+    SUBCASE ("a free runner") { chase = "free"; }
+
+    CodeRig rig;
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", chase);
+
+    //  The code from tick 100; the group armed at tick 1000, eight seconds into the rain's time.
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, 100 * perTick);
+    rig.ticksUntil (1000);
+    rig.goOn (rig.group);
+    rig.ticksUntil (1050);
+
+    const auto seats = appliedOf (rig.engine, "code.seat");
+
+    if (chase == "free")
+    {
+        CHECK (seats.empty());
+        CHECK (rig.countOf (rain) == 0);
+        return;
+    }
+
+    REQUIRE (seats.size() == 1u);
+    REQUIRE (seats.front().args.size() == 3u);
+    const auto sample = seats.front().args[1].getInt64();
+    const auto runId = seats.front().args[2].getString();
+
+    REQUIRE (rig.countOf (rain) == 1);
+    CHECK (rig.runsOf (rain).front()->id == runId);
+    CHECK (rig.runsOf (rain).front()->parent == rig.runs.liveRunOf (rig.group)->id);
+
+    const auto start = 100 * perTick + 480'000;
+    const auto arm = armOf (rig, runId);
+    REQUIRE (arm.has_value());
+    CHECK (arm->startOffset == doctest::Approx (static_cast<double> (sample + seatLeadSamples - start) / 48000.0).epsilon (toTheSample));
+    CHECK (rig.runs.find (runId)->launchedAtSample == sample + seatLeadSamples);
+
+    //  Once: the hook asks no more, and nothing else starts it.
+    rig.ticksUntil (1300);
+    CHECK (appliedOf (rig.engine, "code.seat").size() == 1u);
+    CHECK (rig.countOf (rain) == 1);
+    CHECK (rig.audio.loops.empty());
+}
+
+TEST_CASE ("time group chasing: a replay of a session with locates and a group armed on a running code seats the same runs under the same names")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", "jump");
+    const auto wind = chaser (rig, 1, "Wind", "01:00:20:00", "wind.wav", "jump");
+    const auto bell = chaser (rig, 2, "Bell", "01:00:12:00", "bell.wav", "free");
+    const auto storm = rig.make (rig.group, 3, "group", "Storm", { { "mode", "timeline" }, { "at", "01:00:15:00" } });
+    rig.set ("/godot/cue/" + storm + "/chase", "jump");
+    rig.sound (storm, 0, "Thunder", "", "thunder.wav");
+    rig.lengths["thunder.wav"] = 30.0;
+
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, 100 * perTick);
+    rig.ticksUntil (700);
+    rig.goOn (rig.group);                                       // armed on a running code: the rain seated
+    rig.ticksUntil (800);
+    rig.heard ("jumped", "25", f0 + 750, 800 * perTick);         // forward: the wind seated, the scene re-seated
+    rig.ticksUntil (900);
+    rig.heard ("stopped", "25", f0 + 775, 900 * perTick, 0.0);
+    rig.ticksUntil (1000);
+    rig.heard ("jumped", "25", f0 + 125, 1000 * perTick);        // back: all of them ended
+    rig.ticksUntil (1400);
+    REQUIRE (rig.send ("run.stopAll"));
+    rig.ticksUntil (1500);
+
+    CHECK (rig.countOf (rain) >= 2);
+    CHECK (rig.countOf (wind) >= 1);
+    CHECK (rig.countOf (bell) >= 1);
+    CHECK (appliedOf (rig.engine, "code.seat").size() == 1u);
+    CHECK (rig.rejected == 0);
+
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    //  `wfg replay`: no audio side, no picture side, no hooks.
+    Engine engine;
+    engine.log().openInMemory ({});
+    doc::ShowDocument document;
+    REQUIRE (doc::CanonicalXml::read (show, document).ok);
+    cue::RunTable runs;
+    cue::Focus focus;
+    doc::IdRegistry runIds = doc::IdRegistry::withSeed (77);
+    cue::Runner runner { document, runs, runIds, focus };
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+    runner.setSamplesPerTick (static_cast<int> (perTick));
+    runner.setMediaDurations (&rig.lengths);
+
+    const auto result = replay (engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+
+    for (const auto& run : rig.runs.all())
+    {
+        INFO ("run " << run.id << " of " << run.cue);
+        const auto* again = runs.find (run.id);
+        REQUIRE (again != nullptr);
+        CHECK (again->cue == run.cue);
+        CHECK (again->state == run.state);
+        CHECK (again->parent == run.parent);
+        CHECK (again->endedAtTick == run.endedAtTick);
+    }
+
+    CHECK (runs.all().size() == rig.runs.all().size());
+}
+
+TEST_CASE ("time group chasing: a jump its reader met late is read back - the clock moved to where the reader took it - and the time it lost brings one more jump")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", "jump");
+    rig.goOn (rig.group);
+
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    const std::int64_t anchor = 100 * perTick;
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, anchor);
+
+    const auto start = anchor + 480'000;
+    rig.ticksUntil (start / perTick + 50);
+    REQUIRE (rig.countOf (rain) == 1);
+    const auto runId = rig.runsOf (rain).front()->id;
+
+    //  The first move will be met 40 ms late: the file reaches the code's second 40 ms of reading later.
+    rig.audio.adoptMove = 1;
+    rig.audio.adoptLateBy = 0.040;
+
+    rig.ticksUntil (1000);
+    rig.heard ("running", "25", f0 + 500, anchor + 960'000 - 1440);
+    rig.ticksUntil (1100);
+
+    /*  TWO MOVES: the first, 30 ms; read back late, the member is 40 ms behind
+        again, and the second puts it where the code is - the same file over
+        reader as the first, placed once the first was reached. */
+    REQUIRE (rig.audio.loops.size() == 2u);
+    const auto first = rig.audio.loops[0].move;
+    const auto second = rig.audio.loops[1].move;
+    CHECK (first.fileAt - first.from == doctest::Approx (0.030).epsilon (1e-9));
+    CHECK (second.fileAt - second.from == doctest::Approx (0.030).epsilon (1e-9));
+    CHECK (second.from >= first.from + static_cast<double> (horizonSamples) / 48000.0);
+
+    const auto* run = rig.runs.find (runId);
+    CHECK (run->chaseState == "inStep");
+    CHECK (run->position == doctest::Approx (static_cast<double> (1099 * perTick - start + 1440) / 48000.0).epsilon (toTheSample));
+}
+
+TEST_CASE ("time group chasing: a chaser seated mid-file and jumped back before where it was seated reads where it is - one jump, its playhead the code's")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto wind = chaser (rig, 0, "Wind", "01:00:20:00", "wind.wav", "jump");
+    rig.goOn (rig.group);
+
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, 100 * perTick);
+
+    //  Seated 10.2 s in by a locate to 01:00:30:00, and launched there.
+    rig.ticksUntil (800);
+    rig.heard ("jumped", "25", f0 + 750, 800 * perTick);
+    rig.ticksUntil (850);
+    REQUIRE (rig.countOf (wind) == 1);
+    const auto runId = rig.runsOf (wind).front()->id;
+    const auto track = rig.runs.find (runId)->track;
+    REQUIRE (rig.runs.find (runId)->launchedAtSample == 800 * perTick + seatLeadSamples);
+
+    //  BACK A SECOND, to 01:00:29:00 at tick 850: nine seconds in - 9.04 a horizon on - before the 10.2 it was seated at.
+    rig.heard ("jumped", "25", f0 + 725, 850 * perTick);
+    rig.tickOnce();
+
+    REQUIRE (loopsOn (rig, track).size() == 1u);
+    CHECK (loopsOn (rig, track).front().move.fileAt == doctest::Approx (9.04).epsilon (toTheSample));
+
+    //  Read from there, not held at the second it was seated at: in step, and no second jump.
+    rig.ticksUntil (950);
+    CHECK (loopsOn (rig, track).size() == 1u);
+    CHECK (rig.runs.find (runId)->chaseState == "inStep");
+    CHECK (rig.runs.find (runId)->position
+             == doctest::Approx (9.04 + static_cast<double> (949 * perTick - (850 * perTick + horizonSamples)) / 48000.0).epsilon (toTheSample));
+    CHECK (rig.countOf (wind) == 1);
+}
+
+TEST_CASE ("time group chasing: a group armed before its code is heard is seated by the code.heard that brings the code mid-chaser, and never again by code.seat")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CodeRig rig;
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", "jump");
+    rig.goOn (rig.group);
+
+    //  The code appears at 01:00:16:00: the rain six seconds in, 6.2 a seat's lead on.
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0 + 400, 100 * perTick);
+    rig.ticksUntil (200);
+
+    CHECK (appliedOf (rig.engine, "code.seat").empty());
+    REQUIRE (rig.countOf (rain) == 1);
+    const auto runId = rig.runsOf (rain).front()->id;
+    CHECK (appliedOf (rig.engine, "code.heard").back().args.size() == 7u);
+    CHECK (appliedOf (rig.engine, "code.heard").back().args[6].getString() == runId);
+
+    const auto arm = armOf (rig, runId);
+    REQUIRE (arm.has_value());
+    CHECK (arm->startOffset == doctest::Approx (6.2).epsilon (toTheSample));
+    CHECK (rig.runs.find (runId)->launchedAtSample == 100 * perTick + seatLeadSamples);
+    CHECK (rig.audio.loops.empty());
 }

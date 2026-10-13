@@ -1627,3 +1627,96 @@ TEST_CASE ("seat: a time group's crossed line rides the position - read back, it
 
     CHECK (onTheFollower == 1u);
 }
+
+//==============================================================================
+/*  A CHASER A LOCATE SEATED, CARRIED BY A SEAT (namespace draft §60, TG.8; RD.8):
+    the leader's code locates into the middle of a member that chases, which is
+    seated there, under the group; a follower seated from the leader's position
+    a while later holds that run under the leader's name, under the leader's
+    group, armed at the second the leader's will have reached when it starts -
+    as any sound a seat carries. */
+TEST_CASE ("seat: a chaser a locate seated is carried by pair.seat - under the leader's name, at the leader's playhead")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    std::string text, listId, group, wind, source;
+
+    {
+        doc::ShowDocument show;
+        listId = show.createList ("Sound").id;
+        const auto input = show.createInput (1);
+        REQUIRE (input.ok);
+        REQUIRE (show.setAttribute ("/godot/sync/ltcIn", input.id).ok);
+        source = "ltc:" + input.id;
+        REQUIRE (show.createCue (listId, 0, "memo", "Before").ok);
+        group = show.createCue (listId, 1, "group", "On the code", {}, { { "mode", "time" } }).id;
+        REQUIRE (! group.empty());
+        wind = show.createCue (group, 0, "media", "Wind", {}, { { "at", "01:00:20:00" } }).id;
+        REQUIRE (! wind.empty());
+        REQUIRE (show.setAttribute ("/godot/cue/" + wind + "/file", "wind.wav").ok);
+        REQUIRE (show.setAttribute ("/godot/cue/" + wind + "/chase", "jump").ok);
+        REQUIRE (show.createCue (listId, 2, "memo", "After").ok);
+        REQUIRE (show.setAttribute ("/godot/list/goDebounce", "0").ok);
+        text = doc::CanonicalXml::write (show);
+    }
+
+    const std::map<std::string, double> lengths { { "wind.wav", 60.0 } };
+
+    Machine leader { text }, follower { text };
+    leader.runner.setMediaDurations (&lengths);
+    follower.runner.setMediaDurations (&lengths);
+    leader.go (10, listId, group);
+
+    const auto heard = [&source] (std::int64_t frame, std::int64_t sample)
+    {
+        return std::vector<osc::Value> { s (source), s ("jumped"), s ("25"), osc::Value::int64 (frame),
+                                         osc::Value::int64 (sample), osc::Value::float64 (1.0) };
+    };
+
+    //  The code from 01:00:00:00 at tick 100; at 300 it locates to 01:00:30:00, ten seconds into the wind.
+    for (std::int64_t tick = 12; tick < 400; ++tick)
+    {
+        if (tick == 100)
+            REQUIRE (leader.engine.submit (source, "code.heard", heard (90'000, 100 * 960)));
+
+        if (tick == 300)
+            REQUIRE (leader.engine.submit (source, "code.heard", heard (90'750, 300 * 960)));
+
+        leader.tickOnce (tick);
+    }
+
+    const auto seated = leader.runOf (wind);
+    REQUIRE (! seated.empty());
+    const auto* leaderRun = leader.runs.find (seated);
+    REQUIRE (leaderRun->launchedAtSample == 300 * 960 + 10 * 960);
+    REQUIRE (leaderRun->startOffset == doctest::Approx (10.2));
+    REQUIRE (leaderRun->position > 10.2);
+
+    const auto at = leader.runner.positionNow (399, 9);
+    const auto leaderPosition = leaderRun->position;
+    const auto leaderParent = leaderRun->parent;
+
+    //  SEATED 2601 ticks later on the follower's clock.
+    const std::int64_t local = 3000;
+    auto rebased = at;
+    rebased.rebase (local - 399);
+    REQUIRE (follower.engine.submit (std::string (origin::engine), "pair.seat", { s (pair::toText (rebased)) }));
+    follower.tickOnce (local, false);
+
+    REQUIRE (follower.runOf (wind) == seated);
+    const auto* carried = follower.runs.find (seated);
+    REQUIRE (carried != nullptr);
+    CHECK (carried->parent == leaderParent);
+
+    //  At the leader's playhead, as far on as the leader's will be when this one starts: the launch latency and the seat's lead.
+    const auto lead = static_cast<double> (follower.runner.latencyTicks() + cue::Runner::seatLeadTicks) / 50.0;
+    CHECK (carried->startOffset == doctest::Approx (leaderPosition + lead).epsilon (1e-9));
+
+    std::size_t onTheFollower = 0;
+
+    for (const auto& run : follower.runs.all())
+        if (run.cue == wind)
+            ++onTheFollower;
+
+    CHECK (onTheFollower == 1u);
+}

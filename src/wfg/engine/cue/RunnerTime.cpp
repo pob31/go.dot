@@ -59,8 +59,8 @@
 
       - Armed while the code is already past a member's time, the group does
         not start it: a free runner starts only when the code runs into its
-        time. A chaser that should be playing by then is TG.8's to seat
-        (`seatChasersAt`), called here and left empty.
+        time. A chaser that should be playing by then is seated (TG.8,
+        `seatChasersAt`, below).
 
     A SCENE AS A MEMBER (AIV) - a timeline or an automatic sequence - whose
     every member's start the walk knows (`ShowWalk.h`: one round, every member,
@@ -84,6 +84,39 @@
     reads no map here - reaches the same runs from the log, and a backup's
     hooks, applying the main's `code.heard` mapped onto its own clock, decide
     the same things on the same ticks under the same names.
+
+    CHASING (TG.8; AIF, AIG, AIH, AIN, AIT). A member whose `chase` is not
+    `free` is held to its code once it plays: it should be as far into its
+    material as the code is past its time (`chase::chasePlaceOf`). The two
+    moves that are not gradual are built here; TG.9 adds the catch-up below
+    them.
+
+      - THE JUMP. Every tick after the speeds are placed (`chaseTick`), a
+        chaser by `jump` is measured a launch horizon ahead - where its file
+        is by its own clock against where the code says - and, more than
+        `sync/chaseTolerance` out while the code runs forwards, jumps there
+        over `sync/chaseCrossfade`: inside the slice it plays, or in a cue with
+        no slices, a move on its slot's reader with a crossfade, the one a
+        slice moved under itself makes (§33, CD), and the run's clock told
+        where the file is from there. Across slices, a seek, its gap said
+        (`sought`). A movie cuts, a step on its time ring, and its locked
+        sounds jump with it. One move at a time on a voice: two segments only
+        live in one, so a jump waits until the last move is reached.
+
+      - THE LOCATE. A `jumped` turn - the code appeared, came back after a
+        stop, or located - re-seats the chasers inside its own `code.heard`
+        record, which hands back the runs it drew (`seatChasersOnCode`): one
+        that should be playing at the new place and is, is brought into step
+        where it is; one that should and is not is seated at its offset, as
+        load to time seats a cue; one that should not and is ends, as a jump
+        ends what it abandons. Free runners playing are left alone (AIH); a
+        member of any kind asked for its sample on the old line and not yet
+        playing is cut. A code that stops leaves every chaser playing (AIG),
+        and its return is a locate.
+
+      - A GROUP ARMED WHILE ITS CODE RUNS seats its chasers already past their
+        time by `code.seat`, which the hook submits with the sample it read
+        the code at - the one place a hook asks for a seat.
 */
 
 #include <wfg/engine/cue/Runner.h>
@@ -91,7 +124,9 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/cue/Override.h>
+#include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/cue/ShowWalk.h>
+#include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/cue/TriggerIndex.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/timecode/CodeMap.h>
@@ -99,11 +134,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::cue
@@ -220,6 +257,29 @@ namespace wfg::cue
         {
             return kind == "media" || kind == "mic" || kind == "timecode" || kind == "video";
         }
+
+        /*  WHETHER A MEMBER'S `chase` HOLDS IT TO ITS CODE (AIF): every word
+            but `free`, and an empty one is the row's default, `free`. */
+        bool chasesTheCode (const std::string& chase) noexcept
+        {
+            return ! chase.empty() && chase != "free";
+        }
+
+        //  THE WORDS `run/chaseState` TAKES (TG.2's row).
+        namespace chaseWords
+        {
+            inline constexpr const char* freeRunner = "free";
+            inline constexpr const char* inStep = "inStep";
+            inline constexpr const char* catching = "catching";
+            inline constexpr const char* jumped = "jumped";
+        }
+
+        /*  HOW FAR APART A SOUND AND ITS CODE MAY BE IN TWO DIFFERENT SLICES
+            before it is sought rather than left to cross into the code's: a
+            second, far past a chase's drift at a boundary - a member a few
+            milliseconds from the code crosses into its slice within those
+            milliseconds - and well short of a locate's distance. */
+        constexpr double acrossSlicesSeconds = 1.0;
     }
 
     //==========================================================================
@@ -291,6 +351,7 @@ namespace wfg::cue
             entry.at = textOf (member, "at");
             entry.preWait = std::max (0.0, numberOf (member, "preWait"));
             entry.kind = member.hasType ("Group") ? "group" : member.hasType ("Video") ? "video" : "media";
+            entry.chase = textOf (member, "chase");
             plan.members.push_back (std::move (entry));
         }
 
@@ -413,15 +474,15 @@ namespace wfg::cue
         return placed != nullptr && placed->codeSample > 0;
     }
 
-    void Runner::seatChasersAt (GroupJob& job, std::int64_t frame)
+    void Runner::seatChasersAt (Engine& engine, const Run& groupRun, std::int64_t now)
     {
-        /*  TG.8 SEATS HERE a member that chases and whose time the code has
-            already passed - started at its offset, as load to time seats a
-            scene (`seatPlan`), when it should be playing at `frame` - on the
-            group armed while its code runs, and on every jump. Free runners are
-            never seated (AIH): they start only when the code runs into their
-            time. Nothing yet: TG.7 fires chasers and free runners alike. */
-        juce::ignoreUnused (job, frame);
+        /*  NOT TWICE: a `jumped` turn applied since the group was armed has
+            seated its chasers already, in its own record, and the code has run
+            on from there - the members it reaches from here are the hook's. */
+        if (seatedOnCode (groupRun.id))
+            return;
+
+        engine.submit (origin::engine, "code.seat", { osc::Value::string (groupRun.id), osc::Value::int64 (now) });
     }
 
     //==========================================================================
@@ -569,7 +630,18 @@ namespace wfg::cue
             job.codeTurns = turns;
             job.codeUnitNum = map->unit.num;
             job.codeUnitDen = map->unit.den;
-            seatChasersAt (job, job.codeCrossed);
+
+            /*  AND A CHASER ALREADY PAST ITS TIME is seated where the code is
+                (TG.8), by a record a replay applies. */
+            if (forwards)
+                for (const auto& member : plan.members)
+                    if (const auto frame = frames.find (member.cue);
+                        frame != frames.end() && chasesTheCode (member.chase)
+                          && ! ahead (frame->second, job.codeCrossed, perDay))
+                    {
+                        seatChasersAt (engine, groupRun, now);
+                        break;
+                    }
         }
 
         /*  A JOB A SEAT HANDED OVER (RD.8) holds no count of this machine's:
@@ -585,7 +657,10 @@ namespace wfg::cue
             group crossed is where it landed, so a member it jumped past is never
             started; what was loaded for a time still in the window is kept, and
             what was loaded for a time the code no longer comes to is let go,
-            idle, its voice with it. A free runner already playing plays on. */
+            idle, its voice with it. A free runner already playing plays on. The
+            chasers were re-seated by the `code.heard` record that said the jump
+            (TG.8, `seatChasersOnCode`), in the drain before this tick, and what
+            it seated is asked for already, not waiting on the code. */
         else if (turns != job.codeTurns)
         {
             job.codeTurns = turns;
@@ -613,8 +688,6 @@ namespace wfg::cue
                     if (child->cue == member.cue && awaitsTheCode (*child))
                         engine.submit (origin::engine, "run.kill", one (child->id));
             }
-
-            seatChasersAt (job, job.codeCrossed);
         }
 
         /*  A CODE WHOSE RATE BECAME CLEARER (TG.5's `running` with another
@@ -852,5 +925,1006 @@ namespace wfg::cue
 
         launchRun (engine, tick, made);
         return made;
+    }
+
+    //==========================================================================
+    /*  WHERE A CHASER SHOULD BE (TG.8), pure: see Runner.h. */
+    namespace chase
+    {
+        double codeSecondsSince (const timecode::CodeMap& map, std::int64_t frame, std::int64_t sample) noexcept
+        {
+            if (map.unit.num <= 0 || map.unit.den <= 0)
+                return 0.0;
+
+            const auto at = map.positionAt (sample);
+            const auto frames = static_cast<double> (timecode::codemap::nearestOffset (at.frame - frame, map.unit.perDay))
+                                  + at.fraction;
+
+            return frames * static_cast<double> (map.unit.den) / static_cast<double> (map.unit.num);
+        }
+
+        Place chasePlaceOf (const std::vector<RangeSpec>& ranges, double startOffset,
+                            std::optional<double> fileLength, double rate, double seconds)
+        {
+            Place out;
+
+            /*  BEFORE ITS TIME: where it would begin - its first slice's in
+                point, or its start offset. */
+            if (seconds < 0.0)
+            {
+                out.before = true;
+                out.file = startOffset;
+
+                for (std::size_t index = 0; index < ranges.size(); ++index)
+                    if (ranges[index].out > ranges[index].in)
+                    {
+                        out.range = static_cast<int> (index);
+                        out.file = ranges[index].in;
+                        break;
+                    }
+
+                return out;
+            }
+
+            const auto progress = seconds * std::max (0.0, rate);
+            out.progress = progress;
+
+            //  NO SLICES: the file from its start offset, over at its end when the show knows it.
+            if (ranges.empty())
+            {
+                out.file = startOffset + progress;
+                out.over = fileLength.has_value() && out.file >= *fileLength;
+                return out;
+            }
+
+            /*  A PLAYLIST OVER ONE FILE (§3.24), pass by pass in order. A slice
+                that loops for ever is followed pass by pass too: the code says
+                how long it has played, where a load to time has nobody to ask
+                and lands on its first pass. */
+            auto remaining = progress;
+            auto last = -1;
+
+            for (std::size_t index = 0; index < ranges.size(); ++index)
+            {
+                const auto& slice = ranges[index];
+                const auto span = slice.out - slice.in;
+
+                if (! (span > 0.0))
+                    continue;
+
+                last = static_cast<int> (index);
+                const auto whole = span * static_cast<double> (slice.loops);
+
+                if (slice.loops <= 0 || remaining < whole)
+                {
+                    const auto passes = std::floor (remaining / span);
+
+                    out.range = static_cast<int> (index);
+                    out.pass = static_cast<int> (passes) + 1;
+                    out.file = slice.in + (remaining - passes * span);
+                    return out;
+                }
+
+                remaining -= whole;
+            }
+
+            out.over = true;
+            out.range = last;
+            out.file = last >= 0 ? ranges[static_cast<std::size_t> (last)].out : startOffset;
+            return out;
+        }
+    }
+
+    //==========================================================================
+    Runner::ChaseSettings Runner::chaseSettings() const
+    {
+        const auto read = [this] (const char* name, double fallback)
+        {
+            const auto value = osc::parseDouble (document.getAttribute (std::string ("/godot/sync/") + name)
+                                                   .value_or (std::string {}));
+
+            return value.has_value() && std::isfinite (*value) ? std::max (0.0, *value) : fallback;
+        };
+
+        /*  A TOLERANCE OF NOUGHT is as tight as a jump can be held, not a jump
+            every tick: what is left after a jump is a sample's rounding, and a
+            tenth of a millisecond is twice that at 48 kHz. */
+        ChaseSettings out;
+        out.tolerance = std::max (0.0001, read ("chaseTolerance", 10.0) / 1000.0);
+        out.catchUp = std::max (out.tolerance, read ("chaseJump", 0.25));
+        out.crossfade = read ("chaseCrossfade", 10.0) / 1000.0;
+        return out;
+    }
+
+    std::optional<chase::Place> Runner::chaseTargetOf (const juce::ValueTree& cue, const TimeMember& member,
+                                                       const TimePlan& plan, const timecode::CodeMap& map,
+                                                       std::int64_t sample, double start,
+                                                       const std::map<std::string, double>* lengths) const
+    {
+        if (! cue.isValid())
+            return std::nullopt;
+
+        const auto frame = frameOnCode (map, member.at, plan.showRate);
+        const auto rate = numberOf (cue, "rate");
+
+        /*  BACKWARDS OR STANDING, nothing to hold it to: a cue played the other
+            way runs from its end (§41), and one at nought never moves. */
+        if (! frame.has_value() || ! std::isfinite (rate) || ! (rate > 0.0))
+            return std::nullopt;
+
+        return chase::chasePlaceOf (rangesOf (cue), std::max (0.0, numberOf (cue, "startOffset")),
+                                    playedLengthOf (cue, lengths), rate,
+                                    chase::codeSecondsSince (map, *frame, sample) - start);
+    }
+
+    std::optional<double> Runner::chaseErrorOf (const Run& run, std::int64_t sample, const chase::Place& target,
+                                                double rate, const std::vector<RangeSpec>& ranges) const
+    {
+        if (audio == nullptr || run.launchedAtSample <= 0 || sample < run.launchedAtSample || ! (rate > 0.0))
+            return std::nullopt;
+
+        //  Where its own clock has its file: what `run/position` reads.
+        const auto actual = fileSecondAt (run, static_cast<double> (sample));
+
+        //  NO SLICES, as the code has none either: one file against the other.
+        if (run.range < 0 || target.range < 0)
+        {
+            if ((run.range < 0) != (target.range < 0))
+                return std::nullopt;
+
+            return (actual - target.file) / rate;
+        }
+
+        const auto slot = static_cast<std::size_t> (run.range);
+
+        if (slot >= run.playingSlices.size())
+            return std::nullopt;
+
+        const auto& playing = run.playingSlices[slot];
+        const auto span = playing.out - playing.in;
+
+        /*  IN THE SLICE THE CODE IS IN: the near way round its loop, since the
+            same second comes round at every pass - and a member a whole pass
+            out reads in step, its count of passes its own. */
+        if (run.range == target.range)
+        {
+            auto difference = actual - target.file;
+            const auto loops = slot < ranges.size() ? ranges[slot].loops : 1;
+
+            if (span > 0.0 && loops != 1)
+            {
+                difference = std::fmod (difference, span);
+
+                if (difference >= span / 2.0)
+                    difference -= span;
+                else if (difference < -span / 2.0)
+                    difference += span;
+            }
+
+            return difference / rate;
+        }
+
+        /*  IN ANOTHER: what each has played since the cue began - the slices
+            ahead of the run's whole, then its own passes as its clock last
+            counted them. */
+        auto before = 0.0;
+
+        for (std::size_t index = 0; index < slot && index < ranges.size(); ++index)
+            if (const auto length = ranges[index].out - ranges[index].in; length > 0.0)
+                before += length * static_cast<double> (std::max (1, ranges[index].loops));
+
+        const auto played = before + static_cast<double> (std::max (0, run.rangeIteration - 1)) * std::max (0.0, span)
+                              + (actual - playing.in);
+
+        return (played - target.progress) / rate;
+    }
+
+    //==========================================================================
+    bool Runner::chaseJump (Run& run, std::int64_t sample, const chase::Place& target, double crossfade)
+    {
+        if (audio == nullptr || run.kind != "media" || run.track < 0 || run.launchedAtSample <= 0
+              || sample <= run.launchedAtSample || run.stopIssued || run.rangesFinished || run.direction < 0)
+            return false;
+
+        const auto now = audio->samplesElapsed();
+        const auto rate = static_cast<double> (audio->sampleRate());
+
+        /*  ONE MOVE AT A TIME ON A VOICE: it keeps the latest two segments, the
+            one a jump fades out of and the jump, so a move is placed only once
+            the last one - a jump's, or a slice moved under itself (§33) - has
+            been reached. And never closer than two blocks, as a launch. */
+        if (! (rate > 0.0) || now < run.loopMovePlacedAt
+              || sample - now < 2 * static_cast<std::int64_t> (audio->blockSize()))
+            return false;
+
+        //----------------------------------------------------------------------
+        /*  A CUE WITH NO SLICES: the move on slot nought, from where its reader
+            will be, and the run's file read from there as a turn's is (§41) -
+            bent, its file from `turnFile` at `turnSource`. When the show knows
+            the file's end, Go.dot places that end itself, as it does for a cue
+            that has played backwards: the clip's own end is counted in reads,
+            and a jump moved the file under them. One whose end is not known
+            keeps the clip's, out by what its jumps added up to. */
+        if (run.range < 0)
+        {
+            if (target.range >= 0)
+                return false;
+
+            const auto readerAt = readerSecondAt (run, static_cast<double> (sample));
+            const auto move = audio->placeLoop (run.track, 0, { readerAt, target.file, 0.0, 0.0, crossfade, 1, false });
+
+            if (move == 0)
+                return false;
+
+            run.turnSource = run.rateClock.sourceAt (static_cast<double> (sample));
+            run.turnFile = target.file;
+            run.bent = true;
+
+            if (run.pieceEnd > run.pieceStart)
+            {
+                run.turnEndPlaced = 0;
+
+                if (! run.turned)
+                {
+                    run.turned = true;
+                    audio->endsOutside (run.track, true);
+                }
+            }
+
+            run.loopMove = move;
+            run.loopMoveFrom = readerAt;
+            run.loopMovePlacedAt = sample;
+            return true;
+        }
+
+        //----------------------------------------------------------------------
+        /*  INSIDE THE SLICE IT PLAYS: the slice moved under itself to where the
+            code is, its points unchanged - `moveSoundingSlice`'s clock, from the
+            sample the move lands on - and the passes the code says it has
+            played already counted, so the slice ends where the code's would.
+            Not a slice on its way in (a boundary placed, a move not reached),
+            nor one that bounces or plays backwards. */
+        const auto slot = static_cast<std::size_t> (run.range);
+
+        if (target.range != run.range || slot >= run.playingSlices.size() || run.bent || run.passSamples <= 0
+              || run.rangeStartedAtSample <= 0 || now < run.rangeStartedAtSample)
+            return false;
+
+        const auto playing = run.playingSlices[slot];
+
+        if (playing.pingPong || ! (target.file >= playing.in && target.file < playing.out))
+            return false;
+
+        const auto atSpeed = ! run.rateClock.isIdentityFrom (static_cast<double> (run.launchedAtSample));
+        const auto played = atSpeed ? run.rateClock.sourceAt (static_cast<double> (sample)) - run.rangeSource
+                                    : static_cast<double> (sample - run.rangeStartedAtSample);
+        const auto readerAt = run.readerAtSliceStart + played / rate;
+
+        const auto move = audio->placeLoop (run.track, run.range,
+                                            { readerAt, target.file, playing.in, playing.out, crossfade, 1, false });
+
+        if (move == 0)
+            return false;
+
+        //  The outgoing clock, kept for the lane until the move is reached (§20.4).
+        run.laneOutgoingOrigin = run.positionOrigin;
+        run.laneOutgoingAt = run.rangeStartedAtSample;
+        run.laneOutgoingPass = run.passSamples;
+        run.laneOutgoingSource = run.rangeSource;
+        run.laneOutgoingFirst = run.firstPassSamples;
+        run.laneOutgoingFirstFrom = run.firstPassFrom;
+
+        run.rangeStartedAtSample = sample;
+        run.rangeSource = run.rateClock.sourceAt (static_cast<double> (sample));
+        run.positionOrigin = playing.in;
+        run.firstPassFrom = target.file;
+        run.firstPassSamples = std::max<std::int64_t> (1, std::llround ((playing.out - target.file) * rate));
+        run.passesBefore = std::max (0, target.pass - 1);
+        run.readerAtSliceStart = readerAt;
+        run.boundaryPlacedAt = -1;
+
+        run.loopMove = move;
+        run.loopMoveFrom = readerAt;
+        run.loopMovePlacedAt = sample;
+        return true;
+    }
+
+    void Runner::cutMovie (VideoJob& job, std::int64_t sample, const chase::Place& target,
+                           const std::vector<RangeSpec>& ranges)
+    {
+        /*  A STEP on the playhead's ring, as a seek places one: where it is
+            there, then where it goes - a picture cuts rather than crossfades
+            (AIT). Its range and pass follow the code's. */
+        placeVideoPoint (job, video::Property::time, { sample, videoValueOf (job, video::Property::time, sample) });
+        placeVideoPoint (job, video::Property::time, { sample, target.file });
+
+        job.moviePosition = target.file;
+        job.movieAt = sample;
+        job.rangeId = target.range >= 0 && static_cast<std::size_t> (target.range) < ranges.size()
+                        ? ranges[static_cast<std::size_t> (target.range)].id : std::string {};
+        job.pass = std::max (0, target.pass - 1);
+        job.bounce = 1;
+    }
+
+    //==========================================================================
+    bool Runner::steerChaser (Engine& engine, Run& run, const juce::ValueTree& targetCue, const TimeMember& member,
+                              const TimePlan& plan, const timecode::CodeMap& map, double start,
+                              const ChaseSettings& settings, bool byJump, bool inHandler)
+    {
+        if (run.isFinished() || run.state == runState::stopping || run.takenBack || ! targetCue.isValid())
+            return false;
+
+        const auto rate = numberOf (targetCue, "rate");
+        const auto* lengths = handlerDurations();
+
+        /*  THE ERROR SAID, and whether it is out of step by more than the
+            method lets it be before it acts: the tolerance for a jump, the
+            catch-up's own limit for varispeed and timestretch (TG.9 steers
+            below it). */
+        const auto outOfStep = [&run, &settings, byJump] (double error)
+        {
+            run.chaseError = error * 1000.0;
+
+            if (std::abs (error) <= settings.tolerance)
+            {
+                run.chaseState = chaseWords::inStep;
+                return false;
+            }
+
+            if (! byJump && std::abs (error) <= settings.catchUp)
+            {
+                run.chaseState = chaseWords::catching;
+                return false;
+            }
+
+            return true;
+        };
+
+        //----------------------------------------------------------------------
+        /*  A MOVIE, measured where its next point is placed: its playhead there
+            against the code's second. Not while it waits for its sounds after a
+            seek, nor bouncing, nor backwards. */
+        if (run.kind == "video")
+        {
+            VideoJob* job = nullptr;
+
+            for (auto& candidate : showing)
+                if (candidate.self == run.id && candidate.movie)
+                    job = &candidate;
+
+            const auto at = videoSampleAhead();
+            const auto sampleRate = videoSampleRate();
+
+            if (job == nullptr || ! job->placed || job->removed || job->movieEnded || ! job->soundsSought.empty()
+                  || job->bounce != 1 || ! (job->rate > 0.0) || at < 0 || at < job->movieAt || sampleRate <= 0
+                  || ! (rate > 0.0))
+                return false;
+
+            const auto target = chaseTargetOf (targetCue, member, plan, map, at, start, lengths);
+
+            if (! target.has_value() || ! target->sounding())
+                return false;
+
+            const auto ranges = rangesOf (targetCue);
+            const auto actual = job->moviePosition
+                                  + job->rate * static_cast<double> (at - job->movieAt) / static_cast<double> (sampleRate);
+            auto error = actual - target->file;
+
+            //  The near way round a loop, in the slice the code is in.
+            if (target->range >= 0 && static_cast<std::size_t> (target->range) < ranges.size())
+            {
+                const auto& slice = ranges[static_cast<std::size_t> (target->range)];
+                const auto span = slice.out - slice.in;
+
+                if (slice.id == job->rangeId && slice.loops != 1 && span > 0.0)
+                {
+                    error = std::fmod (error, span);
+
+                    if (error >= span / 2.0)
+                        error -= span;
+                    else if (error < -span / 2.0)
+                        error += span;
+                }
+            }
+
+            if (! outOfStep (error / rate))
+                return false;
+
+            cutMovie (*job, at, *target, ranges);
+            run.chaseState = chaseWords::jumped;
+            return true;
+        }
+
+        //----------------------------------------------------------------------
+        /*  A SOUND, measured a launch horizon ahead, where a jump would land.
+            Not one played the other way or bouncing between a slice's points:
+            its file runs against the clock, and the code's line names none. */
+        if (run.kind != "media" || audio == nullptr || samplesPerTick <= 0 || run.direction < 0
+              || (run.range >= 0 && run.bent))
+            return false;
+
+        const auto now = audio->samplesElapsed();
+        const auto at = now + static_cast<std::int64_t> (latencyTicks()) * samplesPerTick;
+
+        if (run.launchedAtSample <= 0 || at <= run.launchedAtSample)
+            return false;
+
+        const auto target = chaseTargetOf (targetCue, member, plan, map, at, start, lengths);
+
+        if (! target.has_value() || ! target->sounding())
+            return false;
+
+        const auto ranges = rangesOf (targetCue);
+        const auto error = chaseErrorOf (run, at, *target, rate, ranges);
+
+        if (! error.has_value() || ! outOfStep (*error))
+            return false;
+
+        //  IN THE SLICE IT PLAYS, or a cue with none: the crossfaded jump.
+        if (target->range == run.range)
+        {
+            if (! chaseJump (run, at, *target, settings.crossfade))
+                return false;
+
+            run.chaseState = chaseWords::jumped;
+            return true;
+        }
+
+        /*  IN ANOTHER SLICE. A second or less apart, it is one about to cross
+            its boundary into the code's, or the code about to cross into its
+            own, and it is left to: in the same slice, a jump. Further, it is
+            sought there - stopped and started again where the code will be when
+            it can launch, the seat's lead on, and said: a seek has a gap. A
+            handler submits nothing; a locate sought it already if its slice
+            had moved. */
+        if (inHandler || std::abs (*error) < acrossSlicesSeconds)
+            return false;
+
+        const auto launchAt = now + static_cast<std::int64_t> (latencyTicks() + seatLeadTicks) * samplesPerTick;
+        const auto there = chaseTargetOf (targetCue, member, plan, map, launchAt, start, lengths);
+
+        if (! there.has_value() || ! there->sounding())
+            return false;
+
+        run.launchNotBefore = launchAt;
+        run.warning = runWarning::sought;
+        run.chaseState = chaseWords::jumped;
+        engine.submit (origin::engine, "run.seek", { osc::Value::string (run.id), osc::Value::float64 (there->file) });
+        return true;
+    }
+
+    //==========================================================================
+    void Runner::chaseTick (Engine& engine)
+    {
+        if (samplesPerTick <= 0)
+            return;
+
+        std::optional<ChaseSettings> settings;
+
+        /*  BY INDEX: nothing here makes a job, but the jobs are the handlers'
+            and a reference held across a submit is a habit not to start. */
+        for (std::size_t index = 0; index < scheduled.size(); ++index)
+        {
+            if (scheduled[index].retired || scheduled[index].phase != groupPhase::members)
+                continue;
+
+            const auto groupId = scheduled[index].run;
+            const auto* groupRun = runs.find (groupId);
+
+            if (groupRun == nullptr || groupRun->isFinished())
+                continue;
+
+            const auto group = document.findById (groupRun->cue);
+
+            if (! group.isValid() || ! group.hasType ("Group") || ! isTimeGroup (groupMode (group)))
+                continue;
+
+            const auto& plan = timePlanOf (group);
+            const auto* map = plan.source.empty() ? nullptr : codeMapOf (plan.source);
+
+            /*  THE CODE STOPPED (AIG), or running backwards: every chaser plays
+                on at its own speed, and catches up when it comes back - which is
+                a locate, its record's to seat. */
+            const auto forwards = map != nullptr && map->state == timecode::CodeState::running
+                                    && std::isfinite (map->speed) && map->speed > 0.0;
+
+            if (! settings.has_value())
+                settings = chaseSettings();
+
+            //  The group's live runs by their cue, read once a tick rather than once a member.
+            std::map<std::string, std::vector<std::string>> byCue;
+
+            for (const auto* child : runs.childrenOf (groupId))
+                if (! child->isFinished())
+                    byCue[child->cue].push_back (child->id);
+
+            for (const auto& member : plan.members)
+            {
+                const auto mine = byCue.find (member.cue);
+
+                if (mine == byCue.end())
+                    continue;
+
+                const auto chases = chasesTheCode (member.chase);
+                const auto byJump = member.chase == "jump";
+
+                for (const auto& id : mine->second)
+                {
+                    auto* run = runs.find (id);
+
+                    if (run == nullptr)
+                        continue;
+
+                    //  A FREE RUNNER says so, and everything under it: nothing holds it.
+                    if (! chases)
+                    {
+                        run->chaseState = chaseWords::freeRunner;
+                        run->chaseError = 0.0;
+
+                        for (const auto* below : runs.descendantsOf (id))
+                            if (auto* under = runs.find (below->id); under != nullptr && ! under->isFinished())
+                            {
+                                under->chaseState = chaseWords::freeRunner;
+                                under->chaseError = 0.0;
+                            }
+
+                        continue;
+                    }
+
+                    if (! forwards)
+                        continue;
+
+                    /*  A SOUND OR A MOVIE, and a movie's locked sounds against
+                        the movie's second; a scene's runs each against its own
+                        start under the member (AIV), as the walk placed it. */
+                    const auto steerWithSounds = [&] (const std::string& runId, double start)
+                    {
+                        auto* steered = runs.find (runId);
+
+                        if (steered == nullptr)
+                            return;
+
+                        const auto cue = document.findById (steered->cue);
+                        steerChaser (engine, *steered, cue, member, plan, *map, start, *settings, byJump, false);
+
+                        if (steered->kind != "video")
+                            return;
+
+                        std::vector<std::string> sounds;
+
+                        for (const auto* child : runs.childrenOf (runId))
+                            if (child->kind == "media" && ! child->isFinished() && followsAMovie (document.findById (child->cue)))
+                                sounds.push_back (child->id);
+
+                        for (const auto& sound : sounds)
+                            if (auto* locked = runs.find (sound))
+                                steerChaser (engine, *locked, cue, member, plan, *map, start, *settings, byJump, false);
+                    };
+
+                    if (run->isGroup())
+                    {
+                        std::vector<std::pair<std::string, double>> under;
+
+                        for (const auto* below : runs.descendantsOf (id))
+                            if (! below->isFinished() && (below->kind == "media" || below->kind == "video"))
+                                if (const auto found = plan.starts.find (below->cue); found != plan.starts.end())
+                                    under.emplace_back (below->id, found->second);
+
+                        for (const auto& [belowId, start] : under)
+                            steerWithSounds (belowId, start);
+
+                        continue;
+                    }
+
+                    steerWithSounds (id, member.preWait);
+                }
+            }
+        }
+    }
+
+    //==========================================================================
+    void Runner::endChaser (const std::string& runId, std::int64_t tick)
+    {
+        /*  EVERYTHING UNDER IT FIRST, then it: a scene's members and a movie's
+            locked sounds end with it, and nothing watching sees a finished run
+            with live ones below. */
+        std::vector<std::string> ending;
+
+        for (const auto* below : runs.descendantsOf (runId))
+            ending.insert (ending.begin(), below->id);
+
+        ending.push_back (runId);
+
+        const auto at = videoSampleAhead();
+
+        for (const auto& id : ending)
+        {
+            endHere (id, tick);
+
+            /*  A PICTURE TAKEN DOWN a horizon ahead - a cut, as a chasing
+                picture moves (AIT) - its job gone once its run is over. */
+            for (auto& job : showing)
+                if (job.self == id && ! job.removed)
+                {
+                    if (job.placed && videoSink != nullptr)
+                        videoSink->remove (job.self, at >= 0 ? at : -1);
+
+                    job.removed = true;
+                }
+        }
+    }
+
+    //==========================================================================
+    std::vector<std::string> Runner::seatChasersOnCode (Engine& engine, std::int64_t tick, const std::string& source,
+                                                        const std::string& groupRun, std::int64_t sample, bool locate,
+                                                        const std::vector<std::string>& supplied)
+    {
+        std::vector<std::string> used;
+        std::size_t taken = 0;
+
+        const NameDraw nextId = [&] (const std::string& under, const std::string& ofCue)
+        {
+            auto id = taken < supplied.size() ? supplied[taken] : std::string {};
+            ++taken;
+
+            if (id.empty())
+                id = namer.next (RunNames::causeOf (under, ofCue), ofCue);
+
+            used.push_back (id);
+            return id;
+        };
+
+        //  The marks of groups that are over, forgotten.
+        std::erase_if (codeSeated, [this] (const std::string& id)
+                       {
+                           const auto* run = runs.find (id);
+                           return run == nullptr || run->isFinished();
+                       });
+
+        /*  THE GROUPS: every time group armed on the source, or the one named
+            - armed being its run playing, as a member fired by hand reads it
+            (AJB), never its job's phase, which a replay does not move. */
+        std::vector<std::string> groups;
+
+        for (const auto& candidate : runs.all())
+        {
+            if (! candidate.isGroup() || candidate.state != runState::playing || candidate.takenBack
+                  || beingKilled (candidate) || (! groupRun.empty() && candidate.id != groupRun))
+                continue;
+
+            if (const auto node = document.findById (candidate.cue);
+                node.isValid() && node.hasType ("Group") && isTimeGroup (groupMode (node)))
+                groups.push_back (candidate.id);
+        }
+
+        /*  WHERE THE CODE WILL BE WHEN A SEATED SOUND CAN START: a seat's lead
+            after the record's own sample, so live and in a replay the same
+            members are judged playing or not, and a sound seated now is armed
+            at the second the code will be at when it launches there. */
+        const auto launchAt = sample + static_cast<std::int64_t> (seatLeadTicks) * std::max (0, samplesPerTick);
+        const auto* lengths = handlerDurations();
+        const auto settings = chaseSettings();
+
+        //  A sound or a scene the seat made, launched on the sample its offset is for, as a follower's is (RD.8).
+        const auto placeSeated = [this, launchAt, tick] (const std::string& runId)
+        {
+            if (auto* made = runs.find (runId);
+                made != nullptr && ! made->isFinished() && made->launchRequested
+                  && (made->kind == "media" || made->kind == "mic"))
+            {
+                made->launchNotBefore = launchAt;
+                made->launchRequestedAtTick = tick + seatLeadTicks;
+            }
+        };
+
+        for (const auto& groupId : groups)
+        {
+            const auto* armed = runs.find (groupId);
+
+            if (armed == nullptr)
+                continue;
+
+            const auto groupCue = armed->cue;
+            const auto group = document.findById (groupCue);
+            const auto& plan = timePlanOf (group);
+
+            if (plan.source.empty() || (! source.empty() && plan.source != source))
+                continue;
+
+            const auto* map = codeMapOf (plan.source);
+
+            if (map == nullptr || map->state != timecode::CodeState::running || ! std::isfinite (map->speed)
+                  || ! (map->speed > 0.0))
+                continue;
+
+            codeSeated.insert (groupId);
+
+            //  The groups above, as a seek of a scene reads them: what `seatPlan` hangs a member under.
+            std::vector<std::string> above;
+            std::map<std::string, std::string> runFor;
+            runFor[groupCue] = groupId;
+
+            for (auto parent = armed->parent; ! parent.empty();)
+            {
+                const auto* up = runs.find (parent);
+
+                if (up == nullptr)
+                    break;
+
+                above.insert (above.begin(), up->cue);
+                runFor[up->cue] = up->id;
+                parent = up->parent;
+            }
+
+            above.push_back (groupCue);
+
+            for (const auto& member : plan.members)
+            {
+                /*  WHAT OF IT LIVES UNDER THE GROUP: playing - heard, or a scene
+                    entered; asked for and not heard yet; loaded and waiting for
+                    the code. A run on its way out is its stop's. */
+                std::vector<std::string> playingRuns, askedRuns, loadedRuns;
+
+                for (const auto* child : runs.childrenOf (groupId))
+                {
+                    if (child->cue != member.cue || child->isFinished() || child->state == runState::stopping)
+                        continue;
+
+                    if (child->state == runState::playing && (child->isGroup() || child->startedAtTick >= 0))
+                        playingRuns.push_back (child->id);
+                    else if (child->launchRequestedAtTick != 0)
+                        askedRuns.push_back (child->id);
+                    else
+                        loadedRuns.push_back (child->id);
+                }
+
+                const auto cutAsked = [&]
+                {
+                    if (locate)
+                        for (const auto& id : askedRuns)
+                            endChaser (id, tick);
+                };
+
+                //  A FREE RUNNER: never seated, never moved (AIH) - only what was asked for on the old line, cut.
+                if (! chasesTheCode (member.chase))
+                {
+                    cutAsked();
+                    continue;
+                }
+
+                const auto cue = document.findById (member.cue);
+                std::optional<std::int64_t> frame;
+
+                if (cue.isValid())
+                    frame = frameOnCode (*map, member.at, plan.showRate);
+
+                if (! frame.has_value())
+                {
+                    cutAsked();
+                    continue;
+                }
+
+                const auto seconds = chase::codeSecondsSince (*map, *frame, launchAt);
+                const auto byJump = member.chase == "jump";
+
+                //--------------------------------------------------------------
+                /*  A SCENE (AIV): playing between its time and its end - its
+                    own pre-wait and its round, which the walk knows or the
+                    scene never ends. One playing is sought within itself, its
+                    members re-seated around the second (`seekGroup`); one not,
+                    or one a seek cannot move, is seated with the round solved
+                    there. */
+                if (member.kind == "group")
+                {
+                    const auto round = membersOf (cue);
+                    const auto whole = solveRound (document, lengths, cue, round, 0.0);
+                    const auto over = whole.length.has_value() && seconds >= member.preWait + *whole.length;
+
+                    if (seconds < 0.0 || over)
+                    {
+                        if (locate)
+                        {
+                            for (const auto& id : playingRuns)
+                                endChaser (id, tick);
+
+                            cutAsked();
+                        }
+
+                        continue;
+                    }
+
+                    if (! playingRuns.empty())
+                    {
+                        if (! locate)
+                            continue;
+
+                        const std::vector<std::string> rest (supplied.begin() + static_cast<std::ptrdiff_t> (std::min (taken, supplied.size())),
+                                                             supplied.end());
+                        const auto made = seekGroup (engine, tick, playingRuns.back(), seconds, rest);
+
+                        taken += made.size();
+                        used.insert (used.end(), made.begin(), made.end());
+
+                        for (const auto& id : made)
+                            placeSeated (id);
+
+                        if (! made.empty())
+                        {
+                            cutAsked();
+                            continue;
+                        }
+
+                        endChaser (playingRuns.back(), tick);
+                    }
+                    else if (! locate && ! (askedRuns.empty() && loadedRuns.empty()))
+                    {
+                        continue;
+                    }
+
+                    for (const auto& id : askedRuns)
+                        endChaser (id, tick);
+
+                    for (const auto& id : loadedRuns)
+                        endChaser (id, tick);
+
+                    const auto inRound = solveRound (document, lengths, cue, round, seconds - member.preWait);
+
+                    if (inRound.runs.empty())
+                        continue;
+
+                    std::vector<PlannedRun> wanted;
+
+                    PlannedRun self;
+                    self.cue = member.cue;
+                    self.ancestors = above;
+                    self.offset = seconds;
+                    wanted.push_back (self);
+
+                    for (auto run : inRound.runs)
+                    {
+                        run.ancestors.insert (run.ancestors.begin(), above.begin(), above.end());
+                        wanted.push_back (std::move (run));
+                    }
+
+                    const auto from = used.size();
+                    seatPlan (engine, tick, wanted, runFor, nextId);
+
+                    for (auto index = from; index < used.size(); ++index)
+                        placeSeated (used[index]);
+
+                    continue;
+                }
+
+                //--------------------------------------------------------------
+                const auto target = chaseTargetOf (cue, member, plan, *map, launchAt, member.preWait, lengths);
+                const auto sounding = target.has_value() && target->sounding();
+
+                /*  NOT PLAYING THERE - its time ahead, its material over - and
+                    playing: ended, as a jump ends what it abandons. Loaded and
+                    waiting, it is the group's hook's: kept for a time still in
+                    its window, let go otherwise (TG.7). */
+                if (! sounding)
+                {
+                    if (locate)
+                    {
+                        for (const auto& id : playingRuns)
+                            endChaser (id, tick);
+
+                        cutAsked();
+                    }
+
+                    continue;
+                }
+
+                /*  PLAYING, AND IT SHOULD BE: brought into step where it is,
+                    never started again. Into another of its slices by a seek -
+                    the run's slice is handler state, so a replay seeks the same -
+                    said, since a seek has a gap; in its own, or with none, by a
+                    jump on the voice; a movie by a cut, its locked sounds with
+                    it. What else of it was on its way is cut. */
+                if (! playingRuns.empty())
+                {
+                    if (! locate)
+                        continue;
+
+                    cutAsked();
+
+                    for (const auto& id : loadedRuns)
+                        endChaser (id, tick);
+
+                    auto* run = runs.find (playingRuns.back());
+
+                    if (run == nullptr)
+                        continue;
+
+                    if (run->kind == "media" && run->range != target->range)
+                    {
+                        const auto id = run->id;
+
+                        if (seekMedia (engine, tick, id, target->file, false))
+                            if (auto* sought = runs.find (id))
+                            {
+                                sought->launchNotBefore = launchAt;
+                                sought->launchRequestedAtTick = tick + seatLeadTicks;
+                                sought->warning = runWarning::sought;
+                                sought->chaseState = chaseWords::jumped;
+                            }
+
+                        continue;
+                    }
+
+                    steerChaser (engine, *run, cue, member, plan, *map, member.preWait, settings, byJump, true);
+
+                    if (run->kind == "video")
+                    {
+                        std::vector<std::string> sounds;
+
+                        for (const auto* child : runs.childrenOf (run->id))
+                            if (child->kind == "media" && ! child->isFinished() && followsAMovie (document.findById (child->cue)))
+                                sounds.push_back (child->id);
+
+                        for (const auto& sound : sounds)
+                            if (auto* locked = runs.find (sound))
+                                steerChaser (engine, *locked, cue, member, plan, *map, member.preWait, settings, byJump, true);
+                    }
+
+                    continue;
+                }
+
+                //  NOT PLAYING, AND IT SHOULD BE: seated - first sight, only if nothing of it is on its way.
+                if (! locate && ! (askedRuns.empty() && loadedRuns.empty()))
+                    continue;
+
+                for (const auto& id : askedRuns)
+                    endChaser (id, tick);
+
+                for (const auto& id : loadedRuns)
+                    endChaser (id, tick);
+
+                /*  A PICTURE fired again, as a follower's is (RD.8): a movie
+                    sought to the second the code will be at when it comes up, a
+                    horizon ahead; a still shown. */
+                if (member.kind == "video")
+                {
+                    const auto id = nextId (groupId, member.cue);
+                    createRun (id, member.cue, "video", groupId);
+
+                    if (auto* made = runs.find (id))
+                    {
+                        made->preWaitTicks = 0;
+                        made->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
+                    }
+
+                    fireNow (engine, tick, id);
+
+                    if (textOf (cue, "source") == "movie")
+                    {
+                        const auto showsAt = audio != nullptr ? videoSampleAhead() : launchAt;
+
+                        if (const auto there = chaseTargetOf (cue, member, plan, *map, showsAt, member.preWait, lengths);
+                            there.has_value() && there->sounding())
+                            seekMovie (engine, tick, id, there->file, false);
+                    }
+
+                    continue;
+                }
+
+                //  A SOUND, at its offset, by load to time's own builder.
+                PlannedRun wants;
+                wants.cue = member.cue;
+                wants.ancestors = above;
+                wants.offset = target->file;
+                wants.range = target->range;
+                wants.pass = target->pass;
+
+                const auto from = used.size();
+                seatPlan (engine, tick, { wants }, runFor, nextId);
+
+                for (auto index = from; index < used.size(); ++index)
+                    placeSeated (used[index]);
+            }
+        }
+
+        return used;
     }
 }

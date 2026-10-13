@@ -466,10 +466,13 @@ namespace wfg::cue
             const auto u = run.turnFile + static_cast<double> (run.direction) * moved;
             const auto* slice = sliceOf (run);
 
-            //  An end the show does not know is no bound (§41).
+            /*  An end the show does not know is no bound (§41). Going forwards,
+                a chaser's jump (namespace draft §60, TG.8) may put the file
+                before where its piece began - a seat's offset - and its start
+                is then where the jump put it. */
             if (slice == nullptr)
-                return std::clamp (u, run.pieceStart, run.pieceEnd > run.pieceStart ? run.pieceEnd
-                                                                                     : std::numeric_limits<double>::infinity());
+                return std::clamp (u, run.direction > 0 ? std::min (run.pieceStart, run.turnFile) : run.pieceStart,
+                                   run.pieceEnd > run.pieceStart ? run.pieceEnd : std::numeric_limits<double>::infinity());
 
             return loopedSecond (u, slice, run.direction);
         }
@@ -18673,6 +18676,12 @@ namespace wfg::cue
             which the boundary is read off, and is placed on the run's clock
             as it stands after this tick's speed. */
         applySlices (engine, tick);
+
+        /*  A TIME GROUP'S CHASERS (namespace draft §60, TG.8): after the speeds
+            and a slice's own moves, measured on the clocks they leave, and
+            before the boundaries, which a jump inside a slice moves. */
+        chaseTick (engine);
+
         advanceRanges (engine);
         endTurnedRuns();
 
@@ -21012,6 +21021,30 @@ namespace wfg::cue
                         run->readerAtSliceStart = took->from;
                         run->firstPassFrom = took->fileAt;
                         run->firstPassSamples = std::max<std::int64_t> (1, std::llround ((playing.out - took->fileAt) * rate));
+                    }
+
+                    run->loopMove = 0;
+                }
+                else if (now > run->loopMovePlacedAt + static_cast<std::int64_t> (rate))
+                {
+                    run->loopMove = 0;
+                }
+            }
+
+            /*  AND A CHASER'S JUMP IN A CUE WITH NO SLICES (namespace draft §60,
+                TG.8), its move on slot nought: met late, the jump is where the
+                reader was, and the run's file reads on from there - its count
+                the clock's at the reader's position then. */
+            if (run->loopMove != 0 && run->range < 0 && run->bent)
+            {
+                const auto took = audio->loopTaken (run->track, 0);
+
+                if (took.has_value() && took->move == run->loopMove)
+                {
+                    if (took->from - run->loopMoveFrom > 0.0)
+                    {
+                        run->turnSource = run->launchSource + (took->from - run->pieceStart) * rate;
+                        run->turnFile = took->fileAt;
                     }
 
                     run->loopMove = 0;
@@ -23700,28 +23733,86 @@ namespace wfg::cue
             its main's, `main:ltc:...`, their sample already moved onto its own
             clock by the follower, and ignores its own (AGD). THE ONE PLACE THE
             RUNNER LEARNS A CODE, so a replay applying these records reaches the
-            same maps with no decoder. TG.5 keeps the map and seats nothing;
-            TG.8's re-seats will hand back the runs they draw after the sixth
-            argument, as `go` and `seekGroup` hand back theirs. */
+            same maps with no decoder. A `jumped` turn re-seats the chasers of
+            every time group armed on the source (TG.8, `seatChasersOnCode`) -
+            decided at a seat's lead after the record's own sample, so a replay
+            and a backup decide alike - and hands back the runs it drew after
+            the sixth argument, as `go` and `seekGroup` hand back theirs. */
         registry.add ({ timecode::codeheard::command,
                         "An incoming code turned: it appeared, came back or located (jumped), was re-anchored"
                         " on Go.dot's clock (running), or stopped - at this frame of the day, counted at this"
                         " rate, falling on this Go.dot sample, at this speed (code seconds per Go.dot second)."
                         " The engine's, origin ltc:<input>, mtc:<port> or clock; it keeps the code's map, which"
-                        " sync/ltcIn* and sync/mtcIn* read and the time groups fire and chase on.",
+                        " sync/ltcIn* and sync/mtcIn* read and the time groups fire and chase on. A jump re-seats"
+                        " the chasers of the time groups armed on it and hands back the runs it drew.",
                         { { "source", 's', false }, { "what", 's', false }, { "rate", 's', false },
                           { "frame", 'h', false }, { "sample", 'h', false }, { "speed", 'd', false },
                           { "runs", 's', true, true } },
                         true,
-                        [&runner] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&engine, &runner] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             const auto heard = timecode::readCodeHeard (args, runner.videoSampleRate());
 
                             if (! heard.has_value())
                                 return Outcome::rejected (reason::badValue);
 
-                            runner.noteCodeHeard (heard->source, heard->map, heard->what == timecode::CodeTurn::jumped);
-                            return Outcome::ok (args);
+                            const auto jumped = heard->what == timecode::CodeTurn::jumped;
+                            runner.noteCodeHeard (heard->source, heard->map, jumped);
+
+                            std::vector<osc::Value> applied (args.begin(), args.begin() + 6);
+
+                            if (! jumped)
+                                return Outcome::ok (applied);
+
+                            std::vector<std::string> supplied;
+
+                            for (std::size_t n = 6; n < args.size(); ++n)
+                                supplied.push_back (args[n].getString());
+
+                            for (const auto& id : runner.seatChasersOnCode (engine, context.tick, heard->source, {},
+                                                                            heard->map.sample, true, supplied))
+                                applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
+                        } });
+
+        /*  A TIME GROUP ARMED WHILE ITS CODE RAN (namespace draft §60, TG.8,
+            AIH): the hook that first reads the running code under the group
+            submits it, with the sample it read the code at, when a member that
+            chases is already past its time - and the handler seats each such
+            chaser that should be playing, at its offset, as a locate seats one
+            (`seatChasersOnCode`), handing back the runs it drew. Applied and
+            nothing for a group a jump has seated already, or that is not armed
+            on a running code: the hook asks once, and a replay applies the same
+            record the same way. */
+        registry.add ({ "code.seat",
+                        "The engine's: a time group armed while its code was running seats its members that chase"
+                        " and whose time the code has passed, each at its offset where the code will be a seat's"
+                        " lead after this Go.dot sample, and hands back the runs it drew.",
+                        { { "run", 's', false }, { "sample", 'h', false }, { "runs", 's', true, true } },
+                        true,
+                        [&engine, &runner] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto groupRun = args[0].getString();
+
+                            if (! runner.knowsRun (groupRun))
+                                return Outcome::rejected (reason::unknownId);
+
+                            std::vector<osc::Value> applied { args[0], args[1] };
+
+                            if (runner.seatedOnCode (groupRun))
+                                return Outcome::ok (applied);
+
+                            std::vector<std::string> supplied;
+
+                            for (std::size_t n = 2; n < args.size(); ++n)
+                                supplied.push_back (args[n].getString());
+
+                            for (const auto& id : runner.seatChasersOnCode (engine, context.tick, {}, groupRun,
+                                                                            args[1].getInt64(), false, supplied))
+                                applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
                         } });
 
         //----------------------------------------------------------------------

@@ -3524,7 +3524,7 @@ namespace wfg::tree
             meter, level, rate, trim, late, parent, children, phase, claims, pending,
             warning, asserted, seekable, roundFrom, roundLength, strip, held, solo, error,
             processState, processLate, processDropped, said, ports, iteration, iterations,
-            round, pruned, seed, range, rangeIteration, timecode,
+            round, pruned, seed, range, rangeIteration, timecode, chaseError, chaseState,
 
             /*  A row this publish does not know, which reads its default - a
                 row added to the table before anybody wrote its reading. */
@@ -3566,7 +3566,8 @@ namespace wfg::tree
                     { "said", RunRow::said }, { "ports", RunRow::ports }, { "iteration", RunRow::iteration },
                     { "iterations", RunRow::iterations }, { "round", RunRow::round },
                     { "pruned", RunRow::pruned }, { "seed", RunRow::seed }, { "range", RunRow::range },
-                    { "rangeIteration", RunRow::rangeIteration }, { "timecode", RunRow::timecode }
+                    { "rangeIteration", RunRow::rangeIteration }, { "timecode", RunRow::timecode },
+                    { "chaseError", RunRow::chaseError }, { "chaseState", RunRow::chaseState }
                 };
 
                 std::vector<RunRowEntry> entries;
@@ -4920,6 +4921,12 @@ namespace wfg::tree
                         as the Runner wrote it - a copy, and empty for every other
                         kind, so no other run pays for a label it does not have. */
                     case RunRow::timecode:   text = run.timecode; break;
+
+                    /*  How a time group's member keeps up with its code (namespace
+                        draft §60, TG.8), as the Runner's hook last measured it: a
+                        copy, nought and empty for every run nothing chases. */
+                    case RunRow::chaseError: text = osc::formatDouble (std::round (run.chaseError * 100.0) / 100.0); break;
+                    case RunRow::chaseState: text = run.chaseState; break;
                     case RunRow::other:      text = std::string (entry.row->defaultText); break;
                 }
 

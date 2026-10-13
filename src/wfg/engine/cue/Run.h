@@ -183,6 +183,14 @@ namespace wfg::cue
             a failure: the cue did what it was asked, and the one thing it did
             not do is what the show said not to. */
         inline constexpr const char* leftToOperator = "left-to-operator";
+
+        /*  A TIME GROUP'S MEMBER THAT CHASES ITS CODE WAS SOUGHT, NOT JUMPED
+            (namespace draft §60, TG.8, AIT): the code was in another of its
+            slices, and a crossfaded jump moves a voice only inside the slice it
+            plays, so it was stopped and started again where the code is - with
+            the gap a seek makes, which a jump never has. The member is where the
+            code says; what is said is the gap. */
+        inline constexpr const char* sought = "sought";
     }
 
     /*  How far ahead a cue has been got ready. `/godot/cue/<id>/prepare`.
@@ -1166,6 +1174,18 @@ namespace wfg::cue
             when it fires. Nought for every run the code did not place - a GO, a
             name, a seat - and on a replay, which places nothing. */
         std::int64_t codeSample = 0;
+
+        /*  HOW A TIME GROUP'S MEMBER KEEPS UP WITH ITS CODE (namespace draft
+            §60, TG.8; `run/chaseError`, `run/chaseState`): how far it was out of
+            step when the hook last measured it, in milliseconds, ahead when
+            positive, and the word for what it is doing - `free` for a member
+            that plays on at its own speed, `inStep`, `catching`, or `jumped` on
+            the tick it jumped. READOUTS, written by the tick hook from the code's
+            line and Go.dot's own clock, never logged: a replay, which measures
+            nothing, leaves them where a run starts them. Empty and nought for a
+            run no time group holds. */
+        double chaseError = 0.0;
+        std::string chaseState;
 
         /*  Whether the last poll saw it sounding. The edge from true to false
             is what ends a run - a launcher clip stops itself at the end of its
