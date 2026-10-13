@@ -99,6 +99,7 @@ add_executable(wfg_tests
     TimeGroupTests.cpp
     CodeMapTests.cpp
     CodeWatchTests.cpp
+    ClockWatchTests.cpp
     SerialTests.cpp
     WireTests.cpp
     TrafficTapTests.cpp

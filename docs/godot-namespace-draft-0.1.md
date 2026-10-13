@@ -27240,3 +27240,102 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   main's last word; a replay with no `audio.settingsReady` record keeps maps whose sample rate is nought,
   the Runner's then - only the readouts and TG.7 to TG.9 read it; nothing acts on the maps yet (TG.7
   fires, TG.8 and TG.9 chase).
+- **TG.6**, 2026-10-13: the wall clock as a time group's source (AII, AIO, AIQ, AIY). **`timecode::ClockWatch`**
+  (`timecode/ClockWatch.{h,cpp}`), beside CodeWatch, the tick thread's and pure: its map is CodeMap's in the
+  `ms` unit TG.5 left for it, a frame a millisecond of the day, its speed wall-clock milliseconds per Go.dot
+  millisecond; its records are `code.heard s:clock s:<turn> s:ms h:<ms of day> h:<sample> d:<speed>`.
+  **Three clocks, read each tick.** Serve reads the steady clock either side of the wall clock and takes the
+  middle as the reading's moment (`WallReading`: the local millisecond of the day and the steady nanoseconds),
+  and does not hand the watcher a reading whose two steady reads are more than a millisecond apart - the
+  thread was interrupted between them. Go.dot's sample is not read raw beside them: the count moves a block at
+  a time. The tick's clock pair - the count and its steady moment, the one the MTC lane and reader are fed -
+  goes into a straight line of the watcher's own, THE COUNT'S LINE, least squares through the last two minutes
+  of pairs (`pairSeconds`), fitted at every pair for its first second and twice a second after, and a reading's
+  sample is that line's at the reading's moment. Readings wait a second (`quietSeconds`) while the count's line
+  is young, so the first `jumped` comes a second after the watching begins. A reading's position is its
+  millisecond plus half of one: the system clock is truncated, and without the half every map was half a
+  millisecond late. **The clock's line**: least squares through the last thirty seconds of readings
+  (`windowSeconds`), by the same arithmetic - CodeWatch's fit, moved out to `timecode/LineFit.h`, which
+  CodeWatch now uses and computes exactly as before - fitted and asked twice a second, its errors counted in
+  the larger of the readings' scatter and the scatter the long run shows (the residuals averaged a second at a
+  time), since the count's line, refitted, moves every reading after it together. **THE TURNS AS BUILT.**
+  `jumped` at the first reading heard, and at a STEP: the wall clock's advance - the near way round the dial,
+  as `clockCrossings` takes it - differing from the steady clock's by more than 50 ms in one reading
+  (`stepMilliseconds`; no slew trips it - chrony's default ceiling of 8 % is 1.7 ms between two ticks - and
+  it is five times the 10 ms a chaser acts at); the line starts again from where the step landed, at the
+  speed it had. A step of more than 5 ms and up to 50 (`nudgeMilliseconds`) starts the line again likewise
+  and is said `running`: fitted through, 20 ms inside the window would read as some thousand parts per
+  million for half a minute. A SLIP of Go.dot's own clock under the steady one (a dropped buffer, a count
+  paused or reset) is the last eight pairs, together, further from the count's line than six times the
+  scatter of their mean and than 3 ms (`slipPairs`, `slipSigmas`, `slipMilliseconds`): a block's scatter is
+  uniform, so eight pairs average to within a tenth of a block of the line, and a dropped buffer moves them
+  all a whole block.
+  The count's line starts again and is waited for, and the clock's line starts again from the first reading
+  heard after: `jumped` more than 50 ms from the line last written, `running` more than a millisecond,
+  nothing otherwise. `running` when the line at its newest reading is more than 1 ms (`driftMilliseconds`,
+  AIO's MTC threshold) from the line last written, once it has ten seconds of readings (`settleSeconds`), or
+  when the output latency changed; the speed written is the window's weighed with the long baseline's as
+  CodeWatch weighs them, snapped to exactly one within a part per million or three times its error. Never
+  `stopped`. Midnight is no turn: the readings run on unwrapped and a map is written with its millisecond
+  wrapped, which CodeMap reads the nearer way round. A slow tick is time passing on both clocks, and the
+  count's line, straight, is where it was. LATENCY (AIQ): a record's sample is the reading's less
+  `audio/outputLatency`, as MTC's is. `resay` says its own line as `jumped`. TG.1's 2 s rule for clock
+  TRIGGERS is unchanged; serve's triggers now take their steady millisecond from the same bracket's middle.
+  **Serve**: `ShowDocument::holdsTimeGroupOn (source)` - any time group at any depth, in a list or a
+  Persistent section, whose `timeSource`, or the table's default, is the source - is read once a show revision
+  beside the codes' sources; a show without a time group on the clock watches nothing and writes nothing, and
+  one whose clock group goes forgets the watcher, so one coming back is a first reading. In the block where the
+  clock triggers are read, after them: the pair, the latency, the reading, the turn submitted from origin
+  `clock`, which a following backup's gate drops (AGD) - the wall clock is the main's alone; an outage's end
+  forgets the watcher with the triggers' previous reading; a machine whose gate opens re-says it with the
+  codes' watchers. No readouts: TG.2 has no clock rows, and the window shows the clock itself.
+  Where this stage departs from its brief. The sample is read through the count's own line, not beside the
+  wall clock - and not through a `ClockEstimate`, which the first draft used: its slope is followed pair by
+  pair, and pairs a block apart in their noise walk it to its clamp of half a percent (measured at 256 and 512
+  samples), harmless a tick ahead where the MTC lane and reader use it, but milliseconds across a slow tick,
+  and a slip kicks it into ringing - a fifty-millisecond slip read through it wrote forty-five `running` in
+  half a minute at speeds up to a quarter of a percent, one dropped buffer of 512 samples sixteen. The first
+  `jumped` is a second after the watching starts rather than on the very first reading: the count's line is
+  one pair, a block off, before that. The nudge and the slip are turns the brief did not name. The output
+  latency is taken off, which the brief did not say for the clock (§60.4 says it of every `code.heard`). The
+  date is read for the triggers and not by the watcher: its map is a time of day, and midnight is the near way
+  round.
+  Measured, on a made-up interface counted a block at a time read at random moments, the tick up to 3 ms late:
+  twelve hours of a wall clock 50 ppm fast or slow against an interface 20 ppm slow, at 256- and 512-sample
+  blocks, each hour with a gap of three or ten seconds every five minutes - two to five `running` an hour, every
+  map within 1.19 ms of the clock, nothing said at any of the 24 gaps; a slip of one or two blocks, one record
+  at 256, 512 and 1024 samples (four for two blocks of 1024). The first draft - a four-second window through a
+  ClockEstimate with the textbook's errors - wrote 59 to 782 an hour from 128- to 1024-sample blocks.
+  Tests under C and fr_FR, `ClockWatchTests` (new, eleven cases): the first reading `jumped` a second on, at
+  its own millisecond on its own sample, speed exactly one, then nothing for ten minutes, every minute placed
+  to a sample; an hour at +50 and at -50 ppm against an interface at -20 through 256-sample blocks - three
+  `running` each, the map at worst 1.09 and 1.04 ms, the speed learnt to 0.24 and 0.03 ppm; a step of a second
+  back and of an hour forward each `jumped` at the new time with the speed learnt kept to the bit, a 20 ms
+  nudge one `running` moving the map 20 ms; after eight steps through 512-sample blocks nothing but the jump in
+  the ten seconds after each; midnight with one crystal (the map of 23:59:01 places 00:00:30 to the sample, its
+  readout "00:00:30") and slewed through blocks across it; a slow tick with one crystal, and an hour of gaps
+  through 512-sample blocks no different from one without; the count reset half a second back `jumped`, and
+  `forget` a first reading again; a dropped buffer of 256 and of 512 samples one `running` at the speed it had;
+  the latency taken off, a latency changed re-anchoring by exactly the change, a re-say; a show watching the
+  clock only while it holds a time group on it (none, the default `ltc`, `clock` inside a sequence, removed, in
+  a Persistent section); and `code.heard` from `clock` through the engine - the Runner's map the one said at
+  each record, placing 20:00:30 where the world has it, and a replay of the log reaching the same map with no
+  clock read. Also in both locales: `CodeWatchTests` and `CodeMapTests` whole, after the move to LineFit.h;
+  `DocumentTests`' time group cases; `wfg.replay.*`, `wfg.commands`, `client.boundary`, `source.comments`,
+  `unit.shards`. By hand, `wfg serve` on a copy of the minimal fixture for four seconds: no `code.heard`; with
+  an empty time group on the clock added, one - `A 50 0 clock code.heard s:"clock" s:"jumped" s:"ms"
+  h:40161742 h:47960 d:1`. Fourteen deliberate breakages, twelve each turning their own cases red (the step
+  rule; a nudge said as a jump; the step read off the wall clock alone; midnight not the near way round; no
+  reading middle; no latency; no waiting for the count's line; a slip never told; a slip not starting the
+  clock's line; no settling; the speed not kept across a step; the time source ignored). Two did not: the
+  long-run scatter taken out, which the hour's bounds do not see - measured, two to seven `running` an hour
+  and 1.37 ms at worst against two to five and 1.19 - and kept; and the speed it had weighed into a young
+  line's, which the first draft needed against the estimate's noise and the count's line made idle - taken
+  out.
+  Found and left: a slip that is not a whole number of blocks and under a block - which a dropped buffer never
+  is - is not told, and is fitted through: 3 and 5.3 ms at 512 samples wrote three and two `running`, at up
+  to 85 and 100 ppm off. The `ClockEstimate` the MTC lane, the MTC reader and the video renderer keep walks
+  its slope to its half-percent clamp with block-quantised pairs; none of them extrapolates it more than a
+  tick, but the MTC reader's samples just after a slow tick or a slip would carry its wander as this
+  watcher's did (reasoned, not measured for MTC), and TG.9's chasers and RD.9's map should not lean on its
+  slope. Nothing reads the clock's map yet (TG.7 fires).

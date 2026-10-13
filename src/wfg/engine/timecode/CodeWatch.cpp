@@ -385,60 +385,7 @@ namespace wfg::timecode
 
     void CodeWatch::fit()
     {
-        live = {};
-
-        const auto count = window.size();
-
-        if (count < 2)
-            return;
-
-        /*  ABOUT THE NEWEST POINT, so the sums are of small numbers however
-            many hours of samples the clock has counted. */
-        const auto& reference = window.back();
-        auto sumX = 0.0;
-        auto sumY = 0.0;
-
-        for (const auto& point : window)
-        {
-            sumX += point.sample - reference.sample;
-            sumY += point.position - reference.position;
-        }
-
-        const auto n = static_cast<double> (count);
-        const auto meanX = sumX / n;
-        const auto meanY = sumY / n;
-        auto spread = 0.0;
-        auto together = 0.0;
-
-        for (const auto& point : window)
-        {
-            const auto dx = point.sample - reference.sample - meanX;
-            const auto dy = point.position - reference.position - meanY;
-            spread += dx * dx;
-            together += dx * dy;
-        }
-
-        if (! (spread > 0.0))
-            return;
-
-        const auto slope = together / spread;
-        auto leftOver = 0.0;
-
-        for (const auto& point : window)
-        {
-            const auto dx = point.sample - reference.sample - meanX;
-            const auto dy = point.position - reference.position - meanY;
-            leftOver += squared (dy - slope * dx);
-        }
-
-        live.valid = true;
-        live.sample = reference.sample;
-        live.position = reference.position + meanY - slope * meanX;
-        live.slope = slope;
-        live.meanSample = reference.sample + meanX;
-        live.spread = spread;
-        live.count = count;
-        live.residual = count >= 3 ? std::sqrt (leftOver / (n - 2.0)) : -1.0;
+        live = linefit::through (window);
     }
 
     double CodeWatch::sigmaFrames() const noexcept
@@ -456,16 +403,12 @@ namespace wfg::timecode
 
     double CodeWatch::slopeError() const noexcept
     {
-        return live.spread > 0.0 ? sigmaFrames() / std::sqrt (live.spread) : 0.0;
+        return live.slopeError (sigmaFrames());
     }
 
     double CodeWatch::positionError (double atSample) const noexcept
     {
-        if (! live.valid || live.count == 0 || ! (live.spread > 0.0))
-            return 0.0;
-
-        return sigmaFrames() * std::sqrt (1.0 / static_cast<double> (live.count)
-                                            + squared (atSample - live.meanSample) / live.spread);
+        return live.positionError (atSample, sigmaFrames());
     }
 
     double CodeWatch::jitterSamples() const noexcept

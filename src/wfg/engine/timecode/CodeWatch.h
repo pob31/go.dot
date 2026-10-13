@@ -95,6 +95,7 @@
 
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/timecode/CodeMap.h>
+#include <wfg/engine/timecode/LineFit.h>
 #include <wfg/engine/timecode/LtcDecoder.h>
 #include <wfg/engine/timecode/MtcReader.h>
 #include <wfg/engine/timecode/Timecode.h>
@@ -255,28 +256,11 @@ namespace wfg::timecode
         static constexpr double mtcJitterFloorSeconds = 0.00005;
 
     private:
-        struct Point
-        {
-            double sample = 0.0;
-            double position = 0.0;      // frames, unwrapped, at the counting rate
-        };
-
-        /*  The fitted line: through (`sample`, `position`), `slope` frames per
-            sample, with what the errors need - the points' count, their mean
-            sample and spread, and the residual in frames (negative until three). */
-        struct Line
-        {
-            bool valid = false;
-            double sample = 0.0;
-            double position = 0.0;
-            double slope = 0.0;
-            double meanSample = 0.0;
-            double spread = 0.0;
-            double residual = -1.0;
-            std::size_t count = 0;
-
-            double positionAt (double atSample) const noexcept { return position + slope * (atSample - sample); }
-        };
+        /*  A point's position is in frames, unwrapped, at the counting rate;
+            the line's slope frames per sample, its residual in frames
+            (LineFit.h, shared with the wall clock's watcher). */
+        using Point = linefit::Point;
+        using Line = linefit::Line;
 
         //  The line as last written: the map without its latency shift, and its slope and error.
         struct Written

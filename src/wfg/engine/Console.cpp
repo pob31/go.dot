@@ -82,6 +82,7 @@
 #include <wfg/engine/midi/MidiSender.h>
 #include <wfg/engine/midi/MtcInbox.h>
 #include <wfg/engine/midi/PortBinder.h>
+#include <wfg/engine/timecode/ClockWatch.h>
 #include <wfg/engine/timecode/CodeWatch.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/SectionCommands.h>
@@ -5972,6 +5973,14 @@ namespace
         ltcHeard.reserve (64);
         bool codeResayOwed = false;
 
+        /*  AND THE WALL CLOCK, WATCHED AS A CODE (namespace draft §60, TG.6):
+            its watcher, and whether the show holds a time group on the clock
+            - read once a show revision, beside the codes' sources, and nothing
+            watched or written while it holds none. The tick thread's alone. */
+        wfg::timecode::ClockWatch clockWatch;
+        bool clockWatched = false;
+        const std::string clockOrigin { "clock" };
+
         ticks.setBeforeTick ([&] (std::int64_t tickIndex)
                              {
                                  /*  THE PAIR BEFORE ANYTHING (namespace draft §58,
@@ -6436,6 +6445,19 @@ namespace
                                                                .value_or (wfg::timecode::Rate::fps25);
                                      ltcWatch.setShowRate (showRate);
                                      mtcWatch.setShowRate (showRate);
+
+                                     /*  AND WHETHER THE WALL CLOCK IS A SOURCE (TG.6):
+                                         a time group on `clock` anywhere in the show.
+                                         One that goes is forgotten, so the clock's
+                                         first reading after one comes back is a
+                                         `jumped` - nothing about the clock is in the
+                                         log of a show that never used it. */
+                                     if (const auto watchedNow = document.holdsTimeGroupOn ("clock");
+                                         watchedNow != clockWatched)
+                                     {
+                                         clockWatched = watchedNow;
+                                         clockWatch.forget();
+                                     }
                                  }
 
                                  mtcInput.feedClock (clockSample, clockNanos, clockRate);
@@ -6509,6 +6531,10 @@ namespace
 
                                          if (! mtcSource.empty())
                                              say (mtcSource, mtcWatch.resay());
+
+                                         //  The clock's line as this machine reads it, from last tick (TG.6).
+                                         if (clockWatched)
+                                             say (clockOrigin, clockWatch.resay());
                                      }
 
                                      if (! ltcSource.empty())
@@ -6592,13 +6618,21 @@ namespace
                                  }
 
                                  {
-                                     /*  Both clocks, one after the other: the
-                                         microseconds between the two reads are
-                                         nothing beside the two seconds a step
-                                         has to exceed. */
+                                     /*  Both clocks, the steady one read either
+                                         side of the wall clock. The microseconds
+                                         between the reads are nothing beside the
+                                         two seconds a trigger's step has to
+                                         exceed; the bracket's middle is the
+                                         moment the wall clock was read, which the
+                                         clock's watcher measures it against to its
+                                         millisecond (TG.6). */
+                                     const auto steadyBefore = std::chrono::steady_clock::now();
                                      const auto wall = juce::Time::getCurrentTime();
-                                     const auto steady = std::chrono::duration_cast<std::chrono::milliseconds> (
-                                                           std::chrono::steady_clock::now().time_since_epoch()).count();
+                                     const auto steadyAfter = std::chrono::steady_clock::now();
+                                     const auto bracket = std::chrono::duration_cast<std::chrono::nanoseconds> (steadyAfter - steadyBefore).count();
+                                     const auto steadyNanos = std::chrono::duration_cast<std::chrono::nanoseconds> (
+                                                                  steadyBefore.time_since_epoch()).count()
+                                                              + bracket / 2;
 
                                      wfg::cue::ClockReading reading;
                                      reading.date = wall.getYear() * 10000 + (wall.getMonth() + 1) * 100
@@ -6606,10 +6640,16 @@ namespace
                                      reading.millisecondOfDay = ((static_cast<std::int64_t> (wall.getHours()) * 60
                                                                     + wall.getMinutes()) * 60 + wall.getSeconds()) * 1000
                                                                   + wall.getMilliseconds();
-                                     reading.steadyMilliseconds = static_cast<std::int64_t> (steady);
+                                     reading.steadyMilliseconds = static_cast<std::int64_t> (steadyNanos / 1'000'000);
 
+                                     /*  An outage's end forgets the clock's line too:
+                                         Go.dot's samples stood while the wall clock
+                                         went on, and the next reading is a first. */
                                      if (clockForget.exchange (false))
+                                     {
                                          previousClock = {};
+                                         clockWatch.forget();
+                                     }
 
                                      const auto index = triggerIndex;
                                      const auto& triggers = index != nullptr ? *index : noTriggers;
@@ -6633,6 +6673,35 @@ namespace
                                                               { wfg::osc::Value::string (id) } });
 
                                      previousClock = reading;
+
+                                     /*  THE WALL CLOCK AS A TIME GROUP'S SOURCE
+                                         (namespace draft §60, TG.6; AIO, AIQ): only
+                                         while the show holds a time group on it.
+                                         The watcher is fed the tick's clock pair -
+                                         the one the MTC lane and reader were fed -
+                                         then this reading, and says its turn, if
+                                         this tick has one, as `code.heard` from
+                                         origin `clock`, which a following backup's
+                                         gate drops (AGD): the wall clock is the
+                                         main's alone. A reading the thread was
+                                         interrupted in - more than a millisecond
+                                         between the two steady reads - is not
+                                         heard: its wall clock is anywhere in that
+                                         gap, and the next tick reads again. The
+                                         heard sample is the output latency before
+                                         the one read, as MTC's is (AIQ). */
+                                     if (clockWatched)
+                                     {
+                                         clockWatch.feedClock (clockSample, clockNanos, clockRate);
+                                         clockWatch.setLatency (static_cast<std::int64_t> (audioState.outputLatency));
+
+                                         if (bracket <= 1'000'000)
+                                             clockWatch.hear ({ reading.millisecondOfDay, steadyNanos });
+
+                                         if (const auto said = clockWatch.update())
+                                             engine.submit (clockOrigin, wfg::timecode::codeheard::command,
+                                                            wfg::timecode::codeHeardArgs (clockOrigin, *said));
+                                     }
                                  }
 
                                  /*  THE AUTOSAVE, DECIDED HERE, SNAPSHOTTED BY

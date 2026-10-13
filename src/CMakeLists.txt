@@ -336,6 +336,9 @@ add_library(wfg_engine STATIC
     wfg/engine/timecode/CodeMap.h
     wfg/engine/timecode/CodeWatch.h
     wfg/engine/timecode/CodeWatch.cpp
+    wfg/engine/timecode/ClockWatch.h
+    wfg/engine/timecode/ClockWatch.cpp
+    wfg/engine/timecode/LineFit.h
     wfg/engine/TemplateChanges.h
     wfg/engine/document/Template.cpp
     wfg/engine/document/Template.h

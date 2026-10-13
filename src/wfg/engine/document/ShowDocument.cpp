@@ -6988,4 +6988,24 @@ namespace wfg::doc
 
         return problems;
     }
+
+    bool ShowDocument::holdsTimeGroupOn (std::string_view source) const
+    {
+        /*  EVERY GROUP, AT ANY DEPTH: a time group may stand in a manual
+            sequence, in a Persistent section, or deep in either - wherever GO
+            or the section can arm it - and one is enough. */
+        const std::function<bool (const juce::ValueTree&)> holds = [&] (const juce::ValueTree& node)
+        {
+            if (isTimeGroup (node) && timeSourceOf (node) == source)
+                return true;
+
+            for (const auto& child : node)
+                if (holds (child))
+                    return true;
+
+            return false;
+        };
+
+        return holds (showNode.getChildWithName ("Lists"));
+    }
 }
