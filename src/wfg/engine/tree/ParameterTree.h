@@ -86,7 +86,7 @@ namespace wfg::midi { class PortTable; }
 namespace wfg::surface { class SurfaceTable; }
 namespace wfg::tree { class PresetTable; }
 
-namespace wfg::cue { class CurveTable; class DcaTable; class LaneTable; class LiveEdits; class TakeTable; }
+namespace wfg::cue { class CurveTable; class DcaTable; class LaneTable; class LiveEdits; class TakeTable; class TextFields; }
 
 namespace wfg::video { class VideoHost; class Converter; }
 namespace wfg::video::ffmpeg { class Installer; }
@@ -411,6 +411,11 @@ namespace wfg::tree
             for `/godot/curves/` and each armed curve's `ride`. */
         void setCurves (const cue::CurveTable* curvesToRead) noexcept { curveTable = curvesToRead; }
 
+        /*  A text cue's fields (namespace draft 61, AKM), for `/godot/text/<name>`:
+            every blank the show's words hold and every name written, with its
+            value tonight. Absent - a tree dump - the blanks are there, empty. */
+        void setTextFields (const cue::TextFields* fieldsToRead) noexcept { textFields = fieldsToRead; }
+
         /*  What each device's LISTEN is doing (O.10), for `mount/listen`: the
             listener's word, asked every publish since it moves with no command.
             Unset, every device is `off`. */
@@ -585,6 +590,12 @@ namespace wfg::tree
         const cue::TakeTable* takes = nullptr;
         const cue::LaneTable* lanes = nullptr;
         const cue::CurveTable* curveTable = nullptr;
+        const cue::TextFields* textFields = nullptr;
+
+        /*  THE BLANKS THE SHOW'S WORDS HOLD (61), found once a revision: a walk
+            of the document is not a thing to do fifty times a second. */
+        std::uint64_t blanksRevision = ~std::uint64_t { 0 };
+        std::vector<std::string> blankNames;
         std::function<std::string (const std::string&)> listenStatusOf;
         const video::VideoHost* videoHost = nullptr;
         const video::Converter* converter = nullptr;

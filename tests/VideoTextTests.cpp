@@ -24,6 +24,8 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include <wfg/engine/cue/TextFields.h>
+#include <wfg/engine/video/Blanks.h>
 #include <wfg/engine/video/Blur.h>
 #include <wfg/engine/video/TextLook.h>
 #include <wfg/engine/video/TextRaster.h>
@@ -279,4 +281,74 @@ TEST_CASE ("video text: a font this machine has not got is named, once; the defa
 
     if (! installed.isEmpty())
         CHECK (video::fontsNotInstalled ({ installed[0].toStdString() }).empty());
+}
+
+TEST_CASE ("video blanks: a field's name, its blanks found once each and filled, braces written out, a loose brace shown and said (§61, AKM)")
+{
+    CHECK (video::isFieldName ("score"));
+    CHECK (video::isFieldName ("home_team-2"));
+    CHECK (video::isFieldName (std::string (32, 'a')));
+    CHECK_FALSE (video::isFieldName (std::string (33, 'a')));
+    CHECK_FALSE (video::isFieldName (""));
+    CHECK_FALSE (video::isFieldName ("two words"));
+    CHECK_FALSE (video::isFieldName ("caf\xc3\xa9"));
+
+    CHECK (video::blanksIn ("{home} {away} {home}") == std::vector<std::string> { "home", "away" });
+    CHECK (video::blanksIn ("{{home}} {not a name} {} {open").empty());
+
+    const auto values = [] (const std::string& name) { return name == "home" ? std::string ("3") : std::string {}; };
+
+    CHECK (video::fillBlanks ("Score: {home} - {away}", values) == "Score: 3 - ");
+    CHECK (video::fillBlanks ("{{home}} is {home}", values) == "{home} is 3");
+    CHECK (video::fillBlanks ("a } b }} c", values) == "a } b } c");
+    CHECK (video::fillBlanks ("{not a name} {open", values) == "{not a name} {open");
+    CHECK (video::fillBlanks ("", values).empty());
+
+    CHECK (video::hasLooseBrace ("{not a name}"));
+    CHECK (video::hasLooseBrace ("an {open"));
+    CHECK_FALSE (video::hasLooseBrace ("{home} {{x}} and a } alone"));
+}
+
+TEST_CASE ("text fields: a value set and cut at a character, the revision moving only on a change; a name that does not read, and a 257th, refused (§61, AKM)")
+{
+    cue::TextFields fields;
+    CHECK (fields.revision() == 0u);
+    CHECK (fields.valueOf ("score").empty());
+
+    CHECK (fields.set ("score", "12") == cue::TextFields::Set::written);
+    CHECK (fields.valueOf ("score") == "12");
+    CHECK (fields.revision() == 1u);
+
+    //  The same value again moves nothing.
+    CHECK (fields.set ("score", "12") == cue::TextFields::Set::written);
+    CHECK (fields.revision() == 1u);
+
+    CHECK (fields.set ("two words", "x") == cue::TextFields::Set::badName);
+    CHECK (fields.set (std::string (33, 'a'), "x") == cue::TextFields::Set::badName);
+    CHECK (fields.revision() == 1u);
+
+    //  At most 1024 bytes, never half a letter.
+    CHECK (fields.set ("long", std::string (1023, 'a') + "\xc3\xa9") == cue::TextFields::Set::written);
+    CHECK (fields.valueOf ("long").size() == 1023u);
+
+    //  At most 256 names: a new one past them refused, one held still written.
+    for (int n = 0; fields.all().size() < cue::TextFields::mostNames; ++n)
+        REQUIRE (fields.set ("f" + std::to_string (n), "x") == cue::TextFields::Set::written);
+
+    CHECK (fields.set ("oneMore", "x") == cue::TextFields::Set::full);
+    CHECK (fields.set ("score", "13") == cue::TextFields::Set::written);
+
+    //  A seat's whole set replaces them; the same set again moves nothing; a close forgets them.
+    const auto before = fields.revision();
+    fields.replaceAll ({ { "home", "1" } });
+    CHECK (fields.all().size() == 1u);
+    CHECK (fields.revision() == before + 1);
+    fields.replaceAll ({ { "home", "1" } });
+    CHECK (fields.revision() == before + 1);
+    fields.clear();
+    CHECK (fields.all().empty());
+
+    CHECK (cue::isTextFieldAddress ("/godot/text/score"));
+    CHECK_FALSE (cue::isTextFieldAddress ("/godot/text/"));
+    CHECK_FALSE (cue::isTextFieldAddress ("/godot/textual/score"));
 }

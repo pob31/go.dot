@@ -137,6 +137,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/LiveRows.cpp
     wfg/engine/cue/TakeTable.h
     wfg/engine/cue/TakeTable.cpp
+    wfg/engine/cue/TextFields.cpp
+    wfg/engine/cue/TextFields.h
     wfg/engine/cue/TakeCommands.h
     wfg/engine/cue/TakeCommands.cpp
     wfg/engine/cue/LaneTable.h
@@ -468,6 +470,7 @@ add_library(wfg_engine STATIC
     wfg/engine/video/FfmpegInstall.h
     wfg/engine/video/Geometry.h
     wfg/engine/video/Grade.h
+    wfg/engine/video/Blanks.h
     wfg/engine/video/Blur.h
     wfg/engine/video/Hap.h
     wfg/engine/video/HapEncoder.h

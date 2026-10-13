@@ -16,10 +16,12 @@
 
 #include <wfg/engine/cue/PictureSpec.h>
 #include <wfg/engine/cue/PlayedMedia.h>
+#include <wfg/engine/cue/TextFields.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/video/Blanks.h>
 #include <wfg/engine/video/Grade.h>
 #include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Mask.h>
@@ -81,6 +83,13 @@ namespace wfg::cue
 
     video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
                                     const std::string& mediaFolder, const PlayedMedia* played)
+    {
+        return pictureSpecOf (document, cueId, mediaFolder, played, nullptr);
+    }
+
+    video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
+                                    const std::string& mediaFolder, const PlayedMedia* played,
+                                    const TextFields* fields)
     {
         video::LayerSpec spec;
 
@@ -172,7 +181,15 @@ namespace wfg::cue
         /*  A TEXT CUE'S WORDS AND STYLE (namespace draft 61, AKJ, AKK): read
             whatever the source, so an edit that makes a cue text has them. */
         auto& text = spec.text;
-        text.words = video::cutAtCharacter (textOf ("words"), video::wordsBytes - 1);
+
+        /*  ITS BLANKS FILLED (61, AKM): tonight's values, a blank no value has
+            reached empty, `{{` and `}}` a brace; then cut to a slide's worth. */
+        const auto filled = video::fillBlanks (textOf ("words"), [fields] (const std::string& name)
+        {
+            return fields != nullptr ? fields->valueOf (name) : std::string {};
+        });
+
+        text.words = video::cutAtCharacter (filled, video::wordsBytes - 1);
         text.font = textOf ("font");
         text.fontSize = std::clamp (numberOf ("fontSize"), 0.1, 100.0);
         text.bold = textOf ("bold") == "true";

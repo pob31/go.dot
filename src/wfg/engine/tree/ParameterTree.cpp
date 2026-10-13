@@ -16,6 +16,9 @@
 
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <wfg/engine/cue/TextFields.h>
+#include <wfg/engine/video/Blanks.h>
+
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/tree/PresetTable.h>
 
@@ -4480,6 +4483,53 @@ namespace wfg::tree
                 text = curveTable->lastPass;
 
             runtime.push_back (makeLeaf (std::string (godot) + "/curves/" + name, *row, text));
+        }
+
+        /*  A TEXT CUE'S FIELDS (namespace draft 61, AKM): every blank the show's
+            words hold and every name written, each with its value tonight - so a
+            client reading the namespace finds what it may fill, and reads back
+            what it filled. BUILT BY HAND, on `list/aim`'s shape - a string,
+            written, never saved - since a field's address has no row word. */
+        if (const auto* aim = rowNamed ("list", "aim"))
+        {
+            static const auto fieldRow = [aim]
+            {
+                auto row = *aim;
+                row.owner = "text";
+                row.name = "value";
+                row.description = "A text cue's field (namespace draft 61): what every blank of this name in the"
+                                  " words shows, tonight - written by anybody, under the lock too, never saved.";
+                return row;
+            }();
+
+            if (document.showRevision() != blanksRevision)
+            {
+                blanksRevision = document.showRevision();
+                blankNames.clear();
+
+                std::function<void (const juce::ValueTree&)> walk = [&] (const juce::ValueTree& node)
+                {
+                    if (node.hasType ("Video") && node.getProperty ("source").toString() == "text")
+                        for (auto& name : video::blanksIn (node.getProperty ("words").toString().toStdString()))
+                            if (std::find (blankNames.begin(), blankNames.end(), name) == blankNames.end())
+                                blankNames.push_back (std::move (name));
+
+                    for (const auto& child : node)
+                        walk (child);
+                };
+
+                walk (document.root());
+            }
+
+            std::set<std::string> fields (blankNames.begin(), blankNames.end());
+
+            if (textFields != nullptr)
+                for (const auto& [name, value] : textFields->all())
+                    fields.insert (name);
+
+            for (const auto& name : fields)
+                runtime.push_back (makeLeaf (std::string (godot) + "/text/" + name, fieldRow,
+                                             textFields != nullptr ? textFields->valueOf (name) : std::string {}));
         }
 
         /*  WHAT EACH ARMED CURVE RIDES: the device's report or the hand's

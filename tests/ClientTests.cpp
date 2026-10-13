@@ -49,6 +49,7 @@
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/Dual.h>
 #include <wfg/client/model/Picture.h>
+#include <wfg/engine/cue/TextFields.h>
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
@@ -11545,6 +11546,38 @@ TEST_CASE ("client: a text cue is offered on each canvas, born white and saying 
 
     for (const auto* gone : { "words", "font", "fontSize", "bold", "align", "wrap", "outline", "outlineBlur" })
         CHECK (std::find (names.begin(), names.end(), gone) == names.end());
+}
+
+TEST_CASE ("tree: a text cue's blanks are published at /godot/text/<name> with tonight's values, and every name written beside them (§61, AKM)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    cue::TextFields fields;
+    rig.parameters.setTextFields (&fields);
+
+    const auto cue = rig.document.createCue (list, 0, "video", "", {},
+                                             { { "source", "text" }, { "words", "{home} - {away}, {{literal}}" } });
+    REQUIRE (cue.ok);
+
+    auto snapshot = rig.publish (1);
+
+    //  Every blank the words hold, empty until a value reaches it; a brace written out is none.
+    REQUIRE (snapshot->find ("/godot/text/home") != nullptr);
+    REQUIRE (snapshot->find ("/godot/text/away") != nullptr);
+    CHECK (snapshot->find ("/godot/text/literal") == nullptr);
+    CHECK (model::text (*snapshot, "/godot/text/home").empty());
+
+    //  A value, and a name no words hold yet: both published, written by anybody.
+    REQUIRE (fields.set ("home", "3") == cue::TextFields::Set::written);
+    REQUIRE (fields.set ("clock", "21:30") == cue::TextFields::Set::written);
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+
+    CHECK (model::text (*snapshot, "/godot/text/home") == "3");
+    CHECK (model::text (*snapshot, "/godot/text/clock") == "21:30");
+    REQUIRE (snapshot->find ("/godot/text/home") != nullptr);
+    CHECK (snapshot->find ("/godot/text/home")->typeTags == "s");
 }
 
 TEST_CASE ("client: a new insert is numbered by kind and given both its names once; what Go.dot sends is never offered back (§47, AAK)")

@@ -51,7 +51,9 @@
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/cue/TextFields.h>
 #include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/log/Replay.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/video/Compositor.h>
@@ -420,13 +422,16 @@ namespace
             REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
             REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
 
-            doc::registerDocumentCommands (engine.commands(), document);
+            /*  WITH A TEXT CUE'S FIELDS (namespace draft 61): their door in
+                front of the document, as serve and a replay have it. */
+            doc::registerDocumentCommands (engine.commands(), document, {}, cue::textFieldWriteFor (fields));
             cue::registerCueCommands (engine.commands(), document, focus);
             cue::registerRunCommands (engine.commands(), runs);
             cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
             runner.setVideo (&sink);
             runner.setSamplesPerTick (960);
+            runner.setTextFields (&fields);
         }
 
         Engine::TickResult tickOnce()
@@ -465,6 +470,7 @@ namespace
         doc::IdRegistry runIds { doc::IdRegistry::withSeed (23) };
         cue::Runner runner { document, runs, runIds, focus };
         FakeSink sink;
+        cue::TextFields fields;
         std::int64_t tick = 0;
     };
 }
@@ -1595,6 +1601,71 @@ TEST_CASE ("video: a text cue's words and style reach the picture side, and word
     CHECK (set ("align", osc::Value::string ("justified")) == 0);
 }
 
+TEST_CASE ("video: a text cue's blanks filled from the fields - at GO, while it plays, from a number, under the lock - never the show's, and a replay fills the same (§61, AKM)")
+{
+    VideoRig rig;
+
+    const auto field = [&rig] (const char* name, osc::Value value)
+    {
+        return rig.submitAndTick ("node.set", { osc::Value::string (std::string ("/godot/text/") + name), std::move (value) });
+    };
+
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/source"),
+                                              osc::Value::string ("text") }).applied == 1);
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/words"),
+                                              osc::Value::string ("Score: {home} - {away}") }).applied == 1);
+
+    //  A value set before GO is there when it comes up; a blank nobody filled shows nothing.
+    REQUIRE (field ("home", osc::Value::int32 (3)).applied == 1);
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (3);
+
+    REQUIRE (rig.sink.shown.size() == 1);
+    CHECK (rig.sink.shown.front().text.words == "Score: 3 - ");
+
+    //  While it plays: drawn again at once, a number written without the locale; never the show's.
+    const auto revision = rig.document.showRevision();
+    REQUIRE (field ("away", osc::Value::float64 (2.5)).applied == 1);
+    rig.ticks (2);
+
+    REQUIRE_FALSE (rig.sink.restated.empty());
+    CHECK (rig.sink.restated.back().text.words == "Score: 3 - 2.5");
+    CHECK (rig.document.showRevision() == revision);
+    CHECK (rig.sink.shown.size() == 1);
+
+    //  Under the lock: the words refused, a field taken and shown.
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/document/locked"),
+                                              osc::Value::string ("true") }).applied == 1);
+    CHECK (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/words"),
+                                            osc::Value::string ("Other") }).applied == 0);
+    REQUIRE (field ("home", osc::Value::string ("4")).applied == 1);
+    rig.ticks (2);
+    CHECK (rig.sink.restated.back().text.words == "Score: 4 - 2.5");
+
+    //  A name that does not read is refused, and said.
+    CHECK (field ("two words", osc::Value::string ("x")).applied == 0);
+    CHECK (rig.engine.lastError().find ("bad-address") != std::string::npos);
+
+    //  Esc takes the cue down and leaves the fields.
+    rig.submitAndTick ("run.stopAll");
+    rig.ticks (80);
+    CHECK (rig.fields.valueOf ("home") == "4");
+    CHECK (rig.fields.valueOf ("away") == "2.5");
+
+    //  A REPLAY OF THE LOG fills the same blanks, through the same door.
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    VideoRig fresh;
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+    CHECK (fresh.fields.all() == rig.fields.all());
+}
+
 TEST_CASE ("video: wfg validate says a text cue with no words shows nothing, and words past a slide's worth are cut (§61)")
 {
     Rig rig;
@@ -1614,6 +1685,12 @@ TEST_CASE ("video: wfg validate says a text cue with no words shows nothing, and
     problems = rig.problemsAbout ("Video[VD000031]");
     REQUIRE (problems.size() == 1);
     CHECK (problems.front().find ("4096") != std::string::npos);
+
+    //  A { that begins no field: shown as written, and said (61, AKM).
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000031/words"), text ("Hello {not a name}") }));
+    problems = rig.problemsAbout ("Video[VD000031]");
+    REQUIRE (problems.size() == 1);
+    CHECK (problems.front().find ("begins no field") != std::string::npos);
 }
 
 //==============================================================================

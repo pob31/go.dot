@@ -66,6 +66,7 @@
 #include <wfg/engine/cue/LaneRecording.h>
 #include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/TakeTable.h>
+#include <wfg/engine/cue/TextFields.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/pair/Hold.h>
@@ -625,6 +626,15 @@ namespace wfg::cue
             preloadsSent.clear();
             revisionPrepared = 0;
             banksPrepared = 0;
+        }
+
+        /*  THE FIELDS A TEXT CUE'S BLANKS ARE FILLED FROM (namespace draft 61,
+            AKM): serve's and a replay's, null in a rig that has none - its
+            blanks then show nothing. When a value moves, every text cue up is
+            drawn again, its look restated. */
+        void setTextFields (const TextFields* fields) noexcept
+        {
+            textFields = fields;
         }
 
         /*  THE CLOCK A VIDEO POINT IS PLACED ON, now: the audio's samples when
@@ -3186,6 +3196,10 @@ namespace wfg::cue
             taken, so nothing moves. */
         void applyPictureEdits (VideoJob& job, bool reread);
         std::uint64_t pictureRevision = 0;
+
+        //  The fields' revision last seen: a value moved draws every text cue up again (61).
+        const TextFields* textFields = nullptr;
+        std::uint64_t fieldsRevision = 0;
 
         /*  A MOVIE'S PLAYHEAD AS ITS RUN READS IT (namespace draft §47, AAC):
             the file's second at the clock's now, the speed it goes at, the

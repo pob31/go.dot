@@ -41,6 +41,7 @@
 #include <wfg/engine/cue/FadeMoveRows.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/TakeCommands.h>
+#include <wfg/engine/cue/TextFields.h>
 #include <wfg/engine/cue/UndoStep.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/TriggerIndex.h>
@@ -384,6 +385,11 @@ namespace
         runner.setLanes (&lanes);
         wfg::cue::CurveTable curveTable;
         runner.setCurves (&curveTable);
+
+        /*  A TEXT CUE'S FIELDS (namespace draft 61, AKM): tonight's values,
+            written through their own door and read by the Runner and the tree. */
+        wfg::cue::TextFields textFields;
+        runner.setTextFields (&textFields);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -694,6 +700,11 @@ namespace
         runner.setLanes (&lanes);
         wfg::cue::CurveTable curveTable;
         runner.setCurves (&curveTable);
+
+        /*  A TEXT CUE'S FIELDS (namespace draft 61, AKM): tonight's values,
+            written through their own door and read by the Runner and the tree. */
+        wfg::cue::TextFields textFields;
+        runner.setTextFields (&textFields);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -862,10 +873,11 @@ namespace
                     session wrote it through - a fader's trim or a DCA's - so the
                     record applies as it did rather than being refused by a
                     document that cannot hold it. */
-                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
+                wfg::cue::eitherOf (wfg::cue::textFieldWriteFor (textFields),
+                                    wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
                                     wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                         wfg::cue::eitherOf (wfg::cue::fxWriteFor (document, nullptr, &liveEdits),
-                                                                            wfg::cue::fadeMoveWriteFor (document, nullptr)))),
+                                                                            wfg::cue::fadeMoveWriteFor (document, nullptr))))),
                 wfg::cue::liveSendFor (liveEdits, document),
                 /*  AND A SET OF VALUES PUT BACK WHOLE when one is refused
                     (`node.setMany`, namespace draft §30.11), as `serve` has it. */
@@ -1414,6 +1426,11 @@ namespace
         runner.setLanes (&lanes);
         wfg::cue::CurveTable curveTable;
         runner.setCurves (&curveTable);
+
+        /*  A TEXT CUE'S FIELDS (namespace draft 61, AKM): tonight's values,
+            written through their own door and read by the Runner and the tree. */
+        wfg::cue::TextFields textFields;
+        runner.setTextFields (&textFields);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -3880,6 +3897,11 @@ namespace
         wfg::cue::CurveTable curveTable;
         runner.setCurves (&curveTable);
 
+        /*  A TEXT CUE'S FIELDS (namespace draft 61, AKM): tonight's values,
+            written through their own door and read by the Runner and the tree. */
+        wfg::cue::TextFields textFields;
+        runner.setTextFields (&textFields);
+
         /*  THE SPACEMOUSE (namespace draft 45, O.11): read by a thread of its
             own, opened only while a curve with a movement is armed. Serve only:
             a replay has no puck, and its pushes are `curve.ride` records. */
@@ -4052,11 +4074,14 @@ namespace
                 document; an FX parameter through it. */
             /*  AND UNDER THE LOCK, A CUE'S EQ AND SENDS, ridden live in front
                 of the document that would refuse them (2026-09-25) - and its
-                plugins' parameters, held by the FX door (2026-09-26). */
-            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
+                plugins' parameters, held by the FX door (2026-09-26). AND
+                FIRST A TEXT CUE'S FIELD (namespace draft 61, AKM): tonight's,
+                accepted under the lock, never the document's. */
+            wfg::cue::eitherOf (wfg::cue::textFieldWriteFor (textFields),
+                                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
                                 wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                     wfg::cue::eitherOf (wfg::cue::fxWriteFor (document, &catalogues, &liveEdits),
-                                                                        wfg::cue::fadeMoveWriteFor (document, &catalogues)))),
+                                                                        wfg::cue::fadeMoveWriteFor (document, &catalogues))))),
             wfg::cue::liveSendFor (liveEdits, document),
             /*  AND ONE GESTURE OVER SEVERAL ADDRESSES, all or none (namespace
                 draft §30.11): `node.setMany` refuses a hand's ride and puts
@@ -4890,6 +4915,7 @@ namespace
         parameters.setSurfaces (&surfaceTable);
         parameters.setLanes (&lanes);
         parameters.setCurves (&curveTable);
+        parameters.setTextFields (&textFields);
         parameters.setListenStatus ([&listener] (const std::string& mountId) { return listener.statusOf (mountId); });
 
         /*  THE PICTURES (Phase 8a, namespace draft 35.4): the region the scene
@@ -5043,6 +5069,9 @@ namespace
             render landing is no revision of the show, and a render the tile
             shows is not let go of under it. */
         std::uint32_t tileRendersSeen = 0;
+
+        //  And the fields' revision: a text cue's tile drawn again when a value moves (61, AKN).
+        std::uint64_t tileFieldsSeen = 0;
         std::string tileFileShown;
 
         /*  And the lock it was read under: a projector put away while the show
@@ -6585,16 +6614,20 @@ namespace
                                      const auto revision = document.showRevision();
 
                                      const auto rendersNow = renderer.changes();
+                                     const auto fieldsNow = textFields.revision();
 
                                      if (tileSerial != tileWishSeen
-                                           || (! tileCue.empty() && (revision != tileRevisionSeen || rendersNow != tileRendersSeen)))
+                                           || (! tileCue.empty() && (revision != tileRevisionSeen || rendersNow != tileRendersSeen
+                                                                        || fieldsNow != tileFieldsSeen)))
                                      {
                                          tileWishSeen = tileSerial;
                                          tileRevisionSeen = revision;
                                          tileRendersSeen = rendersNow;
+                                         tileFieldsSeen = fieldsNow;
 
                                          auto spec = tileCue.empty() ? wfg::video::LayerSpec {}
-                                                                     : wfg::cue::pictureSpecOf (document, tileCue, mediaFolder);
+                                                                     : wfg::cue::pictureSpecOf (document, tileCue, mediaFolder,
+                                                                                                nullptr, &textFields);
 
                                          if (spec.source.empty())
                                          {

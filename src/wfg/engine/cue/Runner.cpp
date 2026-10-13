@@ -5019,7 +5019,7 @@ namespace wfg::cue
                 return;
             }
 
-            job.spec = pictureSpecOf (document, job.cue, mediaFolder, &played);
+            job.spec = pictureSpecOf (document, job.cue, mediaFolder, &played, textFields);
             job.spec.id = runId;
             job.spec.order = ++videoOrder;
 
@@ -18919,6 +18919,12 @@ namespace wfg::cue
         const auto reread = revision != pictureRevision;
         pictureRevision = revision;
 
+        /*  A FIELD MOVED (namespace draft 61, AKM): every text cue up is read
+            again, its blanks filled with the new value, and restated. */
+        const auto fieldsNow = textFields != nullptr ? textFields->revision() : 0;
+        const auto refilled = fieldsNow != fieldsRevision;
+        fieldsRevision = fieldsNow;
+
         for (auto& job : showing)
         {
             const auto* run = runs.find (job.self);
@@ -19016,7 +19022,7 @@ namespace wfg::cue
             /*  AND ITS CUE'S EDITS, while it is up and not on its way out
                 (§47, AAE): Esc's fade and a stop's are the run's own. */
             if (job.placed && ! job.removed && job.fadeOutTicks < 0 && run->state != runState::stopping)
-                applyPictureEdits (job, reread);
+                applyPictureEdits (job, reread || (refilled && job.spec.source == "text"));
 
             /*  DOWN, AS ESC ASKED: from where it is at the horizon to black over
                 the panic fade, and gone on the frame it gets there. */
@@ -19420,7 +19426,7 @@ namespace wfg::cue
         if (job.cue.empty() || ! document.findById (job.cue).isValid())
             return;
 
-        const auto now = pictureSpecOf (document, job.cue, mediaFolder);
+        const auto now = pictureSpecOf (document, job.cue, mediaFolder, nullptr, textFields);
         const auto at = videoSampleAhead();
 
         /*  WHAT A FADE OR A RAMP IS MOVING NOW: a fade cue aimed at this run

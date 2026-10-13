@@ -73,7 +73,8 @@ namespace wfg::cue
     /** Whether `address` is one of the rows answered here rather than by the
         document: `/godot/run/<id>/trim`, `/godot/dca/<id>/trim`, a take's
         `/godot/slot/<id>/loopIn` and `/loopOut`, or a lane's ride - `/godot/surface/laneRide`
-        for the level, `/godot/bus/<mix>/laneRide` for a send (namespace draft §34). */
+        for the level, `/godot/bus/<mix>/laneRide` for a send (namespace draft §34) -
+        or a text cue's field, `/godot/text/<name>` (61), whose door is its own. */
     bool isLiveAddress (std::string_view address);
 
     /*  Whether an applied command was a ride on a live row - `node.set` on

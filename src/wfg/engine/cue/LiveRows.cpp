@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/LiveRows.h>
+#include <wfg/engine/cue/TextFields.h>
 
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/cue/DcaTable.h>
@@ -118,7 +119,8 @@ namespace wfg::cue
 
     bool isLiveAddress (std::string_view address)
     {
-        return split (address).has_value();
+        //  And a text cue's field (namespace draft 61): tonight's, answered in front of the document.
+        return split (address).has_value() || isTextFieldAddress (address);
     }
 
     bool isLiveWrite (const std::string& commandName, const std::vector<osc::Value>& args)

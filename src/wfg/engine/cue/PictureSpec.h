@@ -41,6 +41,7 @@ namespace wfg::doc { class ShowDocument; }
 namespace wfg::cue
 {
     struct PlayedMedia;
+    class TextFields;
 
     /*  The layer `cueId` would put up now, its file resolved against
         `mediaFolder` as a sound's is. An empty spec for a cue that is not
@@ -54,6 +55,13 @@ namespace wfg::cue
         form above is the tile's and the edit's, which show the source. */
     video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
                                     const std::string& mediaFolder, const PlayedMedia* played);
+
+    /*  AND A TEXT CUE'S BLANKS FILLED from `fields` (namespace draft 61, AKM):
+        the words as they are shown tonight. Without a table - and in the forms
+        above - a blank shows nothing. */
+    video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
+                                    const std::string& mediaFolder, const PlayedMedia* played,
+                                    const TextFields* fields);
 
     /*  WHETHER TWO SPECS LOOK THE SAME, in what a playing layer is told when its
         cue is edited (`Sink::restate`): the blend, the colour, the fit, the

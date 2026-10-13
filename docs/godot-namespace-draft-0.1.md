@@ -27549,3 +27549,28 @@ tiles cost the renderer's message thread with a blur in them.
   rows gone from the inspector), `RunPaneUiTests` (the words where the fit was, the style in the column,
   Left toggled, a picture bringing the fit back; under `WFG_SNAPSHOT_DIR` the page as a picture, looked
   at), `console.unit`, `client.boundary`, `source.comments`; the clang-tidy stand-in clean.
+- **VFX.5**, 2026-10-13: fields (AKC, AKM). `video/Blanks.h`, pure and the client's too: a field's name
+  (one to thirty-two letters, digits, `-`, `_`), the words walked - `{{` and `}}` a brace, `{name}` a blank,
+  a `{` beginning none shown as written - `blanksIn`, `fillBlanks`, `hasLooseBrace`. `cue/TextFields`:
+  tonight's values, a value cut at 1024 bytes at a character, at most 256 names, a revision moving only
+  on a change, `replaceAll` for a seat, `clear`; and its door, `textFieldWriteFor`, first in `node.set`'s
+  chain in serve AND in replay - a replayed field is applied as it was, not refused by a document that
+  cannot hold it - answering `/godot/text/<name>`: applied, `bad-address` for a name that does not read,
+  `bad-value` for a 257th. `isLiveAddress` knows the fields, so no undo step is opened and a set refuses
+  them as a ride. `pictureSpecOf` fills a text cue's blanks from a table (none: a blank shows nothing);
+  the Runner fills them at GO and, when the fields' revision moves, reads every text cue up again and
+  restates it (`setTextFields`); serve asks for the picked cue's tile again on the same revision. The
+  tree publishes `/godot/text/<name>` - every blank the show's words hold, found once a revision, and
+  every name written - on `list/aim`'s shape, a string written and never saved, its value tonight. A
+  `{` that begins no field is a warning. Every verb that makes a Runner makes a table (the tree verb's
+  stays empty: its blanks are published, empty). Tests under C and fr_FR: `VideoTextTests` (the names,
+  the blanks found once and filled, braces written out, a loose brace; the table's cut, revision,
+  refusals, 257th, `replaceAll` and `clear`), `VideoTests` (a value set before GO there when it comes
+  up; a number written while it plays restated at once, without the locale, the show's revision
+  unmoved; under the lock the words refused and a field taken; a name that does not read refused and
+  said; Esc leaving the fields; a replay of the log reaching the same fields; the loose-brace warning),
+  `ClientTests` (the tree's `/godot/text/<name>` nodes: the blanks, empty, a brace written out none, a
+  value, a name no words hold); `wfg.replay.*` and `wfg.commands` - 73 gates - `schema.*`, `unit.shards`,
+  `client.boundary`, `source.comments`; the clang-tidy stand-in clean. A deliberate breakage - the Runner
+  blind to the fields' revision - turned its case red. The position's share (a seat's fields) is its own
+  commit after this one.

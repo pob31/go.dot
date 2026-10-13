@@ -31,6 +31,7 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/timecode/Timecode.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/video/Blanks.h>
 #include <wfg/engine/video/TextLook.h>
 
 #include <map>
@@ -6532,6 +6533,12 @@ namespace wfg::doc
                     else if (words.size() >= video::wordsBytes)
                         problems.push_back (here + ": its words are longer than a slide's worth, 4096 bytes"
                                                    " - the rest is not shown");
+
+                    /*  A `{` THAT BEGINS NO BLANK (61, AKM): shown as written,
+                        which is seldom what was meant. */
+                    if (video::hasLooseBrace (words))
+                        problems.push_back (here + ": a { in its words begins no field - it is shown as written;"
+                                                   " a field is {name}, letters, digits, - and _, and {{ is a brace");
                 }
 
                 for (const auto& child : node)
