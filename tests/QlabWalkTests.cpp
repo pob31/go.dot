@@ -557,6 +557,15 @@ TEST_CASE ("qlab walk: every stage a canvas of its size with its outputs; a pict
     CHECK (said (plan, "triptyque's edge blends are not imported"));
     CHECK (said (plan, "each QLab stage is a canvas"));
 
+    //  Each projector once: each shows the stage drawn to it alone, else the first drawn to it.
+    REQUIRE (plan.outputs.size() == 6u);
+    CHECK (plan.outputs[0].name == "Output 1");
+    CHECK (plan.outputs[0].canvas == "stage:VIEW-1");
+    CHECK (plan.outputs[1].canvas == "screen:Built-in Retina Display");
+    CHECK (plan.outputs[2].canvas == "screen:Screen");
+    CHECK (plan.outputs[3].name == "Gauche");
+    CHECK (plan.outputs[3].canvas == "stage:VIEW-T");
+
     SUBCASE ("QLab 4: a cue on no surface the workspace has is on its default surface")
     {
         auto w = workspaceOf ({ picture ("video/c.png", "0") }, 4);
@@ -566,6 +575,24 @@ TEST_CASE ("qlab walk: every stage a canvas of its size with its outputs; a pict
         REQUIRE (four.canvases.size() == 1);
         CHECK (top (four)[0].canvas == "stage:77");
     }
+}
+
+TEST_CASE ("qlab walk: a projector QLab drew several stages to is one output, showing the stage drawn to it alone; the stage spanning it said (§62, ALF)")
+{
+    auto w = workspaceOf ({ picture ("video/a.png", "VIEW-L") });
+    w.stages = { { "VIEW-T", "triptyque", 5760, 1080, { "Gauche", "Centre", "Droite" }, false, false },
+                 { "VIEW-L", "gauche", 1920, 1080, { "Gauche" }, false, false },
+                 { "VIEW-C", "centre", 1920, 1080, { "Centre" }, false, false } };
+    const auto plan = walk (w);
+
+    REQUIRE (plan.outputs.size() == 3u);
+    CHECK (plan.outputs[0].name == "Gauche");
+    CHECK (plan.outputs[0].canvas == "stage:VIEW-L");
+    CHECK (plan.outputs[1].name == "Centre");
+    CHECK (plan.outputs[1].canvas == "stage:VIEW-C");
+    CHECK (plan.outputs[2].name == "Droite");
+    CHECK (plan.outputs[2].canvas == "stage:VIEW-T");
+    CHECK (said (plan, "the stage triptyque was drawn to Gauche, Centre, which show another canvas here"));
 }
 
 TEST_CASE ("qlab walk: a picture placed - offsets a % of its canvas, a picture at its own size scaled from it, a turn, opacity, layer; what Go.dot has not got said (§62, ALG)")
@@ -788,10 +815,14 @@ TEST_CASE ("qlab walk: a fade of a picture - its opacity, a move, a scale from i
     effects.target = movie.id;
     effects.fadesEffects = true;
 
+    auto soundOnly = cue ("Fade");
+    soundOnly.target = movie.id;
+    soundOnly.fadeLevels = { { 0, 0, 1.0, gain (-60.0) } };
+
     WalkOptions options;
     options.pictureSizes[movie.id] = { 1920, 1080 };
 
-    const auto plan = walk (withStages ({ movie, in, nudge, effects }), options);
+    const auto plan = walk (withStages ({ movie, in, nudge, effects, soundOnly }), options);
     const auto& items = top (plan);
 
     CHECK (items[1].kind == "fade");
@@ -810,4 +841,6 @@ TEST_CASE ("qlab walk: a fade of a picture - its opacity, a move, a scale from i
 
     CHECK (items[3].kind == "memo");
     CHECK (said (plan, "it moves nothing a Go.dot fade of a picture moves"));
+    CHECK (items[4].kind == "memo");
+    CHECK (said (plan, "it fades only the movie's sound"));
 }

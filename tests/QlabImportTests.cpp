@@ -29,11 +29,13 @@
 #include "QlabFixture.h"
 
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/import/QlabImport.h>
 
 #include <juce_core/juce_core.h>
+#include <juce_graphics/juce_graphics.h>
 
 #include <map>
 #include <memory>
@@ -263,4 +265,180 @@ TEST_CASE ("qlab import: the author's own workspaces build into shows that valid
     }
 
     CHECK (workspaces > 0);
+}
+
+//==============================================================================
+/*  QF.9: QLAB'S PICTURES AND WORDS WRITTEN (namespace draft §62): canvases
+    and their outputs, a picture, a movie, a text and a fade; and a whole
+    import from a folder, a still's own size and a movie's codec read. */
+
+namespace
+{
+    std::vector<std::uint8_t> box (const std::string& type, const std::vector<std::uint8_t>& contents)
+    {
+        std::vector<std::uint8_t> out;
+        const auto size = static_cast<std::uint32_t> (contents.size() + 8);
+        for (const auto shift : { 24, 16, 8, 0 })
+            out.push_back (static_cast<std::uint8_t> ((size >> shift) & 0xFF));
+        out.insert (out.end(), type.begin(), type.end());
+        out.insert (out.end(), contents.begin(), contents.end());
+        return out;
+    }
+
+    std::vector<std::uint8_t> joined (std::initializer_list<std::vector<std::uint8_t>> parts)
+    {
+        std::vector<std::uint8_t> out;
+        for (const auto& part : parts)
+            out.insert (out.end(), part.begin(), part.end());
+        return out;
+    }
+
+    /*  A MOVIE'S BOXES, AND NO FRAMES: a QuickTime file whose one video
+        track says its size and its codec, after a box of frames to skip. */
+    std::vector<std::uint8_t> movieBoxes (int width, int height, const std::string& codec)
+    {
+        std::vector<std::uint8_t> tkhd (84, 0);                 // version 0: the size at 76 and 80
+        const auto put = [&tkhd] (std::size_t at, std::uint32_t v)
+        {
+            for (int k = 0; k < 4; ++k)
+                tkhd[at + static_cast<std::size_t> (k)] = static_cast<std::uint8_t> ((v >> (24 - 8 * k)) & 0xFF);
+        };
+        put (76, static_cast<std::uint32_t> (width) << 16);
+        put (80, static_cast<std::uint32_t> (height) << 16);
+
+        std::vector<std::uint8_t> hdlr (24, 0);
+        const std::string video = "vide";
+        std::copy (video.begin(), video.end(), hdlr.begin() + 8);
+
+        std::vector<std::uint8_t> entry (8, 0);
+        entry[3] = 16;
+        std::copy (codec.begin(), codec.end(), entry.begin() + 4);
+        entry.resize (16, 0);
+        std::vector<std::uint8_t> stsd { 0, 0, 0, 0, 0, 0, 0, 1 };
+        stsd.insert (stsd.end(), entry.begin(), entry.end());
+
+        const auto trak = box ("trak", joined ({ box ("tkhd", tkhd),
+                                                  box ("mdia", joined ({ box ("hdlr", hdlr),
+                                                                         box ("minf", box ("stbl", box ("stsd", stsd))) })) }));
+        return joined ({ box ("ftyp", { 'q', 't', ' ', ' ', 0, 0, 0, 0 }),
+                         box ("mdat", std::vector<std::uint8_t> (5000, 0x55)),
+                         box ("moov", trak) });
+    }
+}
+
+TEST_CASE ("qlab import: a stage written as a canvas with its outputs, no display chosen; a picture, a text and a fade on it (§62, ALF-ALJ)")
+{
+    fixture::Workspace w (5);
+    w.stages = { { "VIEW-1", "Stage 1", 1920, 1080, { "Output 1", "Output 2" }, false } };
+    const auto still = w.video ("Title card", "video/title.png", "VIEW-1", {},
+                                { { "fullScreen", Value::boolean (false) }, { "opacity", Value::number (0.0) } });
+    fixture::Workspace::Run run;
+    run.length = 7;
+    run.colour = w.colour (1.0, 1.0, 1.0);
+    const auto words = w.titles ("Act", w.attributed ("Act One", { run }), "VIEW-1");
+    const auto up = w.pictureFade ("", still, 2.0, { { "doOpacity", Value::boolean (true) }, { "opacity", Value::number (1.0) } });
+    const auto bytes = w.bytes ({ w.group ("Main", 0, { still, words, up }) });
+
+    const auto read = readWorkspaceBytes (bytes.data(), bytes.size());
+    REQUIRE (read.workspace.has_value());
+    WalkOptions options;
+    options.pictureSizes[w.idOf (still)] = { 960, 540 };
+    const auto plan = walk (*read.workspace, options);
+
+    doc::ShowDocument document;
+    const std::map<std::string, std::pair<std::string, int>> media { { w.idOf (still), { "title.png", 0 } } };
+    const auto built = build (*read.workspace, plan, media, document);
+
+    const auto canvas = idFor ("stage:VIEW-1");
+    CHECK (elementOf (document, canvas) == "Canvas");
+    CHECK (at (document, "/godot/canvas/" + canvas + "/name") == "Stage 1");
+    CHECK (at (document, "/godot/canvas/" + canvas + "/width") == "1920");
+    CHECK (at (document, "/godot/canvas/" + canvas + "/height") == "1080");
+
+    for (const auto* which : { "Output 1", "Output 2" })
+    {
+        const auto output = idFor (std::string ("output:") + which);
+        CHECK (elementOf (document, output) == "VideoOutput");
+        CHECK (at (document, "/godot/videoOutput/" + output + "/canvas") == canvas);
+        CHECK (at (document, "/godot/videoOutput/" + output + "/name") == which);
+        CHECK (document.getAttribute ("/godot/videoOutput/" + output + "/display").value_or ("") == "");
+    }
+
+    const auto picture = idFor ("cue:" + w.idOf (still));
+    CHECK (elementOf (document, picture) == "Video");
+    CHECK (at (document, "/godot/cue/" + picture + "/source") == "picture");
+    CHECK (at (document, "/godot/cue/" + picture + "/canvas") == canvas);
+    CHECK (at (document, "/godot/cue/" + picture + "/file") == "title.png");
+    CHECK (at (document, "/godot/cue/" + picture + "/scale") == "50");
+    CHECK (at (document, "/godot/cue/" + picture + "/opacity") == "0");
+
+    const auto text = idFor ("cue:" + w.idOf (words));
+    CHECK (at (document, "/godot/cue/" + text + "/source") == "text");
+    CHECK (at (document, "/godot/cue/" + text + "/words") == "Act One");
+    CHECK (at (document, "/godot/cue/" + text + "/canvas") == canvas);
+    CHECK (at (document, "/godot/cue/" + text + "/paint") == "#FFFFFF");
+    CHECK (document.getAttribute ("/godot/cue/" + text + "/file").value_or ("") == "");
+
+    const auto fade = idFor ("cue:" + w.idOf (up));
+    CHECK (elementOf (document, fade) == "Fade");
+    CHECK (at (document, "/godot/cue/" + fade + "/target") == picture);
+    CHECK (at (document, "/godot/cue/" + fade + "/video") == "opacity:100");
+    CHECK (built.cues == 3);
+}
+
+TEST_CASE ("qlab import: a whole workspace from a folder - a still's own size read, a movie's codec read from its boxes, the canvases and fonts reported (§62, ALG, ALH, ALK)")
+{
+    juce::TemporaryFile scratch;
+    const auto folder = scratch.getFile().getSiblingFile ("godot-qlab-pictures-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    REQUIRE (folder.getChildFile ("video").createDirectory());
+
+    {
+        juce::Image still (juce::Image::RGB, 960, 540, true);
+        juce::FileOutputStream out (folder.getChildFile ("video/title.png"));
+        REQUIRE (out.openedOk());
+        juce::PNGImageFormat png;
+        REQUIRE (png.writeImageToStream (still, out));
+    }
+    {
+        const auto movie = movieBoxes (1280, 720, "avc1");
+        REQUIRE (folder.getChildFile ("video/clip.mov").replaceWithData (movie.data(), movie.size()));
+    }
+
+    fixture::Workspace w (5);
+    w.stages = { { "VIEW-1", "Stage 1", 1920, 1080, { "Output 1" }, false } };
+    const auto still = w.video ("Title card", "video/title.png", "VIEW-1", {}, { { "fullScreen", Value::boolean (false) } });
+    const auto clip = w.video ("Clip", "video/clip.mov", "VIEW-1", { { 0, 0, 0.0 } },
+                               { { "fullScreen", Value::boolean (false) }, { "scaleX", Value::number (0.5) },
+                                 { "scaleY", Value::number (0.5) } });
+    fixture::Workspace::Run run;
+    run.length = 3;
+    run.font = "NoSuchFace-Heavy";
+    const auto words = w.titles ("Words", w.attributed ("End", { run }), "VIEW-1");
+    const auto bytes = w.bytes ({ w.group ("Main", 0, { still, clip, words }) });
+    const auto workspaceFile = folder.getChildFile ("Show.qlab5");
+    REQUIRE (workspaceFile.replaceWithData (bytes.data(), bytes.size()));
+
+    ImportOptions options;
+    options.into = folder.getChildFile ("Imported");
+    const auto outcome = importWorkspace (workspaceFile, options);
+    REQUIRE_MESSAGE (outcome.ok, outcome.error);
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (options.into, document).ok);
+    const auto picture = idFor ("cue:" + w.idOf (still));
+    CHECK (at (document, "/godot/cue/" + picture + "/scale") == "50");              // 960 of 1920: half what fits
+    const auto movie = idFor ("cue:" + w.idOf (clip));
+    CHECK (at (document, "/godot/cue/" + movie + "/source") == "movie");
+    CHECK (at (document, "/godot/cue/" + movie + "/scale") == "33.3333");           // 1280 of 1920, halved in QLab
+    CHECK (options.into.getChildFile ("media/clip.mov").existsAsFile());
+
+    const auto report = outcome.report.loadFileAsString().toStdString();
+    CHECK (report.find ("## The canvases") != std::string::npos);
+    CHECK (report.find ("| Stage 1 | 1920 x 1080 | Output 1 |") != std::string::npos);
+    CHECK (report.find ("## The fonts") != std::string::npos);
+    //  Missing here: its family read from the name QLab last saw it under.
+    CHECK (report.find ("| NoSuchFace-Heavy | Helvetica Neue | missing |") != std::string::npos);
+    CHECK (report.find ("a movie in avc1, which Go.dot shows as a preview until it is converted to HAP") != std::string::npos);
+
+    folder.deleteRecursively();
 }

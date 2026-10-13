@@ -732,9 +732,16 @@ namespace wfg::import::qlab
                     pairs.push_back ({ "rotation", number (turn, 3) });
                 }
 
+                const auto sound = std::any_of (cue.fadeLevels.begin(), cue.fadeLevels.end(),
+                                                [] (const FadeLevel& f) { return f.row == 0 && f.column == 0; });
+
+                if (pairs.empty() && sound)
+                    return placeholder (cue, "it fades only the movie's sound, which in Go.dot is the sound cue the movie's "
+                                        "conversion to HAP makes - a fade of that cue", displayName (cue));
+
                 if (cue.fadesEffects)
                     note (Note::Kind::dropped, cue, "it fades video effects too: not imported");
-                if (std::any_of (cue.fadeLevels.begin(), cue.fadeLevels.end(), [] (const FadeLevel& f) { return f.row == 0 && f.column == 0; }))
+                if (sound)
                     note (Note::Kind::dropped, cue, "it fades the movie's sound too: a Go.dot movie's sound is the sound cue "
                           "its conversion to HAP makes, which a fade of its own moves");
 
@@ -1535,10 +1542,37 @@ namespace wfg::import::qlab
                                             "interface output of the same number - a QLab patch that routed its cue outputs "
                                             "elsewhere needs the buses patched again" });
 
+                /*  EACH OUTPUT ONCE (ALF): a projector QLab drew several stages to is
+                    one output here, showing the stage drawn to it alone; the others
+                    are said, to be laid over it as zones. */
+                std::map<std::string, std::string> shows;
+                for (const auto alone : { true, false })
+                    for (const auto& each : plan.canvases)
+                        if ((each.outputs.size() == 1) == alone)
+                            for (const auto& output : each.outputs)
+                                if (shows.count (output) == 0)
+                                {
+                                    shows[output] = each.key;
+                                    plan.outputs.push_back ({ "output:" + output, output, each.key });
+                                }
+
+                for (const auto& each : plan.canvases)
+                {
+                    std::string elsewhere;
+                    for (const auto& output : each.outputs)
+                        if (shows[output] != each.key)
+                            elsewhere += (elsewhere.empty() ? "" : ", ") + output;
+
+                    if (! elsewhere.empty())
+                        plan.notes.push_back ({ Note::Kind::info, -1, {}, "the stage " + each.name + " was drawn to " + elsewhere
+                                                + ", which show another canvas here: lay it over them as a zone (Show settings, "
+                                                  "Video) to see it on those projectors" });
+                }
+
                 if (! plan.canvases.empty())
-                    plan.notes.push_back ({ Note::Kind::info, -1, {}, "each QLab stage is a canvas of its size, its outputs "
-                                            "video outputs with no display chosen, which draw nothing until a projector is "
-                                            "picked for each in Show settings, Video" });
+                    plan.notes.push_back ({ Note::Kind::info, -1, {}, "each QLab stage is a canvas of its size, and each output "
+                                            "QLab drew to a video output with no display chosen, which draws nothing until a "
+                                            "projector is picked for it in Show settings, Video" });
             }
         };
     }

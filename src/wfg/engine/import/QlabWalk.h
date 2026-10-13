@@ -123,6 +123,16 @@ namespace wfg::import::qlab
         std::vector<std::string> outputs;
     };
 
+    /*  A VIDEO OUTPUT for one QLab output - a projector, by its name - made once
+        however many stages QLab drew to it (§62, ALF): it shows the canvas of
+        the first stage drawn to it alone, else of the first drawn to it. */
+    struct Output
+    {
+        std::string key;            ///< "output:<name>"
+        std::string name;
+        std::string canvas;         ///< a `Canvas::key`
+    };
+
     /*  A FONT A TEXT CUE NAMES (§62, ALK): QLab's PostScript name, the family
         it was taken to be, and where that family is - "installed" on this
         machine, or "missing", its family read from the name QLab last saw. */
@@ -184,6 +194,7 @@ namespace wfg::import::qlab
         std::vector<Bus> buses;
         std::vector<Device> devices;
         std::vector<Canvas> canvases;
+        std::vector<Output> outputs;
         std::vector<FontUse> fonts;
         std::vector<Note> notes;
 

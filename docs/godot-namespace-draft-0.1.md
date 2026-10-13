@@ -28553,3 +28553,23 @@ close (§60), which keeps the shared checkout.
   relative, one moving nothing; the ZX case now a camera's memo. 28 QLab cases. Four deliberate
   breakages - the turn's sign, the own-size factor, the braces, the relative move - each turned their
   cases red.
+- **QF.9**, 2026-10-13: the import. Canvases written at their sizes; each output QLab drew to made
+  once, with no display chosen, showing the stage drawn to it alone - Justice-s's three projectors carry
+  its three single stages, and its triptych, drawn to all three, is said, to be laid over them as a zone
+  (ALF, refined here: a projector several stages share is one output, not one per stage). A video cue's
+  file found and copied as a sound's; a still's own size read by its image reader, a movie's own size
+  and codec from its QuickTime or MP4 boxes - the video track's header and sample description - without
+  reading a frame, so a movie of gigabytes costs a few reads; a movie not in HAP said, to be converted.
+  Each item's canvas and file written; the walk handed this machine's fonts through
+  `installed::byPostScript`. The report gains "The canvases" (each stage's size and what it was drawn to)
+  and "The fonts" (QLab's name, the family, installed or missing), and "Files not found" for "Sounds not
+  found". A fade of the movie's sound alone is a memo saying so. Imported for real from the author's
+  drive with `--no-media`: Justice2 (QLab 5) into four canvases and three outputs, and La Reprise
+  (QLab 4) into its four surfaces and three outputs named by their displays, its movies faded up from
+  nought by 24 fades of the picture; each `wfg validate` calls valid. Tests under C and fr_FR:
+  QlabImportTests (a stage, its outputs, a picture, a text and a fade written; a whole import from a
+  folder - a PNG's own size, a hand-built QuickTime file's 1280 by 720 and its codec, the report),
+  QlabWalkTests (a projector several stages share), `blackbox.import-qlab` (a stage, a text cue whose
+  braces are doubled, a PNG at its own size, its fade; DejaVu carried into the show so `wfg validate`
+  passes on any machine); 31 QLab cases. Two deliberate breakages - the canvas not written, the movie
+  header read four bytes early - each turned their cases red.
