@@ -303,6 +303,27 @@ namespace wfg::cue
 
     namespace
     {
+        /*  THE SPEED A SOUND'S VOICE IS GIVEN (namespace draft §22.4, §60
+            TG.9): the run's own speed - the cue's `rate`, or where a speed fade
+            has taken it - times its chase factor, which is one for every run no
+            time group steers. Multiplying by exactly one changes no bit, so a
+            run that does not chase places exactly the speed it always did, and
+            the clock's integer branch at one is kept. A stretched voice is held
+            to the stretcher's limit after the factor, as its own speed is
+            before it, so the run's clock and the voice's never disagree. */
+        double voiceRateOf (const Run& run, double stretchLimit) noexcept
+        {
+            const auto wanted = run.ownRate * run.chaseFactor;
+
+            if (! run.stretch || ! (stretchLimit > 0.0))
+                return wanted;
+
+            return std::copysign (std::min (std::abs (wanted), stretchLimit), wanted);
+        }
+    }
+
+    namespace
+    {
         /*  THE LOGICAL CHANNEL LTC PLAYS ON, or -1 (namespace draft §59, AHI):
             the show's `sync/ltcOut` naming an output - a `<Bus>` - one channel
             wide. Read through the document's getters, which put back the
@@ -5365,8 +5386,23 @@ namespace wfg::cue
             requestArmOn and keeps both (DV). Read with one as the fallback, never
             nought: an unreadable number read as nought would be a stopped tape.
             A stretched run is held to the stretcher's limit at this rate, so the
-            run's clock and the voice's never disagree. */
+            run's clock and the voice's never disagree.
+
+            A TIME GROUP'S CHASER TAKES ITS MODE FROM HOW IT CHASES (namespace
+            draft §60, AIU): `varispeed` resamples and `timestretch` stretches,
+            whatever the cue's own `rateMode` says - the chase is the decision
+            about how this sound changes speed while it catches up, and a speed
+            mode left at its default reads varispeed. A member's, a scene's sound
+            under a member, a movie's locked sound under one: the member's word,
+            found by the runs above it. Free runners and jump chasers keep the
+            cue's own mode. */
         run->stretch = textOf (cue, "rateMode") == "timestretch";
+
+        if (const auto method = chaseMethodOf (*run); method == "varispeed")
+            run->stretch = false;
+        else if (method == "timestretch")
+            run->stretch = true;
+
         run->rateSeen = osc::parseDouble (textOf (cue, "rate")).value_or (1.0);
         const auto stretchLimit = audio != nullptr ? audio->stretchSpeedLimit() : 0.0;
         run->ownRate = run->stretch && stretchLimit > 0.0
@@ -19384,9 +19420,20 @@ namespace wfg::cue
         if (! (duration > 0.0))
             duration = job.movieLength;
 
+        /*  ITS SPEED: the job's own - the cue's `rate`, or where a speed fade
+            has taken it - times the chase factor of a time group's catch-up
+            chaser (namespace draft §60, TG.9), one for every other movie. Read
+            here, where each stretch of its time ring is placed a horizon ahead,
+            so a correction moves the picture as it moves a voice: from the last
+            point on. */
+        const auto* self = runs.find (job.self);
+        const auto factor = self != nullptr && std::isfinite (self->chaseFactor) && self->chaseFactor > 0.0
+                              ? self->chaseFactor : 1.0;
+        const auto speed = job.rate * factor;
+
         /*  THE WAY IT GOES (namespace draft §41): the speed's sign, turned
             again while a ping-pong range plays back from its out-point. */
-        const auto velocity = job.rate * static_cast<double> (job.bounce);
+        const auto velocity = speed * static_cast<double> (job.bounce);
         auto target = job.moviePosition + velocity * static_cast<double> (at - job.movieAt) / static_cast<double> (rate);
 
         /*  ITS RANGES AS THEY ARE NOW (WL, TZ): a range moved while it plays
@@ -19426,7 +19473,7 @@ namespace wfg::cue
 
         for (int guard = 0; guard < 10000; ++guard)
         {
-            const auto way = job.rate * static_cast<double> (job.bounce);
+            const auto way = speed * static_cast<double> (job.bounce);
 
             if (! (std::abs (way) > 0.0))
                 break;
@@ -19487,7 +19534,7 @@ namespace wfg::cue
                 job.moviePosition = *next;
                 job.movieAt = reaches;
 
-                const auto nowWay = job.rate * static_cast<double> (job.bounce);
+                const auto nowWay = speed * static_cast<double> (job.bounce);
                 target = *next + (nowWay > 0.0 ? std::abs (overshoot) : -std::abs (overshoot));
                 continue;
             }
@@ -19616,7 +19663,7 @@ namespace wfg::cue
         const auto now = videoClockNow();
 
         run.position = now >= 0 ? videoValueOf (job, video::Property::time, now) : job.moviePosition;
-        run.rateNow = job.rate * static_cast<double> (job.bounce);
+        run.rateNow = job.rate * run.chaseFactor * static_cast<double> (job.bounce);
 
         auto index = -1;
 
@@ -19852,18 +19899,22 @@ namespace wfg::cue
                     clock starts on the launch's sample at the run's speed, and
                     the voice is told the same breakpoint, so the two begin
                     together. A voice at one told one stays the identity, and a
-                    cue at one plays exactly as it did before there was a speed. */
+                    cue at one plays exactly as it did before there was a speed.
+                    A TIME GROUP'S CATCH-UP CHASER starts at its code's speed (§60,
+                    TG.9): its chase factor, which the hook set while it waited. */
                 if (run->kind == "media")
                 {
                     /*  THE CLOCK COUNTS THE SPEED'S SIZE (namespace draft §41):
                         the reader goes on forwards whichever way the file goes,
                         and the way is `direction`. */
-                    run->rateClock.start (static_cast<double> (target), std::abs (run->ownRate));
+                    const auto speed = voiceRateOf (*run, audio->stretchSpeedLimit());
+
+                    run->rateClock.start (static_cast<double> (target), std::abs (speed));
                     run->launchSource = static_cast<double> (target);
                     run->rangeSource = run->launchSource;
-                    run->ratePlaced = run->ownRate;
-                    run->rateNow = run->ownRate;
-                    audio->placeRate (run->track, target, std::abs (run->ownRate));
+                    run->ratePlaced = speed;
+                    run->rateNow = speed;
+                    audio->placeRate (run->track, target, std::abs (speed));
 
                     /*  A CUE WITH NO RANGES plays between its start offset and
                         its file's end; launched backwards, from that end - its
@@ -20885,10 +20936,15 @@ namespace wfg::cue
                 }
             }
 
+            /*  WHAT THE VOICE IS TO PLAY AT: its own speed times its chase
+                factor (§60, TG.9) - the speed decided, exactly, for every run no
+                time group steers. */
+            const auto speed = voiceRateOf (*run, stretchLimit);
+
             /*  Before the launch the launch places it (`launchIfDue`). */
             if (run->launchedAtSample <= 0)
             {
-                run->rateNow = run->ownRate;
+                run->rateNow = speed;
                 continue;
             }
 
@@ -20897,14 +20953,15 @@ namespace wfg::cue
                 and on the voice, so the playhead is read off the arithmetic the
                 audio thread plays by. A speed fade moves `ownRate` every tick,
                 and its ramps join end to end: each starts where the last one
-                ended. */
-            if (std::bit_cast<std::uint64_t> (run->ownRate) != std::bit_cast<std::uint64_t> (run->ratePlaced))
+                ended; a chaser catching up moves its factor every tick, and its
+                ramps join the same way. */
+            if (std::bit_cast<std::uint64_t> (speed) != std::bit_cast<std::uint64_t> (run->ratePlaced))
             {
                 const auto last = run->rateClock.size() > 0 ? run->rateClock.back().at : 0.0;
                 const auto from = std::max (static_cast<double> (now + lead), last);
                 const auto to = from + static_cast<double> (samplesPerTick);
                 const auto before = std::abs (run->ratePlaced);
-                const auto after = std::abs (run->ownRate);
+                const auto after = std::abs (speed);
 
                 if (from > last)
                 {
@@ -20916,7 +20973,7 @@ namespace wfg::cue
                     comes down to nought where the line crosses it, and the
                     file turns round there - where the reader stands still, so
                     the turn costs no frame. */
-                const auto way = run->ownRate < 0.0 ? -1 : run->ownRate > 0.0 ? 1 : 0;
+                const auto way = speed < 0.0 ? -1 : speed > 0.0 ? 1 : 0;
 
                 if (way != 0 && way != run->direction)
                 {
@@ -20935,7 +20992,7 @@ namespace wfg::cue
 
                 run->rateClock.place (to, after);
                 audio->placeRate (run->track, static_cast<std::int64_t> (to), after);
-                run->ratePlaced = run->ownRate;
+                run->ratePlaced = speed;
             }
 
             /*  The past the clock no longer needs: what the playhead reads is

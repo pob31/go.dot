@@ -85,11 +85,11 @@
     hooks, applying the main's `code.heard` mapped onto its own clock, decide
     the same things on the same ticks under the same names.
 
-    CHASING (TG.8; AIF, AIG, AIH, AIN, AIT). A member whose `chase` is not
-    `free` is held to its code once it plays: it should be as far into its
-    material as the code is past its time (`chase::chasePlaceOf`). The two
-    moves that are not gradual are built here; TG.9 adds the catch-up below
-    them.
+    CHASING (TG.8 and TG.9; AIF, AIG, AIH, AIN, AIS, AIT, AIU, AIV). A member
+    whose `chase` is not `free` is held to its code once it plays: it should be
+    as far into its material as the code is past its time
+    (`chase::chasePlaceOf`). It is brought back by a jump, re-seated at a
+    locate, or caught up gradually:
 
       - THE JUMP. Every tick after the speeds are placed (`chaseTick`), a
         chaser by `jump` is measured a launch horizon ahead - where its file
@@ -117,6 +117,26 @@
       - A GROUP ARMED WHILE ITS CODE RUNS seats its chasers already past their
         time by `code.seat`, which the hook submits with the sample it read
         the code at - the one place a hook asks for a seat.
+
+      - THE CATCH-UP (TG.9). A chaser by `varispeed` or `timestretch` is
+        never moved while it is near: measured as a jump chaser is, it is run
+        at the code's speed times a correction - timecode/Chase.h's law, at
+        most `sync/chaseRate`, begun past `sync/chaseTolerance` and ended back
+        within a millisecond (a stretched voice's chunk, AJC) - and jumps only
+        past `sync/chaseJump`. The factor is the run's (`Run::chaseFactor`),
+        multiplied into its own speed where `applyRates` and the launch place
+        a speed on the voice, and into a movie's rate where `advanceMovie`
+        places its time ring: a speed decided this tick is placed a launch
+        horizon ahead, so the error the hook measures there already holds
+        every speed placed before it. A movie's locked sounds run at the
+        movie's factor; a scene member's sounding media each at its own, by
+        the member's method (AIV). The method also chose the voice's mode at
+        its arm (`chaseMethodOf`, AIU). The code stopped or turned back, every
+        factor is one: a chaser plays on at its own speed (AIG), and the
+        locate that brings the code back jumps it, or steers it from there
+        when it is less than `sync/chaseJump` out. The factor is worked out
+        from the code's logged line and the run's own clock, never logged, so
+        a backup applying the main's lines steers its chasers alike.
 */
 
 #include <wfg/engine/cue/Runner.h>
@@ -129,6 +149,7 @@
 #include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/cue/TriggerIndex.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/timecode/Chase.h>
 #include <wfg/engine/timecode/CodeMap.h>
 #include <wfg/engine/timecode/Timecode.h>
 
@@ -1033,7 +1054,45 @@ namespace wfg::cue
         out.tolerance = std::max (0.0001, read ("chaseTolerance", 10.0) / 1000.0);
         out.catchUp = std::max (out.tolerance, read ("chaseJump", 0.25));
         out.crossfade = read ("chaseCrossfade", 10.0) / 1000.0;
+
+        /*  THE CATCH-UP'S CLAMP (TG.9): the row is a percentage, its range the
+            schema's ten; held there, so a value the door let through by another
+            road never asks a voice for more. And where a stretched voice's
+            catch-up ends: one of the stretcher's chunks at the interface's rate
+            (AJC, timecode/Chase.h). */
+        out.rate = std::clamp (read ("chaseRate", 1.0) / 100.0, 0.0, 0.10);
+        out.stretchSettle = timecode::chaseSettleFor (true, audio != nullptr ? static_cast<double> (audio->sampleRate()) : 0.0);
         return out;
+    }
+
+    std::string Runner::chaseMethodOf (const Run& run) const
+    {
+        /*  UP THE RUNS, not the document: a locked sound may sit anywhere in the
+            show and is a child of its movie's run, and a seated sound of the
+            group's run it was seated under. The first run whose parent is a
+            time group's is the member; its cue's word is the chase. Bounded, as
+            a parent chain a bad table made circular must not hang the arm. */
+        const Run* at = &run;
+
+        for (int depth = 0; depth < 64 && at != nullptr && ! at->parent.empty(); ++depth)
+        {
+            const auto* up = runs.find (at->parent);
+
+            if (up == nullptr)
+                break;
+
+            if (up->isGroup())
+                if (const auto node = document.findById (up->cue);
+                    node.isValid() && node.hasType ("Group") && isTimeGroup (groupMode (node)))
+                {
+                    const auto member = document.findById (at->cue);
+                    return member.isValid() ? textOf (member, "chase") : std::string {};
+                }
+
+            at = up;
+        }
+
+        return {};
     }
 
     std::optional<chase::Place> Runner::chaseTargetOf (const juce::ValueTree& cue, const TimeMember& member,
@@ -1249,7 +1308,7 @@ namespace wfg::cue
     //==========================================================================
     bool Runner::steerChaser (Engine& engine, Run& run, const juce::ValueTree& targetCue, const TimeMember& member,
                               const TimePlan& plan, const timecode::CodeMap& map, double start,
-                              const ChaseSettings& settings, bool byJump, bool inHandler)
+                              const ChaseSettings& settings, bool byJump, bool inHandler, const Run* leader)
     {
         if (run.isFinished() || run.state == runState::stopping || run.takenBack || ! targetCue.isValid())
             return false;
@@ -1257,32 +1316,96 @@ namespace wfg::cue
         const auto rate = numberOf (targetCue, "rate");
         const auto* lengths = handlerDurations();
 
-        /*  THE ERROR SAID, and whether it is out of step by more than the
-            method lets it be before it acts: the tolerance for a jump, the
-            catch-up's own limit for varispeed and timestretch (TG.9 steers
-            below it). */
-        const auto outOfStep = [&run, &settings, byJump] (double error)
+        /*  THE CODE'S SPEED, code seconds per Go.dot second: what a catch-up
+            chaser in step runs at (AIS). Only read while the code runs forwards
+            - the hook does not steer otherwise - so anything else reads as one. */
+        const auto codeSpeed = std::isfinite (map.speed) && map.speed > 0.0 ? map.speed : 1.0;
+
+        /*  A JUMP CHASER plays at its own speed between its jumps, as TG.8 has
+            it: its factor is one, whatever a chase it had before an edit left. */
+        if (byJump)
+        {
+            run.chaseFactor = 1.0;
+            run.chaseCorrecting = false;
+        }
+
+        /*  A CATCH-UP CHASER NOT MEASURED THIS TICK - waiting for its launch or
+            its time, a movie waiting for its sounds after a seek - or just
+            jumped, which lands it in step: at the code's speed, nothing being
+            corrected, so it starts and carries on with the code rather than at
+            one. A locked sound at its movie's, which the movie's run carries. */
+        const auto holdCodeSpeed = [&run, byJump, leader, codeSpeed]
+        {
+            if (byJump)
+                return;
+
+            run.chaseFactor = leader != nullptr ? leader->chaseFactor : codeSpeed;
+            run.chaseCorrecting = false;
+        };
+
+        /*  ONE NOT HELD TO ITS CODE AT ALL - played backwards, bouncing between
+            a slice's points, a movie bouncing or standing, a time that does not
+            read - plays at its own speed, as a free runner does (TG.8 holds
+            none of them): a locked sound at its movie's. */
+        const auto notHeld = [&run, byJump, leader]
+        {
+            if (byJump)
+                return;
+
+            run.chaseFactor = leader != nullptr ? leader->chaseFactor : 1.0;
+            run.chaseCorrecting = false;
+        };
+
+        /*  THE LAW'S NUMBERS (timecode/Chase.h): the show's rows, and where the
+            catch-up ends - a millisecond, or a stretched voice's chunk (AJC). */
+        timecode::ChaseLaw law;
+        law.start = settings.tolerance;
+        law.jump = settings.catchUp;
+        law.most = settings.rate;
+        law.settle = run.stretch ? settings.stretchSettle : timecode::chaseSettleSeconds;
+
+        /*  THE ERROR SAID, and what the method does with it. A jump chaser
+            acts past the tolerance. A catch-up chaser is steered below
+            `sync/chaseJump` - its factor the law's, or a locked sound's its
+            movie's, so the two keep together however each was measured - and
+            acts only past it. True when it is to be brought back by a jump or
+            a cut. */
+        const auto outOfStep = [&] (double error)
         {
             run.chaseError = error * 1000.0;
 
-            if (std::abs (error) <= settings.tolerance)
+            if (byJump)
             {
-                run.chaseState = chaseWords::inStep;
-                return false;
+                if (std::abs (error) <= settings.tolerance)
+                {
+                    run.chaseState = chaseWords::inStep;
+                    return false;
+                }
+
+                return true;
             }
 
-            if (! byJump && std::abs (error) <= settings.catchUp)
-            {
-                run.chaseState = chaseWords::catching;
-                return false;
-            }
+            const auto step = timecode::chaseStep (law, error, codeSpeed, run.chaseCorrecting);
 
-            return true;
+            if (step.move == timecode::ChaseMove::jump)
+                return true;
+
+            run.chaseFactor = leader != nullptr ? leader->chaseFactor : step.factor;
+            run.chaseCorrecting = leader != nullptr ? leader->chaseCorrecting : step.correcting;
+            run.chaseState = run.chaseCorrecting ? chaseWords::catching : chaseWords::inStep;
+            return false;
+        };
+
+        const auto jumpedHere = [&run, &holdCodeSpeed]
+        {
+            run.chaseState = chaseWords::jumped;
+            holdCodeSpeed();
         };
 
         //----------------------------------------------------------------------
         /*  A MOVIE, measured where its next point is placed: its playhead there
-            against the code's second. Not while it waits for its sounds after a
+            against the code's second, at its rate times its factor, as
+            `advanceMovie` moves it. Not while it waits for its sounds after a
             seek, nor bouncing, nor backwards. */
         if (run.kind == "video")
         {
@@ -1296,18 +1419,36 @@ namespace wfg::cue
             const auto sampleRate = videoSampleRate();
 
             if (job == nullptr || ! job->placed || job->removed || job->movieEnded || ! job->soundsSought.empty()
-                  || job->bounce != 1 || ! (job->rate > 0.0) || at < 0 || at < job->movieAt || sampleRate <= 0
-                  || ! (rate > 0.0))
+                  || at < 0 || at < job->movieAt || sampleRate <= 0)
+            {
+                holdCodeSpeed();
                 return false;
+            }
+
+            if (job->bounce != 1 || ! (job->rate > 0.0) || ! (rate > 0.0))
+            {
+                notHeld();
+                return false;
+            }
 
             const auto target = chaseTargetOf (targetCue, member, plan, map, at, start, lengths);
 
-            if (! target.has_value() || ! target->sounding())
+            if (! target.has_value())
+            {
+                notHeld();
                 return false;
+            }
+
+            if (! target->sounding())
+            {
+                holdCodeSpeed();
+                return false;
+            }
 
             const auto ranges = rangesOf (targetCue);
             const auto actual = job->moviePosition
-                                  + job->rate * static_cast<double> (at - job->movieAt) / static_cast<double> (sampleRate);
+                                  + job->rate * run.chaseFactor * static_cast<double> (at - job->movieAt)
+                                      / static_cast<double> (sampleRate);
             auto error = actual - target->file;
 
             //  The near way round a loop, in the slice the code is in.
@@ -1331,33 +1472,60 @@ namespace wfg::cue
                 return false;
 
             cutMovie (*job, at, *target, ranges);
-            run.chaseState = chaseWords::jumped;
+            jumpedHere();
             return true;
         }
 
         //----------------------------------------------------------------------
-        /*  A SOUND, measured a launch horizon ahead, where a jump would land.
-            Not one played the other way or bouncing between a slice's points:
-            its file runs against the clock, and the code's line names none. */
-        if (run.kind != "media" || audio == nullptr || samplesPerTick <= 0 || run.direction < 0
-              || (run.range >= 0 && run.bent))
+        /*  A SOUND, measured a launch horizon ahead, where a jump would land -
+            and where a speed decided now is first placed. Not one played the
+            other way or bouncing between a slice's points: its file runs against
+            the clock, and the code's line names none. */
+        if (run.kind != "media" || audio == nullptr || samplesPerTick <= 0)
+        {
+            holdCodeSpeed();
             return false;
+        }
+
+        if (run.direction < 0 || (run.range >= 0 && run.bent))
+        {
+            notHeld();
+            return false;
+        }
 
         const auto now = audio->samplesElapsed();
         const auto at = now + static_cast<std::int64_t> (latencyTicks()) * samplesPerTick;
 
         if (run.launchedAtSample <= 0 || at <= run.launchedAtSample)
+        {
+            holdCodeSpeed();
             return false;
+        }
 
         const auto target = chaseTargetOf (targetCue, member, plan, map, at, start, lengths);
 
-        if (! target.has_value() || ! target->sounding())
+        if (! target.has_value())
+        {
+            notHeld();
             return false;
+        }
+
+        if (! target->sounding())
+        {
+            holdCodeSpeed();
+            return false;
+        }
 
         const auto ranges = rangesOf (targetCue);
         const auto error = chaseErrorOf (run, at, *target, rate, ranges);
 
-        if (! error.has_value() || ! outOfStep (*error))
+        if (! error.has_value())
+        {
+            holdCodeSpeed();
+            return false;
+        }
+
+        if (! outOfStep (*error))
             return false;
 
         //  IN THE SLICE IT PLAYS, or a cue with none: the crossfaded jump.
@@ -1366,7 +1534,7 @@ namespace wfg::cue
             if (! chaseJump (run, at, *target, settings.crossfade))
                 return false;
 
-            run.chaseState = chaseWords::jumped;
+            jumpedHere();
             return true;
         }
 
@@ -1388,7 +1556,7 @@ namespace wfg::cue
 
         run.launchNotBefore = launchAt;
         run.warning = runWarning::sought;
-        run.chaseState = chaseWords::jumped;
+        jumpedHere();
         engine.submit (origin::engine, "run.seek", { osc::Value::string (run.id), osc::Value::float64 (there->file) });
         return true;
     }
@@ -1423,8 +1591,10 @@ namespace wfg::cue
             const auto* map = plan.source.empty() ? nullptr : codeMapOf (plan.source);
 
             /*  THE CODE STOPPED (AIG), or running backwards: every chaser plays
-                on at its own speed, and catches up when it comes back - which is
-                a locate, its record's to seat. */
+                on at its own speed - its factor one again, so a catch-up chaser
+                does not carry the code's last speed or a correction into the
+                silence - and catches up when it comes back, which is a locate,
+                its record's to seat, and then steering from there. */
             const auto forwards = map != nullptr && map->state == timecode::CodeState::running
                                     && std::isfinite (map->speed) && map->speed > 0.0;
 
@@ -1455,11 +1625,28 @@ namespace wfg::cue
                     if (run == nullptr)
                         continue;
 
-                    //  A FREE RUNNER says so, and everything under it: nothing holds it.
+                    /*  AT ITS OWN SPEED, it and everything under it: a factor of
+                        one and no correction under way (TG.9). */
+                    const auto ownSpeed = [this, &id, run]
+                    {
+                        run->chaseFactor = 1.0;
+                        run->chaseCorrecting = false;
+
+                        for (const auto* below : runs.descendantsOf (id))
+                            if (auto* under = runs.find (below->id); under != nullptr && ! under->isFinished())
+                            {
+                                under->chaseFactor = 1.0;
+                                under->chaseCorrecting = false;
+                            }
+                    };
+
+                    /*  A FREE RUNNER says so, and everything under it: nothing
+                        holds it - nor any chase an edit of its `chase` took away. */
                     if (! chases)
                     {
                         run->chaseState = chaseWords::freeRunner;
                         run->chaseError = 0.0;
+                        ownSpeed();
 
                         for (const auto* below : runs.descendantsOf (id))
                             if (auto* under = runs.find (below->id); under != nullptr && ! under->isFinished())
@@ -1472,11 +1659,17 @@ namespace wfg::cue
                     }
 
                     if (! forwards)
+                    {
+                        ownSpeed();
                         continue;
+                    }
 
                     /*  A SOUND OR A MOVIE, and a movie's locked sounds against
-                        the movie's second; a scene's runs each against its own
-                        start under the member (AIV), as the walk placed it. */
+                        the movie's second - at the movie's own factor, steered
+                        first, so a catch-up moves the picture and its sound
+                        together; a scene's runs each against its own start under
+                        the member (AIV), as the walk placed it, each steered by
+                        the member's method from its own error. */
                     const auto steerWithSounds = [&] (const std::string& runId, double start)
                     {
                         auto* steered = runs.find (runId);
@@ -1498,7 +1691,8 @@ namespace wfg::cue
 
                         for (const auto& sound : sounds)
                             if (auto* locked = runs.find (sound))
-                                steerChaser (engine, *locked, cue, member, plan, *map, start, *settings, byJump, false);
+                                steerChaser (engine, *locked, cue, member, plan, *map, start, *settings, byJump, false,
+                                             steered);
                     };
 
                     if (run->isGroup())
@@ -1865,7 +2059,8 @@ namespace wfg::cue
 
                         for (const auto& sound : sounds)
                             if (auto* locked = runs.find (sound))
-                                steerChaser (engine, *locked, cue, member, plan, *map, member.preWait, settings, byJump, true);
+                                steerChaser (engine, *locked, cue, member, plan, *map, member.preWait, settings, byJump, true,
+                                             run);
                     }
 
                     continue;

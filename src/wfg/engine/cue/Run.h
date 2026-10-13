@@ -1187,6 +1187,25 @@ namespace wfg::cue
         double chaseError = 0.0;
         std::string chaseState;
 
+        /*  AND HOW FAST IT IS MADE TO RUN TO KEEP UP (namespace draft §60,
+            TG.9; AIF, AIG, AIS): what its own speed is multiplied by on the
+            voice - a sound's `ownRate`, a movie's rate - while it chases by
+            `varispeed` or `timestretch`: the code's speed, times a correction
+            of at most `sync/chaseRate` while it catches up (timecode/Chase.h).
+            A FACTOR AND NOT A SPEED, so that a speed fade on the cue keeps
+            moving `ownRate` as it always has and the chase rides on top of it,
+            multiplied rather than replacing it - and so that a run nobody
+            chases, at one, places exactly the speed it always did, bit for bit.
+            One for a free runner, a jump chaser and a code that has stopped
+            (AIG: a chaser keeps playing at its own speed). `chaseCorrecting` is
+            the law's hysteresis, carried from one tick to the next: whether it
+            is catching up, or holding the code's speed inside the tolerance.
+            Both derived each tick from the code's logged line and the run's own
+            clock, never logged, so a backup applying the same lines and a
+            replay (which places no speed at all) agree with what was heard. */
+        double chaseFactor = 1.0;
+        bool chaseCorrecting = false;
+
         /*  Whether the last poll saw it sounding. The edge from true to false
             is what ends a run - a launcher clip stops itself at the end of its
             length, so this is the ordinary finish as well as how a stop is

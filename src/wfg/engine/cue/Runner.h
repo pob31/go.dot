@@ -2026,7 +2026,10 @@ namespace wfg::cue
             ahead, held until then and ramped over a tick, on the run's own
             clock and the Player's alike, so the two never disagree. Between the
             launch and the range boundaries, which read that clock. `rateNow` is
-            the readout. */
+            the readout. WHAT IS PLACED IS `ownRate` TIMES THE RUN'S CHASE FACTOR
+            (namespace draft §60, TG.9): one for every run no time group steers,
+            so the speed placed is the speed decided, bit for bit, and a chaser's
+            catch-up rides on a speed fade rather than replacing it. */
         void applyRates();
 
         /*  A SLICE'S IN OR OUT EDITED WHILE IT SOUNDS (namespace draft §33,
@@ -3486,19 +3489,39 @@ namespace wfg::cue
             sounds jump with it; a sound whose code lands in another of its slices
             is sought there, with the gap a seek makes, and says so (`sought`).
             Free runners are marked `free` and left alone; the code stopped, every
-            chaser plays on (AIG). TG.9's catch-up methods are measured and marked
-            here, and steered there. */
+            chaser plays on (AIG).
+            AND CATCHING UP (TG.9; AIF, AIS, AIU, AIV): a chaser by `varispeed` or
+            `timestretch` is steered instead - its run's `chaseFactor`, the code's
+            speed times the correction timecode/Chase.h's law gives, multiplied
+            into its own speed where `applyRates` and the launch place it on the
+            voice, and into a movie's rate where its time ring is placed - and
+            jumps only past `sync/chaseJump`. A movie's locked sounds take the
+            movie's factor; a scene's sounding media each their own, by the
+            member's method. The code stopped or gone, every factor is one again:
+            a chaser plays on at its own speed (AIG). */
         void chaseTick (Engine& engine);
 
-        /*  THE SETTINGS A CHASE READS, from the show's `sync` rows, in seconds. */
+        /*  THE SETTINGS A CHASE READS, from the show's `sync` rows, in seconds
+            and fractions; `stretchSettle` is where a stretched voice's catch-up
+            ends, one of the stretcher's chunks at the interface's rate (AJC). */
         struct ChaseSettings
         {
             double tolerance = 0.010;   // out of step before a chaser acts
             double catchUp = 0.25;      // out of step before a catch-up chaser jumps instead
             double crossfade = 0.010;   // a jump's crossfade
+            double rate = 0.01;         // the most a catch-up adds to the code's speed
+            double stretchSettle = 0.001;
         };
 
         ChaseSettings chaseSettings() const;
+
+        /*  THE CHASE A RUN PLAYS UNDER (AIU, AIV): the `chase` word of the time
+            group's member it is, or is under - itself, a scene's sound under the
+            scene, a movie's locked sound under the movie - found by its runs'
+            parents, so a locked sound kept elsewhere in the show finds its movie.
+            Empty for a run no time group holds. Read at the arm, where the
+            voice's mode is chosen. */
+        std::string chaseMethodOf (const Run& run) const;
 
         /*  Where a run that chases on behalf of `member` should be at `sample`:
             the member's time on the map, less the run's own start under it -
@@ -3537,15 +3560,17 @@ namespace wfg::cue
             - its own cue, or a locked sound's movie - and, out of step by more
             than its method allows, brought back: a sound by a jump, a movie by
             a cut. `byJump` is false for a catch-up method, which jumps only
-            past `catchUp` (TG.9 catches up below it). Its error and its state
-            written, readouts both. A sound whose code is in another of its
-            slices, a second or more away, is sought there by a `run.seek` the
-            hook submits; from a handler (`inHandler`), which submits nothing,
-            it is left - the locate has sought it already if its slice moved.
-            Answers whether it moved anything. */
+            past `catchUp` and below it is steered (TG.9): its `chaseFactor` set
+            by timecode/Chase.h's law, or, for a locked sound (`leader` its
+            movie's run), the movie's own, so the two keep together. Its error
+            and its state written, readouts both. A sound whose code is in
+            another of its slices, a second or more away, is sought there by a
+            `run.seek` the hook submits; from a handler (`inHandler`), which
+            submits nothing, it is left - the locate has sought it already if
+            its slice moved. Answers whether it moved anything. */
         bool steerChaser (Engine& engine, Run& run, const juce::ValueTree& targetCue, const TimeMember& member,
                           const TimePlan& plan, const timecode::CodeMap& map, double start,
-                          const ChaseSettings& settings, bool byJump, bool inHandler);
+                          const ChaseSettings& settings, bool byJump, bool inHandler, const Run* leader = nullptr);
 
         /*  A RUN A LOCATE ENDS (AIH): it, and everything under it, ended as a
             jump ends what it abandons - no footer, its voice stopped, a picture

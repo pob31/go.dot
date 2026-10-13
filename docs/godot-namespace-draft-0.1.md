@@ -26643,8 +26643,9 @@ does not start it (AIH); the code running into it a second time, after a jump ba
   over `sync/chaseCrossfade` (10 ms) - the crossfaded jump a slice move already makes inside a
   sounding voice (§33, CD). A picture cuts.
 - **Varispeed / timestretch**: the sound runs up to `sync/chaseRate` (1 %) faster or slower than the
-  code until it is back within a millisecond - varispeed bends the pitch, timestretch keeps it; more
-  than `sync/chaseJump` (0.25 s) out, it jumps instead.
+  code until it is back within a millisecond (a stretched one within a stretcher's chunk, AJC) -
+  varispeed bends the pitch, timestretch keeps it; more than `sync/chaseJump` (0.25 s) out, it jumps
+  instead.
 - **The code stops** (AIG): chasers keep playing at their own speed; when it comes back they catch up
   by their method - a return is a locate.
 - **The code jumps** (AIH): chasers are re-seated as load to time seats a scene - started at their
@@ -26741,6 +26742,15 @@ Mine, the author's to overrule:
   a sampler member fired by name is a press on its strip. `needs-go` while the group is not armed, TG.2's
   answer, as a sampler member is `needs-strip` with no bank armed. The code's own loading of that member
   is left alone: the code reaching its time starts it again, as a second crossing does (AIR).
+- **AJC** (mine, TG.9) **A timestretch chaser's catch-up ends within one of the stretcher's chunks**, not
+  a millisecond (AIS): 256 samples at the interface's rate, 5.3 ms at 48 kHz, whichever is the longer;
+  it starts at `sync/chaseTolerance` as varispeed's does, and a tolerance set below the chunk ends it
+  there instead. The steering measures the run's own clock, not the sound, so a stretcher cannot make it
+  hunt; but a stretched voice is only placed in its file to within one to three of those chunks (M14,
+  §22.10), so steering its clock closer buys nothing anyone can hear and keeps the stretcher's ratio
+  moving for longer. A timestretch chaser's steady error, as heard, is up to that chunk on its clock plus
+  the stretcher's own one to three - some 5 to 21 ms at 48 kHz - held, never hunted. Varispeed, and a
+  movie, still settle within a millisecond.
 
 ### 60.3 Rows
 
@@ -27556,3 +27566,98 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   once it sounds; a direction change of the code with no `jumped` turn seats nothing; a member started by hand
   (AJB) in the tick or two between its press and its launch reads as asked and is cut by a locate landing then;
   and nothing yet measures what steering costs a tick with hundreds of chasers.
+- **TG.9**, 2026-10-13: catch-up - a member that chases by `varispeed` or `timestretch` is run a little faster
+  or slower until it is back in step, and jumps only past `sync/chaseJump` (AIF, AIG, AIS, AIU, AIV, AJC).
+  **THE LAW** (`timecode/Chase.h`, pure, `chaseStep`): the factor is the code's speed times one less the error
+  over two seconds, held to `sync/chaseRate` - `codeSpeed * (1 - clamp (error / 2 s, -rate, +rate))`, the error
+  ahead when positive (TG.8's sign), so a member ahead runs slower and one behind faster. Begun past
+  `sync/chaseTolerance`, ended back within a millisecond, the code's speed held exactly in between; past
+  `sync/chaseJump`, "jump", at the code's speed with nothing carried on. A settle wider than the start is held
+  to it, so the band is never inside out. Proportional and nothing more: an exponential with a two-second time
+  constant, never changing sign on the way - fifty milliseconds closes in about nine seconds (three at the 1 %
+  clamp down to twenty, then two times the log of twenty), ten and a half in 4.7. The hook's own lag - decided
+  on one tick, placed by the next tick's speed pass a launch horizon ahead and ramped over a tick, so first
+  measured two ticks on - is a fiftieth of the time constant, too short to make it ring. **A STRETCHED VOICE**
+  lets go within one of the stretcher's 256-sample chunks at the interface's rate, 5.3 ms at 48 kHz (AJC,
+  `chaseSettleFor`). **THE FACTOR** (`Run::chaseFactor`, the law's hysteresis in `Run::chaseCorrecting`):
+  multiplied into the run's own speed wherever a speed reaches the voice - `applyRates` and the launch, both
+  through `voiceRateOf` (Runner.cpp), a stretched voice held to the stretcher's limit after it as before it -
+  and `ratePlaced` is now the speed placed, own times factor. One for every run no time group steers, and a
+  double times exactly one changes no bit, so every run that does not chase places exactly the speed it did and
+  its clock keeps the integer branch at one. A speed fade still moves `ownRate`, and the factor rides on it:
+  multiplied, not replaced. Set in `chaseTick` (TG.8's hook, after `applyRates`) from the error measured a launch
+  horizon ahead - where every speed placed before already holds - and placed by the next tick's `applyRates`, a
+  breakpoint a horizon ahead as any speed change; a speed is placed only when the factor moves, so a chaser in
+  step places nothing tick after tick. Before its launch (and before its time) a catch-up chaser is given the
+  code's speed, and starts with it; just jumped, the same. A jump chaser and a free runner are at one, and so is a
+  member not held to its code at all - played backwards, bouncing in a slice, a movie bouncing or standing (TG.8
+  holds none of them). **THE CODE STOPS** (AIG), turns back or is gone: every chaser of the group, and
+  everything under it, at one - its own speed - with no correction under way; its return is TG.8's locate,
+  which jumps a catch-up chaser past `sync/chaseJump` and, in the same `code.heard` handler, steers one inside
+  it from there. **MOVIES**: `advanceMovie` places the time ring at the job's rate - its speed fade's as ever -
+  times the movie run's factor, the steering measures the movie at that speed, and `run/rate` reads the
+  product. Its locked sounds run at the movie's factor and hysteresis (`steerChaser`'s new `leader`), their
+  own error still measured and published and, past `sync/chaseJump`, still jumped. **SCENES** (AIV): each
+  sounding sound or movie under a chasing scene member is steered from its own error, by the member's method.
+  **THE VOICE'S MODE** (AIU, `Runner::chaseMethodOf`): read in `armMedia`, where `stretch` is chosen and
+  `requestArmOn` carries it, by walking the runs up to the one whose parent is a time group's run - so a locked
+  sound kept anywhere in the show finds its movie and a scene's sound its scene: `varispeed` resamples and
+  `timestretch` stretches whatever `rateMode` says; `jump` and `free` keep the cue's. A seek keeps it (DV).
+  **READOUTS**: `run/chaseState` `catching` while the law corrects, `inStep` otherwise, `jumped` on the tick it
+  jumps; `run/chaseError` as TG.8; `run/rate` the speed placed, factor and all.
+  Where this stage departs from its brief. The law is written with TG.8's sign, the error ahead positive, so the
+  correction is subtracted - the brief's "1 + error / 2 s" with the error counted behind; the same law. A
+  stretched voice lets go at a chunk rather than a millisecond (AJC, §60.2): the steering reads the run's clock,
+  so no stretcher can make it hunt, but closer than a chunk buys nothing heard. Locked sounds take the movie's
+  factor and hysteresis rather than their own, so picture and sound move together whatever floating point their
+  two measures differ by (the breakage below that steered them apart turned their case red). A speed decided is
+  placed by the next tick's speed pass rather than by the hook itself: the hook runs after `applyRates`, and one
+  place that places speeds keeps the fade's and the chase's ramps joined end to end. Members not held to the code
+  are put at one, which the brief did not name. TG.8's "30 ms behind, a varispeed chaser" case read the error
+  unmoved two seconds on; it now reads it closer, still behind, never moved.
+  Tests under C and fr_FR. `ChaseTests` (new, six cases, the law alone): in step it is the code's speed exactly
+  at five speeds and one for a code not running forwards; out of step the error over two seconds, clamped at 1 %
+  (and at half a percent and nought when the row says so), on the code's speed; the band - nine milliseconds out
+  holds, eleven begins, five carries on once begun and does not start, under one ends - and one set inside out
+  held the right way round; past the jump at 0.26 s and not at 0.24, and at a second when the row says so; a
+  stretched voice's settle at 48, 44.1 and 384 kHz and with no rate, and round the loop letting go sooner, at
+  its chunk; and the law round the hook's loop (a decision first heard half a tick later and wholly two):
+  fifty milliseconds either way closed between eight and ten seconds, the error never crossing the code nor
+  growing, then still for fifty seconds at the code's speed exactly; ten and a half in 2 ln 10.5 s; nine never
+  starting. `TimeGroupTests` (TG.9's part, nine cases on the TG.8 rig, whose fake player now records each speed
+  placed): a `varispeed` chaser against a code 50 ppm fast, re-anchored every ten seconds at 48 and 52 ppm, in
+  step for ten simulated minutes (30 000 ticks, within a millisecond throughout, never moved, its factor and
+  its voice the speed last said, at most 123 speeds placed), while a `jump` chaser beside it jumps twice or more
+  at one; a code a tenth of a percent fast said fifteen seconds late - measured -15.06 ms, caught up in
+  2 ln 15.06 s, never ahead, closer every tick from the third, at most 0.76 % over the code's new speed, then
+  at 1.001 exactly; a code at 1.0005 - launched at it, stopped (one, its own speed), back two seconds later (one
+  jump of -2 s), then at 1.0005 again and in step; the mode - `timestretch` stretched on a varispeed cue,
+  `varispeed` resampled on a timestretch cue, `jump` and `free` the cue's own - and both catch-up methods 100 ms
+  behind at exactly 1.01 and no more, the stretched one letting go between 4 and 5.33 ms, the resampled one
+  within one, the jump chaser one jump at one; a speed fade to 0.98 on a chaser at 1.0005, the voice at
+  0.98 x 1.0005 x 1.01; a movie 50 ms behind - its time ring's last stretch at 1.01 to 1e-9, its locked sound
+  stretched as the movie's method says, at the movie's factor bit for bit every tick, both back in step, no
+  cut; a timeline scene by varispeed and by timestretch, both its sounds at the clamp and back in step, their
+  modes the member's; 0.3 s out one jump of 0.3 s and no speed placed, 0.2 s out a second at 1.01 and 190 ms
+  behind; and a replay of a session with a re-anchor, a stop, a return and a locate back reaching the same runs.
+  Green in both locales with the files of the code touched - TimeGroupTests, ChaseTests, SeatTests,
+  FollowTests, CodeWatchTests, ClockWatchTests, CodeMapTests, TimecodeRunTests, TriggerTests, GoTests,
+  SamplerTests, VideoTests, RunTests, RangeTests, MovieTests, MediaCueTests, TreeTests, PublishCostTests,
+  EditPlaybackTests, RateClockTests, LaneRecordTests, LevelLaneTests, SendLaneTests, 869 cases - and AudioTests'
+  speed, stretch, slice-move and backwards cases (21); `wfg.replay.*`, `wfg.commands`, `source.comments`,
+  `unit.shards`. clang-tidy's stand-in for the strict job: nothing in RunnerTime.cpp, Runner.cpp, ChaseTests.cpp
+  or TimeGroupTests.cpp (its run proved by a planted shadow).
+  Fifteen deliberate breakages, each turning its own cases red: no factor where speeds are placed; the launch
+  ignoring it; no code's speed while unmeasured; the cue's own mode; the method read from the direct parent only
+  (the scene's and the locked sound's cases); a stretched voice settling at a millisecond; a stopped code keeping
+  the factor; locked sounds steered on their own; a movie ignoring the factor; never jumping past
+  `sync/chaseJump`; no clamp; no hysteresis; the chase replacing a fade; jump chasers at the code's speed; the
+  factor not on the code's speed.
+  Found and left: the factor and the hysteresis are not carried in RD.8's position, so a run seated by
+  `pair.seat` begins its catch-up afresh from its own next measure; a ranged chaser 0.25 to 1 s out across a
+  slice boundary is left to cross (TG.8's rule) and keeps the factor it had; a stretched voice already at the
+  stretcher's limit cannot be sped up; the `timed/chase` row's words in the parameter CSV say `wfg validate`
+  warns of a chase against the cue's mode, which AIU and §60.5 say it does not - the row's description is the
+  one to correct, with the schema regenerated (TG.10); nothing has listened to a stretcher whose ratio moves
+  every tick, nor measured what that costs it (M46 measured steady speeds) - M64 owes the render; and nothing
+  measures what steering costs a tick with hundreds of chasers.
