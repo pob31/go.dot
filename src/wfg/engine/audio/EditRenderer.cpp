@@ -535,12 +535,52 @@ namespace wfg::audio
         wake.notify_one();
     }
 
-    void EditRenderer::publishEntry (const EditRender& entry)
+    /*  ONLY WHILE IT IS STILL THE CUE'S EDIT (2026-10-13). A render says how it
+        goes - rendering, its tens of percent, done - and each of those used to
+        be published whatever had been offered since: an edit made while the
+        one before it was rendering was written over by that render's next
+        tenth, so the readout and the resolver went back to the older edit; the
+        older render then passed the stale check and landed as the cue's, its
+        name already handed over to be let go of while it was still a part
+        file, and never handed over again - and a newer edit found already on
+        disk, judged against it, was thrown away as stale. Under the real-time
+        sanitizer on a loaded runner the render of a four-second ramp is long
+        enough for a driver's next edit to land in it, and the driver found two
+        renders where the edits left one (blackbox.media-edit, run 38350416745).
+        A cue forgotten since is not its edit either. */
+    bool EditRenderer::isCurrent (const EditRender& entry) const
     {
         const std::lock_guard<std::mutex> lock { guard };
+        const auto found = known->find (entry.cue);
+        return found != known->end() && found->second.editText == entry.editText;
+    }
+
+    bool EditRenderer::publishIfCurrent (const EditRender& entry)
+    {
+        const std::lock_guard<std::mutex> lock { guard };
+
+        if (const auto found = known->find (entry.cue); found == known->end() || found->second.editText != entry.editText)
+            return false;
+
         auto next = std::make_shared<EditRenders> (*known);
         (*next)[entry.cue] = entry;
         known = std::move (next);
+        moved.fetch_add (1, std::memory_order_acq_rel);
+        return true;
+    }
+
+    /*  A RENDER NOBODY WILL PLAY, handed to the caller to let go of - and
+        `changes` moved, so the caller looks now rather than at whatever moves
+        next. The file it names is on disk by now: the offer that replaced it
+        handed over its name while it was still being written, and a name let
+        go of before its file landed removed nothing. */
+    void EditRenderer::superseded (const EditRender& entry)
+    {
+        const std::lock_guard<std::mutex> lock { guard };
+
+        if (! entry.file.empty() && std::find (replaced.begin(), replaced.end(), entry.file) == replaced.end())
+            replaced.push_back (entry.file);
+
         moved.fetch_add (1, std::memory_order_acq_rel);
     }
 
@@ -624,14 +664,14 @@ namespace wfg::audio
         else
         {
             entry.state = renderState::rendering;
-            publishEntry (entry);
+            publishIfCurrent (entry);
 
             const auto progress = [this, &entry] (int percent)
             {
                 if (percent != entry.percent && percent % 10 == 0)
                 {
                     entry.percent = percent;
-                    publishEntry (entry);
+                    publishIfCurrent (entry);
                 }
             };
 
@@ -671,16 +711,10 @@ namespace wfg::audio
 
         /*  A STALE OFFER: the edit changed while this rendered, and the newer
             job is queued; what was made is a render nobody will play. */
+        if (! isCurrent (entry))
         {
-            const std::lock_guard<std::mutex> lock { guard };
-
-            if (const auto found = known->find (job.cue); found != known->end() && found->second.editText != entry.editText)
-            {
-                if (! entry.file.empty())
-                    replaced.push_back (entry.file);
-
-                return;
-            }
+            superseded (entry);
+            return;
         }
 
         if (entry.state == renderState::done && media != nullptr)
@@ -690,7 +724,12 @@ namespace wfg::audio
             media->publish (entry.file, std::move (record));
         }
 
-        publishEntry (entry);
+        /*  AND ASKED AGAIN AS IT IS PUBLISHED, under the one lock: an offer can
+            land while the lengths take theirs, and an entry published over it
+            would say the older edit is the cue's - done, while the newer one
+            waits in the queue to be judged stale against it (2026-10-13). */
+        if (! publishIfCurrent (entry))
+            superseded (entry);
     }
 
     void EditRenderer::runSweep (const std::vector<RenderJob>& openEdits)

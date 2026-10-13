@@ -187,14 +187,30 @@ def http_get_bytes(port: int, target: str) -> "tuple[int, dict, bytes]":
                f"Host: {HOST}:{port}\r\n"
                f"Connection: close\r\n\r\n").encode("ascii")
 
-    with socket.create_connection((HOST, port), timeout=REPLY_TIMEOUT) as sock:
-        sock.sendall(request)
-        chunks = []
-        while True:
-            block = sock.recv(65536)
-            if not block:
-                break
-            chunks.append(block)
+    # A CONNECTION THE SERVER DROPPED UNREAD IS ASKED AGAIN, twice at most
+    # (2026-10-13). The server gives a connection one second to deliver its
+    # request (juce_simpleweb's `timeout_request`) and closes it unread past
+    # that; on a starved machine the second can pass between its accept and its
+    # read, and the request sent at once is answered by a reset - Windows'
+    # 10053 in the middle of phase9b-mic.C on CI (run 38350416745), and here
+    # with a dozen media-edit drivers on two processors. A GET asks for nothing
+    # to change, so asking it again is what any client of the tree does; a
+    # server that is gone refuses the connection, which is never retried.
+    for attempt in range(3):
+        try:
+            with socket.create_connection((HOST, port), timeout=REPLY_TIMEOUT) as sock:
+                sock.sendall(request)
+                chunks = []
+                while True:
+                    block = sock.recv(65536)
+                    if not block:
+                        break
+                    chunks.append(block)
+            break
+        except (ConnectionAbortedError, ConnectionResetError):
+            if attempt == 2:
+                raise
+            time.sleep(0.1)
 
     response = b"".join(chunks)
     head, _, body = response.partition(b"\r\n\r\n")

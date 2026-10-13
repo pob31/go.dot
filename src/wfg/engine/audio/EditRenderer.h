@@ -172,7 +172,9 @@ namespace wfg::audio
         void render (const RenderJob& job);
         void runSweep (const std::vector<RenderJob>& openEdits);
         void runFreeze (const FreezeJob& job);
-        void publishEntry (const EditRender& entry);
+        bool isCurrent (const EditRender& entry) const;
+        bool publishIfCurrent (const EditRender& entry);
+        void superseded (const EditRender& entry);
         std::string keyFor (const RenderJob& job) const;
 
         MediaInfo* media = nullptr;

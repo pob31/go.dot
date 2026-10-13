@@ -132,6 +132,35 @@ def wait_frames(render: Path, frames: int) -> bool:
     return lane_level.wait_for_frames(render, frames)
 
 
+def held_for_a_second(server: Server, render: Path, mark: int, applied: "dict[str, float]") -> bool:
+    """A step of the pass HELD FOR A SECOND OF THE ENGINE'S OWN TICKS, and of the render.
+
+    The render alone used to be the clock here, and it is not the tick's: a
+    starved runner's tick thread falls behind its audio, so a mark read off the
+    tick can lag the render and every wait return at once - the -12, the hands
+    letting go and the stop then reach one tick together, and the pass ends
+    before it has sampled the -12: on Windows CI with four entries at once (run
+    38350416745) the lane said -6 where the hand had gone on to -12. So each
+    step is first seen applied - the faders read what was sent - and then held
+    for fifty ticks of the engine's clock, which the pass samples a tick at a
+    time, as well as for the second of render the hearing checks read.
+    """
+    for address, level in applied.items():
+        if first_sound.wait_for(server, address, level) != level:
+            return False
+
+    start = first_sound.value_of(server, "/godot/engine/tick")
+
+    if not isinstance(start, int):
+        return False
+
+    ticked = common.wait_until(
+        lambda: (lambda now: isinstance(now, int) and now - start >= 50)(first_sound.value_of(server, "/godot/engine/tick")),
+        timeout=60.0)
+
+    return bool(ticked) and wait_frames(render, mark + RATE)
+
+
 def run(locale: "str | None") -> int:
     report = Report(f"a level and a send recorded from the flipped faders ({locale or 'C'})")
 
@@ -188,18 +217,20 @@ def run(locale: "str | None") -> int:
             send(server, "/godot/cmd/node/set", [RIDE, -6.0])
             send(server, "/godot/cmd/node/touch", [FACE_RIDE])
             send(server, "/godot/cmd/node/set", [FACE_RIDE, -10.0])
-            report.check(wait_frames(render, marks["touch"] + RATE), "a second at -6, Face at -10")
+            report.check(held_for_a_second(server, render, marks["touch"], {RIDE: -6.0, FACE_RIDE: -10.0}),
+                         "a second at -6, Face at -10")
             report.equal(first_sound.value_of(server, f"/godot/slot/{FACE_STRIP}/word"), "recording",
                          "Face's strip says it is being written")
 
             marks["move"] = lane_level.clock_frame(server)
             send(server, "/godot/cmd/node/set", [RIDE, -12.0])
-            report.check(wait_frames(render, marks["move"] + RATE), "a second at -12")
+            report.check(held_for_a_second(server, render, marks["move"], {RIDE: -12.0}), "a second at -12")
 
             marks["release"] = lane_level.clock_frame(server)
             send(server, "/godot/cmd/node/release", [RIDE])
             send(server, "/godot/cmd/node/release", [FACE_RIDE])
-            report.check(wait_frames(render, marks["release"] + RATE), "a second after the hands let go")
+            report.check(held_for_a_second(server, render, marks["release"], {RIDE: -12.0}),
+                         "a second after the hands let go")
 
             marks["stop"] = lane_level.clock_frame(server)
             send(server, "/godot/cmd/lane/stop")

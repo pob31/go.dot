@@ -4975,6 +4975,7 @@ namespace
         std::string patchEditorFound;
         std::uint32_t mediaCacheSweepSeen = 0;
         std::uint32_t editRenderSeen = 0;
+        bool rendersHeld = false;           // a replaced render a run still plays, asked again each tick
         std::string serialPortsFound;
         videoHost.configure (document);
 
@@ -7485,11 +7486,27 @@ namespace
                                     when they moved, and a render a newer one
                                     replaced let go of once no run plays it - a
                                     sounding run keeps its file until its next
-                                    run (ADP), so what it names waits. */
-                                if (const auto moved = renderer.changes(); moved != editRenderSeen)
+                                    run (ADP), so what it names waits.
+
+                                    AND WHAT WAITS IS ASKED AGAIN EVERY TICK
+                                    UNTIL IT GOES (2026-10-13). It was asked only
+                                    when the renders moved, so a render held for
+                                    the run playing it was kept until some later
+                                    edit happened to move them - after the run
+                                    had ended, and in a show edited no further,
+                                    until the next open swept it: the edit made
+                                    while a cue sounds, the case ADP is for. The
+                                    held ones are few and the walk is the runs',
+                                    and only while one is held. */
+                                if (const auto moved = renderer.changes(); moved != editRenderSeen || rendersHeld)
                                 {
-                                    editRenderSeen = moved;
-                                    state.editRender = wfg::audio::EditRenderer::readoutText (*renderer.snapshot());
+                                    if (moved != editRenderSeen)
+                                    {
+                                        editRenderSeen = moved;
+                                        state.editRender = wfg::audio::EditRenderer::readoutText (*renderer.snapshot());
+                                    }
+
+                                    rendersHeld = false;
 
                                     for (const auto& file : renderer.takeStale())
                                     {
@@ -7502,9 +7519,14 @@ namespace
                                         named = named || runner.namesMovieFile (file) || (! tileFileShown.empty() && file == tileFileShown);
 
                                         if (named)
+                                        {
                                             renderer.stale (file);
+                                            rendersHeld = true;
+                                        }
                                         else
+                                        {
                                             renderer.discard (file);
+                                        }
                                     }
                                 }
 

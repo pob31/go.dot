@@ -2002,8 +2002,8 @@ endif()
 set_tests_properties(blackbox.wires.C blackbox.wires.fr_FR PROPERTIES COST 225)
 set_tests_properties(blackbox.hold.C blackbox.hold.fr_FR PROPERTIES COST 150)
 set_tests_properties(blackbox.crash-write.C blackbox.crash-write.fr_FR PROPERTIES COST 110)
-set_tests_properties(blackbox.doh.C blackbox.doh.fr_FR PROPERTIES COST 95)
-set_tests_properties(blackbox.first-sound.C blackbox.first-sound.fr_FR PROPERTIES COST 80)
+# The doh and first-sound drivers, long on macOS too, are costed with the
+# `realtime` chain below.
 
 # THE AUDIO-DEVICE CHAIN STARTS FIRST OF ALL. The entries that take turns on the
 # `audio-device` lock - unit.<locale>.devices, ui.live-device.<locale> and
@@ -2020,3 +2020,109 @@ set_tests_properties(unit.C.devices unit.fr_FR.devices blackbox.device.C PROPERT
 if(WIN32)
     set_tests_properties(ui.live-device.C ui.live-device.fr_FR PROPERTIES COST 300)
 endif()
+
+# -----------------------------------------------------------------------------
+# THE DRIVERS THAT JUDGE AN ENGINE'S TIME TAKE TURNS (2026-10-13), on the
+# `realtime` lock - on CI; see the lanes below for a workstation - while the
+# unit shards and the other drivers run beside them.
+#
+# WHY. The first CI run with four entries at once (38350416745) failed eleven of
+# them on the Windows runner, every one a driver of this kind, and the log says
+# what they had in common: up to four of them were running at the same time,
+# and with a main and its backup that was seven or eight engines on four
+# processors. An engine's audio and tick threads run at the audio priority, so
+# an engine that falls behind catches up block after block on a whole processor;
+# with more engines than processors behind at once, none kept time. Then the
+# render written beside a hosted engine dropped whole seconds when its writer
+# could not keep up - the first sound written a second before the GO it
+# followed, a plugin's half-level read in a window that was really after Esc, a
+# stretched cue a second short (M14) - and what a driver waits for in its own
+# wall time came and went before it looked: a footer's run, a claim's wait, a
+# tape that ran out before its fade, a backup that took more than six seconds to
+# follow. Against the unit shards, which run at the ordinary priority, one
+# engine keeps its time - so on a runner these run one at a time, and only these.
+#
+# WHICH, and why each: a driver is here when what it checks is the engine
+# keeping time - in a render read at the engine's frames, in a plugin's child
+# answering by its deadline, in two engines in step, in a state it must see
+# before the engine moves on - or when its numbers are the point (M14, M45,
+# M48, M51, M52, M57, the timecode's frames).
+#   first-sound, phase3, phase4, phase6-sampler, phase9a-eq, doh   the render
+#       read at the frames the engine placed a GO, a fade, a press, an advance
+#   lane-level, lane-send, lane-record, rate-speed                  the same,
+#       and M45, M48, M14 printed from it
+#   timecode                                                         LTC and MTC
+#       read frame by frame against the samples they were drawn on
+#   phase9a-fx, phase9b-width, phase9b-mic, phase9c-take             a plugin's
+#       child answering each block by its deadline, heard in the render
+#   pair-link, pair-follow, pair-seat, redundancy-failover          two engines:
+#       linked, in step, taking over within the link's timeout
+#   osc-curves, process                                              M51, M52
+#       and M57, the times a value and a report take (judged off CI)
+# And not here, though hosted: media-edit, movie-edit, output-layout,
+# import-playback, performance-media, phase6-surfaces, phase9b-inputs,
+# phase9b-plugins and timbre read what was played, never when.
+#
+# ONE AT A TIME ON CI; ONE PER FOUR PROCESSORS ON A MACHINE OF ONE'S OWN. On a
+# runner the one lock is the whole of it: four processors keep one engine in
+# time beside three shards. A workstation keeps more, and one at a time made the
+# chain the floor of the whole run - 700 s of a 700 s run at twelve jobs on the
+# author's sixteen-core box, against 341 to 659 s before any lock. So where
+# GITHUB_ACTIONS is not set at configure time the drivers are dealt, in turn,
+# across one lane per four logical processors - `realtime`, `realtime-1`, ... -
+# each lane its own lock: four such drivers at most at once on that box, where
+# before nothing held them back, and the whole run green there in 296 and 302 s.
+# WFG_REALTIME_LANES overrides the count (1 is CI's arrangement anywhere).
+#
+# COSTED ABOVE EVERYTHING BUT THE AUDIO-DEVICE CHAIN, so that each starts the
+# moment the one before it in its lane ends: one lane is the longest thing on a
+# runner - twelve minutes on Windows and twenty-five on macOS, added up from the
+# last CI runs that ran one entry at a time - and an entry costed below a
+# waiting shard would leave it idle until another slot came free.
+# -----------------------------------------------------------------------------
+if(DEFINED ENV{GITHUB_ACTIONS})
+    set(wfg_lanes_default 1)
+else()
+    cmake_host_system_information(RESULT wfg_processors QUERY NUMBER_OF_LOGICAL_CORES)
+    math(EXPR wfg_lanes_default "${wfg_processors} / 4")
+
+    if(wfg_lanes_default LESS 1)
+        set(wfg_lanes_default 1)
+    endif()
+endif()
+
+set(WFG_REALTIME_LANES "${wfg_lanes_default}" CACHE STRING
+    "How many black-box drivers that judge an engine's time may run at once (tests/CMakeLists.txt): 1 on CI")
+
+if(NOT WFG_REALTIME_LANES MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "WFG_REALTIME_LANES is a count of one or more, not \"${WFG_REALTIME_LANES}\"")
+endif()
+
+message(STATUS "Go.dot: the drivers that judge an engine's time run ${WFG_REALTIME_LANES} at a time")
+
+set(WFG_REALTIME_DRIVERS
+    first-sound phase3 phase4 phase6-sampler phase9a-eq doh
+    lane-level lane-send lane-record rate-speed timecode
+    phase9a-fx phase9b-width phase9b-mic phase9c-take
+    pair-link pair-follow pair-seat redundancy-failover
+    osc-curves process)
+
+set(wfg_lane 0)
+
+foreach(driver IN LISTS WFG_REALTIME_DRIVERS)
+    foreach(locale IN ITEMS C fr_FR)
+        if(NOT TEST blackbox.${driver}.${locale})
+            message(FATAL_ERROR "tests/CMakeLists.txt: the realtime lock names blackbox.${driver}.${locale}, which is no test")
+        endif()
+
+        if(wfg_lane EQUAL 0)
+            set(wfg_lock realtime)
+        else()
+            set(wfg_lock realtime-${wfg_lane})
+        endif()
+
+        set_tests_properties(blackbox.${driver}.${locale} PROPERTIES RESOURCE_LOCK ${wfg_lock} COST 280)
+
+        math(EXPR wfg_lane "(${wfg_lane} + 1) % ${WFG_REALTIME_LANES}")
+    endforeach()
+endforeach()

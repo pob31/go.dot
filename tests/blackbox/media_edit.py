@@ -33,7 +33,9 @@ OSC and the tree:
     where it was; the section after the silence fading in from it, alone, then its curve bent; the
     silence closed up with ripple, the dip a half second earlier with its sound. Each heard so in the
     render, sample by sample.
- 6. The session's log holds every record and replays record for record.
+ 6. Edited again while it sounds, at an eighth of its speed: the render the run plays is kept until
+    the run is stopped, and then let go of - the new render alone under media/.edits.
+ 7. The session's log holds every record and replays record for record.
 """
 import struct
 import sys
@@ -318,6 +320,44 @@ def run(locale: str) -> int:
 
             if slid is not None:
                 report.check(abs(sample_at(slid, 2.75)) < 1e-6, "silence where it was", str(sample_at(slid, 2.75)))
+
+                # --- 6. Edited while it sounds: its render kept, then let go of (55.1, ADP) ---
+                # At an eighth of its speed the cue sounds for thirty-two seconds, so the edit lands
+                # while it plays, however slow the machine. The run keeps the render it was launched
+                # on; once it is over, nothing plays that render and it goes - asked again every tick
+                # until then, not only when the renders next move (2026-10-13), since nothing else moves.
+                send(server, "/godot/cmd/node/set", [cue + "rate", 0.125])
+                first_sound.wait_for(server, cue + "rate", 0.125)
+                send(server, "/godot/cmd/node/set", [f"/godot/list/{LIST}/standby", CUE])
+                first_sound.wait_for(server, f"/godot/list/{LIST}/standby", CUE)
+                first_sound.go(server)
+
+                def playing_run() -> str:
+                    for run in first_sound.runs_in(server):
+                        if first_sound.value_of(server, f"/godot/run/{run}/cue") == CUE \
+                                and first_sound.value_of(server, f"/godot/run/{run}/state") == "playing":
+                            return run
+                    return ""
+
+                sounding = common.wait_until(playing_run, timeout=20) or ""
+                report.check(sounding != "", "GO plays the edit at an eighth of its speed")
+
+                mark = slid.stat().st_mtime_ns
+                send(server, "/godot/cmd/section/fade", [last, "in", 0.2, 1])
+                edited = newest_render(RATE * SECONDS, mark)
+                report.check(edited is not None, "an edit while it sounds is rendered")
+
+                if sounding and edited is not None:
+                    report.equal(first_sound.value_of(server, f"/godot/run/{sounding}/state"), "playing",
+                                 "and the cue plays on through it")
+                    report.check(slid.is_file(), "the render it plays is kept while it plays (ADP)")
+
+                    send(server, "/godot/cmd/run/stopAll", [])
+                    first_sound.wait_for_run_state(server, sounding, "done")
+                    report.check(common.wait_until(lambda: not slid.exists(), timeout=10) is not None,
+                                 "and let go of once the run that played it is over")
+                    left = sorted(p.name for p in (media / ".edits").glob("*.wav"))
+                    report.equal(left, [edited.name], "the edit's render alone under media/.edits")
 
         text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
 

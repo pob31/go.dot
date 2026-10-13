@@ -40,6 +40,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -455,6 +456,110 @@ TEST_CASE ("edit renderer: a job offered is rendered on its thread, published wi
     /*  Forgotten, the cue has no entry. */
     renderer.forget ("CUE00001");
     CHECK (renderer.snapshot()->count ("CUE00001") == 0);
+
+    renderer.stop();
+}
+
+TEST_CASE ("edit renderer: an edit made while the one before it renders is the cue's from then on, and the older render is let go of once it lands")
+{
+    /*  THE RACE A LOADED RUNNER FOUND (2026-10-13, blackbox.media-edit under
+        the real-time sanitizer, run 38350416745: two renders under .edits
+        where the edits left one). The render of the edit before says how it
+        goes, a tenth at a time, and each tenth was published over whatever had
+        been offered since - so the entry went back to the older edit, the older
+        render landed as the cue's, and the name the newer offer had handed over
+        to be let go of was let go of before its file was written. A long file,
+        so the second edit lands while the first is part way. */
+    Scratch scratch;
+    {
+        const auto file = scratch.media.getChildFile ("long.wav");
+        juce::WavAudioFormat format;
+        std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
+        REQUIRE (stream != nullptr);
+
+        auto writer = format.createWriterFor (stream, juce::AudioFormatWriterOptions{}
+                                                          .withSampleRate (static_cast<double> (rate))
+                                                          .withNumChannels (1)
+                                                          .withBitsPerSample (16));
+        REQUIRE (writer != nullptr);
+
+        juce::AudioBuffer<float> buffer { 1, rate * 10 };
+        buffer.clear();
+        juce::FloatVectorOperations::fill (buffer.getWritePointer (0), 0.25f, buffer.getNumSamples());
+
+        for (int n = 0; n < 12; ++n)
+            writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+    }
+
+    doc::ShowDocument document;
+    audio::MediaInfo media { document, scratch.media.getFullPathName().toStdString() };
+    audio::EditRenderer renderer { media, scratch.media.getFullPathName().toStdString() };
+    REQUIRE (renderer.start());
+
+    const std::vector<Section> older { piece ("A", 0.0, 120.0, -3.0) };
+    const std::vector<Section> newer { piece ("A", 0.0, 60.0, -3.0) };
+    const auto olderText = doc::editText (older);
+    const auto newerText = doc::editText (newer);
+
+    const auto entry = [&renderer] { const auto s = renderer.snapshot(); const auto f = s->find ("CUE00001");
+                                     return f != s->end() ? std::optional<audio::EditRender> (f->second) : std::nullopt; };
+
+    /*  What serve does on every tick the renders move: a render no run plays is let go of. */
+    const auto letGo = [&renderer] { for (const auto& file : renderer.takeStale()) renderer.discard (file); };
+
+    renderer.offer ({ "CUE00001", "long.wav", older });
+
+    auto partWay = false;
+
+    for (int n = 0; n < 20000 && ! partWay; ++n)
+    {
+        if (const auto now = entry(); now.has_value() && now->state == audio::renderState::rendering
+                                        && now->percent >= 10 && now->percent <= 60)
+            partWay = true;
+        else
+            std::this_thread::sleep_for (std::chrono::microseconds (500));
+    }
+
+    REQUIRE (partWay);
+
+    renderer.offer ({ "CUE00001", "long.wav", newer });
+    letGo();
+
+    /*  From the offer on, the cue's entry is never the older edit's again. */
+    auto wentBack = false;
+    auto done = false;
+
+    for (int n = 0; n < 6000 && ! done; ++n)
+    {
+        if (const auto now = entry(); now.has_value())
+        {
+            wentBack = wentBack || now->editText == olderText;
+            done = now->editText == newerText && now->state == audio::renderState::done;
+        }
+
+        letGo();
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+
+    CHECK_FALSE (wentBack);
+    REQUIRE (done);
+
+    /*  And once the older render has landed it is let go of: the newer one is
+        the only render left. */
+    const auto edits = scratch.media.getChildFile (".edits");
+    const auto newerFile = scratch.media.getChildFile (juce::String (entry()->file));
+
+    const auto onlyNewer = [&]
+    {
+        letGo();
+        const auto wavs = edits.findChildFiles (juce::File::findFiles, false, "*.wav");
+        return wavs.size() == 1 && wavs.getFirst() == newerFile;
+    };
+
+    const auto left = soon (onlyNewer);
+    INFO ("left under .edits: " << edits.findChildFiles (juce::File::findFiles, false, "*.wav").size() << " renders");
+    CHECK (left);
+    CHECK (newerFile.existsAsFile());
 
     renderer.stop();
 }

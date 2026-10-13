@@ -24248,6 +24248,19 @@ inspector or OSC, until the row grows a handle for it); the first section's cros
 heard; a cue copied whole takes its sections, a template never does (ADQ); a movie's edit is a later
 round.
 
+Found later (2026-10-13, when CI began running the suite four entries at once): two ways a render
+nobody plays stayed under `.edits/` until the next open's sweep. A render published how it went - each
+tenth, then done - whatever had been offered since, so an edit made while the one before it rendered
+was written over: the entry went back to the older edit and the older render landed as the cue's,
+its name - handed over by the newer offer while it was still a part file - already let go of before
+the file was there (the real-time sanitizer's slow render made it happen in `blackbox.media-edit`:
+two renders where one was due). A render now publishes only while it is still the cue's edit, asked again under the one lock as
+it lands, and one superseded is handed over once its file is there. And a replaced render that a run
+was playing was handed back and asked about again only when the renders next moved - in a show edited
+no further, never: serve now asks every tick while one is held, so the render a sounding cue keeps
+(ADP) goes when the run ends. `MediaEditRenderTests` and step 6 of `media_edit.py` were each red before
+their fix.
+
 ### 55.5 Movies
 
 Written 2026-10-10, the sound's row an hour old. The author: *"Can we get to work on the video in a
