@@ -227,36 +227,44 @@ void main() {
 @program movie_q quad_vs movie_q_fs
 
 //------------------------------------------------------------------------------
-//  A MASK (Mask.h, line for line): its shape filled even-odd and feathered,
-//  over the canvas-sized quad the geometry put. Two corners a vec4.
-@fs mask_fs
-layout(binding=1) uniform mask {
-    vec4 colour;
-    vec4 shape;         // canvas width, canvas height, feather, invert
-    vec4 count;         // corners in the shape
-    vec4 corners[32];   // x0 y0 x1 y1, ... in 0..1 of the canvas, y down
+//  AN OUTLINE'S COVER (Mask.h, line for line; namespace draft 61): a mask's, a
+//  blur cue's. Asked at a target's own pixel: the point on the canvas from its
+//  middle, y up - the target's rows run down (Direct3D, Metal) or up (OpenGL),
+//  said by `top-left` - carried back onto the frame the layer's geometry moved
+//  by two rows of an affine map the Painter works out from `Placement`; off
+//  that frame, nothing, or everything turned inside out (AKP); on it, the
+//  shape filled even-odd and feathered. A blur cue with no outline covers all.
+@block cover_block
+layout(binding=2) uniform cover {
+    vec4 cover_shape;       // target width, target height, feather, invert
+    vec4 cover_count;       // corners, whole (1), top-left origin (1), -
+    vec4 cover_u;           // frame u = x * u.x + y * u.y + u.z, 0..1 left to right
+    vec4 cover_v;           // frame v = x * v.x + y * v.y + v.z, 0..1 bottom to top
+    vec4 cover_corners[32]; // x0 y0 x1 y1, ... in 0..1 of the canvas, y down
 };
 
-in vec2 at;
-out vec4 frag_colour;
-
-vec2 corner(int n) {
-    vec4 pair = corners[n >> 1];
+vec2 cover_corner(int n) {
+    vec4 pair = cover_corners[n >> 1];
     return (n & 1) == 0 ? pair.xy : pair.zw;
 }
 
-void main() {
-    vec2 canvas = shape.xy;
-    int points = clamp(int(count.x), 0, 64);
-    vec2 p = vec2(at.x * canvas.x, (1.0 - at.y) * canvas.y);
+float cover_at(vec2 frag) {
+    if (cover_count.y > 0.5) return 1.0;
+    vec2 canvas = cover_shape.xy;
+    float x = frag.x - 0.5 * canvas.x;
+    float y = cover_count.z > 0.5 ? 0.5 * canvas.y - frag.y : frag.y - 0.5 * canvas.y;
+    vec2 uv = vec2(x * cover_u.x + y * cover_u.y + cover_u.z, x * cover_v.x + y * cover_v.y + cover_v.z);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return cover_shape.w > 0.5 ? 1.0 : 0.0;
+    int points = clamp(int(cover_count.x), 0, 64);
+    vec2 p = vec2(uv.x * canvas.x, (1.0 - uv.y) * canvas.y);
     bool inside = false;
     float nearest = 1.0e30;
     int previous = points - 1;
     //  Bounded by the shape's own corners, never a fixed 64 a compiler may
     //  unroll: Mesa's software rasteriser ran out of memory doing so (CI, 2026-10-08).
     for (int n = 0; n < points; ++n) {
-        vec2 a = corner(previous) * canvas;
-        vec2 b = corner(n) * canvas;
+        vec2 a = cover_corner(previous) * canvas;
+        vec2 b = cover_corner(n) * canvas;
         if (((b.y > p.y) != (a.y > p.y)) && (p.x < (a.x - b.x) * (p.y - b.y) / (a.y - b.y) + b.x)) inside = !inside;
         vec2 e = a - b;
         float span = dot(e, e);
@@ -264,16 +272,127 @@ void main() {
         nearest = min(nearest, length(p - (b + t * e)));
         previous = n;
     }
-    float feather = shape.z;
+    float feather = cover_shape.z;
     float cover = points < 3 ? 0.0 : (feather > 0.0 ? clamp(0.5 + (inside ? nearest : -nearest) / feather, 0.0, 1.0)
                                                     : (inside ? 1.0 : 0.0));
-    if (shape.w > 0.5) cover = 1.0 - cover;
-    float alpha = colour.a * cover;
+    if (cover_shape.w > 0.5) cover = 1.0 - cover;
+    return cover;
+}
+@end
+
+//------------------------------------------------------------------------------
+//  A MASK: its colour where its outline covers, over the whole target.
+@fs mask_fs
+@include_block cover_block
+layout(binding=1) uniform mask {
+    vec4 colour;
+};
+
+in vec2 at;
+out vec4 frag_colour;
+
+void main() {
+    float alpha = colour.a * cover_at(gl_FragCoord.xy);
     frag_colour = vec4(colour.rgb * alpha, alpha);
 }
 @end
 
 @program mask quad_vs mask_fs
+
+//------------------------------------------------------------------------------
+//  A BLUR CUE (Blur.h's pyramid, step for step; namespace draft 61, AKO). Every
+//  read is a texel by its integer place - the target's own pixel - so a pass
+//  reads and writes in one orientation whichever way the backend runs its rows.
+//
+//  HALVED: each point the average of the four beneath it, the edges held.
+@fs down_fs
+layout(binding=1) uniform down {
+    vec4 down_size;         // the level read: width, height
+};
+
+layout(binding=0) uniform texture2D level;
+layout(binding=0) uniform sampler level_smp;
+
+in vec2 at;
+out vec4 frag_colour;
+
+void main() {
+    ivec2 p = ivec2(gl_FragCoord.xy) * 2;
+    ivec2 most = ivec2(down_size.xy) - 1;
+    vec3 sum = texelFetch(sampler2D(level, level_smp), min(p, most), 0).rgb
+             + texelFetch(sampler2D(level, level_smp), min(p + ivec2(1, 0), most), 0).rgb
+             + texelFetch(sampler2D(level, level_smp), min(p + ivec2(0, 1), most), 0).rgb
+             + texelFetch(sampler2D(level, level_smp), min(p + ivec2(1, 1), most), 0).rgb;
+    frag_colour = vec4(sum * 0.25, 1.0);
+}
+@end
+
+@program down quad_vs down_fs
+
+//  ONE PASS OF THE GAUSSIAN, across or down: the taps to three spreads,
+//  summing to one, the edges held.
+@fs blur_fs
+layout(binding=1) uniform blur {
+    vec4 blur_step;         // direction x, direction y, spread, reach
+    vec4 blur_size;         // the level: width, height
+};
+
+layout(binding=0) uniform texture2D level;
+layout(binding=0) uniform sampler level_smp;
+
+in vec2 at;
+out vec4 frag_colour;
+
+void main() {
+    ivec2 here = ivec2(gl_FragCoord.xy);
+    ivec2 most = ivec2(blur_size.xy) - 1;
+    ivec2 dir = ivec2(blur_step.xy);
+    float spread = max(blur_step.z, 0.000001);
+    int reach = int(blur_step.w + 0.5);
+    vec3 sum = texelFetch(sampler2D(level, level_smp), here, 0).rgb;
+    float total = 1.0;
+    for (int n = 1; n <= reach; ++n) {
+        float w = exp(-0.5 * float(n * n) / (spread * spread));
+        sum += w * (texelFetch(sampler2D(level, level_smp), clamp(here + dir * n, ivec2(0), most), 0).rgb
+                  + texelFetch(sampler2D(level, level_smp), clamp(here - dir * n, ivec2(0), most), 0).rgb);
+        total += 2.0 * w;
+    }
+    frag_colour = vec4(sum / total, 1.0);
+}
+@end
+
+@program blur quad_vs blur_fs
+
+//  LAID BACK on the canvas: the blurred level read by straight lines between
+//  its points' middles, through the cue's cover times its opacity.
+@fs blur_mix_fs
+@include_block cover_block
+layout(binding=1) uniform blur_mix {
+    vec4 mix_a;             // 2^halvings, the level's width, height, opacity
+};
+
+layout(binding=0) uniform texture2D level;
+layout(binding=0) uniform sampler level_smp;
+
+in vec2 at;
+out vec4 frag_colour;
+
+void main() {
+    vec2 f = gl_FragCoord.xy / mix_a.x - 0.5;
+    ivec2 i0 = ivec2(floor(f));
+    vec2 t = f - vec2(i0);
+    ivec2 most = ivec2(mix_a.yz) - 1;
+    vec3 a = texelFetch(sampler2D(level, level_smp), clamp(i0, ivec2(0), most), 0).rgb;
+    vec3 b = texelFetch(sampler2D(level, level_smp), clamp(i0 + ivec2(1, 0), ivec2(0), most), 0).rgb;
+    vec3 c = texelFetch(sampler2D(level, level_smp), clamp(i0 + ivec2(0, 1), ivec2(0), most), 0).rgb;
+    vec3 d = texelFetch(sampler2D(level, level_smp), clamp(i0 + ivec2(1, 1), ivec2(0), most), 0).rgb;
+    vec3 blurred = mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+    float m = mix_a.w * cover_at(gl_FragCoord.xy);
+    frag_colour = vec4(blurred * m, m);
+}
+@end
+
+@program blur_mix quad_vs blur_mix_fs
 
 //------------------------------------------------------------------------------
 //  THE WARP (Mapping.h): an offscreen picture through the mesh, the output's

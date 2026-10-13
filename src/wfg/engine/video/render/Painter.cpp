@@ -16,6 +16,7 @@
 
 #include <wfg/engine/video/render/Painter.h>
 
+#include <wfg/engine/video/Blur.h>
 #include <wfg/engine/video/Compositor.h>
 #include <wfg/engine/video/Geometry.h>
 #include <wfg/engine/video/render/Gpu.h>
@@ -34,7 +35,7 @@ namespace wfg::video::render
 {
     namespace
     {
-        enum class Program : int { fill = 0, picture, movie, movieQ, mask, warp, count };
+        enum class Program : int { fill = 0, picture, movie, movieQ, mask, warp, down, blur, blurMix, count };
 
         /*  HOW A DRAW IS LAID ON WHAT IS UNDER IT: the layers' four (VD) on
             premultiplied colour - the compositor's formulas as equations - and
@@ -235,8 +236,10 @@ namespace wfg::video::render
             const auto backend = sg_query_backend();
             const sg_shader_desc* descs[] { video_fill_shader_desc (backend), video_picture_shader_desc (backend),
                                             video_movie_shader_desc (backend), video_movie_q_shader_desc (backend),
-                                            video_mask_shader_desc (backend), video_warp_shader_desc (backend) };
-            const char* names[] { "fill", "picture", "movie", "movie_q", "mask", "warp" };
+                                            video_mask_shader_desc (backend), video_warp_shader_desc (backend),
+                                            video_down_shader_desc (backend), video_blur_shader_desc (backend),
+                                            video_blur_mix_shader_desc (backend) };
+            const char* names[] { "fill", "picture", "movie", "movie_q", "mask", "warp", "down", "blur", "blur_mix" };
 
             for (std::size_t n = 0; n < shaders.size(); ++n)
             {
@@ -406,6 +409,16 @@ namespace wfg::video::render
             pass.attachments.colors[0] = colour;
             pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
             pass.action.colors[0].clear_value = { 0.0f, 0.0f, 0.0f, 1.0f };
+            return pass;
+        }
+
+        /*  A PASS THAT KEEPS WHAT THE TARGET HOLDS: the canvas taken up again
+            after a blur cue has read it (namespace draft 61). */
+        static sg_pass passLoading (sg_view colour)
+        {
+            sg_pass pass {};
+            pass.attachments.colors[0] = colour;
+            pass.action.colors[0].load_action = SG_LOADACTION_LOAD;
             return pass;
         }
 
@@ -760,22 +773,11 @@ namespace wfg::video::render
                 else
                 {
                     sg_apply_pipeline (pipeline (Program::mask, Lay::normal, format));
-                    apply (UB_video_corners, quadOf (whole, 1.0, 0.0, 1.0));
+                    apply (UB_video_corners, rectangle (-1.0, -1.0, 1.0, 1.0));
                     video_mask_t uniforms {};
                     colour (uniforms.colour);
-                    uniforms.shape[0] = static_cast<float> (width);
-                    uniforms.shape[1] = static_cast<float> (height);
-                    uniforms.shape[2] = layer.shape.feather;
-                    uniforms.shape[3] = layer.shape.invert ? 1.0f : 0.0f;
-                    uniforms.count[0] = static_cast<float> (layer.shape.count);
-
-                    for (int n = 0; n < layer.shape.count && n < mask::maxPoints; ++n)
-                    {
-                        uniforms.corners[n / 2][(n % 2) * 2] = layer.shape.x[n];
-                        uniforms.corners[n / 2][(n % 2) * 2 + 1] = layer.shape.y[n];
-                    }
-
                     apply (UB_video_mask, uniforms);
+                    apply (UB_video_cover, coverOf (layer.shape, whole, false));
                 }
 
                 sg_draw (0, 4, 1);
@@ -877,6 +879,132 @@ namespace wfg::video::render
         }
 
         //==============================================================================
+        /*  AN OUTLINE'S COVER as the shaders' cover block reads it (namespace
+            draft 61): the shape, the target's size, and the frame `place` puts
+            on the target carried back by an affine map - `Placement::toTexture`
+            as two rows, the flips in them - with whether the target's rows run
+            down. `whole`: a blur cue's, which with no outline covers all. */
+        video_cover_t coverOf (const mask::Shape& shape, const Placement& place, bool whole) const noexcept
+        {
+            video_cover_t uniforms {};
+            uniforms.cover_shape[0] = static_cast<float> (place.canvasWidth);
+            uniforms.cover_shape[1] = static_cast<float> (place.canvasHeight);
+            uniforms.cover_shape[2] = shape.feather;
+            uniforms.cover_shape[3] = shape.invert ? 1.0f : 0.0f;
+            uniforms.cover_count[0] = static_cast<float> (std::clamp (shape.count, 0, mask::maxPoints));
+            uniforms.cover_count[1] = whole && shape.count < 3 ? 1.0f : 0.0f;
+            uniforms.cover_count[2] = originTopLeft ? 1.0f : 0.0f;
+
+            double halfWidth = 0.0, halfHeight = 0.0;
+            place.halfSize (halfWidth, halfHeight);
+
+            if (halfWidth > 0.0 && halfHeight > 0.0)
+            {
+                const auto turn = place.rotation * 3.14159265358979323846 / 180.0;
+                const auto c = std::cos (turn), s = std::sin (turn);
+                const auto ox = place.offsetX / 100.0 * place.canvasWidth;
+                const auto oy = place.offsetY / 100.0 * place.canvasHeight;
+                const auto ku = (place.flipH ? -0.5 : 0.5) / halfWidth;
+                const auto kv = (place.flipV ? -0.5 : 0.5) / halfHeight;
+
+                uniforms.cover_u[0] = static_cast<float> (ku * c);
+                uniforms.cover_u[1] = static_cast<float> (-ku * s);
+                uniforms.cover_u[2] = static_cast<float> (0.5 - ku * (c * ox - s * oy));
+                uniforms.cover_v[0] = static_cast<float> (kv * s);
+                uniforms.cover_v[1] = static_cast<float> (kv * c);
+                uniforms.cover_v[2] = static_cast<float> (0.5 - kv * (s * ox + c * oy));
+            }
+            else
+            {
+                uniforms.cover_u[2] = -1.0f;        // no frame: every point off it
+            }
+
+            for (int n = 0; n < shape.count && n < mask::maxPoints; ++n)
+            {
+                uniforms.cover_corners[n / 2][(n % 2) * 2] = shape.x[n];
+                uniforms.cover_corners[n / 2][(n % 2) * 2 + 1] = shape.y[n];
+            }
+
+            return uniforms;
+        }
+
+        /*  THE CANVAS SO FAR, BLURRED APART (Blur.h's pyramid, namespace draft
+            61, AKO): halved `plan.halvings` times, then a pass across and one
+            down - into pictures of their own, kept while drawn - leaving the
+            blurred level, its size, for the mix to read. */
+        struct Blurred
+        {
+            sg_view view {};
+            int width = 0;
+            int height = 0;
+        };
+
+        Blurred blurCanvas (const std::string& canvasId, const Offscreen& canvas, const pyramid::Plan& plan, int reach)
+        {
+            sg_view source = canvas.texture;
+            auto width = canvas.width, height = canvas.height;
+
+            const auto bindLevel = [this] (sg_view view)
+            {
+                sg_bindings bindings {};
+                bindings.views[VIEW_video_level] = view;
+                bindings.samplers[SMP_video_level_smp] = nearest;
+                sg_apply_bindings (bindings);
+            };
+
+            for (int k = 0; k < plan.halvings; ++k)
+            {
+                const auto key = "blur:" + canvasId + ":" + std::to_string (k);
+                auto& half = offscreen (key, (width + 1) / 2, (height + 1) / 2, canvasFormat);
+                usedTargets.insert (key);
+
+                sg_begin_pass (passInto (half.colour));
+                sg_apply_pipeline (pipeline (Program::down, Lay::none, canvasFormat));
+                bindLevel (source);
+                apply (UB_video_corners, rectangle (-1.0, -1.0, 1.0, 1.0));
+                video_down_t uniforms {};
+                uniforms.down_size[0] = static_cast<float> (width);
+                uniforms.down_size[1] = static_cast<float> (height);
+                apply (UB_video_down, uniforms);
+                sg_draw (0, 4, 1);
+                sg_end_pass();
+
+                source = half.texture;
+                width = half.width;
+                height = half.height;
+            }
+
+            if (reach > 0)
+            {
+                for (const auto across : { true, false })
+                {
+                    const auto key = "blur:" + canvasId + (across ? ":across" : ":down");
+                    auto& passed = offscreen (key, width, height, canvasFormat);
+                    usedTargets.insert (key);
+
+                    sg_begin_pass (passInto (passed.colour));
+                    sg_apply_pipeline (pipeline (Program::blur, Lay::none, canvasFormat));
+                    bindLevel (source);
+                    apply (UB_video_corners, rectangle (-1.0, -1.0, 1.0, 1.0));
+                    video_blur_t uniforms {};
+                    uniforms.blur_step[0] = across ? 1.0f : 0.0f;
+                    uniforms.blur_step[1] = across ? 0.0f : 1.0f;
+                    uniforms.blur_step[2] = static_cast<float> (plan.spread);
+                    uniforms.blur_step[3] = static_cast<float> (reach);
+                    uniforms.blur_size[0] = static_cast<float> (width);
+                    uniforms.blur_size[1] = static_cast<float> (height);
+                    apply (UB_video_blur, uniforms);
+                    sg_draw (0, 4, 1);
+                    sg_end_pass();
+
+                    source = passed.texture;
+                }
+            }
+
+            return { source, width, height };
+        }
+
+        //==============================================================================
         /*  ONE CANVAS'S LAYERS, bottom first, into its own picture. */
         void composite (const std::string& canvasId, const region::CanvasReading& canvas, std::int64_t sample, Offscreen& into)
         {
@@ -895,10 +1023,43 @@ namespace wfg::video::render
 
                 const auto lay = layOf (layer->blend);
 
-                /*  A BLUR CUE (namespace draft 61) shows no picture of its own,
-                    and nothing goes through an insert for it. */
+                /*  A BLUR CUE (namespace draft 61, AKN, AKO): the canvas so far
+                    blurred apart - the pass ends, the pyramid runs - and laid
+                    back through its cover times its opacity on a pass that
+                    keeps what the canvas holds; the layers above go on in it.
+                    Nothing of its own is shown, and nothing goes through an
+                    insert for it. */
                 if (layer->source == region::Source::blur)
+                {
+                    const auto radius = valueOf (*layer, Property::blur, sample, layer->blur);
+                    const auto plan = pyramid::planFor (radius / 3.0);
+                    const auto reach = plan.spread > 1.0e-6 ? static_cast<int> (std::ceil (3.0 * plan.spread)) : 0;
+
+                    if (! (radius > 0.0) || (plan.halvings == 0 && reach == 0))
+                        continue;
+
+                    sg_end_pass();
+                    const auto blurred = blurCanvas (canvasId, into, plan, reach);
+                    sg_begin_pass (passLoading (into.colour));
+
+                    sg_apply_pipeline (pipeline (Program::blurMix, Lay::normal, format));
+                    sg_bindings bindings {};
+                    bindings.views[VIEW_video_level] = blurred.view;
+                    bindings.samplers[SMP_video_level_smp] = nearest;
+                    sg_apply_bindings (bindings);
+                    apply (UB_video_corners, rectangle (-1.0, -1.0, 1.0, 1.0));
+
+                    video_blur_mix_t mixer {};
+                    mixer.mix_a[0] = static_cast<float> (std::ldexp (1.0, plan.halvings));
+                    mixer.mix_a[1] = static_cast<float> (blurred.width);
+                    mixer.mix_a[2] = static_cast<float> (blurred.height);
+                    mixer.mix_a[3] = static_cast<float> (a);
+                    apply (UB_video_blur_mix, mixer);
+                    apply (UB_video_cover, coverOf (layer->shape, placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                                                               canvasWidth, canvasHeight), true));
+                    sg_draw (0, 4, 1);
                     continue;
+                }
 
                 if (! layer->insert.empty())
                 {
@@ -1039,28 +1200,21 @@ namespace wfg::video::render
                 }
                 else if (layer->source == region::Source::mask)
                 {
+                    /*  OVER THE WHOLE CANVAS, its cover carried back onto the
+                        frame its geometry moved - so an inverted mask moved or
+                        shrunk covers outside that frame too, as the monitor's
+                        does (namespace draft 61, AKP). */
                     sg_apply_pipeline (pipeline (Program::mask, lay, format));
-                    apply (UB_video_corners, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
-                                                  1.0, 0.0, 1.0));
+                    apply (UB_video_corners, rectangle (-1.0, -1.0, 1.0, 1.0));
 
                     video_mask_t uniforms {};
                     uniforms.colour[0] = static_cast<float> ((layer->paint >> 16) & 0xffu) / 255.0f;
                     uniforms.colour[1] = static_cast<float> ((layer->paint >> 8) & 0xffu) / 255.0f;
                     uniforms.colour[2] = static_cast<float> (layer->paint & 0xffu) / 255.0f;
                     uniforms.colour[3] = static_cast<float> (a);
-                    uniforms.shape[0] = static_cast<float> (canvasWidth);
-                    uniforms.shape[1] = static_cast<float> (canvasHeight);
-                    uniforms.shape[2] = layer->shape.feather;
-                    uniforms.shape[3] = layer->shape.invert ? 1.0f : 0.0f;
-                    uniforms.count[0] = static_cast<float> (layer->shape.count);
-
-                    for (int n = 0; n < layer->shape.count && n < mask::maxPoints; ++n)
-                    {
-                        uniforms.corners[n / 2][(n % 2) * 2] = layer->shape.x[n];
-                        uniforms.corners[n / 2][(n % 2) * 2 + 1] = layer->shape.y[n];
-                    }
-
                     apply (UB_video_mask, uniforms);
+                    apply (UB_video_cover, coverOf (layer->shape, placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                                                               canvasWidth, canvasHeight), false));
                     sg_draw (0, 4, 1);
                 }
             }

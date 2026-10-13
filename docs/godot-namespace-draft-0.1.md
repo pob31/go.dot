@@ -27626,3 +27626,27 @@ tiles cost the renderer's message thread with a blur in them.
   `AutoNameTests`; 74 gates - `video.gpu.C`, `schema.*`, `unit.shards`, `wfg.replay.*`, `wfg.commands`,
   `client.boundary`, `source.comments`; the clang-tidy stand-in clean. A deliberate breakage, the
   outline ignored, turned its case red.
+- **VFX.8**, 2026-10-13: the blur cue on the projector (AKN, AKO, AKP). The shaders gain `cover_block` -
+  an outline's cover asked at the target's own pixel: the point from the target's middle, y up whichever
+  way the backend runs its rows, carried back onto the frame the layer's geometry moved by two rows of an
+  affine map the Painter works out from `Placement` (`toTexture` as arithmetic, the flips in it); off the
+  frame nothing, or everything turned inside out; on it the shape even-odd and feathered; a blur cue with
+  no outline all of it. `mask_fs` now reads its cover there, drawn over the whole target: AN INVERTED
+  MASK MOVED OR SHRUNK COVERS OUTSIDE ITS MOVED FRAME ON THE PROJECTOR AS IT DID ON THE MONITOR (AKP) -
+  the old shader covered only inside the moved quad. Three programs, every read a texel by its integer
+  place so a pass reads and writes in one orientation on Direct3D, Metal and OpenGL: `down` (the four
+  beneath, the edges held), `blur` (a pass of the Gaussian, its taps to three spreads, the loop bounded by
+  a uniform as the mask's is, for Mesa) and `blur_mix` (the blurred level laid back by straight lines
+  through the cover times the opacity). `Painter::composite` ends the canvas's pass at a blur cue, runs
+  Blur.h's plan - halvings into pictures kept while drawn, a pass across and one down - and takes the
+  canvas up again on a pass that keeps what it holds (`passLoading`), the layers above going on in it; a
+  radius or a spread that blurs nothing draws nothing. On OpenGL, whose rows run up, the halving pairs
+  rows from the bottom where the monitor pairs them from the top: on a canvas of odd height the two can
+  differ by a row's share at the top or the bottom edge. The Metal compile is the Mac's to run, the
+  shaders translated for it here. Tests: `VideoGpuTests` on Direct3D 11's WARP against the reference drawn
+  whole (`drawAndCompareWhole`) - radii whose spreads lie either side of the halvings at eight and sixteen,
+  inside a feathered outline, outside it moved and turned, at half opacity, two blur cues, a sharp layer
+  above - and the inverted mask moved, shrunk and turned against `colourAt`; every earlier GPU case,
+  masks now drawn over the whole canvas; `VideoHostTests` whole in both locales; `video.gpu.C`; the
+  shader header's stamp; the clang-tidy stand-in clean. A deliberate breakage, the Painter passing the
+  blur over, turned every blur scene red - a mean error up to 27 of 255.

@@ -309,6 +309,49 @@ namespace
         });
     }
 
+    /*  `layers` composited on the GPU and by the reference drawn whole
+        (`compositeInto`) - which a blur cue needs (namespace draft 61). */
+    Comparison drawAndCompareWhole (const Pictures& pictures, const std::vector<region::LayerReading>& layers)
+    {
+        constexpr int width = 160, height = 90;
+        constexpr std::int64_t sample = 1000;
+
+        region::ConfigReading config;
+        config.canvases.push_back ({ "C1", width, height });
+
+        std::vector<float> rgba;
+        int readWidth = 0, readHeight = 0;
+
+        {
+            video::render::Painter painter (pictures);
+            std::string why;
+            REQUIRE_MESSAGE (painter.make (why), why);
+
+            painter.beginFrame (config, layers, [] (const std::string&) { return 1.0; });
+            CHECK (painter.canvas ("C1", sample).id != SG_INVALID_ID);
+            sg_commit();
+
+            REQUIRE (video::gpu::readBack (painter.canvasImage ("C1"), rgba, readWidth, readHeight));
+            painter.endFrame();
+        }
+
+        REQUIRE (readWidth == width);
+        REQUIRE (readHeight == height);
+
+        std::vector<const region::LayerReading*> stack;
+
+        for (const auto& layer : layers)
+            stack.push_back (&layer);
+
+        std::vector<double> whole;
+        video::compositeInto (stack, sample, width, height, width, height, &pictures, whole);
+
+        return compare (rgba, width, height, 6.0, [&] (int column, int row)
+        {
+            return video::colourIn (whole, column, row, width, 1.0);
+        });
+    }
+
     std::uint32_t rgbOf (const float* pixel) noexcept
     {
         const auto channel = [] (float value)
@@ -653,6 +696,112 @@ TEST_CASE ("video gpu: a text cue's words drawn where they lie on the canvas's f
     //  Not drawn yet: nothing, the ground showing.
     const auto none = drawAndCompare (Pictures {}, { ground, layerOf ("L3", region::Source::text, 1.0, 2) }, 1.0);
     CHECK (none.far == 0);
+}
+
+TEST_CASE ("video gpu: a blur cue blurs what lies beneath it as the reference says - its radii either side of each halving, its outline, its opacity, two of them, a layer above (§61, AKN, AKO)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    Pictures pictures;
+    pictures.images["picture.png"] = gradientPicture (40, 30);
+
+    //  BENEATH: a picture with a see-through corner, and a white triangle's hard edges over it.
+    auto ground = layerOf ("L1", region::Source::fill, 1.0, 1);
+    ground.paint = 0x204080u;
+
+    auto shown = layerOf ("L2", region::Source::picture, 1.0, 2);
+    shown.file = "picture.png";
+    shown.scale = 80.0;
+
+    auto triangle = layerOf ("L3", region::Source::mask, 1.0, 3);
+    triangle.paint = 0xFFFFFFu;
+    triangle.shape.count = 3;
+    triangle.shape.x[0] = 0.1f; triangle.shape.y[0] = 0.2f;
+    triangle.shape.x[1] = 0.6f; triangle.shape.y[1] = 0.9f;
+    triangle.shape.x[2] = 0.3f; triangle.shape.y[2] = 0.8f;
+
+    const auto blurOf = [] (const char* id, double radius, double opacity, std::uint64_t order)
+    {
+        auto blur = layerOf (id, region::Source::blur, opacity, order);
+        blur.layer = 1;
+        blur.blur = radius;
+        return blur;
+    };
+
+    std::vector<std::pair<std::string, std::vector<region::LayerReading>>> scenes;
+
+    //  Radii whose spreads (a third) sit either side of the halvings at 8 and 16 points.
+    for (const auto radius : { 4.5, 12.0, 23.0, 26.0, 47.0, 50.0, 120.0 })
+        scenes.push_back ({ "radius " + std::to_string (radius), { ground, shown, triangle, blurOf ("B1", radius, 1.0, 4) } });
+
+    auto outlined = blurOf ("B1", 30.0, 1.0, 4);
+    outlined.shape.count = 4;
+    outlined.shape.x[0] = 0.2f; outlined.shape.y[0] = 0.1f;
+    outlined.shape.x[1] = 0.8f; outlined.shape.y[1] = 0.1f;
+    outlined.shape.x[2] = 0.8f; outlined.shape.y[2] = 0.6f;
+    outlined.shape.x[3] = 0.2f; outlined.shape.y[3] = 0.6f;
+    outlined.shape.feather = 6.0f;
+    scenes.push_back ({ "inside a feathered outline", { ground, shown, triangle, outlined } });
+
+    auto inverted = outlined;
+    inverted.shape.invert = true;
+    inverted.scale = 70.0;
+    inverted.rotation = 20.0;
+    scenes.push_back ({ "outside it, the outline moved and turned", { ground, shown, triangle, inverted } });
+
+    scenes.push_back ({ "at half its opacity", { ground, shown, triangle, blurOf ("B1", 30.0, 0.5, 4) } });
+    scenes.push_back ({ "two of them", { ground, shown, triangle, blurOf ("B1", 15.0, 1.0, 4), blurOf ("B2", 21.0, 1.0, 5) } });
+
+    auto above = triangle;
+    above.id = "L4";
+    above.layer = 2;
+    above.order = 6;
+    above.paint = 0xC03010u;
+    scenes.push_back ({ "a sharp layer above it", { ground, shown, triangle, blurOf ("B1", 30.0, 1.0, 4), above } });
+
+    for (const auto& [name, layers] : scenes)
+    {
+        const auto result = drawAndCompareWhole (pictures, layers);
+
+        INFO (name << ": worst " << result.worst << ", mean " << result.mean << ", " << result.far
+              << " of " << result.pixels << " pixels off by more than 6 on " << video::gpu::describe());
+        CHECK (result.far * 100 <= result.pixels);
+        CHECK (result.mean < 1.5);
+    }
+}
+
+TEST_CASE ("video gpu: an inverted mask moved and shrunk covers outside its moved frame too, as the reference does (§61, AKP)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    Pictures pictures;
+
+    auto ground = layerOf ("L1", region::Source::fill, 1.0, 1);
+    ground.paint = 0x204080u;
+
+    auto spill = layerOf ("L2", region::Source::mask, 1.0, 2);
+    spill.paint = 0xFFFFFFu;
+    spill.shape.invert = true;
+    spill.shape.count = 4;
+    spill.shape.x[0] = 0.3f; spill.shape.y[0] = 0.3f;
+    spill.shape.x[1] = 0.7f; spill.shape.y[1] = 0.3f;
+    spill.shape.x[2] = 0.7f; spill.shape.y[2] = 0.7f;
+    spill.shape.x[3] = 0.3f; spill.shape.y[3] = 0.7f;
+    spill.scale = 50.0;
+    spill.offsetX = 20.0;
+    spill.rotation = 15.0;
+
+    const auto result = drawAndCompare (pictures, { ground, spill }, 1.0);
+    INFO ("worst " << result.worst << ", mean " << result.mean << ", " << result.far << " of " << result.pixels
+          << " pixels off by more than 6 on " << video::gpu::describe());
+    CHECK (result.far * 100 <= result.pixels);
+    CHECK (result.mean < 1.5);
 }
 
 TEST_CASE ("video gpu: a movie's frame keyed by its green, and its alpha read or not (§61)")
