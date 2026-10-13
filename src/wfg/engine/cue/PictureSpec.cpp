@@ -146,6 +146,9 @@ namespace wfg::cue
         spec.flipH = textOf ("flipH") == "true";
         spec.flipV = textOf ("flipV") == "true";
 
+        //  A blur cue's radius (namespace draft 61, AKN), a moving value's base as the scale is.
+        spec.blur = std::clamp (numberOf ("blur"), 0.0, 500.0);
+
         //  The grade (§36, VP, VU), its curves baked here so the far side reads tables (VM).
         spec.grade.contrast = numberOf ("contrast");
         spec.grade.saturation = numberOf ("saturation");
@@ -228,7 +231,7 @@ namespace wfg::cue
             return false;
 
         if (! same (a.scale, b.scale) || ! same (a.offsetX, b.offsetX) || ! same (a.offsetY, b.offsetY)
-              || ! same (a.rotation, b.rotation))
+              || ! same (a.rotation, b.rotation) || ! same (a.blur, b.blur))
             return false;
 
         if (! same (a.grade.contrast, b.grade.contrast) || ! same (a.grade.saturation, b.grade.saturation)
@@ -256,6 +259,7 @@ namespace wfg::cue
         into.offsetX = from.offsetX;
         into.offsetY = from.offsetY;
         into.rotation = from.rotation;
+        into.blur = from.blur;
         into.flipH = from.flipH;
         into.flipV = from.flipV;
         into.grade = from.grade;

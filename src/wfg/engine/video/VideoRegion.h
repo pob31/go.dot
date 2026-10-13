@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 19;
+    constexpr std::uint32_t version = 20;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -114,7 +114,7 @@ namespace wfg::video::region
     /** "Not going": a layer whose removal has not been placed. */
     constexpr std::int64_t notRemoved = std::numeric_limits<std::int64_t>::max();
 
-    enum class Source : std::uint32_t { fill = 0, mask = 1, picture = 2, movie = 3, capture = 4, text = 5 };
+    enum class Source : std::uint32_t { fill = 0, mask = 1, picture = 2, movie = 3, capture = 4, text = 5, blur = 6 };
 
     inline Source sourceFrom (std::string_view word) noexcept
     {
@@ -123,6 +123,7 @@ namespace wfg::video::region
         if (word == "movie")   return Source::movie;
         if (word == "capture") return Source::capture;
         if (word == "text")    return Source::text;
+        if (word == "blur")    return Source::blur;
         return Source::fill;
     }
 
@@ -352,6 +353,9 @@ namespace wfg::video::region
         std::atomic<double> rotation;
         std::atomic<std::uint32_t> flipH;
         std::atomic<std::uint32_t> flipV;
+
+        /*  A blur cue's radius where its moving value starts (namespace draft 61). */
+        std::atomic<double> blur;
 
         /*  Its grade, written with what it is: four numbers and the three
             baked tables (Grade.h). */
@@ -831,6 +835,7 @@ namespace wfg::video::region
         double rotation = 0.0;
         bool flipH = false;
         bool flipV = false;
+        double blur = 20.0;
         Grade grade;
         bool useAlpha = true;
         Key key;
@@ -874,6 +879,7 @@ namespace wfg::video::region
             out.rotation = slot.rotation.load (std::memory_order_relaxed);
             out.flipH = slot.flipH.load (std::memory_order_relaxed) != 0;
             out.flipV = slot.flipV.load (std::memory_order_relaxed) != 0;
+            out.blur = slot.blur.load (std::memory_order_relaxed);
             out.grade.contrast = slot.contrast.load (std::memory_order_relaxed);
             out.grade.saturation = slot.saturation.load (std::memory_order_relaxed);
             out.grade.gamma = slot.gamma.load (std::memory_order_relaxed);

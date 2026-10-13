@@ -64,10 +64,11 @@ namespace wfg::video
         offsetY = 3,    ///< % of the canvas's height, up positive
         rotation = 4,   ///< degrees, clockwise
         time = 5,       ///< a movie's playhead: seconds of the file (namespace draft 37, VZ)
-        dca = 6         ///< 0..1, what the DCAs above the cue leave of its opacity (37.5, WE)
+        dca = 6,        ///< 0..1, what the DCAs above the cue leave of its opacity (37.5, WE)
+        blur = 7        ///< canvas px, a blur cue's radius (namespace draft 61, AKN)
     };
 
-    constexpr int propertyCount = 7;
+    constexpr int propertyCount = 8;
 
     /*  One layer: what a video run puts on a canvas. A VALUE, carrying no
         document reference, for `ArmRequest`'s reason - it is read on the other
@@ -78,7 +79,7 @@ namespace wfg::video
         std::string canvas;         ///< the canvas it lies on, by identifier
         int layer = 0;              ///< higher is on top (VI)
         std::uint64_t order = 0;    ///< which came up later, for two on one layer
-        std::string source;         ///< fill, mask, picture, movie, capture or text
+        std::string source;         ///< fill, mask, picture, movie, capture, text or blur
         std::string blend = "normal";   ///< normal, add, screen or multiply (VD)
 
         /*  The fill's or the mask's colour as 0xRRGGBB - the cue's `paint`,
@@ -99,6 +100,10 @@ namespace wfg::video
         double rotation = 0.0;
         bool flipH = false;
         bool flipV = false;
+
+        /*  A BLUR CUE'S RADIUS, in canvas pixels, where its moving value
+            starts (namespace draft 61, AKN). */
+        double blur = 20.0;
 
         /*  ITS GRADE (§36, VP, VU): a picture's and a movie's, the curves
             already baked. Does not move (VV). */

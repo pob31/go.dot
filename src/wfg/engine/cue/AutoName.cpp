@@ -400,6 +400,10 @@ namespace wfg::cue
             /*  A TEXT CUE (namespace draft 61): its first line as written - a
                 blank as its name, {score} - cut at about thirty-two
                 characters; "Text" while it has no words. */
+            //  A BLUR CUE (namespace draft 61): what it does.
+            if (source == "blur")
+                return "Blur";
+
             if (source == "text")
             {
                 const auto words = own (cue, "words");

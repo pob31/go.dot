@@ -102,7 +102,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_plugin_format[] = { "VST3", "AU", "LV2" };
     inline constexpr std::string_view enum_plugin_side[] = { "before", "after" };
     inline constexpr std::string_view enum_plugin_state[] = { "unloaded", "loading", "loaded", "missing", "failed" };
-    inline constexpr std::string_view enum_video_source[] = { "fill", "mask", "picture", "movie", "capture", "text" };
+    inline constexpr std::string_view enum_video_source[] = { "fill", "mask", "picture", "movie", "capture", "text", "blur" };
     inline constexpr std::string_view enum_video_blend[] = { "normal", "add", "screen", "multiply" };
     inline constexpr std::string_view enum_video_fit[] = { "fit", "fill", "stretch" };
     inline constexpr std::string_view enum_video_key[] = { "none", "luma", "matte", "colour" };
@@ -1812,7 +1812,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "What the fade moves a video cue to, as row:value pairs space-separated, sorted - opacity, scale, offsetX, offsetY and rotation, and a movie's rate, in the rows' own units (namespace draft 36, VS). Each moves from where the picture is to its value over the duration, along the curve; a row not listed is left where it is. stopWhenDone takes the picture away where the fade arrives." },
+          "What the fade moves a video cue to, as row:value pairs space-separated, sorted - opacity, scale, offsetX, offsetY and rotation, a movie's rate, and a blur cue's blur (namespace draft 61), in the rows' own units (namespace draft 36, VS). Each moves from where the picture is to its value over the duration, along the curve; a row not listed is left where it is. stopWhenDone takes the picture away where the fade arrives." },
         { "transport", "target",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -4665,10 +4665,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "fill",
           false, 0.0, false, 0.0,
-          enum_video_source, 6,
+          enum_video_source, 7,
           "", 50.0, false, "park",
           "",
-          "What the cue puts on its canvas (namespace draft 35, the author's words): a fill, one flat colour over the whole canvas, sitting behind; a mask, a shape laid over what is under it; a picture, an image file; a movie; a capture, the picture a video input brings in from another program (namespace draft 44, YC); text, words laid on the canvas as on a slide (namespace draft 61). One element for every source (VE), because the canvas, the layer, the opacity and the blend are the same whatever it shows." },
+          "What the cue puts on its canvas (namespace draft 35, the author's words): a fill, one flat colour over the whole canvas, sitting behind; a mask, a shape laid over what is under it; a picture, an image file; a movie; a capture, the picture a video input brings in from another program (namespace draft 44, YC); text, words laid on the canvas as on a slide; blur, everything beneath it on its canvas blurred, inside or outside its outline (namespace draft 61). One element for every source (VE), because the canvas, the layer, the opacity and the blend are the same whatever it shows." },
         { "video", "canvas",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -4932,7 +4932,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "A mask's outline, as (x, y) corners in 0..1 of the canvas from its top-left corner - x to the right, y down - at most 64, filled even-odd (namespace draft 35, UY, VF). Fewer than three is no shape: nothing is covered, or everything when inverted." },
+          "A mask's outline, or the area a blur cue blurs (namespace draft 61, AKN: with fewer than three corners a blur covers the whole canvas), as (x, y) corners in 0..1 of the canvas from its top-left corner - x to the right, y down - at most 64, filled even-odd (namespace draft 35, UY, VF). Fewer than three is no shape: nothing is covered, or everything when inverted." },
         { "video", "feather",
           ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "0",
@@ -5101,6 +5101,14 @@ namespace wfg::doc::generated
           "px", 50.0, false, "park",
           "",
           "How far the outline is blurred, in canvas pixels - a soft glow round the letters (namespace draft 61, AKL); nought is a sharp outline." },
+        { "video", "blur",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "20",
+          true, 0.0, true, 500.0,
+          nullptr, 0,
+          "px", 50.0, false, "park",
+          "",
+          "How far a blur cue blurs what lies beneath it, as a radius in canvas pixels - the Gaussian's spread a third of it (namespace draft 61, AKN); nought blurs nothing. A fade moves it (fade/video pairs, blur:), as it moves a picture's scale." },
         { "cueTemplates", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",

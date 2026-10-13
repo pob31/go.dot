@@ -1666,6 +1666,53 @@ TEST_CASE ("video: a text cue's blanks filled from the fields - at GO, while it 
     CHECK (fresh.fields.all() == rig.fields.all());
 }
 
+TEST_CASE ("video: a blur cue's radius reaches the picture side, an edit restates it, and a fade moves it (§61, AKN)")
+{
+    VideoRig rig;
+
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/source"),
+                                              osc::Value::string ("blur") }).applied == 1);
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/blur"),
+                                              osc::Value::float64 (35.0) }).applied == 1);
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (2),
+                                                osc::Value::string ("fade"), osc::Value::string ("Sharpen"),
+                                                osc::Value::string ("VD000050"),
+                                                osc::Value::string ("target"), osc::Value::string ("VD000002"),
+                                                osc::Value::string ("duration"), osc::Value::string ("1"),
+                                                osc::Value::string ("video"),
+                                                osc::Value::string ("blur:5") }).applied >= 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (60);
+
+    REQUIRE (rig.sink.shown.size() == 1);
+    CHECK (rig.sink.shown.front().source == "blur");
+    CHECK (rig.sink.shown.front().blur == doctest::Approx (35.0));
+    const auto id = rig.runOf ("VD000002")->id;
+
+    //  Never moved: an edit is the layer's own number, restated.
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/blur"),
+                                              osc::Value::float64 (50.0) }).applied == 1);
+    rig.ticks (2);
+    REQUIRE_FALSE (rig.sink.restated.empty());
+    CHECK (rig.sink.restated.back().blur == doctest::Approx (50.0));
+    CHECK (rig.sink.geometry[id][video::Property::blur].empty());
+
+    //  A fade: from fifty to five, on the blur's own points.
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000050") });
+    rig.ticks (70);
+
+    const auto& points = rig.sink.geometry[id][video::Property::blur];
+    REQUIRE (points.size() >= 2);
+    CHECK (points.front().value <= 50.0 + 1.0e-9);      // from where it was, a tick in
+    CHECK (points.front().value > 45.0);
+    CHECK (points.back().value == doctest::Approx (5.0));
+
+    //  A radius past its range is refused at the door.
+    CHECK (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/blur"),
+                                            osc::Value::float64 (900.0) }).applied == 0);
+}
+
 TEST_CASE ("video: wfg validate says a text cue with no words shows nothing, and words past a slide's worth are cut (§61)")
 {
     Rig rig;
@@ -1685,6 +1732,15 @@ TEST_CASE ("video: wfg validate says a text cue with no words shows nothing, and
     problems = rig.problemsAbout ("Video[VD000031]");
     REQUIRE (problems.size() == 1);
     CHECK (problems.front().find ("4096") != std::string::npos);
+
+    //  A blur cue through an insert: nothing of its own to send, and said (61, AKN).
+    REQUIRE (rig.applied ("videoInsert.create", { text ("Look"), text ("spout"), text (""), text ("TD out"), text ("MC000060") }));
+    REQUIRE (rig.applied ("cue.create", { text ("VD000001"), osc::Value::int32 (3), text ("video"),
+                                          text ("Soft"), text ("VD000032"), text ("canvas"), text ("VD000011"),
+                                          text ("source"), text ("blur"), text ("videoInsert"), text ("MC000060") }));
+    const auto softened = rig.problemsAbout ("Video[VD000032]");
+    REQUIRE (softened.size() == 1);
+    CHECK (softened.front().find ("no picture of its own") != std::string::npos);
 
     //  A { that begins no field: shown as written, and said (61, AKM).
     REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000031/words"), text ("Hello {not a name}") }));

@@ -78,7 +78,7 @@ namespace wfg::doc::parts
                     "offsetX", "offsetY", "rotation", "flipH", "flipV",
                     "contrast", "saturation", "gamma", "hue",
                     "curveLuma", "curveRed", "curveGreen", "curveBlue",
-                    "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill",
+                    "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill", "blur",
                     "shape", "feather", "invert" }, {}, {} },
             };
 

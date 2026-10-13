@@ -253,6 +253,10 @@ TEST_CASE ("auto name: a picture, a movie, a capture and a mic are called by the
     show.set (still, "words", "A first line far longer than any name should be");
     CHECK (show.automatic (still) == "A first line far longer than any...");
 
+    //  A BLUR CUE (61): what it does.
+    show.set (still, "source", "blur");
+    CHECK (show.automatic (still) == "Blur");
+
     const auto voice = show.document.createInput (1);
     REQUIRE (voice.ok);
     REQUIRE (show.document.setAttribute ("/godot/input/" + voice.id + "/name", "Voix solo").ok);

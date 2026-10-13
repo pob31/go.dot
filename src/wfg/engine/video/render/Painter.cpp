@@ -895,6 +895,11 @@ namespace wfg::video::render
 
                 const auto lay = layOf (layer->blend);
 
+                /*  A BLUR CUE (namespace draft 61) shows no picture of its own,
+                    and nothing goes through an insert for it. */
+                if (layer->source == region::Source::blur)
+                    continue;
+
                 if (! layer->insert.empty())
                 {
                     /*  THROUGH AN INSERT (§44, YE): what came back, placed,

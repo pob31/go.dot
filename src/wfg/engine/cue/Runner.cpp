@@ -5049,6 +5049,7 @@ namespace wfg::cue
             job.rowSeen[static_cast<std::size_t> (video::Property::offsetX)] = job.spec.offsetX;
             job.rowSeen[static_cast<std::size_t> (video::Property::offsetY)] = job.spec.offsetY;
             job.rowSeen[static_cast<std::size_t> (video::Property::rotation)] = job.spec.rotation;
+            job.rowSeen[static_cast<std::size_t> (video::Property::blur)] = job.spec.blur;
 
             const auto movieCue = job.movie ? job.cue : std::string {};
 
@@ -19074,6 +19075,7 @@ namespace wfg::cue
                         : property == video::Property::offsetX  ? job.spec.offsetX
                         : property == video::Property::offsetY  ? job.spec.offsetY
                         : property == video::Property::rotation ? job.spec.rotation
+                        : property == video::Property::blur     ? job.spec.blur
                         : property == video::Property::dca      ? 1.0
                                                                 : 0.0;
 
@@ -19210,6 +19212,7 @@ namespace wfg::cue
             else if (name == "offsetX")  job.to.push_back ({ video::Property::offsetX, *value });
             else if (name == "offsetY")  job.to.push_back ({ video::Property::offsetY, *value });
             else if (name == "rotation") job.to.push_back ({ video::Property::rotation, *value });
+            else if (name == "blur")     job.to.push_back ({ video::Property::blur, std::clamp (*value, 0.0, 500.0) });
         }
 
         /*  THE RUN IT MOVES is the target cue's live one, found when the fade
@@ -19455,6 +19458,7 @@ namespace wfg::cue
         look.offsetX = job.spec.offsetX;
         look.offsetY = job.spec.offsetY;
         look.rotation = job.spec.rotation;
+        look.blur = job.spec.blur;
 
         auto restate = ! sameLook (look, job.spec);
         job.spec = look;
@@ -19466,7 +19470,8 @@ namespace wfg::cue
             { video::Property::scale, now.scale },
             { video::Property::offsetX, now.offsetX },
             { video::Property::offsetY, now.offsetY },
-            { video::Property::rotation, now.rotation } };
+            { video::Property::rotation, now.rotation },
+            { video::Property::blur, now.blur } };
 
         for (const auto& [property, wanted] : moving)
         {
@@ -19492,6 +19497,7 @@ namespace wfg::cue
                 if (property == video::Property::scale)         job.spec.scale = wanted;
                 else if (property == video::Property::offsetX)  job.spec.offsetX = wanted;
                 else if (property == video::Property::offsetY)  job.spec.offsetY = wanted;
+                else if (property == video::Property::blur)     job.spec.blur = wanted;
                 else                                            job.spec.rotation = wanted;
 
                 restate = true;

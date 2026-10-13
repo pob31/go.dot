@@ -352,3 +352,140 @@ TEST_CASE ("text fields: a value set and cut at a character, the revision moving
     CHECK_FALSE (cue::isTextFieldAddress ("/godot/text/"));
     CHECK_FALSE (cue::isTextFieldAddress ("/godot/textual/score"));
 }
+
+namespace
+{
+    /*  A PICTURE OF THREE CHANNELS, all one value - or one point lit in its middle. */
+    std::vector<double> flatPicture (int width, int height, double value)
+    {
+        return std::vector<double> (static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 3, value);
+    }
+
+    double at (const std::vector<double>& rgb, int x, int y, int width, int channel = 0)
+    {
+        return rgb[video::pyramid::indexOf (x, y, width, channel)];
+    }
+
+    /*  How far a lit point spread across, as the standard deviation of its
+        row through the middle, weighed by what it holds. */
+    double measuredSpread (const std::vector<double>& rgb, int width, int y)
+    {
+        double sum = 0.0, mean = 0.0;
+
+        for (int x = 0; x < width; ++x)
+        {
+            sum += at (rgb, x, y, width);
+            mean += x * at (rgb, x, y, width);
+        }
+
+        mean /= sum;
+        double variance = 0.0;
+
+        for (int x = 0; x < width; ++x)
+            variance += (x - mean) * (x - mean) * at (rgb, x, y, width);
+
+        return std::sqrt (variance / sum);
+    }
+}
+
+TEST_CASE ("video blur cue: the halvings planned so the spread left is eight points or less, and what they blur taken off (§61, AKO)")
+{
+    CHECK (video::pyramid::planFor (0.0).halvings == 0);
+    CHECK (video::pyramid::planFor (0.0).spread == doctest::Approx (0.0));
+
+    const auto small = video::pyramid::planFor (5.0);
+    CHECK (small.halvings == 0);
+    CHECK (small.spread == doctest::Approx (5.0));
+
+    const auto edge = video::pyramid::planFor (8.0);
+    CHECK (edge.halvings == 0);
+
+    //  Past eight, halved once: (8.5^2 - 3/12 - 4/6) / 4, rooted.
+    const auto once = video::pyramid::planFor (8.5);
+    CHECK (once.halvings == 1);
+    CHECK (once.spread == doctest::Approx (std::sqrt ((8.5 * 8.5 - 0.25 - 4.0 / 6.0) / 4.0)));
+
+    CHECK (video::pyramid::planFor (40.0).halvings == 3);
+    CHECK (video::pyramid::planFor (166.0).halvings == 5);
+
+    //  Taps summing to one, out to three spreads.
+    const auto taps = video::pyramid::tapsFor (2.0);
+    CHECK (taps.size() == 7u);
+    double sum = taps[0];
+
+    for (std::size_t n = 1; n < taps.size(); ++n)
+        sum += 2.0 * taps[n];
+
+    CHECK (sum == doctest::Approx (1.0));
+}
+
+TEST_CASE ("video blur cue: nothing at nought, a flat picture left as it is, a lit point spread as asked at every level, its sum kept (§61, AKO)")
+{
+    auto flat = flatPicture (64, 48, 200.0);
+    const auto before = flat;
+    video::blurPicture (flat, 64, 48, 0.0);
+    CHECK (flat == before);
+
+    video::blurPicture (flat, 64, 48, 30.0);
+
+    for (const auto value : flat)
+        CHECK (value == doctest::Approx (200.0));
+
+    //  A lit point, blurred at spreads on either side of each halving: the spread measured is the spread asked.
+    for (const auto sigma : { 3.0, 7.9, 8.1, 15.0, 17.0, 40.0 })
+    {
+        INFO ("sigma " << sigma);
+        const auto size = sigma > 20.0 ? 512 : 256;
+        auto point = flatPicture (size, size, 0.0);
+
+        for (int c = 0; c < 3; ++c)
+            point[video::pyramid::indexOf (size / 2, size / 2, size, c)] = 1000.0;
+
+        video::blurPicture (point, size, size, sigma);
+
+        double total = 0.0;
+
+        for (std::size_t n = 0; n < point.size(); n += 3)
+            total += point[n];
+
+        CHECK (total == doctest::Approx (1000.0).epsilon (0.01));
+        CHECK (measuredSpread (point, size, size / 2) == doctest::Approx (sigma).epsilon (0.06));
+    }
+}
+
+TEST_CASE ("video blur cue: a radius fading through the place one more halving is taken never jumps (§61, AKO)")
+{
+    //  A hard edge, black to white, across a picture.
+    constexpr int width = 200, height = 40;
+    auto edge = flatPicture (width, height, 0.0);
+
+    for (int y = 0; y < height; ++y)
+        for (int x = width / 2; x < width; ++x)
+            for (int c = 0; c < 3; ++c)
+                edge[video::pyramid::indexOf (x, y, width, c)] = 255.0;
+
+    for (const auto from : { 7.5, 15.5 })
+    {
+        std::vector<double> last;
+
+        for (int step = 0; step <= 10; ++step)
+        {
+            const auto sigma = from + 0.1 * step;
+            auto blurred = edge;
+            video::blurPicture (blurred, width, height, sigma);
+
+            if (! last.empty())
+            {
+                double worst = 0.0;
+
+                for (std::size_t n = 0; n < blurred.size(); ++n)
+                    worst = std::max (worst, std::abs (blurred[n] - last[n]));
+
+                INFO ("from sigma " << sigma - 0.1 << " to " << sigma << ": a point moved by " << worst);
+                CHECK (worst <= 3.0);
+            }
+
+            last = std::move (blurred);
+        }
+    }
+}

@@ -32,9 +32,13 @@
 
     A fill is the canvas's own size, placed by the same geometry as a picture
     (§36, VW): scaled down it is a panel. A picture is sampled from what the
-    renderer has read. Masks join this file when they draw.
+    renderer has read; a mask is its outline's cover. A blur cue needs the
+    points round each one, so a canvas holding one is drawn whole
+    (`compositeInto`, namespace draft 61) - and a point read alone passes it
+    over.
 */
 
+#include <wfg/engine/video/Blur.h>
 #include <wfg/engine/video/Geometry.h>
 #include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/TextLook.h>
@@ -156,9 +160,158 @@ namespace wfg::video
         return channel (16) | channel (8) | channel (0);
     }
 
+    /*  ONE LAYER AT ONE POINT, before it is laid: its colour, straight 0..255,
+        and how much of it covers the point - its alpha times its opacity, the
+        DCAs' share in it. False where it shows nothing there: no opacity left,
+        off its frame, a picture not read, a blur cue (which shows nothing of
+        its own, namespace draft 61) or a source the CPU does not draw. */
+    inline bool layerAt (const region::LayerReading& layer, std::int64_t sample, double canvasWidth, double canvasHeight,
+                         double x, double y, const PictureSampler* pictures,
+                         double& r, double& g, double& b, double& a) noexcept
+    {
+        const auto opacity = opacityOf (layer, sample);
+
+        if (! (opacity > 0.0))
+            return false;
+
+        double alpha = 1.0;
+        double u = 0.0, v = 0.0;
+        r = g = b = 0.0;
+
+        if (layer.source == region::Source::fill || layer.source == region::Source::mask)
+        {
+            const auto place = placementOf (layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight);
+
+            /*  A MASK is a fill of the canvas's size, covering only where
+                its shape does - the shape on the canvas the geometry moved. */
+            const auto onCanvas = place.toTexture (x, y, u, v);
+
+            if (layer.source == region::Source::mask)
+            {
+                if (! onCanvas)
+                    u = v = -1.0;
+
+                alpha = onCanvas ? mask::coverAt (layer.shape, u, v, canvasWidth, canvasHeight)
+                                 : (layer.shape.invert ? 1.0 : 0.0);
+            }
+            else if (! onCanvas)
+            {
+                return false;
+            }
+
+            r = static_cast<double> ((layer.paint >> 16) & 0xffu);
+            g = static_cast<double> ((layer.paint >> 8) & 0xffu);
+            b = static_cast<double> (layer.paint & 0xffu);
+        }
+        else if (layer.source == region::Source::picture)
+        {
+            int width = 0, height = 0;
+
+            if (pictures == nullptr || ! pictures->sizeOf (layer.file, width, height))
+                return false;
+
+            const auto place = placementOf (layer, sample, canvasWidth, canvasHeight,
+                                            static_cast<double> (width), static_cast<double> (height));
+
+            if (! place.toTexture (x, y, u, v) || ! pictures->colourAt (layer.file, u, v, r, g, b, alpha))
+                return false;
+        }
+        else if (layer.source == region::Source::movie)
+        {
+            /*  A MOVIE: the frame its playhead says, at this sample (VZ). */
+            int width = 0, height = 0;
+
+            if (pictures == nullptr || ! pictures->movieSizeOf (layer.file, width, height))
+                return false;
+
+            const auto place = placementOf (layer, sample, canvasWidth, canvasHeight,
+                                            static_cast<double> (width), static_cast<double> (height));
+            const auto seconds = valueOf (layer, Property::time, sample, 0.0);
+
+            if (! place.toTexture (x, y, u, v)
+                  || ! pictures->movieColourAt (layer.file, seconds, u, v, r, g, b, alpha))
+                return false;
+        }
+        else if (layer.source == region::Source::text)
+        {
+            /*  A TEXT CUE (namespace draft 61, AKJ): the canvas's frame,
+                moved as a fill's, and on it the words where they were drawn. */
+            const auto place = placementOf (layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight);
+
+            if (pictures == nullptr || ! place.toTexture (x, y, u, v)
+                  || ! pictures->textAt (layer, u, v, r, g, b, alpha))
+                return false;
+        }
+        else
+        {
+            return false;
+        }
+
+        /*  THE ALPHA SWITCH, THE KEY AND THE GRADE, on a picture's and a
+            movie's colour, in that order (namespace draft 61, AKG; VW, VU).
+            A picture whose alpha is not read is drawn as the GPU reads it,
+            premultiplied: black where it was clear (AKE). A matte shows its
+            paint, ungraded. */
+        if (layer.source == region::Source::picture || layer.source == region::Source::movie)
+        {
+            double gr = r / 255.0, gg = g / 255.0, gb = b / 255.0;
+
+            if (! layer.useAlpha)
+            {
+                if (layer.source == region::Source::picture)
+                {
+                    gr *= alpha;
+                    gg *= alpha;
+                    gb *= alpha;
+                }
+
+                alpha = 1.0;
+            }
+
+            applyKey (layer.key, layer.paint, gr, gg, gb, alpha);
+
+            if (layer.key.mode != KeyMode::matte && ! layer.grade.isIdentity())
+                applyGrade (layer.grade, gr, gg, gb);
+
+            r = gr * 255.0;
+            g = gg * 255.0;
+            b = gb * 255.0;
+        }
+
+        a = opacity * std::clamp (alpha, 0.0, 1.0);
+        return true;
+    }
+
+    /*  THE BLEND (VD), on display-space numbers 0..255, premultiplied - the
+        GPU's blend equations exactly: normal covers by `a`; add adds the
+        light; screen is 1 - (1 - under)(1 - colour); multiply darkens as a gel
+        does. */
+    inline double laidOver (region::Blend blend, double a, double under, double over) noexcept
+    {
+        const auto premultiplied = over * a;
+
+        switch (blend)
+        {
+            case region::Blend::add:      return std::min (255.0, under + premultiplied);
+            case region::Blend::screen:   return under * (1.0 - premultiplied / 255.0) + premultiplied;
+            case region::Blend::multiply: return under * (1.0 - a) + under * premultiplied / 255.0;
+            case region::Blend::normal:   break;
+        }
+
+        return under * (1.0 - a) + premultiplied;
+    }
+
+    /*  A channel 0..255 as a byte, rounded. */
+    inline std::uint32_t byteOf (double value) noexcept
+    {
+        return static_cast<std::uint32_t> (std::clamp (std::lround (value), 0L, 255L));
+    }
+
     /*  THE CANVAS'S COLOUR AT ONE POINT, as 0xRRGGBB: (x, y) on its pixels
         from its middle, y up. Every layer of the stack laid over the last,
-        normal blending in display space (VD), from black. */
+        normal blending in display space (VD), from black. A blur cue needs
+        the points around this one, which a point does not have: it is passed
+        over here, and drawn by `compositeInto`. */
     inline std::uint32_t colourAt (const std::vector<const region::LayerReading*>& stack, std::int64_t sample,
                                    double canvasWidth, double canvasHeight, double x, double y,
                                    const PictureSampler* pictures) noexcept
@@ -167,146 +320,112 @@ namespace wfg::video
 
         for (const auto* layer : stack)
         {
-            const auto opacity = opacityOf (*layer, sample);
+            double r = 0.0, g = 0.0, b = 0.0, a = 0.0;
 
-            if (! (opacity > 0.0))
+            if (! layerAt (*layer, sample, canvasWidth, canvasHeight, x, y, pictures, r, g, b, a))
                 continue;
 
-            double r = 0.0, g = 0.0, b = 0.0, alpha = 1.0;
-            double u = 0.0, v = 0.0;
-
-            if (layer->source == region::Source::fill || layer->source == region::Source::mask)
-            {
-                const auto place = placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight);
-
-                /*  A MASK is a fill of the canvas's size, covering only where
-                    its shape does - the shape on the canvas the geometry moved. */
-                const auto onCanvas = place.toTexture (x, y, u, v);
-
-                if (layer->source == region::Source::mask)
-                {
-                    if (! onCanvas)
-                        u = v = -1.0;
-
-                    alpha = onCanvas ? mask::coverAt (layer->shape, u, v, canvasWidth, canvasHeight)
-                                     : (layer->shape.invert ? 1.0 : 0.0);
-                }
-                else if (! onCanvas)
-                {
-                    continue;
-                }
-
-                r = static_cast<double> ((layer->paint >> 16) & 0xffu);
-                g = static_cast<double> ((layer->paint >> 8) & 0xffu);
-                b = static_cast<double> (layer->paint & 0xffu);
-            }
-            else if (layer->source == region::Source::picture)
-            {
-                int width = 0, height = 0;
-
-                if (pictures == nullptr || ! pictures->sizeOf (layer->file, width, height))
-                    continue;
-
-                const auto place = placementOf (*layer, sample, canvasWidth, canvasHeight,
-                                                static_cast<double> (width), static_cast<double> (height));
-
-                if (! place.toTexture (x, y, u, v) || ! pictures->colourAt (layer->file, u, v, r, g, b, alpha))
-                    continue;
-            }
-            else if (layer->source == region::Source::movie)
-            {
-                /*  A MOVIE: the frame its playhead says, at this sample (VZ). */
-                int width = 0, height = 0;
-
-                if (pictures == nullptr || ! pictures->movieSizeOf (layer->file, width, height))
-                    continue;
-
-                const auto place = placementOf (*layer, sample, canvasWidth, canvasHeight,
-                                                static_cast<double> (width), static_cast<double> (height));
-                const auto seconds = valueOf (*layer, Property::time, sample, 0.0);
-
-                if (! place.toTexture (x, y, u, v)
-                      || ! pictures->movieColourAt (layer->file, seconds, u, v, r, g, b, alpha))
-                    continue;
-            }
-            else if (layer->source == region::Source::text)
-            {
-                /*  A TEXT CUE (namespace draft 61, AKJ): the canvas's frame,
-                    moved as a fill's, and on it the words where they were drawn. */
-                const auto place = placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight);
-
-                if (pictures == nullptr || ! place.toTexture (x, y, u, v)
-                      || ! pictures->textAt (*layer, u, v, r, g, b, alpha))
-                    continue;
-            }
-            else
-            {
-                continue;
-            }
-
-            /*  THE ALPHA SWITCH, THE KEY AND THE GRADE, on a picture's and a
-                movie's colour, in that order (namespace draft 61, AKG; VW, VU).
-                A picture whose alpha is not read is drawn as the GPU reads it,
-                premultiplied: black where it was clear (AKE). A matte shows its
-                paint, ungraded. */
-            if (layer->source == region::Source::picture || layer->source == region::Source::movie)
-            {
-                double gr = r / 255.0, gg = g / 255.0, gb = b / 255.0;
-
-                if (! layer->useAlpha)
-                {
-                    if (layer->source == region::Source::picture)
-                    {
-                        gr *= alpha;
-                        gg *= alpha;
-                        gb *= alpha;
-                    }
-
-                    alpha = 1.0;
-                }
-
-                applyKey (layer->key, layer->paint, gr, gg, gb, alpha);
-
-                if (layer->key.mode != KeyMode::matte && ! layer->grade.isIdentity())
-                    applyGrade (layer->grade, gr, gg, gb);
-
-                r = gr * 255.0;
-                g = gg * 255.0;
-                b = gb * 255.0;
-            }
-
-            const auto a = opacity * std::clamp (alpha, 0.0, 1.0);
-
-            /*  THE BLEND (VD), on display-space numbers, premultiplied - the
-                GPU's blend equations exactly: normal covers by `a`; add adds
-                the light; screen is 1 - (1 - under)(1 - colour); multiply
-                darkens as a gel does. */
-            const auto lay = [a, blend = layer->blend] (double under, double over)
-            {
-                const auto premultiplied = over * a;
-
-                switch (blend)
-                {
-                    case region::Blend::add:      return std::min (255.0, under + premultiplied);
-                    case region::Blend::screen:   return under * (1.0 - premultiplied / 255.0) + premultiplied;
-                    case region::Blend::multiply: return under * (1.0 - a) + under * premultiplied / 255.0;
-                    case region::Blend::normal:   break;
-                }
-
-                return under * (1.0 - a) + premultiplied;
-            };
-
-            red = lay (red, r);
-            green = lay (green, g);
-            blue = lay (blue, b);
+            red = laidOver (layer->blend, a, red, r);
+            green = laidOver (layer->blend, a, green, g);
+            blue = laidOver (layer->blend, a, blue, b);
         }
 
-        const auto channel = [] (double value)
-        {
-            return static_cast<std::uint32_t> (std::clamp (std::lround (value), 0L, 255L));
-        };
+        return (byteOf (red) << 16) | (byteOf (green) << 8) | byteOf (blue);
+    }
 
-        return (channel (red) << 16) | (channel (green) << 8) | channel (blue);
+    /*  WHERE A BLUR CUE BLURS, 0..1 at the point (x, y) (namespace draft 61,
+        AKN): its outline as a mask's is, moved by its geometry, turned inside
+        out by `invert`, and covering outside its moved frame when it is
+        (AKP); with no outline, the whole canvas, `invert` meaning nothing. */
+    inline double blurCoverAt (const region::LayerReading& layer, std::int64_t sample, double canvasWidth,
+                               double canvasHeight, double x, double y) noexcept
+    {
+        if (layer.shape.count < 3)
+            return 1.0;
+
+        const auto place = placementOf (layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight);
+        double u = 0.0, v = 0.0;
+
+        if (! place.toTexture (x, y, u, v))
+            return layer.shape.invert ? 1.0 : 0.0;
+
+        return mask::coverAt (layer.shape, u, v, canvasWidth, canvasHeight);
+    }
+
+    /*  THE CANVAS DRAWN WHOLE, `width` by `height` points of three channels
+        0..255 row by row from the top - each point's middle at the place
+        `colourAt` reads it, so a stack with no blur in it is what `colourAt`
+        says, point for point. A BLUR CUE (namespace draft 61, AKN, AKO)
+        blurs what lies beneath it (Blur.h, its radius scaled to the points
+        drawn, the spread a third of it) and lays the blurred canvas back
+        through its cover times its opacity; the layers above it are laid
+        on that. */
+    inline void compositeInto (const std::vector<const region::LayerReading*>& stack, std::int64_t sample,
+                               double canvasWidth, double canvasHeight, int width, int height,
+                               const PictureSampler* pictures, std::vector<double>& rgb)
+    {
+        rgb.assign (static_cast<std::size_t> (std::max (0, width)) * static_cast<std::size_t> (std::max (0, height)) * 3, 0.0);
+
+        const auto xOf = [width, canvasWidth] (int column) { return ((column + 0.5) / width - 0.5) * canvasWidth; };
+        const auto yOf = [height, canvasHeight] (int row) { return (0.5 - (row + 0.5) / height) * canvasHeight; };
+
+        for (const auto* layer : stack)
+        {
+            if (layer->source == region::Source::blur)
+            {
+                const auto a = opacityOf (*layer, sample);
+                const auto radius = valueOf (*layer, Property::blur, sample, layer->blur);
+
+                if (! (a > 0.0) || ! (radius > 0.0))
+                    continue;
+
+                auto blurred = rgb;
+                blurPicture (blurred, width, height, radius / 3.0 * width / canvasWidth);
+
+                for (int row = 0; row < height; ++row)
+                    for (int column = 0; column < width; ++column)
+                    {
+                        const auto m = a * blurCoverAt (*layer, sample, canvasWidth, canvasHeight, xOf (column), yOf (row));
+
+                        for (int c = 0; c < 3; ++c)
+                        {
+                            const auto at = pyramid::indexOf (column, row, width, c);
+                            rgb[at] = rgb[at] * (1.0 - m) + blurred[at] * m;
+                        }
+                    }
+
+                continue;
+            }
+
+            for (int row = 0; row < height; ++row)
+                for (int column = 0; column < width; ++column)
+                {
+                    double r = 0.0, g = 0.0, b = 0.0, a = 0.0;
+
+                    if (! layerAt (*layer, sample, canvasWidth, canvasHeight, xOf (column), yOf (row), pictures, r, g, b, a))
+                        continue;
+
+                    const auto at = pyramid::indexOf (column, row, width, 0);
+                    rgb[at] = laidOver (layer->blend, a, rgb[at], r);
+                    rgb[at + 1] = laidOver (layer->blend, a, rgb[at + 1], g);
+                    rgb[at + 2] = laidOver (layer->blend, a, rgb[at + 2], b);
+                }
+        }
+    }
+
+    /*  Whether a stack holds a blur cue, which only `compositeInto` draws. */
+    inline bool blurs (const std::vector<const region::LayerReading*>& stack) noexcept
+    {
+        return std::any_of (stack.begin(), stack.end(),
+                            [] (const region::LayerReading* layer) { return layer->source == region::Source::blur; });
+    }
+
+    /*  One drawn point as 0xRRGGBB, taken down by the canvas's level. */
+    inline std::uint32_t colourIn (const std::vector<double>& rgb, int column, int row, int width, double level) noexcept
+    {
+        const auto at = pyramid::indexOf (column, row, width, 0);
+        const auto f = std::clamp (level, 0.0, 1.0);
+        return (byteOf (rgb[at] * f) << 16) | (byteOf (rgb[at + 1] * f) << 8) | byteOf (rgb[at + 2] * f);
     }
 
     /*  The middle of a 1920 by 1080 canvas with no picture read: what a fill

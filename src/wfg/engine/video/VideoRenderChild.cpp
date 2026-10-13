@@ -3348,8 +3348,11 @@ namespace wfg::video
                         tileFreshUntil = ticks + 300;
                     }
 
-                    if (tileUp && (ticks <= tileFreshUntil || tileLayer.source == region::Source::capture))
-                        writeTile (config, tileLayer, serial);
+                    /*  ...and for as long as a blur cue is picked, whose tile is the
+                        canvas beneath it as it is now (61). */
+                    if (tileUp && (ticks <= tileFreshUntil || tileLayer.source == region::Source::capture
+                                     || tileLayer.source == region::Source::blur))
+                        writeTile (config, tileLayer, serial, layers);
                 }
             }
 
@@ -3397,12 +3400,19 @@ namespace wfg::video
 
                     previewScratch.resize (static_cast<std::size_t> (3 * width * height));
 
+                    //  A BLUR CUE ON IT (namespace draft 61): the canvas drawn whole, the blur at the preview's size.
+                    const auto whole = blurs (stack);
+
+                    if (whole)
+                        compositeInto (stack, now, canvasWidth, canvasHeight, width, height, &sampler, wholeScratch);
+
                     for (int row = 0; row < height; ++row)
                         for (int column = 0; column < width; ++column)
                         {
                             const auto x = ((column + 0.5) / width - 0.5) * canvasWidth;
                             const auto y = (0.5 - (row + 0.5) / height) * canvasHeight;
-                            const auto rgb = stack.empty() ? 0u
+                            const auto rgb = whole ? colourIn (wholeScratch, column, row, width, level)
+                                           : stack.empty() ? 0u
                                                            : scaledColour (colourAt (stack, now, canvasWidth, canvasHeight, x, y, &sampler), level);
                             auto* pixel = previewScratch.data() + 3 * (row * width + column);
                             pixel[0] = static_cast<std::uint8_t> ((rgb >> 16) & 0xffu);
@@ -3422,12 +3432,16 @@ namespace wfg::video
 
             std::vector<std::uint8_t> previewScratch;
 
+            //  A canvas drawn whole when a blur cue is on it (61): the monitor's previews, the tile, the probe.
+            std::vector<double> wholeScratch;
+
             /*  THE PICKED CUE ALONE (namespace draft §47, AAH): its canvas's
                 shape at most 512 by 288, over black, through the reference
                 compositor the previews use - the cue at its own opacity and,
                 for a movie, the frame at the second asked, from the tile's own
                 movie store. Its point samples are nought, so it is read there. */
-            void writeTile (const region::ConfigReading& config, const region::LayerReading& layer, std::uint32_t serial)
+            void writeTile (const region::ConfigReading& config, const region::LayerReading& layer, std::uint32_t serial,
+                            const std::vector<region::LayerReading>& layers)
             {
                 const auto* canvas = canvasIn (config, layer.canvas);
                 const auto canvasWidth = static_cast<double> (canvas != nullptr ? std::max (1, canvas->width) : 1920);
@@ -3441,12 +3455,32 @@ namespace wfg::video
 
                 tileScratch.resize (static_cast<std::size_t> (3 * width * height));
 
+                /*  A BLUR CUE ALONE IS NOTHING (namespace draft 61, AKN): its
+                    tile is its canvas as it is now beneath its layer, and the
+                    blur over that. */
+                const auto blurTile = layer.source == region::Source::blur;
+
+                if (blurTile)
+                {
+                    const auto now = clock.sampleAt (r, steadyNanos());
+                    std::vector<const region::LayerReading*> beneath;
+
+                    for (const auto* under : stackOf (layers, layer.canvas))
+                        if (under->layer < layer.layer)
+                            beneath.push_back (under);
+
+                    beneath.push_back (&layer);
+                    compositeInto (beneath, std::max<std::int64_t> (now, 0), canvasWidth, canvasHeight, width, height,
+                                   &tileSampler, wholeScratch);
+                }
+
                 for (int row = 0; row < height; ++row)
                     for (int column = 0; column < width; ++column)
                     {
                         const auto x = ((column + 0.5) / width - 0.5) * canvasWidth;
                         const auto y = (0.5 - (row + 0.5) / height) * canvasHeight;
-                        const auto rgb = colourAt (alone, 0, canvasWidth, canvasHeight, x, y, &tileSampler);
+                        const auto rgb = blurTile ? colourIn (wholeScratch, column, row, width, 1.0)
+                                                  : colourAt (alone, 0, canvasWidth, canvasHeight, x, y, &tileSampler);
                         auto* pixel = tileScratch.data() + 3 * (row * width + column);
                         pixel[0] = static_cast<std::uint8_t> ((rgb >> 16) & 0xffu);
                         pixel[1] = static_cast<std::uint8_t> ((rgb >> 8) & 0xffu);
@@ -3674,11 +3708,23 @@ namespace wfg::video
                 for (std::size_t n = 0; n < count; ++n)
                 {
                     const auto& canvas = config.canvases[n];
-                    r.probe[n].store (scaledColour (colourAt (stackOf (layers, canvas.id), now,
-                                                              static_cast<double> (std::max (1, canvas.width)),
-                                                              static_cast<double> (std::max (1, canvas.height)),
-                                                              0.0, 0.0, &sampler),
-                                                    region::canvasLevelOf (r, canvas.id)),
+                    const auto stack = stackOf (layers, canvas.id);
+                    const auto canvasWidth = static_cast<double> (std::max (1, canvas.width));
+                    const auto canvasHeight = static_cast<double> (std::max (1, canvas.height));
+                    const auto level = region::canvasLevelOf (r, canvas.id);
+
+                    /*  A BLUR CUE ON IT (61): the canvas drawn whole, small and
+                        odd-sized so one point lies on its middle, and that point read. */
+                    if (blurs (stack))
+                    {
+                        constexpr int across = 129;
+                        const auto down = std::max (1, static_cast<int> (std::lround (across * canvasHeight / canvasWidth / 2.0)) * 2 + 1);
+                        compositeInto (stack, now, canvasWidth, canvasHeight, across, down, &sampler, wholeScratch);
+                        r.probe[n].store (colourIn (wholeScratch, across / 2, down / 2, across, level), std::memory_order_relaxed);
+                        continue;
+                    }
+
+                    r.probe[n].store (scaledColour (colourAt (stack, now, canvasWidth, canvasHeight, 0.0, 0.0, &sampler), level),
                                       std::memory_order_relaxed);
                 }
 

@@ -6541,6 +6541,14 @@ namespace wfg::doc
                                                    " a field is {name}, letters, digits, - and _, and {{ is a brace");
                 }
 
+                /*  A BLUR CUE THROUGH AN INSERT (61, AKN): it shows no picture of
+                    its own, so there is nothing to send. */
+                if (node.hasType ("Video") && node["source"].toString() == "blur"
+                      && node["videoInsert"].toString().isNotEmpty())
+                    problems.push_back ("/Show/.../Video[" + node[idProperty].toString().toStdString()
+                                          + "]: a blur cue has no picture of its own to send through an insert"
+                                            " - the insert is passed over");
+
                 for (const auto& child : node)
                     visit (child);
             }

@@ -27595,3 +27595,34 @@ tiles cost the renderer's message thread with a blur in them.
   value sent at once under the lock, nothing for no change, Copy's address - not pressed, which would take
   the clipboard of whoever runs the tests; the page as a picture under `WFG_SNAPSHOT_DIR`, looked at);
   the clang-tidy stand-in clean but the one finding already there.
+- **VFX.7**, 2026-10-13: the blur cue, on the monitor (AKN, AKO; AKQ's tile). `video,source` gains `blur`;
+  the row `blur`, a radius in canvas pixels, 20 by default, 0..500; `fade/video` pairs gain `blur`; the
+  mask rows' descriptions cover a blur cue's outline; `show.rng` regenerated. `Property::blur`, its own
+  ring, `propertyCount` 8; `LayerSpec::blur` and the region's (version 20), in `writeLook`; the Runner
+  moves it as it moves a scale - its base at GO, a fade's `blur:` pair, an edit stepping it or, never
+  moved, restating it. `Blur.h`'s pyramid: `planFor` halves until the spread left is eight points or
+  less, taking off what the halvings, (4^k - 1) / 12, and the laying back, 4^k / 6, blur by themselves;
+  `tapsFor`; `halve` (the four beneath, edges held); a pass each way; laid back by straight lines.
+  `Compositor.h` is now `layerAt` (one layer at one point), `laidOver` (the blend) and `colourAt` built
+  of them, and `compositeInto`, the canvas drawn whole - point for point what `colourAt` says when no
+  blur is in it - where a blur cue blurs what lies beneath (its radius scaled to the points drawn, the
+  spread a third of it) and lays it back through `blurCoverAt` times its opacity: its outline, moved by
+  its geometry, inside out by `invert`, outside its moved frame when inverted (AKP), the whole canvas
+  with no outline. The renderer's monitor previews, the picked cue's tile and the probe draw a canvas
+  whole when a blur is on it - the probe at 129 points across, odd so a point lies on the middle - and
+  a blur cue's tile is its canvas beneath it as it is now, kept fresh while it is picked; the tints go
+  on point by point, a blur leaving a canvas's average as it was. On the projector a blur cue is passed
+  over until VFX.8, never drawn as an insert's black. The automatic name is "Blur"; the picture part of
+  Copy and Paste carries the radius; a blur cue with an insert is warned (nothing of its own to send).
+  Tests under C and fr_FR: `VideoTextTests` (the plan's halvings and the spread left, the taps; nothing
+  at nought, a flat picture as it was, a lit point's measured spread within 6 % of the spread asked on
+  either side of each halving and its sum kept; a radius fading across the halvings at eight and
+  sixteen never moving a point more than 3 of 255 a tenth), `VideoHostTests` (drawn whole, a canvas with
+  no blur is `colourAt`'s to the byte; a blur softening an edge, wider further, at half opacity halfway,
+  inside its outline and turned inside out, never what lies above, nothing at nought; its radius moved
+  by a fade's points; two blurring more than one; a renderer with no window reading grey on the
+  canvas's middle edge under a blur), `VideoTests` (the radius to the picture side, an edit restating
+  it, a fade moving it on its own points, one past its range refused; the insert warning),
+  `AutoNameTests`; 74 gates - `video.gpu.C`, `schema.*`, `unit.shards`, `wfg.replay.*`, `wfg.commands`,
+  `client.boundary`, `source.comments`; the clang-tidy stand-in clean. A deliberate breakage, the
+  outline ignored, turned its case red.

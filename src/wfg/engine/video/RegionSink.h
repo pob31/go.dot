@@ -60,6 +60,7 @@ namespace wfg::video
         slot.rotation.store (spec.rotation, std::memory_order_relaxed);
         slot.flipH.store (spec.flipH ? 1u : 0u, std::memory_order_relaxed);
         slot.flipV.store (spec.flipV ? 1u : 0u, std::memory_order_relaxed);
+        slot.blur.store (spec.blur, std::memory_order_relaxed);
         slot.contrast.store (spec.grade.contrast, std::memory_order_relaxed);
         slot.saturation.store (spec.grade.saturation, std::memory_order_relaxed);
         slot.gamma.store (spec.grade.gamma, std::memory_order_relaxed);

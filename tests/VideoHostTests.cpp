@@ -1067,6 +1067,77 @@ TEST_CASE ("video host: a text cue drawn by a renderer with no window, its words
     folder.deleteRecursively();
 }
 
+TEST_CASE ("video host: a renderer with no window blurs the edge on its canvas's middle when a blur cue lies over it (§61, AKN)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-blur-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        //  White on the right half, black on the left: the middle is the edge.
+        video::LayerSpec half;
+        half.id = "RUN00001";
+        half.canvas = "VD000011";
+        half.order = 1;
+        half.source = "mask";
+        half.paint = 0xFFFFFF;
+        half.shape.count = 4;
+        const float xs[4] { 0.5f, 1.0f, 1.0f, 0.5f };
+        const float ys[4] { 0.0f, 0.0f, 1.0f, 1.0f };
+
+        for (int n = 0; n < 4; ++n)
+        {
+            half.shape.x[n] = xs[n];
+            half.shape.y[n] = ys[n];
+        }
+
+        host.sink().show (half);
+        host.sink().opacity ("RUN00001", { clock.now(), 1.0 });
+
+        //  And a blur over it: the middle grey, as much white as black.
+        video::LayerSpec blur;
+        blur.id = "RUN00002";
+        blur.canvas = "VD000011";
+        blur.layer = 1;
+        blur.order = 2;
+        blur.source = "blur";
+        blur.blur = 120.0;
+        host.sink().show (blur);
+        host.sink().opacity ("RUN00002", { clock.now(), 1.0 });
+
+        std::int64_t seen = -1;
+        std::uint32_t colour = 0;
+        CHECK (tickUntil (host, clock, [&]
+        {
+            colour = probeOf (r, 0, seen);
+            const auto red = static_cast<int> ((colour >> 16) & 0xffu);
+            return red > 96 && red < 160;
+        }));
+
+        INFO ("the middle reads " << colour);
+        CHECK (((colour >> 16) & 0xffu) == (colour & 0xffu));
+    }
+
+    folder.deleteRecursively();
+}
+
 namespace
 {
     /*  A STILL THE SIZE OF A PROJECTOR'S PICTURE, noise all over - a real
@@ -2138,6 +2209,192 @@ TEST_CASE ("video region: a layer's alpha switch and key written, read back and 
     CHECK (layers[0].useAlpha);
     CHECK (layers[0].key.mode == video::KeyMode::luma);
     CHECK_FALSE (layers[0].key.invert);
+}
+
+namespace
+{
+    /*  A CANVAS OF 160 BY 90, its right half white - a white mask over the
+        right half, on black - for a blur to soften. */
+    video::LayerSpec rightHalf (const char* id, std::uint64_t order)
+    {
+        auto spec = fill (id, "C1", 0, order, 0xFFFFFF);
+        spec.source = "mask";
+        spec.shape.count = 4;
+        const float xs[4] { 0.5f, 1.0f, 1.0f, 0.5f };
+        const float ys[4] { 0.0f, 0.0f, 1.0f, 1.0f };
+
+        for (int n = 0; n < 4; ++n)
+        {
+            spec.shape.x[n] = xs[n];
+            spec.shape.y[n] = ys[n];
+        }
+
+        return spec;
+    }
+
+    video::LayerSpec blurCue (const char* id, int layer, std::uint64_t order, double radius)
+    {
+        auto spec = fill (id, "C1", layer, order, 0x000000);
+        spec.source = "blur";
+        spec.blur = radius;
+        return spec;
+    }
+
+    struct Drawn
+    {
+        std::vector<double> rgb;
+        int width = 160, height = 90;
+
+        double red (int column, int row) const { return rgb[video::pyramid::indexOf (column, row, width, 0)]; }
+    };
+
+    Drawn drawnWhole (const std::vector<video::LayerSpec>& specs, const std::vector<double>& opacities = {})
+    {
+        Memory memory;
+        video::RegionSink sink { *memory.region };
+
+        for (std::size_t n = 0; n < specs.size(); ++n)
+        {
+            sink.show (specs[n]);
+            sink.opacity (specs[n].id, { 0, n < opacities.size() ? opacities[n] : 1.0 });
+        }
+
+        const auto layers = layersOf (*memory.region);
+        Drawn out;
+        video::compositeInto (video::stackOf (layers, "C1"), 10, 160.0, 90.0, out.width, out.height, nullptr, out.rgb);
+        return out;
+    }
+}
+
+TEST_CASE ("video compositor: drawn whole, a canvas with no blur is what each point says, to the byte (§61)")
+{
+    Memory memory;
+    video::RegionSink sink { *memory.region };
+    const Quarters sampler;
+
+    auto picture = quarters();
+    picture.scale = 80.0;
+    picture.rotation = 12.0;
+    picture.key.mode = video::KeyMode::colour;
+    picture.blend = "screen";
+    sink.show (fill ("RUN00001", "C1", 0, 1, 0x204080));
+    sink.show (picture);
+    auto panel = rightHalf ("RUN00003", 3);
+    panel.blend = "multiply";
+    panel.paint = 0xFFC080;
+    sink.show (panel);
+
+    for (const auto* id : { "RUN00001", "RUN00002", "RUN00003" })
+        sink.opacity (id, { 0, 0.8 });
+
+    const auto layers = layersOf (*memory.region);
+    const auto stack = video::stackOf (layers, "C1");
+    constexpr int width = 96, height = 54;
+
+    std::vector<double> rgb;
+    video::compositeInto (stack, 10, 1920.0, 1080.0, width, height, &sampler, rgb);
+    CHECK_FALSE (video::blurs (stack));
+
+    int differ = 0;
+
+    for (int row = 0; row < height; ++row)
+        for (int column = 0; column < width; ++column)
+        {
+            const auto x = ((column + 0.5) / width - 0.5) * 1920.0;
+            const auto y = (0.5 - (row + 0.5) / height) * 1080.0;
+
+            if (video::colourAt (stack, 10, 1920.0, 1080.0, x, y, &sampler) != video::colourIn (rgb, column, row, width, 1.0))
+                ++differ;
+        }
+
+    CHECK (differ == 0);
+}
+
+TEST_CASE ("video compositor: a blur cue softens what lies beneath it, inside or outside its outline, at its opacity, under what lies above (§61, AKN)")
+{
+    //  Sharp: the edge between black and white at the middle.
+    const auto sharp = drawnWhole ({ rightHalf ("RUN00001", 1) });
+    CHECK (sharp.red (78, 45) == doctest::Approx (0.0));
+    CHECK (sharp.red (81, 45) == doctest::Approx (255.0));
+
+    //  Blurred, no outline: the whole canvas - grey either side of the edge, the far sides as they were.
+    const auto blurred = drawnWhole ({ rightHalf ("RUN00001", 1), blurCue ("RUN00002", 1, 2, 30.0) });
+    CHECK (blurred.red (78, 45) > 60.0);
+    CHECK (blurred.red (81, 45) < 195.0);
+    CHECK (blurred.red (2, 45) == doctest::Approx (0.0).epsilon (0.01));
+    CHECK (blurred.red (157, 45) == doctest::Approx (255.0).epsilon (0.01));
+
+    //  A wider radius reaches further.
+    const auto wider = drawnWhole ({ rightHalf ("RUN00001", 1), blurCue ("RUN00002", 1, 2, 90.0) });
+    CHECK (wider.red (60, 45) > blurred.red (60, 45) + 10.0);
+
+    //  At half its opacity: halfway between sharp and blurred.
+    const auto half = drawnWhole ({ rightHalf ("RUN00001", 1), blurCue ("RUN00002", 1, 2, 30.0) }, { 1.0, 0.5 });
+    CHECK (half.red (78, 45) == doctest::Approx ((sharp.red (78, 45) + blurred.red (78, 45)) / 2.0).epsilon (0.01));
+
+    //  Its outline the top half: the bottom stays sharp; turned inside out, the top does.
+    auto top = blurCue ("RUN00002", 1, 2, 30.0);
+    top.shape.count = 4;
+    const float xs[4] { 0.0f, 1.0f, 1.0f, 0.0f };
+    const float ys[4] { 0.0f, 0.0f, 0.5f, 0.5f };
+
+    for (int n = 0; n < 4; ++n)
+    {
+        top.shape.x[n] = xs[n];
+        top.shape.y[n] = ys[n];
+    }
+
+    const auto upper = drawnWhole ({ rightHalf ("RUN00001", 1), top });
+    CHECK (upper.red (78, 10) > 60.0);
+    CHECK (upper.red (78, 80) == doctest::Approx (0.0));
+
+    top.shape.invert = true;
+    const auto lower = drawnWhole ({ rightHalf ("RUN00001", 1), top });
+    CHECK (lower.red (78, 10) == doctest::Approx (0.0));
+    CHECK (lower.red (78, 80) > 60.0);
+
+    //  What lies above it is not blurred: a white panel on top, its edge sharp.
+    auto above = rightHalf ("RUN00003", 3);
+    above.layer = 2;
+    const auto over = drawnWhole ({ fill ("RUN00004", "C1", 0, 1, 0x000000), blurCue ("RUN00002", 1, 2, 30.0), above });
+    CHECK (over.red (78, 45) == doctest::Approx (0.0));
+    CHECK (over.red (81, 45) == doctest::Approx (255.0));
+
+    //  A radius of nought, or no opacity, blurs nothing.
+    const auto none = drawnWhole ({ rightHalf ("RUN00001", 1), blurCue ("RUN00002", 1, 2, 0.0) });
+    CHECK (none.red (78, 45) == doctest::Approx (0.0));
+}
+
+TEST_CASE ("video compositor: a blur cue's radius moved by a fade's points, and two blur cues blurring more than one (§61, AKN)")
+{
+    Memory memory;
+    video::RegionSink sink { *memory.region };
+
+    sink.show (rightHalf ("RUN00001", 1));
+    sink.opacity ("RUN00001", { 0, 1.0 });
+    sink.show (blurCue ("RUN00002", 1, 2, 0.0));
+    sink.opacity ("RUN00002", { 0, 1.0 });
+
+    //  From nought at sample 0 to 60 at sample 1000.
+    sink.move ("RUN00002", video::Property::blur, { 0, 0.0 });
+    sink.move ("RUN00002", video::Property::blur, { 1000, 60.0 });
+
+    const auto layers = layersOf (*memory.region);
+    const auto stack = video::stackOf (layers, "C1");
+    std::vector<double> start, middle, end;
+    video::compositeInto (stack, 0, 160.0, 90.0, 160, 90, nullptr, start);
+    video::compositeInto (stack, 500, 160.0, 90.0, 160, 90, nullptr, middle);
+    video::compositeInto (stack, 1000, 160.0, 90.0, 160, 90, nullptr, end);
+
+    const auto redAt = [] (const std::vector<double>& rgb, int column) { return rgb[video::pyramid::indexOf (column, 45, 160, 0)]; };
+    CHECK (redAt (start, 70) == doctest::Approx (0.0));
+    CHECK (redAt (middle, 70) > 1.0);
+    CHECK (redAt (end, 70) > redAt (middle, 70));
+
+    //  Two of thirty blur more than one.
+    const auto once = drawnWhole ({ rightHalf ("RUN00001", 1), blurCue ("RUN00002", 1, 2, 30.0) });
+    const auto twice = drawnWhole ({ rightHalf ("RUN00001", 1), blurCue ("RUN00002", 1, 2, 30.0), blurCue ("RUN00003", 1, 3, 30.0) });
+    CHECK (twice.red (70, 45) > once.red (70, 45));
 }
 
 TEST_CASE ("video compositor: normal, add, screen and multiply, in display space")
