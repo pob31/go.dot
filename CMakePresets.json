@@ -261,9 +261,9 @@
       "name": "ci-windows",
       "inherits": "vs-debug",
       "configurePreset": "ci-windows",
-      "description": "What the Windows CI job runs. It inherits vs-debug, as the ci-windows configure preset inherits vs, so the job exercises the local preset's settings too. Four at once because windows-2025 has four CPUs for a public repository (GitHub's runner table, read 2026-10-13; two for a private one, and this would then be 2). Kept at four after the first run at four (38350416745) failed eleven drivers here: what they shared was running four at a time, seven or eight engines on four CPUs, and they now take turns on the `realtime` lock instead (tests/CMakeLists.txt). The same suite held to four of the author's efficiency cores with GITHUB_ACTIONS set was green at four, in 779 s, and again with a second stream of unit shards on those cores beside it, in 798 s.",
+      "description": "What the Windows CI job runs. It inherits vs-debug, as the ci-windows configure preset inherits vs, so the job exercises the local preset's settings too. Four at once because windows-2025 has four CPUs for a public repository (GitHub's runner table, read 2026-10-13; two for a private one, and this would then be 2). Kept at four after the first run at four (38350416745) failed eleven drivers here: what they shared was running four at a time, seven or eight engines on four CPUs, and they now take turns on the `realtime` lock instead (tests/CMakeLists.txt). The same suite held to four of the author's efficiency cores with GITHUB_ACTIONS set was green at four, in 779 s, and again with a second stream of unit shards on those cores beside it, in 798 s. TWO SINCE 2026-10-13: on the runner itself four was not: TG.9's run (38392873762) failed a different engine-timing check on each attempt - pair-link's main found again on its port and ui.show-settings exiting past its 120 s, then phase9c-take's silence while it records - each green alone, each starved by the unit shards running beside the realtime lane. Windows was the fastest of the three test jobs at four (about 32 minutes against Linux's 54), so two costs the run nothing it waits for.",
       "execution": {
-        "jobs": 4
+        "jobs": 2
       }
     }
   ]
