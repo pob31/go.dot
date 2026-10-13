@@ -5044,7 +5044,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "%", 50.0, false, "park",
           "",
-          "How tall the letters are, in % of the canvas's height, as offsets are a % of it (namespace draft 61, AKK)." },
+          "How tall the letters are, in % of the canvas's height, as offsets are a % of it (namespace draft 61, AKK): the letters' em, what a designer and QLab call the size in points - 48 points on a canvas 1080 high is 4.44 - not the line, which is a fifth taller or so (62, ALD)." },
         { "video", "bold",
           ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "false",

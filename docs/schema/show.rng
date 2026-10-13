@@ -1606,7 +1606,7 @@
       </optional>
       <optional>
         <attribute name="fontSize">
-          <a:documentation>How tall the letters are, in % of the canvas&apos;s height, as offsets are a % of it (namespace draft 61, AKK).</a:documentation>
+          <a:documentation>How tall the letters are, in % of the canvas&apos;s height, as offsets are a % of it (namespace draft 61, AKK): the letters&apos; em, what a designer and QLab call the size in points - 48 points on a canvas 1080 high is 4.44 - not the line, which is a fifth taller or so (62, ALD).</a:documentation>
           <data type="double">
             <param name="minInclusive">0.1</param>
             <param name="maxInclusive">100</param>

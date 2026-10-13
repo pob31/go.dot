@@ -25,7 +25,8 @@
     THE FONT: a family by name, or the face file of a family the show carries
     (namespace draft §62), which wins over an installed font of that name.
 
-    THE UNITS: the size is a % of the canvas's height, as offsets are a % of it
+    THE UNITS: the size is a % of the canvas's height - the letters' em, what a
+    designer calls 48 points, not the line's height (§62, ALD) - as offsets are a % of it
     (VQ); the outline's width and its blur are canvas pixels, as a mask's
     feather is. The box the words wrap in is a % of the canvas's width, centred;
     nought never wraps. The words are laid out as on a slide, the canvas the
@@ -66,7 +67,7 @@ namespace wfg::video
     {
         std::string words;              ///< as shown, lines split by a line break
         std::string font;               ///< an installed family; empty is the default sans-serif
-        double fontSize = 8.0;          ///< % of the canvas's height
+        double fontSize = 8.0;          ///< % of the canvas's height: the letters' em (§62, ALD)
         bool bold = false;
         bool italic = false;
         TextAlign align = TextAlign::centre;

@@ -28488,3 +28488,11 @@ close (§60), which keeps the shared checkout.
   commands), RunPaneUiTests (the menu's order and what it offers, the carry asked and followed,
   another's job not said, the lock); 219 client cases and 5 panel cases. Three deliberate breakages each
   turned their own cases red.
+- **QF.5**, 2026-10-13: the size is the letters' em (ALD). The renderer sizes a text by JUCE's point
+  height - the em square - rather than its height, which is the line's: 48 points on a canvas 1080 high
+  is 4.44 %, as QLab sets it, and the same number draws about a sixth larger than the day before (an
+  "H" of DejaVu Sans Mono at 10 %, 68 pixels then, 78.7 now). The spacing goes by the line the font sets,
+  and Go.dot's bold by the em. `fontSize`'s description says so; the schema and `show.rng` regenerated.
+  Nothing else moves: a `wrap` of nought already was QLab's box (ALE). Tests under C and fr_FR:
+  VideoTextTests (a capital's height in the em; twice the size twice the letters), the video and font
+  cases, 161; the schema and GPU gates. One deliberate breakage - the line's height again - turned it red.

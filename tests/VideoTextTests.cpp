@@ -637,3 +637,33 @@ TEST_CASE ("video text: a collection's second face drawn from the collection, an
     REQUIRE (boldFile.copyFileTo (changing));
     CHECK (sameImage (drawn (fromChanging).image, drawn (fromBold).image));
 }
+
+TEST_CASE ("video text: the size is the letters' em - a capital of DejaVu Sans Mono at 10 % of a canvas 1080 high stands its cap height in an em of 108 pixels (§62, ALD)")
+{
+    auto look = lookOf ("H");
+    look.fontSize = 10.0;
+    look.fontFile = pathOf (test::fonts::dejaVu ("DejaVuSansMono.ttf"));
+    const auto drawnH = drawn (look);
+    REQUIRE (drawnH.image.isValid());
+
+    int top = -1, bottom = -1;
+    for (int y = 0; y < drawnH.image.getHeight(); ++y)
+        for (int x = 0; x < drawnH.image.getWidth(); ++x)
+            if (drawnH.image.getPixelAt (x, y).getAlpha() > 128)
+            {
+                if (top < 0)
+                    top = y;
+                bottom = y;
+                break;
+            }
+
+    //  DejaVu Sans Mono's capitals are 1493 of its 2048 units: 0.729 of the em, 78.7 pixels of 108.
+    REQUIRE (top >= 0);
+    CHECK (static_cast<double> (bottom - top + 1) == doctest::Approx (108.0 * 1493.0 / 2048.0).epsilon (0.03));
+
+    //  Twice the size, twice the letters.
+    auto twice = look;
+    twice.fontSize = 20.0;
+    const auto big = drawn (twice);
+    CHECK ((big.y1 - big.y0) / (drawnH.y1 - drawnH.y0) == doctest::Approx (2.0).epsilon (0.06));
+}

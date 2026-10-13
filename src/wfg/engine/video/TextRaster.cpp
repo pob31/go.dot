@@ -117,16 +117,18 @@ namespace wfg::video
 
         /*  A FAMILY'S FACE, OR BY NAME: the carried file when there is one and
             it reads, else the installed family of that name, else the default
-            sans-serif - as before §62. */
-        juce::Font fontFor (const TextLook& look, float height)
+            sans-serif - as before §62. SIZED BY ITS EM (§62, ALD): the letters'
+            size as a designer means it, JUCE's point height, never the line's. */
+        juce::Font fontFor (const TextLook& look, float em)
         {
             if (! look.fontFile.empty())
                 if (auto typeface = carriedTypeface (look.fontFile, look.fontFace))
-                    return juce::Font (juce::FontOptions (typeface).withHeight (height));
+                    return juce::Font (juce::FontOptions (typeface).withPointHeight (em));
 
             const auto style = (look.bold ? juce::Font::bold : 0) | (look.italic ? juce::Font::italic : 0);
-            return juce::Font (look.font.empty() ? juce::FontOptions (height, style)
-                                                 : juce::FontOptions (juce::String::fromUTF8 (look.font.c_str()), height, style));
+            const auto options = look.font.empty() ? juce::FontOptions (em, style)
+                                                   : juce::FontOptions (juce::String::fromUTF8 (look.font.c_str()), em, style);
+            return juce::Font (options.withPointHeight (em));
         }
 
         /*  WHAT A FACE LACKS, DRAWN BY GO.DOT (AKZ): the slant of an oblique,
@@ -159,9 +161,10 @@ namespace wfg::video
         const auto frameWidth = canvasWidth * times;
         const auto frameHeight = canvasHeight * times;
 
-        const auto height = static_cast<float> (std::max (1.0, look.fontSize / 100.0 * frameHeight));
-        const auto font = fontFor (look, height);
-        const auto leading = static_cast<float> ((std::max (50.0, look.lineSpacing) / 100.0 - 1.0) * height);
+        //  THE SIZE IS THE EM (§62, ALD); the spacing goes by the line the font sets, a fifth more or so.
+        const auto em = static_cast<float> (std::max (1.0, look.fontSize / 100.0 * frameHeight));
+        const auto font = fontFor (look, em);
+        const auto leading = static_cast<float> ((std::max (50.0, look.lineSpacing) / 100.0 - 1.0) * font.getHeight());
         const auto justification = justificationOf (look.align);
 
         /*  THE BOX: `wrap` % of the frame's width, centred - or, nothing
@@ -221,7 +224,7 @@ namespace wfg::video
 
         /*  AND THE WEIGHT OF A BOLD, a face that has none thickened by a stroke
             about its edge - a twenty-fourth of the size, as FreeType's. */
-        const auto heavier = look.embolden ? height / 24.0f : 0.0f;
+        const auto heavier = look.embolden ? em / 24.0f : 0.0f;
         juce::Path thickened;
 
         if (heavier > 0.0f)
