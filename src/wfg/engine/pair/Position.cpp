@@ -16,6 +16,8 @@
 
 #include <wfg/engine/pair/Position.h>
 
+#include <wfg/engine/video/Blanks.h>
+
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -351,6 +353,10 @@ namespace wfg::pair
                 .s (source).s (std::string (timecode::wordOf (map.state))).s (timecode::unitWordOf (map.unit))
                 .h (map.frame).h (map.sample).d (map.speed).i (map.sampleRate);
 
+        //  EACH TEXT CUE'S FIELD (§61, AKM): its name and its value tonight.
+        for (const auto& [name, value] : at.fields)
+            Line (out, "field").s (name).s (value);
+
         if (! at.laneCue.empty())
         {
             Line line (out, "lane");
@@ -681,6 +687,16 @@ namespace wfg::pair
                     return bad();
 
                 at.dcas[dca] = trim;
+            }
+            else if (word == "field")
+            {
+                const auto name = a.s();
+                const auto value = a.s();
+
+                if (! a.ok() || ! video::isFieldName (name))
+                    return bad();
+
+                at.fields[name] = value;
             }
             else if (word == "code")
             {

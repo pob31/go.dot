@@ -52,6 +52,7 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/TextFields.h>
 #include <wfg/engine/cue/UndoStep.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
@@ -1465,4 +1466,58 @@ TEST_CASE ("seat: each incoming code's map rides the position as a code line - r
     REQUIRE (follower.runner.codeMapOf ("ltc:IN000001") != nullptr);
     CHECK (follower.runner.codeMapOf ("ltc:IN000001")->sample == 4'800'123 + (local - 100) * 960);
     CHECK (follower.runner.codeReadout ("mtc:P0000001", local * 960).state == "stopped");
+}
+
+TEST_CASE ("seat: a text cue's fields ride the position as field lines - read back exactly, a line break and all, untouched by a rebase, and a seat hands them over (§61, AKM)")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const Show show;
+    Machine leader { show.text }, follower { show.text };
+
+    cue::TextFields leaderFields, followerFields;
+    leader.runner.setTextFields (&leaderFields);
+    follower.runner.setTextFields (&followerFields);
+
+    REQUIRE (leaderFields.set ("home", "3") == cue::TextFields::Set::written);
+    REQUIRE (leaderFields.set ("line", "Act One\nThe forest, \"night\"") == cue::TextFields::Set::written);
+
+    const auto at = leader.runner.positionNow (100, 3);
+    CHECK (at.fields == leaderFields.all());
+
+    const auto text = pair::toText (at);
+    INFO (text);
+    CHECK (text.find ("\nfield s:\"home\" s:\"3\"\n") != std::string::npos);
+
+    //  READ BACK EXACTLY, the line break and the quotes in a value too.
+    std::string why;
+    const auto read = pair::readPosition (text, &why);
+    INFO (why);
+    REQUIRE (read.has_value());
+    CHECK (read->fields == at.fields);
+    CHECK (pair::toText (*read) == text);
+
+    //  No tick in a field: a rebase leaves them.
+    auto moved = *read;
+    moved.rebase (1000);
+    CHECK (moved.fields == at.fields);
+
+    //  A field line whose name does not read is no position.
+    const auto head = "position i:" + std::to_string (pair::Position::format) + " h:1 h:1\n";
+    CHECK_FALSE (pair::readPosition (head + "field s:\"two words\" s:\"x\"\nend\n").has_value());
+    CHECK (pair::readPosition (head + "field s:\"score\" s:\"x\"\nend\n").has_value());
+
+    /*  A SEAT HANDS THEM OVER: the follower's own - set before it followed -
+        give way to the leader's, a field the leader has not got forgotten. */
+    REQUIRE (followerFields.set ("away", "9") == cue::TextFields::Set::written);
+    follower.tickOnce (2999);
+
+    auto rebased = at;
+    rebased.rebase (3000 - 100);
+
+    REQUIRE (follower.engine.submit (std::string (origin::engine), "pair.seat", { s (pair::toText (rebased)) }));
+    follower.tickOnce (3000, false);
+
+    CHECK (followerFields.all() == leaderFields.all());
+    CHECK (followerFields.valueOf ("away").empty());
 }

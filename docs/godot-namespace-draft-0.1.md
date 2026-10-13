@@ -27573,4 +27573,10 @@ tiles cost the renderer's message thread with a blur in them.
   value, a name no words hold); `wfg.replay.*` and `wfg.commands` - 73 gates - `schema.*`, `unit.shards`,
   `client.boundary`, `source.comments`; the clang-tidy stand-in clean. A deliberate breakage - the Runner
   blind to the fields' revision - turned its case red. The position's share (a seat's fields) is its own
-  commit after this one.
+  commit after this one: `Position::format` 3 - agreed with the time groups' session, whose TG.7 takes 4
+  if it lands second - and a top-level `field s:name s:value` line each, after the `code` lines, no tick
+  in it for `rebase` to move; `positionNow` carries the table, a seat replaces this machine's fields with
+  the leader's (`replaceAll`), so a backup seated after a score changed shows the score. The Runner
+  holds the table writable for that. `SeatTests`: read back exactly, a line break and quotes in a value
+  too, a rebase leaving them, a name that does not read no position, a seat handing them over and
+  forgetting the follower's own; a deliberate breakage, the seat keeping the follower's, turned it red.

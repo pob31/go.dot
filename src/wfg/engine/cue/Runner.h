@@ -632,7 +632,7 @@ namespace wfg::cue
             AKM): serve's and a replay's, null in a rig that has none - its
             blanks then show nothing. When a value moves, every text cue up is
             drawn again, its look restated. */
-        void setTextFields (const TextFields* fields) noexcept
+        void setTextFields (TextFields* fields) noexcept
         {
             textFields = fields;
         }
@@ -3198,7 +3198,7 @@ namespace wfg::cue
         std::uint64_t pictureRevision = 0;
 
         //  The fields' revision last seen: a value moved draws every text cue up again (61).
-        const TextFields* textFields = nullptr;
+        TextFields* textFields = nullptr;      ///< read, and replaced whole by a seat (RD.8)
         std::uint64_t fieldsRevision = 0;
 
         /*  A MOVIE'S PLAYHEAD AS ITS RUN READS IT (namespace draft §47, AAC):

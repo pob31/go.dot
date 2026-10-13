@@ -59,6 +59,8 @@
       - each incoming code's map, as the leader's `code.heard` records left
         it (namespace draft §60, TG.5; AIP), so a follower seated while a
         code runs is locked to it at once;
+      - each text cue's field (namespace draft §61, AKM), tonight's value, so
+        a follower seated after the score changed shows the score;
       - the stream's counter and the tick it is true at.
 
     THE LOG'S OWN ATOM GRAMMAR, ONE LINE A THING. Not JSON: a position carries
@@ -176,8 +178,9 @@ namespace wfg::pair
         /*  THE TEXT'S OWN FORMAT: a position from a build that writes another is
             refused, not half read. 2 since TG.5, whose `code` lines a format-1
             reader would refuse as a word it does not know - so the refusal is
-            said for what it is, the two builds' formats. */
-        static constexpr int format = 2;
+            said for what it is, the two builds' formats. 3 since VFX.5, whose
+            `field` lines a format-2 reader would refuse alike. */
+        static constexpr int format = 3;
 
         std::uint64_t counter = 0;          // the last of the leader's stream applied by then
         std::int64_t tick = 0;              // the tick it is true at, after that tick ran
@@ -234,6 +237,11 @@ namespace wfg::pair
             - `ltc:<input>`, `mtc:<port>`, `clock` - as the Runner holds it:
             one top-level `code` line each, beside the trims. */
         std::map<std::string, timecode::CodeMap> codes;
+
+        /*  EACH TEXT CUE'S FIELD (namespace draft §61, AKM), by its name, its
+            value tonight: one top-level `field` line each, after the codes. No
+            tick in it, so `rebase` leaves it alone. */
+        std::map<std::string, std::string> fields;
 
         /** Every tick in it moved by `by`, and every sample with it: the leader's clock read as this machine's. */
         void rebase (std::int64_t by);

@@ -308,6 +308,11 @@ namespace wfg::cue
             turn the leader heard. */
         at.codes = codesHeard;
 
+        /*  EACH TEXT CUE'S FIELD (namespace draft §61, AKM): tonight's values,
+            so a follower seated after a score changed shows the score. */
+        if (textFields != nullptr)
+            at.fields = textFields->all();
+
         if (lanes != nullptr && lanes->flipped())
         {
             at.laneCue = lanes->cue();
@@ -978,6 +983,10 @@ namespace wfg::cue
             the gate's while it follows, and the leader's from here on arrive as
             records. */
         codesHeard = at.codes;
+
+        //  THE FIELDS, THE LEADER'S (61), in place of this machine's - a text cue up is drawn again.
+        if (textFields != nullptr)
+            textFields->replaceAll (at.fields);
 
         if (lanes != nullptr)
         {
