@@ -74,6 +74,7 @@
 #include <wfg/engine/plugin/ScanJob.h>
 #include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/video/FfmpegInstall.h>
+#include <wfg/engine/video/InstalledFonts.h>
 #include <wfg/engine/video/ShowFonts.h>
 #include <wfg/engine/video/TextRaster.h>
 #include <wfg/engine/video/VideoCommands.h>
@@ -4336,7 +4337,8 @@ namespace
             folder and the one around it, read now, and read again after each
             of the fonts.* commands - which the shelf does on a thread of its
             own, never the tick's. */
-        wfg::video::FontShelf fontShelf { target.isDirectory() ? target : juce::File() };
+        wfg::video::FontShelf fontShelf { target.isDirectory() ? target : juce::File(),
+                                          wfg::video::installed::filesOfFamily };
 
         /*  AND THE RENDERS OF THE OPEN EDITS (namespace draft §55, ADM): what
             a sound cue cut into sections plays until it is frozen, made on a

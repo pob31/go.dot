@@ -472,6 +472,8 @@ add_library(wfg_engine STATIC
     wfg/engine/video/Ffmpeg.cpp
     wfg/engine/video/FontFile.cpp
     wfg/engine/video/FontFile.h
+    wfg/engine/video/InstalledFonts.cpp
+    wfg/engine/video/InstalledFonts.h
     wfg/engine/video/ShowFonts.cpp
     wfg/engine/video/ShowFonts.h
     wfg/engine/video/Ffmpeg.h
@@ -583,6 +585,21 @@ if(APPLE)
         wfg/engine/app/Raise_mac.mm
         wfg/engine/app/WindowApplication_mac.mm
         wfg/engine/video/Displays_mac.mm)
+endif()
+
+# The files behind the installed fonts, each system's own way of saying
+# (namespace draft §62): DirectWrite, which JUCE links already; CoreText's C
+# interface; fontconfig, which JUCE reads its fonts through.
+if(WIN32)
+    target_sources(wfg_engine PRIVATE wfg/engine/video/InstalledFonts_windows.cpp)
+elseif(APPLE)
+    target_sources(wfg_engine PRIVATE wfg/engine/video/InstalledFonts_mac.cpp)
+    target_link_libraries(wfg_engine PRIVATE "-framework CoreText" "-framework CoreFoundation")
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(WFG_FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+    target_sources(wfg_engine PRIVATE wfg/engine/video/InstalledFonts_linux.cpp)
+    target_link_libraries(wfg_engine PRIVATE PkgConfig::WFG_FONTCONFIG)
 endif()
 
 # The video renderer's device, each system's own (namespace draft §44.4).

@@ -26,11 +26,15 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/video/InstalledFonts.h>
 #include <wfg/engine/video/ShowFonts.h>
 
 #include "FontFixture.h"
 
 #include <juce_core/juce_core.h>
+#include <juce_graphics/juce_graphics.h>
+
+#include <utility>
 
 #include <string>
 #include <vector>
@@ -332,4 +336,113 @@ TEST_CASE ("save as: a show's fonts/ goes with it, whole (§62, AKX)")
     CHECK (copy.getChildFile ("fonts/DejaVuSansMono.ttf").hasIdenticalContentTo (source.getChildFile ("fonts/DejaVuSansMono.ttf")));
     CHECK (copy.getChildFile ("fonts/DejaVuSansMono-Bold.ttf").existsAsFile());
     CHECK (video::ShowFonts::scan (copy).carries ("DejaVu Sans Mono"));
+}
+
+namespace
+{
+    /*  AN INSTALLED FAMILY GO.DOT CAN READ: the first this machine lists whose
+        files the system names and whose faces Go.dot's reader takes - a Mac
+        may still hold a family in an old .dfont, which is no OpenType file. */
+    struct Readable
+    {
+        std::string family;
+        std::vector<video::fontfile::Face> faces;
+    };
+
+    Readable readableInstalledFamily()
+    {
+        namespace ff = video::fontfile;
+        for (const auto& name : juce::Font::findAllTypefaceNames())
+        {
+            Readable found { name.toStdString(), {} };
+            for (const auto& path : video::installed::filesOfFamily (found.family))
+            {
+                juce::MemoryBlock data;
+                if (! juce::File (juce::String::fromUTF8 (path.c_str())).loadFileAsData (data))
+                    continue;
+                for (const auto& face : ff::read (static_cast<const std::uint8_t*> (data.getData()), data.getSize()).faces)
+                    if (ff::sameFamily (face.family, found.family) || ff::sameFamily (face.legacyFamily, found.family))
+                        found.faces.push_back (face);
+            }
+            if (! found.faces.empty())
+                return found;
+        }
+        return {};
+    }
+}
+
+TEST_CASE ("installed fonts: an installed family's files found on this machine, and a face found again by its PostScript name (§62, ALA, ALI)")
+{
+    namespace ff = video::fontfile;
+    const auto families = juce::Font::findAllTypefaceNames();
+    REQUIRE_FALSE (families.isEmpty());
+
+    //  A family whose files the system names and which hold faces of it: every system has one.
+    const auto [family, faces] = readableInstalledFamily();
+    REQUIRE_MESSAGE (! faces.empty(), "no installed family's files were found and read");
+    MESSAGE ("the family looked up: " << family);
+
+    //  And a face of it found again by the name QLab would know it by.
+    const auto& one = faces.front();
+    REQUIRE_FALSE (one.postScript.empty());
+    const auto found = video::installed::byPostScript (one.postScript);
+    REQUIRE_MESSAGE (found.has_value(), one.postScript);
+    CHECK (found->family == one.family);
+    CHECK (found->style == one.style);
+    CHECK (found->bold == one.bold);
+    CHECK (found->italic == one.italic);
+    CHECK (juce::File (juce::String::fromUTF8 (found->file.c_str())).existsAsFile());
+
+    CHECK_FALSE (video::installed::byPostScript ("NoSuchFace-NowhereAtAll").has_value());
+    CHECK_FALSE (video::installed::byPostScript ("").has_value());
+    CHECK (video::installed::filesOfFamily ("No Such Family Anywhere At All").empty());
+    CHECK (video::installed::filesOfFamily ("").empty());
+
+    //  Where one of each system's usual families is there, its bold is found by name too.
+   #if JUCE_WINDOWS
+    const std::pair<const char*, const char*> usual[] { { "Arial", "Arial-BoldMT" }, { "Segoe UI", "SegoeUI-Bold" } };
+   #elif JUCE_MAC
+    const std::pair<const char*, const char*> usual[] { { "Helvetica", "Helvetica-Bold" }, { "Arial", "Arial-BoldMT" } };
+   #else
+    const std::pair<const char*, const char*> usual[] { { "DejaVu Sans", "DejaVuSans-Bold" }, { "Liberation Sans", "LiberationSans-Bold" } };
+   #endif
+    for (const auto& [name, bold] : usual)
+        if (families.contains (name))
+        {
+            CHECK_FALSE (video::installed::filesOfFamily (name).empty());
+            const auto face = video::installed::byPostScript (bold);
+            REQUIRE_MESSAGE (face.has_value(), bold);
+            CHECK (ff::sameFamily (face->family, name));
+            CHECK (face->bold);
+        }
+}
+
+TEST_CASE ("font shelf: an installed family carried into a show, found through the system, drawn from the show's copy after (§62, ALA, AKW)")
+{
+    Folder place;
+    const auto show = place.file.getChildFile ("Show");
+    show.createDirectory();
+
+    const auto family = readableInstalledFamily().family;
+    REQUIRE_FALSE (family.empty());
+
+    video::FontShelf shelf { show, video::installed::filesOfFamily };
+    shelf.carry (family, false);
+    shelf.waitIdle();
+    const auto job = fieldsOf (shelf.jobText());
+    MESSAGE ("carried " << family << ": " << shelf.jobText());
+
+    //  A system font may forbid carrying: then it is asked about, and nothing copied.
+    REQUIRE_MESSAGE ((job[4] == "carried" || job[4] == "restricted"), shelf.jobText());
+    if (job[4] == "carried")
+    {
+        CHECK (shelf.current()->carries (family));
+        const auto choice = shelf.current()->choose (family, false, false);
+        REQUIRE (choice.has_value());
+        CHECK (juce::File (juce::String::fromUTF8 (choice->file.c_str())).isAChildOf (show.getChildFile ("fonts")));
+    }
+    else
+    {
+        CHECK_FALSE (show.getChildFile ("fonts").exists());
+    }
 }

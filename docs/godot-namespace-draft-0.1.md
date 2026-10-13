@@ -28464,3 +28464,14 @@ close (§60), which keeps the shared checkout.
   giving way to the name, Go.dot's bold and italic, a collection's second face, a file changed on disk),
   VideoHostTests (the region), VideoTests (the Runner); 160 cases across the touched files. Nine
   deliberate breakages each turned their own cases red.
+- **QF.3**, 2026-10-13: an installed family's files, found (`video/InstalledFonts`). JUCE names the
+  installed families but never says where their files are, so each system is asked: DirectWrite's
+  system collection on Windows, through its local file loader, a face it makes up from another adding
+  no file; CoreText's C interface on macOS, a family's faces by its family name and a PostScript name
+  kept only when CoreText matched that very name; fontconfig on Linux, a list rather than a match,
+  which always answers. They only find files: `byPostScript` reads them with Go.dot's own reader for
+  the family, the style and a collection's face, the same everywhere. `serve`'s shelf carries with it,
+  so `fonts.carry` works. The tests look up the first family this machine lists whose files Go.dot can
+  read, a face of it again by its PostScript name, and one of each system's usual families' bold by
+  name, then carry the family into a show; here that family is an AutoCAD one, carried. The macOS and
+  Linux halves are compiled first by CI's jobs: this machine builds neither.
