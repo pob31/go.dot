@@ -12740,6 +12740,8 @@ What each part of the patch does with the answers:
 - **High ratios are read in pieces.** At twenty, one block can ask the resampler for more frames
   than the scratch pool holds or the file cache allows (its assert is at 48 000,
   `AudioFileCache.cpp:913`). A read over the limit is split in two. It never happens at one.
+- **The stretcher's input is carried to the part of a frame** from one chunk to the next
+  (2026-10-13, §22.13): before, every stretched speed played as a whole number of frames in 256.
 
 **What building 0002 found in Tracktion's resampler (S.2, 2026-09-28), and what it mends.** The
 first renders of a moving speed clicked - faintly, at the first sample of a block, a step of
@@ -13128,6 +13130,45 @@ exact zeros unjudged (fb12d4f) stays, harmless. The other lever, the prime on th
 It lists what is Tracktion's own in patch 0002: the Lagrange reader's per-block rounding, the stretcher's prime at speeds other than one, its prime before the file is cached, its
 lost place after a cache miss, a slot rebuilt mid-play restarting its reader, and this loop above
 the stretcher.
+
+### 22.13 A stretched speed to the part of a frame (2026-10-13)
+
+Found by `blackbox.timegroup` (§60.7, TG.11's faults): a time group's timestretch chaser, asked for the
+code's 1.00005 and then 1.001, played at exactly one, while its run's clock - which counts the speed
+asked - read it in step; catching up at 1.01005 it played 1.0117.
+
+**What it was.** Signalsmith makes its output a chunk of 256 at a time and plays at the ratio of the
+input it is handed to the output it makes. Tracktion's `SignalsmithStretcher::getFramesNeeded` asked for
+256 over the stretch, rounded to a whole frame, every chunk, with nothing carried. So every timestretched
+speed was a whole number of frames in 256 - 257/256, 258/256 and so on - and any speed within half a
+frame in 256 of one (0.99805 to 1.00195) played at one. §22's word that Tracktion's own per-block ratio
+"then drives the resampler or the stretcher by itself" held, for the stretcher, only to that grain.
+Varispeed never had it: its reader has carried its exact position since S.2 (§22.3).
+
+**Now** (patch 0002), each chunk takes the input its ratio asks plus what the chunks before it were
+short of, rounded, and carries what is left - between minus and plus half a frame - to the next, as a
+resampler carries its phase: over any run of chunks the input taken is the ratio's to within half a
+frame. A speed that is a whole number of frames in 256 - one, two, a half, one and a half, three
+quarters, every speed M14, M46 and M47 played stretched but M47's 1.3, which was varispeed - takes
+exactly the frames it took before, so their numbers stand. The ratio is the `float` every Tracktion
+stretcher is handed, at worst a part in seventeen million of the speed: a millisecond in four hours.
+
+**And Signalsmith's own sample of slack, which that uncovered.** A spectrum's phase advance is read
+against the spectrum before it, which Signalsmith analyses again a whole interval back (1440 samples at
+48 kHz) unless the input since was within a sample of that - then it uses the one it has. A sample off,
+every frequency comes out a sample in 1440 sharp or flat: 0.69 Hz on 1 kHz, 1.2 cents. No stretch played
+there before, the rounding putting every speed at one or at least a frame in 256 away; now every stretch
+within two samples an interval of one does, about half the time - the driver heard 1.001 at 0.4 Hz sharp,
+1.00066 at 0.6. So Signalsmith (vendored in Tracktion, MIT) is patched too: it analyses again whenever the
+previous input is not exactly an interval back. Every stretch further from one did so already, at the
+cost M46 measured; one at exactly one never does.
+
+**Measured** (`AudioTests`, "a stretched cue at a speed within half a frame in 256 of one plays at that
+speed, not at one, and keeps its pitch"): ten seconds of a file between two onsets of a 1 kHz tone,
+played stretched - before, 480 000 samples at 1.001 (479 520.5 asked; the rounded speed's 480 000) and
+474 434 at 1.01005 (475 224.0 asked; 474 440.0 rounded); now 479 519 and 475 223, each within a sample
+of what was asked. Each burst's pitch within 0.0002 Hz of 1 kHz, where 1.001 played 0.4 Hz sharp with the
+remainder carried and Signalsmith's slack left.
 
 ## 23. The stop levels held to their law
 
@@ -27911,6 +27952,82 @@ real interface's clock against MTC from a cable, and a code from a VTR or a desk
   members load, and in M64 more as a session makes runs (60.6, with a candidate cause); a member asked for then starts
   late, as soon as it can, and one late by less than a block is not said by `run.late`. Left: the guides and the
   README (TG.12); the four faults above, and with them M64's chase table, to measure again once mended.
+- **TG.11's faults, part 1**, 2026-10-13: three of the four faults TG.11's driver found, mended - (1), (2) and (4)
+  above; (3), MTC's `code.heard` not sparse, is another stage's.
+  **(1) A JUMP IN A CUE WITH NO SLICES FROZE ITS VOICE.** The cause was as TG.11 traced it. Patch 0002's
+  `LoopSource::Segment` says a segment whose `loopOut` is not after its `loopIn` is no loop, the file, and
+  `UnrolledLoopReader` read it so backwards and bouncing (`bentFrameFor` reads `looping`); its forward arithmetic -
+  `passOf`, `fileFrameFor`, `nextPassAfter` - never read it, so such a segment was a loop of `max (0, 1)` frame at
+  its in-point, and from the end of the crossfade the reader held that one frame. MENDED IN THE PATCH, where the
+  meaning is written: a map that does not loop is in pass nought everywhere and has no next pass. Not in `chaseJump`:
+  the file's real bounds there would be a loop, which plays the file again from its start at its end - an end the
+  show may not know (a cue with no known length never ends, TG.8) - and a cue with no ranges does not loop; TG.11's
+  trial of a far `loopOut` was that loop with its end out of reach. And the patch had a second caller relying on
+  it, found on the way: `turnRun` (§41) gives a cue with no ranges turned forwards again after playing backwards the
+  same segment, forwards with no loop, and it froze the same way - silent, the sweep's first sample being nought -
+  while its playhead went on; §41's case read the playhead only. Both are mended by the one change.
+  **(2) A STRETCHED VOICE PLAYED ONLY WHOLE FRAMES IN 256** - and, mended, Signalsmith's own sample of slack: §22.13.
+  The remainder is carried in `SignalsmithStretcher` (`framesOwed`), in patch 0002, whose file
+  `tracktion_TimeStretch.cpp` is; Signalsmith's header joins 0002 for the same reason (the patches README: a file
+  belongs to one patch, and the two changes are one mend).
+  **(4) A STRETCHED CHASER'S JUMP LANDED 106 MS BEHIND.** Found: a stretched voice's reader runs ahead of what is
+  heard by its stretcher's lag in its file - the input latency plus the speed times the output latency, as patch
+  0002 primes it (§22.10) - and by up to a chunk the stretcher has made and the voice not yet played: at 48 kHz,
+  Signalsmith's default with its computation split, 2880 + 4320 + 256 = 7456 samples heard at one, 155 ms. The jump
+  was placed a launch horizon ahead (two ticks, 40 ms), so the reader met it some 115 ms after its `from`, applied it
+  where it was (§33, UD) and said so; the Runner moved the run's clock there (`loopTaken`, TG.8), so its clock was
+  where the sound was and both stood that far behind the code, which the catch-up then took seven seconds over.
+  MENDED IN THE RUNNER: `steerChaser` places a stretched voice's jump - a chaser by `timestretch`, or by `jump` on a
+  cue whose own mode stretches - at the horizon plus `Player::stretchLeadSamples (speed)` (new: HostPlayer answers
+  from AudioHost, which reads its stretcher's input and output latency at `buildEdit` from a stretcher made as a
+  voice's; nought by default, a replay's and the tests' players reading nothing ahead), its target the code's second
+  at that sample; a resampled voice jumps at the horizon as before. And a run whose last move lands beyond where it
+  is measured is not measured until it lands, held at the code's speed as just jumped: its clock, bent at the
+  landing sample, reads the file standing at the jump's target before it, which against the code is the jump
+  itself as an error - a jump chaser would have published it, a catch-up chaser slowed for it.
+  A PLAIN JUMP OF A STRETCHED CUE: a slice moved under a stretched loop (§33) is placed a horizon ahead too and met
+  late the same way, as UD foresaw - applied where the reader is, the clock moved there - so it is heard about
+  115 ms after it is placed, its playhead honest throughout; nothing outside the show says where its file should be,
+  so it is a late edit and not an error, and is left. A seek is a stop and a launch, whose stretcher primes aimed at
+  its speed (M14): within a chunk, no error.
+  Tests, red first (built against the series as it was, the Runner's lead turned off), then green under C and
+  fr_FR. `AudioTests`, four cases "(TG.11)", on the host: a jump in a cue with no ranges, a ramp's every sample on
+  its path before and after the crossfade and the file running on through the rest of the render (red: held at
+  nought, 94 494 samples off the path); a stretched voice's jump onto 1 kHz bursts placed its stretcher's lead beyond
+  the horizon, met in time and every onset after it where it was aimed to 1e-5 sample (red: no burst after the jump,
+  held at nought), and placed a horizon ahead as before, met late and 5506 samples (115 ms) behind; ten seconds of a
+  file stretched at 1.001 and 1.01005 between two onsets, 479 519 and 475 223 samples, within a sample of the speed
+  asked, and every burst's pitch within 0.0002 Hz of 1 kHz (red: 480 000 and 474 434, the rounded speeds' grain;
+  and, with the remainder carried but Signalsmith's slack left, 0.4 Hz sharp at 1.001, heard by the driver); and
+  §41's cue with no ranges turned forwards again sounding its sweep, rising (red: 0 and 0 rising crossings).
+  `TimeGroupTests`, one case on the TG.8 rig, its fake player reading 7456 samples ahead: a timestretch chaser 0.3 s
+  behind and a jump chaser on a timestretch cue 30 ms behind each jump once, to the reader's second and the code's
+  7456 samples past the horizon, the lead asked at the code's speed, nothing measured, moved or placed in the eight
+  ticks before it lands, then in step on the code's playhead; a varispeed chaser at the horizon as before (red:
+  placed at the horizon). Green in both locales with the files of the code touched - TimeGroupTests, ChaseTests,
+  RateClockTests, RangeTests, SeatTests, FollowTests, CodeMapTests, CodeWatchTests, ClockWatchTests, MediaCueTests,
+  GoTests, RunTests, TimecodeRunTests, MovieTests, SamplerTests, TriggerTests, LevelLaneTests, SendLaneTests,
+  LaneRecordTests, EditPlaybackTests, 775 cases - and AudioTests' speed, stretch, range, M13, slice-move, LTC and
+  §41 cases with the new ones (45); `blackbox.rate-speed` (M14) and `blackbox.timecode` in both, the `wfg.replay.*`
+  gates and `source.comments`. clang-tidy's stand-in for the strict job: nothing in RunnerTime.cpp, HostPlayer.cpp,
+  TimeGroupTests.cpp or AudioTests.cpp, and in AudioHost.cpp only what the plugin headers it includes said before
+  (its run proved by a planted shadow). Two deliberate breakages after, each turning its own cases red: Signalsmith's
+  slack put back (every burst at 1.001 0.38 to 0.40 Hz sharp), and a stretched jump measured before it lands (the
+  catch-up chaser slowed for an error that was not there - speeds placed, 1.35 ms out after).
+  `blackbox.timegroup`: before, the same 14 of 101 red in both locales (60.7, TG.11); now 1 of 101 in each, MTC's
+  sparsity (3), the other stage's. The jump chaser steps back once through the step (+9.95 ms) and is in step after the
+  return and the locate, as are the scene's sounds and the MTC jump chaser; the timestretch chaser runs at 1.00005 and
+  then 1.001, keeps 1 kHz in every burst, and is re-seated by the locate; the varispeed chaser is re-seated too. Run
+  twice through ctest in each locale with the same result; the first run, before Signalsmith's slack was mended,
+  was 2 and 3 red (below).
+  Two departures from the brief. Signalsmith's slack was not in it: the driver's pitch check, green before because no
+  stretch near one ever played, went red with the remainder carried (0.4 to 0.6 Hz sharp at 1.001 and 1.00066,
+  against its 0.5), and the mend was the stretcher's, not a looser check. And the driver's re-seat check now ends
+  half a second before the loop point, as its MTC chaser's did: the loop point's stop cut the last burst short,
+  which read as one of the shorter five, 501.6 ms out - in fr_FR, never reached before the freeze was mended.
+  Left: M64's chase table to measure again (`m64_chase.py`, by hand, two ten-minute sessions); MTC's sparsity (3); a
+  slice move on a stretched loop heard 115 ms after it is placed (above), and whether a §41 turn of a stretched cue,
+  placed a horizon ahead on a reader that reads ahead, turns where its clock says - not measured.
 
 ## 61. Keys, text and blur
 

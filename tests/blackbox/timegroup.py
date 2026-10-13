@@ -1286,7 +1286,11 @@ def judge_returned(report: Report, word: str, member: Member, errs, truth: Truth
 
 
 def judge_relocated(report: Report, word: str, member: Member, errs, truth: Truth, bound: float = 2.0) -> None:
-    first, last = truth.at(LOCATE_AT) + 0.5 * SAMPLE_RATE, truth.at(LOOP)
+    # To half a second before the loop point, as the MTC chaser's is judged: the
+    # loop point's stop cuts the last burst short, and a burst cut short reads
+    # as one of the shorter five - half a second out (TG.11's faults, part 1,
+    # where the timestretch chaser was first heard re-seated at all).
+    first, last = truth.at(LOCATE_AT) + 0.5 * SAMPLE_RATE, truth.at(LOOP) - 0.5 * SAMPLE_RATE
     out = worst(errs, first, last)
     bound = max(bound, 10.0) if ON_CI else bound
     report.check(out is not None and out <= bound,

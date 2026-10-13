@@ -104,6 +104,7 @@ namespace wfg::audio
         void endsOutside (int track, bool outside) override;
         std::optional<LoopTaken> loopTaken (int track, int slot) override;
         double stretchSpeedLimit() const override;
+        double stretchLeadSamples (double speed) const override;
         void setRouting (int track, const std::vector<cue::Coefficient>&) override;
         void setEq (int track, const EqSettings&) override;
         void setFxEnabled (int track, int slot, bool enabled) override;

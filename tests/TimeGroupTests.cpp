@@ -617,6 +617,18 @@ namespace
         std::uint64_t adoptMove = 0;
         double adoptLateBy = 0.0;
 
+        /*  HOW FAR AHEAD A STRETCHED VOICE READS, in samples heard, and the
+            speeds it was asked at: nought, as no reader here reads ahead, unless
+            a case says otherwise (TG.11's faults). */
+        double stretchLeadSamples (double speed) const override
+        {
+            leadAskedAt.push_back (speed);
+            return lead;
+        }
+
+        double lead = 0.0;
+        mutable std::vector<double> leadAskedAt;
+
         //  A SPEED PLACED ON A VOICE (TG.9's catch-up): the breakpoint, as the voice is told it.
         struct Rate
         {
@@ -2912,6 +2924,98 @@ TEST_CASE ("time group catching up: 0.3 s out is past sync/chaseJump - one jump 
     CHECK (lastRateOn (rig, track) == doctest::Approx (1.01).epsilon (1e-12));
     CHECK (run->chaseError < -185.0);
     CHECK (run->chaseError > -195.0);
+}
+
+TEST_CASE ("time group catching up: a stretched chaser's jump lands beyond its stretcher - its lead past the horizon, at the code's second there - and is not measured again until it lands (TG.11)")
+{
+    /*  A stretched voice's reader runs ahead of what is heard by its
+        stretcher's latency, so a jump placed only a launch horizon ahead was
+        met after the reader had passed it and heard late (blackbox.timegroup,
+        TG.11: 106 ms). The fake audio side says its stretched voices read 7456
+        samples ahead - Signalsmith's 7200 at 48 kHz and a chunk - and records
+        each move. */
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    std::string chase = "timestretch";
+    std::string mode = "varispeed";
+    std::int64_t shift = 14'400;        // 300 ms at 48 kHz: past sync/chaseJump
+    auto stretched = true;
+
+    SUBCASE ("a timestretch chaser 0.3 s behind") {}
+
+    SUBCASE ("a jump chaser on a timestretch cue 30 ms behind")
+    {
+        chase = "jump";
+        mode = "timestretch";
+        shift = 1440;
+    }
+
+    SUBCASE ("a varispeed chaser 0.3 s behind: resampled, it jumps a horizon ahead as before")
+    {
+        chase = "varispeed";
+        mode = "timestretch";
+        stretched = false;
+    }
+
+    CodeRig rig;
+    rig.audio.lead = 7456.0;
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", chase, 120.0);
+    rig.set ("/godot/cue/" + rain + "/rateMode", mode);
+    rig.goOn (rig.group);
+
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    const std::int64_t s0 = 100 * perTick;
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, s0);
+
+    rig.ticksUntil (800);
+    REQUIRE (rig.countOf (rain) == 1);
+    const auto runId = rig.runsOf (rain).front()->id;
+    const auto track = rig.runs.find (runId)->track;
+    const auto start = rig.runs.find (runId)->launchedAtSample;
+    REQUIRE (start == s0 + 480'000);
+    REQUIRE (rig.runs.find (runId)->stretch == stretched);
+
+    //  Behind by `shift`, re-anchored in tick 1000's drain, measured by tick 1001's hook.
+    rig.ticksUntil (1000);
+    rig.heard ("running", "25", f0 + 500, s0 + 960'000 - shift);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (loopsOn (rig, track).size() == 1u);
+    const auto move = loopsOn (rig, track).front().move;
+    const auto at = 1001 * perTick + horizonSamples;
+    const auto lands = stretched ? at + 7456 : at;
+
+    /*  WHERE IT LANDS: the reader's second there, and the code's - the shift
+        on from it. The lead asked at the speed the voice plays, the code's. */
+    CHECK (move.from == doctest::Approx (static_cast<double> (lands - start) / 48000.0).epsilon (toTheSample));
+    CHECK (move.fileAt == doctest::Approx (static_cast<double> (lands - start + shift) / 48000.0).epsilon (toTheSample));
+    CHECK (move.crossfade == doctest::Approx (0.010));
+    CHECK (rig.runs.find (runId)->chaseState == "jumped");
+
+    if (stretched)
+    {
+        REQUIRE_FALSE (rig.audio.leadAskedAt.empty());
+        CHECK (rig.audio.leadAskedAt.back() == doctest::Approx (1.0));
+    }
+
+    /*  UNTIL IT LANDS, eight ticks on, nothing is measured against the code:
+        no second jump, no catch-up's speed - the clock reads the file where the
+        jump puts it, and the line before it would read the jump as an error. */
+    rig.ticksUntil (1009);
+    CHECK (loopsOn (rig, track).size() == 1u);
+    CHECK (ratesOn (rig, track).size() == 1u);
+
+    //  AND THEN IN STEP, never moved again, at its own speed, its playhead the code's.
+    rig.ticksUntil (1100);
+    const auto* run = rig.runs.find (runId);
+    CHECK (loopsOn (rig, track).size() == 1u);
+    CHECK (ratesOn (rig, track).size() == 1u);
+    CHECK (run->chaseState == "inStep");
+    CHECK (std::abs (run->chaseError) < 0.05);
+    CHECK (run->position == doctest::Approx (static_cast<double> (1099 * perTick - start + shift) / 48000.0).epsilon (toTheSample));
+    CHECK (rig.rejected == 0);
 }
 
 TEST_CASE ("time group catching up: a replay of a session with catch-up chasers, a re-anchor, a stop and two locates reaches the same runs")

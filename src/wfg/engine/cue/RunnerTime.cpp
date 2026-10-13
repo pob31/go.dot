@@ -1502,6 +1502,17 @@ namespace wfg::cue
             return false;
         }
 
+        /*  A JUMP PLACED BEYOND WHERE IT IS MEASURED, and not reached there yet -
+            a stretched voice's, below - is left to land, as just jumped: from the
+            sample it lands on the run's clock reads the file where the jump puts
+            it, and before it reads it standing there, which measured against the
+            code would be a jump's worth of error that is not there. */
+        if (at < run.loopMovePlacedAt)
+        {
+            holdCodeSpeed();
+            return false;
+        }
+
         const auto target = chaseTargetOf (targetCue, member, plan, map, at, start, lengths);
 
         if (! target.has_value())
@@ -1531,7 +1542,31 @@ namespace wfg::cue
         //  IN THE SLICE IT PLAYS, or a cue with none: the crossfaded jump.
         if (target->range == run.range)
         {
-            if (! chaseJump (run, at, *target, settings.crossfade))
+            /*  A STRETCHED VOICE'S JUMP LANDS BEYOND ITS STRETCHER. Its reader
+                runs ahead of what is heard by the stretcher's latency and a chunk
+                - some 155 ms at 48 kHz, four launch horizons - so a jump placed a
+                horizon ahead was met only after the reader had read past it,
+                applied from where the reader was, and heard that much behind the
+                code: 106 ms in blackbox.timegroup (TG.11), then seven seconds
+                catching up. So it is placed where the reader has not been yet, its
+                lead beyond the horizon, at the code's second there; the clock is
+                not measured again until it lands (above). A resampled voice reads
+                a frame or two ahead and jumps a horizon ahead, as before. */
+            auto land = at;
+            auto landing = *target;
+
+            if (run.stretch)
+            {
+                land = at + static_cast<std::int64_t> (std::ceil (audio->stretchLeadSamples (run.ratePlaced)));
+                const auto there = chaseTargetOf (targetCue, member, plan, map, land, start, lengths);
+
+                if (! there.has_value() || ! there->sounding() || there->range != run.range)
+                    return false;
+
+                landing = *there;
+            }
+
+            if (! chaseJump (run, land, landing, settings.crossfade))
                 return false;
 
             jumpedHere();
