@@ -181,8 +181,10 @@ the code.
 - **The tests run side by side**, as many at once as the machine keeps up
   with: the unit suite is cut into shards, and `unit.shards` asks the binary
   that every case still runs exactly once a locale. What cannot share a machine
-  — the real audio interface, the desktop the window tests open on — takes its
-  turn on a ctest lock rather than slowing everything else down.
+  — the real audio interface, the desktop the window tests open on, and the
+  black-box drivers that judge an engine keeping time (one at a time on CI, one
+  per four processors on a workstation) — takes its turn on a ctest lock rather
+  than slowing everything else down.
 
 ---
 

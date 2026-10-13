@@ -23,7 +23,7 @@ that a speed edited while a cue sounds and a fade cue that takes it to nought
 are heard as they should be.
 
 THE SOUND IS ONE TONE, a 750 Hz sine at a quarter of full scale: two seconds
-of it for the four cues M14 measures, eight for the tape. Its period, 64
+of it for the four cues M14 measures, thirty for the tape. Its period, 64
 samples at 48 kHz, divides the block, so a block the hosted render drops on a
 loaded machine (§17.12) costs a reading nothing but its own length.
 
@@ -79,7 +79,13 @@ SAMPLES_PER_TICK = RATE // 50
 TONE_HZ = 750.0
 AMPLITUDE = 0.25
 TONE_SECONDS = 2.0
-TAPE_SECONDS = 8.0
+# THIRTY SECONDS, NOT EIGHT (2026-10-13): the tape must still be sounding when the
+# driver's fade GO reaches it, and the driver gets there by waiting on the render,
+# which a loaded runner writes late. Eight left four seconds after the edit; on
+# Windows CI with four entries at once (run 38350416745) the tape had ended, been
+# let go of, and the fade found no run to stop - its speed read None and the
+# window read for 1.5 times the pitch held the tape's end. Thirty leave nineteen.
+TAPE_SECONDS = 30.0
 
 # The four M14 measures: the cue, what it is, its speed, and whether it stretches.
 M14 = [

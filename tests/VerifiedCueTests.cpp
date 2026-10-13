@@ -391,6 +391,22 @@ namespace
             REQUIRE (probe.start());
 
             listId = document.createList ("Cues").id;
+
+            /*  DOH!'S WINDOW AT ITS WIDEST, sixty seconds - three thousand
+                ticks (2026-10-13). This rig's ticks are not a show's time:
+                while it waits for the desk - a sweep's question over HTTP, its
+                answer, a pre-send landing - it ticks once every two
+                milliseconds of the wait, so the ticks between a GO and its
+                Doh! are however many a loaded machine's waits take - up to
+                twelve hundred in "a value the next scene pre-sent", against
+                the show's five hundred. Under the real-time sanitizer with
+                ctest running four at once that case's Doh! was refused
+                (unit.C.editor-helper, run 38350416745), and of the refusals
+                only too-late depends on how long the waits took. No case here
+                is about the window's length - GoTests' are - and between a GO
+                and its Doh! none waits more than twice, each wait stopping at
+                six hundred ticks. */
+            REQUIRE (document.setAttribute ("/godot/list/dohWindow", "60").ok);
         }
 
         ~VerifiedRig()
@@ -3580,6 +3596,7 @@ TEST_CASE ("go.doh: a value the next scene pre-sent after the GO goes back to wh
 
     rig.engine.submit ("cli", "go.doh", {});
     rig.tickOnce();
+    INFO ("Doh! answered \"" << rig.engine.lastError() << "\" at tick " << rig.tick);
     REQUIRE (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)) == std::optional<std::string> (goCue));
 
     ticksOf (rig, 5);
