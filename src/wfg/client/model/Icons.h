@@ -61,8 +61,8 @@ namespace wfg::client::model
         //  What a transport cue does, by its verb.
         stop, stopFade, stopAfter, advance, record, loop, overdub, clear, enable, jump,
 
-        //  How a group runs its members, by its mode.
-        sequence, timeline, sampler,
+        //  How a group runs its members, by its mode - a time group's code its own (namespace draft §60).
+        sequence, timeline, sampler, timeGroup,
 
         //  What a row says about itself beside its name.
         forever, shuffle, follow, subset, preset, disabled, speed, stretch, dca, lane,
@@ -91,8 +91,10 @@ namespace wfg::client::model
 
     /*  THE THEME TOKEN A KIND'S ACCENT IS DRAWN IN - "kind-media" and so on -
         or the faint ink for a kind that has none. A token and not a colour, so
-        the theme file is where it is changed. */
-    std::string accentFor (const std::string& kind);
+        the theme file is where it is changed. A group's `mode` is asked for
+        one group alone: a time group wears an accent of its own (namespace
+        draft §60), every other group the group's. */
+    std::string accentFor (const std::string& kind, const std::string& mode = {});
 
     /*  THE PANEL AT THE FOOT, by the word `Subject` uses: "waveform",
         "sends", "curve", "timeline", "take" - and `none` for "eq" and "fx",

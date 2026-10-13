@@ -4244,8 +4244,9 @@ TEST_CASE ("client: the group list offers the picked cues when the engine would 
     CHECK (items (around, true) == groups);
     CHECK (items (around, false) == groups);
 
-    // A memo among them: no sampler around them, still one in the empty part.
-    CHECK (items (model::groupMenu (mixed, "after Rain"), true) == groups - 1);
+    /*  A memo among them: no sampler and no time group around them (§49,
+        §60), still one of each in the empty part. */
+    CHECK (items (model::groupMenu (mixed, "after Rain"), true) == groups - 2);
 
     CHECK (model::groupMenu (model::wrapOf (*snapshot, { "A0000001" }), "after Rain").front().text
              == "Put the picked cue in a new…");
@@ -4257,7 +4258,10 @@ TEST_CASE ("client: the group list offers the picked cues when the engine would 
     CHECK (items (refused, true) == 0);
 
     // And the engine takes what the list offered.
-    const auto sampler = gesture::wrapGroup (media.cues, model::groupChoices().back().settings);
+    const auto samplerLine = std::find_if (model::groupChoices().begin(), model::groupChoices().end(),
+                                           [] (const model::Choice& choice) { return choice.label == "Sampler group"; });
+    REQUIRE (samplerLine != model::groupChoices().end());
+    const auto sampler = gesture::wrapGroup (media.cues, samplerLine->settings);
     rig.document.beginTransaction (sampler.command, tick, sampler.origin, {});
     REQUIRE (rig.apply (tick++, sampler.origin, sampler.command, sampler.args).applied == 1);
     const auto after = rig.publish (tick);
@@ -8780,11 +8784,10 @@ TEST_CASE ("client: a time group asks the engine's questions - no icon of a sequ
 {
     /*  The predicates the engine asks (cue/GroupMode.h) are the client's too.
         A time group whose `advance` reads `manual` - its default - or `auto`
-        is neither a sequence nor a chain: its row draws the plain group until
-        TG.10 gives it its own, no "each member follows" mark, the timeline
-        panel cannot know its length, and a drag on its run is not said to be a
-        manual sequence's. */
-    CHECK (model::iconFor ("group", "time") == model::Icon::group);
+        is neither a sequence nor a chain: its row draws its own icon (TG.10),
+        no "each member follows" mark, the timeline panel cannot know its
+        length, and a drag on its run is not said to be a manual sequence's. */
+    CHECK (model::iconFor ("group", "time") == model::Icon::timeGroup);
     CHECK (model::iconFor ("group", "sequence") == model::Icon::sequence);
     CHECK (model::iconFor ("group") == model::Icon::group);
 
@@ -13588,4 +13591,478 @@ TEST_CASE ("client: the label a timecode run reads a second past its start, as a
     CHECK (model::labelAt ("23:59:59:24", "25", 0.04) == "00:00:00:00");
     CHECK (model::labelAt ("nonsense", "25", 1.0).empty());
     CHECK (model::labelAt ("01:00:00:00", "nope", 1.0).empty());
+}
+
+//==============================================================================
+/*  TG.10 (namespace draft §60): THE WINDOW'S TIME GROUPS. The words were the
+    implementer's and the author accepted them as offered (2026-10-12/13);
+    they are asserted here as they read, so a later change to one is a
+    failing case that says which. */
+TEST_CASE ("client: + group offers a Time group, made and read back as time, around picked cues only when it may hold them")
+{
+    //  The line: last, after the sampler, born with mode time and nothing else.
+    const auto& groups = model::groupChoices();
+    REQUIRE_FALSE (groups.empty());
+    const auto& line = groups.back();
+    CHECK (line.label == "Time group");
+    CHECK (line.explanation == "its members start when LTC, MTC or the clock reaches their time");
+    CHECK (line.kind == "group");
+    CHECK (line.settings == model::Settings { { "mode", "time" } });
+    CHECK (line.section.empty());
+    CHECK_FALSE (line.playableOnly);
+    CHECK_FALSE (line.aimed);
+
+    Rig rig;
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE_FALSE (listId.empty());
+    auto tick = std::int64_t { 1 };
+
+    //  Made as the list makes it, and read back: the mode, and the kind column's word.
+    {
+        const auto event = gesture::createCue (listId, 0, line.kind, "", line.settings);
+        REQUIRE (rig.apply (tick++, event.origin, event.command, event.args).applied == 1);
+
+        const auto snapshot = rig.publish (tick);
+        const auto made = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
+        REQUIRE (model::text (*snapshot, "/godot/cue/" + made + "/kind") == "group");
+        CHECK (model::text (*snapshot, "/godot/cue/" + made + "/mode") == "time");
+        CHECK (model::text (*snapshot, "/godot/cue/" + made + "/timeSource") == "ltc");
+
+        model::ShowModel show;
+        show.refresh (*snapshot, listId);
+        const auto at = show.indexOf (made);
+        REQUIRE (at >= 0);
+        const auto& row = show.rows()[static_cast<std::size_t> (at)];
+        CHECK (row.isGroup);
+        CHECK (model::groupModeWord (row.mode) == "time");
+        CHECK (model::groupModeWord (row.mode).size() <= 8);
+
+        REQUIRE (rig.apply (tick++, "window", "undo", {}).applied == 1);
+    }
+
+    //  Every other group keeps its mode as its word.
+    CHECK (model::groupModeWord ("sampler") == "sampler");
+    CHECK (model::groupModeWord ("timeline") == "timeline");
+    CHECK (model::groupModeWord ("sequence") == "sequence");
+
+    /*  WHAT A TIME GROUP MAY HOLD (AIK), asked of the picked cues as the
+        engine asks it: a sound, a picture, a timeline, an automatic sequence -
+        not a memo, a manual sequence, a sampler or a timecode cue. */
+    const auto create = [&] (const char* kind, const char* id, std::vector<osc::Value> bornWith = {})
+    {
+        std::vector<osc::Value> args { osc::Value::string (listId), osc::Value::int32 (0), osc::Value::string (kind),
+                                       osc::Value::string (""), osc::Value::string (id) };
+        args.insert (args.end(), bornWith.begin(), bornWith.end());
+        REQUIRE (rig.apply (tick++, "window", "cue.create", std::move (args)).applied == 1);
+    };
+
+    create ("media", "TGSD0001");
+    create ("video", "TGPC0001");
+    create ("memo", "TGMM0001");
+    create ("timecode", "TGTC0001");
+    create ("group", "TGTM0001", { osc::Value::string ("mode"), osc::Value::string ("timeline") });
+    create ("group", "TGAS0001", { osc::Value::string ("mode"), osc::Value::string ("sequence"),
+                                   osc::Value::string ("advance"), osc::Value::string ("auto") });
+    create ("group", "TGMS0001", { osc::Value::string ("mode"), osc::Value::string ("sequence"),
+                                   osc::Value::string ("advance"), osc::Value::string ("manual") });
+    create ("group", "TGSM0001", { osc::Value::string ("mode"), osc::Value::string ("sampler") });
+
+    const auto snapshot = rig.publish (tick);
+
+    CHECK (model::wrapOf (*snapshot, { "TGSD0001", "TGPC0001", "TGTM0001", "TGAS0001" }).allTimeable);
+
+    for (const char* refused : { "TGMM0001", "TGTC0001", "TGMS0001", "TGSM0001" })
+    {
+        INFO ("picked with " << refused);
+        const auto wrap = model::wrapOf (*snapshot, { "TGSD0001", refused });
+        CHECK (wrap.possible());
+        CHECK_FALSE (wrap.allTimeable);
+    }
+
+    const auto offersTime = [] (const std::vector<model::MenuLine>& lines, bool wrapped)
+    {
+        return std::any_of (lines.begin(), lines.end(), [wrapped] (const model::MenuLine& menuLine)
+                            {
+                                return menuLine.kind == model::MenuLine::Kind::item && menuLine.wrap == wrapped
+                                         && menuLine.text.rfind ("Time group", 0) == 0;
+                            });
+    };
+
+    //  Around sounds and scenes, offered; with a memo among them, not - but always in the empty part.
+    const auto timeable = model::wrapOf (*snapshot, { "TGSD0001", "TGTM0001" });
+    CHECK (offersTime (model::groupMenu (timeable, "after Rain"), true));
+    CHECK (offersTime (model::groupMenu (timeable, "after Rain"), false));
+    CHECK_FALSE (offersTime (model::groupMenu (model::wrapOf (*snapshot, { "TGSD0001", "TGMM0001" }), "after Rain"), true));
+    CHECK (offersTime (model::groupMenu (model::wrapOf (*snapshot, { "TGSD0001", "TGMM0001" }), "after Rain"), false));
+
+    //  A sampler does not take a scene, a time group does: the two lines are asked apart.
+    const auto aroundScene = model::groupMenu (model::wrapOf (*snapshot, { "TGTM0001" }), "after Rain");
+    CHECK (offersTime (aroundScene, true));
+    CHECK_FALSE (std::any_of (aroundScene.begin(), aroundScene.end(), [] (const model::MenuLine& menuLine)
+                              { return menuLine.wrap && menuLine.text.rfind ("Sampler group", 0) == 0; }));
+
+    //  And the engine takes what the list offered, and refuses what it did not.
+    const auto refused = gesture::wrapGroup ({ "TGSD0001", "TGMS0001" }, line.settings);
+    rig.document.beginTransaction (refused.command, tick, refused.origin, {});
+    CHECK (rig.apply (tick++, refused.origin, refused.command, refused.args).applied == 0);
+
+    const auto wrapped = gesture::wrapGroup (timeable.cues, line.settings);
+    rig.document.beginTransaction (wrapped.command, tick, wrapped.origin, {});
+    REQUIRE (rig.apply (tick++, wrapped.origin, wrapped.command, wrapped.args).applied == 1);
+
+    const auto after = rig.publish (tick);
+    const auto group = model::text (*after, "/godot/cue/TGSD0001/parent");
+    CHECK (model::text (*after, "/godot/cue/" + group + "/mode") == "time");
+    CHECK (model::text (*after, "/godot/cue/TGTM0001/parent") == group);
+}
+
+TEST_CASE ("client: a time group is inspected as follows, its members as starts at and chase, first where a code asks them")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto loose = rig.document.createCue (list, 0, "media", "Loose");
+    const auto code = rig.document.createCue (list, 1, "group", "Show code", {}, { { "mode", "time" } });
+    REQUIRE (loose.ok);
+    REQUIRE (code.ok);
+
+    const auto sound = rig.document.createCue (code.id, 0, "media", "Rain", {}, { { "at", "01:00:00:00" } });
+    const auto scene = rig.document.createCue (code.id, 1, "group", "Storm", {}, { { "mode", "timeline" },
+                                                                                   { "chase", "varispeed" } });
+    REQUIRE (sound.ok);
+    REQUIRE (scene.ok);
+
+    rig.parameters.markStale();
+    auto snapshot = rig.publish (1);
+
+    const auto does = [] (const model::Inspection& inspection) -> std::vector<model::Field>
+    {
+        for (const auto& block : inspection.blocks)
+            if (block.heading == "what it does")
+                return block.fields;
+
+        return {};
+    };
+
+    //  THE GROUP: what it follows first, worded, a menu of the three sources.
+    {
+        const auto fields = does (model::inspect (*snapshot, code.id));
+        REQUIRE_FALSE (fields.empty());
+        CHECK (fields[0].name == "timeSource");
+        CHECK (fields[0].label == "follows");
+        CHECK (fields[0].applies);
+        CHECK (fields[0].control == model::Control::choice);
+        CHECK (fields[0].value == "ltc");
+        CHECK (fields[0].choices == std::vector<std::pair<std::string, std::string>> { { "ltc", "LTC in" },
+                                                                                       { "mtc", "MTC in" },
+                                                                                       { "clock", "the clock" } });
+    }
+
+    //  Any other group asks it after its mode and a sampler's takeover, greyed - and calls it the same.
+    {
+        const auto fields = does (model::inspect (*snapshot, "D9FH2JKA"));
+        REQUIRE (fields.size() >= 3u);
+        CHECK (fields[0].name == "mode");
+        CHECK (fields[1].name == "takeover");
+        CHECK (fields[2].name == "timeSource");
+        CHECK (fields[2].label == "follows");
+        CHECK_FALSE (fields[2].applies);
+    }
+
+    //  A MEMBER: when it starts and how it keeps up, before what it plays.
+    for (const auto& id : { sound.id, scene.id })
+    {
+        INFO ("member " << id);
+        const auto fields = does (model::inspect (*snapshot, id));
+        REQUIRE (fields.size() >= 2u);
+        CHECK (fields[0].name == "at");
+        CHECK (fields[0].label == "starts at");
+        CHECK (fields[0].applies);
+        CHECK (fields[1].name == "chase");
+        CHECK (fields[1].label == "chase");
+        CHECK (fields[1].applies);
+        CHECK (fields[1].control == model::Control::choice);
+        CHECK (fields[1].choices == std::vector<std::pair<std::string, std::string>> {
+                                        { "free", "free run" }, { "jump", "jump" },
+                                        { "varispeed", "catch up, varispeed" },
+                                        { "timestretch", "catch up, timestretch" } });
+    }
+
+    //  A row's value as the panel shows it, and a failure rather than a crash when the row is not there.
+    const auto shown = [&snapshot] (const std::string& id, const std::string& name)
+    {
+        const auto inspection = model::inspect (*snapshot, id);
+        const auto* field = rowIn (inspection, name);
+        REQUIRE (field != nullptr);
+        return field->value;
+    };
+
+    CHECK (shown (sound.id, "at") == "01:00:00:00");
+    CHECK (shown (sound.id, "chase") == "free");
+    CHECK (shown (scene.id, "chase") == "varispeed");
+
+    /*  A cue in no time group keeps its rows where they were, last of what it
+        does, greyed - named all the same, so moved into one it finds them. */
+    {
+        const auto fields = does (model::inspect (*snapshot, loose.id));
+        REQUIRE (fields.size() >= 2u);
+        CHECK (fields[0].name == "file");
+
+        const auto inspection = model::inspect (*snapshot, loose.id);
+        const auto* at = rowIn (inspection, "at");
+        REQUIRE (at != nullptr);
+        CHECK (at->label == "starts at");
+        CHECK_FALSE (at->applies);
+    }
+
+    //  At 29.97 drop-frame the time shows its semicolon, as a reader shows it; the stored text keeps its colons.
+    REQUIRE (rig.document.setAttribute ("/godot/sync/frameRate", "29.97df").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+    CHECK (shown (sound.id, "at") == "01:00:00;00");
+    CHECK (model::text (*snapshot, "/godot/cue/" + sound.id + "/at") == "01:00:00:00");
+
+    //  On the clock, a member's time is the clock's HH:MM:SS, as stored.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + code.id + "/timeSource", "clock").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + sound.id + "/at", "20:15:03").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (3);
+    CHECK (shown (sound.id, "at") == "20:15:03");
+    CHECK (shown (code.id, "timeSource") == "clock");
+}
+
+TEST_CASE ("client: the codes coming in are read off <Sync>, LTC's inputs one channel wide, a line for each named source")
+{
+    Rig rig;
+    auto tick = std::int64_t { 1 };
+
+    //  A show nobody has set: no input, no port, the four chase settings at the engine's defaults, nothing heard.
+    auto sync = model::readSync (*rig.publish (tick));
+    CHECK (sync.ltcIn.empty());
+    CHECK (sync.mtcIn.empty());
+    CHECK (sync.chaseTolerance == "10");
+    CHECK (sync.chaseJump == "0.25");
+    CHECK (sync.chaseRate == "1");
+    CHECK (sync.chaseCrossfade == "10");
+    CHECK (sync.ltcHeard.state == "none");
+    CHECK (sync.mtcHeard.state == "none");
+    CHECK (model::comingInLines (sync).empty());
+
+    //  Inputs: one channel offered, two listed and disabled, saying why, as the LTC output menu does.
+    const auto voice = rig.document.createInput (1);
+    const auto keys = rig.document.createInput (2);
+    REQUIRE (voice.ok);
+    REQUIRE (keys.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/input/" + voice.id + "/name", "Code in").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/input/" + keys.id + "/name", "Keys").ok);
+    const auto port = rig.document.createPort ("Desk");
+    REQUIRE (port.ok);
+    rig.parameters.markStale();
+
+    auto snapshot = rig.publish (++tick);
+    const auto inputs = model::ltcInputChoices (model::readInputs (*snapshot));
+    REQUIRE (inputs.size() == 3u);
+    CHECK (inputs[0] == model::SyncChoice { "", "None", true });
+    CHECK (inputs[1] == model::SyncChoice { voice.id, "Code in", true });
+    CHECK (inputs[2] == model::SyncChoice { keys.id, "Keys (2 channels: LTC needs one)", false });
+
+    //  What the Coming in part sends, read back.
+    for (const auto& [row, value] : { std::pair<std::string, std::string> { "ltcIn", voice.id },
+                                      std::pair<std::string, std::string> { "mtcIn", port.id },
+                                      std::pair<std::string, std::string> { "chaseTolerance", "12.5" },
+                                      std::pair<std::string, std::string> { "chaseJump", "0.5" },
+                                      std::pair<std::string, std::string> { "chaseRate", "2" },
+                                      std::pair<std::string, std::string> { "chaseCrossfade", "20" } })
+    {
+        const auto event = gesture::setNode ("/godot/sync/" + row, value);
+        CHECK_MESSAGE (rig.apply (++tick, event.origin, event.command, event.args).applied == 1, row);
+    }
+
+    sync = model::readSync (*rig.publish (++tick));
+    CHECK (sync.ltcIn == voice.id);
+    CHECK (sync.mtcIn == port.id);
+    CHECK (osc::parseDouble (sync.chaseTolerance).value_or (0.0) == doctest::Approx (12.5));
+    CHECK (osc::parseDouble (sync.chaseJump).value_or (0.0) == doctest::Approx (0.5));
+    CHECK (osc::parseDouble (sync.chaseRate).value_or (0.0) == doctest::Approx (2.0));
+    CHECK (osc::parseDouble (sync.chaseCrossfade).value_or (0.0) == doctest::Approx (20.0));
+
+    //  What the machine hears, as serve copies it each tick: a line per named source.
+    EngineState state;
+    state.tick = ++tick;
+    state.ltcIn = timecode::CodeReadout { "running", "01:02:03:04", "25", 1.000012 };
+    state.mtcIn = timecode::CodeReadout { "stopped", "10:00:00:12", "29.97df", 0.0 };
+    rig.parameters.markStale();
+
+    sync = model::readSync (*rig.parameters.publish (tick, state));
+    CHECK (sync.ltcHeard.state == "running");
+    CHECK (sync.ltcHeard.code == "01:02:03:04");
+    CHECK (sync.ltcHeard.rate == "25");
+    CHECK (sync.ltcHeard.speed == doctest::Approx (1.000012));
+    CHECK (model::comingInLines (sync) == std::vector<std::string> {
+                                             "LTC in: running, 01:02:03:04 at 25, +12 ppm",
+                                             "MTC in: stopped, 10:00:00;12 at 29.97 drop-frame" });
+
+    //  Each state says only what it has: absent no more; slow and in step in ppm; another speed as a speed.
+    CHECK (model::codeInLine ("ltc", { "absent", {}, {}, 0.0 }) == "LTC in: absent");
+    CHECK (model::codeInLine ("mtc", { "running", "00:00:10:00", "30", 0.999997 }) == "MTC in: running, 00:00:10:00 at 30, -3 ppm");
+    CHECK (model::codeInLine ("ltc", { "running", "00:00:10:00", "24", 1.0 }) == "LTC in: running, 00:00:10:00 at 24, 0 ppm");
+    CHECK (model::codeInLine ("ltc", { "running", "00:00:10:00", "25", 0.5 }) == "LTC in: running, 00:00:10:00 at 25, \xc3\x97" "0.5");
+    CHECK (model::codeInLine ("ltc", { "none", {}, {}, 0.0 }).empty());
+}
+
+TEST_CASE ("client: a time group's run says the code it follows, and a chasing member how far out of step it is")
+{
+    Rig rig;
+    const auto listId = rig.document.createList ("Codes").id;
+    const auto group = rig.document.createCue (listId, 0, "group", "Show code", {}, { { "mode", "time" } }).id;
+    REQUIRE_FALSE (group.empty());
+    const auto rain = rig.document.createCue (group, 0, "media", "Rain").id;
+    const auto wind = rig.document.createCue (group, 1, "media", "Wind").id;
+    REQUIRE_FALSE (rain.empty());
+    REQUIRE_FALSE (wind.empty());
+
+    //  Every run made before any is held: a create may move the table under a pointer.
+    rig.runs.create ("RTGRP001", group, "group");
+    rig.runs.create ("RTRAN001", rain, "media", "RTGRP001");
+    rig.runs.create ("RTWND001", wind, "media", "RTGRP001");
+
+    for (const auto* id : { "RTGRP001", "RTRAN001", "RTWND001" })
+    {
+        auto* run = rig.runs.find (id);
+        REQUIRE (run != nullptr);
+        run->state = cue::runState::playing;
+    }
+
+    auto* rainRun = rig.runs.find ("RTRAN001");
+    rainRun->chaseState = "inStep";
+    rainRun->chaseError = 3.2;
+    rig.runs.find ("RTWND001")->chaseState = "free";
+
+    const auto rowsAt = [&rig] (std::int64_t tick, const EngineState& state, long long clock)
+    {
+        rig.parameters.markStale();
+        std::map<std::string, model::RunRow> found;
+
+        for (const auto& row : model::readRuns (*rig.parameters.publish (tick, state), clock))
+            found[row.id] = row;
+
+        return found;
+    };
+
+    EngineState state;
+    state.tick = 1;
+    state.ltcIn = timecode::CodeReadout { "running", "01:02:03:04", "25", 1.0 };
+
+    //  LTC, running: its label. A chaser in step: how far out. A free runner: nothing.
+    auto rows = rowsAt (1, state, -1);
+    CHECK (rows["RTGRP001"].liveWords == "LTC 01:02:03:04");
+    CHECK (rows["RTRAN001"].liveWords == "3 ms out");
+    CHECK (rows["RTWND001"].liveWords.empty());
+
+    //  Catching up, the engine's word after it; a millisecond rounds, whichever side.
+    rainRun->chaseState = "catching";
+    rainRun->chaseError = -12.6;
+    state.ltcIn = timecode::CodeReadout { "stopped", "01:02:03:04", "25", 0.0 };
+    rows = rowsAt (2, state, -1);
+    CHECK (rows["RTGRP001"].liveWords == "LTC stopped 01:02:03:04");
+    CHECK (rows["RTRAN001"].liveWords == "13 ms out \xc2\xb7 catching");
+
+    //  MTC at drop-frame, its semicolon; and absent, its state alone.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + group + "/timeSource", "mtc").ok);
+    state.mtcIn = timecode::CodeReadout { "running", "10:00:00:12", "29.97df", 1.0 };
+    CHECK (rowsAt (3, state, -1)["RTGRP001"].liveWords == "MTC 10:00:00;12");
+
+    state.mtcIn = timecode::CodeReadout { "absent", {}, {}, 0.0 };
+    CHECK (rowsAt (4, state, -1)["RTGRP001"].liveWords == "MTC absent");
+
+    //  The wall clock: the window's own, handed in - and "clock" alone when it is not known.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + group + "/timeSource", "clock").ok);
+    CHECK (rowsAt (5, state, ((20LL * 60 + 15) * 60 + 3) * 1000 + 250)["RTGRP001"].liveWords == "clock 20:15:03");
+    CHECK (rowsAt (6, state, -1)["RTGRP001"].liveWords == "clock");
+
+    //  The words alone, as the pane says them.
+    CHECK (model::clockLabel (0) == "00:00:00");
+    CHECK (model::clockLabel (86399999) == "23:59:59");
+    CHECK (model::clockLabel (-1).empty());
+    CHECK (model::chaseWords ("inStep", 0.4) == "0 ms out");
+    CHECK (model::chaseWords ("jumped", 30.0) == "30 ms out \xc2\xb7 jumped");
+    CHECK (model::chaseWords ("free", 30.0).empty());
+    CHECK (model::chaseWords ("", 30.0).empty());
+    CHECK (model::followsWords ("", { "running", "00:00:01:00", "25", 1.0 }, -1) == "LTC 00:00:01:00");
+}
+
+TEST_CASE ("client: a time group's member's time in the list is its at, and the cell writes at")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto code = rig.document.createCue (list, 0, "group", "Show code", {}, { { "mode", "time" } });
+    REQUIRE (code.ok);
+    const auto sound = rig.document.createCue (code.id, 0, "media", "Rain", {}, { { "at", "01:00:00:00" } });
+    const auto quiet = rig.document.createCue (code.id, 1, "video", "Moon");
+    const auto loose = rig.document.createCue (list, 1, "media", "Loose");
+    REQUIRE (sound.ok);
+    REQUIRE (quiet.ok);
+    REQUIRE (loose.ok);
+
+    const auto rowOf = [&rig, &list] (std::int64_t tick, const std::string& id)
+    {
+        rig.parameters.markStale();
+        model::ShowModel show;
+        show.refresh (*rig.publish (tick), list);
+        const auto at = show.indexOf (id);
+        REQUIRE (at >= 0);
+        return show.rows()[static_cast<std::size_t> (at)];
+    };
+
+    //  A member's time is when its code starts it; one with none says nothing; a cue in no time group is as it was.
+    auto row = rowOf (1, sound.id);
+    CHECK (row.memberOfTimeGroup);
+    CHECK (row.duration == "01:00:00:00");
+    CHECK (rowOf (1, quiet.id).duration.empty());
+    CHECK_FALSE (rowOf (1, loose.id).memberOfTimeGroup);
+    CHECK_FALSE (rowOf (1, code.id).memberOfTimeGroup);
+
+    //  The cell writes `at`, whatever kind the member is; a cue outside writes what its kind writes.
+    CHECK (model::editAttributeFor (model::EditCell::duration, row) == "at");
+    CHECK (model::editAttributeFor (model::EditCell::preWait, row) == "preWait");
+    CHECK (model::editAttributeFor (model::EditCell::duration, rowOf (1, quiet.id)) == "at");
+    CHECK (model::editAttributeFor (model::EditCell::duration, rowOf (1, loose.id)).empty());
+
+    //  At 29.97 drop-frame, the semicolon; on the clock, the clock's HH:MM:SS.
+    REQUIRE (rig.document.setAttribute ("/godot/sync/frameRate", "29.97df").ok);
+    CHECK (rowOf (2, sound.id).duration == "01:00:00;00");
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + code.id + "/timeSource", "clock").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + sound.id + "/at", "20:15:03").ok);
+    CHECK (rowOf (3, sound.id).duration == "20:15:03");
+
+    CHECK (model::memberTime ("01:00:00:00", "mtc", "29.97df") == "01:00:00;00");
+    CHECK (model::memberTime ("01:00:00:00", "ltc", "25") == "01:00:00:00");
+    CHECK (model::memberTime ("20:15:03", "clock", "29.97df") == "20:15:03");
+}
+
+TEST_CASE ("client: a time group wears a drawn icon and an accent of its own, never red")
+{
+    const model::Theme theme;
+    const auto& names = model::Theme::colourNames();
+
+    CHECK (model::iconFor ("group", "time") == model::Icon::timeGroup);
+    CHECK (model::iconForDrawer ("what it does", "group", "time") == model::Icon::timeGroup);
+    CHECK (model::accentFor ("group", "time") == "kind-timegroup");
+    CHECK (std::find (names.begin(), names.end(), "kind-timegroup") != names.end());
+
+    //  Every other group keeps the group's accent; a kind asked without a mode, its own.
+    CHECK (model::accentFor ("group", "sampler") == "kind-group");
+    CHECK (model::accentFor ("group") == "kind-group");
+    CHECK (model::accentFor ("media", "time") == "kind-media");
+
+    for (const auto& name : names)
+        if (name.rfind ("kind-", 0) == 0 && name != "kind-timegroup")
+        {
+            INFO ("accent " << name);
+            CHECK (theme.colour (name) != theme.colour ("kind-timegroup"));
+        }
+
+    CHECK (theme.colour ("failed") != theme.colour ("kind-timegroup"));
 }

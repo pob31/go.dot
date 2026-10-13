@@ -29,6 +29,7 @@
 #include <initializer_list>
 #include <map>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -7081,7 +7082,16 @@ namespace wfg::client::ui
             that is simply not there reads as a fault. And while an output is
             chosen, the sentence under it says what that costs: whatever the
             show routes there is not heard. A -18 dBFS square wave in a PA is
-            the one mistake on this tab that is loud. */
+            the one mistake on this tab that is loud.
+
+            AND BELOW THEM, COMING IN (namespace draft §60, TG.10, the words
+            model/Timecode.h's `timeGroupWords`): the input LTC comes in on and
+            the port MTC does - the inputs wider than a channel listed and
+            disabled, as the outputs are above - how a member that chases keeps
+            up, and a line for each code the show names saying what the machine
+            hears of it. The same `node.set`s on the same `/godot/sync` rows,
+            landing at once. The page scrolls: the two parts are longer than
+            the window is tall. */
         class TimecodePage final : public juce::Component
         {
         public:
@@ -7089,6 +7099,11 @@ namespace wfg::client::ui
                 : send (std::move (dispatch))
             {
                 namespace words = model::timecodeWords;
+                namespace timeWords = model::timeGroupWords;
+
+                viewport.setViewedComponent (&inner, false);
+                viewport.setScrollBarsShown (true, false);
+                addAndMakeVisible (viewport);
 
                 for (auto [label, said] : { std::pair { &rateLabel, words::frameRate },
                                             std::pair { &mtcLabel, words::mtcOut },
@@ -7098,7 +7113,7 @@ namespace wfg::client::ui
                                             std::pair { &carriesOnly, words::timecodeOnly } })
                 {
                     label->setText (said, juce::dontSendNotification);
-                    addAndMakeVisible (*label);
+                    inner.addAndMakeVisible (*label);
                 }
 
                 /*  THE RATES ARE FIXED, so their menu is filled once: the
@@ -7113,7 +7128,7 @@ namespace wfg::client::ui
                                            std::pair { &ltc, words::ltcOut } })
                 {
                     box->setTitle (title);
-                    addAndMakeVisible (*box);
+                    inner.addAndMakeVisible (*box);
                 }
 
                 rate.onChange = [this] { commitRate(); };
@@ -7125,23 +7140,75 @@ namespace wfg::client::ui
                 level.setTitle (words::ltcLevel);
                 level.onReturnKey = [this] { commitLevel(); };
                 level.onFocusLost = [this] { commitLevel(); };
-                addAndMakeVisible (level);
+                inner.addAndMakeVisible (level);
 
                 carriesOnly.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
                 carriesOnly.setVisible (false);
 
                 //  The machine's readings, quiet: nothing on them is a setting.
                 late.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-faint"));
-                addAndMakeVisible (late);
+                inner.addAndMakeVisible (late);
+
+                //  COMING IN: its heading, in the ink a heading is, then its two menus.
+                comingIn.setText (timeWords::comingIn, juce::dontSendNotification);
+                comingIn.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                comingIn.setFont (Look::font (themeToUse, 15.0f));
+                inner.addAndMakeVisible (comingIn);
+
+                for (auto [label, box, said] : { std::tuple { &ltcInLabel, &ltcIn, timeWords::ltcInOn },
+                                                 std::tuple { &mtcInLabel, &mtcIn, timeWords::mtcInOn } })
+                {
+                    label->setText (said, juce::dontSendNotification);
+                    inner.addAndMakeVisible (*label);
+                    box->setTitle (said);
+                    inner.addAndMakeVisible (*box);
+                }
+
+                ltcIn.onChange = [this] { commitChoice (ltcIn, ltcInChoices, "/godot/sync/ltcIn", shown.ltcIn); };
+                mtcIn.onChange = [this] { commitChoice (mtcIn, mtcInChoices, "/godot/sync/mtcIn", shown.mtcIn); };
+
+                /*  THE FOUR CHASE SETTINGS, each a number and its unit, written
+                    as the Playback tab writes its numbers: on Return or on
+                    leaving the box, a comma read as a point. */
+                for (auto [field, said, unit, address] :
+                     { std::tuple { &tolerance, timeWords::inStepWithin, timeWords::milliseconds, "/godot/sync/chaseTolerance" },
+                       std::tuple { &jumpPast, timeWords::jumpsPast, timeWords::seconds, "/godot/sync/chaseJump" },
+                       std::tuple { &catchUp, timeWords::catchesUpBy, timeWords::percent, "/godot/sync/chaseRate" },
+                       std::tuple { &crossfade, timeWords::jumpCrossfade, timeWords::milliseconds, "/godot/sync/chaseCrossfade" } })
+                {
+                    field->address = address;
+                    field->label.setText (said, juce::dontSendNotification);
+                    field->unit.setText (unit, juce::dontSendNotification);
+                    field->editor.setJustification (juce::Justification::centredLeft);
+                    field->editor.setInputRestrictions (8, "0123456789.,");
+                    field->editor.setTitle (said);
+                    //  A plain pointer, not the binding itself, for the two callbacks to hold.
+                    Number* const number = field;
+                    field->editor.onReturnKey = [this, number] { commitNumber (*number); };
+                    field->editor.onFocusLost = [this, number] { commitNumber (*number); };
+
+                    inner.addAndMakeVisible (field->label);
+                    inner.addAndMakeVisible (field->editor);
+                    inner.addAndMakeVisible (field->unit);
+                }
+
+                //  What the machine hears of each code the show names, as quiet as the late counts.
+                for (auto* heard : { &ltcHeard, &mtcHeard })
+                {
+                    heard->setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-faint"));
+                    inner.addAndMakeVisible (*heard);
+                }
             }
 
             void show (const model::SyncRow& sync, std::vector<model::SyncChoice> ports,
-                       std::vector<model::SyncChoice> outputs, bool editable)
+                       std::vector<model::SyncChoice> outputs, std::vector<model::SyncChoice> inputs, bool editable)
             {
                 shown = sync;
 
-                fill (mtc, mtcChoices, std::move (ports), sync.mtcOut);
+                fill (mtc, mtcChoices, ports, sync.mtcOut);
                 fill (ltc, ltcChoices, std::move (outputs), sync.ltcOut);
+                fill (mtcIn, mtcInChoices, std::move (ports), sync.mtcIn);
+                fill (ltcIn, ltcInChoices, std::move (inputs), sync.ltcIn);
 
                 auto rateId = 0;
                 const auto& rates = model::rateChoices();
@@ -7163,19 +7230,44 @@ namespace wfg::client::ui
                 if (const auto line = juce::String (model::lateLine (sync)); late.getText() != line)
                     late.setText (line, juce::dontSendNotification);
 
-                for (auto* control : std::initializer_list<juce::Component*> { &rate, &mtc, &ltc, &level })
+                for (auto [field, now] : { std::pair { &tolerance, &sync.chaseTolerance },
+                                           std::pair { &jumpPast, &sync.chaseJump },
+                                           std::pair { &catchUp, &sync.chaseRate },
+                                           std::pair { &crossfade, &sync.chaseCrossfade } })
+                {
+                    field->shown = *now;
+
+                    //  Not while it is being typed into - the Playback tab's rule.
+                    if (! field->editor.hasKeyboardFocus (true) && field->editor.getText() != juce::String (*now))
+                        field->editor.setText (juce::String (*now), juce::dontSendNotification);
+
+                    field->editor.setEnabled (editable);
+                }
+
+                /*  A LINE PER CODE THE SHOW NAMES, its place kept when there is
+                    none so the lines do not trade places as a source comes and
+                    goes. */
+                for (auto [heard, line] : { std::pair { &ltcHeard, model::codeInLine ("ltc", sync.ltcHeard) },
+                                            std::pair { &mtcHeard, model::codeInLine ("mtc", sync.mtcHeard) } })
+                    if (heard->getText() != juce::String (line))
+                        heard->setText (juce::String (line), juce::dontSendNotification);
+
+                for (auto* control : std::initializer_list<juce::Component*> { &rate, &mtc, &ltc, &level, &ltcIn, &mtcIn })
                     control->setEnabled (editable);
             }
 
             void resized() override
             {
-                auto area = getLocalBounds().reduced (22);
+                viewport.setBounds (getLocalBounds());
 
-                const auto row = [&area] (juce::Label& label, juce::Component& control, int width)
+                const auto width = juce::jmax (300, viewport.getWidth() - viewport.getScrollBarThickness());
+                auto area = juce::Rectangle<int> (0, 0, width, 10000).reduced (22);
+
+                const auto row = [&area] (juce::Label& label, juce::Component& control, int controlWidth)
                 {
                     auto line = area.removeFromTop (30);
                     label.setBounds (line.removeFromLeft (230));
-                    control.setBounds (line.removeFromLeft (width).reduced (0, 2));
+                    control.setBounds (line.removeFromLeft (controlWidth).reduced (0, 2));
                     area.removeFromTop (10);
                     return line;
                 };
@@ -7189,12 +7281,33 @@ namespace wfg::client::ui
                 carriesOnly.setBounds (area.removeFromTop (24).withTrimmedLeft (230));
                 area.removeFromTop (8);
 
-                auto line = row (levelLabel, level, 70);
-                line.removeFromLeft (6);
-                levelUnit.setBounds (line.removeFromLeft (60));
+                auto levelLine = row (levelLabel, level, 70);
+                levelLine.removeFromLeft (6);
+                levelUnit.setBounds (levelLine.removeFromLeft (60));
 
                 area.removeFromTop (14);
                 late.setBounds (area.removeFromTop (24));
+
+                //  Coming in, under a heading of its own.
+                area.removeFromTop (18);
+                comingIn.setBounds (area.removeFromTop (28));
+                area.removeFromTop (6);
+
+                row (ltcInLabel, ltcIn, 360);
+                row (mtcInLabel, mtcIn, 360);
+
+                for (auto* field : { &tolerance, &jumpPast, &catchUp, &crossfade })
+                {
+                    auto line = row (field->label, field->editor, 70);
+                    line.removeFromLeft (6);
+                    field->unit.setBounds (line.removeFromLeft (60));
+                }
+
+                area.removeFromTop (4);
+                ltcHeard.setBounds (area.removeFromTop (24));
+                mtcHeard.setBounds (area.removeFromTop (24));
+
+                inner.setSize (width, mtcHeard.getBottom() + 22);
             }
 
         private:
@@ -7286,12 +7399,43 @@ namespace wfg::client::ui
                 send (gesture::setNode ("/godot/sync/ltcLevel", typed));
             }
 
+            /*  ONE CHASE SETTING: the row it writes, what the show says now, and
+                its label, box and unit. */
+            struct Number
+            {
+                std::string address, shown;
+                juce::Label label, unit;
+                juce::TextEditor editor;
+            };
+
+            void commitNumber (Number& field)
+            {
+                if (! send || ! field.editor.isEnabled())
+                    return;
+
+                /*  A COMMA IS A DECIMAL POINT, as for the level above; a value
+                    the show already holds is not an edit. The engine judges the
+                    range (`sync/chase*`'s own), as it judges every row. */
+                const auto typed = field.editor.getText().trim().replaceCharacter (',', '.').toStdString();
+                const auto value = osc::parseDouble (typed);
+
+                if (! value || std::abs (*value - osc::parseDouble (field.shown).value_or (-1.0)) < 1.0e-9)
+                    return;
+
+                send (gesture::setNode (field.address, typed));
+            }
+
             std::function<void (Event)> send;
             model::SyncRow shown;
-            std::vector<model::SyncChoice> mtcChoices, ltcChoices;
+            std::vector<model::SyncChoice> mtcChoices, ltcChoices, ltcInChoices, mtcInChoices;
+            juce::Viewport viewport;
+            juce::Component inner;
             juce::Label rateLabel, mtcLabel, ltcLabel, levelLabel, levelUnit, carriesOnly, late;
             juce::ComboBox rate, mtc, ltc;
             juce::TextEditor level;
+            juce::Label comingIn, ltcInLabel, mtcInLabel, ltcHeard, mtcHeard;
+            juce::ComboBox ltcIn, mtcIn;
+            Number tolerance, jumpPast, catchUp, crossfade;
         };
 
         /*  WHAT TO DO FIRST, AND WHAT EACH TAB IS FOR (author, 2026-09-30:
@@ -7347,8 +7491,9 @@ namespace wfg::client::ui
                                       " born with from the Add lists." },
                     { model::timecodeWords::tab,
                                       "The timecode the show sends a desk or a server: its frame rate, the MIDI"
-                                      " port MTC leaves on and the output LTC plays on. Nothing to do for a"
-                                      " show that sends none." },
+                                      " port MTC leaves on and the output LTC plays on - and the timecode its"
+                                      " time groups follow: where LTC and MTC come in and how their members"
+                                      " keep up. Nothing to do for a show that sends and follows none." },
                     { "Playback",     "How GO, Doh! and Esc behave: the least time between two GOs, how"
                                       " long after a GO it can be taken back, and how long the panic fade"
                                       " takes." },
@@ -7783,9 +7928,12 @@ namespace wfg::client::ui
             /*  THE SHOW'S TIMECODE (namespace draft §59): the document's, re-read
                 every pass like the rest, since each control lands at once as a
                 `node.set` - its menus made of the ports and outputs the tabs
-                before it declare, its quiet line the machine's counts. */
+                before it declare, its quiet line the machine's counts - and the
+                codes coming in (§60), from the same ports and the named inputs,
+                with what the machine hears of each. */
             timecode->show (model::readSync (snapshot), model::mtcPortChoices (ports),
                             model::ltcOutputChoices (model::readOutputs (snapshot)),
+                            model::ltcInputChoices (model::readInputs (snapshot)),
                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 
             /*  GO AND ESC: the document's, re-read every pass like the outputs,

@@ -100,6 +100,12 @@ namespace wfg::client::ui
         juce::String clockOf (int index) const;
         bool drawsHead (int index) const;
 
+        /*  WHAT A ROW SAYS BESIDE ITS NAME - a sampler's count, a mic's
+            channel, a time group's code, a chaser's step (namespace draft §60),
+            its counts and its speed - the painter's own words, public so a
+            test reads what a hand would see. Empty past the end. */
+        juce::String besideOf (int index) const;
+
         /*  WHAT THE GHOST HEAD'S BOX SAYS while a scrub is held - the clock of
             the second a release sends, or a timecode run's label there (§59) -
             and empty otherwise. Public so a test reads what a hand would see. */
@@ -217,6 +223,9 @@ namespace wfg::client::ui
             painter and for `drawsHead` and `clockOf`. */
         bool headFor (const model::RunRow& entry) const;
         static juce::String clockFor (const model::RunRow& entry);
+
+        //  The words beside the name: one answer for the painter and for `besideOf`.
+        static std::string besideFor (const model::RunRow& entry);
 
         /*  How wide the clock cell is in `font`: the seconds' five units, or a
             timecode label's width - the row and the ghost's box agree on it. */

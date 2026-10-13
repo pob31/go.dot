@@ -6783,3 +6783,96 @@ TEST_CASE ("osc messages: the arrow beside an address asks for its device's tree
     CHECK (submenus == 4);
     CHECK (ticked == 2);
 }
+
+TEST_CASE ("run pane: a time group's row says the code it follows, and a chasing member how far out of step it is")
+{
+    /*  Namespace draft §60 (TG.10, the implementer's words accepted by the
+        author as offered): the group's row says "LTC 01:02:03:04", the clock's
+        "clock 20:15:03"; a member that chases "3 ms out", and the engine's
+        word while it catches up - beside the name, where a mic run says its
+        channel, before its speed. Painted too, and with WFG_SNAPSHOT_DIR set,
+        run-pane-timegroup.png. */
+    const auto run = [] (const char* runId, const char* name, const char* kind, std::string words, int depth)
+    {
+        model::RunRow row;
+        row.id = runId;
+        row.cueId = std::string ("CUE") + runId;
+        row.cueName = name;
+        row.kind = kind;
+        row.state = "playing";
+        row.position = "12.2";
+        row.seconds = 12.16;
+        row.liveWords = std::move (words);
+        row.depth = depth;
+        return row;
+    };
+
+    auto catching = run ("RUNTG003", "Wind", "media", model::chaseWords ("catching", -12.6), 1);
+    catching.rate = 1.01;
+
+    const std::vector<model::RunRow> rows {
+        run ("RUNTG001", "Show code", "group", model::followsWords ("ltc", { "running", "01:02:03:04", "25", 1.0 }, -1), 0),
+        run ("RUNTG002", "Rain", "media", model::chaseWords ("inStep", 3.2), 1),
+        catching,
+        run ("RUNTG004", "Bell", "media", model::chaseWords ("free", 0.0), 1),
+        run ("RUNTG005", "Doors", "group", model::followsWords ("clock", {}, ((20LL * 60 + 15) * 60 + 3) * 1000), 0) };
+
+    ui::RunPaneComponent pane (model::Theme {}, {});
+    pane.setSize (450, 260);
+    pane.show (rows, {});
+
+    CHECK (pane.besideOf (0) == "LTC 01:02:03:04");
+    CHECK (pane.besideOf (1) == "3 ms out");
+    CHECK (pane.besideOf (2) == juce::String::fromUTF8 ("13 ms out \xc2\xb7 catching \xc2\xb7 \xc3\x97" "1.01"));
+    CHECK (pane.besideOf (3).isEmpty());
+    CHECK (pane.besideOf (4) == "clock 20:15:03");
+    CHECK (pane.besideOf (5).isEmpty());
+
+    /*  AND THE PICTURE AGREES: a chaser three milliseconds out and one twelve
+        out paint differently, and a code that moved paints a different row. */
+    const auto painted = [] (const std::vector<model::RunRow>& drawn)
+    {
+        ui::RunPaneComponent one (model::Theme {}, {});
+        one.setSize (450, 60);
+        one.show (drawn, {});
+
+        juce::Image canvas (juce::Image::ARGB, 450, 60, true);
+        juce::Graphics g (canvas);
+        one.paintEntireComponent (g, false);
+        return canvas;
+    };
+
+    const auto differ = [] (const juce::Image& a, const juce::Image& b)
+    {
+        for (int y = 0; y < a.getHeight(); ++y)
+            for (int x = 0; x < a.getWidth(); ++x)
+                if (a.getPixelAt (x, y) != b.getPixelAt (x, y))
+                    return true;
+
+        return false;
+    };
+
+    CHECK (differ (painted ({ run ("RUNTG006", "Rain", "media", model::chaseWords ("inStep", 3.0), 0) }),
+                   painted ({ run ("RUNTG006", "Rain", "media", model::chaseWords ("inStep", 12.0), 0) })));
+    CHECK (differ (painted ({ run ("RUNTG007", "Code", "group", "LTC 01:02:03:04", 0) }),
+                   painted ({ run ("RUNTG007", "Code", "group", "LTC 01:02:03:05", 0) })));
+
+    juce::Image canvas (juce::Image::ARGB, 450, 260, true);
+    juce::Graphics g (canvas);
+    pane.paintEntireComponent (g, false);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto picture = pane.createComponentSnapshot (pane.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("run-pane-timegroup.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}

@@ -208,6 +208,13 @@ namespace wfg::client::model
                 { "kind-process",   0xFF7FD1AE },   // namespace draft §51: a seafoam no other kind wears
                 { "kind-timecode",  0xFFBCD65E },   // namespace draft §59: a lime, between OSC's yellow and video's green, never red
                 { "kind-group",     0xFFC6C1B9 },
+
+                /*  A TIME GROUP'S (namespace draft §60, TG.10): an orchid, at
+                    about 282° in the widest gap the kinds leave on the wheel -
+                    between MIDI's violet (258°) and the mic's pink (320°) - and
+                    far from the failure's red. The one group with a hue: its
+                    members are started by a time, not by GO or a hand. */
+                { "kind-timegroup", 0xFFCF8CEB },
             };
 
             return table;

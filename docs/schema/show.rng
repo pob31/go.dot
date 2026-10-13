@@ -251,7 +251,7 @@
       </optional>
       <optional>
         <attribute name="chase">
-          <a:documentation>A time group&apos;s member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue&apos;s own speed mode says, and wfg validate says so (AIU).</a:documentation>
+          <a:documentation>A time group&apos;s member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue&apos;s own speed mode says - which wfg validate does not warn of, since a speed mode left at its default reads varispeed and every timestretch chaser would be (AIU).</a:documentation>
           <choice>
             <value>free</value>
             <value>jump</value>
@@ -524,7 +524,7 @@
       </optional>
       <optional>
         <attribute name="chase">
-          <a:documentation>A time group&apos;s member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue&apos;s own speed mode says, and wfg validate says so (AIU).</a:documentation>
+          <a:documentation>A time group&apos;s member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue&apos;s own speed mode says - which wfg validate does not warn of, since a speed mode left at its default reads varispeed and every timestretch chaser would be (AIU).</a:documentation>
           <choice>
             <value>free</value>
             <value>jump</value>
@@ -1445,7 +1445,7 @@
       </optional>
       <optional>
         <attribute name="chase">
-          <a:documentation>A time group&apos;s member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue&apos;s own speed mode says, and wfg validate says so (AIU).</a:documentation>
+          <a:documentation>A time group&apos;s member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue&apos;s own speed mode says - which wfg validate does not warn of, since a speed mode left at its default reads varispeed and every timestretch chaser would be (AIU).</a:documentation>
           <choice>
             <value>free</value>
             <value>jump</value>

@@ -139,8 +139,11 @@ namespace wfg::client::model
 
                 /*  `takeover` BESIDE `mode`, because it is a question only a
                     sampler group is asked and the answer to `mode` is what
-                    makes it one; the DCA the whole group answers to last. */
-                { "group",   { "mode", "takeover", "advance", "selection", "play", "loops",
+                    makes it one; the DCA the whole group answers to last.
+                    `timeSource` after it for the same reason, a time group's
+                    question (namespace draft §60) - and first of all on a time
+                    group itself, which `inspect` moves it to. */
+                { "group",   { "mode", "takeover", "timeSource", "advance", "selection", "play", "loops",
                                "seed", "dca", "dcaCurve", "dcaOffset" } },
                 { "range",   { "name", "in", "out", "loops" } },
                 { "trigger", { "kind", "enabled", "address", "value", "port", "channel",
@@ -581,6 +584,113 @@ namespace wfg::client::model
                         field.value.clear();
                         field.placeholder = timecodeWords::untilStopped;
                     }
+                }
+            }
+        }
+
+        /*  A CLOSED SET OF STORED WORDS AS A MENU OF SAID ONES: the node's own
+            values, each worded where the table knows it, so a value the engine
+            grows later keeps its stored word in the menu, as a verb does. */
+        void wordTheOptions (Field& field, const std::vector<std::pair<std::string, std::string>>& said)
+        {
+            if (! field.writable || field.options.empty())
+                return;
+
+            field.choices.clear();
+
+            for (const auto& option : field.options)
+            {
+                auto word = option;
+
+                for (const auto& [stored, shown] : said)
+                    if (stored == option)
+                        word = shown;
+
+                field.choices.emplace_back (option, word);
+            }
+        }
+
+        /*  WHAT A CODE ASKS OF THIS CUE (namespace draft §60): whether it is a
+            MEMBER of a time group - a sound, a picture or a group whose parent
+            is one, and in its members and not its header or footer, which are
+            the group's own and no code starts - and then which source its time
+            is read under, the group's `timeSource` or the table's `ltc`; and
+            whether it IS a time group, which is asked where it follows. Read
+            once, for the words, the greying and the order alike. */
+        struct CodeAsks
+        {
+            bool member = false;
+            bool group = false;
+            std::string source;
+        };
+
+        CodeAsks whatACodeAsks (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                                const std::string& kind, const std::vector<Field>& decided)
+        {
+            CodeAsks asks;
+
+            if (kind != "media" && kind != "video" && kind != "group")
+                return asks;
+
+            const auto base = "/godot/cue/" + cueId + "/";
+            const auto parent = text (snapshot, base + "parent");
+            const auto parentBase = "/godot/cue/" + parent + "/";
+
+            asks.member = text (snapshot, base + "role") == "member" && ! parent.empty()
+                            && cue::isTimeGroup (cue::GroupMode { text (snapshot, parentBase + "mode"), {} });
+
+            for (const auto& field : decided)
+                if (field.name == "mode")
+                    asks.group = kind == "group" && cue::isTimeGroup (cue::GroupMode { field.value, {} });
+
+            if (asks.member)
+            {
+                asks.source = text (snapshot, parentBase + "timeSource");
+
+                if (asks.source.empty())
+                    asks.source = "ltc";
+            }
+
+            return asks;
+        }
+
+        /*  A TIME GROUP AND ITS MEMBERS IN WORDS (namespace draft §60, TG.10 -
+            the implementer's words, accepted by the author as offered, and
+            model/Timecode.h's): the group's source is what it "follows", LTC
+            in, MTC in or the clock; a member "starts at" its time, shown as
+            the list shows it - with its semicolon at drop-frame - and its
+            "chase" is a menu of the four ways it keeps up. Worded on every
+            sound, picture and group that carries the rows, greyed or not, so
+            a cue moved into a time group finds its rows already named.
+
+            ASKED BY NAME AND ONLY FOR THESE KINDS: a clock trigger has an `at`
+            too, which is the trigger's and is not a member's time. */
+        void wordTheTime (const tree::TreeSnapshot& snapshot, const std::string& kind, const CodeAsks& asks,
+                          std::vector<Field>& decided)
+        {
+            if (kind != "media" && kind != "video" && kind != "group")
+                return;
+
+            const auto rate = text (snapshot, "/godot/sync/frameRate");
+
+            for (auto& field : decided)
+            {
+                if (field.name == "at")
+                {
+                    field.label = timeGroupWords::startsAt;
+
+                    if (! field.mixed)
+                        field.value = memberTime (field.value, asks.source, rate);
+                }
+                else if (field.name == "chase")
+                {
+                    field.label = timeGroupWords::chase;
+                    wordTheOptions (field, chaseChoices());
+                }
+                else if (field.name == "timeSource")
+                {
+                    field.label = timeGroupWords::follows;
+                    wordTheOptions (field, timeSourceChoices());
                 }
             }
         }
@@ -1087,36 +1197,18 @@ namespace wfg::client::model
             AND A TIME GROUP IS ASKED NO ROUND, as a sampler is not: its code
             starts each member at its own time, so how it advances, how a round
             is drawn and how many it plays mean nothing to it. */
-        void greyWhatOnlyACodeAsks (const tree::TreeSnapshot& snapshot, const std::string& cueId,
-                                    const std::string& kind, std::vector<Field>& decided)
+        void greyWhatOnlyACodeAsks (const std::string& kind, const CodeAsks& asks, std::vector<Field>& decided)
         {
             if (kind != "media" && kind != "video" && kind != "group")
                 return;
 
-            const auto valueOf = [&decided] (const std::string& name)
-            {
-                for (const auto& field : decided)
-                    if (field.name == name)
-                        return field.value;
-
-                return std::string {};
-            };
-
-            const auto base = "/godot/cue/" + cueId + "/";
-            const auto parent = text (snapshot, base + "parent");
-            const auto member = text (snapshot, base + "role") == "member";
-            const auto timed = member && ! parent.empty()
-                                 && cue::isTimeGroup (cue::GroupMode { text (snapshot, "/godot/cue/" + parent + "/mode"),
-                                                                       {} });
-            const auto timeGroup = kind == "group" && cue::isTimeGroup (cue::GroupMode { valueOf ("mode"), {} });
-
             for (auto& field : decided)
             {
                 if (field.name == "at" || field.name == "chase")
-                    field.applies = timed;
+                    field.applies = asks.member;
                 else if (field.name == "timeSource")
-                    field.applies = timeGroup;
-                else if (timeGroup && named (roundRows, field.name))
+                    field.applies = asks.group;
+                else if (asks.group && named (roundRows, field.name))
                     field.applies = false;
             }
         }
@@ -1658,6 +1750,10 @@ namespace wfg::client::model
         if (out.kind == "timecode")
             wordTheCode (snapshot, decided);
 
+        //  A time group and its members, in words (namespace draft §60, TG.10).
+        const auto asks = whatACodeAsks (snapshot, cueId, out.kind, decided);
+        wordTheTime (snapshot, out.kind, asks, decided);
+
         /*  AN UNNAMED CUE'S NAME BOX shows, greyed, what the cue is called
             while it stays unnamed (namespace draft §53): a fade after its
             target, a sound after its file. Typing names it; emptying the box
@@ -1677,7 +1773,7 @@ namespace wfg::client::model
         offerTheGroupsAround (snapshot, cueId, decided);
 
         greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
-        greyWhatOnlyACodeAsks (snapshot, cueId, out.kind, decided);
+        greyWhatOnlyACodeAsks (out.kind, asks, decided);
         greyTheMapping (out.kind, decided);
 
         /*  THE EQ'S NINETEEN ROWS HAVE AN EDITOR OF THEIR OWN (Phase 9a), the
@@ -1720,11 +1816,26 @@ namespace wfg::client::model
                                     { return field.name == "sends" || field.name == "eq" || field.name == "fx"; });
 
         //  The four blocks, in the order somebody fills them in.
-        const auto kindRows = [&out]
+        auto kindRows = [&out]
         {
             const auto found = kindOrder().find (out.kind);
             return found != kindOrder().end() ? found->second : std::vector<std::string> {};
         }();
+
+        /*  WHAT A CODE ASKS FIRST, where a code asks it (namespace draft §60,
+            TG.10): a time group's member says when it starts and how it keeps
+            up before what it plays - those two are why it is in the group - and
+            a time group says what it follows before anything else. Elsewhere
+            the rows keep their places, greyed: at the end of what a cue does,
+            and `timeSource` beside a group's `mode`. */
+        if (asks.member)
+            kindRows.insert (kindRows.begin(), { "at", "chase" });
+
+        if (asks.group)
+        {
+            std::erase (kindRows, std::string ("timeSource"));
+            kindRows.insert (kindRows.begin(), "timeSource");
+        }
 
         Block isBlock { "what it is", {} }, whenBlock { "when", {} },
               doesBlock { "what it does", {} }, listBlock { "in the list", {} },

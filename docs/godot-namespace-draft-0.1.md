@@ -27661,6 +27661,105 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   one to correct, with the schema regenerated (TG.10); nothing has listened to a stretcher whose ratio moves
   every tick, nor measured what that costs it (M46 measured steady speeds) - M64 owes the render; and nothing
   measures what steering costs a tick with hundreds of chasers.
+- **TG.10**, 2026-10-13: the window - the + group line, the inspector, the Timecode tab's Coming in part, the
+  list's columns, the icon and accent, the running pane (AJA). THE WORDS were worded by the implementer and
+  the author accepted them as offered (2026-10-12/13); each is a constant in one place, `client/model/Timecode.h`'s
+  `timeGroupWords` beside TC.8's `timecodeWords`, so a later change is one edit: the + group list's line **Time
+  group**, "its members start when LTC, MTC or the clock reaches their time"; the group's **follows** with **LTC
+  in**, **MTC in**, **the clock**; a member's **starts at** and **chase** with **free run**, **jump**, **catch up,
+  varispeed**, **catch up, timestretch**; **time** in the kind column; the tab's **Coming in** with **LTC comes in
+  on**, **MTC comes in on**, **in step within** (ms), **jumps past** (s), **catches up by at most** (%), **jump
+  crossfade** (ms), and a line per source such as "LTC in: running, 01:02:03:04 at 25, +12 ppm"; in the running
+  pane "LTC 01:02:03:04", "MTC ...", "clock 20:15:03" on a time group's row and "3 ms out" on a chaser's. Two
+  things on screen were not among them and are the implementer's alone, for the author to see: a code a hundredth
+  or more off Go.dot's speed says its speed as the window says any ("×0.5") rather than half a million parts per
+  million; and the Timecode tab's Getting started line, which now names what comes in too.
+  **The model** (`Timecode.{h,cpp}`, std only): `SyncRow` gains `ltcIn`, `mtcIn`, the four chase settings as the
+  tree wrote them and `ltcHeard`/`mtcHeard` (`SyncRow::CodeIn`, read by `readCodeIn` from
+  `sync/{ltc,mtc}In{State,Code,Rate,Speed}`); `ltcInputChoices` - None, then every named input, one wider than a
+  channel listed and DISABLED with the outputs' own reason, one helper (`oneChannel`) for both ends; MTC's menu is
+  TC.8's `mtcPortChoices`; `codeInLine` and `comingInLines` - the engine's state word, then only what that state has:
+  a stopped code where it stopped, an absent one no more, a running one its speed off one in ppm, the label with
+  its semicolon at drop-frame through `shownLabel` at the code's own rate; `timeSourceChoices`, `chaseChoices`;
+  `groupModeWord` (asked through `cue::isTimeGroup`); `memberTime` - a label at the show's rate with its drop-frame
+  semicolon for LTC and MTC, the stored `HH:MM:SS` for the clock; `clockLabel`; `followsWords` - a running code its
+  label alone, any other its state word first, the clock from the millisecond handed in or "clock" alone; and
+  `chaseWords` - whole milliseconds, no side, and the engine's `catching` or `jumped` after it, nothing for a run
+  that does not chase.
+  **The + group list** (`NewCueMenus.cpp`): the Time group line last, after the sampler, born `{mode=time}`
+  (`ltc` by default). `Wrap::allTimeable` beside `allPlayable`: every picked cue, a picked group's picked members
+  riding in with it, a sound, a picture, or a group the engine's `pacedByMachine` says is a timeline or an
+  automatic sequence - what `groupSelection` asks of each node it would move (AIK); a locked sound needs no movie
+  here. Around picked cues the line is offered only then, judged from the line's own `mode` setting through
+  `cue::isTimeGroup` - the very word `groupSelection` reads to refuse - so no new field on `Choice`, whose lines are
+  aggregates spelled in full; in the empty part, always. The sampler and the time group are asked apart: a timeline
+  picked alone is offered the time group and not the sampler.
+  **The inspector** (`Inspector.cpp`): `whatACodeAsks` reads once whether a cue is a time group's MEMBER (in its
+  members, not its header or footer) and under which source, and whether it IS a time group - for the words, TG.2's
+  greying (`greyWhatOnlyACodeAsks`, now fed it) and the order alike. `wordTheTime`, on a sound, a picture and a group
+  only (a clock trigger's `at` is the trigger's), names `timeSource` "follows", `at` "starts at" shown through
+  `memberTime`, `chase` "chase", the two menus worded by `wordTheOptions` from the node's own values; worded greyed
+  or not, so a cue moved into a time group finds its rows named. THE ORDER: a member's `at` and `chase` first in what
+  it does - they are why it is in the group - and a time group's `timeSource` first of all; every other group asks
+  `timeSource` after `mode` and the sampler's `takeover` (an existing case pins `takeover` beside `mode`, and a
+  first draft that put `timeSource` between them turned it red). The head's and the drawer's accent are asked with
+  the mode (`InspectorComponent`, two lines).
+  **The Timecode tab** (`ShowSettingsWindow.cpp`): under the outgoing rows a heading, **Coming in**, then LTC comes
+  in on (the named inputs, re-read every pass), MTC comes in on (the ports the MIDI tab declares), the four numbers
+  with their units - each a `node.set` on its `/godot/sync` row on Return or on leaving the box, a comma read as a
+  point, a value the show already holds not sent, the range the engine's to judge - and a line for each code the show
+  names, its place kept when there is none; all six disabled under the lock; a menu's disabled item never sent, a
+  stored value no longer offered kept and marked, TC.8's `fill` and `commitChoice` for both. The page now scrolls in a
+  viewport, as Getting started does: the two parts are taller than the window.
+  **The list**: the kind column says `groupModeWord`'s "time"; a member's time column is its `at` -
+  `Row::memberOfTimeGroup` (a member, not header or footer, of a time group, on a cue that carries the row) and
+  `duration` through `memberTime` - squeezed to fit (`drawFittedText`, to half its width) since a label is eleven
+  characters where a number is five; the cell writes `at` (`editAttributeFor (EditCell, const Row&)`, beside the
+  kind's, the four call sites handing the row). Its length is no longer in the column: the inspector and the running
+  pane still say it. **The icon**, `Icon::timeGroup`: the plain group's back frame with a clock face where its front
+  frame stands, its hands at four o'clock - drawn, the frame behind telling it from the inspector's "when" drawer.
+  **The accent**, `kind-timegroup` 0xFFCF8CEB, an orchid at about 282°, in the widest gap the kinds leave on the wheel
+  (MIDI's violet 258°, the mic's pink 320°), far from the failure's red; `accentFor (kind, mode)`, a time group the
+  one group with a hue - on its row, its inspector's head and its drawer.
+  **The running pane** (`RunModel.cpp`): `readRuns (snapshot, clockMilliseconds)` - the window's own wall clock,
+  which `Client.cpp` reads from `juce::Time` each pass, since the engine publishes no clock row and the window runs
+  on the engine's machine; a time group's run says `followsWords` of its cue's source, its readouts asked only for a
+  time group; any run whose `run/chaseState` is not `free` says `chaseWords` of its `run/chaseError`; both in
+  `RunRow::liveWords`, drawn where a mic run says its channel, before its counts and its speed.
+  `RunPaneComponent::besideFor`, one answer for the painter and for `besideOf`, which a test reads.
+  **The page** (`clients/console`): nothing. Its generic inspector already draws `at`, `chase` and `timeSource` -
+  unclaimed rows, at the end of their block alphabetically, the two closed sets as selects from `RANGE`.
+  **A stale description mended**: `timed/chase`'s row said `wfg validate` warns of a chase against the cue's own
+  speed mode, which AIU and 60.5 say it does not; it now says why it does not. `SchemaTable.generated.h` and
+  `docs/schema/show.rng` regenerated.
+  Tests under C and fr_FR. `ClientTests`, six new cases: the + group line, its words, made through `cue.create` and
+  read back as `time` with its kind column's word, `allTimeable` true for a sound, a picture, a timeline and an
+  automatic sequence and false with a memo, a timecode cue, a manual sequence or a sampler, offered around them only
+  then and in the empty part always, a lone timeline offered the time group and not the sampler, the engine refusing
+  a wrap the list did not offer and taking the one it did; the inspector's order, labels and menus on a time group,
+  another group, a sound and a scene member and a cue in no time group, the drop-frame semicolon with the stored
+  text's colons, the clock's time; `readSync`'s new rows before and after each `node.set`, the input menu with a
+  stereo input disabled, the readout lines through `EngineState` and five more by hand; a time group's run on LTC
+  running and stopped, MTC at drop-frame and absent, the clock and the clock unknown, chasers in step, catching and
+  free; the list's time column, the cell's `at`, drop-frame and the clock; the icon and an accent no other kind's
+  and not the failure's. Two cases amended - the group list (a memo now refuses two lines; the sampler found by its
+  label, no longer last) and TG.2's icon (now its own) - and the new-cue lines' case makes the sixth line too. `RunPaneUiTests`
+  (the words beside a time group's and a chaser's names, and the picture differing with them), `ShowSettingsUiTests`
+  (the Coming in part's labels, defaults, each control's `node.set`, a stereo input never sent, the readout lines,
+  the lock; TC.8's case counts five menus and five boxes now). Run: `ClientTests` whole (213 cases) and
+  `RunPaneUiTests` whole (68) in both locales, the Timecode tab's two cases and Getting started's (the window opens
+  for a moment), `client.boundary`, `schema.generated`, `wfg.schema` in both, `schema.fixtures`, `source.comments`.
+  Fifteen deliberate breakages, each turning its own cases red: the line offered around anything; no scene
+  timeable; no member order; no `timeSource` first; the time column left alone; the label shown without its
+  semicolon; `catching` unsaid; the clock never read; the cell writing the kind's; the accent the group's; stereo
+  inputs enabled; the ppm without its sign; `ltcIn`'s menu not wired; two chase boxes writing one row; the pane
+  dropping the live words. clang-tidy's stand-in for the strict job: nothing in the touched files (its run proved by
+  a planted shadow).
+  Left: a time group's scrub still says nothing - a sentence for it was not among the words offered; TG.2's
+  automatic names ("Time group on LTC", "on MTC", "on the wall clock") are still the implementer's, not yet put to
+  the author; the readout line shows the incoming rate and the show's is the tab's own Frame rate row, with no word
+  of a mismatch beside it, which `sync/ltcInRate`'s description promises - a phrase for the author; the time column
+  shows a member's `at` in place of its length.
 
 ## 61. Keys, text and blur
 

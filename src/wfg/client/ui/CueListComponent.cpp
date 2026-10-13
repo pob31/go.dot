@@ -298,7 +298,7 @@ namespace wfg::client::ui
 
         /*  A COLUMN THAT IS NOT THIS CUE'S TO WRITE says so rather than opening
             a box that would be refused: a media cue's duration is its file's. */
-        if (model::editAttributeFor (cell, entry.kind).empty())
+        if (model::editAttributeFor (cell, entry).empty())
         {
             if (actions.say)
                 actions.say (cell == model::EditCell::duration
@@ -317,7 +317,7 @@ namespace wfg::client::ui
             commitEdit();
 
         const auto& entry = rows[static_cast<std::size_t> (row)];
-        const auto attribute = model::editAttributeFor (cell, entry.kind);
+        const auto attribute = model::editAttributeFor (cell, entry);
 
         if (attribute.empty())
             return;
@@ -391,6 +391,7 @@ namespace wfg::client::ui
                        : attribute == "preWait"  ? entry.preWait
                        : attribute == "duration" ? entry.duration
                        : attribute == "length"   ? entry.duration     // a timecode cue's time (§59)
+                       : attribute == "at"       ? entry.duration     // a time group's member's (§60)
                                                  : entry.postWait;
 
         if (text != was && actions.setValue)
@@ -436,7 +437,7 @@ namespace wfg::client::ui
 
             for (at += cellStep; at >= 0 && at < 5; at += cellStep)
             {
-                if (! model::editAttributeFor (order[at], entry.kind).empty())
+                if (! model::editAttributeFor (order[at], entry).empty())
                 {
                     beginEdit (row, order[at]);
                     return;
@@ -453,7 +454,7 @@ namespace wfg::client::ui
             if (entry.rowKind != model::RowKind::cue || entry.derived)
                 continue;
 
-            if (model::editAttributeFor (cell, entry.kind).empty())
+            if (model::editAttributeFor (cell, entry).empty())
                 continue;
 
             list.scrollToEnsureRowIsOnscreen (row);
@@ -795,16 +796,25 @@ namespace wfg::client::ui
         {
             auto cell = area.removeFromRight (timeChars * unit);
             g.setColour (faint);
-            g.drawText (*when, cell.reduced (pad / 2, 0), juce::Justification::centredRight, false);
+
+            /*  A TIME GROUP'S MEMBER'S TIME IS A LABEL (namespace draft §60),
+                eleven characters where a number is five: squeezed to fit the
+                cell rather than cut, since the frames at its end are the part
+                that tells two members apart. */
+            if (when == &entry.duration && entry.memberOfTimeGroup)
+                g.drawFittedText (*when, cell.reduced (pad / 2, 0), juce::Justification::centredRight, 1, 0.5f);
+            else
+                g.drawText (*when, cell.reduced (pad / 2, 0), juce::Justification::centredRight, false);
         }
 
-        /*  WHAT THE ROW IS, IN A WORD: a group's mode, a transport cue's
-            verb (2026-09-27: "stop", "round", "rec" - the list that made it
-            told them apart, so the row does too), a timecode cue's code - MTC
-            or LTC (namespace draft §59, AHD) - else the kind. */
+        /*  WHAT THE ROW IS, IN A WORD: a group's mode - "time" for a time
+            group (namespace draft §60), model/Timecode.h's word - a transport
+            cue's verb (2026-09-27: "stop", "round", "rec" - the list that made
+            it told them apart, so the row does too), a timecode cue's code -
+            MTC or LTC (namespace draft §59, AHD) - else the kind. */
         auto kindCell = area.removeFromRight (kindChars * unit);
         g.setColour (faint);
-        g.drawText (entry.isGroup && ! entry.mode.empty() ? juce::String (entry.mode)
+        g.drawText (entry.isGroup && ! entry.mode.empty() ? juce::String (model::groupModeWord (entry.mode))
                       : ! entry.verb.empty()               ? juce::String (model::verbWord (entry.verb, entry.andGo))
                       : entry.followsMovie                 ? juce::String ("sound")
                       : entry.kind == "timecode"           ? juce::String (model::formatWord (entry.format))
@@ -921,7 +931,7 @@ namespace wfg::client::ui
         {
             const auto iconCell = entry.isGroup ? area.removeFromLeft (indent) : markCell;
             const auto side = juce::jmin (static_cast<float> (indent) * 0.82f, 13.0f * static_cast<float> (theme.type));
-            auto tint = Look::colour (theme, model::accentFor (entry.kind).c_str());
+            auto tint = Look::colour (theme, model::accentFor (entry.kind, entry.mode).c_str());
 
             if (! entry.runsNow() || entry.derived)
                 tint = tint.withMultipliedAlpha (0.45f);

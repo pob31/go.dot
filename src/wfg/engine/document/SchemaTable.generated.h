@@ -1164,7 +1164,7 @@ namespace wfg::doc::generated
           enum_timed_chase, 4,
           "", 50.0, false, "park",
           "",
-          "A time group's member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue's own speed mode says, and wfg validate says so (AIU)." },
+          "A time group's member: how it keeps up with the code once it is playing (namespace draft 60, AIF). free plays on at its own speed from where it started. jump jumps to where the code says it should be once it is more than sync/chaseTolerance out, over sync/chaseCrossfade. varispeed and timestretch run it up to sync/chaseRate faster or slower until it is back in step - varispeed bending the pitch, timestretch keeping it - and jump instead past sync/chaseJump; either one decides how the voice changes speed, whatever the cue's own speed mode says - which wfg validate does not warn of, since a speed mode left at its default reads varispeed and every timestretch chaser would be (AIU)." },
         { "sound", "eqOn",
           ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "true",

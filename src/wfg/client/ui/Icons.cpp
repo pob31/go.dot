@@ -313,6 +313,25 @@ namespace wfg::client::ui
                     f.addRoundedRectangle (13.0f, 13.0f, 7.0f, 7.0f, 1.5f);
                     break;
 
+                case model::Icon::timeGroup:
+                    /*  A TIME GROUP (namespace draft §60): the plain group's
+                        back frame, and in front of it a clock face where the
+                        group has its front frame - a group whose members a
+                        time starts. Drawn, not a letter. The face fills the
+                        front frame's box, so the back frame meets it where it
+                        meets the frame; the frame behind is what tells it from
+                        the inspector's "when" drawer, a clock alone. */
+                    ring (l, 9.5f, 14.5f, 6.5f);
+                    l.startNewSubPath (8.0f, 8.0f);
+                    l.lineTo (8.0f, 3.5f);
+                    l.lineTo (21.0f, 3.5f);
+                    l.lineTo (21.0f, 16.0f);
+                    l.lineTo (16.0f, 16.0f);
+                    l.startNewSubPath (9.5f, 10.5f);
+                    l.lineTo (9.5f, 14.5f);
+                    l.lineTo (12.5f, 16.25f);
+                    break;
+
                 //  WHAT A ROW SAYS ABOUT ITSELF ------------------------------------
                 case model::Icon::forever:
                     l.startNewSubPath (12.0f, 12.0f);

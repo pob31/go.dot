@@ -517,7 +517,7 @@ namespace wfg::client::ui
         };
 
         const auto icon = model::iconFor (inspection.kind, valueOf ("mode"), valueOf ("verb"));
-        const auto accent = model::accentFor (inspection.kind);
+        const auto accent = model::accentFor (inspection.kind, valueOf ("mode"));   // a time group's own (§60)
         const auto colour = valueOf ("colour");
 
         if (icon == headIcon && accent == headAccent && colour == headColour)
@@ -1341,7 +1341,6 @@ namespace wfg::client::ui
 
             shut = isShut (drawer);
 
-            const auto accent = drawer == "what it does" ? model::accentFor (drawnKind) : std::string ("ink-faint");
             const auto mode = [this]
             {
                 for (const auto& other : lines)
@@ -1350,6 +1349,9 @@ namespace wfg::client::ui
 
                 return std::string {};
             }();
+
+            //  A time group's own accent on its drawer, as on its icon (namespace draft §60).
+            const auto accent = drawer == "what it does" ? model::accentFor (drawnKind, mode) : std::string ("ink-faint");
 
             head.set (juce::String (drawer), model::iconForDrawer (drawer, drawnKind, mode), accent,
                       shut, rowsIn, rowsIn > 0 && idle == rowsIn);
