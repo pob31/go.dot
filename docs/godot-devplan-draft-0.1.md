@@ -672,6 +672,25 @@ frame. Owed to the bench: a real green screen through a camera; text and blur on
 4K; M66 on the Intel Arc; the Metal compile of the new shaders, on the Mac. The screen words wait for the
 author (AKS).
 
+*Added 2026-10-13, at the author's direction* (namespace draft §62; PRD §3.19, §3.20, §6.9 and §6.11
+amended): **fonts carried by the show, and QLab's text and video cues imported.** Built on the branch
+`qtext`, in a worktree of its own, beside the time groups' close (namespace draft §62.8):
+
+| Stage | What the author sees |
+|---|---|
+| QF.0 | Namespace draft §62 |
+| QF.1 | Nothing yet: a font file's names read by Go.dot itself |
+| QF.2 | A carried font drawing a text cue, over an installed one of the same name; Save as carrying `fonts/` |
+| QF.3 | Nothing yet: an installed family's files found on each system |
+| QF.4 | The font menu: the show's fonts, Carry it in the show, Add a font file... |
+| QF.5 | A text's size as the letters' em; a width of nought as no box |
+| QF.6 | The probe workspace (the author's) |
+| QF.7 | Nothing yet: QLab's text, placement, stages and fades read |
+| QF.8 | Nothing yet: the walk to canvases, pictures, movies, texts and fades |
+| QF.9 | A QLab workspace imported with its text and video cues |
+| QF.10 | La Reprise and Justice-s imported; M67 |
+| QF.11 | The guides, the README, the screen words |
+
 ---
 
 ## Phase 9 — Plugins and the rack · L
