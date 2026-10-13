@@ -4569,6 +4569,19 @@ namespace
         midiIn.sendTo (engine);
         midiIn.setTap (&traffic);
 
+        /*  THE TRIGGERS KNOWN BEFORE ANY INPUT IS: built and published here,
+            before a MIDI port or the OSC socket is opened, rather than on the
+            first tick. The tick rebuilds it whenever the document moves, but it
+            only ever BUILT it there - and the tree a client reads is served
+            from the start, so a client that read a trigger and sent its
+            datagram before the first tick ran had it matched against no
+            triggers at all, and dropped. On a loaded CI runner the first tick
+            comes late: blackbox.triggers failed on Linux, both locales, in
+            run 38350416745, the cue never run and no trigger.fire logged. */
+        triggerIndex = wfg::cue::TriggerIndex::build (document);
+        nameSpace.publishTriggers (triggerIndex);
+        midiIn.publishTriggers (triggerIndex);
+
         for (const auto& name : midiInputNames)
             midiIn.open (name);
 
