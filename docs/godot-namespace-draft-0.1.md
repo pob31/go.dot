@@ -28496,3 +28496,28 @@ close (§60), which keeps the shared checkout.
   Nothing else moves: a `wrap` of nought already was QLab's box (ALE). Tests under C and fr_FR:
   VideoTextTests (a capital's height in the em; twice the size twice the letters), the video and font
   cases, 161; the schema and GPU gates. One deliberate breakage - the line's height again - turned it red.
+- **QF.7**, 2026-10-13: QLab's text and video cues read, in QLab's own terms (62.5), before the probe:
+  the keys were read from QLab 5's own cue templates and from La Reprise (QLab 4) and Justice-s (QLab 5).
+  A video, text or camera cue's stage - QLab 5's viewport UUID, which is what a cue names, not its
+  stage's; QLab 4's surface number - and its placement: translation, scale per axis, origin, turn,
+  opacity, layer, blend mode (an object holding an index in QLab 5), whether it fills its stage and how,
+  crop. A turn is a quaternion that every workspace so far wrote as nothing: an array, text or data of
+  four numbers is read, anything else marked unread for the report. A video cue's file and timing as a
+  sound's, its sound's levels and patch from the audio cue QLab keeps inside it; holding the last frame;
+  effects. A text cue's words, its fixed width, the fonts QLab last saw, and its runs: one dictionary
+  for the whole, or several with `NSAttributeInfo`'s run lengths - seven bits a byte, low first - in
+  UTF-16 units as Cocoa counts; each run's font by PostScript name and size, colour (RGB, grey, CMYK,
+  components, a named colour's fallback, written numbers read without the locale), alignment and line
+  height as archived, stroke, shadow, background, underline, strikethrough, kerning. A fade's picture
+  switches, its targets read as a placement, its geometry mode and turn type. The workspace's QLab 5
+  stages (name, size, the routes of its regions, an edge blend, a mask) or QLab 4 surfaces (the displays
+  of their facets), and its default: QLab 4's surface, or QLab 5's screen when it has no stages, each cue
+  then saying the screen it last saw and its size. Read on the two shows: Justice2's four stages
+  (three of 1920 by 1080 and a triptych of 5760), every picture cue on one; La Reprise's four surfaces,
+  its movies at their own size, scaled 0.81 and moved 10 and 30, faded up from nought, its actors'
+  monitors filling a second surface. Tests under C and fr_FR (QlabReaderTests): a text cue's run and
+  placement in both versions, several runs - a two-byte length, a mask in UTF-16, a run past the words
+  dropped - a stroke, a shadow, a background and a grey; a video cue and its fade in both versions with
+  a triptych; a QLab 5 workspace drawing on a screen and a turn unread; and, with WFG_QLAB_CORPUS, every
+  picture cue of the author's shows on a stage they have. Two deliberate breakages - the run lengths
+  read high byte first, a stage named by its own id - each turned their cases red.

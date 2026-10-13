@@ -41,6 +41,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -82,6 +83,63 @@ namespace wfg::import::qlab
         double time = 0.0;          ///< where the slice ENDS, in the file's seconds
         int playCount = 1;
         bool infinite = false;
+    };
+
+    /*  A COLOUR AS COCOA ARCHIVES IT (namespace draft §62.5): red, green, blue
+        and alpha, nought to one, from whichever colour space it was written in
+        - RGB, a grey, CMYK, or components with a colour space of their own.
+        `set` false where there was none. */
+    struct Colour
+    {
+        double r = 0.0, g = 0.0, b = 0.0, a = 1.0;
+        bool set = false;
+    };
+
+    /*  ONE RUN OF A TEXT CUE'S WORDS, ITS STYLE AS COCOA KEEPS IT (§62.5): the
+        attributes of an `NSAttributedString`, over `length` UTF-16 units from
+        `start`, as Cocoa counts. Nothing interpreted: an alignment is the
+        number archived, a stroke's width a % of the size, negative when the
+        letters are filled as well. */
+    struct TextRun
+    {
+        std::size_t start = 0;
+        std::size_t length = 0;
+        std::string font;                   ///< the PostScript name, "HelveticaNeue-Bold"
+        double size = 0.0;                  ///< in points
+        Colour colour;
+        int alignment = -1;                 ///< NSTextAlignment as archived; -1 when not said
+        double lineHeightMultiple = 0.0;    ///< nought when not said
+        double lineSpacing = 0.0;
+        double strokeWidth = 0.0;
+        Colour strokeColour;
+        bool shadow = false;
+        double shadowBlur = 0.0, shadowX = 0.0, shadowY = 0.0;
+        Colour shadowColour;
+        Colour background;
+        int underline = 0;
+        int strikethrough = 0;
+        double kern = 0.0;
+    };
+
+    /*  WHERE A PICTURE GOES ON ITS STAGE, IN QLAB'S TERMS (§62.5): pixels from
+        the stage's middle, a scale for each axis, an origin, a turn kept as a
+        quaternion, the opacity nought to one, a layer, a blend mode by number;
+        whether it fills the stage and how. A fade's targets are read the same. */
+    struct Placement
+    {
+        double translationX = 0.0, translationY = 0.0;
+        double scaleX = 1.0, scaleY = 1.0;
+        double originX = 0.0, originY = 0.0;
+        std::optional<std::array<double, 4>> quaternion;    ///< x, y, z, w; none where QLab wrote nothing
+        bool quaternionUnread = false;      ///< one was written, in a shape this does not read
+        double rotation = 0.0;              ///< a fade's turn, in degrees, about what `rotationType` says
+        double opacity = 1.0;
+        double layer = 1000.0;
+        int blendMode = 0;
+        bool fullScreen = true;
+        int fillStyle = 0;
+        bool preserveAspectRatio = true;
+        double cropLeft = 0.0, cropRight = 0.0, cropTop = 0.0, cropBottom = 0.0;
     };
 
     /*  A FILE AS THE WORKSPACE NAMES IT: the absolute path it had where it was
@@ -164,6 +222,49 @@ namespace wfg::import::qlab
 
         //  A script cue, kept as text and never run (PRD §3.20).
         std::string source;
+
+        /*  A VIDEO, TEXT OR CAMERA CUE (namespace draft §62): the stage it is
+            on - QLab 5's viewport UUID, QLab 4's surface number as text - and
+            where it goes there; a video cue's file and timing are an audio
+            cue's fields above, its sound's levels and patch those of the audio
+            cue QLab keeps inside it. QLab 5's last look at a screen it drew on
+            directly, where it names no stage. */
+        std::string stage;
+        Placement placement;
+        bool hasEffects = false;
+        bool holdLastFrame = false;
+        std::string lastSeenScreen;
+        int lastSeenWidth = 0;
+        int lastSeenHeight = 0;
+
+        //  A text cue: its words, their runs, its fixed width (nought: none), the fonts QLab last saw.
+        std::string words;
+        std::vector<TextRun> runs;
+        double fixedWidth = 0.0;
+        std::vector<std::string> lastSeenFontNames;
+
+        //  A fade of a picture (its targets in `placement`), and how its geometry and turn are meant.
+        bool fadesOpacity = false;
+        bool fadesTranslation = false;
+        bool fadesScale = false;
+        bool fadesRotation = false;
+        bool fadesEffects = false;
+        int geoMode = 0;
+        int rotationType = 0;
+    };
+
+    /*  A STAGE OR A SURFACE (§62.5): what QLab 5 calls a stage and QLab 4 a
+        surface - a picture's frame of so many pixels, drawn to outputs. `id`
+        is what a cue names: QLab 5's viewport UUID, QLab 4's surface number. */
+    struct Stage
+    {
+        std::string id;
+        std::string name;
+        int width = 0;
+        int height = 0;
+        std::vector<std::string> outputs;   ///< by name: QLab 5's routes, QLab 4's displays
+        bool blended = false;               ///< an edge blend set
+        bool masked = false;                ///< a mask image set
     };
 
     struct AudioPatch
@@ -194,6 +295,9 @@ namespace wfg::import::qlab
         std::vector<AudioPatch> audioPatches;
         std::vector<NetworkPatch> networkPatches;
         double minVolume = -60.0;   ///< dB: at or below it is silence
+
+        std::vector<Stage> stages;
+        std::string defaultStage;   ///< QLab 4's default surface; QLab 5's screen when it has no stages
 
         std::vector<std::string> problems;  ///< what was read past rather than refused
     };
