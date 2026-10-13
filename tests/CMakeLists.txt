@@ -1809,6 +1809,26 @@ add_test(NAME blackbox.timecode.fr_FR
 set_tests_properties(blackbox.timecode.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
+# TIME GROUPS AND CHASE END TO END (namespace draft 60, TG.11): serve --hosted
+# --render hearing LTC on an input (--input-wav, written by the driver's own LTC
+# writer) and MTC on a port (--midi-play-loop, its own MTC writer), a time group
+# on each, every member's sound itself LTC so the render, decoded, says where
+# each stood on every sample. Members on the code's sample, a free runner never
+# moved, each chaser by its method through +50 ppm, +0.1 %, a stop, a return, a
+# locate back and the loop point, code.heard sparse from ltc:/mtc: origins; and
+# a second serve held, firing the same. Two serves one after another: unbuffered,
+# and hold's limit, for hold's reason.
+add_test(NAME blackbox.timegroup.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timegroup.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.timegroup.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+add_test(NAME blackbox.timegroup.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timegroup.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.timegroup.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
 # DOH! END TO END (namespace draft 24.15): the GO pressed too soon and taken back,
 # over a real Tracktion graph and two mock devices on real sockets - a console that
 # takes back and a lighting desk left to its operator. What each device received,
@@ -2056,6 +2076,8 @@ endif()
 #       and M45, M48, M14 printed from it
 #   timecode                                                         LTC and MTC
 #       read frame by frame against the samples they were drawn on
+#   timegroup                                                        members
+#       started on the code's sample, chasers read frame by frame against it
 #   phase9a-fx, phase9b-width, phase9b-mic, phase9c-take             a plugin's
 #       child answering each block by its deadline, heard in the render
 #   pair-link, pair-follow, pair-seat, redundancy-failover          two engines:
@@ -2105,7 +2127,7 @@ message(STATUS "Go.dot: the drivers that judge an engine's time run ${WFG_REALTI
 
 set(WFG_REALTIME_DRIVERS
     first-sound phase3 phase4 phase6-sampler phase9a-eq doh
-    lane-level lane-send lane-record rate-speed timecode
+    lane-level lane-send lane-record rate-speed timecode timegroup
     phase9a-fx phase9b-width phase9b-mic phase9c-take
     pair-link pair-follow pair-seat redundancy-failover
     osc-curves process)

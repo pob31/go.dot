@@ -26811,6 +26811,62 @@ and the worst over two hundred fires, from LTC and from MTC; and, for each chase
 minutes against a code running 50 ppm fast, with a 0.1 % step, a two-second stop and a thirty-second
 locate back: the steady error, the time to catch up, the jumps, the worst error.
 
+**M64**, measured 2026-10-13 (TG.11), by `tests/blackbox/m64_chase.py`, run by hand and never by ctest:
+sessions of `wfg serve --hosted --render --input-wav=<LTC> --midi-play-loop=MTC in=<MTC>` on shows written into a
+copy of the timegroup fixture, the code written by `timegroup.py`'s own LTC and MTC writers and the render read by
+its reader; the Debug binary on the author's Windows box (16 cores), 25 fps at 48 kHz, 128-sample blocks.
+
+(a) FIRING: two time groups, one on LTC and one on MTC, each of ten free runners, each a second of LTC on its group's
+own output; the code loops and every pass fires them all again. Each fire's onset - where a line through its frames
+puts its file's first sample - against the input frame its time names (LTC), against where the port's pass put the
+frame, the median over that pass's `code.heard` of where each put its frame (MTC), and against the sample the
+engine's own map gave the time when it asked for it (both). "Late" is a fire that began after its map's sample, on a
+block's first sample: asked for while the tick thread ran behind its audio, launched as soon as it could be.
+
+| members 3 s apart, 200 fires each | median | p99 | worst | late |
+|---|---|---|---|---|
+| LTC, against the input's frame | +0.153 ms | 27.5 ms | 30.7 ms | 72 |
+| LTC, the 128 on time | +0.042 ms | 0.450 ms | 0.450 ms | - |
+| LTC, against its map's sample | +0.017 ms | 27.5 ms | 30.7 ms | - |
+| MTC, against the port's moment | +0.496 ms | 25.3 ms | 31.0 ms | 68 |
+| MTC, the 132 on time | +0.321 ms | 1.02 ms | 1.13 ms | - |
+| MTC, against its map's sample | +0.006 ms | 24.4 ms | 30.5 ms | - |
+
+No fire was late for the first eight passes (some 160 runs made); late launches came from the ninth, and from the
+sixteenth nearly every fire was - the tick thread noted behind its audio 88 times, up to 133 ms, all after the
+session's first 264 runs. A probe of three passes at the same spacing: none late, LTC within 0.45 ms of the frame and
+0.021 ms of its map, MTC within 1.39 ms and 0.018 ms. With the members 1.32 s apart - a sound ending, the next
+loading and two firing in the same half second - the tick fell behind from the sixth second on, up to 521 and 399 ms
+in two sessions, and 86 and 138 of 200 LTC fires were late (on time: median +0.018 and +0.023 ms, worst 0.48 and
+0.22 ms; MTC on time, median +0.31 and +0.29, worst 1.25 and 1.01 ms). A launch late by less than a block says
+nothing in `run.late`, which counts whole blocks. Where the late launches come from is not measured here; a
+candidate, read and not proven: the Runner's run table keeps every run of the session (`RunTable`, by design, so a
+replay agrees), and 23 of its per-tick passes walk `runs.all()` calling `RunTable::find`, a linear search, for each -
+quadratic in the runs a session has made, which a Debug build pays dearly. `code.heard`: LTC two a pass (the loop
+point's `jumped` and a re-anchor), 41 in 21 passes; MTC 241.
+
+(b) CHASE: a time group on LTC holding a free runner, a chaser by jump, by varispeed and by timestretch at 01:00:02:00
+against 612 s of code: +50 ppm for four minutes, +0.1 % for three, a two-second stop, back 120 ms on from where it
+would have been, two minutes at +50 ppm, a locate back thirty seconds, a minute more. Each stretch's |error| against
+the code, median/worst in ms; "in step" within 1.5 ms (varispeed), 10 (jump), 21.3 (timestretch, AJC); two sessions,
+alike to the hundredth of a millisecond:
+
+| method | +50 ppm | +0.1 % | in step after the return | then | in step after the locate | then | jumps heard | speeds: +50 ppm / +0.1 % / catching up |
+|---|---|---|---|---|---|---|---|---|
+| free | 6.11/11.94 | 104.35/191.75 | never | 315.3/317.8 | never | 29 680.6 ahead | 0 | 1 / 1 / 1 |
+| jump | 5.15/10.02 | silent | - | silent | - | silent | 0 | 1 / - / - |
+| varispeed | 0.06/0.06 | 1.17/1.17 | 15.4 s | 1.02/1.02 | - | silent | 0 | 1.000050 / 1.001000 / 1.010000 |
+| timestretch | 6.11/11.92 | 104.31/191.55 | never | 181.6/184.1 | - | silent | 0 | 1.000000 / 1.000000 / 1.011776 |
+
+WHAT THE TABLE SAYS OF THE ENGINE (60.7, TG.11, has each): the jump chaser fell 10 ms behind at +50 ppm some 200 s
+in, jumped, and its voice froze on its file's first sample - silent to the reader from then on; the varispeed chaser
+followed both speeds to the part per million and caught 121 ms up in 15.4 s at the clamp, then froze at the locate,
+which jumps it; the timestretch chaser played at exactly one against both speeds, as the free runner did, while its
+run's clock counted the speeds asked, so it believed itself in step 192 ms behind, caught up at 259/256 of the code's
+speed from the return's 120 ms only to stand 182 ms behind, and froze at the locate. `code.heard` from LTC: ten in ten
+minutes (4 jumped, 5 running, 1 stopped); the tick thread at worst 14.7 ms behind. WHAT THE RENDER CANNOT SHOW: a
+real interface's clock against MTC from a cable, and a code from a VTR or a desk - the bench's.
+
 ### 60.7 Built so far
 
 - **TG.0**, 2026-10-12: this section; PRD §3.7, §3.14's chasing half and its open question answered,
@@ -27760,6 +27816,101 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   the author; the readout line shows the incoming rate and the show's is the tab's own Frame rate row, with no word
   of a mismatch beside it, which `sync/ltcInRate`'s description promises - a phrase for the author; the time column
   shows a member's `at` in place of its length.
+- **TG.11**, 2026-10-13: `blackbox.timegroup` and M64 - time groups from outside the process. THE WRITERS, a
+  fourth implementation of the standards, in Python, sharing nothing with Go.dot's generator, decoder, MTC cursor or
+  reader, nor with `tests/LtcReader.h`: an LTC writer (biphase mark, BCD, the sync word, the polarity bit at 59 in
+  25-frame code making the ones even, each edge placed to its fraction of a sample by holding each level for its share
+  of the sample the edge falls in - how TG.3's decoder, placing an edge by its area, finds it) into the WAV
+  `--input-wav` loops; and an MTC writer into a `--midi-render` file for `--midi-play-loop`: a full frame where the code
+  starts or locates, then cycles of quarter frames, each naming the frame its piece 0 is sent on, a quarter apart at the
+  code's speed. The driver reads its writers back before it asks the engine anything: a member's file frame by frame on
+  its own samples, the input as the story to a tenth of a sample, the MTC through `timecode.py`'s MTC reader.
+  `common.Server` gains `midi_play` and `midi_play_loop`.
+  THE FIXTURE, `tests/fixtures/bundles/timegroup`: a one-channel input "LTC in" (`sync/ltcIn`), a port "MTC in"
+  (`sync/mtcIn`), a one-channel output a member, `goDebounce="0"`; a time group on LTC holding, at 01:00:02:00, a free
+  runner and a chaser by jump, by varispeed and by timestretch, and at 01:00:03:00 a timeline group chasing by jump, its
+  two sounds 1.5 s apart (a pre-wait); a time group on MTC holding a free runner and a chaser by jump at 01:00:02:00.
+  Every member's sound is itself LTC from 00:00:00:00, written by the driver into its copy, so the render, decoded, says
+  frame by frame where in its file each member was; the timestretch chaser's is a 1 kHz tone in a burst every half
+  second, 200 to 320 ms long in turn so a burst tells which of five it is, since a stretcher would not leave LTC
+  readable and a tone's pitch is what it keeps. `wfg validate` and `validate-show.py` pass it.
+  THE DRIVER, `tests/blackbox/timegroup.py`, `blackbox.timegroup.{C,fr_FR}` (unbuffered, 400 s, on the `realtime`
+  lock). THE STORY, 75 s looped on the input and the port alike: from 00:59:40:00 at +50 ppm (twenty seconds of lead-in
+  for the GOs), at 01:00:12:00 a step to +0.1 % for fifteen seconds, a stop of two, back 120 ms on from where it would
+  have been, eighteen seconds on a locate back thirty, eight more and the loop point, itself a locate back. Both groups
+  armed by GO; the pass read is the first whose lead-in the GOs came in time for. THE READING: the render (eight channels,
+  77 s) is read through each float's top byte - its sign and whether it is an eighth or more, a slice and a translate away
+  - and as floats only where an edge is, the edges fed to `timecode.py`'s decoder: two seconds a serve where reading
+  every sample in Python took twenty; bursts by their silences, their pitch by rising zero crossings; and the log's
+  `code.heard`, `run.spawn`, `run.fire`, `run.late` and its notes. Where the session's sample nought falls in the
+  render (nought, in every run) is read from the first `jumped`; MTC's pass is placed by the median of where its own
+  `code.heard` put its frames. `--keep` and `--analyse` judge a kept room again by hand. THE CHECKS, 101 a run over
+  the two serves: the input's frame heard on its own sample; every `code.heard` of either code from `ltc:TG0N0001` and
+  `mtc:TG0P0001`, `stopped` at the stop, `jumped` at the return and the locate (LTC on the frame's sample, MTC within
+  20 ms of the port's moment) and at the loop point; each code's records a handful a pass (LTC: eight against 1825
+  frames); each member on the sample the engine's map gave its time (to 2.5 samples: a varispeed chaser starts at the
+  code's speed, and the resampler's interpolator sounds it 1.7 samples on), within a millisecond of the input frame
+  (+0.037 ms, the scene's +0.025) and within 3 ms of the port's moment (+0.29 to +0.67 ms); the scene's second sound
+  1.5 s after its first to the sample; the free runner at speed one to 2 ppm against +50 ppm and +0.1 %, never moved,
+  thirty seconds ahead after the locate; the varispeed chaser at the code's speed (to 5 ppm, then 30) within a
+  millisecond and then three, playing on through the stop, 120 ms behind after it, catching up at 1.01 times the code
+  without a jump, back within 1.5 ms before the locate and re-seated by it; the jump chaser at speed one within 2 ms
+  through +50 ppm, stepping back each time it is ten out through +0.1 %, playing through the stop, in step half a second
+  after the return and after the locate; the timestretch chaser at 1 kHz in every burst, at the code's speed, within
+  AJC's 21.3 ms, catching up at about 1 % and back within it, re-seated by the locate; the scene's sounds as the jump
+  chaser; the MTC free runner never moved and the MTC jump chaser in step after the return and the locate with the code
+  as Go.dot hears it; the loop point ending every chaser; the readouts read over HTTP while the story ran
+  (`sync/ltcInState` stopped through the stop, `ltcInSpeed` 1.00005 then 1.001, the varispeed run's `chaseState`
+  catching then inStep, the free runner's free); nothing allocated on the audio thread; and a second serve, `--hold`,
+  `pair/sending` false, both codes still heard, every LTC member on the same sample of its code as unheld. ON CI only
+  the runner's is loosened: MTC's placing and its record count are printed and voided, the steering's bounds widen, a
+  readout missed is voided; LTC is in the render's own samples everywhere. A start the engine owns up to as late -
+  `run.late`, a note of its tick two or more behind, or a sound beginning on a block's first sample after its own, a
+  launch placed as soon as it could be - voids that start's checks alone.
+  Ran: three times in each locale, twice through ctest (127 s each) and once by hand - the same 87 checks green and the
+  same 14 red every time (below); `blackbox.timecode`, `blackbox.process` and `blackbox.first-sound` in both,
+  green. Eight deliberate breakages of a kept room each turned their own checks red and nothing else: the stop's record
+  taken out, LTC's re-anchors written four times, the free runner a millisecond late, the varispeed chaser's sound
+  replaced by the free runner's, a record from another origin, the held free runner three samples late, the free
+  runner moved 5 ms in the step, the timestretch chaser's tone a percent sharp. And one the other way: with the engine
+  change (1) below tried and taken out again, every jump-path check went green.
+  FOUND, AND NOT MENDED HERE - the driver is red on each, as the brief asks; M64 (60.6) measures them:
+  1. **A chaser's crossfaded jump in a cue with no slices freezes its voice** (12 of the 14). TG.8's `chaseJump` moves
+     slot nought with `loopIn = loopOut = 0`, "no loop", which patch 0002's `LoopSource::Segment` documents as "the file,
+     either way"; but the plain forward `Map` - `fileFrameFor`, `passOf`, `nextPassAfter` - never reads `looping`, and the
+     map's loop of `max (0, 1)` frame at frame nought holds the reader on the file's first sample. From the end of the
+     10 ms crossfade the member sounds one constant level (+0.5 on the LTC members), never advancing, until a locate's
+     re-seat makes a new run or the loop point ends it. Heard: the jump chaser at 41.44 s of the pass, its first jump,
+     ten milliseconds out at +0.1 % - silent to the reader through the stop, the return and the locate; the scene's two
+     sounds at 41.48 and 41.50 s (re-made by `seekGroup` at the return, so they sound again from there); the MTC jump
+     chaser alike; the varispeed and timestretch chasers at the locate back, which jumps them. The unit tests' player
+     records the move and plays nothing; AudioTests' slice moves carry real loop points. Tried and taken out again: a
+     `loopOut` far past the file's end in `chaseJump` turned every one of these checks green - one jump of +9.96 ms
+     through the step, in step after the return and the locate, the scene's sounds and the MTC chaser alike. The mend is
+     the author's to place: `looping` honoured on the plain path of patch 0002, or `chaseJump`.
+  2. **A stretched voice plays at a whole number of frames in 256** (1). Tracktion's
+     `SignalsmithStretcher::getFramesNeeded` is `roundToInt (samplesPerOutputBuffer / speedRatio)` - 256 times the speed,
+     rounded, each chunk, nothing carried - so a timestretch chaser asked 1.00005 or 1.001 plays at exactly one, and
+     catching up at 1.01005 plays 259/256 = 1.01172 (1.011740 and 1.011776 measured). The run's clock counts the speed
+     asked, so the chaser drifts from its code while it reads itself in step: 16 ms in the driver's fifteen seconds at
+     +0.1 %, 192 ms in M64's three minutes, and 182 ms behind for good after catching up (AJC's chunk is on its clock,
+     not its sound). M46 measured speeds that are whole frames in 256 (2, 0.5).
+  3. **MTC's `code.heard` is not sparse** (1). 32 to 123 records a 75 s pass against LTC's eight, the speeds written
+     0.98 to 1.009, once 3.6 % off just after a locate; in M64's chase session, with no MTC group at all, the port's
+     watcher wrote one every second or two at 0.999 and 1.0006 in turn. MTC's moments reach Go.dot's samples through
+     the reader's `ClockEstimate`, fed the tick's clock pairs, and a tick late by tens of milliseconds (a Debug engine
+     loading sounds) moves them by milliseconds - its map 16 ms from LTC's at worst in one pass - which the watcher,
+     re-anchoring at a millisecond, follows. TG.6 foresaw it ("TG.9's chasers and RD.9's map should not lean on its
+     slope") and gave the clock's watcher a fitted count's line; the MTC reader still has the estimate. Firing is not
+     hurt: an MTC member starts on its map's sample and within 1.4 ms of the port's moment.
+  4. Behind (1), with it worked around: **a timestretch chaser's jump lands about 106 ms behind** - the locate jumped it
+     to where the code was and the stretcher sounded that a tenth of a second late, from which it caught up at 1.0117 for
+     some seven seconds; the stretcher's buffered audio is not in the jump's target, it seems. The driver's check of its
+     re-seat stays red until both are mended.
+  Also seen: the tick thread falls behind its audio while a Debug engine loads sounds - 40 to 56 ms as this show's eight
+  members load, and in M64 more as a session makes runs (60.6, with a candidate cause); a member asked for then starts
+  late, as soon as it can, and one late by less than a block is not said by `run.late`. Left: the guides and the
+  README (TG.12); the four faults above, and with them M64's chase table, to measure again once mended.
 
 ## 61. Keys, text and blur
 
