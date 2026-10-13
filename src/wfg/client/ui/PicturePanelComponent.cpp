@@ -817,6 +817,21 @@ namespace wfg::client::ui
         outlineSwatch.onClick = [this] { chooseColour ("outlineColour", reading.outlineColour, outlineSwatch); };
         addAndMakeVisible (outlineSwatch);
 
+        /*  ITS FIELDS (61, AKM), a page of the column picked beside the font. */
+        fieldsPick.setWantsKeyboardFocus (false);
+        fieldsPick.setTooltip ("The blanks in the words, {name}, and what fills them tonight");
+        fieldsPick.onClick = [this]
+        {
+            fieldsPage = ! fieldsPage;
+            refresh();
+        };
+        addAndMakeVisible (fieldsPick);
+
+        noFields.setText ("No fields: write {name} in the words, and send /godot/text/name to fill it",
+                          juce::dontSendNotification);
+        noFields.setJustificationType (juce::Justification::topLeft);
+        addAndMakeVisible (noFields);
+
         applyTheme (theme);
     }
 
@@ -872,6 +887,73 @@ namespace wfg::client::ui
         }
 
         actions.setMany (rows);
+    }
+
+    /*  A FIELD'S VALUE SENT (61, AKM): at once, and under the lock too - a
+        field is tonight's, never the show's, so the lock that keeps the show
+        from changing has nothing to keep here. */
+    void PicturePanelComponent::sendField (FieldRow& row)
+    {
+        const auto typed = row.value.getText().toStdString();
+
+        for (const auto& field : reading.fields)
+            if (field.name == row.name && field.value == typed)
+                return;
+
+        if (actions.set != nullptr)
+            actions.set (row.address, typed);
+    }
+
+    /*  THE ROWS, one a blank, made again only when the blanks are others;
+        a value under a hand is the hand's. */
+    void PicturePanelComponent::refreshFields()
+    {
+        auto same = fieldRows.size() == reading.fields.size();
+
+        for (std::size_t at = 0; same && at < fieldRows.size(); ++at)
+            same = fieldRows[at]->name == reading.fields[at].name;
+
+        if (! same)
+        {
+            for (auto& row : fieldRows)
+            {
+                removeChildComponent (&row->label);
+                removeChildComponent (&row->value);
+                removeChildComponent (&row->copy);
+            }
+
+            fieldRows.clear();
+
+            for (const auto& field : reading.fields)
+            {
+                auto row = std::make_unique<FieldRow>();
+                auto* made = row.get();
+                made->name = field.name;
+                made->address = field.address;
+                made->label.setText (juce::String::fromUTF8 (field.name.c_str()), juce::dontSendNotification);
+                made->label.setTooltip (juce::String::fromUTF8 (field.address.c_str()));
+                made->label.setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
+                made->label.setFont (Look::font (theme, 12.0f));
+                made->value.setTooltip ("What {" + juce::String::fromUTF8 (field.name.c_str())
+                                          + "} shows tonight; sent when you press Return or leave the box");
+                made->value.onReturnKey = [this, made] { sendField (*made); };
+                made->value.onFocusLost = [this, made] { sendField (*made); };
+                made->copy.setWantsKeyboardFocus (false);
+                made->copy.setTooltip ("Copy " + juce::String::fromUTF8 (field.address.c_str()));
+                made->copy.onClick = [made]
+                {
+                    juce::SystemClipboard::copyTextToClipboard (juce::String::fromUTF8 (made->address.c_str()));
+                };
+                addChildComponent (made->label);
+                addChildComponent (made->value);
+                addChildComponent (made->copy);
+                fieldRows.push_back (std::move (row));
+            }
+        }
+
+        for (std::size_t at = 0; at < fieldRows.size(); ++at)
+            if (! fieldRows[at]->value.hasKeyboardFocus (true))
+                fieldRows[at]->value.setText (juce::String::fromUTF8 (reading.fields[at].value.c_str()), false);
     }
 
     void PicturePanelComponent::writeWords()
@@ -1077,6 +1159,27 @@ namespace wfg::client::ui
         for (auto& button : fitButtons)
             button.setVisible (! texted);
 
+        //  THE STYLE OR THE FIELDS, picked beside the font (61).
+        refreshFields();
+        fieldsPick.setButtonText (fieldsPage ? juce::String ("Style")
+                                             : "Fields (" + juce::String (static_cast<int> (reading.fields.size())) + ")");
+        fieldsPick.setVisible (texted);
+
+        if (texted && fieldsPage)
+            for (auto* part : std::initializer_list<juce::Component*> { &fontSize, &fontSizeLabel, &bold, &italic,
+                                                                        &alignVMenu, &alignButtons[0], &alignButtons[1],
+                                                                        &alignButtons[2], &lineSpacing, &lineSpacingLabel,
+                                                                        &wrap, &wrapLabel, &outlineWidth, &outlineLabel,
+                                                                        &outlineBlur, &outlineBlurLabel, &letterSwatch,
+                                                                        &outlineSwatch })
+                part->setVisible (false);
+
+        for (auto& row : fieldRows)
+            for (auto* part : std::initializer_list<juce::Component*> { &row->label, &row->value, &row->copy })
+                part->setVisible (texted && fieldsPage);
+
+        noFields.setVisible (texted && fieldsPage && fieldRows.empty());
+
         paintSwatch.setVisible (painted);
         paintLabel.setVisible (painted);
 
@@ -1240,7 +1343,26 @@ namespace wfg::client::ui
         //  A TEXT CUE'S STYLE (61): the font, the letters, the alignments, the box, the outline.
         if (reading.texted())
         {
-            fontMenu.setBounds (colourColumn.removeFromTop (row).reduced (2, 2));
+            auto first = colourColumn.removeFromTop (row);
+            fieldsPick.setBounds (first.removeFromRight (first.getWidth() / 3).reduced (2, 2));
+            fontMenu.setBounds (first.reduced (2, 2));
+
+            /*  ITS FIELDS: a row each - the name, the value, Copy. */
+            if (fieldsPage)
+            {
+                if (fieldRows.empty())
+                    noFields.setBounds (colourColumn.removeFromTop (row * 2));
+
+                for (auto& field : fieldRows)
+                {
+                    auto line = colourColumn.removeFromTop (row);
+                    field->label.setBounds (line.removeFromLeft (72));
+                    field->copy.setBounds (line.removeFromRight (52).reduced (2, 2));
+                    field->value.setBounds (line.reduced (2, 2));
+                }
+
+                return;
+            }
 
             const auto sliderLine = [&] (juce::Slider& slider, juce::Label& label)
             {

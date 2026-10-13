@@ -27580,3 +27580,18 @@ tiles cost the renderer's message thread with a blur in them.
   holds the table writable for that. `SeatTests`: read back exactly, a line break and quotes in a value
   too, a rebase leaving them, a name that does not read no position, a seat handing them over and
   forgetting the follower's own; a deliberate breakage, the seat keeping the follower's, turned it red.
+- **VFX.6**, 2026-10-13: fields in the window. A text cue's panel reads its fields - each blank once, in
+  the order the words first hold it, its value as the engine publishes it at `/godot/text/<name>`, and
+  that address (`model::FieldReading`). The Text page picks **Fields (n)** or **Style** beside the font:
+  on the fields' page a row a blank - its name, its value in a box, **Copy** - the value sent at once on
+  Return or when the hand leaves the box, nothing sent when it did not change, and OPEN UNDER THE LOCK
+  while the style beside it is greyed: a field is tonight's, never the show's. Copy puts the address on
+  the clipboard for whoever sends; it says the address in its tooltip and the name's. With no blank, it
+  says how to make one. The rows are made again only when the blanks change, a value under a hand left to
+  it. The browser console has no fields' block yet: a client reading the namespace finds and writes
+  `/godot/text/<name>` as any node. Screen words the implementer's (AKS). Tests under C and fr_FR:
+  `ClientTests` (each blank once in order, its value and address, a brace written out none, a cue that is
+  not text none), `RunPaneUiTests` (the pick with its count, the fields' page in place of the style, a
+  value sent at once under the lock, nothing for no change, Copy's address - not pressed, which would take
+  the clipboard of whoever runs the tests; the page as a picture under `WFG_SNAPSHOT_DIR`, looked at);
+  the clang-tidy stand-in clean but the one finding already there.

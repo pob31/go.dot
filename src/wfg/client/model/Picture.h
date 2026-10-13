@@ -66,6 +66,15 @@ namespace wfg::client::model
         double y = 0.0;
     };
 
+    /*  A TEXT CUE'S FIELD (namespace draft 61, AKM): a blank its words hold,
+        what it shows tonight, and the address anybody fills it at. */
+    struct FieldReading
+    {
+        std::string name;
+        std::string value;
+        std::string address;
+    };
+
     /** A curve's point: what comes in, what goes out, each 0..1. */
     using CurvePoints = std::vector<std::pair<double, double>>;
 
@@ -134,6 +143,9 @@ namespace wfg::client::model
         std::string outlineColour = "#000000";
         double outline = 0.0;
         double outlineBlur = 0.0;
+
+        /*  Its blanks, in the order the words first hold them, with tonight's values. */
+        std::vector<FieldReading> fields;
 
         bool locked = false;
 

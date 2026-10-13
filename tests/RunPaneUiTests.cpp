@@ -3213,6 +3213,82 @@ TEST_CASE ("picture panel: a text cue's words where the fit is, and its style in
     MESSAGE ("wrote " << file.getFullPathName().toStdString());
 }
 
+TEST_CASE ("picture panel: a text cue's fields picked beside the font, each typed and sent at once, under the lock too (§61, AKM)")
+{
+    std::vector<std::pair<std::string, std::string>> sent;
+
+    ui::PicturePanelComponent::Actions actions;
+    actions.set = [&sent] (const std::string& address, const std::string& text) { sent.emplace_back (address, text); };
+
+    ui::PicturePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+
+    auto reading = keyedPicture ("none");
+    reading.picture.source = "text";
+    reading.picture.words = "{home} - {away}";
+    reading.picture.fields = { { "home", "3", "/godot/text/home" }, { "away", "", "/godot/text/away" } };
+    reading.picture.locked = true;
+    panel.show (reading, nullptr);
+
+    //  The style first; the pick says how many fields there are.
+    auto* pick = childSaying<juce::TextButton> (panel, "Fields (2)");
+    REQUIRE (pick != nullptr);
+    CHECK (childSaying<juce::Label> (panel, "letters")->isVisible());
+    pick->onClick();
+
+    //  Its fields: the style gone, each blank's name, its value, Copy.
+    CHECK_FALSE (childSaying<juce::Label> (panel, "letters")->isVisible());
+    REQUIRE (childSaying<juce::Label> (panel, "home") != nullptr);
+    CHECK (childSaying<juce::Label> (panel, "home")->isVisible());
+    CHECK (childSaying<juce::TextButton> (panel, "Style") != nullptr);
+
+    juce::TextEditor* home = nullptr;
+
+    for (auto* child : panel.getChildren())
+        if (auto* editor = dynamic_cast<juce::TextEditor*> (child); editor != nullptr && editor->isVisible()
+              && editor->getText() == "3")
+            home = editor;
+
+    REQUIRE (home != nullptr);
+
+    //  Under the lock: still open, and sent at once.
+    CHECK (home->isEnabled());
+    home->setText ("4", false);
+    REQUIRE (home->onReturnKey != nullptr);
+    home->onReturnKey();
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent.front() == std::pair<std::string, std::string> { "/godot/text/home", "4" });
+
+    //  Unchanged, nothing is sent.
+    reading.picture.fields[0].value = "4";
+    panel.show (reading, nullptr);
+    home->onReturnKey();
+    CHECK (sent.size() == 1u);
+
+    /*  Copy names the address it puts on the clipboard - not pressed here,
+        which would take the clipboard of whoever runs the tests. */
+    auto* copy = childSaying<juce::TextButton> (panel, "Copy");
+    REQUIRE (copy != nullptr);
+    CHECK (copy->getTooltip() == "Copy /godot/text/home");
+
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isEmpty())
+        return;
+
+    const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+    const juce::File file { juce::File (dir).getChildFile ("picture-panel-fields.png") };
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    juce::FileOutputStream out { file };
+    REQUIRE (out.openedOk());
+
+    juce::PNGImageFormat png;
+    CHECK (png.writeImageToStream (picture, out));
+    MESSAGE ("wrote " << file.getFullPathName().toStdString());
+}
+
 TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 {
     /*  NOT AN ASSERTION BUT AN EYE. With WFG_SNAPSHOT_DIR set, the panel is

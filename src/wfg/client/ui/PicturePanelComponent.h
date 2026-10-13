@@ -43,7 +43,10 @@
     words where the fit is, typed and written when the hand leaves them, and
     their style in the colour column: the font, the letters' size, bold and
     italic, their colour, the alignments, the spacing, the box they wrap in,
-    the outline's colour, width and blur.
+    the outline's colour, width and blur. Its FIELDS (61, AKM) are picked
+    beside the font: each blank, its value tonight - typed and sent at once,
+    under the lock too, since a field is never the show's - its address, and
+    a button to copy it for whoever sends.
 
     A drag is a run of `node.set` on one address, which the document folds
     into one undo step - the offsets one `node.setMany`, their two addresses
@@ -137,6 +140,22 @@ namespace wfg::client::ui
         juce::TextButton letterSwatch, outlineSwatch;
         bool fontsFilled = false;
         std::string fontShown;
+
+        /*  A TEXT CUE'S FIELDS (61, AKM), picked beside the font. */
+        struct FieldRow
+        {
+            std::string name, address;
+            juce::Label label;
+            juce::TextEditor value;
+            juce::TextButton copy { "Copy" };
+        };
+
+        juce::TextButton fieldsPick;
+        juce::Label noFields;
+        std::vector<std::unique_ptr<FieldRow>> fieldRows;
+        bool fieldsPage = false;
+        void refreshFields();
+        void sendField (FieldRow& row);
 
         void build (juce::Slider& slider, juce::Label& label, const char* words, const char* row,
                     double low, double high, double mid, bool symmetric, const char* suffix, int decimals);

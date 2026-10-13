@@ -19,6 +19,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
+#include <wfg/engine/video/Blanks.h>
 
 #include <algorithm>
 #include <cmath>
@@ -185,6 +186,14 @@ namespace wfg::client::model
 
         out.outline = numberAt (snapshot, base + "outline", 0.0);
         out.outlineBlur = numberAt (snapshot, base + "outlineBlur", 0.0);
+
+        //  ITS FIELDS (61, AKM): each blank, its value as the engine publishes it.
+        if (out.source == "text")
+            for (const auto& name : video::blanksIn (out.words))
+            {
+                const auto address = "/godot/text/" + name;
+                out.fields.push_back ({ name, text (snapshot, address), address });
+            }
 
         out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 

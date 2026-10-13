@@ -11580,6 +11580,34 @@ TEST_CASE ("tree: a text cue's blanks are published at /godot/text/<name> with t
     CHECK (snapshot->find ("/godot/text/home")->typeTags == "s");
 }
 
+TEST_CASE ("client: a text cue's panel reads its fields - each blank once, in order, its value tonight and its address (§61, AKM)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    cue::TextFields fields;
+    rig.parameters.setTextFields (&fields);
+    REQUIRE (fields.set ("home", "3") == cue::TextFields::Set::written);
+
+    const auto cue = rig.document.createCue (list, 0, "video", "", {},
+                                             { { "source", "text" }, { "words", "{home} - {away} ({home}), {{not}}" } });
+    REQUIRE (cue.ok);
+
+    const auto reading = model::readFoot (*rig.publish (1), { model::Subject::Kind::picture, cue.id }).picture;
+    REQUIRE (reading.fields.size() == 2u);
+    CHECK (reading.fields[0].name == "home");
+    CHECK (reading.fields[0].value == "3");
+    CHECK (reading.fields[0].address == "/godot/text/home");
+    CHECK (reading.fields[1].name == "away");
+    CHECK (reading.fields[1].value.empty());
+
+    //  A cue that is not text has none.
+    const auto still = rig.document.createCue (list, 1, "video", "", {}, { { "source", "picture" }, { "words", "{home}" } });
+    REQUIRE (still.ok);
+    rig.parameters.markStale();
+    CHECK (model::readFoot (*rig.publish (2), { model::Subject::Kind::picture, still.id }).picture.fields.empty());
+}
+
 TEST_CASE ("client: a new insert is numbered by kind and given both its names once; what Go.dot sends is never offered back (§47, AAK)")
 {
     std::vector<model::VideoInsertRow> inserts;
