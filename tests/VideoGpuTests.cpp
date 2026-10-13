@@ -29,6 +29,7 @@
 
 #include <wfg/engine/video/Compositor.h>
 #include <wfg/engine/video/Grade.h>
+#include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Mapping.h>
 #include <wfg/engine/video/VideoRegion.h>
 #include <wfg/engine/video/render/Gpu.h>
@@ -481,6 +482,177 @@ TEST_CASE ("video gpu: the GPU composites a canvas as the reference compositor s
         CHECK (result.far * 100 <= result.pixels);
         CHECK (result.mean < 1.5);
     }
+}
+
+TEST_CASE ("video gpu: a picture keyed by brightness, as a shape and by a colour, and its alpha switched off, as the reference compositor says (§61)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    /*  A SCREEN BEHIND A SUBJECT, smooth everywhere so the GPU's smooth
+        sampling and the reference's nearest pixel differ by less than a step:
+        green on the left, warming to a skin tone on the right. */
+    juce::Image screen (juce::Image::ARGB, 40, 30, true, juce::SoftwareImageType());
+
+    for (int y = 0; y < 30; ++y)
+        for (int x = 0; x < 40; ++x)
+            screen.setPixelAt (x, y, juce::Colour (static_cast<std::uint8_t> (std::min (255, 6 * x)),
+                                                   static_cast<std::uint8_t> (230 - 3 * x),
+                                                   static_cast<std::uint8_t> (40 + 2 * y)));
+
+    Pictures pictures;
+    pictures.images["picture.png"] = gradientPicture (40, 30);
+    pictures.images["screen.png"] = screen;
+
+    auto ground = layerOf ("L1", region::Source::fill, 1.0, 1);
+    ground.paint = 0x204080u;
+
+    const auto picture = [] (const char* file)
+    {
+        auto layer = layerOf ("L2", region::Source::picture, 1.0, 2);
+        layer.file = file;
+        return layer;
+    };
+
+    std::vector<std::pair<std::string, region::LayerReading>> scenes;
+
+    auto luma = picture ("picture.png");
+    luma.key.mode = video::KeyMode::luma;
+    scenes.push_back ({ "brightness, at its defaults", luma });
+
+    auto turned = luma;
+    turned.key.invert = true;
+    turned.key.level = 40.0;
+    turned.key.softness = 60.0;
+    scenes.push_back ({ "brightness turned round, narrower", turned });
+
+    auto graded = luma;
+    graded.grade.contrast = 130.0;
+    graded.grade.hue = 40.0;
+    scenes.push_back ({ "brightness, then graded", graded });
+
+    auto matte = picture ("picture.png");
+    matte.key.mode = video::KeyMode::matte;
+    matte.paint = 0xFF8000u;
+    matte.grade.saturation = 0.0;       // a matte is not graded
+    scenes.push_back ({ "a matte in its paint", matte });
+
+    auto green = picture ("screen.png");
+    green.key.mode = video::KeyMode::colour;
+    scenes.push_back ({ "a green screen, at its defaults", green });
+
+    auto tight = green;
+    tight.key.level = 40.0;
+    tight.key.softness = 30.0;
+    tight.key.spill = 90.0;
+    scenes.push_back ({ "a green screen, tighter, its spill taken off", tight });
+
+    auto blue = picture ("screen.png");
+    blue.key.mode = video::KeyMode::colour;
+    blue.key.colour = 0x0000FFu;
+    blue.key.spill = 70.0;
+    scenes.push_back ({ "a blue key", blue });
+
+    auto solid = picture ("picture.png");
+    solid.useAlpha = false;
+    scenes.push_back ({ "its alpha switched off", solid });
+
+    for (const auto& [name, layer] : scenes)
+    {
+        const auto result = drawAndCompare (pictures, { ground, layer }, 1.0);
+
+        INFO (name << ": worst " << result.worst << ", mean " << result.mean << ", " << result.far
+              << " of " << result.pixels << " pixels off by more than 6 on " << video::gpu::describe());
+        CHECK (result.far * 100 <= result.pixels);
+        CHECK (result.mean < 1.5);
+    }
+}
+
+TEST_CASE ("video gpu: a movie's frame keyed by its green, and its alpha read or not (§61)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    //  Two preview frames, straight RGBA: all green; and a colour whose alpha is nought.
+    const auto frameOf = [] (std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)
+    {
+        auto frame = std::make_shared<video::render::MovieFrame>();
+        frame->width = 6;
+        frame->height = 4;
+        frame->index = 0;
+
+        for (int n = 0; n < 6 * 4; ++n)
+            frame->rgba.insert (frame->rgba.end(), { r, g, b, a });
+
+        return frame;
+    };
+
+    Pictures pictures;
+    pictures.frames["green.mp4"] = frameOf (0, 255, 0, 255);
+    pictures.frames["clear.mp4"] = frameOf (200, 100, 50, 0);
+
+    std::vector<region::LayerReading> layers;
+
+    const auto add = [&layers] (const char* canvas, const char* file, std::uint64_t order)
+    {
+        auto ground = layerOf (std::string ("G") + canvas, region::Source::fill, 1.0, order);
+        ground.canvas = canvas;
+        ground.paint = 0x0000FFu;
+        layers.push_back (ground);
+
+        auto movie = layerOf (std::string ("M") + canvas, region::Source::movie, 1.0, order + 1);
+        movie.canvas = canvas;
+        movie.file = file;
+        movie.fit = region::Fit::stretch;
+        layers.push_back (movie);
+        return layers.size() - 1;
+    };
+
+    layers.reserve (6);
+    layers[add ("C1", "green.mp4", 1)].key.mode = video::KeyMode::colour;
+    add ("C2", "clear.mp4", 3);
+    layers[add ("C3", "clear.mp4", 5)].useAlpha = false;
+
+    region::ConfigReading config;
+
+    for (const auto* canvas : { "C1", "C2", "C3" })
+        config.canvases.push_back ({ canvas, 16, 16 });
+
+    std::vector<float> keyed, clear, solid;
+    int w = 0, h = 0;
+
+    {
+        video::render::Painter painter (pictures);
+        std::string why;
+        REQUIRE_MESSAGE (painter.make (why), why);
+
+        painter.beginFrame (config, layers, {});
+
+        for (const auto* canvas : { "C1", "C2", "C3" })
+            painter.canvas (canvas, 100);
+
+        sg_commit();
+
+        REQUIRE (video::gpu::readBack (painter.canvasImage ("C1"), keyed, w, h));
+        REQUIRE (video::gpu::readBack (painter.canvasImage ("C2"), clear, w, h));
+        REQUIRE (video::gpu::readBack (painter.canvasImage ("C3"), solid, w, h));
+        painter.endFrame();
+    }
+
+    const auto middleOf = [&w, &h] (const std::vector<float>& rgba)
+    {
+        return rgbOf (rgba.data() + 4 * (static_cast<std::size_t> (h / 2) * static_cast<std::size_t> (w)
+                                         + static_cast<std::size_t> (w / 2)));
+    };
+
+    INFO ("keyed " << middleOf (keyed) << ", clear " << middleOf (clear) << ", solid " << middleOf (solid));
+    CHECK (middleOf (keyed) == 0x0000FFu);      // the green keyed out to the blue beneath
+    CHECK (middleOf (clear) == 0x0000FFu);      // its alpha read: nothing of it
+    CHECK (middleOf (solid) == 0xC86432u);      // its alpha not read: its colour, solid
 }
 
 TEST_CASE ("video gpu: a playing picture's curves edited are drawn at once, its table made again (§47)")

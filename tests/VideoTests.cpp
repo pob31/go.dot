@@ -58,6 +58,7 @@
 #include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/video/DcaOpacity.h>
 #include <wfg/engine/video/Ffmpeg.h>
+#include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Movie.h>
 #include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/VideoRamp.h>
@@ -1457,6 +1458,87 @@ TEST_CASE ("video: a mask cue's outline, feather and inversion reach the picture
     CHECK (spec.shape.y[2] == doctest::Approx (0.8f));
     CHECK (spec.shape.feather == doctest::Approx (12.0f));
     CHECK (spec.shape.invert);
+}
+
+TEST_CASE ("video: a cue's alpha switch and key reach the picture side, and a playing cue's key edited is restated at once (§61)")
+{
+    VideoRig rig;
+    const auto set = [&rig] (const char* row, osc::Value value)
+    {
+        return rig.submitAndTick ("node.set", { osc::Value::string (std::string ("/godot/cue/VD000002/") + row),
+                                                std::move (value) }).applied;
+    };
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (3);
+
+    //  At rest: its alpha read, no key, the key's own defaults.
+    REQUIRE (rig.sink.shown.size() == 1);
+    const auto shown = rig.sink.shown.front();
+    CHECK (shown.useAlpha);
+    CHECK (shown.key.mode == video::KeyMode::none);
+    CHECK (shown.key.colour == 0x00FF00u);
+    CHECK (shown.key.level == doctest::Approx (50.0));
+    CHECK (shown.key.softness == doctest::Approx (100.0));
+    CHECK (shown.key.spill == doctest::Approx (50.0));
+    CHECK_FALSE (shown.key.invert);
+
+    //  Keyed by a blue screen while it plays: restated, never shown again.
+    REQUIRE (set ("key", osc::Value::string ("colour")) == 1);
+    REQUIRE (set ("keyColour", osc::Value::string ("#0000FF")) == 1);
+    REQUIRE (set ("keyLevel", osc::Value::float64 (40.0)) == 1);
+    REQUIRE (set ("keySoftness", osc::Value::float64 (10.0)) == 1);
+    REQUIRE (set ("keySpill", osc::Value::float64 (80.0)) == 1);
+    REQUIRE (set ("keyInvert", osc::Value::string ("true")) == 1);
+    REQUIRE (set ("useAlpha", osc::Value::string ("false")) == 1);
+    rig.ticks (2);
+
+    REQUIRE_FALSE (rig.sink.restated.empty());
+    const auto last = rig.sink.restated.back();
+    CHECK (last.key.mode == video::KeyMode::colour);
+    CHECK (last.key.colour == 0x0000FFu);
+    CHECK (last.key.level == doctest::Approx (40.0));
+    CHECK (last.key.softness == doctest::Approx (10.0));
+    CHECK (last.key.spill == doctest::Approx (80.0));
+    CHECK (last.key.invert);
+    CHECK_FALSE (last.useAlpha);
+    CHECK (rig.sink.shown.size() == 1);
+
+    //  A key that is no key is refused at the door.
+    CHECK (set ("key", osc::Value::string ("chroma")) == 0);
+}
+
+TEST_CASE ("video: a capture reads its alpha only when its input says it sends one, and its own switch has the last word (§61, AKF)")
+{
+    VideoRig rig;
+
+    REQUIRE (rig.submitAndTick ("videoInput.create", { osc::Value::string ("Camera"), osc::Value::string ("ndi"),
+                                                       osc::Value::string (""), osc::Value::string ("MC000050") }).applied >= 1);
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/source"),
+                                              osc::Value::string ("capture") }).applied == 1);
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/videoInput"),
+                                              osc::Value::string ("MC000050") }).applied == 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (3);
+
+    //  Its own switch on, its input saying nothing: drawn solid, as captures always were.
+    REQUIRE (rig.sink.shown.size() == 1);
+    CHECK (rig.sink.shown.front().source == "capture");
+    CHECK_FALSE (rig.sink.shown.front().useAlpha);
+
+    //  The input says it sends alpha: read, at once.
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/videoInput/MC000050/alpha"),
+                                              osc::Value::string ("true") }).applied == 1);
+    rig.ticks (2);
+    REQUIRE_FALSE (rig.sink.restated.empty());
+    CHECK (rig.sink.restated.back().useAlpha);
+
+    //  And the cue's own switch off wins.
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/useAlpha"),
+                                              osc::Value::string ("false") }).applied == 1);
+    rig.ticks (2);
+    CHECK_FALSE (rig.sink.restated.back().useAlpha);
 }
 
 //==============================================================================

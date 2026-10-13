@@ -42,6 +42,7 @@
 */
 
 #include <wfg/engine/video/Grade.h>
+#include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Mask.h>
 
 #include <cmath>
@@ -101,6 +102,13 @@ namespace wfg::video
         /*  ITS GRADE (§36, VP, VU): a picture's and a movie's, the curves
             already baked. Does not move (VV). */
         Grade grade;
+
+        /*  WHETHER ITS OWN ALPHA IS READ, and its key (namespace draft 61,
+            AKE, AKF, AKH): a picture's, a movie's or a capture's - a capture's
+            alpha already folded in with its input's, so the far side reads one
+            switch. Before the grade (AKG). */
+        bool useAlpha = true;
+        Key key;
 
         /*  A MASK'S OUTLINE, its feather and whether it is turned inside out
             (UY, VF), parsed once here. */

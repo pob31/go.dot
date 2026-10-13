@@ -21,6 +21,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/video/Grade.h>
+#include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Mask.h>
 #include <wfg/engine/video/VideoRamp.h>
 
@@ -149,6 +150,24 @@ namespace wfg::cue
         video::bakeCurves (spec.grade, curveOf ("curveLuma"),
                            { curveOf ("curveRed"), curveOf ("curveGreen"), curveOf ("curveBlue") });
 
+        /*  ITS OWN ALPHA AND ITS KEY (namespace draft 61, AKE-AKH). A capture's
+            alpha is read only when its input says it sends one (AKF): many
+            programs send a fourth byte that means nothing (YO). */
+        spec.useAlpha = textOf ("useAlpha") != "false";
+
+        if (spec.source == "capture")
+            spec.useAlpha = spec.useAlpha
+                && document.getAttribute ("/godot/videoInput/" + spec.input + "/alpha").value_or (std::string {}) == "true";
+
+        spec.key.mode = video::keyModeFrom (textOf ("key"));
+
+        const auto keyColour = textOf ("keyColour");
+        spec.key.colour = video::paintFromText (keyColour.data(), keyColour.size());
+        spec.key.level = std::clamp (numberOf ("keyLevel"), 0.0, 100.0);
+        spec.key.softness = std::clamp (numberOf ("keySoftness"), 0.0, 100.0);
+        spec.key.spill = std::clamp (numberOf ("keySpill"), 0.0, 100.0);
+        spec.key.invert = textOf ("keyInvert") == "true";
+
         //  A mask's outline (UY, VF): x, y pairs, at most `maxPoints`.
         const auto corners = numbersIn (textOf ("shape"));
         const auto count = std::min<std::size_t> (corners.size() / 2, video::mask::maxPoints);
@@ -181,6 +200,9 @@ namespace wfg::cue
               || a.grade.hasCurves != b.grade.hasCurves || a.grade.tables != b.grade.tables)
             return false;
 
+        if (a.useAlpha != b.useAlpha || ! video::sameKey (a.key, b.key))
+            return false;
+
         if (a.shape.count != b.shape.count || a.shape.invert != b.shape.invert
               || ! same (a.shape.feather, b.shape.feather))
             return false;
@@ -201,6 +223,8 @@ namespace wfg::cue
         into.flipH = from.flipH;
         into.flipV = from.flipV;
         into.grade = from.grade;
+        into.useAlpha = from.useAlpha;
+        into.key = from.key;
         into.shape = from.shape;
     }
 }

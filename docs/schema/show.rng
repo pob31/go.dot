@@ -1597,6 +1597,59 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="key">
+          <a:documentation>What makes a picture, a movie or a capture see-through besides its alpha (namespace draft 61, AKA, AKB): none; luma, its brightness - it keeps its colours, black clear and white solid; matte, its brightness as a shape, filled with the cue&apos;s paint, as a mask whose outline a picture draws; colour, the points near keyColour cleared, a blue or green screen. Read from the picture as it arrives, before its grade, so a grade never moves the cut; a matte is not graded (AKG).</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>luma</value>
+            <value>matte</value>
+            <value>colour</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="keyColour">
+          <a:documentation>The colour a colour key clears, as #RRGGBB: green, the usual screen; blue is the other. Its brightness is not read, only where it lies among the colours (namespace draft 61, AKH).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="keyInvert">
+          <a:documentation>Whether the key keeps what it would clear: a luma key keeping the dark and clearing the light, a colour key keeping only the key colour.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="keyLevel">
+          <a:documentation>Where the key&apos;s cut falls (namespace draft 61, AKH): for luma and matte the brightness at which a point is half solid; for colour how far from keyColour a point is half solid, nought the key colour itself and 100 grey. With keySoftness at 100, 50 makes a luma key exactly brightness as opacity.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="keySoftness">
+          <a:documentation>How gradual the key&apos;s cut is, on the same scale as keyLevel: nought is a hard edge, 100 a ramp as wide as the whole scale. The picture panel sets 10 the first time a cue is keyed by colour with this and keyLevel untouched, and keyLevel 40 (namespace draft 61, AKH).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="keySpill">
+          <a:documentation>How much of the key colour a colour key takes off the colours it keeps - the green a screen throws onto hair and shoulders - along the key colour&apos;s own direction, the brightness kept (namespace draft 61, AKH). Read by a colour key alone.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="layer">
           <a:documentation>Where it lies in the canvas&apos;s stack: higher is on top, and of two on the same layer the one brought up later (VI). An integer per cue and never the list&apos;s order, which changes all through a technical rehearsal and would silently restack the picture (PRD 3.19b).</a:documentation>
           <data type="integer">
@@ -1790,6 +1843,15 @@
         <attribute name="strip">
           <a:documentation>sampler member: the strip this clip is played from, by identifier - a fader or a pad (author, 2026-09-25: &apos;I need to specify which track goes where&apos;). Empty is automatic: the next sampler strip nobody in the group has named, in member order, which is how every member was placed before. Two members naming one strip: the first in member order has it and the other is placed automatically. A strip that is not a sampler strip of this layout - deleted, or made a DCA strip - is no pin at all, and the member is placed automatically rather than left silent. A sound or a picture alike (namespace draft 49).</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="useAlpha">
+          <a:documentation>Whether a picture&apos;s, a movie&apos;s or a capture&apos;s own alpha makes it see-through where it says (namespace draft 61, AKE). On, so no show changes its look; off, it is drawn solid - black where a PNG was transparent, the colour under a transparent point being lost once the file is read; a HAP movie keeps its colour there. A capture&apos;s alpha is read only when its input says it sends one (videoInput/alpha, AKF).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -4218,6 +4280,15 @@
       <attribute name="id">
         <ref name="identifier"/>
       </attribute>
+      <optional>
+        <attribute name="alpha">
+          <a:documentation>Whether the program sending this input sends a meaningful alpha, so a capture of it may be see-through where the picture says (namespace draft 61, AKF). Off, captures are drawn solid, as they always were: many programs send a fourth byte that means nothing (YO). A capture&apos;s own useAlpha still has the last word.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
       <optional>
         <attribute name="enabled">
           <a:documentation>Whether Go.dot takes it in. It is connected while declared and enabled, never at GO (namespace draft 44, YD), so a cue showing it shows the latest picture that arrived.</a:documentation>

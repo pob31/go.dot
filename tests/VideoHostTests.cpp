@@ -59,6 +59,7 @@
 #include <wfg/engine/video/Displays.h>
 #include <wfg/engine/video/Ffmpeg.h>
 #include <wfg/engine/video/Geometry.h>
+#include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Mapping.h>
 #include <wfg/engine/video/Movie.h>
 #include <wfg/engine/video/MovieEditRender.h>
@@ -1808,6 +1809,279 @@ TEST_CASE ("video compositor: a picture's grade applied where it is sampled, and
 
     layers = layersOf (*memory.region);
     CHECK (video::colourAt (video::stackOf (layers, "C2"), 10, 1920.0, 1080.0, 0.0, 0.0, nullptr) == 0xFF0000u);
+}
+
+TEST_CASE ("video key: brightness as opacity, a hard edge, turned round, and nothing when there is no key (§61)")
+{
+    video::Key key;
+    double r = 0.3, g = 0.3, b = 0.3, a = 1.0;
+
+    //  No key: nothing changes.
+    video::applyKey (key, 0xFF0000, r, g, b, a);
+    CHECK (a == doctest::Approx (1.0));
+    CHECK (r == doctest::Approx (0.3));
+
+    /*  LUMA AT ITS DEFAULTS (level 50, softness 100) is exactly brightness as
+        opacity, the colour kept; turned round, the dark is kept. */
+    key.mode = video::KeyMode::luma;
+    video::applyKey (key, 0xFF0000, r, g, b, a);
+    CHECK (a == doctest::Approx (0.3));
+    CHECK (r == doctest::Approx (0.3));
+
+    key.invert = true;
+    r = g = b = 0.3;
+    a = 1.0;
+    video::applyKey (key, 0, r, g, b, a);
+    CHECK (a == doctest::Approx (0.7));
+
+    //  A point already half clear keeps half of what the key leaves.
+    key.invert = false;
+    r = g = b = 0.8;
+    a = 0.5;
+    video::applyKey (key, 0, r, g, b, a);
+    CHECK (a == doctest::Approx (0.4));
+
+    //  Softness nought: a step at the level.
+    key.softness = 0.0;
+    r = g = b = 0.49;
+    a = 1.0;
+    video::applyKey (key, 0, r, g, b, a);
+    CHECK (a == doctest::Approx (0.0));
+    r = g = b = 0.51;
+    a = 1.0;
+    video::applyKey (key, 0, r, g, b, a);
+    CHECK (a == doctest::Approx (1.0));
+}
+
+TEST_CASE ("video key: a green screen cleared, grey and red kept, its spill taken off with the brightness kept; a blue one too (§61)")
+{
+    video::Key key;
+    key.mode = video::KeyMode::colour;
+    key.spill = 0.0;
+
+    const auto keyed = [&key] (double r, double g, double b)
+    {
+        double a = 1.0;
+        video::applyKey (key, 0, r, g, b, a);
+        return a;
+    };
+
+    //  At the defaults the key colour is clear and grey solid, whatever its brightness.
+    CHECK (keyed (0.0, 1.0, 0.0) == doctest::Approx (0.0));
+    CHECK (keyed (0.5, 0.5, 0.5) == doctest::Approx (1.0));
+    CHECK (keyed (0.1, 0.1, 0.1) == doctest::Approx (1.0));
+    CHECK (keyed (1.0, 0.0, 0.0) == doctest::Approx (1.0));
+
+    //  A shadow across the screen - the same green, half as bright - is still the screen.
+    CHECK (keyed (0.0, 0.5, 0.0) == doctest::Approx (0.0));
+
+    //  A darker, duller green is too, at the panel's tight setting; skin and near-black are not.
+    key.level = 40.0;
+    key.softness = 10.0;
+    CHECK (keyed (0.05, 0.6, 0.05) == doctest::Approx (0.0));
+    CHECK (keyed (0.8, 0.6, 0.5) == doctest::Approx (1.0));
+    CHECK (keyed (0.02, 0.05, 0.02) == doctest::Approx (1.0));
+
+    //  THE SPILL: a grey with green in it loses the green, its brightness kept.
+    key.spill = 100.0;
+    double r = 0.45, g = 0.55, b = 0.45, a = 1.0;
+    const auto before = video::keying::lumaOf (r, g, b);
+    video::applyKey (key, 0, r, g, b, a);
+    CHECK (g < 0.55);
+    CHECK (video::keying::lumaOf (r, g, b) == doctest::Approx (before).epsilon (1.0e-6));
+
+    //  Spill nought: the colour is untouched.
+    key.spill = 0.0;
+    r = 0.45;
+    g = 0.55;
+    b = 0.45;
+    video::applyKey (key, 0, r, g, b, a);
+    CHECK (g == doctest::Approx (0.55));
+
+    //  A colour leaning away from the key (magenta, from green) loses nothing to the spill.
+    key.spill = 100.0;
+    r = 0.6;
+    g = 0.4;
+    b = 0.6;
+    video::applyKey (key, 0, r, g, b, a);
+    CHECK (g == doctest::Approx (0.4).epsilon (1.0e-6));
+
+    //  Blue is a key colour as green is.
+    key.colour = 0x0000FF;
+    key.spill = 0.0;
+    key.level = 50.0;
+    key.softness = 100.0;
+    CHECK (keyed (0.0, 0.0, 1.0) == doctest::Approx (0.0));
+    CHECK (keyed (0.0, 1.0, 0.0) == doctest::Approx (1.0));
+}
+
+TEST_CASE ("video key: a matte shows the cue's paint, cut by the picture's brightness (§61)")
+{
+    video::Key key;
+    key.mode = video::KeyMode::matte;
+
+    double r = 1.0, g = 1.0, b = 1.0, a = 1.0;
+    video::applyKey (key, 0xFF0000, r, g, b, a);
+    CHECK (r == doctest::Approx (1.0));
+    CHECK (g == doctest::Approx (0.0));
+    CHECK (b == doctest::Approx (0.0));
+    CHECK (a == doctest::Approx (1.0));
+
+    r = g = b = 0.0;
+    a = 1.0;
+    video::applyKey (key, 0x00FF00, r, g, b, a);
+    CHECK (g == doctest::Approx (1.0));
+    CHECK (a == doctest::Approx (0.0));
+}
+
+namespace
+{
+    /*  A PICTURE IN FOUR QUARTERS, left to right: a green screen; a grey
+        subject; white, half see-through; dark grey. 400 by 200. */
+    struct Quarters final : video::PictureSampler
+    {
+        bool sizeOf (const std::string& path, int& width, int& height) const override
+        {
+            if (path != "quarters.png")
+                return false;
+
+            width = 400;
+            height = 200;
+            return true;
+        }
+
+        bool colourAt (const std::string& path, double u, double,
+                       double& red, double& green, double& blue, double& alpha) const override
+        {
+            if (path != "quarters.png")
+                return false;
+
+            alpha = 1.0;
+
+            if (u < 0.25)       { red = 0.0;   green = 255.0; blue = 0.0; }
+            else if (u < 0.5)   { red = green = blue = 128.0; }
+            else if (u < 0.75)  { red = green = blue = 255.0; alpha = 0.5; }
+            else                { red = green = blue = 32.0; }
+
+            return true;
+        }
+    };
+
+    /*  The quarters' middles on a 1920 by 1080 canvas, the picture fitted to
+        its width. */
+    constexpr double screenX = -720.0, subjectX = -240.0, halfClearX = 240.0, darkX = 720.0;
+
+    std::uint32_t keyedAt (const video::LayerSpec& spec, double x)
+    {
+        Memory memory;
+        video::RegionSink sink { *memory.region };
+        const Quarters sampler;
+
+        //  A blue fill beneath, so what is see-through shows.
+        sink.show (fill ("RUN00001", "C1", 0, 1, 0x0000FF));
+        sink.opacity ("RUN00001", { 0, 1.0 });
+        sink.show (spec);
+        sink.opacity (spec.id, { 0, 1.0 });
+
+        const auto layers = layersOf (*memory.region);
+        return video::colourAt (video::stackOf (layers, "C1"), 10, 1920.0, 1080.0, x, 0.0, &sampler);
+    }
+
+    video::LayerSpec quarters()
+    {
+        video::LayerSpec spec;
+        spec.id = "RUN00002";
+        spec.canvas = "C1";
+        spec.layer = 1;
+        spec.order = 2;
+        spec.source = "picture";
+        spec.file = "quarters.png";
+        return spec;
+    }
+
+    double channelOf (std::uint32_t rgb, int shift)
+    {
+        return static_cast<double> ((rgb >> shift) & 0xffu);
+    }
+}
+
+TEST_CASE ("video compositor: a picture's own alpha, switched off, and keyed by brightness, as a shape or by its green (§61)")
+{
+    auto spec = quarters();
+
+    //  AS IT WAS: the half see-through white lets half the blue through.
+    auto colour = keyedAt (spec, halfClearX);
+    CHECK (channelOf (colour, 16) == doctest::Approx (128.0).epsilon (0.02));
+    CHECK (channelOf (colour, 0) == doctest::Approx (255.0));
+    CHECK (keyedAt (spec, screenX) == 0x00FF00u);
+
+    //  ITS ALPHA SWITCHED OFF: solid, and premultiplied - grey where it was half clear (AKE).
+    spec.useAlpha = false;
+    colour = keyedAt (spec, halfClearX);
+    CHECK (channelOf (colour, 16) == doctest::Approx (128.0).epsilon (0.02));
+    CHECK (channelOf (colour, 0) == doctest::Approx (128.0).epsilon (0.02));
+    spec.useAlpha = true;
+
+    //  A GREEN SCREEN: the screen clear to the blue beneath, the grey subject kept.
+    spec.key.mode = video::KeyMode::colour;
+    CHECK (keyedAt (spec, screenX) == 0x0000FFu);
+    CHECK (keyedAt (spec, subjectX) == 0x808080u);
+
+    //  BRIGHTNESS: the dark quarter mostly clear, its colour kept where it shows.
+    spec.key.mode = video::KeyMode::luma;
+    const auto dark = 32.0 / 255.0;
+    colour = keyedAt (spec, darkX);
+    CHECK (channelOf (colour, 0) == doctest::Approx (255.0 * (1.0 - dark) + 32.0 * dark).epsilon (0.02));
+    CHECK (channelOf (colour, 16) == doctest::Approx (32.0 * dark).epsilon (0.2));
+
+    /*  BRIGHTNESS AS A SHAPE: the grey subject is half the red paint, over the
+        blue - and a matte is not graded. */
+    spec.key.mode = video::KeyMode::matte;
+    spec.paint = 0xFF0000;
+    spec.grade.saturation = 0.0;
+    colour = keyedAt (spec, subjectX);
+    CHECK (channelOf (colour, 16) == doctest::Approx (128.0).epsilon (0.02));
+    CHECK (channelOf (colour, 8) == doctest::Approx (0.0));
+    CHECK (channelOf (colour, 0) == doctest::Approx (127.0).epsilon (0.02));
+}
+
+TEST_CASE ("video region: a layer's alpha switch and key written, read back and restated (§61)")
+{
+    Memory memory;
+    auto& r = *memory.region;
+    video::RegionSink sink { r };
+
+    auto spec = quarters();
+    spec.useAlpha = false;
+    spec.key.mode = video::KeyMode::colour;
+    spec.key.colour = 0x0000FF;
+    spec.key.level = 40.0;
+    spec.key.softness = 10.0;
+    spec.key.spill = 75.0;
+    spec.key.invert = true;
+    sink.show (spec);
+
+    auto layers = layersOf (r);
+    REQUIRE (layers.size() == 1);
+    CHECK_FALSE (layers[0].useAlpha);
+    CHECK (layers[0].key.mode == video::KeyMode::colour);
+    CHECK (layers[0].key.colour == 0x0000FFu);
+    CHECK (layers[0].key.level == doctest::Approx (40.0));
+    CHECK (layers[0].key.softness == doctest::Approx (10.0));
+    CHECK (layers[0].key.spill == doctest::Approx (75.0));
+    CHECK (layers[0].key.invert);
+
+    //  A playing cue's key edited: restated, its look and nothing else (§47, AAE).
+    spec.useAlpha = true;
+    spec.key.mode = video::KeyMode::luma;
+    spec.key.invert = false;
+    sink.restate (spec);
+
+    layers = layersOf (r);
+    REQUIRE (layers.size() == 1);
+    CHECK (layers[0].useAlpha);
+    CHECK (layers[0].key.mode == video::KeyMode::luma);
+    CHECK_FALSE (layers[0].key.invert);
 }
 
 TEST_CASE ("video compositor: normal, add, screen and multiply, in display space")

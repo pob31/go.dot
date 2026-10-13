@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 17;
+    constexpr std::uint32_t version = 18;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -360,6 +360,16 @@ namespace wfg::video::region
         std::atomic<double> hue;
         std::atomic<std::uint32_t> hasCurves;
         std::uint8_t tables[3][256];
+
+        /*  Whether its own alpha is read, and its key (Key.h; namespace
+            draft 61), written with what it is. */
+        std::atomic<std::uint32_t> useAlpha;
+        std::atomic<std::uint32_t> keyMode;
+        std::atomic<std::uint32_t> keyColour;
+        std::atomic<std::uint32_t> keyInvert;
+        std::atomic<double> keyLevel;
+        std::atomic<double> keySoftness;
+        std::atomic<double> keySpill;
 
         /*  A mask's outline (Mask.h), written with what it is. */
         std::atomic<std::int32_t> shapeCount;
@@ -809,6 +819,8 @@ namespace wfg::video::region
         bool flipH = false;
         bool flipV = false;
         Grade grade;
+        bool useAlpha = true;
+        Key key;
         mask::Shape shape;
         std::string input;
         std::string insert;
@@ -856,6 +868,14 @@ namespace wfg::video::region
 
             for (std::size_t channel = 0; channel < 3; ++channel)
                 std::memcpy (out.grade.tables[channel].data(), slot.tables[channel], 256);
+
+            out.useAlpha = slot.useAlpha.load (std::memory_order_relaxed) != 0;
+            out.key.mode = static_cast<KeyMode> (std::min (slot.keyMode.load (std::memory_order_relaxed), 3u));
+            out.key.colour = slot.keyColour.load (std::memory_order_relaxed);
+            out.key.invert = slot.keyInvert.load (std::memory_order_relaxed) != 0;
+            out.key.level = slot.keyLevel.load (std::memory_order_relaxed);
+            out.key.softness = slot.keySoftness.load (std::memory_order_relaxed);
+            out.key.spill = slot.keySpill.load (std::memory_order_relaxed);
 
             out.shape.count = std::clamp (slot.shapeCount.load (std::memory_order_relaxed), 0, mask::maxPoints);
             out.shape.feather = slot.shapeFeather.load (std::memory_order_relaxed);

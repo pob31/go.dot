@@ -36,6 +36,7 @@
 */
 
 #include <wfg/engine/video/Geometry.h>
+#include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/video/VideoRegion.h>
 
@@ -225,12 +226,32 @@ namespace wfg::video
                 continue;
             }
 
-            /*  THE GRADE, on a picture's and a movie's colour (VW, VU). */
-            if ((layer->source == region::Source::picture || layer->source == region::Source::movie)
-                  && ! layer->grade.isIdentity())
+            /*  THE ALPHA SWITCH, THE KEY AND THE GRADE, on a picture's and a
+                movie's colour, in that order (namespace draft 61, AKG; VW, VU).
+                A picture whose alpha is not read is drawn as the GPU reads it,
+                premultiplied: black where it was clear (AKE). A matte shows its
+                paint, ungraded. */
+            if (layer->source == region::Source::picture || layer->source == region::Source::movie)
             {
                 double gr = r / 255.0, gg = g / 255.0, gb = b / 255.0;
-                applyGrade (layer->grade, gr, gg, gb);
+
+                if (! layer->useAlpha)
+                {
+                    if (layer->source == region::Source::picture)
+                    {
+                        gr *= alpha;
+                        gg *= alpha;
+                        gb *= alpha;
+                    }
+
+                    alpha = 1.0;
+                }
+
+                applyKey (layer->key, layer->paint, gr, gg, gb, alpha);
+
+                if (layer->key.mode != KeyMode::matte && ! layer->grade.isIdentity())
+                    applyGrade (layer->grade, gr, gg, gb);
+
                 r = gr * 255.0;
                 g = gg * 255.0;
                 b = gb * 255.0;

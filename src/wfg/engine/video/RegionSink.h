@@ -42,23 +42,16 @@
 
 namespace wfg::video
 {
-    /*  WHAT A LAYER IS, written into a slot - its identity, its source and file,
-        its geometry's own numbers, its grade and mask - and not its points or
-        its removal: a run's (`RegionSink::show`), and the monitor's tile of the
-        picked cue (§47, AAH). The caller holds the slot's `seq`. */
-    inline void writeLayerSpec (region::Layer& slot, const LayerSpec& spec)
+    /*  WHAT A LAYER LOOKS LIKE, written into a slot: everything a playing
+        cue's edit may change at once (namespace draft 47, AAE) - its colour,
+        blend, fit and geometry's own numbers, its grade, its alpha switch and
+        key, its mask - and not what it is or shows. One list for the first
+        write and every restate, so neither can miss a field the other writes.
+        The caller holds the slot's `seq`. */
+    inline void writeLook (region::Layer& slot, const LayerSpec& spec)
     {
-        slot.used.store (1, std::memory_order_relaxed);
-        region::writeText (slot.id, spec.id);
-        region::writeText (slot.canvas, spec.canvas);
-        slot.layer.store (spec.layer, std::memory_order_relaxed);
-        slot.order.store (spec.order, std::memory_order_relaxed);
-        slot.source.store (static_cast<std::uint32_t> (region::sourceFrom (spec.source)), std::memory_order_relaxed);
         slot.paint.store (spec.paint, std::memory_order_relaxed);
         slot.blend.store (static_cast<std::uint32_t> (region::blendFrom (spec.blend)), std::memory_order_relaxed);
-        region::writeText (slot.file, spec.file);
-        region::writeText (slot.input, spec.input);
-        region::writeText (slot.insert, spec.insert);
         slot.fit.store (static_cast<std::uint32_t> (region::fitFrom (spec.fit)), std::memory_order_relaxed);
         slot.scale.store (spec.scale, std::memory_order_relaxed);
         slot.offsetX.store (spec.offsetX, std::memory_order_relaxed);
@@ -75,11 +68,37 @@ namespace wfg::video
         for (std::size_t channel = 0; channel < 3; ++channel)
             std::memcpy (slot.tables[channel], spec.grade.tables[channel].data(), 256);
 
+        slot.useAlpha.store (spec.useAlpha ? 1u : 0u, std::memory_order_relaxed);
+        slot.keyMode.store (static_cast<std::uint32_t> (spec.key.mode), std::memory_order_relaxed);
+        slot.keyColour.store (spec.key.colour, std::memory_order_relaxed);
+        slot.keyInvert.store (spec.key.invert ? 1u : 0u, std::memory_order_relaxed);
+        slot.keyLevel.store (spec.key.level, std::memory_order_relaxed);
+        slot.keySoftness.store (spec.key.softness, std::memory_order_relaxed);
+        slot.keySpill.store (spec.key.spill, std::memory_order_relaxed);
+
         slot.shapeCount.store (spec.shape.count, std::memory_order_relaxed);
         slot.shapeFeather.store (spec.shape.feather, std::memory_order_relaxed);
         slot.shapeInvert.store (spec.shape.invert ? 1u : 0u, std::memory_order_relaxed);
         std::memcpy (slot.shapeX, spec.shape.x, sizeof (slot.shapeX));
         std::memcpy (slot.shapeY, spec.shape.y, sizeof (slot.shapeY));
+    }
+
+    /*  WHAT A LAYER IS, written into a slot - its identity, its source and file,
+        and its look - and not its points or its removal: a run's
+        (`RegionSink::show`), and the monitor's tile of the picked cue (§47,
+        AAH). The caller holds the slot's `seq`. */
+    inline void writeLayerSpec (region::Layer& slot, const LayerSpec& spec)
+    {
+        slot.used.store (1, std::memory_order_relaxed);
+        region::writeText (slot.id, spec.id);
+        region::writeText (slot.canvas, spec.canvas);
+        slot.layer.store (spec.layer, std::memory_order_relaxed);
+        slot.order.store (spec.order, std::memory_order_relaxed);
+        slot.source.store (static_cast<std::uint32_t> (region::sourceFrom (spec.source)), std::memory_order_relaxed);
+        region::writeText (slot.file, spec.file);
+        region::writeText (slot.input, spec.input);
+        region::writeText (slot.insert, spec.insert);
+        writeLook (slot, spec);
     }
 
     class RegionSink final : public Sink
@@ -137,29 +156,7 @@ namespace wfg::video
             auto& slot = r.layers[static_cast<std::size_t> (at)];
 
             region::beginWrite (slot.seq);
-            slot.paint.store (spec.paint, std::memory_order_relaxed);
-            slot.blend.store (static_cast<std::uint32_t> (region::blendFrom (spec.blend)), std::memory_order_relaxed);
-            slot.fit.store (static_cast<std::uint32_t> (region::fitFrom (spec.fit)), std::memory_order_relaxed);
-            slot.scale.store (spec.scale, std::memory_order_relaxed);
-            slot.offsetX.store (spec.offsetX, std::memory_order_relaxed);
-            slot.offsetY.store (spec.offsetY, std::memory_order_relaxed);
-            slot.rotation.store (spec.rotation, std::memory_order_relaxed);
-            slot.flipH.store (spec.flipH ? 1u : 0u, std::memory_order_relaxed);
-            slot.flipV.store (spec.flipV ? 1u : 0u, std::memory_order_relaxed);
-            slot.contrast.store (spec.grade.contrast, std::memory_order_relaxed);
-            slot.saturation.store (spec.grade.saturation, std::memory_order_relaxed);
-            slot.gamma.store (spec.grade.gamma, std::memory_order_relaxed);
-            slot.hue.store (spec.grade.hue, std::memory_order_relaxed);
-            slot.hasCurves.store (spec.grade.hasCurves ? 1u : 0u, std::memory_order_relaxed);
-
-            for (std::size_t channel = 0; channel < 3; ++channel)
-                std::memcpy (slot.tables[channel], spec.grade.tables[channel].data(), 256);
-
-            slot.shapeCount.store (spec.shape.count, std::memory_order_relaxed);
-            slot.shapeFeather.store (spec.shape.feather, std::memory_order_relaxed);
-            slot.shapeInvert.store (spec.shape.invert ? 1u : 0u, std::memory_order_relaxed);
-            std::memcpy (slot.shapeX, spec.shape.x, sizeof (slot.shapeX));
-            std::memcpy (slot.shapeY, spec.shape.y, sizeof (slot.shapeY));
+            writeLook (slot, spec);
             region::endWrite (slot.seq);
         }
 

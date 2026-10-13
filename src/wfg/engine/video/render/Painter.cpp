@@ -780,7 +780,7 @@ namespace wfg::video::render
                     sg_apply_pipeline (pipeline (Program::movie, Lay::normal, format));
                     bindPicture (found->second.view, layer);
                     apply (UB_video_corners, quadOf (whole, 1.0, 1.0, 0.0));
-                    apply (UB_video_grade, gradeOf (layer, 1.0, true));
+                    apply (UB_video_grade, gradeOf (layer, 1.0));
                     sg_draw (0, 4, 1);
                 }
             }
@@ -789,7 +789,11 @@ namespace wfg::video::render
             return drawn;
         }
 
-        static video_grade_t gradeOf (const region::LayerReading& layer, double opacity, bool opaque = false) noexcept
+        /*  A PICTURE'S, A MOVIE'S OR A CAPTURE'S GRADE, its alpha switch and
+            its key (namespace draft 61): its own alpha unread when the switch
+            is off - a capture's already folded with its input's by the engine
+            (AKF) - and the key's numbers 0..1, a matte's colour its paint. */
+        static video_grade_t gradeOf (const region::LayerReading& layer, double opacity) noexcept
         {
             const auto& grade = layer.grade;
             const auto turn = grade.hue * 3.14159265358979323846 / 180.0;
@@ -802,7 +806,18 @@ namespace wfg::video::render
             uniforms.grade_b[0] = static_cast<float> (std::cos (turn));
             uniforms.grade_b[1] = static_cast<float> (std::sin (turn));
             uniforms.grade_b[2] = static_cast<float> (opacity);
-            uniforms.grade_b[3] = opaque ? 1.0f : 0.0f;
+            uniforms.grade_b[3] = layer.useAlpha ? 0.0f : 1.0f;
+
+            const auto& key = layer.key;
+            const auto shown = key.mode == KeyMode::matte ? layer.paint : key.colour;
+            uniforms.key_a[0] = static_cast<float> (key.mode);
+            uniforms.key_a[1] = static_cast<float> (key.level / 100.0);
+            uniforms.key_a[2] = static_cast<float> (key.softness / 100.0);
+            uniforms.key_a[3] = key.invert ? 1.0f : 0.0f;
+            uniforms.key_b[0] = static_cast<float> ((shown >> 16) & 0xffu) / 255.0f;
+            uniforms.key_b[1] = static_cast<float> ((shown >> 8) & 0xffu) / 255.0f;
+            uniforms.key_b[2] = static_cast<float> (shown & 0xffu) / 255.0f;
+            uniforms.key_b[3] = static_cast<float> (key.spill / 100.0);
             return uniforms;
         }
 
@@ -924,9 +939,10 @@ namespace wfg::video::render
                 else if (layer->source == region::Source::capture)
                 {
                     /*  A CAPTURE (§44, YC): its input's newest picture, rows
-                        from the top, drawn as a movie's frame is but opaque -
-                        a sender's fourth byte is often anything. Nothing while
-                        none has arrived. */
+                        from the top, drawn as a movie's frame is - opaque unless
+                        its input says it sends alpha (61, AKF), a sender's
+                        fourth byte being often anything. Nothing while none
+                        has arrived. */
                     const auto found = inputs.find (layer->input);
 
                     if (found == inputs.end() || found->second.view.id == SG_INVALID_ID
@@ -939,7 +955,7 @@ namespace wfg::video::render
                     apply (UB_video_corners, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
                                                                static_cast<double> (in.width), static_cast<double> (in.height)),
                                                   1.0, 1.0, 0.0));
-                    apply (UB_video_grade, gradeOf (*layer, a, true));
+                    apply (UB_video_grade, gradeOf (*layer, a));
                     sg_draw (0, 4, 1);
                 }
                 else if (layer->source == region::Source::mask)

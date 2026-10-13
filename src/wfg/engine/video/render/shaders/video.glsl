@@ -64,11 +64,20 @@ void main() {
 //------------------------------------------------------------------------------
 //  THE GRADE (Grade.h, line for line): gamma, contrast about mid-grey, the hue
 //  turned about the grey axis, the saturation, then the baked tables - one
-//  texel a step, red, green and blue.
+//  texel a step, red, green and blue. Before it, THE KEY (Key.h, line for
+//  line; namespace draft 61): a point's measure - its brightness, or for a
+//  colour key its colour's distance from the key colour's in the Cb Cr plane,
+//  each relative to its own brightness (at least a tenth) so a shadow is still
+//  the screen, the key nought and grey one, the spill taken off along the
+//  key's direction - then
+//  the ramp, which multiplies its alpha; a matte shows the cue's paint and is
+//  not graded.
 @block grade_block
 layout(binding=1) uniform grade {
     vec4 grade_a;       // gamma, contrast, saturation, curves (0 or 1)
-    vec4 grade_b;       // cos (hue), sin (hue), opacity, opaque (a capture: 1)
+    vec4 grade_b;       // cos (hue), sin (hue), opacity, alpha not read (1)
+    vec4 key_a;         // mode (0 none, 1 luma, 2 matte, 3 colour), level, softness, invert - 0..1
+    vec4 key_b;         // the key colour, or a matte's paint; the spill 0..1
 };
 
 layout(binding=1) uniform texture2D grade_tables;
@@ -90,6 +99,38 @@ vec3 apply_grade(vec3 c) {
     }
     return c;
 }
+
+void apply_key(inout vec3 c, inout float a) {
+    int mode = int(key_a.x + 0.5);
+    if (mode == 0) return;
+    vec3 weights = vec3(0.2126, 0.7152, 0.0722);
+    float y = dot(c, weights);
+    float m = y;
+    if (mode == 3) {
+        float ky = dot(key_b.rgb, weights);
+        vec2 kc = vec2((key_b.b - ky) / 1.8556, (key_b.r - ky) / 1.5748);
+        vec2 pc = vec2((c.b - y) / 1.8556, (c.r - y) / 1.5748);
+        float key_scale = 1.0 / max(ky, 0.1);
+        float norm = max(length(kc) * key_scale, 0.001);
+        m = length(pc / max(y, 0.1) - kc * key_scale) / norm;
+        vec2 dir = kc / max(length(kc), 0.000001);
+        pc -= dir * (max(0.0, dot(pc, dir)) * clamp(key_b.w, 0.0, 1.0));
+        float r = y + 1.5748 * pc.y;
+        float b = y + 1.8556 * pc.x;
+        float g = (y - 0.2126 * r - 0.0722 * b) / 0.7152;
+        c = clamp(vec3(r, g, b), 0.0, 1.0);
+    }
+    float k = key_a.z > 0.0 ? clamp((m - key_a.y) / key_a.z + 0.5, 0.0, 1.0) : (m >= key_a.y ? 1.0 : 0.0);
+    if (key_a.w > 0.5) k = 1.0 - k;
+    if (mode == 2) c = key_b.rgb;
+    a *= k;
+}
+
+//  The key, then the grade - a matte shows its paint as it is.
+void key_and_grade(inout vec3 c, inout float a) {
+    apply_key(c, a);
+    if (int(key_a.x + 0.5) != 2) c = apply_grade(c);
+}
 @end
 
 //------------------------------------------------------------------------------
@@ -110,8 +151,10 @@ void main() {
 @program fill quad_vs fill_fs
 
 //------------------------------------------------------------------------------
-//  A PICTURE: read premultiplied, as the store holds it; graded on its own
-//  colour; premultiplied again and taken down by the layer's opacity.
+//  A PICTURE: read premultiplied, as the store holds it; keyed and graded on
+//  its own colour; premultiplied again and taken down by the layer's opacity.
+//  Its alpha not read (61, AKE), it is solid - black where it was clear, the
+//  colour there gone once the file was read.
 @fs picture_fs
 @include_block grade_block
 
@@ -123,8 +166,10 @@ out vec4 frag_colour;
 
 void main() {
     vec4 p = texture(sampler2D(picture, picture_smp), at);
-    vec3 rgb = p.a > 0.0 ? apply_grade(p.rgb / p.a) : vec3(0.0);
-    frag_colour = vec4(rgb * p.a, p.a) * grade_b.z;
+    float a = grade_b.w > 0.5 ? 1.0 : p.a;
+    vec3 rgb = grade_b.w > 0.5 ? p.rgb : (p.a > 0.0 ? p.rgb / p.a : vec3(0.0));
+    key_and_grade(rgb, a);
+    frag_colour = vec4(rgb * a, a) * grade_b.z;
 }
 @end
 
@@ -132,9 +177,10 @@ void main() {
 
 //------------------------------------------------------------------------------
 //  A MOVIE'S FRAME: DXT's colour, or a preview's, straight - HAP's alpha is not
-//  premultiplied - graded, then premultiplied by its own alpha. And a capture's
-//  picture (namespace draft 44, YC), whose alpha is not read (grade_b.w): many
-//  programs send BGRX, its fourth byte whatever it happens to be.
+//  premultiplied - keyed and graded, then premultiplied by its own alpha. And a
+//  capture's picture (namespace draft 44, YC), whose alpha is read only when its
+//  input says it sends one (61, AKF; grade_b.w): many programs send BGRX, its
+//  fourth byte whatever it happens to be.
 @fs movie_fs
 @include_block grade_block
 
@@ -147,7 +193,9 @@ out vec4 frag_colour;
 void main() {
     vec4 c = texture(sampler2D(picture, picture_smp), at);
     float a = grade_b.w > 0.5 ? 1.0 : c.a;
-    frag_colour = vec4(apply_grade(c.rgb) * a, a) * grade_b.z;
+    vec3 rgb = c.rgb;
+    key_and_grade(rgb, a);
+    frag_colour = vec4(rgb * a, a) * grade_b.z;
 }
 @end
 
@@ -169,8 +217,10 @@ void main() {
     float scale = (q.b * (255.0 / 8.0)) + 1.0;
     float co = (q.r - 0.50196078431373) / scale;
     float cg = (q.g - 0.50196078431373) / scale;
-    vec3 rgb = vec3(q.a + co - cg, q.a + cg, q.a - co - cg);
-    frag_colour = vec4(apply_grade(clamp(rgb, 0.0, 1.0)), 1.0) * grade_b.z;
+    vec3 rgb = clamp(vec3(q.a + co - cg, q.a + cg, q.a - co - cg), 0.0, 1.0);
+    float a = 1.0;
+    key_and_grade(rgb, a);
+    frag_colour = vec4(rgb * a, a) * grade_b.z;
 }
 @end
 

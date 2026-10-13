@@ -27317,9 +27317,11 @@ Mine, the author's to overrule:
   insert, the opacity and the DCA, the blend. A blur cue is a step of compositing the canvas.
 - **AKH** (mine) **The key's rows and arithmetic.** One set of rows for the three modes: `keyLevel` 50 %,
   `keySoftness` 100 %, `keyInvert`, `keySpill` 50 % (the colour key's alone), `keyColour` green. A point's
-  measure is its brightness (Rec. 709) for `luma` and `matte`, and for `colour` its distance from the key
-  colour in the colour plane (Cb, Cr), counted so that the key colour is nought and grey is one; the
-  ramp is `clamp ((m - level) / softness + 1/2)`, a step at softness nought. At the defaults, `luma` is
+  measure is its brightness (Rec. 709) for `luma` and `matte`, and for `colour` how far its colour lies
+  from the key colour's in the colour plane (Cb, Cr), each taken relative to its own brightness - never
+  less than a tenth, below which a colour is mostly noise - so a shadow across the screen, the same
+  green half as bright, is still the screen; counted so that the key colour is nought and grey is one.
+  The ramp is `clamp ((m - level) / softness + 1/2)`, a step at softness nought. At the defaults, `luma` is
   exactly "brightness is opacity" and `matte` exactly "the greyscale is the shape". The first time a cue
   is set to `colour` with level and softness at those defaults, the picture panel moves them to 40 % and
   10 %, one undo. The spill is taken off along the key colour's own direction in the colour plane, its
@@ -27449,3 +27451,29 @@ tiles cost the renderer's message thread with a blur in them.
 
 - **VFX.0**, 2026-10-13: this section; PRD §3.19, §3.19b, §6.9's proposals, §6.11's M65 and M66; the
   devplan's stages under Phase 8b.
+- **VFX.1**, 2026-10-13: the alpha switch and the keys, on the projector and the monitor (AKA, AKB,
+  AKE-AKH). The rows of 61.3 for them and `videoInput/alpha`; `show.rng` regenerated. `video/Key.h`, pure:
+  `KeyMode`, `Key`, `applyKey` on a point's straight colour and alpha, `sameKey`. `LayerSpec` and the
+  region's layer carry `useAlpha` and the key (region version 18); `writeLook` is now the one list of
+  what a layer looks like, written by `writeLayerSpec` and by `restate` alike, so a field added to one
+  can no longer be missed by the other. `pictureSpecOf` reads the rows and folds a capture's switch
+  with its input's `alpha` (AKF); `sameLook` and `takeLook` take them, so a playing cue keyed is
+  restated at once, as its grade is. The shader's grade block gains `key_a` and `key_b` - vec4s, the
+  packing alike on Direct3D, Metal and OpenGL - and `apply_key`, then `key_and_grade`, in `picture_fs`
+  (which reads `grade_b.w`, the switch, for the first time), `movie_fs` and `movie_q_fs`; `gradeOf`
+  fills them, a matte's colour its paint, and captures are no longer drawn opaque by hand - the switch
+  says so. The reference compositor applies the switch (a picture premultiplied, as the GPU reads it),
+  the key, then the grade, skipped for a matte. The picture part of Copy and Paste carries the key.
+  The colour key's measure was first the absolute distance in the colour plane; a darker green failed
+  its case, and a shadow across a real screen would have read as half the key - so each colour is taken
+  relative to its own brightness, never below a tenth. Tests under C and fr_FR: `VideoHostTests` (the
+  arithmetic - brightness as opacity, a hard edge, turned round, a green and a blue screen, a shadow, a
+  skin tone and near-black kept, the spill keeping the brightness and sparing colours leaning away, a
+  matte in its paint; the compositor over a blue fill - the alpha read and switched off, a green screen,
+  brightness, a matte ungraded; the region written, read back and restated), `VideoTests` (the rows to
+  the picture side and a playing cue's key restated, a key that is no key refused; a capture's alpha
+  only from its input, its own switch last), `VideoGpuTests` (eight keyed scenes against the reference
+  on Direct3D 11's WARP; a movie frame keyed and its alpha read or not); `CuePartTests`; `schema.*`,
+  `client.boundary`, `source.comments`, `video.gpu.C`. Two deliberate breakages, each turning its own
+  cases red: the shader never told the key (six of the eight scenes and the movie; the blue key on a
+  picture with nothing blue in it is alike either way), and a capture's input not asked.
