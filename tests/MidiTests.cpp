@@ -3989,6 +3989,48 @@ TEST_CASE ("mtc in: observations' samples follow the clock line fed, 1:1 and wit
     }
 }
 
+TEST_CASE ("mtc in: a count the engine moved and says so is followed at once; one the reader finds moved for itself is held two seconds first")
+{
+    /*  Three seconds of pairs every 20 ms on the 1:1 line, then Go.dot's count
+        ten seconds back - an interface opened again, the session's clock
+        rebased (TG.11's faults, part 2: serve tells the reader through the flag
+        the clock triggers forget by). */
+    constexpr std::int64_t moved = 480'000;
+    constexpr std::int64_t zero = 10'000'000;
+
+    const auto settle = [] (timecode::MtcReader& reader)
+    {
+        for (std::int64_t ms = 0; ms <= 3000; ms += 20)
+            reader.feedClock (zero + ms * 48, mtcInBase + ms * 1'000'000, 48000);
+
+        CHECK (reader.sampleAt (mtcInBase + 3'000'000'000) == zero + 144'000);
+    };
+
+    //  Told: the next pair starts the line, and a moment just after it is on the new count.
+    timecode::MtcReader told;
+    settle (told);
+    told.forgetClock();
+    told.feedClock (zero + 3020 * 48 - moved, mtcInBase + 3'020'000'000, 48000);
+    CHECK (std::llabs (told.sampleAt (mtcInBase + 3'030'000'000) - (zero + 3030 * 48 - moved)) <= 1);
+
+    //  Untold: a slip, which a late count looks like, held two seconds on the old line, then followed.
+    timecode::MtcReader untold;
+    settle (untold);
+    std::int64_t followedAt = 0;
+
+    for (std::int64_t ms = 3020; ms <= 6000 && followedAt == 0; ms += 20)
+    {
+        untold.feedClock (zero + ms * 48 - moved, mtcInBase + ms * 1'000'000, 48000);
+
+        if (std::llabs (untold.sampleAt (mtcInBase + ms * 1'000'000) - (zero + ms * 48 - moved)) <= 1)
+            followedAt = ms;
+    }
+
+    INFO ("followed at " << followedAt << " ms");
+    CHECK (followedAt >= 3020 + 2000);
+    CHECK (followedAt <= 3020 + 2200);
+}
+
 TEST_CASE ("mtc in: quarter frames and full frames on sync/mtcIn are taken into the inbox before a surface's consumer; other ports and messages go on as before")
 {
     Engine engine;

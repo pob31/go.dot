@@ -28028,6 +28028,124 @@ real interface's clock against MTC from a cable, and a code from a VTR or a desk
   Left: M64's chase table to measure again (`m64_chase.py`, by hand, two ten-minute sessions); MTC's sparsity (3); a
   slice move on a stretched loop heard 115 ms after it is placed (above), and whether a §41 turn of a stretched cue,
   placed a horizon ahead on a reader that reads ahead, turns where its clock says - not measured.
+- **TG.11's faults, part 2**, 2026-10-13: the last of the four faults TG.11's driver found, (3), mended - MTC's
+  `code.heard` as sparse as LTC's - and a code's turns written only while the show holds a time group on it (AIO,
+  AIP).
+  **THE CAUSE, AS FOUND.** As TG.11 traced it, MTC's moments reached Go.dot's samples through the reader's
+  `ClockEstimate`, which follows the tick's clock pairs one by one - each moving its offset by a tenth of its error
+  and its slope by a hundredth of the error over the time since the last pair, clamped within half a percent. But not
+  because the tick was late: a pair read late is read whole, the count and the moment together, and the driver's
+  baseline on part 1's binary noted no tick behind at all - 1 of 101 red in C, MTC 25 records in the pass (3 jumped,
+  21 running, 1 stopped) at speeds from 0.99892 to 1.00236 against a code at 1.00005 and then 1.001, where LTC wrote
+  eight. Pairs a block apart in their noise walk the estimate's slope to its clamp (TG.6's measurement, at 256 and 512
+  samples; the driver's blocks are 128) and its offset rings with it by a millisecond and more for seconds; the
+  watcher, fitting its line through samples read off it, re-anchored on every ring. A tick thread running the ticks
+  it owes back to back, a third of a millisecond apart on one count, would kick the slope harder still - reasoned
+  from the arithmetic; the cable below wrote no more records with the tick's stalls than without.
+  **THE MEND, ONE: A STRAIGHT LINE.** `timecode::CountLine` (`timecode/CountLine.{h,cpp}`, new): TG.6's count's line
+  moved out of ClockWatch - least squares through the last two minutes of the tick's pairs, fitted at every pair for
+  its first second and twice a second after, a slip told from eight pairs together and the line started again - and
+  the MTC reader keeps one in place of its `ClockEstimate`, fed the pair serve's hook hands the lane. ClockWatch reads
+  it as it read its own: ClockWatchTests' hours are 3 and 4 `running`, at worst 1.09419 and 1.07583 ms, the speed
+  learnt to 0.255607 and 0.0618927 ppm, to the digit before the move and after everything below. Beyond TG.6's line,
+  for MTC, which cannot wait the second ClockWatch waits before it reads anything and must not move while it reads:
+  - `sampleAt` reads through the pairs' middle at a slope weighed by inverse variance between the line's own and the
+    nominal, believed to 100 ppm (`priorPartsPerMillion`) - after a slip, the slope the line had, as well as it was
+    known, the pairs that slipped taken out first. Found by measuring: through the plain line the cable below, at
+    512-sample blocks, wrote four `running` in MTC's first four seconds, at 1.0021, 1.00056, 0.99924 and 1 - a line
+    through a second of such blocks knows its slope to a part in a thousand (one read -100 ppm against a crystal at
+    -20; weighed, -0.45).
+  - A pair further from the line than six times its scatter and 3 ms, not yet a slip, is not fitted through - a thread
+    preempted between reading the count and reading the clock (the brief's "outliers from late ticks"; a late tick's
+    own pair is no outlier).
+  - A COUNT RUNNING LATE IS NO SLIP. One of the first final runs went red in fr_FR, 22 MTC records, 15 of them in the
+    lead-in, at speeds from 0.983 to 1.0098, while another session loaded the machine. A probe (taken out again)
+    wrote every tick's pair and every MTC observation: with the machine busy on every core, the hosted pump of the
+    Debug engine fell 590 ms behind its deadlines for a second and a half, and twice more, then ran its blocks back to
+    back; on ten cores, 70 ms for half a second. The slip rule told those as slips and started the line again from
+    pairs that were only late, and again when the count caught up, moving every MTC moment by as much. Now a slip's
+    eight pairs must stand at ONE distance - within four times the line's scatter of each other, a block's width, as a
+    count that lost samples does - where a late count's are strung out over tens or hundreds of milliseconds; and
+    MTC's line holds a slip two seconds (`lateHoldSeconds`, past the 1.8 s seen) before believing it, fitting nothing
+    meanwhile, since a count late at one distance for a while looks like a slip until it catches up. The cost: a
+    count that really lost its samples has MTC's moments read that much off for two seconds - a re-anchor or two. The
+    wall clock's watcher keeps no hold, as TG.6 measured it, and its numbers did not move.
+  - A COUNT THE ENGINE MOVED is no guess: an outage's end, an apply that opened another interface, the session's clock
+    rebased - the occasions serve already raised `clockForget` at for the clock triggers. Serve now takes that flag
+    before MTC's drain, forgets the reader's count's line (`MtcInput::forgetClock`) and hands the clock block the
+    same answer, so the line starts again from the next pair rather than holding two seconds on samples that are not
+    the count's any more.
+  The `ClockEstimate` stays where the MTC lane and the video renderer use it, a tick ahead of what they send and show;
+  the lane carries the same wander there, as TG.6 said and left, and MtcReader.h says so.
+  **THE MEND, TWO: WRITTEN ONLY FOR A TIME GROUP.** `CodeWatch::setWriting`: serve reads
+  `ShowDocument::holdsTimeGroupOn ("ltc")` and `("mtc")` once a show revision, beside the codes' sources and the
+  clock's own question, and tells each watcher. A code arriving at a show with no group reading it is what the
+  machine happened to hear, not anything somebody decided (PRD §4.10). Off, the watcher goes on exactly as before -
+  the decoding, the reader, its line and its turns - and says nothing, at a takeover either; a backup decodes as
+  ever (redundancy constraint 2). THE READOUTS (`sync/ltcIn*`, `sync/mtcIn*`) read the Runner's map while a group
+  reads the code, as before, and the watcher's own (`CodeWatch::map`, shifted by the latency as a record is) while
+  none does - so the Timecode tab shows an arriving code with no group. WHEN A GROUP APPEARS, the very next tick says
+  at once what the watcher knows, as a takeover's re-say does: `jumped` on the line it kept while the code runs,
+  `stopped` where it stopped, nothing for a code never heard (whose first `jumped` comes with it, as always) - the
+  Runner's map before that was the last one written while a group was there, or none, and is not the code's; a
+  takeover on that same tick says it once. When the group goes, nothing more is written; the Runner keeps the last
+  map, which nothing reads and the readouts no longer show. The clock was already watched only for a group (TG.6).
+  **AIO'S THRESHOLD FOR MTC, 1 MS, KEPT**: on the straight line the cable below writes one to four `running` in ten
+  minutes at +50 ppm, its maps at worst 0.88 to 0.99 ms from the code - the threshold itself, the most a map is let
+  drift - and the driver two to five a pass, as LTC at its 0.5 ms writes four. Nothing measured asks for another.
+  Tests under C and fr_FR, `CodeWatchTests` four new cases and `MidiTests` one. "count line": a second of 512-sample
+  pairs from a crystal at -20 ppm read at -0.45 ppm where the line's own slope is -100, the moment within a
+  millisecond; two minutes on,
+  the slope to a part per million and the moment within half; one pair read 30 ms early not fitted through, a twin
+  never fed it reading the same to the last bit; a count frozen 600 ms and caught up eight times faster than it
+  plays, 584 ms behind at worst, no slip, the moment in its middle read within half a millisecond; a block lost for
+  good told on its eighth pair, and half a second after it the slope read -19.59 ppm. "count line, held": a count
+  late 70 ms at one distance for a second, a line that does not hold telling a slip on its eighth pair and MTC's
+  line none, every moment within half a millisecond throughout; a 512-sample buffer lost told 107 ticks on by the
+  held line (8 by the other), then read where it now is. "MTC through the input": Go.dot's own sender's messages
+  arriving on the steady clock with half a millisecond of driver either way, the code +50 ppm against an interface at
+  -20 counted 256 or 512 samples at a time, the hook ticked up to 3 ms late and, in two of the four runs, stalled
+  every eight seconds by 30 to 130 ms and run through its owed ticks back to back - each tick feeding the MTC input
+  the pair, taking the inbox and feeding the watcher as serve does: ten minutes, before the mend 285, 279, 555 and
+  565 records (red), after it 2, 3, 4 and 5, one `jumped` and no `stopped` each, every map within a millisecond, the
+  speed learnt. "Nothing written": half a minute of code with writing off says nothing, re-says nothing, and keeps a
+  running map within a millisecond; on, `jumped` on the next tick, on that map, then little; off with the code
+  stopped, nothing, the map stopped; on again, `stopped` at once and then nothing; and a takeover on the tick a group
+  appears says it once. "mtc in: a count the engine moved and says so": three seconds of pairs, the count ten seconds
+  back, told - the next pair's moment on the new count - and untold, held on the old line for the eight pairs that
+  told it and two seconds more (checked between 2.0 and 2.2 s), then followed.
+  Whole in both locales: CodeWatchTests, ClockWatchTests, CodeMapTests, MidiTests (its other "mtc in" cases read
+  through the count's line, unchanged), TimeGroupTests, FollowTests, SeatTests, TreeTests, TimecodeRunTests - 253
+  cases. Deliberate breakages, each turning its own cases red: the nominal slope not weighed in (the young line
+  at -100 ppm, the slope after a slip 2725 ppm, the cable's 512-sample run with stalls seven `running`); a pair far off
+  fitted through (the twins differ); no slope kept across a slip (+1.8 ppm read); a slip's pairs not asked to stand
+  at one distance (the late count told a slip, its middle read 584 ms off); no hold (the 70 ms late count a slip,
+  read 70 ms off); `forgetClock` doing nothing (the told count read ten seconds off); `setWriting` ignored (records
+  with no group, a re-say); no word at once when a group appears. The clang-tidy stand-in clean on CountLine.cpp,
+  ClockWatch.cpp, CodeWatch.cpp, MtcReader.cpp, MtcInbox.cpp, Console.cpp, CodeWatchTests.cpp and MidiTests.cpp, its
+  run proved by a planted shadow.
+  `blackbox.timegroup`: before, part 1's binary, 1 of 101 red (above). On the final binary, 101 of 101 twice through
+  ctest in each locale: MTC 8, 8, 9 and 6 records a pass (3 jumped, 1 stopped, 2 to 5 running, nought or one in the
+  lead-in after its first two seconds), its speeds 1.00000 to 1.00171 against 1.00005 and 1.001, its `jumped` at the
+  return and the locate 0.60 to 1.56 ms before where the port's pass puts them; LTC's eight unchanged. On the way:
+  before the slip at one distance and the hold, nine runs (one by hand, eight through ctest), eight green (MTC 6 to 8
+  records where printed) and the fr_FR one above, red at 22, while another session loaded the machine; with the slip
+  at one distance and no hold, on a machine busy on ten cores, 34 (30 running at 0.926 to 1.090), the pump 70 ms late
+  at one distance for half a second; with the hold and before `forgetClock`, four more through ctest, green, MTC 7
+  and 8. With all sixteen cores busy, MTC's own arrivals came late by milliseconds as well - the player's thread
+  starved, which no reader can see through - and that run is no measure. `blackbox.timecode`, the `wfg.replay.*`
+  gates and `source.comments` green in both locales on the final binary.
+  Where this departs from the brief. The cause was the block's noise, not the late tick, as above. The gate lives in
+  the watcher (`setWriting`), not around serve's submit, so a case pins it and a takeover's re-say obeys it too;
+  serve only reads the document. The weighed slope, the pair left out, the slip at one distance and the hold are
+  beyond TG.6's line, each found by a measurement above. The wall clock's watcher shares the line and so its slip at
+  one distance - its numbers unchanged, and a late count strung out no longer a slip for it either - but not the
+  hold.
+  Left: M64's chase table to measure again (part 1's); the driver judges MTC's turns to 20 ms (`MTC_PLACED_MS`) and
+  voids MTC's placing and sparsity on CI as the runner's, which the straight line may let it tighten - not measured on
+  a runner, so left; a count that moves for a reason serve does not raise `clockForget` at waits the two seconds'
+  hold before MTC's line follows it, where the `ClockEstimate` started again at once from a quarter of a second off -
+  none is known; the MTC lane's and the renderer's `ClockEstimate`, a tick ahead.
 
 ## 61. Keys, text and blur
 

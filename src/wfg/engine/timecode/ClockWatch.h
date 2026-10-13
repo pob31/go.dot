@@ -49,15 +49,16 @@
         pair - the count and the steady moment it was read at, the one the MTC
         lane and the MTC reader are fed - goes into a straight line of this
         watcher's own, the COUNT'S LINE, fitted by least squares through the
-        last `pairSeconds` of pairs (LineFit.h), and a reading's sample is that
-        line's at the steady moment the wall clock was read at. Not the
-        `ClockEstimate` the MTC reader keeps: its slope is followed pair by
-        pair, and pairs a block apart in their noise walk it to its clamp of
-        half a percent (measured, at 256 and at 512 samples) - harmless a tick
-        ahead, where it is used, but milliseconds across a three-second gap,
-        and the readings a line is fitted through must not wander so. Readings
-        wait a second (`quietSeconds`) while the count's line is young - which
-        is why the first `jumped` comes a second after the watching begins.
+        last two minutes of pairs (CountLine.h, which the MTC reader keeps one
+        of too since TG.11's faults), and a reading's sample is that line's at
+        the steady moment the wall clock was read at. Not the `ClockEstimate`
+        the MTC lane keeps: its slope is followed pair by pair, and pairs a
+        block apart in their noise walk it to its clamp of half a percent
+        (measured, at 256 and at 512 samples) - harmless a tick ahead, where it
+        is used, but milliseconds across a three-second gap, and the readings a
+        line is fitted through must not wander so. Readings wait a second
+        (`CountLine::quietSeconds`) while the count's line is young - which is
+        why the first `jumped` comes a second after the watching begins.
 
     THE LINE. Each reading is a point: the wall clock's millisecond of the day,
     plus half a millisecond - a reading of .123 is a clock somewhere in .123 to
@@ -95,7 +96,7 @@
         speed is what a varispeed chaser plays at.
       - WHEN GO.DOT'S CLOCK SLIPS under the steady one - an interface that
         dropped a buffer and lost its samples, a count that paused or reset -
-        the count's line is started again and waited for (`feedClock` says how
+        the count's line is started again and waited for (CountLine.h says how
         a slip is told), and the clock's line with it: the readings before the
         slip are on another line. Then, as the clock is found: `jumped` if it
         is more than `stepMilliseconds` from the line last written, `running`
@@ -144,9 +145,9 @@
 
 #include <wfg/engine/timecode/CodeMap.h>
 #include <wfg/engine/timecode/CodeWatch.h>
+#include <wfg/engine/timecode/CountLine.h>
 #include <wfg/engine/timecode/LineFit.h>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -221,17 +222,6 @@ namespace wfg::timecode
         //  The readings averaged together to measure the scatter over the long run: a second's.
         static constexpr std::size_t batchReadings = 50;
 
-        //  The count's line: two minutes of pairs, readings heard once it has a second of them.
-        static constexpr double pairSeconds = 120.0;
-        static constexpr double quietSeconds = 1.0;
-
-        /*  A SLIP: the last `slipPairs` pairs' mean distance from the count's
-            line further than `slipSigmas` times what that mean's scatter is,
-            and than `slipMilliseconds`. */
-        static constexpr std::size_t slipPairs = 8;
-        static constexpr double slipSigmas = 6.0;
-        static constexpr double slipMilliseconds = 3.0;
-
     private:
         using Point = linefit::Point;
         using Line = linefit::Line;
@@ -248,7 +238,6 @@ namespace wfg::timecode
             std::int64_t latency = 0;
         };
 
-        void restartCount() noexcept;
         void restart (Point point, std::optional<CodeTurn> turn);
         void trim();
         void fit();
@@ -263,19 +252,10 @@ namespace wfg::timecode
         int sampleRate = 0;
         std::int64_t latency = 0;
 
-        /*  THE COUNT'S LINE: the pairs, each a steady millisecond against the
-            count read at it (LineFit's `sample` the steady millisecond, its
-            `position` the count); the line through them and the steady
-            millisecond it was fitted at; until when readings wait for it; the
-            last pairs' distances from it, in samples; and a slip the clock's
-            line has still to start again for. */
-        std::deque<Point> pairs;
-        Line countLine;
-        double countFittedAt = 0.0;
-        std::int64_t quietUntil = 0;
-        std::array<double, slipPairs> recentOffs {};
-        std::size_t recentNext = 0;
-        std::size_t recentCount = 0;
+        /*  THE COUNT'S LINE (CountLine.h), readings waiting while it is young,
+            and a slip it told that the clock's line has still to start again
+            for. */
+        CountLine count;
         bool slipped = false;
 
         //  The reading before, and its position unwrapped.

@@ -56,6 +56,11 @@
     (AGD), writes as sparsely as the main does, and at a takeover it has a line
     of its own to say at once (`resay`).
 
+    AND IT WRITES ONLY FOR A TIME GROUP (TG.11's faults, part 2): serve tells
+    it whether the show holds one on its code (`setWriting`), and while it does
+    not, the watcher watches and says nothing - its map is what the readouts
+    show (`map`) - and says what it knows at once when one appears.
+
     THE SPEED A RECORD CARRIES is measured twice and the better kept. A second
     of observations gives a slope that MTC's millisecond of driver jitter
     leaves hundreds of parts per million uncertain; but a code that drifted a
@@ -200,6 +205,20 @@ namespace wfg::timecode
             code absent: its source changed, or the line it came on restarted. */
         void forget() noexcept;
 
+        /*  WHETHER ITS TURNS ARE WRITTEN: while the show holds a time group on
+            this code (namespace draft §60.7, TG.11's faults, part 2). A code is
+            written into the log for what reads it - a time group firing and
+            chasing on it - and a code arriving at a show that has none is not
+            something anyone decided, so it is not the log's (PRD §4.10). Off,
+            the watcher goes on exactly as before - the line, its turns, what it
+            would have written, which the readouts show (`map`) - and says
+            nothing, not even at a takeover. On again, the next `update` says
+            at once what it knows, as a takeover's `resay` does: `jumped` on its
+            line while the code runs, `stopped` where it stopped, nothing for a
+            code never heard - the Runner's map, last written while a group
+            was there, or never, is no longer the code's. On by default. */
+        void setWriting (bool on) noexcept;
+
         //======================================================================
         /*  FED IN ORDER, on the tick: an LTC frame as the decoder read it (a
             `lost` entry says nothing - the four-frame rule decides a stop - and
@@ -224,6 +243,12 @@ namespace wfg::timecode
         //======================================================================
         //  What it last said: absent until the code is first believed.
         CodeState state() const noexcept { return current; }
+
+        /*  THE MAP IT LAST DECIDED ON, latency shifted as a record carries it,
+            written or not: absent until the code is first believed. What the
+            readouts show of a code the show holds no time group on - the
+            Timecode tab shows a code arriving whether or not anything reads it. */
+        CodeMap map() const;
 
         //  The jitter about the line, in samples, measured over the window; nought until three points.
         double jitterSamples() const noexcept;
@@ -297,6 +322,10 @@ namespace wfg::timecode
         CodeSaid sayStopped();
         CodeSaid shifted (const CodeMap& raw, CodeTurn turn) const;
 
+        //  `update` and `resay` whether or not their turns are written.
+        std::optional<CodeSaid> turnAt (std::int64_t now);
+        std::optional<CodeSaid> resayOwn();
+
         Kind kind;
         int sampleRate = 0;
         Rate showRate = Rate::fps25;
@@ -318,6 +347,10 @@ namespace wfg::timecode
         bool locked = false;
         bool pendingJump = false;
         bool jumpWhileRunning = false;
+
+        //  Whether turns are written, and whether what it knows is owed at once because they now are.
+        bool writing = true;
+        bool owedAtOnce = false;
 
         std::deque<Point> window;
         std::vector<Point> candidates;

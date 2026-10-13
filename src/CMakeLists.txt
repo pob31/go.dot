@@ -341,6 +341,8 @@ add_library(wfg_engine STATIC
     wfg/engine/timecode/CodeWatch.cpp
     wfg/engine/timecode/ClockWatch.h
     wfg/engine/timecode/ClockWatch.cpp
+    wfg/engine/timecode/CountLine.h
+    wfg/engine/timecode/CountLine.cpp
     wfg/engine/timecode/LineFit.h
     wfg/engine/timecode/Chase.h
     wfg/engine/TemplateChanges.h

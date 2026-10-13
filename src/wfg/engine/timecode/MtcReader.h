@@ -74,20 +74,34 @@
     alike; a label the code's rate does not have (hours past 23, frames past
     the rate, a name drop-frame leaves out) is no frame.
 
-    FROM A MOMENT TO A SAMPLE through a clock line of the reader's own
-    (clock/ClockEstimate.h), fed the very pair the tick hands the MTC lane
-    each tick - where Go.dot's samples were and when - and never shared with
-    another thread: one estimate a reader, as the video renderer and the lane
-    each keep theirs.
+    FROM A MOMENT TO A SAMPLE through a line of the reader's own, the COUNT'S
+    LINE (CountLine.h): least squares through the last two minutes of the very
+    pairs the tick hands the MTC lane - where Go.dot's samples were and when -
+    never shared with another thread. Not the `ClockEstimate` the lane and the
+    video renderer each keep (clock/ClockEstimate.h), which this reader had
+    until TG.11's faults (namespace draft §60.7, part 2): its slope follows
+    the pairs one by one, and pairs a block apart walk it to its clamp of half
+    a percent and ring its offset by a millisecond and more for seconds -
+    which the watcher fitting its line through these samples (CodeWatch.h)
+    followed, re-anchoring on every ring: 25 to 123 records a 75-second pass
+    where LTC wrote eight. On the count's line every moment falls on one
+    straight line, as it would on the interface's own crystal, and a count
+    running late on a loaded machine moves none of them: this reader's line
+    holds a slip two seconds before believing it (`lateHoldSeconds`). The MTC
+    LANE still carries that wander, a tick ahead where it sends, and so does
+    the renderer; TG.6 said as much and left them, and so does this.
 
     PURE AND TICK-OWNED: no JUCE, no clock of its own, no thread. It allocates
-    only when `out` has to grow, which the caller avoids by reserving.
+    only when `out` has to grow, which the caller avoids by reserving, and as
+    the count's line keeps its two minutes of pairs - on the tick thread, as
+    the wall clock's watcher does, never the audio thread.
 */
 
-#include <wfg/engine/clock/ClockEstimate.h>
+#include <wfg/engine/timecode/CountLine.h>
 #include <wfg/engine/timecode/Timecode.h>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -133,13 +147,16 @@ namespace wfg::timecode
     class MtcReader
     {
     public:
-        /*  A pair of the clock line: Go.dot's sample `sample` (at
-            `sampleRate`) was playing when the steady clock read `nanos`. The
+        /*  A pair of the count's line: Go.dot's sample `sample` (at
+            `sampleRate`) was counted when the steady clock read `nanos`. The
             same pair the tick hands the MTC lane, fed before each read. */
-        void feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate) noexcept
+        void feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate)
         {
-            estimate.feed (sample, nanos, sampleRate);
+            countLine.feed (sample, nanos, sampleRate);
         }
+
+        //  The count's line forgotten: Go.dot's count moved, and the next pair starts it again.
+        void forgetClock() noexcept { countLine.forget(); }
 
         /*  One message as it arrived, in order. What it completes - a whole
             cycle's eight pieces, or a full frame's locate - is appended to
@@ -158,10 +175,14 @@ namespace wfg::timecode
         std::uint64_t cyclesBroken() const noexcept  { return broken; }
 
         /*  Go.dot's sample at a moment of the steady clock, on the reader's own
-            line, or -1 before it has had a pair: where a piece that completed
-            nothing yet arrived, which keeps a code alive for TG.5's watcher
-            while its cycle is being put together. */
-        std::int64_t sampleAt (std::int64_t nanos) const noexcept { return estimate.sampleAt (nanos); }
+            line, or -1 before it has had a pair: what every observation says,
+            and where a piece that completed nothing yet arrived, which keeps a
+            code alive for TG.5's watcher while its cycle is being put
+            together. */
+        std::int64_t sampleAt (std::int64_t nanos) const noexcept
+        {
+            return countLine.known() ? static_cast<std::int64_t> (std::llround (countLine.sampleAt (nanos))) : -1;
+        }
 
         /*  A piece arriving this long after the one before it does not
             continue a cycle: the code stopped and started again between them,
@@ -182,7 +203,7 @@ namespace wfg::timecode
 
         enum class Direction { unknown, forward, reverse };
 
-        ClockEstimate estimate;
+        CountLine countLine { CountLine::lateHoldSeconds };
 
         //  The cycle being read: each piece's nibble and arrival, how many, which way.
         std::array<int, 8> nibbles {};
