@@ -49,9 +49,14 @@
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/Touches.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace wfg;
 
@@ -403,6 +408,496 @@ TEST_CASE ("run table: the live run of a cue is the newest unfinished one")
     CHECK (table.liveRunOf ("C1")->id == "R2");
 
     CHECK (table.liveRunOf ("C2") == nullptr);
+}
+
+//==============================================================================
+/*  WHAT THE TICK READS, AND WHAT IT LETS GO OF (2026-10-13, namespace draft
+    §31.5, M68).
+
+    The table keeps every run of the session, so a replay agrees; until today
+    every pass of the tick walked them all, and six looked each one up again by
+    a walk, so an evening's thousands of finished runs made the Debug tick two
+    seconds long. `current` is what the passes walk now: every unfinished run,
+    and each finished one until `settle` finds it older than its retention.
+
+    The cases below hold the table to the answers the walk of every run gave.
+    The oracle is that walk, written out again here over `all()`, and every
+    question is asked of a table whose settled runs it no longer looks at. */
+namespace
+{
+    namespace oracle
+    {
+        std::vector<std::string> childrenOf (const cue::RunTable& table, const std::string& parent)
+        {
+            std::vector<std::string> out;
+
+            for (const auto& run : table.all())
+                if (run.parent == parent)
+                    out.push_back (run.id);
+
+            return out;
+        }
+
+        std::vector<std::string> descendantsOf (const cue::RunTable& table, const std::string& parent)
+        {
+            std::vector<std::string> out;
+
+            for (const auto& child : childrenOf (table, parent))
+            {
+                out.push_back (child);
+
+                for (const auto& deeper : descendantsOf (table, child))
+                    out.push_back (deeper);
+            }
+
+            return out;
+        }
+
+        std::string liveRunOf (const cue::RunTable& table, const std::string& cueId)
+        {
+            std::string out;
+
+            for (const auto& run : table.all())
+                if (run.cue == cueId && ! run.isFinished() && run.state != cue::runState::preparing)
+                    out = run.id;
+
+            return out;
+        }
+
+        std::string preparedRunOf (const cue::RunTable& table, const std::string& cueId)
+        {
+            std::string out;
+
+            for (const auto& run : table.all())
+                if (run.cue == cueId && run.state == cue::runState::preparing)
+                    out = run.id;
+
+            return out;
+        }
+
+        std::string newestOf (const cue::RunTable& table, const std::string& cueId)
+        {
+            std::string out;
+
+            for (const auto& run : table.all())
+                if (run.cue == cueId)
+                    out = run.id;
+
+            return out;
+        }
+
+        std::string holderOf (const cue::RunTable& table, const std::string& slot)
+        {
+            for (const auto& run : table.all())
+                if (! run.isFinished() && std::find (run.claims.begin(), run.claims.end(), slot) != run.claims.end())
+                    return run.id;
+
+            return {};
+        }
+
+        std::vector<std::string> waitersFor (const cue::RunTable& table, const std::string& slot)
+        {
+            std::vector<std::string> out;
+
+            for (const auto& run : table.all())
+                if (! run.isFinished() && std::find (run.pending.begin(), run.pending.end(), slot) != run.pending.end())
+                    out.push_back (run.id);
+
+            return out;
+        }
+
+        bool allChildrenFinished (const cue::RunTable& table, const std::string& parent)
+        {
+            for (const auto& run : table.all())
+                if (run.parent == parent && ! run.isFinished())
+                    return false;
+
+            return true;
+        }
+
+        //  What `current` must hold at least: every unfinished run, in creation order.
+        std::vector<std::string> unfinished (const cue::RunTable& table)
+        {
+            std::vector<std::string> out;
+
+            for (const auto& run : table.all())
+                if (! run.isFinished())
+                    out.push_back (run.id);
+
+            return out;
+        }
+    }
+
+    std::vector<std::string> namesOf (const std::vector<const cue::Run*>& runs)
+    {
+        std::vector<std::string> out;
+
+        for (const auto* run : runs)
+            out.push_back (run->id);
+
+        return out;
+    }
+
+    std::string nameOf (const cue::Run* run)
+    {
+        return run != nullptr ? run->id : std::string();
+    }
+
+    std::vector<std::string> currentOf (const cue::RunTable& table)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& run : table.current())
+            out.push_back (run.id);
+
+        return out;
+    }
+
+    bool reads (const cue::RunTable& table, const std::string& id)
+    {
+        const auto now = currentOf (table);
+        return std::find (now.begin(), now.end(), id) != now.end();
+    }
+
+    //  Every question the table answers, against the walk of every run.
+    void answersAsTheWalk (const cue::RunTable& table, const std::vector<std::string>& parents,
+                           const std::vector<std::string>& cues, const std::vector<std::string>& slots, int tracks)
+    {
+        for (const auto& parent : parents)
+        {
+            INFO ("under " << parent);
+            CHECK (namesOf (table.childrenOf (parent)) == oracle::childrenOf (table, parent));
+            CHECK (namesOf (table.descendantsOf (parent)) == oracle::descendantsOf (table, parent));
+            CHECK (table.allChildrenFinished (parent) == oracle::allChildrenFinished (table, parent));
+
+            for (const auto& cueId : cues)
+            {
+                const auto children = oracle::childrenOf (table, parent);
+                const auto expected = std::any_of (children.begin(), children.end(), [&] (const std::string& id)
+                                                   { return table.find (id)->cue == cueId; });
+                CHECK (table.hasChildFor (parent, cueId) == expected);
+            }
+        }
+
+        for (const auto& cueId : cues)
+        {
+            INFO ("of " << cueId);
+            CHECK (nameOf (table.liveRunOf (cueId)) == oracle::liveRunOf (table, cueId));
+            CHECK (nameOf (table.preparedRunOf (cueId)) == oracle::preparedRunOf (table, cueId));
+            CHECK (nameOf (table.newestOf (cueId)) == oracle::newestOf (table, cueId));
+        }
+
+        for (const auto& slot : slots)
+        {
+            INFO ("slot " << slot);
+            CHECK (nameOf (table.holderOf (slot)) == oracle::holderOf (table, slot));
+            CHECK (namesOf (table.waitersFor (slot)) == oracle::waitersFor (table, slot));
+        }
+
+        for (int track = 0; track < tracks; ++track)
+        {
+            const auto busy = std::any_of (table.all().begin(), table.all().end(), [track] (const cue::Run& run)
+                                           { return run.holdsTrack() && run.track == track; });
+            CHECK (table.isTrackBusy (track) == busy);
+        }
+
+        //  Every unfinished run is read, in creation order, and every name still found.
+        const auto readNow = currentOf (table);
+        std::vector<std::string> readUnfinished;
+
+        for (const auto& id : readNow)
+            if (! table.find (id)->isFinished())
+                readUnfinished.push_back (id);
+
+        CHECK (readUnfinished == oracle::unfinished (table));
+
+        for (const auto& run : table.all())
+            CHECK (table.find (run.id) == &run);
+    }
+
+    /*  AN EVENING IN MINIATURE: an act with a scene in it, members finished
+        long ago and lately, a sound holding a slot another waits for, a cue run
+        three times, a preparation - each ending at the tick given, or not. */
+    void buildEvening (cue::RunTable& table)
+    {
+        const auto make = [&table] (const std::string& id, const std::string& cueId, const std::string& kind,
+                                    const std::string& parent, const char* state, std::int64_t endedAt)
+        {
+            table.create (id, cueId, kind, parent);
+            auto* run = table.find (id);
+            REQUIRE (run != nullptr);
+            run->state = state;
+            run->endedAtTick = endedAt;
+        };
+
+        make ("ACT", "CACT", "group", "", cue::runState::playing, -1);
+        make ("A1", "CA1", "memo", "ACT", cue::runState::done, 10);
+        make ("SCN", "CSCN", "group", "ACT", cue::runState::done, 20);
+        make ("S1", "CS1", "media", "SCN", cue::runState::done, 15);
+        make ("S2", "CS2", "osc", "SCN", cue::runState::failed, 20);
+        make ("K1", "CK", "media", "", cue::runState::done, 30);
+        make ("A2", "CA2", "media", "ACT", cue::runState::playing, -1);
+        make ("K2", "CK", "media", "", cue::runState::playing, -1);
+        make ("HLD", "CH", "media", "", cue::runState::playing, -1);
+        make ("WT", "CW", "media", "", cue::runState::armed, -1);
+        make ("PRP", "CK", "group", "", cue::runState::preparing, -1);
+        make ("K3", "CK", "media", "", cue::runState::done, 900);
+        make ("OLD", "CH", "media", "", cue::runState::done, 40);
+
+        table.find ("K2")->track = 0;
+        table.find ("HLD")->track = 1;
+        table.find ("K1")->track = 1;
+        table.find ("HLD")->claims = { "SLOT" };
+        table.find ("OLD")->claims = { "SLOT" };
+        table.find ("WT")->pending = { "SLOT" };
+    }
+
+    const std::vector<std::string> eveningParents { "", "ACT", "SCN", "K1", "NOBODY" };
+    const std::vector<std::string> eveningCues { "CACT", "CA1", "CSCN", "CS1", "CS2", "CK", "CA2", "CH", "CW", "NONE" };
+    const std::vector<std::string> eveningSlots { "SLOT", "NOSLOT" };
+}
+
+TEST_CASE ("run table: a run ended longer ago than its retention leaves what the tick reads, and stays in the table")
+{
+    cue::RunTable table;
+    buildEvening (table);
+
+    REQUIRE (table.all().size() == 13u);
+    CHECK (table.current().size() == 13u);
+    answersAsTheWalk (table, eveningParents, eveningCues, eveningSlots, 3);
+
+    /*  At tick 1000 every run that ended before 750 settles: A1, SCN, S1, S2,
+        K1 and OLD. K3 ended at 900, inside its retention, and is read still,
+        as the tree still publishes it. */
+    table.settle (1000);
+
+    CHECK (currentOf (table) == std::vector<std::string> { "ACT", "A2", "K2", "HLD", "WT", "PRP", "K3" });
+    CHECK (table.all().size() == 13u);
+    answersAsTheWalk (std::as_const (table), eveningParents, eveningCues, eveningSlots, 3);
+
+    //  Nothing a const look moves: still settled.
+    CHECK (std::as_const (table).find ("SCN") != nullptr);
+    CHECK_FALSE (reads (table, "SCN"));
+
+    /*  The retention's edge is the tree's: ended at 900, read through 1150 and
+        gone at 1151. */
+    table.settle (1150);
+    CHECK (reads (table, "K3"));
+    table.settle (1151);
+    CHECK_FALSE (reads (table, "K3"));
+
+    //  A run not over stays, whatever its ending tick says.
+    table.find ("WT")->endedAtTick = 3;
+    table.settle (5000);
+    CHECK (reads (table, "WT"));
+    CHECK (currentOf (table) == std::vector<std::string> { "ACT", "A2", "K2", "HLD", "WT", "PRP" });
+    answersAsTheWalk (std::as_const (table), eveningParents, eveningCues, eveningSlots, 3);
+}
+
+TEST_CASE ("run table: a settled run found to be changed is read again, in its place, until it settles again")
+{
+    cue::RunTable table;
+    buildEvening (table);
+    table.settle (1000);
+
+    REQUIRE_FALSE (reads (table, "SCN"));
+
+    /*  BROUGHT BACK, as Doh! brings back an act ended six seconds ago: found to
+        be changed, it is read again at once, between the act and its member,
+        where it was made. */
+    auto* scene = table.find ("SCN");
+    REQUIRE (scene != nullptr);
+    scene->state = cue::runState::playing;
+    scene->endedAtTick = -1;
+
+    CHECK (currentOf (table) == std::vector<std::string> { "ACT", "SCN", "A2", "K2", "HLD", "WT", "PRP", "K3" });
+    answersAsTheWalk (std::as_const (table), eveningParents, eveningCues, eveningSlots, 3);
+
+    table.settle (2000);
+    CHECK (reads (table, "SCN"));                     // alive: it stays
+
+    /*  FOUND AND LEFT AS IT WAS: read until the next settle, then let go. And
+        moved under another parent while it was thawed - an adoption - it is
+        filed under the new one when it settles again. */
+    auto* member = table.find ("S1");
+    REQUIRE (member != nullptr);
+    CHECK (reads (table, "S1"));
+    member->parent = "K1";
+
+    answersAsTheWalk (std::as_const (table), eveningParents, eveningCues, eveningSlots, 3);
+
+    table.settle (2000);
+    CHECK_FALSE (reads (table, "S1"));
+    CHECK (namesOf (table.childrenOf ("K1")) == std::vector<std::string> { "S1" });
+    CHECK (namesOf (table.childrenOf ("SCN")) == std::vector<std::string> { "S2" });
+    answersAsTheWalk (std::as_const (table), eveningParents, eveningCues, eveningSlots, 3);
+}
+
+TEST_CASE ("run table: a run found while the tick walks is reached by that walk, and the next walk is in order")
+{
+    cue::RunTable table;
+    buildEvening (table);
+    table.settle (1000);
+
+    std::vector<std::string> walked;
+    auto thawed = false;
+
+    for (const auto& run : table.current())
+    {
+        walked.push_back (run.id);
+
+        //  From inside the walk, as a pass that looks up a run's parent does.
+        if (! thawed)
+        {
+            REQUIRE (table.find ("A1") != nullptr);
+            thawed = true;
+
+            //  Asked inside the walk, the table still answers as the walk of every run.
+            CHECK (nameOf (table.liveRunOf ("CK")) == "K2");
+            CHECK (namesOf (table.childrenOf ("ACT")) == std::vector<std::string> { "A1", "SCN", "A2" });
+        }
+    }
+
+    CHECK (walked == std::vector<std::string> { "ACT", "A2", "K2", "HLD", "WT", "PRP", "K3", "A1" });
+    CHECK (currentOf (table) == std::vector<std::string> { "ACT", "A1", "A2", "K2", "HLD", "WT", "PRP", "K3" });
+
+    //  And let go again at the next settle - which never runs under a walk.
+    for (const auto& run : table.current())
+    {
+        table.settle (1000);
+        CHECK (! run.id.empty());
+    }
+
+    CHECK (reads (table, "A1"));
+    table.settle (1000);
+    CHECK_FALSE (reads (table, "A1"));
+}
+
+TEST_CASE ("run table: runs taken out at once are taken out as one at a time takes them")
+{
+    cue::RunTable atOnce, oneByOne;
+    buildEvening (atOnce);
+    buildEvening (oneByOne);
+    atOnce.settle (1000);
+    oneByOne.settle (1000);
+
+    //  A seat takes out every run the leader's position does not hold: settled, read, a parent and its child.
+    const std::set<std::string> gone { "A1", "SCN", "S1", "K2", "OLD", "NOBODY" };
+
+    atOnce.remove (gone);
+
+    for (const auto& id : gone)
+        oneByOne.remove (id);
+
+    REQUIRE (atOnce.all().size() == oneByOne.all().size());
+    CHECK (atOnce.all().size() == 8u);
+
+    for (std::size_t n = 0; n < atOnce.all().size(); ++n)
+    {
+        const auto& left = atOnce.all()[n];
+        const auto& right = oneByOne.all()[n];
+        INFO ("run " << left.id);
+        CHECK (left.id == right.id);
+        CHECK (left.parent == right.parent);
+        CHECK (left.children == right.children);
+    }
+
+    /*  The act no longer names the children taken out; S2 keeps the parent's
+        name, as a pruned parent's child does. Asked of the const table: a look
+        that could change S2 would put it back where the tick reads it. */
+    CHECK (std::as_const (atOnce).find ("ACT")->children == std::vector<std::string> { "A2" });
+    CHECK (std::as_const (atOnce).find ("S2")->parent == "SCN");
+
+    //  What had settled stays settled, and every question still answers as the walk.
+    CHECK (currentOf (atOnce) == currentOf (oneByOne));
+    CHECK (currentOf (atOnce) == std::vector<std::string> { "ACT", "A2", "HLD", "WT", "PRP", "K3" });
+    answersAsTheWalk (std::as_const (atOnce), eveningParents, eveningCues, eveningSlots, 3);
+
+    //  A name made again after it was taken out is found as the new run.
+    atOnce.create ("K2", "CK", "media");
+    CHECK (atOnce.find ("K2") == &atOnce.all().back());
+    CHECK (nameOf (atOnce.newestOf ("CK")) == "K2");
+}
+
+TEST_CASE ("run: an evening of cues fired leaves the tick reading what is live and lately ended, and the tree as it was")
+{
+    /*  A memo fired every other tick for a thousand two hundred ticks, the
+        Runner's hook run as the tick thread runs it: six hundred runs, each
+        ended the tick after it fired. What the tick reads stays at what ended
+        in the last five seconds; the table holds all six hundred; and the tree
+        publishes exactly the runs the walk of every run would have. */
+    Rig rig;
+
+    tree::MountTable mounts;
+    tree::ParameterTree parameters { rig.document, rig.engine.commands(), mounts, rig.runs };
+    tree::EngineState state;
+
+    std::size_t mostRead = 0;
+
+    for (int n = 0; n < 600; ++n)
+    {
+        REQUIRE (rig.engine.submit ("cli", "cue.fire", { osc::Value::string (rig.memoId) }));
+
+        for (int k = 0; k < 2; ++k)
+        {
+            rig.runner.beforeTick (rig.engine, rig.tick);
+            rig.engine.processTick (rig.tick++);
+            mostRead = std::max (mostRead, rig.runs.current().size());
+        }
+    }
+
+    REQUIRE (rig.runs.all().size() == 600u);
+
+    const auto published = [&rig, &parameters, &state]
+    {
+        state.tick = rig.tick - 1;
+        const auto snapshot = parameters.publish (rig.tick - 1, state);
+        REQUIRE (snapshot != nullptr);
+
+        const auto* order = snapshot->find ("/godot/run/order");
+        REQUIRE (order != nullptr);
+        return order->soleValue().has_value() ? order->soleValue()->getString() : std::string();
+    };
+
+    const auto walked = [&rig]
+    {
+        std::string out;
+
+        for (const auto& run : rig.runs.all())
+            if (! (run.endedAtTick >= 0 && (rig.tick - 1) - run.endedAtTick > cue::retentionTicks))
+                out += (out.empty() ? "" : " ") + run.id;
+
+        return out;
+    };
+
+    for (const auto& run : rig.runs.all())
+        REQUIRE (run.state == cue::runState::done);
+
+    //  A run ended every other tick, read for 250 ticks after: some 126, never the six hundred.
+    CHECK (mostRead <= 130u);
+    CHECK (rig.runs.current().size() <= 127u);
+    CHECK (published() == walked());
+
+    //  Five quiet seconds and a tick more: nothing is read, nothing published, everything kept.
+    for (int n = 0; n < 252; ++n)
+    {
+        rig.runner.beforeTick (rig.engine, rig.tick);
+        rig.engine.processTick (rig.tick++);
+    }
+
+    CHECK (rig.runs.current().size() == 0u);
+    CHECK (rig.runs.all().size() == 600u);
+    CHECK (published().empty());
+    CHECK (walked().empty());
+
+    //  And the next one fired is read, and found, as the first was.
+    REQUIRE (rig.engine.submit ("cli", "cue.fire", { osc::Value::string (rig.memoId) }));
+    rig.runner.beforeTick (rig.engine, rig.tick);
+    rig.engine.processTick (rig.tick++);
+
+    REQUIRE (rig.runs.all().size() == 601u);
+    CHECK (currentOf (rig.runs) == std::vector<std::string> { rig.runs.all().back().id });
+    CHECK (rig.runs.liveRunOf (rig.memoId) == &rig.runs.all().back());
 }
 
 //==============================================================================

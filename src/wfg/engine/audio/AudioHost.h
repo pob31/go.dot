@@ -613,6 +613,14 @@ namespace wfg::audio
             a graph. Any thread. */
         double stretchSpeedLimit() const noexcept;
 
+        /*  HOW FAR AHEAD OF WHAT IS HEARD a time-stretched voice at `speed`
+            reads its file, in samples heard: the stretcher's latency, and up to
+            a chunk it has made and not yet played. A move on its slot's reader
+            placed nearer than this is met only after the reader has read past
+            it, and lands that much late (namespace draft §60, TG.11's faults).
+            Nought before a graph. Any thread. */
+        double stretchLeadSamples (double speed) const noexcept;
+
         /** How many slots every track was built with: the show's widest cue. */
         int slotCount() const noexcept;
 

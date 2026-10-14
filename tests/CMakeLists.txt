@@ -1811,6 +1811,26 @@ add_test(NAME blackbox.timecode.fr_FR
 set_tests_properties(blackbox.timecode.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
+# TIME GROUPS AND CHASE END TO END (namespace draft 60, TG.11): serve --hosted
+# --render hearing LTC on an input (--input-wav, written by the driver's own LTC
+# writer) and MTC on a port (--midi-play-loop, its own MTC writer), a time group
+# on each, every member's sound itself LTC so the render, decoded, says where
+# each stood on every sample. Members on the code's sample, a free runner never
+# moved, each chaser by its method through +50 ppm, +0.1 %, a stop, a return, a
+# locate back and the loop point, code.heard sparse from ltc:/mtc: origins; and
+# a second serve held, firing the same. Two serves one after another: unbuffered,
+# and hold's limit, for hold's reason.
+add_test(NAME blackbox.timegroup.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timegroup.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.timegroup.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+add_test(NAME blackbox.timegroup.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timegroup.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.timegroup.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
 # DOH! END TO END (namespace draft 24.15): the GO pressed too soon and taken back,
 # over a real Tracktion graph and two mock devices on real sockets - a console that
 # takes back and a lighting desk left to its operator. What each device received,
@@ -2058,6 +2078,8 @@ endif()
 #       and M45, M48, M14 printed from it
 #   timecode                                                         LTC and MTC
 #       read frame by frame against the samples they were drawn on
+#   timegroup                                                        members
+#       started on the code's sample, chasers read frame by frame against it
 #   phase9a-fx, phase9b-width, phase9b-mic, phase9c-take             a plugin's
 #       child answering each block by its deadline, heard in the render
 #   pair-link, pair-follow, pair-seat, redundancy-failover          two engines:
@@ -2107,7 +2129,7 @@ message(STATUS "Go.dot: the drivers that judge an engine's time run ${WFG_REALTI
 
 set(WFG_REALTIME_DRIVERS
     first-sound phase3 phase4 phase6-sampler phase9a-eq doh
-    lane-level lane-send lane-record rate-speed timecode
+    lane-level lane-send lane-record rate-speed timecode timegroup
     phase9a-fx phase9b-width phase9b-mic phase9c-take
     pair-link pair-follow pair-seat redundancy-failover
     osc-curves process)
@@ -2131,3 +2153,25 @@ foreach(driver IN LISTS WFG_REALTIME_DRIVERS)
         math(EXPR wfg_lane "(${wfg_lane} + 1) % ${WFG_REALTIME_LANES}")
     endforeach()
 endforeach()
+
+# THE TIME GROUP'S DRIVER HOLDS EVERY LANE (2026-10-14, namespace draft §60.7,
+# TG.12). It plays the MTC it judges from inside the engine it judges
+# (`--midi-play-loop`), so a starved machine makes its own sender late and the
+# quarter frames arrive milliseconds off their moments - which its check that
+# MTC's `code.heard` is sparse then reads as the engine's wander. The first full
+# run at twelve jobs dealt its C and fr_FR runs to two lanes at once, beside two
+# other timing drivers and the unit shards, and that check went red in both (26
+# and 20 records a pass, against 8 alone); the two run one after the other, they
+# were green. CI, one lane, already runs it alone among the timing drivers and
+# voids that check besides. Here it waits for every lane, so no other driver
+# that judges time runs beside it.
+set(wfg_every_lane realtime)
+math(EXPR wfg_last_lane "${WFG_REALTIME_LANES} - 1")
+
+if(wfg_last_lane GREATER 0)
+    foreach(wfg_n RANGE 1 ${wfg_last_lane})
+        list(APPEND wfg_every_lane realtime-${wfg_n})
+    endforeach()
+endif()
+
+set_tests_properties(blackbox.timegroup.C blackbox.timegroup.fr_FR PROPERTIES RESOURCE_LOCK "${wfg_every_lane}")

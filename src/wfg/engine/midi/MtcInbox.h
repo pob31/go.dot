@@ -127,8 +127,15 @@ namespace wfg::midi
         void configure (const MtcInSetting& settingNow);
         const MtcInSetting& setting() const noexcept { return current; }
 
-        //  The tick's clock pair - the one the MTC lane is fed - before each drain.
-        void feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate) noexcept;
+        /*  The tick's clock pair - the one the MTC lane is fed - before each
+            drain, for the reader's count's line (timecode/CountLine.h). */
+        void feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate);
+
+        /*  GO.DOT'S COUNT MOVED for a reason serve knows - an outage ended, an
+            interface opened, the clock rebased: the count's line forgotten, so
+            the next pair starts it, where a slip it found for itself is held
+            two seconds first. */
+        void forgetClock() noexcept { reading.forgetClock(); }
 
         /*  ONCE A TICK: everything the inbox kept, taken, and what came on the
             port while it listens read in order. What came while it did not

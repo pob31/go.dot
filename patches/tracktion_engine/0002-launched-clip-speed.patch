@@ -89,6 +89,26 @@ rebuilt in the middle of a change of speed needs nothing carried across it.
   interpolator a frame twice or skipped one, and judged against the file's
   whole-frame position it reset whenever a moving ratio moved the part of a
   frame the interpolator had pending.
+- And Signalsmith's stretcher carries the part of a frame each chunk's input
+  was rounded by on to the next chunk (2026-10-13, namespace draft sections
+  22.13 and 60.7). Its input was 256 over the stretch, rounded, every chunk,
+  with nothing carried, so every stretched speed played as a whole number of
+  frames in 256 - anything within half a frame of one, 1.001 among them, at
+  exactly one - while the reader above counted the speed it asked for. A speed
+  that is a whole number of frames in 256 reads what it always did. And so
+  Signalsmith (vendored here, MIT) analyses its previous input again whenever
+  it is not exactly one interval back, where it allowed a sample either way:
+  read a sample off, the phase it advances by makes every frequency a sample
+  in an interval sharp or flat, 1.2 cents at 48 kHz, which every stretch
+  within two samples an interval of one now reached (1.001 played 0.4 Hz
+  sharp on 1 kHz). Every other stretch analysed again already.
+- A loop source's segment with no loop - its loopOut not after its loopIn -
+  is the file going forwards as well as backwards (2026-10-13, the same
+  sections). The forward reader never read `looping` and made such a segment a
+  loop of one frame at its in-point: a cue with no ranges moved in its file -
+  a time group's chaser jumping back into step, a cue turned forwards again
+  after playing backwards - held its first sample from the end of the move's
+  crossfade.
 
 With no speed source, or one at exactly one, every read is the same doubles as
 before. Each file it touches carries a notice that Go.dot modified it (GPL-3,
@@ -99,6 +119,28 @@ patches/tracktion_engine/series gives; refreshed from the working tree with
 scripts/te-patches.py refresh, which keeps this header. Against Tracktion
 Engine 13b5132 (2026-09-23). Namespace draft section 22.3, decisions DQ-DX.
 
+diff --git a/modules/tracktion_engine/3rd_party/signalsmith-stretch/signalsmith-stretch.h b/modules/tracktion_engine/3rd_party/signalsmith-stretch/signalsmith-stretch.h
+index cd13f2e98b8..c175ff9e5c7 100644
+--- a/modules/tracktion_engine/3rd_party/signalsmith-stretch/signalsmith-stretch.h
++++ b/modules/tracktion_engine/3rd_party/signalsmith-stretch/signalsmith-stretch.h
+@@ -300,7 +300,16 @@ struct SignalsmithStretch {
+ 				blockProcess.mappedFrequencies = customFreqMap || freqMultiplier != 1;
+ 				if (blockProcess.newSpectrum) {
+ 					// make sure the previous input is the correct distance in the past (give or take 1 sample)
+-					blockProcess.reanalysePrev = didSeek || std::abs(inputInterval - int(stft.defaultInterval())) > 1;
++					// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-10-13, by
++					// patches/tracktion_engine/0002-launched-clip-speed.patch: exactly the correct distance.
++					// The previous spectrum stands in for one a whole interval back, and its phase is read as
++					// one interval's advance: taken a sample off, every frequency comes out a sample in an
++					// interval sharp or flat - 1/1440 at 48 kHz, 0.69 Hz on 1 kHz, 1.2 cents. Every stretch but
++					// one within two samples an interval of one does that, since Tracktion's reader now hands
++					// this the input its speed asks to the part of a frame (TimeStretch.cpp, the same patch):
++					// 1.001 played 0.4 Hz sharp on 1 kHz. Any further stretch already analysed the previous
++					// input again, at the cost every such speed pays; one exactly at one never does.
++					blockProcess.reanalysePrev = didSeek || inputInterval != int(stft.defaultInterval());
+ 					if (blockProcess.reanalysePrev) blockProcess.steps += stft.analyseSteps() + 1;
+ 
+ 					// analyse a new input
 diff --git a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp b/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp
 index 13f50a9e148..6bad5f599f2 100644
 --- a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp
@@ -423,7 +465,7 @@ index 90ee2402c5c..fef637df9bd 100644
              }
  
 diff --git a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
-index 1993f02782b..b6bdeea7a56 100644
+index 1993f02782b..23e2a8ea4ef 100644
 --- a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
 +++ b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
 @@ -106,6 +106,12 @@ public:
@@ -439,7 +481,7 @@ index 1993f02782b..b6bdeea7a56 100644
      void reset() override
      {}
  
-@@ -237,6 +243,402 @@ public:
+@@ -237,6 +243,424 @@ public:
      const SampleRange loopRange;
  };
  
@@ -629,6 +671,10 @@ index 1993f02782b..b6bdeea7a56 100644
 +        bool looping = true;
 +        SampleCount from = 0, fileAtFrom = 0;
 +
++        // MODIFIED BY GO.DOT, 2026-10-13 (patch 0002): how far on a map that does not loop
++        // puts its next pass - some 250 days at 48 kHz, past any read and any position.
++        static constexpr SampleCount noNextPass = SampleCount (1) << 40;
++
 +        Map() = default;
 +
 +        Map (SampleCount shiftToUse, SampleCount start, double length)
@@ -684,8 +730,21 @@ index 1993f02782b..b6bdeea7a56 100644
 +        }
 +
 +        // Which pass a shifted position is in: nought up to the loop's end.
++        // MODIFIED BY GO.DOT, 2026-10-13 (patch 0002): and nought everywhere for a map that
++        // does not loop. A segment whose loopOut is not after its loopIn is "no loop: the
++        // file", as LaunchHandle::LoopSource::Segment says, and the backwards and bouncing
++        // arithmetic above honoured it - but this forward one never read `looping`, so such
++        // a segment became a loop of one frame (its length held to one) at its in-point,
++        // and from the end of its crossfade the reader held that one frame for good. Go.dot
++        // places such a segment wherever a cue with no ranges is moved in its file going
++        // forwards: a time group's chaser jumping back into step, and a cue turned forwards
++        // again after playing backwards (namespace draft sections 60 and 41). Its voice
++        // froze on its file's first sample (blackbox.timegroup, TG.11, 2026-10-13).
 +        SampleCount passOf (SampleCount u) const
 +        {
++            if (! looping)
++                return 0;
++
 +            const auto intoLoop = static_cast<double> (u - loopStart);
 +
 +            return intoLoop < loopLength ? 0
@@ -711,8 +770,13 @@ index 1993f02782b..b6bdeea7a56 100644
 +        }
 +
 +        // The first position of the pass after the one t is in.
++        // MODIFIED BY GO.DOT, 2026-10-13 (patch 0002): a map that does not loop has no pass
++        // after the one it is in - the file runs on - so the next is put far beyond any read.
 +        SampleCount nextPassAfter (SampleCount t) const
 +        {
++            if (! looping)
++                return t + noNextPass;
++
 +            const auto u = t + shift;
 +            const auto pass = passOf (u);
 +            auto next = std::max (u + 1, loopStart + static_cast<SampleCount> (std::ceil (static_cast<double> (pass + 1) * loopLength)));
@@ -842,7 +906,7 @@ index 1993f02782b..b6bdeea7a56 100644
  
  //==============================================================================
  class ResamplerReader : public SingleInputAudioReader
-@@ -266,6 +668,11 @@ public:
+@@ -266,6 +690,11 @@ public:
              resamplers.emplace_back();
              resamplers.back().reset();
          }
@@ -854,7 +918,7 @@ index 1993f02782b..b6bdeea7a56 100644
      }
  
      void reset() override
-@@ -275,10 +682,25 @@ public:
+@@ -275,10 +704,25 @@ public:
  
          hasBeenReset = true;
          timeSourceIsAheadDueToLatency = {};
@@ -880,7 +944,7 @@ index 1993f02782b..b6bdeea7a56 100644
          const auto sourcePosition = TimePosition::fromSamples (source->getPosition(), source->getSampleRate());
          return toSamples (sourcePosition - timeSourceIsAheadDueToLatency, destSampleRate);
      }
-@@ -292,10 +714,24 @@ public:
+@@ -292,10 +736,24 @@ public:
      {
          // If the position has jumped, reset so the interpolator doesn't blend in samples from the
          // old position. This also clears the latency offset so it's re-compensated on the next read
@@ -907,7 +971,7 @@ index 1993f02782b..b6bdeea7a56 100644
      }
  
      /** Sets a ratio to increase or decrease playback speed. */
-@@ -328,6 +764,25 @@ public:
+@@ -328,6 +786,25 @@ public:
          const auto numDestFrames = destBuffer.getNumFrames();
          const int numSourceFramesToRead = static_cast<int> ((numDestFrames * ratio) + 0.5);
  
@@ -933,7 +997,7 @@ index 1993f02782b..b6bdeea7a56 100644
          if (std::exchange (hasBeenReset, false))
          {
              constexpr auto baseLatencyNumSamples = static_cast<FrameCount> (juce::LagrangeInterpolator::getBaseLatency());
-@@ -340,16 +795,16 @@ public:
+@@ -340,16 +817,16 @@ public:
              auto destScratchView = toBufferView (destDataScratch.buffer);
              destScratchView.clear();
  
@@ -954,7 +1018,7 @@ index 1993f02782b..b6bdeea7a56 100644
      }
  
      const double destSampleRate;
-@@ -360,30 +815,140 @@ public:
+@@ -360,30 +837,140 @@ public:
      float gains[2] = { 1.0f, 1.0f };
      TimeDuration timeSourceIsAheadDueToLatency;
      bool hasBeenReset = true;
@@ -1105,7 +1169,7 @@ index 1993f02782b..b6bdeea7a56 100644
              }
              else
              {
-@@ -391,6 +956,26 @@ public:
+@@ -391,6 +978,26 @@ public:
              }
          }
  
@@ -1132,7 +1196,7 @@ index 1993f02782b..b6bdeea7a56 100644
          return ok;
      }
  };
-@@ -630,7 +1215,8 @@ public:
+@@ -630,7 +1237,8 @@ public:
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
          inputFifo.reset();
          outputFifo.reset();
@@ -1142,7 +1206,7 @@ index 1993f02782b..b6bdeea7a56 100644
      }
  
      void setPosition (TimePosition t) override
-@@ -665,7 +1251,10 @@ public:
+@@ -665,7 +1273,10 @@ public:
          playbackSpeedRatio = speedRatio;
          semitonesShift = semitones;
  
@@ -1154,7 +1218,7 @@ index 1993f02782b..b6bdeea7a56 100644
          assert (ok);
      }
  
-@@ -674,6 +1263,30 @@ public:
+@@ -674,6 +1285,30 @@ public:
          assert (numChannels == (int) destBuffer.getNumChannels());
          const auto numFramesToDo = destBuffer.getNumFrames();
  
@@ -1185,7 +1249,7 @@ index 1993f02782b..b6bdeea7a56 100644
          for (;;)
          {
              // If there are enough output samples in the fifo, read them out
-@@ -684,7 +1297,7 @@ public:
+@@ -684,7 +1319,7 @@ public:
                  break;
              }
  
@@ -1194,7 +1258,7 @@ index 1993f02782b..b6bdeea7a56 100644
                  return false;
          }
  
-@@ -696,6 +1309,10 @@ public:
+@@ -696,6 +1331,10 @@ public:
      static constexpr int chunkSize = 256;
      const int numChannels;
      int latencySamples = 0;
@@ -1205,7 +1269,7 @@ index 1993f02782b..b6bdeea7a56 100644
      TimeStretcher timeStretcher;
      AudioFifo inputFifo { numChannels, chunkSize }, outputFifo { numChannels, chunkSize };
      double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
-@@ -706,7 +1323,15 @@ public:
+@@ -706,7 +1345,15 @@ public:
      }
  
      // Reads source audio, feeds it to the stretcher, and produces output into the FIFO
@@ -1222,7 +1286,7 @@ index 1993f02782b..b6bdeea7a56 100644
      {
          const auto numThisTime = timeStretcher.getFramesNeeded();
  
-@@ -717,7 +1342,12 @@ public:
+@@ -717,7 +1364,12 @@ public:
              auto scratchView = toBufferView (scratchBuffer.buffer);
  
              if (! source->readSamples (scratchView))
@@ -1236,7 +1300,7 @@ index 1993f02782b..b6bdeea7a56 100644
  
              inputFifo.write (scratchBuffer.buffer);
          }
-@@ -731,27 +1361,67 @@ public:
+@@ -731,27 +1383,67 @@ public:
          return true;
      }
  
@@ -1309,7 +1373,7 @@ index 1993f02782b..b6bdeea7a56 100644
                  break;
  
              const int available = outputFifo.getNumReady();
-@@ -764,6 +1434,9 @@ public:
+@@ -764,6 +1456,9 @@ public:
                  outputDiscarded += toDiscard;
              }
          }
@@ -1319,7 +1383,7 @@ index 1993f02782b..b6bdeea7a56 100644
      }
  };
  
-@@ -784,7 +1457,7 @@ public:
+@@ -784,7 +1479,7 @@ public:
          source->setPosition (getReadPosition());
          timeStretcher.reset();
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
@@ -1328,7 +1392,7 @@ index 1993f02782b..b6bdeea7a56 100644
      }
  
      SampleCount getPosition() override
-@@ -802,7 +1475,7 @@ public:
+@@ -802,7 +1497,7 @@ public:
          source->setPosition (t);
          timeStretcher.reset();
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
@@ -1337,7 +1401,7 @@ index 1993f02782b..b6bdeea7a56 100644
      }
  
      void setPosition (TimePosition t) override
-@@ -837,7 +1510,10 @@ public:
+@@ -837,7 +1532,10 @@ public:
          playbackSpeedRatio = speedRatio;
          semitonesShift = semitones;
  
@@ -1349,7 +1413,7 @@ index 1993f02782b..b6bdeea7a56 100644
          assert (ok);
      }
  
-@@ -847,6 +1523,19 @@ public:
+@@ -847,6 +1545,19 @@ public:
          const auto numFramesToDo = static_cast<int> (destBuffer.getNumFrames());
          int startFrame = 0;
  
@@ -1369,7 +1433,7 @@ index 1993f02782b..b6bdeea7a56 100644
          // Always push one block to keep the input fifo stoked but don't do this for every chunk unless required
          if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
              if (! readSourceAndPushFrames (numToPush))
-@@ -884,6 +1573,7 @@ public:
+@@ -884,6 +1595,7 @@ public:
  
      const int numChannels, chunkSize = 1024;
      int latencySamples = 0;
@@ -1377,7 +1441,7 @@ index 1993f02782b..b6bdeea7a56 100644
      ReadAheadTimeStretcher timeStretcher { 3 };
      double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
  
-@@ -910,10 +1600,28 @@ public:
+@@ -910,10 +1622,28 @@ public:
  
      // Pre-feeds real audio into the stretcher and discards initial output
      // to handle the stretcher's startup latency locally
@@ -1408,7 +1472,7 @@ index 1993f02782b..b6bdeea7a56 100644
  
          const auto position = static_cast<SampleCount> (readPosition);
          const auto backupPos = std::max (SampleCount (0), position - latencySamples);
-@@ -928,7 +1636,8 @@ public:
+@@ -928,7 +1658,8 @@ public:
          while (outputDiscarded < numToDiscard)
          {
              if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
@@ -1418,7 +1482,7 @@ index 1993f02782b..b6bdeea7a56 100644
  
              // Only ever discard up to the target so the stretcher isn't left ahead of readPosition
              const int numThisTime = std::min (chunkSize, numToDiscard - outputDiscarded);
-@@ -940,6 +1649,8 @@ public:
+@@ -940,6 +1671,8 @@ public:
  
              outputDiscarded += numRead;
          }
@@ -1427,7 +1491,7 @@ index 1993f02782b..b6bdeea7a56 100644
      }
  };
  
-@@ -1149,7 +1860,12 @@ public:
+@@ -1149,7 +1882,12 @@ public:
      {
          const auto numSourceSamples = toSamples (tr.getLength(), getSampleRate());
  
@@ -1441,7 +1505,7 @@ index 1993f02782b..b6bdeea7a56 100644
          {
              destBuffer.clear();
              return true;
-@@ -1164,7 +1880,12 @@ public:
+@@ -1164,7 +1902,12 @@ public:
  
          setPosition (tr.getStart());
  
@@ -1455,7 +1519,7 @@ index 1993f02782b..b6bdeea7a56 100644
              reset();
  
          return readSamples (destBuffer);
-@@ -1172,6 +1893,10 @@ public:
+@@ -1172,6 +1915,10 @@ public:
  
      ResamplerReader* resamplerReader = nullptr;
      TimeStretchReaderBase* timeStretchSource = nullptr;
@@ -1466,7 +1530,7 @@ index 1993f02782b..b6bdeea7a56 100644
  };
  
  
-@@ -1291,6 +2016,12 @@ public:
+@@ -1291,6 +2038,12 @@ public:
          return source->readSamples (destBuffer);
      }
  
@@ -1479,7 +1543,7 @@ index 1993f02782b..b6bdeea7a56 100644
  private:
      std::unique_ptr<TimeRangeReader> source;
      const BeatRange loopRange;
-@@ -1309,6 +2040,11 @@ private:
+@@ -1309,6 +2062,11 @@ private:
          if (loopRange.isEmpty())
              return readBeatRange (br, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
  
@@ -1491,7 +1555,7 @@ index 1993f02782b..b6bdeea7a56 100644
          const auto s = linearPositionToLoopPosition (br.getStart(), loopRange);
          const auto e = linearPositionToLoopPosition (br.getEnd(), loopRange);
  
-@@ -2137,6 +2873,12 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
+@@ -2137,6 +2895,12 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
  }
  
  //==============================================================================
@@ -1504,7 +1568,7 @@ index 1993f02782b..b6bdeea7a56 100644
  void WaveNodeRealTime::setDynamicOffsetBeats (BeatDuration newOffset)
  {
      if (juce::approximatelyEqual (dynamicOffsetBeats->inBeats(), newOffset.inBeats()))
-@@ -2234,6 +2976,49 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
+@@ -2234,6 +2998,49 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
          loopReader = std::move (audioFileCacheReader);
      }
  
@@ -1554,7 +1618,7 @@ index 1993f02782b..b6bdeea7a56 100644
      const bool timestretchDisabled = timeStretcherMode == TimeStretcher::Mode::disabled;
      std::unique_ptr<ResamplerReader> resamplerAudioReader;
  
-@@ -2285,11 +3070,15 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
+@@ -2285,11 +3092,15 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
          }
      }
  
@@ -1570,7 +1634,7 @@ index 1993f02782b..b6bdeea7a56 100644
          auto editToClipBeatReader    = std::make_unique<EditToClipBeatReader> (std::move (beatRangeReader), editPositionBeats, dynamicOffsetBeats);
          basicEditReader = std::make_unique<EditReader> (std::move (editToClipBeatReader), nullptr);
      }
-@@ -2348,6 +3137,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
+@@ -2348,6 +3159,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
      editReader = other.editReader;
      pitchAdjustReader = other.pitchAdjustReader;
      dynamicOffsetBeats = other.dynamicOffsetBeats;
@@ -1578,7 +1642,7 @@ index 1993f02782b..b6bdeea7a56 100644
  }
  
  void WaveNodeRealTime::processSection (ProcessContext& pc)
-@@ -2355,6 +3145,40 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2355,6 +3167,40 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
      const auto sectionEditBeats = getEditBeatRange();
      const auto sectionEditTime = getEditTimeRange();
  
@@ -1619,7 +1683,7 @@ index 1993f02782b..b6bdeea7a56 100644
      // Check that the number of channels requested matches the destination buffer num channels
      assert (destChannels.getNumChannels() == (int) pc.buffers.audio.getNumChannels());
  
-@@ -2401,7 +3225,7 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2401,7 +3247,7 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
          }
          else if (fileTempoSequence != nullptr)
          {
@@ -1628,7 +1692,7 @@ index 1993f02782b..b6bdeea7a56 100644
              auto sourceBeats = BeatPosition::fromBeats (offsetIntoClip.inBeats() + offsetBeats.inBeats());
  
              if (! loopSectionBeats.isEmpty() && sourceBeats >= loopSectionBeats.getStart())
-@@ -2440,12 +3264,52 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2440,12 +3286,52 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
      if (pitchAdjustReader != nullptr)
          pitchAdjustReader->setKey (getKeyToSyncTo (sectionEditTime.getStart()));
  
@@ -1727,7 +1791,7 @@ index e85787125b1..458f5e4d811 100644
      PitchAdjustReader* pitchAdjustReader = nullptr;
      std::shared_ptr<SpeedFadeEditReader> editReader;
 diff --git a/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp b/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp
-index 26fd3d15d2e..70591eb7cb1 100644
+index 26fd3d15d2e..e0b62973743 100644
 --- a/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp
 +++ b/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp
 @@ -87,6 +87,10 @@ struct TimeStretcher::Stretcher
@@ -1741,7 +1805,50 @@ index 26fd3d15d2e..70591eb7cb1 100644
  };
  
  //==============================================================================
-@@ -966,6 +970,12 @@ struct SignalsmithStretcher  : public TimeStretcher::Stretcher
+@@ -925,6 +929,7 @@ struct SignalsmithStretcher  : public TimeStretcher::Stretcher
+     {
+         stretch.reset();
+         hasDoneFinalBlock = false;
++        framesOwed = 0.0;   // MODIFIED BY GO.DOT, 2026-10-13 (patch 0002): see getFramesNeeded
+     }
+ 
+     bool setSpeedAndPitch (float speedRatio_, float semitonesUp) override
+@@ -934,9 +939,22 @@ struct SignalsmithStretcher  : public TimeStretcher::Stretcher
+         return true;
+     }
+ 
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-10-13, by
++    // patches/tracktion_engine/0002-launched-clip-speed.patch: the input a chunk takes
++    // carries the part of a frame the last chunks owed. Each chunk of output asks for its
++    // input rounded to a whole frame, and Signalsmith plays at the ratio of what it is
++    // given to what it gives - so with nothing carried every speed played as a whole
++    // number of frames in a chunk: anything within half a frame in 256 of one (1.00005,
++    // 1.001, 0.999) played at exactly one, and 1.01005 at 259/256. The reader above counts
++    // the speed it asked for, so the file drifted under the sound unseen - a time group's
++    // timestretch chaser 182 ms behind its code while it read itself in step
++    // (blackbox.timegroup, TG.11). Now what each chunk's rounding left over is carried to
++    // the next, as a resampler carries its phase, so over any run of chunks the frames
++    // consumed are the ratio's to within half a frame. A speed that is a whole number of
++    // frames in a chunk - 2, 0.5, 1 - reads exactly what it always did.
+     int getFramesNeeded() const override
+     {
+-        return juce::roundToInt (samplesPerOutputBuffer / speedRatio);
++        return framesForNextChunk();
+     }
+ 
+     int getMaxFramesNeeded() const override
+@@ -948,6 +966,10 @@ struct SignalsmithStretcher  : public TimeStretcher::Stretcher
+     {
+         CRASH_TRACER
+         stretch.process (inChannels, numSamples, outChannels, samplesPerOutputBuffer);
++
++        // MODIFIED BY GO.DOT, 2026-10-13 (patch 0002): what this chunk took against what
++        // its ratio asked, carried to the next (getFramesNeeded).
++        framesOwed += exactFramesPerChunk() - static_cast<double> (numSamples);
+         return samplesPerOutputBuffer;
+     }
+ 
+@@ -966,6 +988,12 @@ struct SignalsmithStretcher  : public TimeStretcher::Stretcher
          return stretch.inputLatency() + stretch.outputLatency();
      }
  
@@ -1754,7 +1861,30 @@ index 26fd3d15d2e..70591eb7cb1 100644
  private:
      signalsmith::stretch::SignalsmithStretch<float> stretch;
      int numChannels = 0;
-@@ -1383,6 +1393,12 @@ int TimeStretcher::getLatencySamples() const
+@@ -973,6 +1001,22 @@ private:
+     float speedRatio = 1.0f;
+     bool hasDoneFinalBlock = false;
+ 
++    // MODIFIED BY GO.DOT, 2026-10-13 (patch 0002): the part of a frame of input the chunks
++    // so far took less than their ratio asked, between minus and plus a half; and the input
++    // one chunk asks for, unrounded. The ratio is the float every stretcher is handed, a
++    // part in seventeen million of the speed at worst - a millisecond in four hours.
++    double framesOwed = 0.0;
++
++    double exactFramesPerChunk() const
++    {
++        return static_cast<double> (samplesPerOutputBuffer) / static_cast<double> (speedRatio);
++    }
++
++    int framesForNextChunk() const
++    {
++        return std::max (0, static_cast<int> (std::floor (framesOwed + exactFramesPerChunk() + 0.5)));
++    }
++
+     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SignalsmithStretcher)
+ };
+ 
+@@ -1383,6 +1427,12 @@ int TimeStretcher::getLatencySamples() const
      return stretcher ? stretcher->getLatencySamples() : 0;
  }
  

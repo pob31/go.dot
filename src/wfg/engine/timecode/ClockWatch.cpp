@@ -51,9 +51,8 @@ namespace wfg::timecode
             a millisecond late. */
         constexpr double readingMiddle = 0.5;
 
-        //  The most readings the clock's line keeps, and pairs the count's: forty seconds of ticks, and three minutes.
+        //  The most readings the clock's line keeps: forty seconds of ticks.
         constexpr std::size_t mostPoints = 2048;
-        constexpr std::size_t mostPairs = 9000;
     }
 
     //==========================================================================
@@ -68,84 +67,12 @@ namespace wfg::timecode
             sampleRate = rate;
         }
 
-        const auto at = static_cast<double> (nanos) * 1.0e-6;
-        const auto count = static_cast<double> (sample);
-
-        /*  A SLIP OF GO.DOT'S CLOCK under the steady one - an interface that
-            dropped a buffer and lost its samples, a count that paused or
-            reset: the last `slipPairs` pairs, together, further from the
-            count's line than their scatter ever puts them. A block's scatter
-            is uniform, so eight pairs average to within a tenth of a block of
-            the line, while one dropped buffer moves every one of them a whole
-            block; and the line, fitted through two minutes of pairs, has not
-            yet moved for the few that slipped. The count's line starts again
-            from this pair, readings wait a second for it, and the clock's
-            line starts again from the first reading heard after (`hear`).
-            Not while the line is young: its scatter is not known yet. Found by
-            measuring: read through the ClockEstimate this watcher was first
-            written with, which follows a slip in a few pairs and rings, a
-            fifty-millisecond slip wrote forty-five `running` in half a minute
-            at speeds up to a quarter of a percent, and one dropped buffer of
-            512 samples sixteen at up to six hundred parts per million; told
-            here, either is one record, at the speed the clock had. */
-        if (countLine.valid && countLine.residual >= 0.0)
-        {
-            recentOffs[recentNext] = count - countLine.positionAt (at);
-            recentNext = (recentNext + 1) % recentOffs.size();
-            recentCount = std::min (recentCount + 1, recentOffs.size());
-
-            if (nanos >= quietUntil && recentCount == recentOffs.size())
-            {
-                auto sum = 0.0;
-
-                for (const auto value : recentOffs)
-                    sum += value;
-
-                const auto perMillisecond = static_cast<double> (rate) / 1000.0;
-                const auto scatter = std::max (countLine.residual, 0.1 * perMillisecond)
-                                       / std::sqrt (static_cast<double> (recentOffs.size()));
-
-                if (std::abs (sum / static_cast<double> (recentOffs.size()))
-                      > std::max (slipMilliseconds * perMillisecond, slipSigmas * scatter))
-                {
-                    restartCount();
-                    slipped = true;
-                }
-            }
-        }
-
-        //  A LINE STARTING - the first pair, or the first after a slip - is waited for a second.
-        if (pairs.empty())
-            quietUntil = nanos + static_cast<std::int64_t> (quietSeconds * 1.0e9);
-
-        pairs.push_back ({ at, count });
-
-        while (pairs.size() > 2 && (pairs.front().sample < at - pairSeconds * 1000.0 || pairs.size() > mostPairs))
-            pairs.pop_front();
-
-        /*  Fitted at every pair while it is young, then twice a second: a
-            straight line through two minutes of pairs moves by nothing worth
-            the arithmetic in between, and is read off where it stands. Two
-            minutes because its slope is the interface's crystal against the
-            steady clock, which does not change, and every reading's sample is
-            read off it: through half a minute of 512-sample blocks it was good
-            to ten parts per million, and the clock's speed wandered with it -
-            four to fifteen `running` an hour, measured, against two to five. */
-        if (! countLine.valid || at - pairs.front().sample < quietSeconds * 1000.0
-              || at - countFittedAt >= checkSeconds * 1000.0)
-        {
-            countLine = linefit::through (pairs);
-            countFittedAt = at;
-        }
-    }
-
-    void ClockWatch::restartCount() noexcept
-    {
-        pairs.clear();
-        countLine = {};
-        countFittedAt = 0.0;
-        recentNext = 0;
-        recentCount = 0;
+        /*  THE COUNT'S LINE (CountLine.h), which says when Go.dot's clock
+            slipped under the steady one: it starts again from this pair and
+            readings wait a second for it, and the clock's line starts again
+            from the first reading heard after (`hear`). */
+        if (count.feed (sample, nanos, rate))
+            slipped = true;
     }
 
     void ClockWatch::setLatency (std::int64_t samples) noexcept
@@ -155,8 +82,7 @@ namespace wfg::timecode
 
     void ClockWatch::forget() noexcept
     {
-        restartCount();
-        quietUntil = 0;
+        count.forget();
         slipped = false;
         havePrevious = false;
         previous = {};
@@ -174,11 +100,11 @@ namespace wfg::timecode
     void ClockWatch::hear (const WallReading& reading)
     {
         if (reading.millisecondOfDay < 0 || reading.millisecondOfDay >= millisecondsPerDay
-              || sampleRate <= 0 || ! countLine.valid || reading.steadyNanos < quietUntil)
+              || sampleRate <= 0 || ! count.line().valid || reading.steadyNanos < count.youngUntil())
             return;
 
         //  The Go.dot sample at the moment the wall clock was read, off the count's line.
-        const auto sample = countLine.positionAt (static_cast<double> (reading.steadyNanos) * 1.0e-6);
+        const auto sample = count.line().positionAt (static_cast<double> (reading.steadyNanos) * 1.0e-6);
 
         if (! havePrevious)
         {

@@ -487,6 +487,14 @@ namespace wfg::cue
             it, so its clock and the voice's agree. */
         virtual double stretchSpeedLimit() const { return 20.0; }
 
+        /*  How far ahead of what is heard a time-stretched voice at `speed`
+            reads its file, in samples heard - its stretcher's latency and a
+            chunk. A jump placed on its reader nearer than this lands late by
+            the difference, so a chaser's jump is placed beyond it (TG.11's
+            faults, namespace draft §60.7). Nought by default: a player whose
+            voices read nothing ahead - a replay's, a test's. */
+        virtual double stretchLeadSamples (double) const { return 0.0; }
+
         /*  Where a SOUNDING cue's channels go, changed under it. Tick thread,
             on an edit and never per tick.
 

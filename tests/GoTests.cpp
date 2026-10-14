@@ -72,6 +72,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -16507,6 +16508,32 @@ TEST_CASE ("go.doh: the last cue of an act taken back - the act lives on, its he
             rig.tickOnce();
 
         REQUIRE (doh (rig).rejected == 0);
+    }
+
+    /*  SIX SECONDS ON (2026-10-13, M68): the act, its footer and its members
+        ended longer ago than their retention, so the tick's passes no longer
+        read them - the table keeps them, and the Doh that brings the act back
+        finds it there and puts it back where the passes read it. */
+    SUBCASE ("pressed six seconds after the act ended, when the tick no longer reads it")
+    {
+        const auto readByTheTick = [&rig, &act]
+        {
+            for (const auto& run : rig.runs.current())
+                if (run.id == act)
+                    return true;
+
+            return false;
+        };
+
+        REQUIRE (rig.tickUntil ([&] { return std::as_const (rig.runs).find (act)->isFinished(); }));
+        REQUIRE (runsFor (rig, closing) == 1u);
+
+        for (int n = 0; n < 300; ++n)
+            rig.tickOnce();
+
+        REQUIRE_FALSE (readByTheTick());
+        REQUIRE (doh (rig).rejected == 0);
+        CHECK (readByTheTick());
     }
 
     SUBCASE ("pressed in the very tick whose hook decided the act's end")

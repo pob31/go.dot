@@ -40,6 +40,7 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/command/Event.h>
 #include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/audio/EditRenderer.h>
@@ -88,7 +89,9 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -510,4 +513,274 @@ TEST_CASE ("tree: a published node says what its row says, and a mounted node wh
         }
 
     CHECK (declared > 0);
+}
+
+//==============================================================================
+namespace
+{
+    /*  A SOUND CARD THAT PLAYS EACH VOICE A WHILE, for M68: an arm is answered
+        on the next tick, as a disk answers, and a voice sounds a third of a
+        second from its launch and stops on its own, so the Runner sees its
+        edge and ends the run as it ends one at a file's end. */
+    struct SessionPlayer final : cue::Player
+    {
+        int trackCount() const override                  { return 16; }
+        int slotCount() const override                   { return 1; }
+        std::int64_t samplesElapsed() const override     { return samples; }
+        int blockSize() const override                   { return 128; }
+        int sampleRate() const override                  { return 48000; }
+        int channelsPerTrack() const override            { return 2; }
+
+        void requestArm (const cue::ArmRequest& request) override { arms.push_back (request); }
+
+        bool launchAtSample (int track, int, std::int64_t sample) override
+        {
+            endsAt[track] = sample + voiceSamples;
+            return true;
+        }
+
+        bool stop (int track) override
+        {
+            endsAt.erase (track);
+            return true;
+        }
+
+        bool stopAtSample (int track, int, std::int64_t sample) override
+        {
+            if (const auto found = endsAt.find (track); found != endsAt.end())
+                found->second = std::min (found->second, sample);
+
+            return true;
+        }
+
+        void setLevelDb (int, double) override {}
+        void setRouting (int, const std::vector<cue::Coefficient>&) override {}
+
+        bool isPlaying (int track) const override
+        {
+            const auto found = endsAt.find (track);
+            return found != endsAt.end() && samples < found->second;
+        }
+
+        bool isArmReady (int track) const override { return ready.count (track) > 0; }
+
+        void answerArms (Engine& engine)
+        {
+            for (const auto& arm : arms)
+            {
+                engine.submit (origin::engine, "audio.armed",
+                               { osc::Value::string (arm.runId), osc::Value::int32 (arm.track) });
+                ready.insert (arm.track);
+            }
+
+            arms.clear();
+        }
+
+        std::int64_t samples = 0;
+        std::int64_t voiceSamples = 16000;
+        std::vector<cue::ArmRequest> arms;
+        std::map<int, std::int64_t> endsAt;
+        std::set<int> ready;
+    };
+
+    /*  AN EVENING ON THE FIRST-SOUND SHOW, as the tick thread serves it: the
+        Runner's hook, the engine's tick and the publish, in that order, on a
+        show that goes on firing. Every eight ticks the next of three GOs - the
+        fixture's sound, its fade, and a scene added here (an automatic group of
+        a memo, an OSC cue and a fade) - each made ready two ticks before it is
+        fired, as a pointer reaches a cue while the operator reads the next
+        line. Six runs every 24 ticks, most of them ended within the next 24. */
+    struct Evening
+    {
+        explicit Evening (ServedTree& servedTree)
+            : served (servedTree)
+        {
+            served.engine.log().openInMemory ({});
+            served.runner.setPlayer (&player);
+            served.runner.setSamplesPerTick (960);
+
+            listId = "7K2QM9X4";
+            const auto scene = served.document.createCue (listId, 5, "group", "Scene");
+            REQUIRE (scene.ok);
+            served.document.setAttribute ("/godot/cue/" + scene.id + "/advance", "auto");
+
+            REQUIRE (served.document.createCue (scene.id, 0, "memo", "Note").ok);
+
+            const auto osc = served.document.createCue (scene.id, 1, "osc", "Desk");
+            REQUIRE (osc.ok);
+            served.document.setAttribute ("/godot/cue/" + osc.id + "/address", "/desk/fader");
+            served.document.setAttribute ("/godot/cue/" + osc.id + "/value", "f:0.5");
+
+            const auto fade = served.document.createCue (scene.id, 2, "fade", "Down");
+            REQUIRE (fade.ok);
+            served.document.setAttribute ("/godot/cue/" + fade.id + "/target", "B3N8R5TW");
+            served.document.setAttribute ("/godot/cue/" + fade.id + "/duration", "0.1");
+            served.document.setAttribute ("/godot/cue/" + fade.id + "/level", "-10");
+
+            cycle = { "B3N8R5TW", "E4GP6QSC", scene.id };
+        }
+
+        struct Cost
+        {
+            double before = 0.0, process = 0.0, publish = 0.0;
+        };
+
+        Cost step()
+        {
+            const auto phase = tick % 8;
+
+            if (phase == 0)
+                served.document.setAttribute (cue::standbyAddressOf (listId), cycle[next++ % cycle.size()]);
+            else if (phase == 2)
+                served.engine.submit ("cli", "go", {});
+
+            player.samples = tick * 960;
+            player.answerArms (served.engine);
+
+            Cost cost;
+            const auto start = std::chrono::steady_clock::now();
+            served.runner.beforeTick (served.engine, tick);
+            const auto hooked = std::chrono::steady_clock::now();
+            served.engine.processTick (tick);
+            const auto processed = std::chrono::steady_clock::now();
+            const auto snapshot = served.publish (tick);
+            const auto published = std::chrono::steady_clock::now();
+
+            REQUIRE (snapshot != nullptr);
+
+            cost.before = millisecondsOf (hooked - start);
+            cost.process = millisecondsOf (processed - hooked);
+            cost.publish = millisecondsOf (published - processed);
+            ++tick;
+            return cost;
+        }
+
+        /*  THE FINISHED RUNS THE EVENING HAS MADE, copied under new names until
+            the table holds `target` runs, as an evening of GOs leaves them:
+            each family - a group's run and its members' - keeps its parent and
+            children among its own copies, and every copy ended long ago. What
+            the tick pays for a run that ended an hour ago is what it pays for
+            one of these. */
+        void growTo (std::size_t target)
+        {
+            std::vector<cue::Run> seeds;
+
+            for (const auto& run : served.runs.all())
+                if (run.isFinished() && run.id.rfind ("ZZ", 0) != 0)
+                    seeds.push_back (run);
+
+            REQUIRE (! seeds.empty());
+
+            while (served.runs.all().size() < target)
+            {
+                std::map<std::string, std::string> renamed;
+
+                for (const auto& seed : seeds)
+                    renamed[seed.id] = "ZZ" + doc::Id::encode (copies++).substr (2);
+
+                for (const auto& seed : seeds)
+                {
+                    if (served.runs.all().size() >= target)
+                        break;
+
+                    auto copy = seed;
+                    copy.id = renamed[seed.id];
+
+                    const auto parent = renamed.find (seed.parent);
+                    copy.parent = parent != renamed.end() ? parent->second : std::string();
+
+                    copy.children.clear();
+
+                    for (const auto& child : seed.children)
+                        if (const auto found = renamed.find (child); found != renamed.end())
+                            copy.children.push_back (found->second);
+
+                    copy.endedAtTick = 1;
+
+                    served.runs.create (copy.id, copy.cue, copy.kind);
+
+                    auto* made = served.runs.find (copy.id);
+                    REQUIRE (made != nullptr);
+                    *made = std::move (copy);
+                }
+            }
+        }
+
+        ServedTree& served;
+        SessionPlayer player;
+        std::string listId;
+        std::vector<std::string> cycle;
+        std::size_t next = 0;
+        std::int64_t tick = 1;
+        std::uint64_t copies = 0;
+    };
+
+    double percentileOf (std::vector<double> samples, double fraction)
+    {
+        std::sort (samples.begin(), samples.end());
+        const auto at = static_cast<std::size_t> (fraction * static_cast<double> (samples.size() - 1));
+        return samples[at];
+    }
+}
+
+//==============================================================================
+/*  WHAT THE RUNS A SESSION HAS MADE COST THE TICK (namespace draft §31.5, M68).
+
+    M64 (§60.6) ran a time group firing a member every 3 s, and every 1.32 s,
+    for many minutes in the Debug build: no fire was late for the first eight
+    passes, then late launches grew until nearly every one was, the tick up to
+    133 ms behind its audio (400 to 520 ms at 1.32 s). The run table keeps every
+    run of the session, so whatever the tick pays for each one grows with the
+    evening, whatever the show.
+
+    An evening on the first-sound show (above), and between its stretches its
+    finished runs copied until the table holds 100, 1000, 2500 and 5000; each
+    stretch times 96 ticks of it going on - the Runner's hook, the engine's tick
+    and the publish, each alone. REPORTED AND NEVER ASSERTED, for M18's reason;
+    what the mend guarantees is asserted in RunTests, by what the tick visits
+    rather than by a clock. */
+TEST_CASE ("M68: what the runs a session has made cost the tick, reported and not asserted")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    ServedTree served { bundleNamed ("phase2") };
+    Evening evening { served };
+
+    //  The evening's first ten seconds: the runs the copies are made from.
+    for (int n = 0; n < 500; ++n)
+        evening.step();
+
+    MESSAGE ("M68  " << std::string (buildName()) << ": " << served.runs.all().size()
+             << " runs made by the evening's first 500 ticks");
+
+    for (const std::size_t target : { std::size_t { 0 }, std::size_t { 100 }, std::size_t { 1000 },
+                                      std::size_t { 2500 }, std::size_t { 5000 } })
+    {
+        if (target > 0)
+            evening.growTo (target);
+
+        for (int n = 0; n < 24; ++n)
+            evening.step();
+
+        const auto held = served.runs.all().size();
+        std::vector<double> before, process, publish, whole;
+
+        for (int n = 0; n < 96; ++n)
+        {
+            const auto cost = evening.step();
+            before.push_back (cost.before);
+            process.push_back (cost.process);
+            publish.push_back (cost.publish);
+            whole.push_back (cost.before + cost.process + cost.publish);
+        }
+
+        MESSAGE ("M68  " << std::string (buildName()) << ", " << held << " runs in the table, "
+                 << served.runs.current().size() << " the tick reads: a tick median "
+                 << percentileOf (whole, 0.5) << " ms, 90th percentile " << percentileOf (whole, 0.9)
+                 << " ms, worst " << percentileOf (whole, 1.0) << " ms; the hook " << percentileOf (before, 0.5)
+                 << " ms, the engine's tick " << percentileOf (process, 0.5) << " ms, the publish "
+                 << percentileOf (publish, 0.5) << " ms (medians)");
+    }
+
+    CHECK (served.runs.all().size() >= 5000u);
 }

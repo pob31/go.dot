@@ -365,7 +365,7 @@ namespace wfg::cue
         std::set<std::string> left;
         out.runs.reserve (16);
 
-        for (const auto& run : runs.all())
+        for (const auto& run : runs.current())
         {
             if (run.isFinished())
                 continue;
@@ -547,8 +547,9 @@ namespace wfg::cue
                            return gone.count (job.self) > 0 || gone.count (job.target) > 0;
                        });
 
-        for (const auto& id : gone)
-            runs.remove (id);
+        /*  AT ONCE, so the table's index is made again once and not once a
+            run: an evening's finished runs are all here (2026-10-13, M68). */
+        runs.remove (gone);
 
         //  THE HOOKS' MEMORY OF RUNS NOW GONE, and of the standby they prepared.
         armedStandby.clear();

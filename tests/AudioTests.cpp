@@ -7923,6 +7923,350 @@ TEST_CASE ("slice move: a stretched loop moved while it plays goes on with no ga
 }
 
 //==============================================================================
+/*  TG.11'S FAULTS, PART 1 (namespace draft §60.7): what blackbox.timegroup
+    heard a time group's chasers do, each heard here on the voice itself.
+
+    A CHASER'S JUMP in a cue with no ranges is a move of its file with no loop:
+    a segment whose out is not after its in, which patch 0002 documents as the
+    file running on. The forward reader made it a loop of one frame at its
+    in-point instead, and from the end of the crossfade held the file's first
+    sample for good. A STRETCHED VOICE read only whole frames in 256 a chunk,
+    so a speed within half a frame of one played at one. And its reader runs
+    ahead of what is heard by its stretcher's latency, so a jump placed a launch
+    horizon ahead was met after the reader had passed it, and landed late.
+*/
+namespace
+{
+    /*  A 1 kHz tone at a quarter, silent for the first fifth of every second:
+        the tone of second k begins at k + 0.2 s of the file. A stretcher keeps
+        an onset where it was, and its pitch, so the bursts say where in its
+        file a stretched voice is - which neither a ramp nor LTC survives. A
+        gap of 0.2 s is shorter than the two blocks of silence after which
+        Signalsmith stops analysing, so every onset is made alike. */
+    juce::File writeSecondBursts (const juce::File& folder, int rate, int seconds)
+    {
+        const auto file = folder.getChildFile ("bursts.wav");
+        folder.createDirectory();
+
+        juce::WavAudioFormat format;
+        std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
+
+        if (stream == nullptr)
+            return {};
+
+        auto writer = format.createWriterFor (stream,
+                                              juce::AudioFormatWriterOptions{}
+                                                .withSampleRate (static_cast<double> (rate))
+                                                .withNumChannels (1)
+                                                .withBitsPerSample (24));
+
+        if (writer == nullptr)
+            return {};
+
+        juce::AudioBuffer<float> buffer { 1, rate * std::max (1, seconds) };
+        auto* data = buffer.getWritePointer (0);
+        const auto step = 2.0 * juce::MathConstants<double>::pi * 1000.0 / rate;
+        const auto silent = rate / 5;
+
+        for (int n = 0; n < buffer.getNumSamples(); ++n)
+            data[n] = n % rate < silent ? 0.0f : 0.25f * static_cast<float> (std::sin (step * n));
+
+        writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+        return file;
+    }
+
+    /*  WHERE A BURST BEGINS in a render, in samples from its start and to a
+        fraction of one: within a tenth of a second either side of `expected`,
+        where the mean size of the sound over a millisecond - a period of the
+        tone, so its own ripple is not an edge - climbs through half the tone's,
+        having been under a quarter of it; nought when it does not. The mean
+        size of a sine of a quarter is a quarter times two over pi. */
+    double burstOnsetNear (const juce::AudioBuffer<float>& heard, int rate, double expected)
+    {
+        const auto* x = heard.getReadPointer (0);
+        const auto period = rate / 1000;
+        const auto tone = 0.25 * 2.0 / juce::MathConstants<double>::pi;
+        const auto from = std::max (0, static_cast<int> (expected) - rate / 10);
+        const auto to = std::min (heard.getNumSamples() - period, static_cast<int> (expected) + rate / 10);
+
+        if (to <= from)
+            return 0.0;
+
+        auto sum = 0.0;
+
+        for (int n = from; n < from + period; ++n)
+            sum += std::abs (static_cast<double> (x[n]));
+
+        auto quiet = false;
+        auto previous = sum / period;
+
+        for (int n = from + 1; n < to; ++n)
+        {
+            sum += std::abs (static_cast<double> (x[n + period - 1])) - std::abs (static_cast<double> (x[n - 1]));
+            const auto mean = sum / period;
+
+            if (mean < tone / 4.0)
+                quiet = true;
+            else if (quiet && mean >= tone / 2.0 && previous < tone / 2.0)
+                return static_cast<double> (n - 1) + (tone / 2.0 - previous) / (mean - previous)
+                         + static_cast<double> (period) / 2.0;
+
+            previous = mean;
+        }
+
+        return 0.0;
+    }
+
+    /*  THE PITCH OF A BURST, from its rising zero crossings over `seconds`
+        from 30 ms after `onset`, each placed to its fraction of a sample. */
+    double burstPitch (const juce::AudioBuffer<float>& heard, int rate, double onset, double seconds)
+    {
+        const auto* x = heard.getReadPointer (0);
+        const auto from = static_cast<int> (onset) + rate * 3 / 100;
+        const auto to = std::min (heard.getNumSamples(), from + static_cast<int> (seconds * rate));
+        auto first = -1.0, last = -1.0;
+        auto count = 0;
+
+        for (int n = std::max (1, from); n < to; ++n)
+            if (x[n - 1] < 0.0f && x[n] >= 0.0f)
+            {
+                const auto at = static_cast<double> (n - 1) + static_cast<double> (-x[n - 1]) / static_cast<double> (x[n] - x[n - 1]);
+
+                if (count == 0)
+                    first = at;
+
+                last = at;
+                ++count;
+            }
+
+        return count > 2 ? static_cast<double> (count - 1) * rate / (last - first) : 0.0;
+    }
+}
+
+TEST_CASE ("chase jump: a jump in a cue with no ranges carries its file on from where it lands, never holding its first frame (TG.11)")
+{
+    /*  As a time group's chaser jumps (RunnerTime.cpp's `chaseJump`): no loop,
+        a 10 ms crossfade, a second on from where the file was. The ramp says
+        where the file is at every sample. */
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 4);
+    REQUIRE (ramp.existsAsFile());
+    REQUIRE (voice.open (ramp, false));
+    REQUIRE (voice.go (1.0));
+
+    voice.runTo (voice.at (0.5));
+
+    const auto lands = voice.rig.host.clock().samplesElapsed() + 4 * voice.block;
+    const auto landsAt = static_cast<double> (lands - voice.launch) / voice.rate;
+
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, landsAt, landsAt + 1.0, 0.0, 0.0, 0.010 }) != 0);
+
+    const auto heard = voice.record (0.2, 2.0);
+    const auto path = [landsAt] (double t) { return t < landsAt ? t : t + 1.0; };
+
+    const auto fadeStarts = static_cast<int> (landsAt * voice.rate) - static_cast<int> (voice.startedAt - voice.launch);
+    const auto fadeEnds = static_cast<int> ((landsAt + 0.010) * voice.rate) - static_cast<int> (voice.startedAt - voice.launch);
+    REQUIRE (fadeStarts > 0);
+
+    //  Before the jump and after its fade, exactly the path: the file running on.
+    juce::AudioBuffer<float> before { 1, fadeStarts - 2 };
+    before.copyFrom (0, 0, heard, 0, 0, fadeStarts - 2);
+    CHECK (offPath (before, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0) == 0);
+    CHECK (offPath (heard, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0, fadeEnds + 2) == 0);
+
+    //  Not one sample held: the file goes on through what the rest of the render covers.
+    const auto* x = heard.getReadPointer (0);
+    const auto covered = rampSecond (x[heard.getNumSamples() - 1], 4) - rampSecond (x[fadeEnds + 2], 4);
+    INFO ("after the jump the file went from " << rampSecond (x[fadeEnds + 2], 4) << " s to "
+          << rampSecond (x[heard.getNumSamples() - 1], 4) << " s");
+    CHECK (covered > 1.5);
+
+    //  Placed ahead of a resampled reader, it was met in time.
+    CHECK_FALSE (voice.rig.host.trackLoopAdoption (0, 0).has_value());
+}
+
+TEST_CASE ("chase jump: a stretched voice's jump placed beyond its stretcher's lead is met in time and lands within a chunk of its aim - placed a launch horizon ahead it landed a tenth of a second late (TG.11)")
+{
+    auto beyond = true;
+
+    SUBCASE ("placed the stretcher's lead beyond the horizon, as a chaser's jump is now") {}
+
+    SUBCASE ("placed a launch horizon ahead, as a chaser's jump was")
+    {
+        beyond = false;
+    }
+
+    SpeedRig voice;
+    const auto bursts = writeSecondBursts (voice.rig.storage.folder, voice.rate, 8);
+    REQUIRE (bursts.existsAsFile());
+    REQUIRE (voice.open (bursts, true));
+
+    /*  HOW FAR AHEAD THE STRETCHER READS: its latency - Signalsmith's default,
+        some 150 ms at 48 kHz - and up to a chunk of 256 it has made and not
+        played. */
+    const auto lead = voice.rig.host.stretchLeadSamples (1.0);
+    MESSAGE ("a stretched voice at one reads " << lead << " samples ahead of what is heard");
+    REQUIRE (lead > 0.1 * voice.rate);
+    REQUIRE (lead < 0.2 * voice.rate);
+
+    REQUIRE (voice.go (1.0));
+
+    RecordingSink sink;
+    sink.prepare (1, 6 * voice.rate);
+    const auto startedAt = voice.rig.host.clock().samplesElapsed();
+    voice.rig.host.setBlockSink (&sink);
+
+    //  Two and a half seconds in, a jump three tenths on, as a chaser's: no loop, 10 ms.
+    voice.runTo (voice.at (2.5));
+
+    const std::int64_t horizon = 2 * 960;      // two ticks at 50 Hz, as the Runner places a launch
+    const auto now = voice.rig.host.clock().samplesElapsed();
+    const auto lands = now + horizon + (beyond ? static_cast<std::int64_t> (std::ceil (lead)) : 0);
+    const auto from = static_cast<double> (lands - voice.launch) / voice.rate;
+    const auto fileAt = from + 0.3;
+
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, from, fileAt, 0.0, 0.0, 0.010 }) != 0);
+
+    while (sink.written < sink.buffer.getNumSamples())
+        voice.rig.host.processBlock();
+
+    voice.rig.host.setBlockSink (nullptr);
+
+    /*  WHERE EACH BURST BEGAN against where the file puts it. Before the jump
+        the file's second k + 0.2 is heard k + 0.2 s after the launch; after it,
+        (k + 0.2 - fileAt) s after the sample it lands on. The stretcher's own
+        offset, a few milliseconds, is read from the bursts before and taken
+        off those after. */
+    const auto launchIndex = static_cast<double> (voice.launch - startedAt);
+    const auto landsIndex = static_cast<double> (lands - startedAt);
+    auto offsetBefore = 0.0;
+
+    for (const auto second : { 1.2, 2.2 })
+    {
+        const auto expected = launchIndex + second * voice.rate;
+        const auto onset = burstOnsetNear (sink.buffer, voice.rate, expected);
+        INFO ("the file's " << second << " s began at " << onset << ", expected " << expected);
+        REQUIRE (onset > 0.0);
+        offsetBefore += (onset - expected) / 2.0;
+    }
+
+    std::vector<double> lateness;
+
+    for (const auto second : { 3.2, 4.2, 5.2 })
+    {
+        const auto expected = landsIndex + (second - fileAt) * voice.rate;
+        const auto onset = burstOnsetNear (sink.buffer, voice.rate, expected + (beyond ? 0.0 : 0.08 * voice.rate));
+        INFO ("after the jump, the file's " << second << " s began at " << onset << ", expected " << expected
+              << " and " << offsetBefore << " for the stretcher");
+        REQUIRE (onset > 0.0);
+        lateness.push_back (onset - expected - offsetBefore);
+    }
+
+    const auto adoption = voice.rig.host.trackLoopAdoption (0, 0);
+
+    for (const auto late : lateness)
+        MESSAGE ((beyond ? "beyond the lead" : "a horizon ahead") << ": landed " << late << " samples late");
+
+    if (beyond)
+    {
+        //  Met before the reader reached it, and heard where it was aimed, to a chunk.
+        CHECK_FALSE (adoption.has_value());
+
+        for (const auto late : lateness)
+            CHECK (std::abs (late) <= 256.0);
+
+        return;
+    }
+
+    /*  Met after the reader had read past it, applied from there - the reader
+        says so - and heard that much late: what blackbox.timegroup heard. */
+    CHECK (adoption.has_value());
+
+    for (const auto late : lateness)
+        CHECK (late > 0.04 * voice.rate);
+}
+
+TEST_CASE ("audio host: a stretched cue at a speed within half a frame in 256 of one plays at that speed, not at one, and keeps its pitch - ten seconds at 1.001 are 10.01 of its file (TG.11)")
+{
+    /*  Signalsmith plays at the ratio of the input it is given to the output
+        it makes, a chunk of 256 at a time, and the input was rounded to a
+        whole frame a chunk with nothing carried: 1.001 asked for 256.256 and
+        was given 256, so it played at one; 1.01005, a catch-up's 1 % on a code
+        fifty parts per million fast, was given 259 and played at 1.0117. The
+        place a stretched voice is put in its file is right to a few chunks
+        (M14), so the speed is read from two onsets ten seconds of the file
+        apart in one render, where that offset is the same for both. */
+    for (const auto speed : { 1.001, 1.01005 })
+    {
+        INFO ("x" << speed);
+
+        SpeedRig voice;
+        const auto bursts = writeSecondBursts (voice.rig.storage.folder, voice.rate, 12);
+        REQUIRE (bursts.existsAsFile());
+        REQUIRE (voice.open (bursts, true));
+        REQUIRE (voice.go (speed));
+
+        const auto heard = voice.record (0.0, 11.6 / speed);
+        const auto launchIndex = static_cast<double> (voice.launch - voice.startedAt);
+        const auto first = burstOnsetNear (heard, voice.rate, launchIndex + 1.2 / speed * voice.rate);
+        const auto last = burstOnsetNear (heard, voice.rate, launchIndex + 11.2 / speed * voice.rate);
+        REQUIRE (first > 0.0);
+        REQUIRE (last > 0.0);
+
+        const auto wanted = 10.0 / speed * voice.rate;
+        const auto rounded = 10.0 / (std::round (256.0 * speed) / 256.0) * voice.rate;
+
+        MESSAGE ("x" << speed << ": ten seconds of the file took " << (last - first) << " samples: " << wanted
+                 << " at that speed, " << rounded << " at the speed a whole frame in 256 would give");
+        CHECK (std::abs ((last - first) - wanted) <= 256.0);
+        CHECK (std::abs ((last - first) - rounded) > 256.0);
+
+        /*  AND ITS PITCH KEPT, to a tenth of a hertz. Signalsmith took the
+            spectrum before as one interval back when it was within a sample of
+            it, and read a sample off every frequency came out that much sharp
+            or flat - 1/1440 at 48 kHz, 0.69 Hz on 1 kHz - which a stretch this
+            near one reached about half the time: 1.001 played 0.4 Hz sharp. */
+        for (const auto second : { 2.2, 6.2, 10.2 })
+        {
+            const auto onset = burstOnsetNear (heard, voice.rate, launchIndex + second / speed * voice.rate);
+            REQUIRE (onset > 0.0);
+            const auto pitch = burstPitch (heard, voice.rate, onset, 0.6);
+            INFO ("the burst at the file's " << second << " s sounds at " << pitch << " Hz");
+            CHECK (std::abs (pitch - 1000.0) < 0.1);
+        }
+    }
+}
+
+TEST_CASE ("audio host: a cue with no ranges turned forwards again after playing backwards plays on from where it turned (§41, TG.11)")
+{
+    /*  The turn forwards is a segment with no loop - the file going on from
+        where it is - which the forward reader used to make a loop of one frame
+        at the file's start: the playhead went on, and the sound held the
+        sweep's first sample, silence. */
+    SpeedShow show;
+    show.sweepTo = 2000.0;
+    REQUIRE (show.open (200.0, 6, "1", "varispeed"));
+    REQUIRE (show.go());
+    show.ticks (100);
+
+    REQUIRE (show.fire (show.speedFade (1, "-1", "0.5")));
+    show.ticks (40);
+    REQUIRE (show.tone().rateNow == doctest::Approx (-1.0));
+
+    REQUIRE (show.fire (show.speedFade (2, "1", "0.2")));
+    show.ticks (40);
+
+    //  Forwards again: the sweep sounds, rising, where the playhead says.
+    const auto first = risingCrossings (show.record (25));
+    const auto second = risingCrossings (show.record (25));
+    INFO ("rising crossings in half a second: " << first << " then " << second
+          << "; the playhead at " << show.tone().position);
+    CHECK (first > 100);
+    CHECK (second > first);
+    CHECK (show.tone().rateNow == doctest::Approx (1.0));
+}
+
+//==============================================================================
 TEST_CASE ("audio host: an output's gain trims what leaves on its channels and nothing else")
 {
     /*  Namespace draft §38: an output's trim and its DCA's, applied after the

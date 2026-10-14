@@ -549,6 +549,8 @@ class Server:
                  recover: bool = False,
                  hold: bool = False,
                  midi_render: "dict | None" = None,
+                 midi_play: "dict | None" = None,
+                 midi_play_loop: "dict | None" = None,
                  extra_args: "list[str] | None" = None,
                  role: "str | None" = "none",
                  http_port: int = 0):
@@ -634,6 +636,18 @@ class Server:
         # relative one against where it was started.
         for port, path in (midi_render or {}).items():
             argv.append(f"--midi-render={port}={path}")
+
+        # --midi-play=<port>=<file> is the other way round (namespace draft
+        # section 60, TG.4, AIZ): a file in --midi-render's own format played
+        # INTO a port's input at its lines' moments, as if a cable had brought
+        # it - MTC to the reader, anything else to the triggers and surfaces.
+        # --midi-play-loop plays it again and again, each pass after the last
+        # step between two of its lines. The port by the show's name again,
+        # one entry here a port, the path given whole.
+        for port, path in (midi_play or {}).items():
+            argv.append(f"--midi-play={port}={path}")
+        for port, path in (midi_play_loop or {}).items():
+            argv.append(f"--midi-play-loop={port}={path}")
 
         # EVERY DRIVER RUNS UNPAIRED UNLESS IT ASKS (namespace draft section 58,
         # RD.5). A serve not given --engine-folder reads the developer's own

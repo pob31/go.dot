@@ -12740,6 +12740,8 @@ What each part of the patch does with the answers:
 - **High ratios are read in pieces.** At twenty, one block can ask the resampler for more frames
   than the scratch pool holds or the file cache allows (its assert is at 48 000,
   `AudioFileCache.cpp:913`). A read over the limit is split in two. It never happens at one.
+- **The stretcher's input is carried to the part of a frame** from one chunk to the next
+  (2026-10-13, §22.13): before, every stretched speed played as a whole number of frames in 256.
 
 **What building 0002 found in Tracktion's resampler (S.2, 2026-09-28), and what it mends.** The
 first renders of a moving speed clicked - faintly, at the first sample of a block, a step of
@@ -13128,6 +13130,45 @@ exact zeros unjudged (fb12d4f) stays, harmless. The other lever, the prime on th
 It lists what is Tracktion's own in patch 0002: the Lagrange reader's per-block rounding, the stretcher's prime at speeds other than one, its prime before the file is cached, its
 lost place after a cache miss, a slot rebuilt mid-play restarting its reader, and this loop above
 the stretcher.
+
+### 22.13 A stretched speed to the part of a frame (2026-10-13)
+
+Found by `blackbox.timegroup` (§60.7, TG.11's faults): a time group's timestretch chaser, asked for the
+code's 1.00005 and then 1.001, played at exactly one, while its run's clock - which counts the speed
+asked - read it in step; catching up at 1.01005 it played 1.0117.
+
+**What it was.** Signalsmith makes its output a chunk of 256 at a time and plays at the ratio of the
+input it is handed to the output it makes. Tracktion's `SignalsmithStretcher::getFramesNeeded` asked for
+256 over the stretch, rounded to a whole frame, every chunk, with nothing carried. So every timestretched
+speed was a whole number of frames in 256 - 257/256, 258/256 and so on - and any speed within half a
+frame in 256 of one (0.99805 to 1.00195) played at one. §22's word that Tracktion's own per-block ratio
+"then drives the resampler or the stretcher by itself" held, for the stretcher, only to that grain.
+Varispeed never had it: its reader has carried its exact position since S.2 (§22.3).
+
+**Now** (patch 0002), each chunk takes the input its ratio asks plus what the chunks before it were
+short of, rounded, and carries what is left - between minus and plus half a frame - to the next, as a
+resampler carries its phase: over any run of chunks the input taken is the ratio's to within half a
+frame. A speed that is a whole number of frames in 256 - one, two, a half, one and a half, three
+quarters, every speed M14, M46 and M47 played stretched but M47's 1.3, which was varispeed - takes
+exactly the frames it took before, so their numbers stand. The ratio is the `float` every Tracktion
+stretcher is handed, at worst a part in seventeen million of the speed: a millisecond in four hours.
+
+**And Signalsmith's own sample of slack, which that uncovered.** A spectrum's phase advance is read
+against the spectrum before it, which Signalsmith analyses again a whole interval back (1440 samples at
+48 kHz) unless the input since was within a sample of that - then it uses the one it has. A sample off,
+every frequency comes out a sample in 1440 sharp or flat: 0.69 Hz on 1 kHz, 1.2 cents. No stretch played
+there before, the rounding putting every speed at one or at least a frame in 256 away; now every stretch
+within two samples an interval of one does, about half the time - the driver heard 1.001 at 0.4 Hz sharp,
+1.00066 at 0.6. So Signalsmith (vendored in Tracktion, MIT) is patched too: it analyses again whenever the
+previous input is not exactly an interval back. Every stretch further from one did so already, at the
+cost M46 measured; one at exactly one never does.
+
+**Measured** (`AudioTests`, "a stretched cue at a speed within half a frame in 256 of one plays at that
+speed, not at one, and keeps its pitch"): ten seconds of a file between two onsets of a 1 kHz tone,
+played stretched - before, 480 000 samples at 1.001 (479 520.5 asked; the rounded speed's 480 000) and
+474 434 at 1.01005 (475 224.0 asked; 474 440.0 rounded); now 479 519 and 475 223, each within a sample
+of what was asked. Each burst's pitch within 0.0002 Hz of 1 kHz, where 1.001 played 0.4 Hz sharp with the
+remainder carried and Signalsmith's slack left.
 
 ## 23. The stop levels held to their law
 
@@ -20178,6 +20219,141 @@ next tick's too.
 - **A runtime row's value still goes to text and back**: `osc::formatDouble`, then the schema's
   parser. That keeps the value the file would hold, at the cost of a parse a leaf.
 
+**2026-10-13: what an evening's runs cost the tick (M68).** M64 (§60.6) heard a time group's members launch
+late more and more as a Debug session went on - none for its first eight passes, then nearly every one, the
+tick up to 133 ms behind its audio, and 400 to 520 ms with members 1.32 s apart. TG.11 named a candidate, read
+and not proven: the run table keeps every run of the session (`retentionTicks` retires a run from the tree,
+not from the table, so a replay agrees), and the tick's passes walked them all, looking each one up again by
+a walk. Measured, it was that.
+
+**M68** is what the tick costs as the table grows. `PublishCostTests`, case "M68": an evening on the
+first-sound show served as the tick thread serves it - the Runner's hook, the engine's tick and the publish,
+each timed alone - a GO every eight ticks, each cue made ready two ticks before (the fixture's sound, its fade,
+and a scene of a memo, an OSC cue and a fade), six runs every 24 ticks. Between stretches the evening's
+finished runs are copied under new names, each family with its parent and children, until the table holds
+100, 1000, 2500 and 5000; each stretch times 96 ticks. Reported and never asserted (M18's reason); what the
+mend guarantees is asserted by what the tick reads, in RunTests. Debug, the author's box, medians in ms; the
+spread is over the runs named below the table:
+
+| runs in the table | the hook, before | the tick, before | the hook, `find` indexed alone | the hook, after | the tick, after |
+|---|---|---|---|---|---|
+| 128 (the evening's own) | 1.23 to 1.27 (2.08) | 20.1 to 20.9 (21.3) | 0.71 | 0.49 to 0.61 | 19.5 to 21.8 |
+| 158 | 1.59 to 1.64 (2.94) | 20.6 to 21.8 (22.6) | 0.79 | 0.50 to 0.60 | 19.7 to 21.1 |
+| 1006 | 34.8 to 36.1 (87.0) | 54.9 to 57.4 (108) | 1.92 | 0.51 to 0.61 | 19.5 to 21.8 |
+| 2506 | 207 to 210 (510) | 228 to 232 (533) | 4.10 | 0.51 to 0.60 | 19.3 to 21.1 |
+| 5006 | 806 to 809 (2006) | 826 to 832 (2031) | 7.96 | 0.51 to 0.59 | 20.0 to 22.1 |
+
+Before: HEAD's engine (`9263767`) with this case added, three runs - two three minutes apart on a quiet
+machine (CPU 13 to 29 %, nothing running from the other worktree, no compiler), and one with temporary timers
+round each of the hook's passes, alike - and, in brackets, the first run of all, two and a half times slower
+at 5000, taken at an hour when the machine was not watched; a memory-bound walk is what another session's
+build slows most. After: three runs, two on a quiet machine (CPU 7 to 15 %). The engine's tick is 0.03 to
+0.25 ms throughout, and the publish 18.8 to 21.4 ms, after as before: it walked every run only to retire it
+from the tree. The tick reads 64 runs after, at every size of the table: what is live and what ended in the
+last five seconds.
+
+**Where it went.** The timers, since taken out, at 5006 runs before: six passes - `applyLevels`,
+`updatePositions`, `launchIfDue`, `observeEdges`, `deClickLaunched` and `advanceRanges` - 130 ms each,
+`mirrorRound` 22 ms, every other pass under half a millisecond. Each of the six walked `runs.all()` and looked
+every run up again with `RunTable::find`, itself a walk: quadratic in the runs of the session, some twelve
+million string comparisons a pass at five thousand. With `find` indexed and nothing else changed (the column
+above), the hook was linear instead: forty-odd passes still walking every run of the evening to skip the
+finished ones, 8 ms at 5006.
+
+**What was done.**
+
+- **`RunTable` keeps an index beside its vector**: where each run is by name, so `find` is not a walk (the
+  first made under a name, as the walk found it); the newest run of each cue; and `current()`, the runs the
+  tick reads - every unfinished one, and each finished one until it settles. The vector stays: creation order
+  is the slots' queue and the order every pass walks in, and `all()` hands it out as before.
+- **`RunTable::settle (tick)`**, called by the Runner at the end of its hook, takes out of `current` every
+  finished run that ended more than `retentionTicks` before - the tree's own rule, so the tree never publishes
+  a run the view has lost. At the end of the hook and never at its start: every pass has then seen a run
+  finished at least once before it settles, however long the hook went unrun (an apply, a seat).
+- **The table still keeps every run.** Handlers, a replay, Doh!'s history (`rootFor`, `goDoh`), a seat
+  (`positionNow`, `carriedRuns`) and `killedSinceLift` read `all()` as before. A replay runs no hooks and so
+  never settles: what it reads in `current` is every run - the same answers, more slowly.
+- **A settled run is frozen.** Every way to change a run is a `find` on a table that is not const, and that
+  `find` puts a settled run back into `current` before handing it over; the next `settle` takes it out again
+  if it is still over. The case that needs it: a Doh! bringing back an act that ended six seconds ago, inside
+  its window and past its retention. A run put back while a pass walks `current` goes on the end, and that
+  pass still reaches it; the order is mended before the next walk. Since nothing changes a settled run without
+  putting it back, the settled children of each run are filed by parent as they settle, and `childrenOf`,
+  `descendantsOf`, `askedForUnder` and `hasChildFor` answer without a walk of every run, finished children
+  and all.
+- **The passes walk `current`**: the 29 of the Runner's hook that walked `all()`, serve's count of live runs
+  for the pair, `summaryNow`, and the publish's run order and run rows. Each was read for what it does to a
+  finished run: nothing, or one thing once - a flag put down, a meter set to silence, a round's readout
+  zeroed - done many times over in the retention a run spends in `current`. `liveRunOf`, `preparedRunOf`,
+  `isTrackBusy`, `lowestFreeTrack`, `holderOf`, `waitersFor` and `allChildrenFinished`, which only ever
+  answered with unfinished runs, read it too, the newest or the first chosen by place in the vector rather
+  than by where it is met; so do the GO path's `liveUntakenRunOf` and `liveOtherRunOf`.
+- **The preparedness** reads the newest run of each cue from the table rather than a map of every run made
+  every tick; a failed arm still ahead that has settled is read where the table keeps it.
+- **A seat** takes out every run the leader's position does not hold at once (`RunTable::remove` of a set),
+  the index made again once, not once a run.
+
+**M64's firing case again** (§60.6), `m64_chase.py --firing-only --spacing=33 --passes=34`: a time group on
+LTC and one on MTC, ten members each 1.32 s apart, 34 passes of 17.8 s - ten minutes, 340 fires a code - on
+the Debug binary, the machine quiet (CPU 7 to 33 % at the start, no compiler running, nothing from the other
+worktree):
+
+| session | fires after their map's sample, LTC / MTC | the tick noted two ticks or more behind | at worst | on time, median and worst: LTC / MTC |
+|---|---|---|---|---|
+| before (HEAD's engine) | 155 / 133 of 340 | 212 times | 15.8 s | +0.022, 0.48 / +0.430, 0.84 ms |
+| after | 25 / 26 | twice, in the first 30 s | 44 ms | +0.022, 0.48 / +0.478, 0.87 ms |
+| after, its tick probed | 19 / 21 | - (one tick or more: 158 seconds) | 43 ms | +0.022, 0.48 / +0.478, 0.92 ms |
+| after, the show half rebuilt only on a show edit (an experiment) | 4 / 4, each within a block | never one tick | 14.7 ms | +0.022, 0.48 / +0.478, 0.90 ms |
+
+Before, no fire was late in the first ten passes, then more every pass - two in the eleventh, twenty of twenty
+from the thirty-first - and the tick fell 15.8 s behind: the run table's growth, as M68 found it. After, the
+late fires do not grow: by 0.06 to 16 ms, in passes 15 to 21 and 32, none in the last.
+
+WHAT IS LEFT OF THEM IS NOT THE RUN TABLE. The probed session carried a temporary note (since taken out) of
+every second in which the tick ran one tick or more behind, with the longest tick and the longest publish in
+it: 158 such seconds over the ten minutes, from the first pass to the last, the tick 20 to 43 ms behind, its
+longest tick 23 to 45 ms, of which the publish 18 to 35 ms. Serve rebuilds the show half on every tick that
+applies a command (`outcome.applied > 0`, M62's "left" above), and a time group's members apply one every few
+ticks - `run.spawn`, `audio.armed`, `run.fire`, `run.started`, `run.ended`, `code.heard` - each a rebuild of
+the show half in Debug. Rebuilt only when the show's revision moved (the experiment, taken out again), the
+tick was never one tick behind, and the eight fires after their map's sample were each within a block (2.66 ms
+at worst), which `run.late` does not count. Whether the show half may be left alone on a tick that applied
+only engine records - what it publishes that moves with no show revision - is a question for the author, and
+not answered here.
+
+**Tests**, in C and fr_FR. RunTests: four run-table cases asking every question the table answers - children,
+descendants, the live, prepared and newest run of a cue, a slot's holder and waiters, whether a track is busy,
+whether all of a group's children are finished, `find` - of a table whose settled runs it no longer looks at,
+against the walk of every run written out again in the test: settled at the tree's edge (read through 250
+ticks, gone at 251), a run not over kept whatever its ending tick, a settled run found to be changed read again
+in its place and filed under a new parent when it settles again, a run found during a walk reached by that walk
+and the next walk in order, `settle` refused under a walk, runs taken out at once as one at a time takes them.
+And one on the Runner: six hundred memos fired over twelve hundred ticks, the tick reading at most 130 of them,
+the table all six hundred, the tree's run order the walk's, and five quiet seconds later nothing read and
+nothing published. GoTests: "go.doh: the last cue of an act taken back" gains the press six seconds after the
+act ended, when the tick no longer reads it - the act read again and everything after as before, the session
+replayed record for record. VideoTests: the read-ahead rows' failed arm still ahead speaks once it has settled.
+Five deliberate breakages, each turning its own cases red: no thaw in `find` (the act brought back is not read
+by the tick, and after the corrected GO it never ends; the table's answers wrong besides), a run not over
+settled, `childrenOf` without the settled children, a run put back in its place under a walk, and the
+preparedness without the settled failed arm. Green: the 50 test files that use the run table or the Runner,
+2026 cases; the run pane's and the show settings' UI cases (95); the `wfg.replay.*` gates and
+`source.comments`; `blackbox.timegroup` (101 of 101), `.doh`, `.pair-seat`, `.pair-follow` and `.first-sound`.
+The clang-tidy stand-in clean on every changed file, its run proved by a planted shadow.
+
+**Left.**
+
+- **The show half rebuilt on every applied command** (M62's "left"), which is what M64 still hears in Debug:
+  20 to 45 ms ticks whenever a time group's members apply their records, and a fire in one of them late by a
+  few milliseconds (above). Not the run table's, and a change to what the publish promises - the author's.
+- **The publish of the evening above is 19 to 21 ms in Debug**, a tick's worth, and flat in the session: most
+  of it is the 64 runs on the tree, some forty rows each (M62's idle publish of the same show with five runs
+  is 1.7 to 2.0 ms) - what the last five seconds made, not the evening. M62's next step, making only what
+  changed, would reach it.
+- **A handler that walks `all()`** still walks the evening, once a press: `pausePersistent`, `loadToTime`,
+  `endGo`, `goDoh`, `resumeStandby`, `pressMember`, `seatChasersOnCode` and the rest. Some milliseconds at five
+  thousand runs in Debug, on the GO path, never on every tick.
+
 ## 32. A copy that would not find its sounds
 
 Written 2026-10-06, when the author asked: *"When saving outside the workfolder (show) warn the user
@@ -26813,6 +26989,106 @@ and the worst over two hundred fires, from LTC and from MTC; and, for each chase
 minutes against a code running 50 ppm fast, with a 0.1 % step, a two-second stop and a thirty-second
 locate back: the steady error, the time to catch up, the jumps, the worst error.
 
+**M64**, measured 2026-10-13 (TG.11), by `tests/blackbox/m64_chase.py`, run by hand and never by ctest:
+sessions of `wfg serve --hosted --render --input-wav=<LTC> --midi-play-loop=MTC in=<MTC>` on shows written into a
+copy of the timegroup fixture, the code written by `timegroup.py`'s own LTC and MTC writers and the render read by
+its reader; the Debug binary on the author's Windows box (16 cores), 25 fps at 48 kHz, 128-sample blocks.
+
+(a) FIRING: two time groups, one on LTC and one on MTC, each of ten free runners, each a second of LTC on its group's
+own output; the code loops and every pass fires them all again. Each fire's onset - where a line through its frames
+puts its file's first sample - against the input frame its time names (LTC), against where the port's pass put the
+frame, the median over that pass's `code.heard` of where each put its frame (MTC), and against the sample the
+engine's own map gave the time when it asked for it (both). "Late" is a fire that began after its map's sample, on a
+block's first sample: asked for while the tick thread ran behind its audio, launched as soon as it could be.
+
+| members 3 s apart, 200 fires each | median | p99 | worst | late |
+|---|---|---|---|---|
+| LTC, against the input's frame | +0.153 ms | 27.5 ms | 30.7 ms | 72 |
+| LTC, the 128 on time | +0.042 ms | 0.450 ms | 0.450 ms | - |
+| LTC, against its map's sample | +0.017 ms | 27.5 ms | 30.7 ms | - |
+| MTC, against the port's moment | +0.496 ms | 25.3 ms | 31.0 ms | 68 |
+| MTC, the 132 on time | +0.321 ms | 1.02 ms | 1.13 ms | - |
+| MTC, against its map's sample | +0.006 ms | 24.4 ms | 30.5 ms | - |
+
+No fire was late for the first eight passes (some 160 runs made); late launches came from the ninth, and from the
+sixteenth nearly every fire was - the tick thread noted behind its audio 88 times, up to 133 ms, all after the
+session's first 264 runs. A probe of three passes at the same spacing: none late, LTC within 0.45 ms of the frame and
+0.021 ms of its map, MTC within 1.39 ms and 0.018 ms. With the members 1.32 s apart - a sound ending, the next
+loading and two firing in the same half second - the tick fell behind from the sixth second on, up to 521 and 399 ms
+in two sessions, and 86 and 138 of 200 LTC fires were late (on time: median +0.018 and +0.023 ms, worst 0.48 and
+0.22 ms; MTC on time, median +0.31 and +0.29, worst 1.25 and 1.01 ms). A launch late by less than a block says
+nothing in `run.late`, which counts whole blocks. Where the late launches come from is not measured here; a
+candidate, read and not proven: the Runner's run table keeps every run of the session (`RunTable`, by design, so a
+replay agrees), and 23 of its per-tick passes walk `runs.all()` calling `RunTable::find`, a linear search, for each -
+quadratic in the runs a session has made, which a Debug build pays dearly. `code.heard`: LTC two a pass (the loop
+point's `jumped` and a re-anchor), 41 in 21 passes; MTC 241.
+
+(b) CHASE: a time group on LTC holding a free runner, a chaser by jump, by varispeed and by timestretch at 01:00:02:00
+against 612 s of code: +50 ppm for four minutes, +0.1 % for three, a two-second stop, back 120 ms on from where it
+would have been, two minutes at +50 ppm, a locate back thirty seconds, a minute more. Each stretch's |error| against
+the code, median/worst in ms; "in step" within 1.5 ms (varispeed), 10 (jump), 21.3 (timestretch, AJC); two sessions,
+alike to the hundredth of a millisecond:
+
+| method | +50 ppm | +0.1 % | in step after the return | then | in step after the locate | then | jumps heard | speeds: +50 ppm / +0.1 % / catching up |
+|---|---|---|---|---|---|---|---|---|
+| free | 6.11/11.94 | 104.35/191.75 | never | 315.3/317.8 | never | 29 680.6 ahead | 0 | 1 / 1 / 1 |
+| jump | 5.15/10.02 | silent | - | silent | - | silent | 0 | 1 / - / - |
+| varispeed | 0.06/0.06 | 1.17/1.17 | 15.4 s | 1.02/1.02 | - | silent | 0 | 1.000050 / 1.001000 / 1.010000 |
+| timestretch | 6.11/11.92 | 104.31/191.55 | never | 181.6/184.1 | - | silent | 0 | 1.000000 / 1.000000 / 1.011776 |
+
+WHAT THE TABLE SAYS OF THE ENGINE (60.7, TG.11, has each): the jump chaser fell 10 ms behind at +50 ppm some 200 s
+in, jumped, and its voice froze on its file's first sample - silent to the reader from then on; the varispeed chaser
+followed both speeds to the part per million and caught 121 ms up in 15.4 s at the clamp, then froze at the locate,
+which jumps it; the timestretch chaser played at exactly one against both speeds, as the free runner did, while its
+run's clock counted the speeds asked, so it believed itself in step 192 ms behind, caught up at 259/256 of the code's
+speed from the return's 120 ms only to stand 182 ms behind, and froze at the locate. `code.heard` from LTC: ten in ten
+minutes (4 jumped, 5 running, 1 stopped); the tick thread at worst 14.7 ms behind. WHAT THE RENDER CANNOT SHOW: a
+real interface's clock against MTC from a cable, and a code from a VTR or a desk - the bench's.
+
+**M64 again**, measured 2026-10-14 (TG.12), after the three mends of TG.11's faults (60.7, parts 1 to 3), the same
+script and shape on the Debug binary of 2ed4f5e, on a quiet machine: one session each, rtViolations 0 and audioGaps
+0 in both.
+
+| members 3 s apart, 200 fires each | median | p99 | worst | late |
+|---|---|---|---|---|
+| LTC, against the input's frame | +0.042 ms | 4.71 ms | 5.16 ms | 19 |
+| LTC, the 181 on time | +0.042 ms | 0.450 ms | 0.450 ms | - |
+| LTC, against its map's sample | +0.012 ms | 4.69 ms | 5.14 ms | - |
+| MTC, against the port's moment | +0.321 ms | 5.42 ms | 7.44 ms | 23 |
+| MTC, the 177 on time | +0.236 ms | 1.03 ms | 1.03 ms | - |
+| MTC, against its map's sample | +0.000 ms | 4.48 ms | 7.65 ms | - |
+
+The tick thread was never noted behind its audio (88 times in TG.11's session), its lateness at worst 29.3 ms; the
+late fires, 19 and 23 where there were 72 and 68, are each late by less than 8 ms and do not grow with the session.
+What makes them is no longer the run table but the publish: serve rebuilds the show half of the tree on every tick
+that applies a command, and a time group's members apply one every few ticks (31.5, M68, left for the author).
+`code.heard` in 21 passes: LTC 41, MTC 43 - two a pass each, the loop point's `jumped` and a re-anchor - where MTC
+wrote 241.
+
+| method | +50 ppm | +0.1 % | in step after the return | then | in step after the locate | then | jumps (A/B/C/D) | speeds: +50 ppm / +0.1 % / catching up |
+|---|---|---|---|---|---|---|---|---|
+| free | 6.11/11.94 | 104.35/191.75 | never | 315.28/317.76 | never | 29 680.59 ahead | 0/0/0/0 | 1 / 1 / 1 |
+| jump | 4.20/10.02 | 5.05/9.99 | 0.2 s | 3.04/6.01 | 0.2 s | 1.53/3.00 | 1/18/1/1 | 1.000035 / 1.001000 / 1 |
+| varispeed | 0.06/0.06 | 1.17/1.17 | 15.4 s | 1.02/1.02 | 0.2 s | 0.53/0.53 | 0/0/0/1 | 1.000050 / 1.001000 / 1.010000 |
+| timestretch | 0.04/0.05 | 1.27/1.47 | 10.5 s | 5.24/11.53 | 0.5 s | 0.52/0.54 | 0/0/0/0 | 1.000050 / 1.001000 / 1.009992 |
+
+(A: from 5 s after the members' time to the step; B: from 5 s after the step to the stop; C: from a second after
+it is back in step to the locate; D: from a second after it is in step again. The tolerances as above.)
+
+WHAT IT SAYS: every chaser holds its tolerance for the ten minutes. The jump chaser reaches 10 ms out once at +50 ppm
+and jumps; at +0.1 %, a millisecond a second, it jumps every ten seconds or so, 18 times in three minutes, each
+landing in step; the return and the locate are each one jump, in step 0.2 s later. The varispeed chaser follows
+both speeds to the part per million, catches the return's 120 ms in 15.4 s at the 1 % clamp and the locate by one
+jump. The timestretch chaser now plays the speeds it is asked - 1.000050 and 1.001000, where it played exactly one
+- holds 0.05 ms at +50 ppm, catches the return in 10.5 s and lands the locate's jump 0.52 ms from the code, where it
+landed 106 ms behind and then froze. ONE THING NOT TRACED: between the return and the locate (C) the timestretch
+chaser held a median 5.24 ms out, 11.53 at worst, where it held 1.27 before the stop and 0.52 after the locate -
+inside its 21.3 ms (AJC), but a stretch the other two do not show. A candidate, read and not proven: the
+stretcher's lead depends on its speed (`stretchLeadSamples` divides its input latency by it), so a voice that
+caught up at 1.01 and came back to 1.001 hears its file a lead's difference away from where its clock reads it.
+Left for a later round. WHAT THE RENDER CANNOT SHOW is unchanged: a real interface's clock against MTC from a
+cable, and a code from a VTR or a desk - the bench's.
+
 ### 60.7 Built so far
 
 - **TG.0**, 2026-10-12: this section; PRD §3.7, §3.14's chasing half and its open question answered,
@@ -27762,6 +28038,326 @@ locate back: the steady error, the time to catch up, the jumps, the worst error.
   the author; the readout line shows the incoming rate and the show's is the tab's own Frame rate row, with no word
   of a mismatch beside it, which `sync/ltcInRate`'s description promises - a phrase for the author; the time column
   shows a member's `at` in place of its length.
+- **TG.11**, 2026-10-13: `blackbox.timegroup` and M64 - time groups from outside the process. THE WRITERS, a
+  fourth implementation of the standards, in Python, sharing nothing with Go.dot's generator, decoder, MTC cursor or
+  reader, nor with `tests/LtcReader.h`: an LTC writer (biphase mark, BCD, the sync word, the polarity bit at 59 in
+  25-frame code making the ones even, each edge placed to its fraction of a sample by holding each level for its share
+  of the sample the edge falls in - how TG.3's decoder, placing an edge by its area, finds it) into the WAV
+  `--input-wav` loops; and an MTC writer into a `--midi-render` file for `--midi-play-loop`: a full frame where the code
+  starts or locates, then cycles of quarter frames, each naming the frame its piece 0 is sent on, a quarter apart at the
+  code's speed. The driver reads its writers back before it asks the engine anything: a member's file frame by frame on
+  its own samples, the input as the story to a tenth of a sample, the MTC through `timecode.py`'s MTC reader.
+  `common.Server` gains `midi_play` and `midi_play_loop`.
+  THE FIXTURE, `tests/fixtures/bundles/timegroup`: a one-channel input "LTC in" (`sync/ltcIn`), a port "MTC in"
+  (`sync/mtcIn`), a one-channel output a member, `goDebounce="0"`; a time group on LTC holding, at 01:00:02:00, a free
+  runner and a chaser by jump, by varispeed and by timestretch, and at 01:00:03:00 a timeline group chasing by jump, its
+  two sounds 1.5 s apart (a pre-wait); a time group on MTC holding a free runner and a chaser by jump at 01:00:02:00.
+  Every member's sound is itself LTC from 00:00:00:00, written by the driver into its copy, so the render, decoded, says
+  frame by frame where in its file each member was; the timestretch chaser's is a 1 kHz tone in a burst every half
+  second, 200 to 320 ms long in turn so a burst tells which of five it is, since a stretcher would not leave LTC
+  readable and a tone's pitch is what it keeps. `wfg validate` and `validate-show.py` pass it.
+  THE DRIVER, `tests/blackbox/timegroup.py`, `blackbox.timegroup.{C,fr_FR}` (unbuffered, 400 s, on the `realtime`
+  lock). THE STORY, 75 s looped on the input and the port alike: from 00:59:40:00 at +50 ppm (twenty seconds of lead-in
+  for the GOs), at 01:00:12:00 a step to +0.1 % for fifteen seconds, a stop of two, back 120 ms on from where it would
+  have been, eighteen seconds on a locate back thirty, eight more and the loop point, itself a locate back. Both groups
+  armed by GO; the pass read is the first whose lead-in the GOs came in time for. THE READING: the render (eight channels,
+  77 s) is read through each float's top byte - its sign and whether it is an eighth or more, a slice and a translate away
+  - and as floats only where an edge is, the edges fed to `timecode.py`'s decoder: two seconds a serve where reading
+  every sample in Python took twenty; bursts by their silences, their pitch by rising zero crossings; and the log's
+  `code.heard`, `run.spawn`, `run.fire`, `run.late` and its notes. Where the session's sample nought falls in the
+  render (nought, in every run) is read from the first `jumped`; MTC's pass is placed by the median of where its own
+  `code.heard` put its frames. `--keep` and `--analyse` judge a kept room again by hand. THE CHECKS, 101 a run over
+  the two serves: the input's frame heard on its own sample; every `code.heard` of either code from `ltc:TG0N0001` and
+  `mtc:TG0P0001`, `stopped` at the stop, `jumped` at the return and the locate (LTC on the frame's sample, MTC within
+  20 ms of the port's moment) and at the loop point; each code's records a handful a pass (LTC: eight against 1825
+  frames); each member on the sample the engine's map gave its time (to 2.5 samples: a varispeed chaser starts at the
+  code's speed, and the resampler's interpolator sounds it 1.7 samples on), within a millisecond of the input frame
+  (+0.037 ms, the scene's +0.025) and within 3 ms of the port's moment (+0.29 to +0.67 ms); the scene's second sound
+  1.5 s after its first to the sample; the free runner at speed one to 2 ppm against +50 ppm and +0.1 %, never moved,
+  thirty seconds ahead after the locate; the varispeed chaser at the code's speed (to 5 ppm, then 30) within a
+  millisecond and then three, playing on through the stop, 120 ms behind after it, catching up at 1.01 times the code
+  without a jump, back within 1.5 ms before the locate and re-seated by it; the jump chaser at speed one within 2 ms
+  through +50 ppm, stepping back each time it is ten out through +0.1 %, playing through the stop, in step half a second
+  after the return and after the locate; the timestretch chaser at 1 kHz in every burst, at the code's speed, within
+  AJC's 21.3 ms, catching up at about 1 % and back within it, re-seated by the locate; the scene's sounds as the jump
+  chaser; the MTC free runner never moved and the MTC jump chaser in step after the return and the locate with the code
+  as Go.dot hears it; the loop point ending every chaser; the readouts read over HTTP while the story ran
+  (`sync/ltcInState` stopped through the stop, `ltcInSpeed` 1.00005 then 1.001, the varispeed run's `chaseState`
+  catching then inStep, the free runner's free); nothing allocated on the audio thread; and a second serve, `--hold`,
+  `pair/sending` false, both codes still heard, every LTC member on the same sample of its code as unheld. ON CI only
+  the runner's is loosened: MTC's placing and its record count are printed and voided, the steering's bounds widen, a
+  readout missed is voided; LTC is in the render's own samples everywhere. A start the engine owns up to as late -
+  `run.late`, a note of its tick two or more behind, or a sound beginning on a block's first sample after its own, a
+  launch placed as soon as it could be - voids that start's checks alone.
+  Ran: three times in each locale, twice through ctest (127 s each) and once by hand - the same 87 checks green and the
+  same 14 red every time (below); `blackbox.timecode`, `blackbox.process` and `blackbox.first-sound` in both,
+  green. Eight deliberate breakages of a kept room each turned their own checks red and nothing else: the stop's record
+  taken out, LTC's re-anchors written four times, the free runner a millisecond late, the varispeed chaser's sound
+  replaced by the free runner's, a record from another origin, the held free runner three samples late, the free
+  runner moved 5 ms in the step, the timestretch chaser's tone a percent sharp. And one the other way: with the engine
+  change (1) below tried and taken out again, every jump-path check went green.
+  FOUND, AND NOT MENDED HERE - the driver is red on each, as the brief asks; M64 (60.6) measures them:
+  1. **A chaser's crossfaded jump in a cue with no slices freezes its voice** (12 of the 14). TG.8's `chaseJump` moves
+     slot nought with `loopIn = loopOut = 0`, "no loop", which patch 0002's `LoopSource::Segment` documents as "the file,
+     either way"; but the plain forward `Map` - `fileFrameFor`, `passOf`, `nextPassAfter` - never reads `looping`, and the
+     map's loop of `max (0, 1)` frame at frame nought holds the reader on the file's first sample. From the end of the
+     10 ms crossfade the member sounds one constant level (+0.5 on the LTC members), never advancing, until a locate's
+     re-seat makes a new run or the loop point ends it. Heard: the jump chaser at 41.44 s of the pass, its first jump,
+     ten milliseconds out at +0.1 % - silent to the reader through the stop, the return and the locate; the scene's two
+     sounds at 41.48 and 41.50 s (re-made by `seekGroup` at the return, so they sound again from there); the MTC jump
+     chaser alike; the varispeed and timestretch chasers at the locate back, which jumps them. The unit tests' player
+     records the move and plays nothing; AudioTests' slice moves carry real loop points. Tried and taken out again: a
+     `loopOut` far past the file's end in `chaseJump` turned every one of these checks green - one jump of +9.96 ms
+     through the step, in step after the return and the locate, the scene's sounds and the MTC chaser alike. The mend is
+     the author's to place: `looping` honoured on the plain path of patch 0002, or `chaseJump`.
+  2. **A stretched voice plays at a whole number of frames in 256** (1). Tracktion's
+     `SignalsmithStretcher::getFramesNeeded` is `roundToInt (samplesPerOutputBuffer / speedRatio)` - 256 times the speed,
+     rounded, each chunk, nothing carried - so a timestretch chaser asked 1.00005 or 1.001 plays at exactly one, and
+     catching up at 1.01005 plays 259/256 = 1.01172 (1.011740 and 1.011776 measured). The run's clock counts the speed
+     asked, so the chaser drifts from its code while it reads itself in step: 16 ms in the driver's fifteen seconds at
+     +0.1 %, 192 ms in M64's three minutes, and 182 ms behind for good after catching up (AJC's chunk is on its clock,
+     not its sound). M46 measured speeds that are whole frames in 256 (2, 0.5).
+  3. **MTC's `code.heard` is not sparse** (1). 32 to 123 records a 75 s pass against LTC's eight, the speeds written
+     0.98 to 1.009, once 3.6 % off just after a locate; in M64's chase session, with no MTC group at all, the port's
+     watcher wrote one every second or two at 0.999 and 1.0006 in turn. MTC's moments reach Go.dot's samples through
+     the reader's `ClockEstimate`, fed the tick's clock pairs, and a tick late by tens of milliseconds (a Debug engine
+     loading sounds) moves them by milliseconds - its map 16 ms from LTC's at worst in one pass - which the watcher,
+     re-anchoring at a millisecond, follows. TG.6 foresaw it ("TG.9's chasers and RD.9's map should not lean on its
+     slope") and gave the clock's watcher a fitted count's line; the MTC reader still has the estimate. Firing is not
+     hurt: an MTC member starts on its map's sample and within 1.4 ms of the port's moment.
+  4. Behind (1), with it worked around: **a timestretch chaser's jump lands about 106 ms behind** - the locate jumped it
+     to where the code was and the stretcher sounded that a tenth of a second late, from which it caught up at 1.0117 for
+     some seven seconds; the stretcher's buffered audio is not in the jump's target, it seems. The driver's check of its
+     re-seat stays red until both are mended.
+  Also seen: the tick thread falls behind its audio while a Debug engine loads sounds - 40 to 56 ms as this show's eight
+  members load, and in M64 more as a session makes runs (60.6, with a candidate cause); a member asked for then starts
+  late, as soon as it can, and one late by less than a block is not said by `run.late`. Left: the guides and the
+  README (TG.12); the four faults above, and with them M64's chase table, to measure again once mended.
+- **TG.11's faults, part 1**, 2026-10-13: three of the four faults TG.11's driver found, mended - (1), (2) and (4)
+  above; (3), MTC's `code.heard` not sparse, is another stage's.
+  **(1) A JUMP IN A CUE WITH NO SLICES FROZE ITS VOICE.** The cause was as TG.11 traced it. Patch 0002's
+  `LoopSource::Segment` says a segment whose `loopOut` is not after its `loopIn` is no loop, the file, and
+  `UnrolledLoopReader` read it so backwards and bouncing (`bentFrameFor` reads `looping`); its forward arithmetic -
+  `passOf`, `fileFrameFor`, `nextPassAfter` - never read it, so such a segment was a loop of `max (0, 1)` frame at
+  its in-point, and from the end of the crossfade the reader held that one frame. MENDED IN THE PATCH, where the
+  meaning is written: a map that does not loop is in pass nought everywhere and has no next pass. Not in `chaseJump`:
+  the file's real bounds there would be a loop, which plays the file again from its start at its end - an end the
+  show may not know (a cue with no known length never ends, TG.8) - and a cue with no ranges does not loop; TG.11's
+  trial of a far `loopOut` was that loop with its end out of reach. And the patch had a second caller relying on
+  it, found on the way: `turnRun` (§41) gives a cue with no ranges turned forwards again after playing backwards the
+  same segment, forwards with no loop, and it froze the same way - silent, the sweep's first sample being nought -
+  while its playhead went on; §41's case read the playhead only. Both are mended by the one change.
+  **(2) A STRETCHED VOICE PLAYED ONLY WHOLE FRAMES IN 256** - and, mended, Signalsmith's own sample of slack: §22.13.
+  The remainder is carried in `SignalsmithStretcher` (`framesOwed`), in patch 0002, whose file
+  `tracktion_TimeStretch.cpp` is; Signalsmith's header joins 0002 for the same reason (the patches README: a file
+  belongs to one patch, and the two changes are one mend).
+  **(4) A STRETCHED CHASER'S JUMP LANDED 106 MS BEHIND.** Found: a stretched voice's reader runs ahead of what is
+  heard by its stretcher's lag in its file - the input latency plus the speed times the output latency, as patch
+  0002 primes it (§22.10) - and by up to a chunk the stretcher has made and the voice not yet played: at 48 kHz,
+  Signalsmith's default with its computation split, 2880 + 4320 + 256 = 7456 samples heard at one, 155 ms. The jump
+  was placed a launch horizon ahead (two ticks, 40 ms), so the reader met it some 115 ms after its `from`, applied it
+  where it was (§33, UD) and said so; the Runner moved the run's clock there (`loopTaken`, TG.8), so its clock was
+  where the sound was and both stood that far behind the code, which the catch-up then took seven seconds over.
+  MENDED IN THE RUNNER: `steerChaser` places a stretched voice's jump - a chaser by `timestretch`, or by `jump` on a
+  cue whose own mode stretches - at the horizon plus `Player::stretchLeadSamples (speed)` (new: HostPlayer answers
+  from AudioHost, which reads its stretcher's input and output latency at `buildEdit` from a stretcher made as a
+  voice's; nought by default, a replay's and the tests' players reading nothing ahead), its target the code's second
+  at that sample; a resampled voice jumps at the horizon as before. And a run whose last move lands beyond where it
+  is measured is not measured until it lands, held at the code's speed as just jumped: its clock, bent at the
+  landing sample, reads the file standing at the jump's target before it, which against the code is the jump
+  itself as an error - a jump chaser would have published it, a catch-up chaser slowed for it.
+  A PLAIN JUMP OF A STRETCHED CUE: a slice moved under a stretched loop (§33) is placed a horizon ahead too and met
+  late the same way, as UD foresaw - applied where the reader is, the clock moved there - so it is heard about
+  115 ms after it is placed, its playhead honest throughout; nothing outside the show says where its file should be,
+  so it is a late edit and not an error, and is left. A seek is a stop and a launch, whose stretcher primes aimed at
+  its speed (M14): within a chunk, no error.
+  Tests, red first (built against the series as it was, the Runner's lead turned off), then green under C and
+  fr_FR. `AudioTests`, four cases "(TG.11)", on the host: a jump in a cue with no ranges, a ramp's every sample on
+  its path before and after the crossfade and the file running on through the rest of the render (red: held at
+  nought, 94 494 samples off the path); a stretched voice's jump onto 1 kHz bursts placed its stretcher's lead beyond
+  the horizon, met in time and every onset after it where it was aimed to 1e-5 sample (red: no burst after the jump,
+  held at nought), and placed a horizon ahead as before, met late and 5506 samples (115 ms) behind; ten seconds of a
+  file stretched at 1.001 and 1.01005 between two onsets, 479 519 and 475 223 samples, within a sample of the speed
+  asked, and every burst's pitch within 0.0002 Hz of 1 kHz (red: 480 000 and 474 434, the rounded speeds' grain;
+  and, with the remainder carried but Signalsmith's slack left, 0.4 Hz sharp at 1.001, heard by the driver); and
+  §41's cue with no ranges turned forwards again sounding its sweep, rising (red: 0 and 0 rising crossings).
+  `TimeGroupTests`, one case on the TG.8 rig, its fake player reading 7456 samples ahead: a timestretch chaser 0.3 s
+  behind and a jump chaser on a timestretch cue 30 ms behind each jump once, to the reader's second and the code's
+  7456 samples past the horizon, the lead asked at the code's speed, nothing measured, moved or placed in the eight
+  ticks before it lands, then in step on the code's playhead; a varispeed chaser at the horizon as before (red:
+  placed at the horizon). Green in both locales with the files of the code touched - TimeGroupTests, ChaseTests,
+  RateClockTests, RangeTests, SeatTests, FollowTests, CodeMapTests, CodeWatchTests, ClockWatchTests, MediaCueTests,
+  GoTests, RunTests, TimecodeRunTests, MovieTests, SamplerTests, TriggerTests, LevelLaneTests, SendLaneTests,
+  LaneRecordTests, EditPlaybackTests, 775 cases - and AudioTests' speed, stretch, range, M13, slice-move, LTC and
+  §41 cases with the new ones (45); `blackbox.rate-speed` (M14) and `blackbox.timecode` in both, the `wfg.replay.*`
+  gates and `source.comments`. clang-tidy's stand-in for the strict job: nothing in RunnerTime.cpp, HostPlayer.cpp,
+  TimeGroupTests.cpp or AudioTests.cpp, and in AudioHost.cpp only what the plugin headers it includes said before
+  (its run proved by a planted shadow). Two deliberate breakages after, each turning its own cases red: Signalsmith's
+  slack put back (every burst at 1.001 0.38 to 0.40 Hz sharp), and a stretched jump measured before it lands (the
+  catch-up chaser slowed for an error that was not there - speeds placed, 1.35 ms out after).
+  `blackbox.timegroup`: before, the same 14 of 101 red in both locales (60.7, TG.11); now 1 of 101 in each, MTC's
+  sparsity (3), the other stage's. The jump chaser steps back once through the step (+9.95 ms) and is in step after the
+  return and the locate, as are the scene's sounds and the MTC jump chaser; the timestretch chaser runs at 1.00005 and
+  then 1.001, keeps 1 kHz in every burst, and is re-seated by the locate; the varispeed chaser is re-seated too. Run
+  twice through ctest in each locale with the same result; the first run, before Signalsmith's slack was mended,
+  was 2 and 3 red (below).
+  Two departures from the brief. Signalsmith's slack was not in it: the driver's pitch check, green before because no
+  stretch near one ever played, went red with the remainder carried (0.4 to 0.6 Hz sharp at 1.001 and 1.00066,
+  against its 0.5), and the mend was the stretcher's, not a looser check. And the driver's re-seat check now ends
+  half a second before the loop point, as its MTC chaser's did: the loop point's stop cut the last burst short,
+  which read as one of the shorter five, 501.6 ms out - in fr_FR, never reached before the freeze was mended.
+  Left: M64's chase table to measure again (`m64_chase.py`, by hand, two ten-minute sessions); MTC's sparsity (3); a
+  slice move on a stretched loop heard 115 ms after it is placed (above), and whether a §41 turn of a stretched cue,
+  placed a horizon ahead on a reader that reads ahead, turns where its clock says - not measured.
+- **TG.11's faults, part 2**, 2026-10-13: the last of the four faults TG.11's driver found, (3), mended - MTC's
+  `code.heard` as sparse as LTC's - and a code's turns written only while the show holds a time group on it (AIO,
+  AIP).
+  **THE CAUSE, AS FOUND.** As TG.11 traced it, MTC's moments reached Go.dot's samples through the reader's
+  `ClockEstimate`, which follows the tick's clock pairs one by one - each moving its offset by a tenth of its error
+  and its slope by a hundredth of the error over the time since the last pair, clamped within half a percent. But not
+  because the tick was late: a pair read late is read whole, the count and the moment together, and the driver's
+  baseline on part 1's binary noted no tick behind at all - 1 of 101 red in C, MTC 25 records in the pass (3 jumped,
+  21 running, 1 stopped) at speeds from 0.99892 to 1.00236 against a code at 1.00005 and then 1.001, where LTC wrote
+  eight. Pairs a block apart in their noise walk the estimate's slope to its clamp (TG.6's measurement, at 256 and 512
+  samples; the driver's blocks are 128) and its offset rings with it by a millisecond and more for seconds; the
+  watcher, fitting its line through samples read off it, re-anchored on every ring. A tick thread running the ticks
+  it owes back to back, a third of a millisecond apart on one count, would kick the slope harder still - reasoned
+  from the arithmetic; the cable below wrote no more records with the tick's stalls than without.
+  **THE MEND, ONE: A STRAIGHT LINE.** `timecode::CountLine` (`timecode/CountLine.{h,cpp}`, new): TG.6's count's line
+  moved out of ClockWatch - least squares through the last two minutes of the tick's pairs, fitted at every pair for
+  its first second and twice a second after, a slip told from eight pairs together and the line started again - and
+  the MTC reader keeps one in place of its `ClockEstimate`, fed the pair serve's hook hands the lane. ClockWatch reads
+  it as it read its own: ClockWatchTests' hours are 3 and 4 `running`, at worst 1.09419 and 1.07583 ms, the speed
+  learnt to 0.255607 and 0.0618927 ppm, to the digit before the move and after everything below. Beyond TG.6's line,
+  for MTC, which cannot wait the second ClockWatch waits before it reads anything and must not move while it reads:
+  - `sampleAt` reads through the pairs' middle at a slope weighed by inverse variance between the line's own and the
+    nominal, believed to 100 ppm (`priorPartsPerMillion`) - after a slip, the slope the line had, as well as it was
+    known, the pairs that slipped taken out first. Found by measuring: through the plain line the cable below, at
+    512-sample blocks, wrote four `running` in MTC's first four seconds, at 1.0021, 1.00056, 0.99924 and 1 - a line
+    through a second of such blocks knows its slope to a part in a thousand (one read -100 ppm against a crystal at
+    -20; weighed, -0.45).
+  - A pair further from the line than six times its scatter and 3 ms, not yet a slip, is not fitted through - a thread
+    preempted between reading the count and reading the clock (the brief's "outliers from late ticks"; a late tick's
+    own pair is no outlier).
+  - A COUNT RUNNING LATE IS NO SLIP. One of the first final runs went red in fr_FR, 22 MTC records, 15 of them in the
+    lead-in, at speeds from 0.983 to 1.0098, while another session loaded the machine. A probe (taken out again)
+    wrote every tick's pair and every MTC observation: with the machine busy on every core, the hosted pump of the
+    Debug engine fell 590 ms behind its deadlines for a second and a half, and twice more, then ran its blocks back to
+    back; on ten cores, 70 ms for half a second. The slip rule told those as slips and started the line again from
+    pairs that were only late, and again when the count caught up, moving every MTC moment by as much. Now a slip's
+    eight pairs must stand at ONE distance - within four times the line's scatter of each other, a block's width, as a
+    count that lost samples does - where a late count's are strung out over tens or hundreds of milliseconds; and
+    MTC's line holds a slip two seconds (`lateHoldSeconds`, past the 1.8 s seen) before believing it, fitting nothing
+    meanwhile, since a count late at one distance for a while looks like a slip until it catches up. The cost: a
+    count that really lost its samples has MTC's moments read that much off for two seconds - a re-anchor or two. The
+    wall clock's watcher keeps no hold, as TG.6 measured it, and its numbers did not move.
+  - A COUNT THE ENGINE MOVED is no guess: an outage's end, an apply that opened another interface, the session's clock
+    rebased - the occasions serve already raised `clockForget` at for the clock triggers. Serve now takes that flag
+    before MTC's drain, forgets the reader's count's line (`MtcInput::forgetClock`) and hands the clock block the
+    same answer, so the line starts again from the next pair rather than holding two seconds on samples that are not
+    the count's any more.
+  The `ClockEstimate` stays where the MTC lane and the video renderer use it, a tick ahead of what they send and show;
+  the lane carries the same wander there, as TG.6 said and left, and MtcReader.h says so.
+  **THE MEND, TWO: WRITTEN ONLY FOR A TIME GROUP.** `CodeWatch::setWriting`: serve reads
+  `ShowDocument::holdsTimeGroupOn ("ltc")` and `("mtc")` once a show revision, beside the codes' sources and the
+  clock's own question, and tells each watcher. A code arriving at a show with no group reading it is what the
+  machine happened to hear, not anything somebody decided (PRD §4.10). Off, the watcher goes on exactly as before -
+  the decoding, the reader, its line and its turns - and says nothing, at a takeover either; a backup decodes as
+  ever (redundancy constraint 2). THE READOUTS (`sync/ltcIn*`, `sync/mtcIn*`) read the Runner's map while a group
+  reads the code, as before, and the watcher's own (`CodeWatch::map`, shifted by the latency as a record is) while
+  none does - so the Timecode tab shows an arriving code with no group. WHEN A GROUP APPEARS, the very next tick says
+  at once what the watcher knows, as a takeover's re-say does: `jumped` on the line it kept while the code runs,
+  `stopped` where it stopped, nothing for a code never heard (whose first `jumped` comes with it, as always) - the
+  Runner's map before that was the last one written while a group was there, or none, and is not the code's; a
+  takeover on that same tick says it once. When the group goes, nothing more is written; the Runner keeps the last
+  map, which nothing reads and the readouts no longer show. The clock was already watched only for a group (TG.6).
+  **AIO'S THRESHOLD FOR MTC, 1 MS, KEPT**: on the straight line the cable below writes one to four `running` in ten
+  minutes at +50 ppm, its maps at worst 0.88 to 0.99 ms from the code - the threshold itself, the most a map is let
+  drift - and the driver two to five a pass, as LTC at its 0.5 ms writes four. Nothing measured asks for another.
+  Tests under C and fr_FR, `CodeWatchTests` four new cases and `MidiTests` one. "count line": a second of 512-sample
+  pairs from a crystal at -20 ppm read at -0.45 ppm where the line's own slope is -100, the moment within a
+  millisecond; two minutes on,
+  the slope to a part per million and the moment within half; one pair read 30 ms early not fitted through, a twin
+  never fed it reading the same to the last bit; a count frozen 600 ms and caught up eight times faster than it
+  plays, 584 ms behind at worst, no slip, the moment in its middle read within half a millisecond; a block lost for
+  good told on its eighth pair, and half a second after it the slope read -19.59 ppm. "count line, held": a count
+  late 70 ms at one distance for a second, a line that does not hold telling a slip on its eighth pair and MTC's
+  line none, every moment within half a millisecond throughout; a 512-sample buffer lost told 107 ticks on by the
+  held line (8 by the other), then read where it now is. "MTC through the input": Go.dot's own sender's messages
+  arriving on the steady clock with half a millisecond of driver either way, the code +50 ppm against an interface at
+  -20 counted 256 or 512 samples at a time, the hook ticked up to 3 ms late and, in two of the four runs, stalled
+  every eight seconds by 30 to 130 ms and run through its owed ticks back to back - each tick feeding the MTC input
+  the pair, taking the inbox and feeding the watcher as serve does: ten minutes, before the mend 285, 279, 555 and
+  565 records (red), after it 2, 3, 4 and 5, one `jumped` and no `stopped` each, every map within a millisecond, the
+  speed learnt. "Nothing written": half a minute of code with writing off says nothing, re-says nothing, and keeps a
+  running map within a millisecond; on, `jumped` on the next tick, on that map, then little; off with the code
+  stopped, nothing, the map stopped; on again, `stopped` at once and then nothing; and a takeover on the tick a group
+  appears says it once. "mtc in: a count the engine moved and says so": three seconds of pairs, the count ten seconds
+  back, told - the next pair's moment on the new count - and untold, held on the old line for the eight pairs that
+  told it and two seconds more (checked between 2.0 and 2.2 s), then followed.
+  Whole in both locales: CodeWatchTests, ClockWatchTests, CodeMapTests, MidiTests (its other "mtc in" cases read
+  through the count's line, unchanged), TimeGroupTests, FollowTests, SeatTests, TreeTests, TimecodeRunTests - 253
+  cases. Deliberate breakages, each turning its own cases red: the nominal slope not weighed in (the young line
+  at -100 ppm, the slope after a slip 2725 ppm, the cable's 512-sample run with stalls seven `running`); a pair far off
+  fitted through (the twins differ); no slope kept across a slip (+1.8 ppm read); a slip's pairs not asked to stand
+  at one distance (the late count told a slip, its middle read 584 ms off); no hold (the 70 ms late count a slip,
+  read 70 ms off); `forgetClock` doing nothing (the told count read ten seconds off); `setWriting` ignored (records
+  with no group, a re-say); no word at once when a group appears. The clang-tidy stand-in clean on CountLine.cpp,
+  ClockWatch.cpp, CodeWatch.cpp, MtcReader.cpp, MtcInbox.cpp, Console.cpp, CodeWatchTests.cpp and MidiTests.cpp, its
+  run proved by a planted shadow.
+  `blackbox.timegroup`: before, part 1's binary, 1 of 101 red (above). On the final binary, 101 of 101 twice through
+  ctest in each locale: MTC 8, 8, 9 and 6 records a pass (3 jumped, 1 stopped, 2 to 5 running, nought or one in the
+  lead-in after its first two seconds), its speeds 1.00000 to 1.00171 against 1.00005 and 1.001, its `jumped` at the
+  return and the locate 0.60 to 1.56 ms before where the port's pass puts them; LTC's eight unchanged. On the way:
+  before the slip at one distance and the hold, nine runs (one by hand, eight through ctest), eight green (MTC 6 to 8
+  records where printed) and the fr_FR one above, red at 22, while another session loaded the machine; with the slip
+  at one distance and no hold, on a machine busy on ten cores, 34 (30 running at 0.926 to 1.090), the pump 70 ms late
+  at one distance for half a second; with the hold and before `forgetClock`, four more through ctest, green, MTC 7
+  and 8. With all sixteen cores busy, MTC's own arrivals came late by milliseconds as well - the player's thread
+  starved, which no reader can see through - and that run is no measure. `blackbox.timecode`, the `wfg.replay.*`
+  gates and `source.comments` green in both locales on the final binary.
+  Where this departs from the brief. The cause was the block's noise, not the late tick, as above. The gate lives in
+  the watcher (`setWriting`), not around serve's submit, so a case pins it and a takeover's re-say obeys it too;
+  serve only reads the document. The weighed slope, the pair left out, the slip at one distance and the hold are
+  beyond TG.6's line, each found by a measurement above. The wall clock's watcher shares the line and so its slip at
+  one distance - its numbers unchanged, and a late count strung out no longer a slip for it either - but not the
+  hold.
+  Left: M64's chase table to measure again (part 1's); the driver judges MTC's turns to 20 ms (`MTC_PLACED_MS`) and
+  voids MTC's placing and sparsity on CI as the runner's, which the straight line may let it tighten - not measured on
+  a runner, so left; a count that moves for a reason serve does not raise `clockForget` at waits the two seconds'
+  hold before MTC's line follows it, where the `ClockEstimate` started again at once from a quarter of a second off -
+  none is known; the MTC lane's and the renderer's `ClockEstimate`, a tick ahead.
+- **TG.11's faults, part 3: the tick that fell behind**, 2026-10-13 - what TG.11 saw beside its four faults and
+  M64 measured (60.6): a Debug tick falling further behind its audio as a session made runs, members launched
+  late. MEASURED AND MENDED IN §31.5 (M68): the cause was the one TG.11 read - the run table keeps every run of
+  the session, and six of the hook's passes walked them all looking each one up again by a walk, quadratic in
+  the runs made: the hook 1.2 ms at 128 runs, 35 at 1000, 208 at 2500 and 806 ms at 5000. Not a time group's
+  fault: any show that fires thousands of cues an evening paid it. Now `RunTable` finds by an index and the
+  passes walk `current()`, the unfinished runs and those ended in the last five seconds, the rest settling out
+  of it and staying in the table for handlers, a replay, Doh! and a seat: the hook 0.5 to 0.6 ms at every size.
+  M64's firing case, members 1.32 s apart for ten minutes: before, 155 and 133 of 340 fires late from the
+  eleventh pass, the tick 15.8 s behind at worst; after, 25 and 26 by at most 16 ms that do not grow, the tick
+  noted two ticks behind only twice, in its first 30 s. What is left of those late fires, the probe in §31.5
+  finds, is the show half rebuilt on every tick that applies a command, not the run table.
+  `blackbox.timegroup` 101 of 101 in C and fr_FR on the final binary, as before. Left: that rebuild (§31.5).
+- **TG.12**, 2026-10-14: the close-out. M64 measured again after the three mends (60.6, "M64 again"): an LTC
+  member starts +0.042 ms from its frame at the median, 0.45 ms at worst among the 181 of 200 on time, the rest
+  late by under 5.2 ms where they were late by up to 31; MTC +0.32 ms from the port's moment, 1.03 ms at worst on
+  time; every chaser within its tolerance over ten minutes, the timestretch chaser now playing the speed it is
+  asked and landing a jump 0.5 ms from the code. Both tester guides gain *Timecode in* and the time group in the
+  groups line, and lose *Timecode* from what is coming; the README's *Timecode in* and its table row; PRD 6.11's
+  M64 measured; the devplan's Built line. Left, for the author or a later round: the show half rebuilt on every
+  tick that applies a command (31.5); the timestretch chaser's 5 ms between a return and a locate (60.6); a
+  slice move of a stretched cue heard ~115 ms after it is placed, which decision UD makes a late edit; the words
+  the implementer chose beyond the accepted list (TG.2's automatic names, the Getting started sentence, the x0.5);
+  no sentence yet for a time group's scrub refusal or for an incoming rate unlike the show's; and the bench - a
+  DAW, a VTR or a desk sending LTC and MTC, a signal through a desk, the hour.
+  THE FULL RUN found one thing more: at twelve jobs, with this machine's four lanes for the drivers that judge
+  time, `blackbox.timegroup`'s C and fr_FR runs went at once beside two other such drivers and the unit shards,
+  and both went red on MTC's sparse check alone - 26 and 20 records a pass where alone it writes 8. The
+  driver plays the MTC it judges from inside the engine (`--midi-play-loop`), so a starved machine makes its
+  own sender late; run one after the other, both were green. `tests/CMakeLists.txt` now has it hold every
+  lane, so no other timing driver runs beside it; CI, one lane, ran it so already and voids that check.
 
 ## 61. Keys, text and blur
 

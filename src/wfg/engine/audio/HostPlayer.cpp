@@ -440,6 +440,11 @@ namespace wfg::audio
         return audioHost.stretchSpeedLimit();
     }
 
+    double HostPlayer::stretchLeadSamples (double speed) const
+    {
+        return audioHost.stretchLeadSamples (speed);
+    }
+
     void HostPlayer::setRouting (int track, const std::vector<cue::Coefficient>& coefficients)
     {
         auto* matrix = audioHost.trackMatrix (track);

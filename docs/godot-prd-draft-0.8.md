@@ -4386,6 +4386,15 @@ Mackie vs HUI first — first week with the D700.
   hundred fires, from LTC and from MTC); and for each chase method over ten minutes against a code
   running 50 ppm fast, with a 0.1 % step, a two-second stop and a thirty-second locate back: the
   steady error, the time to catch up, the jumps and the worst error.
+  *Measured 2026-10-14* (namespace draft §60.6, "M64 again"), on a Debug build on Windows at 25 fps,
+  after the three faults the first measurement found were mended: an LTC member starts a median of
+  0.042 ms after its frame, 0.45 ms at worst among the 181 of 200 fires on time; the 19 others were
+  launched as soon as the tick could, under 5.2 ms late, by the publish's cost on a tick that applies a
+  command. MTC: +0.32 ms from the port's moment, 1.03 ms at worst on time, 23 late by under 7.5 ms.
+  Every chaser held its tolerance for ten minutes: the varispeed chaser 0.06 ms out at +50 ppm and
+  1.2 ms at +0.1 %, the timestretch chaser 0.05 and 1.5 ms, the jump chaser jumping when 10 ms out; a
+  return caught in 15.4 s by varispeed and 10.5 s by timestretch, a locate in a jump. A real source -
+  a DAW, a VTR, a desk - and the hour are owed to the bench.
 - **A text field shown** (§3.19, 2026-10-13, namespace draft §61): **M65** - how long a field takes
   from its datagram to the frame that shows it (the median, the 99th percentile and the worst over two
   hundred changes of a forty-character title with an outline and its blur at 1080p), split into the

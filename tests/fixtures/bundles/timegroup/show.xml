@@ -1,0 +1,57 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="TG0A0001" name="Time groups">
+      <Group id="TG0G0001" mode="time" name="On LTC" number="1" timeSource="ltc">
+        <Media at="01:00:02:00" file="ltc.wav" id="TG0M0001" name="Free runner" number="1.1">
+          <Route bus="TG0B0001" gains="1" id="TG0R0001"/>
+        </Media>
+        <Media at="01:00:02:00" chase="jump" file="ltc.wav" id="TG0M0002" name="By jump" number="1.2">
+          <Route bus="TG0B0002" gains="1" id="TG0R0002"/>
+        </Media>
+        <Media at="01:00:02:00" chase="varispeed" file="ltc.wav" id="TG0M0003" name="By varispeed" number="1.3">
+          <Route bus="TG0B0003" gains="1" id="TG0R0003"/>
+        </Media>
+        <Media at="01:00:02:00" chase="timestretch" file="bursts.wav" id="TG0M0004" name="By timestretch" number="1.4">
+          <Route bus="TG0B0004" gains="1" id="TG0R0004"/>
+        </Media>
+        <Group at="01:00:03:00" chase="jump" id="TG0G0002" mode="timeline" name="A scene" number="1.5">
+          <Media file="ltc.wav" id="TG0M0005" name="Scene, first" number="1.5.1">
+            <Route bus="TG0B0005" gains="1" id="TG0R0005"/>
+          </Media>
+          <Media file="ltc.wav" id="TG0M0006" name="Scene, second" number="1.5.2" preWait="1.5">
+            <Route bus="TG0B0006" gains="1" id="TG0R0006"/>
+          </Media>
+        </Group>
+      </Group>
+      <Group id="TG0G0003" mode="time" name="On MTC" number="2" timeSource="mtc">
+        <Media at="01:00:02:00" file="ltc.wav" id="TG0M0007" name="MTC, free runner" number="2.1">
+          <Route bus="TG0B0007" gains="1" id="TG0R0007"/>
+        </Media>
+        <Media at="01:00:02:00" chase="jump" file="ltc.wav" id="TG0M0008" name="MTC, by jump" number="2.2">
+          <Route bus="TG0B0008" gains="1" id="TG0R0008"/>
+        </Media>
+      </Group>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="12">
+    <Bus id="TG0B0001" name="Free runner"/>
+    <Bus firstChannel="1" id="TG0B0002" name="By jump"/>
+    <Bus firstChannel="2" id="TG0B0003" name="By varispeed"/>
+    <Bus firstChannel="3" id="TG0B0004" name="By timestretch"/>
+    <Bus firstChannel="4" id="TG0B0005" name="Scene, first"/>
+    <Bus firstChannel="5" id="TG0B0006" name="Scene, second"/>
+    <Bus firstChannel="6" id="TG0B0007" name="MTC, free runner"/>
+    <Bus firstChannel="7" id="TG0B0008" name="MTC, by jump"/>
+    <Inputs>
+      <Input id="TG0N0001" name="LTC in"/>
+    </Inputs>
+  </Audio>
+  <MidiPorts>
+    <Port id="TG0P0001" name="MTC in"/>
+  </MidiPorts>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+  <Sync frameRate="25" ltcIn="TG0N0001" mtcIn="TG0P0001"/>
+</Show>

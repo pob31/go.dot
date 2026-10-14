@@ -4070,7 +4070,10 @@ namespace wfg::tree
             stopped being published has stopped being in the order. */
         std::string runOrder;
 
-        for (const auto& run : runs.all())
+        /*  `current`, NOT `all` (2026-10-13, M68): a run that has settled is
+            past its retention, which this filter drops anyway, and walking an
+            evening's thousands of them every tick was the tick's to pay. */
+        for (const auto& run : runs.current())
         {
             if (run.id.empty())
                 continue;
@@ -4232,22 +4235,34 @@ namespace wfg::tree
                     picturesAhead = picturesAhead || entry.kind != "sound";
                 }
 
-            std::map<std::string, std::string> newest;
+            /*  A FAILED ARM THAT STILL SPEAKS: the newest run of a cue ahead,
+                failed with a preparation on it. The table keeps the newest of
+                each cue (2026-10-13, M68) where this made a map of every run
+                of the session every tick. */
+            const auto stillSpeaks = [this, &ahead] (const cue::Run& run)
+            {
+                return ! run.prepare.empty() && run.state == cue::runState::failed && ahead.count (run.cue) > 0
+                         && runs.newestOf (run.cue) == &run;
+            };
 
-            for (const auto& run : runs.all())
-                newest[run.cue] = run.id;
-
-            for (const auto& run : runs.all())
+            for (const auto& run : runs.current())
             {
                 if (run.prepare.empty())
                     continue;
 
-                if (run.isFinished()
-                      && ! (run.state == cue::runState::failed && ahead.count (run.cue) > 0 && newest[run.cue] == run.id))
+                if (run.isFinished() && ! stillSpeaks (run))
                     continue;
 
                 preparedness[run.cue] = cue::runWordOf (run);
             }
+
+            /*  AND ONE THAT FAILED LONGER AGO THAN THE TICK STILL LOOKS: it is
+                the newest of its cue, so nothing after it in the walk above
+                would have spoken over it - set last, as the walk of every run
+                set it. */
+            for (const auto& cueId : ahead)
+                if (const auto* newest = runs.newestOf (cueId); newest != nullptr && stillSpeaks (*newest))
+                    preparedness[cueId] = cue::runWordOf (*newest);
 
             if (picturesAhead)
             {
@@ -4878,7 +4893,7 @@ namespace wfg::tree
                                                  osc::formatDouble (dcas != nullptr ? dcas->trimOf (dcaId)
                                                                                     : 0.0)));
 
-        for (const auto& run : runs.all())
+        for (const auto& run : runs.current())
         {
             if (run.id.empty())
                 continue;

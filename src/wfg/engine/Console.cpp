@@ -6078,6 +6078,12 @@ namespace
         wfg::timecode::CodeWatch ltcWatch { wfg::timecode::CodeWatch::Kind::ltc };
         wfg::timecode::CodeWatch mtcWatch { wfg::timecode::CodeWatch::Kind::mtc };
         std::string ltcSource, mtcSource;
+
+        /*  And whether the show holds a time group on each, read once a show
+            revision with the sources: only then are its turns written
+            (namespace draft §60.7, TG.11's faults, part 2). */
+        bool ltcWritten = false;
+        bool mtcWritten = false;
         std::vector<wfg::timecode::LtcHeard> ltcHeard;
         ltcHeard.reserve (64);
         bool codeResayOwed = false;
@@ -6555,6 +6561,27 @@ namespace
                                      ltcWatch.setShowRate (showRate);
                                      mtcWatch.setShowRate (showRate);
 
+                                     /*  AND WHETHER ANYTHING READS EACH CODE (TG.11's
+                                         faults, part 2): a time group on `ltc` or on
+                                         `mtc` anywhere in the show, as the clock's is
+                                         read below. Only then are a watcher's turns
+                                         written: a code arriving at a show that reads
+                                         none is what the machine happened to hear,
+                                         not anything somebody decided (PRD §4.10), and
+                                         TG.11 measured MTC's watcher writing every
+                                         second or two with no MTC group at all. The
+                                         watcher goes on all the same - the decoding,
+                                         the line, the readouts (below, in the after
+                                         hook), a backup's too (redundancy constraint
+                                         2) - and a group appearing is said at once:
+                                         `jumped` on the line it kept while the code
+                                         runs, `stopped` where it stopped, as when a
+                                         code appears. */
+                                     ltcWritten = document.holdsTimeGroupOn ("ltc");
+                                     mtcWritten = document.holdsTimeGroupOn ("mtc");
+                                     ltcWatch.setWriting (ltcWritten);
+                                     mtcWatch.setWriting (mtcWritten);
+
                                      /*  AND WHETHER THE WALL CLOCK IS A SOURCE (TG.6):
                                          a time group on `clock` anywhere in the show.
                                          One that goes is forgotten, so the clock's
@@ -6568,6 +6595,22 @@ namespace
                                          clockWatch.forget();
                                      }
                                  }
+
+                                 /*  A COUNT THAT MOVED UNDER THE STEADY CLOCK -
+                                     an outage's end, an apply that opened another
+                                     interface, the session's clock rebased: the
+                                     flag the clock triggers below forget by, taken
+                                     here so MTC's reader forgets its count's line
+                                     on the same tick (TG.11's faults, part 2).
+                                     That line holds a slip two seconds before it
+                                     believes it, since a count running late looks
+                                     like one (timecode/CountLine.h); a count that
+                                     moved for a reason the engine knows is no
+                                     guess. */
+                                 const auto countMoved = clockForget.exchange (false);
+
+                                 if (countMoved)
+                                     mtcInput.forgetClock();
 
                                  mtcInput.feedClock (clockSample, clockNanos, clockRate);
                                  mtcInput.drain (midiIn.mtcInbox());
@@ -6760,8 +6803,9 @@ namespace
 
                                      /*  An outage's end forgets the clock's line too:
                                          Go.dot's samples stood while the wall clock
-                                         went on, and the next reading is a first. */
-                                     if (clockForget.exchange (false))
+                                         went on, and the next reading is a first. The
+                                         flag was taken above, for MTC's reader too. */
+                                     if (countMoved)
                                      {
                                          previousClock = {};
                                          clockWatch.forget();
@@ -7096,7 +7140,7 @@ namespace
                                 {
                                     std::int64_t live = 0;
 
-                                    for (const auto& run : runs.all())
+                                    for (const auto& run : runs.current())
                                         if (! run.isFinished() && run.state != wfg::cue::runState::preparing
                                               && run.prepare.empty())
                                             ++live;
@@ -7644,9 +7688,27 @@ namespace
                                     (namespace draft §60, TG.5), from the maps
                                     `code.heard` keeps, at the sample now: at
                                     rest, `none`, for a source the show does
-                                    not name - no map is looked for then. */
-                                state.ltcIn = runner.codeReadout (ltcSource, runner.videoClockNow());
-                                state.mtcIn = runner.codeReadout (mtcSource, runner.videoClockNow());
+                                    not name - no map is looked for then. A code
+                                    no time group reads is written nowhere
+                                    (TG.11's faults, part 2), and is read off its
+                                    watcher's own map instead: the Timecode tab
+                                    shows a code arriving whether or not anything
+                                    in the show reads it. */
+                                {
+                                    const auto now = runner.videoClockNow();
+                                    const auto readout = [&runner, now] (const std::string& source, bool written,
+                                                                         const wfg::timecode::CodeWatch& watch)
+                                    {
+                                        if (source.empty() || written)
+                                            return runner.codeReadout (source, now);
+
+                                        const auto own = watch.map();
+                                        return wfg::timecode::readoutOf (&own, now);
+                                    };
+
+                                    state.ltcIn = readout (ltcSource, ltcWritten, ltcWatch);
+                                    state.mtcIn = readout (mtcSource, mtcWritten, mtcWatch);
+                                }
 
                                 /*  WHAT A PATCH IS EDITED IN, looked for every five
                                     seconds - a Pd installed or downloaded meanwhile is

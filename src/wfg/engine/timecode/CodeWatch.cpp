@@ -573,7 +573,42 @@ namespace wfg::timecode
     }
 
     //==========================================================================
+    void CodeWatch::setWriting (bool on) noexcept
+    {
+        if (on && ! writing)
+            owedAtOnce = true;
+
+        if (! on)
+            owedAtOnce = false;
+
+        writing = on;
+    }
+
+    CodeMap CodeWatch::map() const
+    {
+        return written.valid ? shifted (written.map, CodeTurn::running).map : CodeMap {};
+    }
+
     std::optional<CodeSaid> CodeWatch::update (std::int64_t now)
+    {
+        /*  THE WATCHER GOES ON WHETHER OR NOT ANYTHING IS WRITTEN: its line,
+            its turns and what it would have said are the same either way, so a
+            group that appears finds it locked, and the readouts show the code
+            meanwhile. */
+        auto said = turnAt (now);
+
+        if (! writing)
+            return std::nullopt;
+
+        /*  A TIME GROUP HAS JUST APPEARED: what it knows, said in full at once,
+            as at a takeover - whatever this tick decided is in it. */
+        if (std::exchange (owedAtOnce, false))
+            return resayOwn();
+
+        return said;
+    }
+
+    std::optional<CodeSaid> CodeWatch::turnAt (std::int64_t now)
     {
         if (sampleRate <= 0)
             return std::nullopt;
@@ -662,6 +697,17 @@ namespace wfg::timecode
     }
 
     std::optional<CodeSaid> CodeWatch::resay()
+    {
+        //  A takeover writes nothing for a code no time group reads.
+        if (! writing)
+            return std::nullopt;
+
+        //  Said in full here, so a group that appeared on the same tick is owed nothing more.
+        owedAtOnce = false;
+        return resayOwn();
+    }
+
+    std::optional<CodeSaid> CodeWatch::resayOwn()
     {
         if (sampleRate <= 0)
             return std::nullopt;

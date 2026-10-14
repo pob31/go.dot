@@ -812,6 +812,19 @@ namespace wfg::audio
                                     te::TimeStretcher::signalsmithDefault, sampleRate, true) - 1) / 256.0,
                                 std::memory_order_relaxed);
 
+            /*  AND HOW FAR AHEAD OF THE SOUND IT READS: the input latency plus
+                the speed times the output latency, in frames of its file (patch
+                0002 primes it so). Asked of a stretcher made as a voice's is -
+                this rate, chunks of 256, real time - here on the message thread,
+                where making one costs nothing heard. */
+            {
+                te::TimeStretcher probe;
+                probe.initialise (sampleRate, 256, 1, te::TimeStretcher::signalsmithDefault, {}, true);
+                const auto output = probe.getOutputLatencySamples();
+                stretchOutputLatency.store (output, std::memory_order_relaxed);
+                stretchInputLatency.store (std::max (0, probe.getLatencySamples() - output), std::memory_order_relaxed);
+            }
+
             beatOffset.store (0.0, std::memory_order_relaxed);
             anchorSample.store (0, std::memory_order_relaxed);
             referenceSkew.store (0, std::memory_order_relaxed);
@@ -1334,6 +1347,8 @@ namespace wfg::audio
             slotLoops.clear();
             loopVoices.clear();
             stretchLimit.store (0.0, std::memory_order_relaxed);
+            stretchInputLatency.store (0, std::memory_order_relaxed);
+            stretchOutputLatency.store (0, std::memory_order_relaxed);
             context = nullptr;
 
             /*  No sample rate, so nothing drawn and nothing taken: a stopped
@@ -2419,6 +2434,11 @@ namespace wfg::audio
         std::vector<std::unique_ptr<SlotSpeed>> slotSpeeds;
         std::atomic<double> stretchLimit { 0.0 };
 
+        /*  How far ahead of what is heard a stretched voice reads its file
+            (`stretchLeadSamples`): the stretcher's input and output latency at
+            this graph's rate, in samples. Nought before a graph. */
+        std::atomic<int> stretchInputLatency { 0 }, stretchOutputLatency { 0 };
+
         /*  AND EVERY SLOT'S LOOP POINTS (namespace draft §33), in `handles`'
             order, destroyed after the Edit for the same reason. */
         std::vector<std::unique_ptr<LoopVoice>> loopVoices;
@@ -3068,6 +3088,24 @@ namespace wfg::audio
     double AudioHost::stretchSpeedLimit() const noexcept
     {
         return impl->stretchLimit.load (std::memory_order_relaxed);
+    }
+
+    double AudioHost::stretchLeadSamples (double speed) const noexcept
+    {
+        /*  The stretcher is primed so that what it plays now is the file where
+            the voice's clock says; its reader is then ahead by its input
+            latency plus the speed times its output latency, in frames of the
+            file - over the speed, in samples heard - and by what is left in its
+            output buffer, up to a chunk of 256. Below a quarter it is primed at
+            a quarter, so it is counted there. */
+        const auto input = impl->stretchInputLatency.load (std::memory_order_relaxed);
+        const auto output = impl->stretchOutputLatency.load (std::memory_order_relaxed);
+
+        if (input + output <= 0)
+            return 0.0;
+
+        const auto size = std::max (0.25, std::abs (speed));
+        return static_cast<double> (input) / size + static_cast<double> (output) + 256.0;
     }
 
     bool AudioHost::stopTrackAt (int trackIndex, int slot, double monotonicBeat) noexcept

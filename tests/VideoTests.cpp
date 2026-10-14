@@ -1205,6 +1205,18 @@ TEST_CASE ("video read-ahead: the rows say what is got ready - a missing picture
 
     CHECK (rowOf (rig, thunder) == std::pair<std::string, std::string> { "partial", "media-missing" });
 
+    /*  AND STILL, ENDED LONGER AGO THAN THE TICK LOOKS (2026-10-13, namespace
+        draft §31.5, M68): settled out of what the tick's passes read, it is
+        still the newest run of its cue, and speaks from where the table
+        keeps it. */
+    failedArm->endedAtTick = 0;
+    rig.runs.settle (cue::retentionTicks + 1);
+
+    for (const auto& read : rig.runs.current())
+        REQUIRE (read.id != "RUNFAIL1");
+
+    CHECK (rowOf (rig, thunder) == std::pair<std::string, std::string> { "partial", "media-missing" });
+
     /*  ARMED AGAIN, newer: getting ready until the audio side confirms the
         voice, then armed - the failed one no longer speaks for it. */
     rig.runs.create ("RUNARM01", thunder, "media");

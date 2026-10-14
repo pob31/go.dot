@@ -1903,7 +1903,7 @@ namespace wfg::cue
             horizon ahead, which the five ticks cover. A run already on its way
             out has nothing to come up for, and a fade somebody set going on it
             already owns its level (it starts from the silence the arm left). */
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             auto* run = runs.find (snapshot.id);
 
@@ -3138,7 +3138,7 @@ namespace wfg::cue
             playing - the only state a client offers the scrub in (K9's
             review, MW): a finished run, or one waiting or armed, reads false
             without a walk of the show, every tick. */
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             const auto now = snapshot.state == runState::playing && seekableNow (snapshot);
 
@@ -3177,7 +3177,7 @@ namespace wfg::cue
             logged, nought through a replay, which runs no hooks. */
         const auto revision = document.showRevision();
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (snapshot.kind != "group")
                 continue;
@@ -5623,7 +5623,7 @@ namespace wfg::cue
 
         /*  AND WHETHER EACH CHANNEL SOUNDS ITS INPUT AS WELL (§19.3): as the
             mic cue holding it says, told when it changes. */
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (snapshot.kind != "mic" || snapshot.isFinished() || snapshot.claims.empty())
                 continue;
@@ -5644,7 +5644,7 @@ namespace wfg::cue
 
     void Runner::armWaitingMics (Engine& engine)
     {
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (! snapshot.waitsForChannel || snapshot.isFinished() || snapshot.track >= 0
                   || ! snapshot.pending.empty())
@@ -8202,7 +8202,7 @@ namespace wfg::cue
     {
         const Run* newest = nullptr;
 
-        for (const auto& run : runs.all())
+        for (const auto& run : runs.current())
             if (run.cue == cueId && ! run.isFinished() && run.state != runState::preparing
                   && ! run.takenBack)
                 newest = &run;
@@ -8214,7 +8214,7 @@ namespace wfg::cue
     {
         const Run* newest = nullptr;
 
-        for (const auto& run : runs.all())
+        for (const auto& run : runs.current())
             if (run.cue == cueId && run.id != except && ! run.isFinished() && run.state != runState::preparing
                   && ! run.takenBack)
                 newest = &run;
@@ -12686,7 +12686,7 @@ namespace wfg::cue
             scene left the desk where the cue before the scene put it. */
         std::set<std::string> firing;
 
-        for (const auto& run : runs.all())
+        for (const auto& run : runs.current())
             if (run.kind == "osc" && run.state == runState::waiting && run.dueTick <= currentTick)
                 if (const auto address = textOf (document.findById (run.cue), "address"); ! address.empty())
                     firing.insert (address);
@@ -13028,7 +13028,7 @@ namespace wfg::cue
         /*  A SOLO NEVER OUTLIVES ITS CLIP: at its end, a stop, a kill or a
             release, the flag goes - and with it the lock on the bank and the
             light on the button. */
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
             if (snapshot.solo && ! snapshot.soloCanHold())
                 if (auto* run = runs.find (snapshot.id))
                     run->solo = false;
@@ -15946,7 +15946,7 @@ namespace wfg::cue
             ended here. The ownership test is what keeps this from reporting the
             same run twice, because the job loops run after this one in the same
             tick and will end the ones they own. */
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (snapshot.state != runState::stopping || snapshot.track >= 0)
                 continue;
@@ -15978,7 +15978,7 @@ namespace wfg::cue
                 engine.submit (origin::engine, "run.ended", one (snapshot.id));
         }
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (! snapshot.isWaiting() || tick < snapshot.dueTick)
                 continue;
@@ -16264,7 +16264,7 @@ namespace wfg::cue
 
     void Runner::endOrphanedSounds (Engine& engine)
     {
-        for (const auto& sound : runs.all())
+        for (const auto& sound : runs.current())
         {
             if (! sound.waitsForVoice || sound.isFinished() || sound.state != runState::armed || sound.launchRequested)
                 continue;
@@ -17770,7 +17770,7 @@ namespace wfg::cue
                 return false;
             };
 
-            for (const auto& snapshot : runs.all())
+            for (const auto& snapshot : runs.current())
             {
                 if (! isBlock (snapshot) || snapshot.parent.empty()
                       || std::find (givenBack.begin(), givenBack.end(), snapshot.id) != givenBack.end())
@@ -17882,7 +17882,7 @@ namespace wfg::cue
             the replay would then hold voices the session let go of. */
         const auto horizon = horizonGroupsFor (list, standby);
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             /*  A PLAIN MEDIA CUE AT STANDBY IS THE SMALLEST HORIZON THERE IS,
                 and it leaked until the Phase 4 driver walked the pointer past
@@ -18694,7 +18694,10 @@ namespace wfg::cue
         advanceVideo (engine, tick);
 
         if (audio == nullptr)
+        {
+            runs.settle (tick);
             return;
+        }
 
         armWaitingMics (engine);
         serviceTakes (engine);
@@ -18730,6 +18733,19 @@ namespace wfg::cue
         updatePositions (tick);
         enforceStops();
         observeEdges (engine);
+
+        /*  WHAT IS OVER LEAVES THE PASSES, LAST (2026-10-13, namespace draft
+            §31.5, M68): every pass above walks `runs.current()`, and a run
+            ended more than its retention ago leaves it here - after this
+            pass, never before one, so whatever a pass does once for a run that
+            has ended it has done, however long this hook went unrun. The
+            table keeps it: a handler, a replay and a seat find it as before,
+            and a `find` that changes it puts it back. Without this, every tick
+            walked every run the evening had made, and six passes looked each
+            one up again by a walk - two seconds a tick at five thousand runs in
+            Debug, M64's late launches. Above, as well, where a show with no
+            player returns. */
+        runs.settle (tick);
     }
 
     std::int64_t Runner::videoClockNow() const noexcept
@@ -18804,7 +18820,7 @@ namespace wfg::cue
             hash *= 1099511628211ull;
         };
 
-        for (const auto& run : runs.all())
+        for (const auto& run : runs.current())
         {
             /*  AND A PICTURE A TIME GROUP'S CODE HAS LOADED (namespace draft §60,
                 TG.7): read ahead from when it is loaded to when it is asked for,
@@ -18941,7 +18957,7 @@ namespace wfg::cue
             armed again a tick apart: a list made from runs would let a still go
             in between and read it again for the next press. A bank closing, or
             a strip another bank took, offers nothing more. */
-        for (const auto& bank : runs.all())
+        for (const auto& bank : runs.current())
         {
             if (bank.kind != "group" || bank.isFinished() || bank.state == runState::preparing || bank.closing)
                 continue;
@@ -18960,7 +18976,7 @@ namespace wfg::cue
         /*  A TIME GROUP'S PICTURES THE CODE HAS LOADED (namespace draft §60,
             TG.7, AIQ): two seconds before the code reaches each one's time, and
             until it is asked for - after the banks, before the other lists. */
-        for (const auto& loaded : runs.all())
+        for (const auto& loaded : runs.current())
             if (loaded.kind == "video" && pictureLoadedForTheCode (loaded))
                 readAhead (document.findById (loaded.cue));
 
@@ -19825,7 +19841,7 @@ namespace wfg::cue
             should not make them wonder why. */
         auto saidSettled = false;
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             auto* run = runs.find (snapshot.id);
 
@@ -20166,7 +20182,7 @@ namespace wfg::cue
         const auto now = audio->samplesElapsed();
         const auto lead = static_cast<std::int64_t> (ticksAhead) * samplesPerTick;
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             auto* run = runs.find (snapshot.id);
 
@@ -20526,7 +20542,7 @@ namespace wfg::cue
 
         const auto now = audio->samplesElapsed();
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             auto* run = runs.find (snapshot.id);
 
@@ -20703,7 +20719,7 @@ namespace wfg::cue
             loudest of its locked sounds this tick, read after theirs - so a
             movie on a strip lights that strip's meter, and a picture with no
             sound leaves it dark. */
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (snapshot.kind != "video" || snapshot.isFinished())
                 continue;
@@ -20828,7 +20844,7 @@ namespace wfg::cue
             so one tick of samples is what this reads ahead. */
         const auto at = audio->samplesElapsed() + static_cast<std::int64_t> (samplesPerTick);
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
                 continue;
@@ -20913,7 +20929,7 @@ namespace wfg::cue
         const auto lead = static_cast<std::int64_t> (latencyTicks()) * samplesPerTick;
         const auto stretchLimit = audio->stretchSpeedLimit();
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
                 continue;
@@ -21049,7 +21065,7 @@ namespace wfg::cue
             second, so a hand that lets go is heard by the time it reaches GO. */
         constexpr std::int64_t rearmSettleTicks = TickClock::rateHz / 5;
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
                 continue;
@@ -21345,7 +21361,7 @@ namespace wfg::cue
         const auto lead = static_cast<std::int64_t> (latencyTicks() + 1) * samplesPerTick;
         const auto rate = static_cast<double> (std::max (1, audio->sampleRate()));
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
                 continue;
@@ -21869,7 +21885,7 @@ namespace wfg::cue
                      || underAKill (candidate);
         };
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             auto* run = runs.find (snapshot.id);
 
@@ -21939,7 +21955,7 @@ namespace wfg::cue
         routingMovedRevision = movedRevision;
         routingSendLaneRevision = sendLaneRevision;
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             auto* run = runs.find (snapshot.id);
 
@@ -22097,7 +22113,7 @@ namespace wfg::cue
         fxLiveRevision = layer;
         fxMovedRevision = movedRevision;
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             auto* run = runs.find (snapshot.id);
 
@@ -22200,7 +22216,7 @@ namespace wfg::cue
         eqLiveRevision = layer;
         eqMovedRevision = movedRevision;
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             auto* run = runs.find (snapshot.id);
 
@@ -22255,7 +22271,7 @@ namespace wfg::cue
         if (audio == nullptr)
             return;
 
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             if (snapshot.state != runState::stopping || snapshot.track < 0)
                 continue;
@@ -22340,7 +22356,7 @@ namespace wfg::cue
 
     void Runner::observeEdges (Engine& engine)
     {
-        for (const auto& snapshot : runs.all())
+        for (const auto& snapshot : runs.current())
         {
             auto* run = runs.find (snapshot.id);
 

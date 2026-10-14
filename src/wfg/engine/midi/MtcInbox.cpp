@@ -119,7 +119,7 @@ namespace wfg::midi
         lastHeardNanos = 0;
     }
 
-    void MtcInput::feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate) noexcept
+    void MtcInput::feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate)
     {
         reading.feedClock (sample, nanos, sampleRate);
     }
