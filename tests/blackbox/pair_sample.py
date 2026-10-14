@@ -233,7 +233,7 @@ def run() -> int:
             rows["residual"] = as_float(read_backup("/godot/pair/clockResidual"))
             rows["backup peer latency"] = as_float(read_backup("/godot/pair/peerOutputLatency"))
             rows["main peer latency"] = as_float(read_main("/godot/pair/peerOutputLatency"))
-            print(f"  note Δ {rows['delta']} tick(s) on the backup, the main's extra lead {rows['extra']},"
+            print(f"  note delta {rows['delta']} tick(s) on the backup, the main's extra lead {rows['extra']},"
                   f" drift {rows['drift']:.3f} ppm, residual {rows['residual']:.1f} us,"
                   f" output latency of the other: {rows['backup peer latency']} s on the backup,"
                   f" {rows['main peer latency']} s on the main")
@@ -303,7 +303,7 @@ def run() -> int:
             at_backup = zero_backup + onset_backup * 1.0e9 / RATE
             apart = (at_backup - at_main) / 1.0e9
             print(f"M61: the click on the main at frame {onset_main}, on the backup at frame {onset_backup};"
-                  f" on the steady clock {apart * 1.0e6:+.0f} us apart (backup less main); Δ {rows.get('delta')} tick(s),"
+                  f" on the steady clock {apart * 1.0e6:+.0f} us apart (backup less main); delta {rows.get('delta')} tick(s),"
                   f" the main's extra lead {rows.get('extra')}, drift {rows.get('drift', float('nan')):.3f} ppm,"
                   f" residual {rows.get('residual', float('nan')):.1f} us")
             report.check(abs(apart) <= WITHIN,

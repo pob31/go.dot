@@ -448,6 +448,30 @@ TEST_CASE ("same sample: a block's stamp is never read torn - one block's sample
     CHECK (torn == 0);
 }
 
+namespace
+{
+    /*  WAITED FOR, NOT SLEPT FOR: a block is stamped once the clock's own
+        thread has run it, and a loaded runner can take longer than any fixed
+        sleep to start that thread (macOS CI on 06725f3 had no stamp 60 ms
+        after the start). Polls until a block past `after` has been stamped,
+        or five seconds have gone. */
+    template <typename ReadsStamps>
+    bool stampAfter (ReadsStamps&& lastBlock, std::int64_t after, BlockStamp::Reading& out)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (5);
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            if (lastBlock (out) && out.sample > after)
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+        }
+
+        return false;
+    }
+}
+
 TEST_CASE ("same sample: the dummy clock stamps every block with its first sample and the moment it was due")
 {
     DummyAudioClock clock { 48000, 480 };
@@ -456,12 +480,14 @@ TEST_CASE ("same sample: the dummy clock stamps every block with its first sampl
     CHECK_FALSE (clock.clock().lastBlock (reading));
 
     clock.start();
-    std::this_thread::sleep_for (60ms);
+    const auto stamped = [&clock] (BlockStamp::Reading& out) { return clock.clock().lastBlock (out); };
 
     BlockStamp::Reading first;
-    REQUIRE (clock.clock().lastBlock (first));
+    REQUIRE (stampAfter (stamped, -1, first));
 
-    std::this_thread::sleep_for (60ms);
+    //  A few blocks on, so the two stamps are some way apart.
+    BlockStamp::Reading later;
+    REQUIRE (stampAfter (stamped, first.sample + 3 * 480, later));
     clock.stop();
 
     BlockStamp::Reading last;
@@ -518,12 +544,13 @@ TEST_CASE ("same sample: the hosted pump stamps every block at its deadline; an 
         CHECK_FALSE (driver.clock().lastBlock (reading));
 
         REQUIRE (driver.start());
-        std::this_thread::sleep_for (100ms);
+        const auto stamped = [&driver] (BlockStamp::Reading& out) { return driver.clock().lastBlock (out); };
 
         BlockStamp::Reading first;
-        REQUIRE (driver.clock().lastBlock (first));
+        REQUIRE (stampAfter (stamped, -1, first));
 
-        std::this_thread::sleep_for (100ms);
+        BlockStamp::Reading later;
+        REQUIRE (stampAfter (stamped, first.sample + 3 * 256, later));
         driver.stop();
 
         BlockStamp::Reading last;
