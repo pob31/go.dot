@@ -29169,3 +29169,9 @@ close (§60), which keeps the shared checkout.
   braces are doubled, a PNG at its own size, its fade; DejaVu carried into the show so `wfg validate`
   passes on any machine); 31 QLab cases. Two deliberate breakages - the canvas not written, the movie
   header read four bytes early - each turned their cases red.
+- **QF.11** (in part), 2026-10-14: `main` merged in after the time groups landed (ff8f5ac, clean; the
+  edited Tracktion patch re-applied by the build); the tester guides, English and French - a *Fonts in
+  the show* row beside the text cues, QLab's text and video cues in the import's paragraph - and the
+  README's video, import and status lines; a summary for the author beside the build, listing every
+  word of mine on the screen. The full suite on the merged branch, 210 of 210. Waiting: the author's
+  probe workspace (QF.6), which settles the provisional units and signs and M67 (QF.10).

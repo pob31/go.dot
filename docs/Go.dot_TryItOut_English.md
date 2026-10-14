@@ -144,6 +144,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Picture panel | Fit, fill or stretch; scale, move, turn, flip; contrast, saturation, gamma, hue and four curves; normal, add, screen and multiply blending | *Picture* panel |
 | Keys (new) | A picture, a movie or a camera made see-through by its own alpha, by its brightness, by its brightness as a shape in a colour, or by a blue or green screen with the screen's colour taken off the edges | *Picture* panel, *Key* |
 | Text cues (new) | Titles and slides: words in a font, a size and a colour, with an outline that can glow. The words can hold fields like `{score}`, which any program fills by sending `/godot/text/score` over OSC - at once, even while the show is locked, and never saved | *Add > video > Text*; *Picture* panel, *Fields* |
+| Fonts in the show (new) | A show can carry its own fonts, in a `fonts/` folder beside its media, put there from the font menu: an installed font carried, or a font file added. A title then looks the same on every machine, Mac or PC, main or backup, and *Save as* takes the fonts along. A font's size is the letters' size, as in any layout program | *Picture* panel, the font menu: *Carry it in the show*, *Add a font file...* |
 | Blur cues (new) | Blurs everything beneath it on its canvas, inside or outside an outline; a fade moves how far | *Add > video > Blur*; *Picture* panel |
 | Canvases and mapping | Several canvases on one output, each bent onto the wall with a mesh warp, and an ASC CDL per output to match projectors | *Show settings > Video*; warp editor |
 | NDI, Spout, Syphon | Send an output to another program, take a program's picture in as a live input, or pass a cue's picture through another program and back | *Show settings > Video* |
@@ -159,7 +160,7 @@ A **process cue** holds a Pure Data patch and runs it while the cue runs, at con
 
 ### Importing QLab and Ableton Live shows (new)
 
-- **QLab**: File > Import QLab workspace… reads a QLab 4 or 5 workspace file directly, with no QLab needed. Tick the cue lists you want; Go.dot writes a new show (cues, groups, levels, fades, routing and targets) and a report of what it could not carry over.
+- **QLab**: File > Import QLab workspace… reads a QLab 4 or 5 workspace file directly, with no QLab needed. Tick the cue lists you want; Go.dot writes a new show (cues, groups, levels, fades, routing and targets) and a report of what it could not carry over. Text and video cues come over too (new): each QLab stage becomes a canvas of its size, its outputs waiting for a projector to be picked, and movies, stills and titles are placed and faded as in QLab. Some of QLab's own numbers are still being checked against a test workspace, and the report names the fonts a title uses that this machine has not got.
 - **Ableton Live**: the importer unzips the .als file (a gzipped XML document) and reads the XML inside to turn the Live set into cues and groups, so a show built in a session can move to the cue list. One scene is one GO, and the silent "track in" clips become the fades they stand for. It reads Live 10 to 12, turns a tour into one show with a performance per venue, and lives under File > Import Ableton Live set…
 
 ### Keeping the show safe
