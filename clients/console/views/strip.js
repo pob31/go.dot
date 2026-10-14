@@ -194,10 +194,11 @@ function renderStrip() {
 
   /*  WHAT A LOCKED SHOW IS RIDING LIVE (2026-09-25): said while locked, and
       offered to keep or discard once it is not - nothing can be kept while
-      the show refuses edits. */
+      the show refuses edits - `isLocked` as read for the lock's own readout
+      above. (A second `const isLocked` here, from 43d15f9 until RD.11, was a
+      SyntaxError that stopped every module of the page from running: no
+      test executed the page's scripts, only served them.) */
   const live = Number(tree.get("/godot/document/live", 0)) || 0;
-  const lockedNow = tree.get("/godot/document/locked", null);
-  const isLocked = lockedNow === true || lockedNow === "true";
 
   el("live-note").hidden = live === 0;
   el("live-note").textContent = live === 0 ? ""
