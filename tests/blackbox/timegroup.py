@@ -84,7 +84,11 @@ on the tick, so on CI its bounds widen.
 
 By hand, `--keep=<folder>` leaves both rooms there (`main`, `held`: the show,
 the input, the MTC file, the render and the log) and `--analyse=<folder>`
-judges rooms kept before without serving again.
+judges rooms kept before without serving again. On a runner,
+`WFG_KEEP_ROOMS=<folder>` keeps them in `<folder>/<locale>` when anything did not
+hold, and takes them away when everything did: a runner's starvation cannot be
+had again on demand, so the rooms of its red are the evidence, and CI uploads
+them (.github/workflows/ci.yml).
 
 Exit codes: 0 everything held, 1 something did not, 2 the harness could not run.
 """
@@ -1700,6 +1704,9 @@ def run() -> int:
     report = Report(f"time groups and chase: LTC and MTC in ({LOCALE or 'C'})")
     self_check(report)
     kept, again = option("keep"), option("analyse")
+    if_red = None if kept or again else os.environ.get("WFG_KEEP_ROOMS")
+    if if_red:
+        kept = str(Path(if_red) / (LOCALE or "C"))
     unheld: dict = {}
     for held, word, name in ((False, "LTC and MTC", "main"), (True, "held", "held")):
         if again:
@@ -1718,7 +1725,10 @@ def run() -> int:
                 starts = scenario(report, Path(scratch), held, word, unheld)
         if not held:
             unheld = starts
-    return report.finish()
+    code = report.finish()
+    if if_red and code == 0:
+        common.shutil.rmtree(kept, ignore_errors=True)
+    return code
 
 
 def main() -> int:

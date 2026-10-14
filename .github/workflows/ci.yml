@@ -234,7 +234,24 @@ jobs:
         # so that the three platforms' numbers sit side by side with the reason
         # for each, and what must not share the machine is held back by its own
         # ctest properties (tests/CMakeLists.txt), never by a smaller number.
+        env:
+          WFG_KEEP_ROOMS: ${{ runner.temp }}/timegroup-rooms
         run: ctest --preset ci-linux
+
+      - name: Keep the time group's rooms when it went red
+        # blackbox/timegroup.py keeps a room only when its checks did not hold
+        # (WFG_KEEP_ROOMS, on the test step above): the show, the input, the MTC
+        # file, the render and the log, which `timegroup.py --analyse=<room>`
+        # judges again on any machine. A runner's starvation cannot be had again
+        # on demand, so the rooms of its red are the evidence. Three days: they
+        # are a few hundred megabytes, and only a red keeps any.
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: timegroup-rooms-linux
+          path: ${{ runner.temp }}/timegroup-rooms
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Build (Release)
         run: cmake --build --preset ci-linux-release
@@ -353,7 +370,24 @@ jobs:
       - name: Test (Debug — C and fr_FR)
         # Three at once, from the preset: macos-latest is a three-CPU M1. The
         # Linux job's test step says why the number lives in the preset.
+        env:
+          WFG_KEEP_ROOMS: ${{ runner.temp }}/timegroup-rooms
         run: ctest --preset ci-macos
+
+      - name: Keep the time group's rooms when it went red
+        # blackbox/timegroup.py keeps a room only when its checks did not hold
+        # (WFG_KEEP_ROOMS, on the test step above): the show, the input, the MTC
+        # file, the render and the log, which `timegroup.py --analyse=<room>`
+        # judges again on any machine. A runner's starvation cannot be had again
+        # on demand, so the rooms of its red are the evidence. Three days: they
+        # are a few hundred megabytes, and only a red keeps any.
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: timegroup-rooms-macos
+          path: ${{ runner.temp }}/timegroup-rooms
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: ccache statistics
         if: always()
@@ -430,7 +464,24 @@ jobs:
         #
         # Four at once, from the preset: windows-2025 has four CPUs. The Linux
         # job's test step says why the number lives in the preset.
+        env:
+          WFG_KEEP_ROOMS: ${{ runner.temp }}/timegroup-rooms
         run: ctest --preset ci-windows
+
+      - name: Keep the time group's rooms when it went red
+        # blackbox/timegroup.py keeps a room only when its checks did not hold
+        # (WFG_KEEP_ROOMS, on the test step above): the show, the input, the MTC
+        # file, the render and the log, which `timegroup.py --analyse=<room>`
+        # judges again on any machine. A runner's starvation cannot be had again
+        # on demand, so the rooms of its red are the evidence. Three days: they
+        # are a few hundred megabytes, and only a red keeps any.
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: timegroup-rooms-windows
+          path: ${{ runner.temp }}/timegroup-rooms
+          if-no-files-found: ignore
+          retention-days: 3
 
   # ---------------------------------------------------------------------------
   # Job 5 — the spikes, built and never run.
