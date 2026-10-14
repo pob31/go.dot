@@ -111,6 +111,14 @@ LICENSE        text eol=lf
 *.patch                     text eol=lf
 patches/tracktion_engine/series text eol=lf
 
+# Go.dot's fixes to JUCE are the opposite case. JUCE stores most of its sources
+# with CRLF in its own repository, so `git apply` compares against CRLF lines,
+# and a patch to such a file carries a CR at the end of every hunk line. Git
+# must keep those bytes exactly as written, on every platform: -text, never
+# converted. The patch headers and the series are plain LF all the same.
+patches/JUCE/*.patch        -text
+patches/JUCE/series         text eol=lf
+
 # Nothing here reaches ThirdParty/: those are two gitlinks, and Git does not
 # apply a superproject's attributes across a submodule boundary. JUCE and
 # Tracktion Engine carry their own.

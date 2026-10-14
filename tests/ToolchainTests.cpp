@@ -31,6 +31,9 @@
 #include <tracktion_engine/tracktion_engine.h>
 
 #include <concepts>
+#include <cstddef>
+#include <cstring>
+#include <limits>
 #include <string>
 
 //==============================================================================
@@ -164,6 +167,69 @@ TEST_CASE ("toolchain: Tracktion carries Go.dot's patches, and Signalsmith is co
         one that says no, and AudioTests asks what that does to a cue. */
     tracktion::engine::EngineBehaviour defaults;
     CHECK (defaults.autoTempoClipsUseDefaultTimeStretcher());
+}
+
+//==============================================================================
+namespace
+{
+    /*  The shape of JUCE's private StringHolder (juce_String.cpp), which sits just
+        ahead of a string's text: a reference count, the bytes allocated for the
+        text, then the text. Mirrored only so the case below can read the second. */
+    struct StringHolderShape
+    {
+        int refCount;
+        std::size_t allocatedNumBytes;
+        char text[1];
+    };
+
+    std::size_t bytesAllocatedFor (const juce::String& s)
+    {
+        constexpr auto back = static_cast<std::ptrdiff_t> (offsetof (StringHolderShape, text)
+                                                            - offsetof (StringHolderShape, allocatedNumBytes));
+        std::size_t allocated = 0;
+        std::memcpy (&allocated, s.toRawUTF8() - back, sizeof (allocated));
+        return allocated;
+    }
+}
+
+TEST_CASE ("toolchain: JUCE carries Go.dot's patches - a String from malformed UTF-8 fits its allocation")
+{
+    /*  patches/JUCE/0001: JUCE's own fix (330ef16fa0d0, in 8.0.16 and 9.0.4),
+        carried on the 8.0.13 Tracktion pins, by the author's decision of
+        2026-10-14 (cmake/WfgJucePatches.cmake). Without it, a juce::String
+        made from malformed UTF-8 is filled with more bytes than were allocated
+        for it, and Go.dot makes such strings from every WebSocket message the
+        OSCQuery server receives (std::string), from show files (std::string),
+        and from text cue words (a UTF-8 pointer, as String::fromUTF8 does).
+
+        Nothing a string says shows the overrun, so this reads what JUCE
+        allocated and compares it with what was written. The inputs are small
+        on purpose: unpatched, each overruns by a byte or a few, which stays
+        inside the heap block's own padding - so a build without the patch
+        fails these checks rather than corrupting the heap of the test run. */
+
+    // The shape is believed only once it reads right on plain ASCII: ten
+    // characters and a null, rounded up to a multiple of four.
+    const juce::String ascii ("abcdefghij");
+    REQUIRE_MESSAGE (bytesAllocatedFor (ascii) == 12,
+                     "juce::String's private StringHolder is not the shape this case reads - "
+                     "has the JUCE pin moved? Drop the case with patches/JUCE/0001 once "
+                     "the pin carries the fix");
+
+    const auto fits = [] (const juce::String& s)
+    {
+        CHECK (s.endsWith ("trailing"));
+        CHECK (juce::CharPointer_UTF8::isValidString (s.toRawUTF8(), std::numeric_limits<int>::max()));
+        CHECK (bytesAllocatedFor (s) >= std::strlen (s.toRawUTF8()) + 1);   // what was written, not what it decodes to
+    };
+
+    // Two lone continuation bytes, each written as U+FFFD, three bytes: what
+    // juce_simpleweb's String (in_message->string()) and CanonicalXml do.
+    fits (juce::String (std::string ("\x80\x80" "trailing")));
+
+    // An overlong four-byte sequence, counted as U+FFFD's three: the path
+    // String::fromUTF8 (text) takes, without its debug assertion on bad input.
+    fits (juce::String (juce::CharPointer_UTF8 ("\xF0\x80\x80\x80" "trailing")));
 }
 
 //==============================================================================

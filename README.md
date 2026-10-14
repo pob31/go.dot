@@ -647,7 +647,7 @@ live in `packaging/`.
 
 | Dependency | Version | Commit |
 |---|---|---|
-| JUCE | 8.0.13+7 (on `develop`) | `37c894f83d379179b2070d437ccd0f1cd9af9576` |
+| JUCE | 8.0.13+7 (on `develop`), carrying one fix from 8.0.16 (below) | `37c894f83d379179b2070d437ccd0f1cd9af9576` |
 | Tracktion Engine | develop (3.5.0) | `13b51326693e3227ddef91b224114d12af6433ce` |
 | juce_simpleweb (the OSCQuery server's HTTP and WebSocket; the author's fork) | `pob31/juce_simpleweb` | `b72ec947548654cdd0a7e72b71ab5826fe574847` |
 | spatcore (the author's shared control-plane code, headers only) | main, after PR #18 | `5803830150e408ad76c296cd9edbd5d9eba35dc3` |
@@ -677,33 +677,52 @@ on and touches nothing (`cmake/WfgTracktionPatches.cmake`). So:
   series, and it is expected. `git -C ThirdParty/tracktion_engine diff` shows it.
 - A configure refuses a Tracktion tree carrying anything else, and says how to
   look at it and how to clean it. It never cleans it itself.
-- `python3 scripts/te-patches.py status | apply | revert | refresh | new` does by
-  hand what the configure does, and what it cannot: `refresh` rewrites a patch
-  from the tree after an edit in the submodule; `new` starts one.
+- `python3 scripts/patches.py tracktion_engine status | apply | revert | refresh | new`
+  does by hand what the configure does, and what it cannot: `refresh` rewrites a
+  patch from the tree after an edit in the submodule; `new` starts one.
+  `scripts/te-patches.py` is the same with `tracktion_engine` already given.
 - `check-pins.py` check (g) says whether the series is on or fits the pin.
 
 Every file the series touches carries a notice that Go.dot modified it, and
 `THIRD_PARTY_NOTICES.md` says the Tracktion Engine in this build is modified.
 
+### Go.dot's fixes to JUCE
+
+JUCE is built the same way, with a series in `patches/JUCE/` applied by every
+configure before JUCE is added (`cmake/WfgJucePatches.cmake`; both share
+`cmake/WfgSubmodulePatches.cmake`). It differs in what it may hold: **only fixes
+JUCE has already made** in a later release, taken from JUCE's history as JUCE
+wrote them, carried because the pin stays where Tracktion's is. Today one,
+JUCE's own fix for a `String` built from malformed UTF-8 overrunning its
+allocation (in 8.0.16 and 9.0.4; the author's decision of 2026-10-14 to carry it
+rather than move ahead of Tracktion). `git status` shows `ThirdParty/JUCE` as
+modified, `python3 scripts/patches.py JUCE ...` works on it by hand, check (g)
+covers it, and `patches/JUCE/README.md` lists each fix with the release that has
+it. JUCE keeps its sources in CRLF, so its patches do too, byte for byte - see
+that README before editing one.
+
 ### Bumping a pin
 
 0. Make sure nothing else is building from this checkout, then take Go.dot's
-   patches off Tracktion: `python3 scripts/te-patches.py revert`. Git will not
-   check a new commit out over files the patches changed.
+   patches off both: `python3 scripts/patches.py tracktion_engine revert` and
+   `python3 scripts/patches.py JUCE revert`. Git will not check a new commit out
+   over files the patches changed.
 1. Move `ThirdParty/tracktion_engine` to the new tag.
 2. Read TE's new vendored JUCE SHA:
    `git -C ThirdParty/tracktion_engine ls-tree HEAD modules/juce`.
 3. Move `ThirdParty/JUCE` to **that exact SHA**. Not to the tip of `develop`, not
-   to the nearest tag.
-4. Put the patches back on: `python3 scripts/te-patches.py apply --3way`. If a
-   hunk no longer fits, resolve it in the submodule, then
-   `python3 scripts/te-patches.py refresh` rewrites the patch from the tree.
+   to the nearest tag. Take out of `patches/JUCE/series` (and delete) every fix
+   the new JUCE already has - `patches/JUCE/README.md` says from which release.
+4. Put the patches back on: `python3 scripts/patches.py tracktion_engine apply --3way`,
+   and the same for `JUCE` if any fix is left. If a hunk no longer fits, resolve
+   it in the submodule, then `python3 scripts/patches.py <submodule> refresh`
+   rewrites the patch from the tree.
 5. Run `python3 scripts/check-pins.py`, then configure every build tree and run
    the presets locally on at least one platform.
 6. **Commit both gitlinks and the patches in one commit**, so a bisect can never
    land on a skewed pair, or on a pin its patches do not fit.
 
-**Pulling somebody else's pin move** is step 0 and then the pull: revert, pull,
+**Pulling somebody else's pin move** is step 0 and then the pull: revert both, pull,
 `git submodule update --init ThirdParty/tracktion_engine ThirdParty/JUCE`, and
 the next configure applies the moved series.
 
@@ -826,8 +845,9 @@ Two directories that do **not** exist here, and will not:
 4. Update `docs/` when the behaviour it describes changes.
 5. A change to Tracktion Engine goes in `patches/tracktion_engine/`, never as a
    commit in the submodule: edit the submodule's files, then
-   `python3 scripts/te-patches.py refresh` (or `new` for a patch of its own),
-   and carry the modification notice the other patches carry.
+   `python3 scripts/patches.py tracktion_engine refresh` (or `new` for a patch of
+   its own), and carry the modification notice the other patches carry. JUCE
+   takes only fixes JUCE has already released, in `patches/JUCE/` the same way.
 
 <!-- No CI badge: the repo is private until alpha, and a badge for a private
      repo renders as a broken image for everyone outside it. Add one at the

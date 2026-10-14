@@ -17,7 +17,8 @@ and enforced by `scripts/check-pins.py`.
 ## JUCE Framework
 
 - **Website**: https://juce.com
-- **Version**: 8.0.13+7 (`develop`), commit `37c894f83d379179b2070d437ccd0f1cd9af9576`
+- **Version**: 8.0.13+7 (`develop`), commit `37c894f83d379179b2070d437ccd0f1cd9af9576`,
+  **modified by Go.dot** (below)
 - **Licence**: AGPLv3 or commercial JUCE Licence
 - **Copyright**: Raw Material Software Limited
 
@@ -34,6 +35,19 @@ Go.dot links `juce_core`, `juce_events`, `juce_data_structures`,
 through `juce_audio_processors` — an unbreakable chain in JUCE 8, which is why
 this headless Phase 0 binary is nevertheless GUI-linked and why the Linux
 package list carries X11, freetype and fontconfig.
+
+**Modified.** Since 2026-10-14 Go.dot builds JUCE with fixes JUCE has already
+made in later releases, carried on the commit above because Tracktion Engine
+pins it. They are kept in `patches/JUCE/` and applied by the build to the
+submodule's working tree (`cmake/WfgJucePatches.cmake`). The corresponding
+source of the JUCE in a Go.dot binary is therefore the commit above **plus** the
+patches that `patches/JUCE/series` lists, in its order. Every file a patch
+touches carries a notice saying Go.dot modified it, when, and in which patch -
+AGPL-3, section 5(a):
+
+- `0001-string-malformed-utf8.patch` (2026-10-14): JUCE's commit `330ef16fa0d0`
+  (in 8.0.16 and 9.0.4), so a `String` built from malformed UTF-8 is allocated
+  the bytes it is filled with.
 
 JUCE bundles further dependencies with their own licences; the two that reach
 every Go.dot binary through `juce_graphics` are listed separately below. See

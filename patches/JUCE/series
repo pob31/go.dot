@@ -1,0 +1,4 @@
+# Go.dot's fixes to JUCE, applied in this order by the build
+# (cmake/WfgJucePatches.cmake) and by scripts/patches.py JUCE.
+# One file name per line; a line starting with # is a comment.
+0001-string-malformed-utf8.patch

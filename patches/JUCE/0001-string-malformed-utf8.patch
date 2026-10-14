@@ -1,0 +1,183 @@
+Go.dot patch 0001 for JUCE: a String built from malformed UTF-8 stays inside its allocation.
+
+JUCE's own fix, commit 330ef16fa0d04bf36d843c7811e0f1d5a31b2c66 on develop
+("String: Fix allocation sizes for malformed data", Tom Poole, 2026-10-08),
+released in 9.0.4 and, cherry-picked as 619353fb327b, in 8.0.16 - the only
+change 8.0.16 makes. Taken verbatim from 619353fb327b: juce_String.cpp is the
+same at this pin as at that commit's parent, so every hunk is JUCE's.
+
+The fault: StringHolderUtils sized a new string's allocation by one walk of its
+source and filled it by another, and on malformed UTF-8 the two disagree, so the
+copy writes past the end of the heap block. A String made from a std::string
+counted one byte for each source byte, then wrote each malformed byte (a lone
+continuation byte, say) as U+FFFD, three bytes. A String made from a bare UTF-8
+pointer counted three bytes for a malformed four-byte sequence (an overlong one)
+and copied its four. Go.dot builds such strings from bytes it does not control:
+every WebSocket message juce_simpleweb receives on the OSCQuery port
+(String(in_message->string())), show files (CanonicalXml.cpp), and text cue
+words, which an OSC message can set (String::fromUTF8 in TextRaster.cpp). The
+fix sizes and copies in one walk.
+
+JUCE's test for the fix comes with it, in the same file. Go.dot's own,
+tests/ToolchainTests.cpp, reads the allocation a malformed string was given, so
+a build without this patch fails there. Each hunk carries a notice that Go.dot
+modified the file (GPL-3 and AGPL-3, section 5(a)).
+
+LINE ENDINGS. JUCE stores juce_String.cpp with CRLF in its own repository, so
+every line of the hunks below ends in CRLF and must stay so; .gitattributes
+keeps this file byte for byte (-text), and scripts/patches.py writes it as bytes.
+
+Applied by Go.dot's build, cmake/WfgJucePatches.cmake, in the order
+patches/JUCE/series gives; refreshed from the working tree with
+scripts/patches.py JUCE refresh, which keeps this header. Against JUCE
+37c894f83d37 (8.0.13+7, the JUCE Tracktion Engine 13b5132 pins). Drop it when
+the pin moves to 8.0.16, 9.0.4 or later. The author's decision of 2026-10-14.
+
+diff --git a/modules/juce_core/text/juce_String.cpp b/modules/juce_core/text/juce_String.cpp
+index ff855ac1fe..b595b21569 100644
+--- a/modules/juce_core/text/juce_String.cpp
++++ b/modules/juce_core/text/juce_String.cpp
+@@ -86,31 +86,24 @@ public:
+         return CharPointerType (unalignedPointerCast<CharType*> (bytes + offsetof (StringHolder, text)));
+     }
+ 
+-    template <class CharPointer>
+-    static CharPointerType createFromCharPointer (const CharPointer text)
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-10-14, by
++    // patches/JUCE/0001-string-malformed-utf8.patch: JUCE's own fix, commit 330ef16fa0d0
++    // ("String: Fix allocation sizes for malformed data", in 8.0.16 and 9.0.4), carried on
++    // the 8.0.13 Tracktion pins. From here to createFromFixedLength, the walk that sizes the
++    // allocation is the walk that copies, so malformed UTF-8 cannot write past its end.
++    template <typename CharPointer, typename ShouldContinueFn>
++    static CharPointerType createFromCharPointerWhile (const CharPointer text, ShouldContinueFn&& shouldContinueFn)
+     {
+         if (text.getAddress() == nullptr || text.isEmpty())
+             return CharPointerType (emptyString.text);
+ 
+-        auto bytesNeeded = sizeof (CharType) + CharPointerType::getBytesRequiredFor (text);
+-        auto dest = createUninitialisedBytes (bytesNeeded);
+-        CharPointerType (dest).writeAll (text);
+-        return dest;
+-    }
+-
+-    template <class CharPointer>
+-    static CharPointerType createFromCharPointer (const CharPointer text, size_t maxChars)
+-    {
+-        if (text.getAddress() == nullptr || text.isEmpty() || maxChars == 0)
+-            return CharPointerType (emptyString.text);
+-
+-        auto end = text;
++        auto pos = text;
+         size_t numChars = 0;
+         size_t bytesNeeded = sizeof (CharType);
+ 
+-        while (numChars < maxChars && ! end.isEmpty())
++        while (shouldContinueFn (pos, numChars) && ! pos.isEmpty())
+         {
+-            bytesNeeded += CharPointerType::getBytesRequiredFor (end.getAndAdvance());
++            bytesNeeded += CharPointerType::getBytesRequiredFor (pos.getAndAdvance());
+             ++numChars;
+         }
+ 
+@@ -120,24 +113,24 @@ public:
+     }
+ 
+     template <class CharPointer>
+-    static CharPointerType createFromCharPointer (const CharPointer start, const CharPointer end)
++    static CharPointerType createFromCharPointer (const CharPointer text)
+     {
+-        if (start.getAddress() == nullptr || start.isEmpty())
+-            return CharPointerType (emptyString.text);
++        return createFromCharPointer (text, std::numeric_limits<size_t>::max());
++    }
+ 
+-        auto e = start;
+-        int numChars = 0;
+-        auto bytesNeeded = sizeof (CharType);
++    template <class CharPointer>
++    static CharPointerType createFromCharPointer (const CharPointer text, size_t maxChars)
++    {
++        if (maxChars == 0)
++            return CharPointerType (emptyString.text);
+ 
+-        while (e < end && ! e.isEmpty())
+-        {
+-            bytesNeeded += CharPointerType::getBytesRequiredFor (e.getAndAdvance());
+-            ++numChars;
+-        }
++        return createFromCharPointerWhile (text, [maxChars] (auto, size_t numChars) { return numChars < maxChars; });
++    }
+ 
+-        auto dest = createUninitialisedBytes (bytesNeeded);
+-        CharPointerType (dest).writeWithCharLimit (start, numChars + 1);
+-        return dest;
++    template <class CharPointer>
++    static CharPointerType createFromCharPointer (const CharPointer start, const CharPointer end)
++    {
++        return createFromCharPointerWhile (start, [end] (auto pos, size_t) { return pos < end; });
+     }
+ 
+     static CharPointerType createFromCharPointer (const CharPointerType start, const CharPointerType end)
+@@ -155,9 +148,8 @@ public:
+ 
+     static CharPointerType createFromFixedLength (const char* const src, const size_t numChars)
+     {
+-        auto dest = createUninitialisedBytes (numChars * sizeof (CharType) + sizeof (CharType));
+-        CharPointerType (dest).writeWithCharLimit (CharPointer_UTF8 (src), (int) (numChars + 1));
+-        return dest;
++        const auto end = CharPointer_UTF8 (src + numChars);
++        return createFromCharPointerWhile (CharPointer_UTF8 (src), [end] (auto pos, size_t) { return pos < end; });
+     }
+ 
+     //==============================================================================
+@@ -3051,6 +3043,50 @@ public:
+             constexpr char buffer[] = "glass \xBD full";
+             expect (expectedString == String::createStringFromData (buffer, sizeof (buffer)));
+         }
++
++        // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-10-14, by
++        // patches/JUCE/0001-string-malformed-utf8.patch: JUCE's own test for its fix.
++        beginTest ("Constructing from malformed UTF-8 does not overrun the allocation");
++        {
++            // The allocation size and the copy must agree on malformed input, otherwise a
++            // String constructed from invalid UTF-8 writes past the end of its heap block.
++            std::string overlong;
++
++            for (int i = 0; i < 16; ++i)
++                overlong += "\xF0\x80\x80\x80";
++
++            overlong += "trailing";
++
++            std::string lone (16, '\x80');
++            lone += "trailing";
++
++            const auto isValid = [] (const String& s)
++            {
++                return CharPointer_UTF8::isValidString (s.toRawUTF8(), std::numeric_limits<int>::max());
++            };
++
++            // Constructors that decode and re-encode replace malformed input with the
++            // replacement character, so the result is always well-formed UTF-8.
++            for (const auto& s : { String::fromUTF8 (overlong.data(), -1),
++                                   String (CharPointer_UTF8 (overlong.data())),
++                                   String (CharPointer_UTF8 (overlong.data()), overlong.size()),
++                                   String (overlong),
++                                   String (lone) })
++            {
++                expect (isValid (s));
++                expect (s.endsWith ("trailing"));
++            }
++
++            // The explicit-length overloads copy the source bytes verbatim. They must still
++            // allocate enough room for the bytes they copy, and must preserve the trailing
++            // data rather than overrun it.
++            for (const auto& s : { String::fromUTF8 (overlong.data(), (int) overlong.size()),
++                                   String (CharPointer_UTF8 (overlong.data()),
++                                           CharPointer_UTF8 (overlong.data() + overlong.size())) })
++            {
++                expect (s.endsWith ("trailing"));
++            }
++        }
+     }
+ };
+ 

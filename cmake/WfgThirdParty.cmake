@@ -69,6 +69,11 @@ set(JUCE_MODULES_ONLY ON CACHE BOOL
 #
 # CMAKE_SOURCE_DIR is the repo root: Go.dot is always the top-level project (it is an
 # application, never a subdirectory of someone else's build).
+#
+# The fixes Go.dot carries for JUCE go on first (patches/JUCE/series), so everything
+# below compiles the patched sources. check-pins.py check (g) says whether the series
+# fits the pin before any toolchain runs.
+include(WfgJucePatches)
 add_subdirectory("${CMAKE_SOURCE_DIR}/ThirdParty/JUCE" juce)
 
 # ---------------------------------------------------------------------------
