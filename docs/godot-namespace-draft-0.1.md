@@ -27043,6 +27043,50 @@ speed from the return's 120 ms only to stand 182 ms behind, and froze at the loc
 minutes (4 jumped, 5 running, 1 stopped); the tick thread at worst 14.7 ms behind. WHAT THE RENDER CANNOT SHOW: a
 real interface's clock against MTC from a cable, and a code from a VTR or a desk - the bench's.
 
+**M64 again**, measured 2026-10-14 (TG.12), after the three mends of TG.11's faults (60.7, parts 1 to 3), the same
+script and shape on the Debug binary of 2ed4f5e, on a quiet machine: one session each, rtViolations 0 and audioGaps
+0 in both.
+
+| members 3 s apart, 200 fires each | median | p99 | worst | late |
+|---|---|---|---|---|
+| LTC, against the input's frame | +0.042 ms | 4.71 ms | 5.16 ms | 19 |
+| LTC, the 181 on time | +0.042 ms | 0.450 ms | 0.450 ms | - |
+| LTC, against its map's sample | +0.012 ms | 4.69 ms | 5.14 ms | - |
+| MTC, against the port's moment | +0.321 ms | 5.42 ms | 7.44 ms | 23 |
+| MTC, the 177 on time | +0.236 ms | 1.03 ms | 1.03 ms | - |
+| MTC, against its map's sample | +0.000 ms | 4.48 ms | 7.65 ms | - |
+
+The tick thread was never noted behind its audio (88 times in TG.11's session), its lateness at worst 29.3 ms; the
+late fires, 19 and 23 where there were 72 and 68, are each late by less than 8 ms and do not grow with the session.
+What makes them is no longer the run table but the publish: serve rebuilds the show half of the tree on every tick
+that applies a command, and a time group's members apply one every few ticks (31.5, M68, left for the author).
+`code.heard` in 21 passes: LTC 41, MTC 43 - two a pass each, the loop point's `jumped` and a re-anchor - where MTC
+wrote 241.
+
+| method | +50 ppm | +0.1 % | in step after the return | then | in step after the locate | then | jumps (A/B/C/D) | speeds: +50 ppm / +0.1 % / catching up |
+|---|---|---|---|---|---|---|---|---|
+| free | 6.11/11.94 | 104.35/191.75 | never | 315.28/317.76 | never | 29 680.59 ahead | 0/0/0/0 | 1 / 1 / 1 |
+| jump | 4.20/10.02 | 5.05/9.99 | 0.2 s | 3.04/6.01 | 0.2 s | 1.53/3.00 | 1/18/1/1 | 1.000035 / 1.001000 / 1 |
+| varispeed | 0.06/0.06 | 1.17/1.17 | 15.4 s | 1.02/1.02 | 0.2 s | 0.53/0.53 | 0/0/0/1 | 1.000050 / 1.001000 / 1.010000 |
+| timestretch | 0.04/0.05 | 1.27/1.47 | 10.5 s | 5.24/11.53 | 0.5 s | 0.52/0.54 | 0/0/0/0 | 1.000050 / 1.001000 / 1.009992 |
+
+(A: from 5 s after the members' time to the step; B: from 5 s after the step to the stop; C: from a second after
+it is back in step to the locate; D: from a second after it is in step again. The tolerances as above.)
+
+WHAT IT SAYS: every chaser holds its tolerance for the ten minutes. The jump chaser reaches 10 ms out once at +50 ppm
+and jumps; at +0.1 %, a millisecond a second, it jumps every ten seconds or so, 18 times in three minutes, each
+landing in step; the return and the locate are each one jump, in step 0.2 s later. The varispeed chaser follows
+both speeds to the part per million, catches the return's 120 ms in 15.4 s at the 1 % clamp and the locate by one
+jump. The timestretch chaser now plays the speeds it is asked - 1.000050 and 1.001000, where it played exactly one
+- holds 0.05 ms at +50 ppm, catches the return in 10.5 s and lands the locate's jump 0.52 ms from the code, where it
+landed 106 ms behind and then froze. ONE THING NOT TRACED: between the return and the locate (C) the timestretch
+chaser held a median 5.24 ms out, 11.53 at worst, where it held 1.27 before the stop and 0.52 after the locate -
+inside its 21.3 ms (AJC), but a stretch the other two do not show. A candidate, read and not proven: the
+stretcher's lead depends on its speed (`stretchLeadSamples` divides its input latency by it), so a voice that
+caught up at 1.01 and came back to 1.001 hears its file a lead's difference away from where its clock reads it.
+Left for a later round. WHAT THE RENDER CANNOT SHOW is unchanged: a real interface's clock against MTC from a
+cable, and a code from a VTR or a desk - the bench's.
+
 ### 60.7 Built so far
 
 - **TG.0**, 2026-10-12: this section; PRD §3.7, §3.14's chasing half and its open question answered,
@@ -28294,6 +28338,24 @@ real interface's clock against MTC from a cable, and a code from a VTR or a desk
   noted two ticks behind only twice, in its first 30 s. What is left of those late fires, the probe in §31.5
   finds, is the show half rebuilt on every tick that applies a command, not the run table.
   `blackbox.timegroup` 101 of 101 in C and fr_FR on the final binary, as before. Left: that rebuild (§31.5).
+- **TG.12**, 2026-10-14: the close-out. M64 measured again after the three mends (60.6, "M64 again"): an LTC
+  member starts +0.042 ms from its frame at the median, 0.45 ms at worst among the 181 of 200 on time, the rest
+  late by under 5.2 ms where they were late by up to 31; MTC +0.32 ms from the port's moment, 1.03 ms at worst on
+  time; every chaser within its tolerance over ten minutes, the timestretch chaser now playing the speed it is
+  asked and landing a jump 0.5 ms from the code. Both tester guides gain *Timecode in* and the time group in the
+  groups line, and lose *Timecode* from what is coming; the README's *Timecode in* and its table row; PRD 6.11's
+  M64 measured; the devplan's Built line. Left, for the author or a later round: the show half rebuilt on every
+  tick that applies a command (31.5); the timestretch chaser's 5 ms between a return and a locate (60.6); a
+  slice move of a stretched cue heard ~115 ms after it is placed, which decision UD makes a late edit; the words
+  the implementer chose beyond the accepted list (TG.2's automatic names, the Getting started sentence, the x0.5);
+  no sentence yet for a time group's scrub refusal or for an incoming rate unlike the show's; and the bench - a
+  DAW, a VTR or a desk sending LTC and MTC, a signal through a desk, the hour.
+  THE FULL RUN found one thing more: at twelve jobs, with this machine's four lanes for the drivers that judge
+  time, `blackbox.timegroup`'s C and fr_FR runs went at once beside two other such drivers and the unit shards,
+  and both went red on MTC's sparse check alone - 26 and 20 records a pass where alone it writes 8. The
+  driver plays the MTC it judges from inside the engine (`--midi-play-loop`), so a starved machine makes its
+  own sender late; run one after the other, both were green. `tests/CMakeLists.txt` now has it hold every
+  lane, so no other timing driver runs beside it; CI, one lane, ran it so already and voids that check.
 
 ## 61. Keys, text and blur
 

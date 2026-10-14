@@ -101,7 +101,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 
 | Fonction | Ce qu'elle fait | Où |
 | --- | --- | --- |
-| Groupes | *Timeline* (les membres partent ensemble), *Sequential on GO*, *Sequential automatic*, *Shuffle* (nouvel ordre à chaque tour), *Sampler* (sons et images lancés depuis pads et faders, le fader d'une image réglant son opacité) | *Add > group* |
+| Groupes | *Timeline* (les membres partent ensemble), *Sequential on GO*, *Sequential automatic*, *Shuffle* (nouvel ordre à chaque tour), *Sampler* (sons et images lancés depuis pads et faders, le fader d'une image réglant son opacité), *Time group* (ses membres partent quand le LTC, le MTC ou l'horloge atteint leur heure : voir *Timecode en entrée*) | *Add > group* |
 | Fondus | Faire varier niveau, envois, EQ et paramètres de plugins de n'importe quelle cue ou groupe, selon une courbe dessinée | *Add > fade*, puis *Mixer* et *Curve* |
 | Cues de transport | Arrêter, arrêter après ce membre ou ce tour, lancer une autre cue ; activer ou désactiver une cue pour ce passage ; déplacer l'attente sur une cue, ou y sauter et faire GO | *Add > transport* |
 | Noms automatiques (nouveau) | Une cue que personne n'a nommée porte le nom de ce qu'elle fait : un fondu ou un arrêt celui de sa cible (*Fade out Intro music*), une cue OSC ou MIDI son message, un son, une image ou un micro son fichier ou son entrée. Il suit quand la cible, le fichier ou le message change. Un nom tapé reste ; effacé, le nom automatique revient | Colonne du nom ; inspecteur, *Name* |
@@ -128,6 +128,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Retour arrière Doh! | Quand un GO est repris, envoyer à chaque appareil la commande qui l'annule | Inspecteur ; onglet *Network* |
 | Cues MIDI | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
 | Timecode en sortie (nouveau) | Du MTC sur un port MIDI, ou du LTC SMPTE sur une sortie audio, depuis une cue. Il démarre au label que vous lui donnez (01:00:00:00 si vous ne dites rien) et tourne jusqu'à ce qu'on l'arrête, ou pendant une durée. Placé dans un groupe avec une chanson, les deux démarrent sur le même échantillon ; une deuxième cue de timecode reprend la ligne ; Échap l'arrête sur une limite d'image ; Doh! le met en pause et le GO suivant le reprend là où il s'était arrêté ; on le fait sauter en le glissant dans le panneau des cues en cours. On choisit une fois pour le spectacle la cadence d'images, le port MIDI et la sortie, et on donne au LTC une sortie à lui : elle ne porte rien d'autre. Pas encore vérifié avec une console ou un lecteur de timecode : dites-nous ce que le vôtre a fait | *Add > midi > MTC*, *Add > audio > LTC timecode* ; *Show settings > Timecode* |
+| Timecode en entrée (nouveau) | Lancer des sons, des images, des groupes timeline et des séquences automatiques quand le timecode entrant atteint leur heure. Sélectionner les cues, choisir *Add > group > Time group*, dire ce qu'il suit (*follows* : *LTC in*, *MTC in* ou *the clock*, l'horloge de l'ordinateur) et donner à chaque membre l'heure à laquelle il démarre (*starts at*). Le GO arme le groupe, qui reste armé jusqu'à ce qu'on l'arrête, comme une banque de sampler ; dans la section Persistent il reste armé tout le spectacle, et la cue en attente ne bouge pas quand un membre part. Un membre lancé par du LTC démarre sur l'échantillon exact où le code atteint son heure. Chaque membre dit aussi comment il suit le code (*chase*) : *free run* joue à sa propre vitesse une fois lancé ; *jump* revient en place par un fondu enchaîné de 10 ms dès qu'il s'écarte de plus de 10 ms ; *catch up, varispeed* et *catch up, timestretch* jouent jusqu'à 1 % plus vite ou plus lentement jusqu'à se recaler, le premier en changeant la hauteur, le second en la gardant, et sautent plutôt quand l'écart dépasse un quart de seconde. Quand le code s'arrête, les membres continuent de jouer ; quand il saute, les membres qui suivent sont replacés là où il dit et ceux en *free run* sont laissés tels quels. Go.dot garde sa propre horloge et mesure le code par rapport à elle, si bien que le reste du spectacle garde son propre temps quoi que fasse le code. On choisit une fois pour le spectacle l'entrée LTC et le port MIDI par lesquels le code arrive, et avec quelle précision les membres suivent ; l'onglet montre ce qui arrive. Pas encore vérifié avec un magnétoscope, une station audionumérique ou une console qui envoie du timecode : dites-nous ce que le vôtre a fait | *Add > group > Time group* ; *Show settings > Timecode > Coming in* |
 | Moniteur réseau | Voir chaque message entrant et sortant | *Show > Network monitor…* |
 | Surfaces de contrôle | Faders, pads, potentiomètres et DCA. Prise en charge complète de l'Asparion D700 : faders, pages EQ et plugins sur les rotatifs, molette maître, attente sur les flèches | *Show > Surfaces…* |
 | Console web | Le même spectacle dans un navigateur, sur n'importe quelle machine du réseau | `http://<cette machine>:5010/ui` |
@@ -182,10 +183,6 @@ La console web tourne déjà dans n'importe quel navigateur du réseau. Elle dev
 ### Compensation de latence vidéo
 
 On règle une fois le retard du vidéoprojecteur, et le son est retardé d'autant pour s'aligner sur l'image.
-
-### Timecode
-
-**Suivre du LTC et du MTC.** Go.dot pourra suivre une source de timecode. Il génère déjà les deux : voir *Timecode en sortie* plus haut.
 
 ### Enchaîner les membres d'une séquence
 

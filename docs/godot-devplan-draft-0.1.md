@@ -1606,6 +1606,21 @@ is locked at a takeover; a step of the wall clock fires nothing; CI is green.
 **Needs from the author:** the words on screen before they ship; a bench with a real source - a DAW, a
 VTR or a desk sending LTC and MTC - and a signal through a desk.
 
+**Built** (2026-10-12 to 14, TG.0-TG.12, namespace draft §60.7): the time group and its members' `at`
+and `chase`; the wall clock's step rule, a clock trigger once a day; an LTC decoder on the audio thread
+after the input tap, MTC in on its own inbox with arrival stamps, the wall clock as a source; the code
+map and its watchers writing `code.heard` only at a turn and only for a time group, a line through the
+tick's clock pairs that does not wander; firing on the code's sample, a jump and a locate re-seating
+the chasers through `seatPlan`, catch-up by varispeed and by timestretch; the window's words (accepted
+as offered); `blackbox.timegroup` and M64. The driver found four faults and the measurement one, all
+mended before the push: a chaser's jump froze its voice (patch 0002's plain map ignored "no loop"),
+every timestretched speed was rounded to whole frames in 256 (Tracktion's stretcher carried no
+remainder, now it does, in patch 0002), a stretched jump landed 106 ms behind (the stretcher's lead,
+now placed beyond), MTC's records were not sparse (`ClockEstimate`'s wander, now a shared count's
+line), and the tick fell behind as a session made runs (the run table walked whole, now indexed and
+settled - M68, §31.5). Owed to a bench: a real source on LTC and MTC, a signal through a desk, the hour.
+Left: the show half rebuilt on every tick that applies a command (§31.5).
+
 ---
 
 ## Phase 11 — Integrations · M

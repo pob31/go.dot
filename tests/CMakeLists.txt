@@ -2151,3 +2151,25 @@ foreach(driver IN LISTS WFG_REALTIME_DRIVERS)
         math(EXPR wfg_lane "(${wfg_lane} + 1) % ${WFG_REALTIME_LANES}")
     endforeach()
 endforeach()
+
+# THE TIME GROUP'S DRIVER HOLDS EVERY LANE (2026-10-14, namespace draft §60.7,
+# TG.12). It plays the MTC it judges from inside the engine it judges
+# (`--midi-play-loop`), so a starved machine makes its own sender late and the
+# quarter frames arrive milliseconds off their moments - which its check that
+# MTC's `code.heard` is sparse then reads as the engine's wander. The first full
+# run at twelve jobs dealt its C and fr_FR runs to two lanes at once, beside two
+# other timing drivers and the unit shards, and that check went red in both (26
+# and 20 records a pass, against 8 alone); the two run one after the other, they
+# were green. CI, one lane, already runs it alone among the timing drivers and
+# voids that check besides. Here it waits for every lane, so no other driver
+# that judges time runs beside it.
+set(wfg_every_lane realtime)
+math(EXPR wfg_last_lane "${WFG_REALTIME_LANES} - 1")
+
+if(wfg_last_lane GREATER 0)
+    foreach(wfg_n RANGE 1 ${wfg_last_lane})
+        list(APPEND wfg_every_lane realtime-${wfg_n})
+    endforeach()
+endif()
+
+set_tests_properties(blackbox.timegroup.C blackbox.timegroup.fr_FR PROPERTIES RESOURCE_LOCK "${wfg_every_lane}")

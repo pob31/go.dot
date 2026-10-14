@@ -125,6 +125,14 @@ has stood in front of the thing.
   it and the corrected GO picks it up where it stopped, and the running pane
   scrubs it. The frame rate, the MIDI port and the output are the show's, on a
   Timecode tab of their own.
+- **Timecode in.** A time group starts its members - sounds, pictures, timeline
+  groups and automatic sequences - when incoming LTC, MTC or the computer's clock
+  reaches each one's time, an LTC member on the very sample its frame begins.
+  GO arms it until it is stopped, as a sampler bank. Each member free-runs or
+  chases the code: by a crossfaded jump, or by catching up with varispeed or
+  timestretch. When the code stops the members play on; when it jumps the chasers
+  are put where it says. Go.dot's own clock never follows the code: the code is
+  measured against it, and only a turn of the code is written into the log.
 - **Stopping.** Esc fades running cues out over the panic fade and runs their
   footers, as if they had ended; a persistent cue is paused instead, and the
   next GO resumes it. A double Esc stops everything Go.dot started, at once,
@@ -137,8 +145,6 @@ has stood in front of the thing.
 
 ### Not built yet
 
-- **Timecode chase** — following an LTC or MTC source rather than being one
-  (devplan Phase 10, PRD §3.14's open question); generating both is built.
 - **Panic values** — every parameter declares a resting state (PRD §3.3), but
   nothing yet puts a node back to it.
 - **Bindings** — a general way to bind any parameter to any control, with read,
@@ -216,6 +222,7 @@ and says afterwards what was built against what was drawn.
 | OSC cues | Several messages, bundles, recorded curves | §45 |
 | Process cues | Pure Data inside a cue, serial ports | §51 |
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
+| Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
 
 The documents, besides the PRD and the devplan:
 

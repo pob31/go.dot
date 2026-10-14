@@ -99,7 +99,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 
 | Feature | What it does | Where |
 | --- | --- | --- |
-| Groups | *Timeline* (members start together), *Sequential on GO*, *Sequential automatic*, *Shuffle* (new order each round), *Sampler* (sounds and pictures fired from pads and faders, a picture's fader setting its opacity) | *Add > group* |
+| Groups | *Timeline* (members start together), *Sequential on GO*, *Sequential automatic*, *Shuffle* (new order each round), *Sampler* (sounds and pictures fired from pads and faders, a picture's fader setting its opacity), *Time group* (its members start when LTC, MTC or the clock reaches their time: see *Timecode in*) | *Add > group* |
 | Fades | Fade level, sends, EQ and plugin values of any cue or group, with a drawn curve | *Add > fade*, then *Mixer* and *Curve* |
 | Transport cues | Stop, stop after this member or round, start another cue; enable or disable a cue for this run; jump standby to a cue, or jump and GO | *Add > transport* |
 | Automatic names (new) | A cue nobody has named is called by what it does: a fade or a stop by its target (*Fade out Intro music*), an OSC or MIDI cue by its message, a sound, a picture or a mic by its file or input. It follows when the target, file or message changes. Type a name and it stays; clear it and the automatic one comes back | Name column; inspector, *Name* |
@@ -126,6 +126,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Doh! rollback | When a GO is taken back, send each device the command that undoes it | Cue inspector; *Network* tab |
 | MIDI cues | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
 | Timecode out (new) | MTC on a MIDI port, or SMPTE LTC on an audio output, from a cue. It starts at the label you give it (01:00:00:00 unless you say otherwise) and runs until it is stopped, or for a length. Put it in a group with a song and both start on the same sample; a second timecode cue takes the line over; Esc stops it on a frame boundary; Doh! pauses it and the next GO picks it up where it stopped; drag it in the running pane to jump. Pick the frame rate, the MIDI port and the output once for the show, and give LTC an output of its own: it carries nothing else. Not yet checked against a desk or a timecode reader: tell us what yours did | *Add > midi > MTC*, *Add > audio > LTC timecode*; *Show settings > Timecode* |
+| Timecode in (new) | Start sounds, pictures, timeline groups and automatic sequences when incoming timecode reaches their time. Pick the cues, choose *Add > group > Time group*, say what it *follows* (*LTC in*, *MTC in* or *the clock* of the computer) and give each member the time it *starts at*. GO arms the group and it stays armed until stopped, as a sampler bank does; in the Persistent section it stays armed all show, and the standby never moves when a member fires. A member started by LTC starts on the very sample the code reaches its time. Each member also says how it keeps up with the code, its *chase*: *free run* plays at its own speed once started; *jump* jumps back into step over a 10 ms crossfade when it is more than 10 ms out; *catch up, varispeed* and *catch up, timestretch* play up to 1 % faster or slower until back in step, the first bending the pitch and the second keeping it, and jump instead when more than a quarter of a second out. When the code stops, members keep playing; when it jumps, the chasing members are put where it says and the free runners are left alone. Go.dot keeps its own clock and measures the code against it, so the rest of the show keeps its own time whatever the code does. Pick the LTC input and the MIDI port the code comes in on, and how closely members chase, once for the show; the tab shows what is arriving. Not yet checked against a tape machine, a DAW or a desk sending timecode: tell us what yours did | *Add > group > Time group*; *Show settings > Timecode > Coming in* |
 | Network monitor | See every message in and out | *Show > Network monitor…* |
 | Control surfaces | Faders, pads, dials and DCAs. Full support for the Asparion D700: faders, EQ and plugin pages on the rotaries, a master dial, standby on the arrows | *Show > Surfaces…* |
 | Web console | The same show in a browser, on any machine on the network | `http://<this machine>:5010/ui` |
@@ -180,10 +181,6 @@ The web console already runs in any browser on the network. It will grow into a 
 ### Video latency compensation
 
 Set a projector's delay once, and sound is held back to line up with the picture.
-
-### Timecode
-
-**Chasing LTC and MTC.** Go.dot will follow a timecode source. It already generates both: see *Timecode out* above.
 
 ### Joining a sequence's members
 
