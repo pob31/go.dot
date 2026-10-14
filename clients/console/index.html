@@ -102,6 +102,39 @@
     <button id="lock" aria-pressed="false" disabled>lock the show</button>
   </div>
 
+  <!--  THIS COMPUTER IN ITS PAIR (namespace draft §58, RD.11): a main and a
+        backup playing one show, each from its own copy of the show folder.
+
+        Shown only on a computer with a role, and always while it has one: what
+        it is, in the author's words - "Backup - following", "Main - sending",
+        "Main - alone" (AGM) - and what that means in a sentence; or, when the
+        engine says the pair needs a hand (`pair/alarm`), the alarm itself - "Two
+        mains!" (AGO) when both computers send - in amber, or in red for two
+        mains, the words carrying it before the colour does (§4.8).
+
+        THE OPERATOR'S FIVE, each the one command its `data-cmd` names (§4.11),
+        shown where the engine would take it - and the one that answers an
+        alarm shown greyed, with why in its title and in the sentence, when it
+        would not. The words on them are the author's where he chose them
+        ("Take over", "Hand over", "Make this the main", AGN and AGO) and the
+        implementer's otherwise. Written once, here, and only shown, hidden and
+        relabelled by the poll (views/transport.js), for the recovery banner's
+        reason: a button rebuilt ten times a second can be swapped between the
+        press and the release. Where a role is given is the desktop's Show
+        settings > Redundancy tab: a page has no business choosing which machine
+        it is talking to. -->
+  <div id="pair" hidden>
+    <b id="pair-head"></b>
+    <span id="pair-said"></span>
+    <span class="choice">
+      <button data-cmd="pair.keep" hidden>Make this the main</button>
+      <button data-cmd="pair.takeOver" hidden>Take over</button>
+      <button data-cmd="pair.handOver" hidden>Hand over</button>
+      <button data-cmd="pair.realign" hidden>Realign</button>
+      <button data-cmd="pair.adoptShow" hidden>Take the main's show</button>
+    </span>
+  </div>
+
   <!--  UNSAVED WORK FROM A SESSION THAT DID NOT END, offered and not taken.
 
         While somebody works, the engine writes the show into the bundle's own

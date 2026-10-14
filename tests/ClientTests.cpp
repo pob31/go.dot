@@ -65,6 +65,7 @@
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Pair.h>
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Panic.h>
@@ -140,6 +141,8 @@
 #include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/tree/OscQueryJson.h>
+#include <wfg/engine/pair/Leadership.h>
+#include <wfg/engine/pair/PairSettings.h>
 
 #include <juce_core/juce_core.h>
 
@@ -14065,4 +14068,388 @@ TEST_CASE ("client: a time group wears a drawn icon and an accent of its own, ne
         }
 
     CHECK (theme.colour ("failed") != theme.colour ("kind-timegroup"));
+}
+
+//==============================================================================
+/*  REDUNDANCY ON SCREEN (namespace draft §58, RD.11): what a main and a backup
+    say about themselves, the banner for each case that needs a hand, and the
+    operator's five and the three settings as the commands they are - with the
+    window greying a button exactly where the engine would refuse it. */
+namespace
+{
+    /*  THE RIG, WITH THE PAIR'S ROWS as serve publishes them: `pairState`'s
+        pair fields, laid over the readings `Rig::publish` gives every test. */
+    struct PairRig : Rig
+    {
+        EngineState pairState;
+
+        std::shared_ptr<const TreeSnapshot> publishPair (std::int64_t tick)
+        {
+            auto state = pairState;
+            state.version = "test";
+            state.tick = tick;
+            state.sampleRate = 48000;
+            state.blockSize = 256;
+            state.clock = "dummy";
+            state.audioStatus = "running";
+            state.documentName = "minimal";
+            state.documentRevision = document.showRevision();
+            state.errorCount = engine.errorCount();
+            state.lastError = engine.lastError();
+            return parameters.publish (tick, state);
+        }
+
+        model::PairReading seat (const char* role, const char* state)
+        {
+            pairState.pairSettings.role = role;
+            pairState.pairFollow.state = state;
+            return model::readTransport (*publishPair (1)).pair;
+        }
+    };
+}
+
+TEST_CASE ("client: what a computer says it is in its pair - the author's words where he chose them, nothing unpaired")
+{
+    PairRig rig;
+
+    //  Not paired: no words, no banner, nothing offered.
+    const auto alone = rig.seat ("none", "alone");
+    CHECK_FALSE (alone.paired());
+    CHECK (alone.seatWords().empty());
+    CHECK_FALSE (alone.bannerShowing());
+
+    //  THE AUTHOR'S THREE (AGM), exactly as he chose them.
+    CHECK (rig.seat ("main", "leading").seatWords() == "Main - sending");
+    CHECK (rig.seat ("main", "alone").seatWords() == "Main - alone");
+    CHECK (rig.seat ("backup", "following").seatWords() == "Backup - following");
+    CHECK (std::string (model::pairWords::mainSending) == "Main - sending");
+    CHECK (std::string (model::pairWords::takeOver) == "Take over");
+    CHECK (std::string (model::pairWords::handOver) == "Hand over");
+    CHECK (std::string (model::pairWords::twoMains) == "Two mains!");
+    CHECK (std::string (model::pairWords::makeThisTheMain) == "Make this the main");
+    CHECK (std::string (model::pairWords::tab) == "Redundancy");
+
+    //  The implementer's, in the same shape, for the seats the author was not asked about.
+    CHECK (rig.seat ("backup", "waiting").seatWords() == "Backup - waiting");
+    CHECK (rig.seat ("backup", "leading").seatWords() == "Backup - sending");
+    CHECK (rig.seat ("main", "following").seatWords() == "Main - following");
+
+    //  Two machines both sending each say they send; the banner says there are two.
+    CHECK (rig.seat ("main", "bothSending").seatWords() == "Main - sending");
+    CHECK (rig.seat ("backup", "bothSending").seatWords() == "Backup - sending");
+
+    //  And what each means, in a sentence: who follows whom.
+    CHECK (rig.seat ("backup", "following").seatSentence().find ("follows the main") != std::string::npos);
+    CHECK (rig.seat ("main", "following").seatSentence().rfind ("The backup took over", 0) == 0);
+    CHECK (rig.seat ("main", "alone").seatSentence().find ("no backup follows it") != std::string::npos);
+
+    //  The same reading twice is equal - the window's redraw test - and a seat moved is not.
+    CHECK (model::readTransport (*rig.publishPair (2)) == model::readTransport (*rig.publishPair (2)));
+    const auto before = model::readTransport (*rig.publishPair (2));
+    rig.pairState.pairFollow.state = "leading";
+    CHECK (model::readTransport (*rig.publishPair (2)) != before);
+}
+
+TEST_CASE ("client: the pair's banner says the engine's alarm, with the one button that answers it")
+{
+    PairRig rig;
+    using pair::Role;
+    using pair::Seat;
+
+    const pair::Situation nobody;
+    const pair::NotInStep inStep;
+
+    /*  THE ENGINE'S OWN SENTENCES (pair/Leadership.h `alarm`), as serve
+        publishes them at `pair/alarm`. */
+    const auto banner = [&rig] (const char* role, const char* state, const std::string& alarm)
+    {
+        rig.pairState.pairFollow.alarm = alarm;
+        return rig.seat (role, state);
+    };
+
+    SUBCASE ("two mains: \"Two mains!\", and \"Make this the main\"")
+    {
+        rig.pairState.pairLink.linked = true;
+        const auto seen = banner ("backup", "bothSending",
+                                  pair::alarm ({ Role::backup, Seat::bothSending, "both-sending" }, nobody, inStep));
+
+        REQUIRE (seen.bannerShowing());
+        CHECK (seen.bannerHeading() == "Two mains!");
+        CHECK (seen.bannerAlarming());
+        REQUIRE (seen.bannerAct() == model::PairAct::keep);
+        CHECK (seen.buttonWords (model::PairAct::keep) == "Make this the main");
+        CHECK (seen.offer (model::PairAct::keep).open);
+
+        //  The engine's sentence answers the button in the author's word (AGO).
+        CHECK (seen.bannerSentence().find ("Make one of them the main") != std::string::npos);
+    }
+
+    SUBCASE ("a backup waiting for its main: \"Take over\"")
+    {
+        const auto seen = banner ("backup", "waiting",
+                                  pair::alarm ({ Role::backup, Seat::waiting, "started" }, nobody, inStep));
+
+        REQUIRE (seen.bannerShowing());
+        CHECK (seen.bannerHeading() == "Backup - waiting");
+        CHECK_FALSE (seen.bannerAlarming());
+        REQUIRE (seen.bannerAct() == model::PairAct::takeOver);
+        CHECK (seen.buttonWords (model::PairAct::takeOver) == "Take over");
+        CHECK (seen.offer (model::PairAct::takeOver).open);
+        CHECK (seen.bannerSentence().rfind ("Waiting for the main", 0) == 0);
+    }
+
+    SUBCASE ("a follower not in step: what differs, and \"Realign\"")
+    {
+        pair::NotInStep apart;
+        apart.differs = "cue Bed is running on the main, not here";
+        rig.pairState.pairFollow.differs = apart.differs;
+        rig.pairState.pairFollow.inStep = false;
+
+        const auto seen = banner ("backup", "following",
+                                  pair::alarm ({ Role::backup, Seat::following, "main-found" }, nobody, apart));
+
+        REQUIRE (seen.bannerShowing());
+        CHECK (seen.bannerHeading() == "Backup - following");
+        REQUIRE (seen.bannerAct() == model::PairAct::realign);
+        CHECK (seen.buttonWords (model::PairAct::realign) == "Realign");
+        CHECK (seen.bannerSentence().find ("cue Bed is running on the main, not here") != std::string::npos);
+    }
+
+    SUBCASE ("a show that differs: \"Take the main's show\", greyed with why while a cue runs")
+    {
+        pair::NotInStep differs;
+        differs.showDiffers = "the show differs: cue 4 Rain changed";
+        differs.showTextDiffers = true;
+        rig.pairState.pairFollow.showDiffers = differs.showDiffers;
+
+        const auto alarm = pair::alarm ({ Role::backup, Seat::following, "main-found" }, nobody, differs);
+        auto seen = banner ("backup", "following", alarm);
+
+        REQUIRE (seen.bannerAct() == model::PairAct::adoptShow);
+        CHECK (seen.buttonWords (model::PairAct::adoptShow) == "Take the main's show");
+        CHECK (seen.offer (model::PairAct::adoptShow).open);
+        CHECK (seen.bannerSentence() == alarm);
+
+        //  A cue running here, as `busyNow` counts it: started and not ended.
+        rig.runs.create ("RUNLIVE1", "B3N8R5TW", "media");
+        auto* run = rig.runs.find ("RUNLIVE1");
+        REQUIRE (run != nullptr);
+        run->state = cue::runState::playing;
+        run->launchRequestedAtTick = 120;
+        rig.parameters.markStale();
+
+        seen = rig.seat ("backup", "following");
+        CHECK (seen.busy);
+
+        const auto offered = seen.offer (model::PairAct::adoptShow);
+        CHECK_FALSE (offered.open);
+        CHECK (offered.reason == "busy");
+        CHECK (seen.bannerSentence() == alarm + " " + offered.words);
+        CHECK (offered.words.find ("Not while a cue runs here") != std::string::npos);
+
+        //  What the horizon only made ready does not count.
+        run->state = cue::runState::preparing;
+        run->launchRequestedAtTick = 0;
+        rig.parameters.markStale();
+        CHECK_FALSE (rig.seat ("backup", "following").busy);
+
+        //  A main following the backup that took over takes the backup's show.
+        CHECK (rig.seat ("main", "following").buttonWords (model::PairAct::adoptShow) == "Take the backup's show");
+    }
+
+    SUBCASE ("files alone: the alarm, and no button - files never travel")
+    {
+        pair::NotInStep files;
+        files.showDiffers = "1 sound missing here: tone.wav";
+        rig.pairState.pairFollow.showDiffers = files.showDiffers;
+
+        const auto seen = banner ("backup", "following",
+                                  pair::alarm ({ Role::backup, Seat::following, "main-found" }, nobody, files));
+
+        REQUIRE (seen.bannerShowing());
+        CHECK_FALSE (seen.bannerAct().has_value());
+        CHECK (seen.offer (model::PairAct::adoptShow).reason == "files-only");
+    }
+
+    SUBCASE ("the main lost and this backup took over: said, nothing to press")
+    {
+        const auto seen = banner ("backup", "leading",
+                                  pair::alarm ({ Role::backup, Seat::leading, "link-lost" }, nobody, inStep));
+
+        REQUIRE (seen.bannerShowing());
+        CHECK (seen.bannerHeading() == "Backup - sending");
+        CHECK_FALSE (seen.bannerAct().has_value());
+        CHECK (seen.bannerSentence() == "The main was lost and this machine took over: it sends now.");
+    }
+
+    SUBCASE ("in step and the same show: no banner")
+    {
+        rig.pairState.pairFollow.inStep = true;
+        rig.pairState.pairFollow.showMatch = true;
+        const auto seen = banner ("backup", "following", {});
+
+        CHECK_FALSE (seen.bannerShowing());
+        CHECK (seen.offer (model::PairAct::adoptShow).reason == "same-show");
+    }
+}
+
+TEST_CASE ("client: the pair's readout says the delay, the clocks and the jump a changeover makes")
+{
+    PairRig rig;
+    rig.pairState.pairLink.linked = true;
+    rig.pairState.pairLink.peer = "10.0.0.1:5010";
+    rig.pairState.pairLink.roundTrip = 0.0011;
+    rig.pairState.pairFollow.delay = 2;
+    rig.pairState.pairFollow.mapped = true;
+    rig.pairState.pairFollow.drift = -14.5;
+    rig.pairState.pairFollow.clockResidual = 341.0;
+    rig.pairState.pairFollow.outputLatency = 0.003771;
+    rig.pairState.pairFollow.peerOutputLatency = 0.01;
+    rig.pairState.pairSending = false;
+
+    const auto lines = rig.seat ("backup", "following").lines();
+
+    const auto value = [&lines] (const std::string& label)
+    {
+        for (const auto& line : lines)
+            if (line.label == label)
+                return line.value;
+
+        FAIL ("no line " << label);
+        return std::string();
+    };
+
+    CHECK (value ("This computer").rfind ("Backup - following. ", 0) == 0);
+    CHECK (value ("Sends to the devices").rfind ("No - everything meant for a device", 0) == 0);
+    CHECK (value ("The main") == "There, heard at 10.0.0.1:5010");
+    CHECK (value ("Round trip") == "1.1 ms there and back over the network");
+    CHECK (value ("Delay") == "Applies the main's commands 2 ticks (40 ms) after it");
+    CHECK (value ("Same sample").rfind ("Yes", 0) == 0);
+    CHECK (value ("Clock drift").rfind ("This computer's sound clock runs 14.5 parts per million slower", 0) == 0);
+    CHECK (value ("Clock drift").find ("52.2 ms an hour") != std::string::npos);
+    CHECK (value ("Clock match") == "Known to within 341 µs");
+    CHECK (value ("Output delay") == "This computer 3.8 ms · the main 10 ms");
+
+    /*  AGQ, THE AUTHOR'S: the jump said, and that nothing makes up for it. */
+    CHECK (value ("Changeover jump").rfind ("6.2 ms - the main's sound comes out 6.2 ms later than this computer's", 0) == 0);
+    CHECK (value ("Changeover jump").find ("Nothing makes up for it") != std::string::npos);
+
+    /*  A MAIN IS NEVER TOLD (RD.10's question): it says where to look. */
+    rig.pairState.pairFollow.delay = 2;
+    const auto main = rig.seat ("main", "leading").lines();
+    auto sameShow = std::string();
+
+    for (const auto& line : main)
+        if (line.label == "Same show")
+            sameShow = line.value;
+
+    CHECK (sameShow == "Checked on the backup - look at its screen");
+}
+
+TEST_CASE ("client: the pair's five and three settings are real commands, greyed exactly where the engine refuses")
+{
+    Rig rig;
+    pair::Pairing pairing;
+    pair::registerPairCommands (rig.engine.commands(), pairing);
+
+    const std::vector<Event> gestures
+    {
+        gesture::takeOver(), gesture::handOver(), gesture::keepTheShow(), gesture::realign(), gesture::adoptShow(),
+        gesture::setPairRole ("backup"), gesture::setPairPeers ("10.0.0.2 10.0.1.2:5011"), gesture::setPairTimeout (1.5)
+    };
+
+    for (const auto& event : gestures)
+    {
+        INFO (event.command);
+        CHECK (event.origin == origin::window);
+
+        const auto* command = rig.engine.commands().find (event.command);
+        REQUIRE (command != nullptr);
+        CHECK (CommandRegistry::checkArgs (*command, event.args).ok);
+    }
+
+    //  Each act is the command it names.
+    CHECK (model::eventFor (model::PairAct::takeOver).command == "pair.takeOver");
+    CHECK (model::eventFor (model::PairAct::handOver).command == "pair.handOver");
+    CHECK (model::eventFor (model::PairAct::keep).command == "pair.keep");
+    CHECK (model::eventFor (model::PairAct::realign).command == "pair.realign");
+    CHECK (model::eventFor (model::PairAct::adoptShow).command == "pair.adoptShow");
+
+    /*  THE THREE SETTINGS, APPLIED: the role, the peers made host:port, and a
+        float of 1.5 read as the 1.5 typed - in either locale. */
+    std::int64_t tick = 1;
+
+    for (const auto& event : { gesture::setPairRole ("backup"), gesture::setPairPeers ("10.0.0.2 10.0.1.2:5011"),
+                                gesture::setPairTimeout (1.5) })
+        CHECK (rig.apply (tick++, event.origin, event.command, event.args).applied == 1);
+
+    CHECK (pairing.inForce.role == "backup");
+    CHECK (pairing.inForce.peers == std::vector<std::string> { "10.0.0.2:5010", "10.0.1.2:5011" });
+    CHECK (pairing.inForce.timeout == doctest::Approx (1.5));
+
+    /*  THE WINDOW'S GREY IS THE ENGINE'S REFUSAL: every role against every seat,
+        the other machine there and not, each of the four the seat decides -
+        pressed through the real handlers - refused exactly where the window
+        greys it, and for the reason the window names. */
+    for (const auto* role : { "none", "main", "backup" })
+        for (const auto seat : { pair::Seat::alone, pair::Seat::leading, pair::Seat::following,
+                                 pair::Seat::waiting, pair::Seat::bothSending })
+            for (const auto there : { false, true })
+            {
+                pairing.seated = { pair::roleNamed (role), seat, "test" };
+                pairing.peerNow = [there] { return there ? std::string ("following") : std::string(); };
+
+                model::PairReading reading;
+                reading.role = role;
+                reading.state = pair::wordOf (seat);
+                reading.linked = there ? model::Flag::yes : model::Flag::no;
+
+                for (const auto act : { model::PairAct::takeOver, model::PairAct::handOver,
+                                        model::PairAct::keep, model::PairAct::realign })
+                {
+                    const auto event = model::eventFor (act);
+                    INFO (role << " " << pair::wordOf (seat) << (there ? " linked " : " alone ") << event.command);
+
+                    const auto offered = reading.offer (act);
+                    const auto refused = rig.apply (tick++, event.origin, event.command, event.args).applied == 0;
+
+                    CHECK (refused == ! offered.open);
+
+                    if (refused)
+                    {
+                        const auto fields = model::words (rig.engine.lastError());
+                        REQUIRE (fields.size() >= 5);
+                        CHECK (fields[3] == offered.reason);
+                        CHECK_FALSE (offered.words.empty());
+                    }
+
+                    pairing.asked.reset();
+                    pairing.realignAsked = false;
+                }
+            }
+
+    //  Taking the leader's show: refused where the window greys it for the seat, and for a cue running.
+    auto busy = false;
+    pairing.busyNow = [&busy] { return busy; };
+
+    for (const auto seat : { pair::Seat::alone, pair::Seat::leading, pair::Seat::following })
+        for (const auto running : { false, true })
+        {
+            pairing.seated = { pair::Role::backup, seat, "test" };
+            busy = running;
+
+            model::PairReading reading;
+            reading.role = "backup";
+            reading.state = pair::wordOf (seat);
+            reading.busy = running;
+            reading.showDiffers = "the show differs: cue 4 Rain changed";
+
+            const auto offered = reading.offer (model::PairAct::adoptShow);
+
+            if (offered.open)
+                continue;       // the rig holds no show of a leader's: the engine would say not-fetched
+
+            REQUIRE (rig.apply (tick++, origin::window, "pair.adoptShow").applied == 0);
+            CHECK (model::words (rig.engine.lastError())[3] == offered.reason);
+        }
 }

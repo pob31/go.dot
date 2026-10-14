@@ -496,8 +496,8 @@ TEST_CASE ("leadership: the alarm in front of the operator, and empty when there
               " or is told to take over.");
 
     CHECK (pair::alarm ({ Role::main, Seat::bothSending, "both-sending" }, nobody, inStep)
-           == "Both machines are sending: every command reaches the devices from both. Keep the show on one of"
-              " them; the other will hold and follow.");
+           == "Both machines are sending: every command reaches the devices from both. Make one of them the"
+              " main; the other will hold and follow.");
 
     //  The main lost and this backup took over - until the main, back, follows it.
     CHECK (pair::alarm ({ Role::backup, Seat::leading, "link-lost" }, nobody, inStep)

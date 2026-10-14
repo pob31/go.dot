@@ -3,6 +3,11 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/ui/Look.h>
+#include <wfg/client/ui/TransportComponent.h>
+#include <wfg/client/model/Pair.h>
+#include <wfg/client/model/Transport.h>
+#include <wfg/engine/pair/Leadership.h>
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/MidiPorts.h>
@@ -20,6 +25,7 @@
 #include <algorithm>
 #include <functional>
 #include <initializer_list>
+#include <optional>
 #include <chrono>
 #include <cstddef>
 #include <string>
@@ -1003,7 +1009,9 @@ TEST_CASE ("show settings UI: the MIDI tab declares ports and offers this machin
 
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
-    CHECK (tabs->getTabNames().indexOf ("MIDI") == tabs->getTabNames().indexOf ("Network") + 1);
+    //  After Network and the Redundancy tab beside it (namespace draft §58, AGP).
+    CHECK (tabs->getTabNames().indexOf ("MIDI") == tabs->getTabNames().indexOf ("Redundancy") + 1);
+    CHECK (tabs->getTabNames().indexOf ("Redundancy") == tabs->getTabNames().indexOf ("Network") + 1);
 
     tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("MIDI"));
 
@@ -2106,4 +2114,448 @@ TEST_CASE ("show settings UI: the Timecode tab's Coming in part sends a node.set
 
     for (auto* control : std::initializer_list<juce::Component*> { ltcIn, mtcIn, tolerance, jumpPast, catchUp, crossfade })
         CHECK_FALSE (control->isEnabled());
+}
+
+//==============================================================================
+/*  REDUNDANCY ON SCREEN (namespace draft §58, RD.11): the Redundancy tab of
+    Show settings - after Network, the author's AGP - and the transport's words
+    and banner, each state painted into a PNG when WFG_SNAPSHOT_DIR is set.
+
+    THE PICTURES ARE PAINTED, NEVER CAPTURED: `createComponentSnapshot` draws a
+    component into an image with no screen involved. The transport is a plain
+    component that is never put on the desktop; the settings window, which
+    shows itself as it is made (as every test in this file finds it), is hidden
+    again at once, before anything is drawn. */
+namespace
+{
+    /*  THE WINDOW'S OWN LOOK for the pictures, as Client.cpp sets it, and put
+        back before the look itself goes. */
+    struct DefaultLook
+    {
+        explicit DefaultLook (juce::LookAndFeel& look) { juce::Desktop::getInstance().setDefaultLookAndFeel (&look); }
+        ~DefaultLook() { juce::Desktop::getInstance().setDefaultLookAndFeel (nullptr); }
+
+        DefaultLook (const DefaultLook&) = delete;
+        DefaultLook& operator= (const DefaultLook&) = delete;
+    };
+
+    void snapshotTo (juce::Component& component, const juce::String& name)
+    {
+        const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+        if (dir.isEmpty())
+            return;
+
+        const auto picture = component.createComponentSnapshot (component.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile (name) };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    juce::Label* labelSaying (juce::Component& root, const juce::String& text)
+    {
+        if (auto* candidate = dynamic_cast<juce::Label*> (&root))
+            if (candidate->getText() == text) return candidate;
+        for (auto* child : root.getChildren())
+            if (auto* found = labelSaying (*child, text)) return found;
+        return nullptr;
+    }
+
+    /*  ONE STATE OF A PAIR, as serve fills `EngineState` from the link, the
+        follower and the leadership - the alarm the engine's own sentence. */
+    struct PairState
+    {
+        const char* name = "";
+        const char* role = "none";
+        const char* seat = "alone";
+        bool linked = false;
+        std::string alarm = {};
+        std::function<void (tree::EngineState&)> more = {};
+    };
+
+    std::vector<PairState> pairStates()
+    {
+        using pair::Role;
+        using pair::Seat;
+
+        const pair::Situation nobody;
+        const pair::NotInStep inStep;
+
+        pair::NotInStep showDiffers;
+        showDiffers.showDiffers = "the show differs: cue 4 Rain changed";
+        showDiffers.showTextDiffers = true;
+
+        pair::NotInStep apart;
+        apart.differs = "cue Bed is running on the main, not here";
+
+        const auto timing = [] (tree::EngineState& state, bool follows)
+        {
+            state.pairLink.roundTrip = 0.0011;
+            state.pairLink.received = 1840;
+            state.pairFollow.delay = 2;
+            state.pairFollow.outputLatency = follows ? 0.010 : 0.003771;
+            state.pairFollow.peerOutputLatency = follows ? 0.003771 : 0.010;
+
+            if (follows)
+            {
+                state.pairFollow.mapped = true;
+                state.pairFollow.drift = 14.5;
+                state.pairFollow.clockResidual = 341.0;
+                state.pairFollow.relayed = 3;
+                state.pairSending = false;
+            }
+        };
+
+        return {
+            { "not-paired", "none", "alone", false, {}, {} },
+            { "main-sending", "main", "leading", true, {},
+              [timing] (tree::EngineState& s) { timing (s, false); s.pairLink.peer = "ws:192.168.1.21:52344"; } },
+            { "main-alone", "main", "alone", false, {},
+              [] (tree::EngineState& s) { s.pairSettings.peers = { "192.168.1.21:5010" }; s.pairFollow.outputLatency = 0.003771; } },
+            { "backup-following", "backup", "following", true, {},
+              [timing] (tree::EngineState& s) { timing (s, true); s.pairLink.peer = "192.168.1.20:5010";
+                                                 s.pairFollow.inStep = true; s.pairFollow.showMatch = true; } },
+            { "backup-waiting", "backup", "waiting", false,
+              pair::alarm ({ Role::backup, Seat::waiting, "started" }, nobody, inStep),
+              [] (tree::EngineState& s) { s.pairSettings.peers = { "192.168.1.20:5010" }; s.pairSending = false;
+                                          s.pairFollow.outputLatency = 0.010; } },
+            { "two-mains", "backup", "bothSending", true,
+              pair::alarm ({ Role::backup, Seat::bothSending, "both-sending" }, nobody, inStep),
+              [timing] (tree::EngineState& s) { timing (s, false); s.pairLink.peer = "192.168.1.20:5010"; } },
+            { "not-in-step", "backup", "following", true,
+              pair::alarm ({ Role::backup, Seat::following, "main-found" }, nobody, apart),
+              [timing, apart] (tree::EngineState& s) { timing (s, true); s.pairLink.peer = "192.168.1.20:5010";
+                                                       s.pairFollow.differs = apart.differs; s.pairFollow.showMatch = true; } },
+            { "show-differs", "backup", "following", true,
+              pair::alarm ({ Role::backup, Seat::following, "main-found" }, nobody, showDiffers),
+              [timing, showDiffers] (tree::EngineState& s) { timing (s, true); s.pairLink.peer = "192.168.1.20:5010";
+                                                             s.pairFollow.showDiffers = showDiffers.showDiffers; } },
+            { "backup-took-over", "backup", "leading", false,
+              pair::alarm ({ Role::backup, Seat::leading, "link-lost" }, nobody, inStep),
+              [] (tree::EngineState& s) { s.pairSettings.peers = { "192.168.1.20:5010" }; s.pairFollow.outputLatency = 0.010; } },
+            { "main-following", "main", "following", true, {},
+              [timing] (tree::EngineState& s) { timing (s, true); s.pairLink.peer = "ws:192.168.1.21:52344";
+                                                 s.pairFollow.inStep = true; s.pairFollow.showMatch = true; } },
+        };
+    }
+
+    void seatThe (tree::EngineState& state, const PairState& pair)
+    {
+        state.pairSettings = {};
+        state.pairLink = {};
+        state.pairFollow = {};
+        state.pairSending = true;
+
+        state.pairSettings.role = pair.role;
+        state.pairFollow.state = pair.seat;
+
+        //  The other computer's address, as a paired machine would have it.
+        if (std::string (pair.role) == "main")
+            state.pairSettings.peers = { "192.168.1.21:5010" };
+        else if (std::string (pair.role) == "backup")
+            state.pairSettings.peers = { "192.168.1.20:5010" };
+        state.pairLink.linked = pair.linked;
+        state.pairFollow.alarm = pair.alarm;
+
+        if (pair.more)
+            pair.more (state);
+    }
+}
+
+TEST_CASE ("show settings UI: the Redundancy tab sits after Network, and its three settings are this machine's own commands")
+{
+    Rig rig;
+    client::ui::Look look (rig.theme);
+    const DefaultLook guard (look);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setVisible (false);       // painted, never shown: see above
+    panel.setSize (1200, 740);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    //  The author's word for the tab (AGP), after Network and before MIDI.
+    const auto names = tabs->getTabNames();
+    REQUIRE (names.contains ("Redundancy"));
+    CHECK (names.indexOf ("Redundancy") == names.indexOf ("Network") + 1);
+    CHECK (names.indexOf ("MIDI") == names.indexOf ("Redundancy") + 1);
+
+    tabs->setCurrentTabIndex (names.indexOf ("Redundancy"));
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    //  It says first that it belongs to this computer and not the show.
+    std::vector<juce::TextEditor*> boxes;
+    std::vector<juce::Label*> labels;
+    std::function<void (juce::Component&)> collect = [&] (juce::Component& at)
+    {
+        if (auto* box = dynamic_cast<juce::TextEditor*> (&at)) boxes.push_back (box);
+        if (auto* label = dynamic_cast<juce::Label*> (&at)) labels.push_back (label);
+        for (auto* child : at.getChildren()) collect (*child);
+    };
+    collect (*page);
+
+    CHECK (std::any_of (labels.begin(), labels.end(), [] (const juce::Label* l)
+                        { return l->getText().startsWith ("These settings belong to this computer, not to the show"); }));
+
+    auto* role = component<juce::ComboBox> (*page);
+    REQUIRE (role != nullptr);
+    REQUIRE (boxes.size() == 2u);
+    auto* peers = boxes[0];
+    auto* timeout = boxes[1];
+
+    //  Unpaired, as a machine with no pairing.xml is.
+    CHECK (role->getText() == "Not paired");
+    CHECK (timeout->getText() == "1");
+
+    /*  EACH SETTING IS ITS OWN MACHINE-LOCAL COMMAND (AGC), never a node.set,
+        and a value already in force is not sent again. */
+    role->setSelectedId (3, juce::sendNotificationSync);
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent.back().command == "pair.setRole");
+    CHECK (rig.sent.back().origin == "window");
+    CHECK (rig.sent.back().args[0].getString() == "backup");
+
+    peers->setText ("192.168.1.20 10.0.0.20:5011", juce::dontSendNotification);
+    peers->onReturnKey();
+    REQUIRE (rig.sent.size() == 2u);
+    CHECK (rig.sent.back().command == "pair.setPeers");
+    CHECK (rig.sent.back().args[0].getString() == "192.168.1.20 10.0.0.20:5011");
+
+    //  A comma is a decimal point, as a French booth types it; the float is the command's own type.
+    timeout->setText ("1,5", juce::dontSendNotification);
+    timeout->onReturnKey();
+    REQUIRE (rig.sent.size() == 3u);
+    CHECK (rig.sent.back().command == "pair.setTimeout");
+    REQUIRE (rig.sent.back().args[0].isFloat32());
+    CHECK (rig.sent.back().args[0].getFloat32() == doctest::Approx (1.5f));
+
+    timeout->setText ("1", juce::dontSendNotification);
+    timeout->onFocusLost();
+    CHECK (rig.sent.size() == 3u);
+
+    /*  THE OPERATOR'S FIVE, GREYED WITH WHY: unpaired, every one refused and a
+        sentence beside each; a backup following, Take over open - and pressed,
+        its one command. */
+    for (const auto* words : { "Take over", "Hand over", "Make this the main", "Realign", "Take the main's show" })
+    {
+        INFO (words);
+        auto* act = button (*page, words);
+        REQUIRE (act != nullptr);
+        CHECK_FALSE (act->isEnabled());
+    }
+
+    CHECK (labelSaying (*page, "This computer is not paired: choose Main or Backup above.") != nullptr);
+
+    for (const auto& state : pairStates())
+    {
+        INFO (state.name);
+        seatThe (rig.state, state);
+        panel.refresh (*rig.publish());
+
+        const auto reading = client::model::readPair (*rig.publish());
+        CHECK (role->getText() == (std::string (state.role) == "main" ? "Main"
+                                   : std::string (state.role) == "backup" ? "Backup" : "Not paired"));
+
+        for (const auto act : { client::model::PairAct::takeOver, client::model::PairAct::handOver,
+                                client::model::PairAct::keep, client::model::PairAct::realign,
+                                client::model::PairAct::adoptShow })
+        {
+            const auto offered = reading.offer (act);
+            auto* pressed = button (*page, reading.buttonWords (act));
+            REQUIRE (pressed != nullptr);
+            CHECK (pressed->isEnabled() == offered.open);
+            CHECK (labelSaying (*page, offered.words) != nullptr);
+        }
+
+        /*  THE WHOLE TAB in the picture: at the window's own height the
+            readout under the five scrolls. */
+        panel.setSize (1200, 1240);
+        snapshotTo (panel, "redundancy-tab-" + juce::String (state.name) + ".png");
+        panel.setSize (1200, 740);
+    }
+
+    //  The readout of a backup following: the jump a changeover makes, said with what makes up for it - nothing.
+    seatThe (rig.state, pairStates()[3]);
+    panel.refresh (*rig.publish());
+    CHECK (labelSaying (*page, "Changeover jump") != nullptr);
+    CHECK (labelSaying (*page, "6.2 ms - the main's sound comes out 6.2 ms earlier than this computer's. Nothing makes up"
+                               " for it: both start each sound on the same sample, and each interface takes its own"
+                               " time") != nullptr);
+
+    auto* takeOver = button (*page, "Take over");
+    REQUIRE (takeOver != nullptr);
+    REQUIRE (takeOver->isEnabled());
+
+    rig.sent.clear();
+    takeOver->onClick();
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent.back().command == "pair.takeOver");
+    CHECK (rig.sent.back().args.empty());
+
+    //  And Getting started lists it after Network, with what it is for.
+    tabs->setCurrentTabIndex (names.indexOf ("Getting started"));
+    auto* started = tabs->getCurrentContentComponent();
+    REQUIRE (started != nullptr);
+    auto* go = button (*started, "Redundancy");
+    REQUIRE (go != nullptr);
+    go->onClick();
+    CHECK (tabs->getCurrentTabIndex() == names.indexOf ("Redundancy"));
+}
+
+TEST_CASE ("transport UI: what this computer is beside the show's name, and the banner when the pair needs a hand")
+{
+    Rig rig;
+
+    //  A show to stand the transport on: a list, two cues, the standby on the first.
+    const auto list = rig.document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto rain = rig.document.createCue (list.id, 0, "memo", "Rain");
+    REQUIRE (rain.ok);
+    REQUIRE (rig.document.createCue (list.id, 1, "memo", "Thunder").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rain.id + "/notes", "When the lights go blue").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/list/" + list.id + "/standby", rain.id).ok);
+    rig.state.documentName = "Storm";
+    rig.state.sampleRate = 48000;
+    rig.state.blockSize = 256;
+    rig.state.clock = "device";
+    rig.state.audioStatus = "running";
+
+    client::ui::Look look (rig.theme);
+    const DefaultLook guard (look);
+
+    std::vector<client::model::PairAct> pressed;
+    client::ui::TransportComponent::Actions actions;
+    actions.pair = [&pressed] (client::model::PairAct act) { pressed.push_back (act); };
+
+    //  A plain component, never put on the desktop.
+    client::ui::TransportComponent transport (rig.theme, std::move (actions));
+    transport.setSize (1180, transport.preferredHeight());
+
+    const auto showIt = [&transport, &rig]
+    {
+        transport.show (client::model::readTransport (*rig.publish()));
+        transport.setSize (1180, transport.preferredHeight());
+    };
+
+    //  Not paired: no words, no banner, and not a pixel of height for either.
+    seatThe (rig.state, pairStates()[0]);
+    showIt();
+    const auto unpairedHeight = transport.preferredHeight();
+    snapshotTo (transport, "transport-not-paired.png");
+
+    struct Wanted { const char* name = ""; const char* words = ""; const char* heading = nullptr;
+                    const char* button = nullptr; std::optional<client::model::PairAct> act = {}; };
+
+    for (const auto& wanted : { Wanted { "main-sending", "Main - sending", nullptr, nullptr, std::nullopt },
+                                Wanted { "main-alone", "Main - alone", nullptr, nullptr, std::nullopt },
+                                Wanted { "backup-following", "Backup - following", nullptr, nullptr, std::nullopt },
+                                Wanted { "backup-waiting", "Backup - waiting", "Backup - waiting", "Take over",
+                                         client::model::PairAct::takeOver },
+                                Wanted { "two-mains", "Backup - sending", "Two mains!", "Make this the main",
+                                         client::model::PairAct::keep },
+                                Wanted { "not-in-step", "Backup - following", "Backup - following", "Realign",
+                                         client::model::PairAct::realign },
+                                Wanted { "show-differs", "Backup - following", "Backup - following",
+                                         "Take the main's show", client::model::PairAct::adoptShow },
+                                Wanted { "backup-took-over", "Backup - sending", "Backup - sending", nullptr, std::nullopt },
+                                Wanted { "main-following", "Main - following", nullptr, nullptr, std::nullopt } })
+    {
+        INFO (wanted.name);
+
+        for (const auto& state : pairStates())
+            if (std::string (state.name) == wanted.name)
+                seatThe (rig.state, state);
+
+        showIt();
+
+        //  The words on the title line, always while a role is set.
+        auto* seat = labelSaying (transport, wanted.words);
+        REQUIRE (seat != nullptr);
+        CHECK (seat->isVisible());
+        CHECK_FALSE (seat->getBounds().isEmpty());
+
+        if (wanted.heading == nullptr)
+        {
+            //  Nothing to act on: no banner, and the strip as tall as an unpaired one.
+            CHECK (transport.preferredHeight() == unpairedHeight);
+        }
+        else
+        {
+            CHECK (transport.preferredHeight() > unpairedHeight);
+
+            //  The heading - a word, never a colour alone - and the engine's sentence under it.
+            const auto headings = [&transport, &wanted]
+            {
+                int found = 0;
+                std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+                {
+                    if (auto* label = dynamic_cast<juce::Label*> (&at))
+                        if (label->getText() == wanted.heading && label->isVisible()) ++found;
+                    for (auto* child : at.getChildren()) walk (*child);
+                };
+                walk (transport);
+                return found;
+            }();
+
+            CHECK (headings >= 1);
+
+            if (wanted.button != nullptr)
+            {
+                auto* answer = button (transport, wanted.button);
+                REQUIRE (answer != nullptr);
+                CHECK (answer->isVisible());
+                CHECK (answer->isEnabled());
+
+                pressed.clear();
+                answer->onClick();
+                REQUIRE (pressed.size() == 1u);
+                CHECK (pressed.back() == *wanted.act);
+            }
+        }
+
+        snapshotTo (transport, "transport-" + juce::String (wanted.name) + ".png");
+    }
+
+    /*  A BUTTON THE ENGINE WOULD REFUSE IS GREYED, AND THE BANNER SAYS WHY:
+        the main's show offered while a cue runs here. */
+    for (const auto& state : pairStates())
+        if (std::string (state.name) == "show-differs")
+            seatThe (rig.state, state);
+
+    rig.runs.create ("RUNLIVE1", rain.id, "memo");
+    auto* run = rig.runs.find ("RUNLIVE1");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::playing;
+    run->launchRequestedAtTick = 120;
+
+    showIt();
+
+    auto* adopt = button (transport, "Take the main's show");
+    REQUIRE (adopt != nullptr);
+    CHECK_FALSE (adopt->isEnabled());
+    CHECK (adopt->getTooltip() == "Not while a cue runs here: stop it first.");
+
+    std::vector<juce::String> sentences;
+    std::function<void (juce::Component&)> gather = [&] (juce::Component& at)
+    {
+        if (auto* label = dynamic_cast<juce::Label*> (&at))
+            if (label->isVisible()) sentences.push_back (label->getText());
+        for (auto* child : at.getChildren()) gather (*child);
+    };
+    gather (transport);
+
+    CHECK (std::any_of (sentences.begin(), sentences.end(), [] (const juce::String& said)
+                        { return said.endsWith ("Not while a cue runs here: stop it first."); }));
+
+    snapshotTo (transport, "transport-show-differs-busy.png");
 }

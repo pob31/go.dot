@@ -14,7 +14,7 @@
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-/*  THE ONE DOOR EVERY RENDER GOES THROUGH. app.js puts `render` and its five
+/*  THE ONE DOOR EVERY RENDER GOES THROUGH. app.js puts `render` and its six
     parts here; the poll draws through `view.render`, a click that changes what
     is folded or picked redraws through it, and `render` calls each part as
     `view.renderLists()` and the rest - never by a name bound in some module.

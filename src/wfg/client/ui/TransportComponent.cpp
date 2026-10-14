@@ -18,6 +18,8 @@
 
 #include <wfg/client/ui/Look.h>
 
+#include <initializer_list>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -46,7 +48,7 @@ namespace wfg::client::ui
     {
         for (auto* label : { &showLabel, &clockLabel, &rateLabel,
                              &listLabel, &standbyLabel, &notesLabel, &statusLabel, &errorLabel,
-                             &noticeLabel, &dialLabel })
+                             &noticeLabel, &dialLabel, &pairLabel })
         {
             label->setJustificationType (juce::Justification::centredLeft);
             label->setMinimumHorizontalScale (1.0f);
@@ -75,6 +77,23 @@ namespace wfg::client::ui
             button->onClick = [action] { if (*action) (*action)(); };
             addAndMakeVisible (button);
         }
+
+        /*  THE PAIR'S BANNER (RD.11): hidden until the engine says something
+            needs a hand, its button pressing whichever of the operator's five
+            the banner is about - and, like every button here, never the
+            keyboard's. */
+        for (auto* label : { &pairHeading, &pairSentence })
+        {
+            label->setMinimumHorizontalScale (1.0f);
+            addChildComponent (label);
+        }
+
+        pairHeading.setJustificationType (juce::Justification::centredLeft);
+        pairSentence.setJustificationType (juce::Justification::topLeft);
+
+        pairButton.setWantsKeyboardFocus (false);
+        pairButton.onClick = [this] { if (pairAct.has_value() && actions.pair) actions.pair (*pairAct); };
+        addChildComponent (pairButton);
 
         /*  THE TWO PRESSED WITHOUT LOOKING ARE READ FROM FURTHEST AWAY
             (author, 2026-09-18): GO at twice the button type, PANIC at one and
@@ -149,6 +168,16 @@ namespace wfg::client::ui
 
         noticeLabel.setFont (Look::font (theme, 13.0f));
         noticeLabel.setColour (juce::Label::textColourId, Look::colour (theme, "waiting"));
+
+        /*  WHAT THIS COMPUTER IS, in the reading ink and a word, never a
+            colour alone (§4.8); the banner's heading in the banner's own
+            colour, set with the banner (`dressPair`), and its sentence in the
+            colour the recovery offer is written in. */
+        pairLabel.setFont (Look::font (theme, 13.0f));
+        pairLabel.setColour (juce::Label::textColourId, ink);
+        pairHeading.setFont (Look::font (theme, 15.0f).boldened());
+        pairSentence.setFont (Look::font (theme, 12.0f));
+        pairSentence.setColour (juce::Label::textColourId, dim);
 
         dressGo();
         dressDoh();
@@ -242,6 +271,10 @@ namespace wfg::client::ui
             showDohNotice (dohNow);
 
         const auto audioMoved = ! shownOnce || reading.status != last.status;
+        const auto pairWas = pairShowing;
+        const auto seatWas = pairLabel.getText();
+
+        dressPair (reading.pair);
 
         last = reading;
         shownOnce = true;
@@ -253,7 +286,7 @@ namespace wfg::client::ui
         /*  EVERY READING: the tick moves on each one, and the fade with it. */
         dressDoh();
 
-        if (bannerShowing != wasShowing)
+        if (bannerShowing != wasShowing || pairShowing != pairWas)
         {
             recoverButton.setVisible (bannerShowing);
             discardButton.setVisible (bannerShowing);
@@ -267,6 +300,58 @@ namespace wfg::client::ui
             resized();
             repaint();
         }
+        else if (pairLabel.getText() != seatWas)
+        {
+            //  The title line makes room for the words, as it does for the lock's.
+            resized();
+        }
+    }
+
+    void TransportComponent::dressPair (const model::PairReading& pair)
+    {
+        pairLabel.setText (juce::String (pair.seatWords()), juce::dontSendNotification);
+        pairLabel.setTooltip (pair.paired() ? juce::String (pair.seatSentence()) : juce::String());
+
+        const auto alarmingWas = pairShowing && last.pair.bannerAlarming();
+        pairShowing = pair.bannerShowing();
+        pairAct = pairShowing ? pair.bannerAct() : std::nullopt;
+
+        for (auto* part : std::initializer_list<juce::Component*> { &pairHeading, &pairSentence })
+            part->setVisible (pairShowing);
+
+        if (! pairShowing)
+        {
+            pairButton.setVisible (false);
+            return;
+        }
+
+        /*  "TWO MAINS!" IN THE REFUSAL'S RED, every other alarm in the
+            standby's amber, as the recovery offer is: the words say which
+            (§4.8), the colour is for the eye that already knows. */
+        const auto alarming = pair.bannerAlarming();
+        pairHeading.setColour (juce::Label::textColourId, Look::colour (theme, alarming ? "failed" : "standby"));
+        pairHeading.setText (juce::String (pair.bannerHeading()), juce::dontSendNotification);
+
+        /*  THE ENGINE'S SENTENCE, bounded twice: the model clips it, and the
+            label, two lines high, shows what fits - the whole of it on hover. */
+        const auto sentence = juce::String (pair.bannerSentence());
+        pairSentence.setText (sentence, juce::dontSendNotification);
+        pairSentence.setTooltip (sentence);
+
+        pairButton.setVisible (pairAct.has_value());
+
+        if (pairAct.has_value())
+        {
+            const auto offered = pair.offer (*pairAct);
+            pairButton.setButtonText (juce::String (pair.buttonWords (*pairAct)));
+            pairButton.setEnabled (offered.open);
+            pairButton.setTooltip (juce::String (offered.words));
+            pairButton.setColour (juce::TextButton::textColourOffId,
+                                  Look::colour (theme, alarming ? "failed" : "standby"));
+        }
+
+        if (alarming != alarmingWas)
+            repaint (pairArea);
     }
 
     void TransportComponent::setNotice (const juce::String& notice)
@@ -392,6 +477,7 @@ namespace wfg::client::ui
                         + row                       // show, lock, error or notice, dial, clock, rate
                         + row / 2
                         + (bannerShowing ? row * 4 : 0)
+                        + (pairShowing ? row * 3 : 0)
                         + row * 2;                  // the standby, and GO
 
         return rows;
@@ -437,6 +523,18 @@ namespace wfg::client::ui
                               banner.reduced (pad, pad / 2).withTrimmedRight (row * 7),
                               juce::Justification::topLeft, 6, 1.0f);
         }
+
+        /*  THE PAIR'S BANNER, the recovery offer's shape: the same ground, a
+            stripe down its left edge - red for two machines both sending, amber
+            for the rest - and the heading saying which in words. */
+        if (pairShowing && ! pairArea.isEmpty())
+        {
+            g.setColour (Look::colour (theme, "panel-high"));
+            g.fillRect (pairArea);
+
+            g.setColour (Look::colour (theme, last.pair.bannerAlarming() ? "failed" : "standby"));
+            g.fillRect (pairArea.getX(), pairArea.getY(), 2, pairArea.getHeight());
+        }
     }
 
     void TransportComponent::resized()
@@ -468,6 +566,16 @@ namespace wfg::client::ui
         else
             statusLabel.setBounds ({});
 
+        /*  AND WHAT THIS COMPUTER IS IN ITS PAIR, right after (RD.11): always
+            there while a role is set, so a glance at the title line says which
+            machine this is - and no room taken on a machine that is not paired. */
+        if (pairLabel.getText().isNotEmpty())
+            pairLabel.setBounds (top.removeFromLeft (juce::GlyphArrangement::getStringWidthInt (pairLabel.getFont(),
+                                                                                                  pairLabel.getText())
+                                                     + row));
+        else
+            pairLabel.setBounds ({});
+
         if (dialLabel.getText().isNotEmpty())
             dialLabel.setBounds (top.removeFromRight (juce::jmin (row * 14, top.getWidth() / 2)));
         else
@@ -489,6 +597,26 @@ namespace wfg::client::ui
             recoverButton.setBounds (choice.removeFromTop (row).reduced (1));
             choice.removeFromTop (pad / 2);
             discardButton.setBounds (choice.removeFromTop (row).reduced (1));
+        }
+
+        /*  THE PAIR'S BANNER UNDER IT, three rows less the half row of air
+            below: the heading, two lines of the sentence, and the one button
+            on the right where the recovery offer puts its own. */
+        if (pairShowing)
+        {
+            pairArea = area.removeFromTop (row * 3).withTrimmedBottom (row / 2);
+
+            auto inside = pairArea.reduced (pad, pad / 4);
+            auto choice = inside.removeFromRight (row * 8);
+            pairButton.setBounds (choice.withSizeKeepingCentre (choice.getWidth(), row).reduced (1));
+            inside.removeFromRight (pad);
+
+            pairHeading.setBounds (inside.removeFromTop (row));
+            pairSentence.setBounds (inside);
+        }
+        else
+        {
+            pairArea = {};
         }
 
         /*  GO ON THE LEFT AND THE CUE IT WILL FIRE BESIDE IT (author,

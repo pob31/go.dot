@@ -26395,6 +26395,73 @@ socket's asymmetry, which half the round trip bounds and no exchange can see.
   followed clock ends it, and a second capture needs another serve; a stop by TerminateProcess leaves `closed` false
   and up to a second unflushed; the sidecar's `firstSample` is on the AudioHost's count, which restarts with every
   open, and not on the session clock's (`SessionAudioClock`), whose offset from it serve sets once the ticks start.
+- **RD.11**, 2026-10-15: the screens, the guides, the close-out (AGM-AGP; AGQ said on screen). WHAT THE
+  ROWS SAY, IN WORDS (`client/model/Pair.h`, std only, a reading of the snapshot): the seat in AGM's words
+  and the implementer's in their shape; the banner - `pair/alarm`, the engine's own sentence, with the one
+  button that answers it, chosen from the rows and never from the alarm's words: both sending, *Make this
+  the main* (`pair.keep`); a backup waiting, *Take over*; following with a show whose text differs (the
+  sentence opens with "the show differs", ShowCheck.cpp's), *Take the main's show* (`pair.adoptShow`) - on
+  a main following a backup, *Take the backup's show*; following and not in step with something said,
+  *Realign*; any other alarm (taken over, files alone, a seat on its way) said with no button. Whether a
+  command would be taken is THE ENGINE'S OWN RULE asked with the rows - `pair::refusal` for the three that
+  move a seat, the seat for `realign` and `adoptShow`, a cue running here (`run/order`, started and not
+  ended, the horizon's preparations left out, as `busyNow`) for `busy` - and what the rows say before the
+  engine would (`same-show`, `not-compared`, `files-only`, each `not-fetched` there): a greyed button
+  always has its reason in words beside it, and in the banner's sentence. ClientTests presses the four
+  seat commands through the real handlers for every role, seat and link and finds them refused exactly
+  where the window greys them, for the reason it names. THE WINDOW: the seat on the transport's title
+  line after the show's name and the lock, nothing at all when not paired; the banner under it, after the
+  recovery offer when both are up, the recovery offer's shape - amber, red with "Two mains!" - and its
+  button greyed with why; a Redundancy submenu in the Show menu, on a paired machine, holding the five,
+  which the lock does not grey (the settings window greys every tab under the lock, and the engine never
+  refuses the pair's commands for it); and the Redundancy tab of Show settings after Network (AGP), saying
+  first that it is this computer's and not the show's, its role menu, the other computer's addresses and
+  the timeout each one machine-local command (`pair.setRole`, `pair.setPeers`, `pair.setTimeout` with the
+  float its signature names, a comma read as a point), the five with what each does or why not, and the
+  readout: what this computer is and whether it sends, the other there or looked for, the round trip, the
+  delay and the extra lead, the same sample, the drift in parts per million and as milliseconds an hour,
+  how well the clocks are matched, each interface's output delay and THE JUMP A CHANGEOVER MAKES, with
+  "Nothing makes up for it" (AGQ), in step, the same show, what went down the link. Getting started lists
+  the tab after Network and its intro says Redundancy is not saved with the show. THE PAGE: one line under
+  the transport (`#pair`), shown on a computer with a role: the seat and what it means, or the alarm in
+  amber or red; the five as `data-cmd` buttons in commands.json's "buttons", shown where the engine would
+  take them and the alarm's own shown greyed with its reason (`clients/console/model/pair.js`, the
+  desktop's model said again, the same words). RD.7's both-sending alarm now answers AGO's button: "Make one
+  of them the main; the other will hold and follow." (was "Keep the show on one of them"). A MAIN IS NEVER
+  TOLD - RD.10's question: no row on a leader says whether its follower's show or position matches (only
+  the follower compares), so the main's tab says "Checked on the backup - look at its screen" for in step
+  and the same show; the follower saying its two verdicts back, and the leader publishing them, is engine
+  work not done. FOUND AND MENDED: the page had not started since 43d15f9 (2026-09-25) - a second `const
+  isLocked` in `renderStrip` was a SyntaxError that stopped every module, and no test executes the page's
+  scripts (client_page.py checks they are served, console.unit imports pure modules only). Tests under C
+  and fr_FR: ClientTests (four cases: every seat's words, the banner for each case with the engine's own
+  alarm sentences, the readout's delay, drift, match and jump, the gestures against the registry and the
+  refusals against the engine), LeadershipTests, ShowSettingsUiTests (the tab after Network and before
+  MIDI, its three settings their own commands, the five greyed with why in ten states, Take over sending
+  `pair.takeOver`; the transport's words and banner in ten states, each button pressing its act, the
+  main's show greyed while a cue runs), console.unit (tests/console/pair.test.mjs), blackbox.client,
+  client.boundary, source.comments. Pictures for the author in `build/redundancy-shots/`, painted
+  offscreen (`createComponentSnapshot`) and, for the page, a headless browser. THE WORDS, the author's as
+  he chose them: *Main - sending*, *Main - alone*, *Backup - following* (AGM), *Take over*, *Hand over*
+  (AGN), *Two mains!*, *Make this the main* (AGO), *Redundancy* (AGP). The implementer's, for the author's
+  review: the seats *Backup - waiting*, *Backup - sending*, *Main - following* (and *Main - waiting*, a seat
+  no main reaches); the buttons *Realign* and *Take the main's show* / *Take the backup's show*; the menu
+  *Redundancy - <seat>*; the tab's *This computer is*, *Not paired*, *Main*, *Backup*, *The other computer's
+  address*, *Link lost after*, *What this computer can do now*, *Now*, its intro and two explanations, the
+  readout's labels (*This computer*, *Sends to the devices*, *The main*/*The backup*, *Round trip*, *Delay*,
+  *Same sample*, *Clock drift*, *Clock match*, *Output delay*, *Changeover jump*, *In step*, *Same show*,
+  *Records*, *Commands*) and sentences, the six seat sentences, the five what-it-does sentences and the
+  reasons (*This computer already sends.*, *This computer holds: there is nothing to hand over.*, *The main
+  is not there to take the show.*, *Only while both computers send.*, *Only on a computer that follows the
+  other.*, *Not while a cue runs here: stop it first.*, *The two shows are the same.*, *The two shows have
+  not been compared yet.*, *Only files differ, and files never travel: copy them onto this computer.*, *This
+  computer is not paired: choose Main or Backup above.*); Getting started's line; the changed both-sending
+  alarm. Carried from earlier stages, still the implementer's and unchanged: RD.10's `not-fetched` and
+  `set-aside.<date>.<time>`, and the alarm sentences of RD.7 (waiting, lost and took over, started again,
+  took over), RD.8 (not yet in step, taking the other machine's position, not in step ... Realign) and
+  RD.10 (the show differs ... Take the other machine's show, Copy the files). The alarms say *machine* where
+  the screens say *computer* (AGP's word): one of the two, the author's to pick. RD.9's trust thresholds are
+  not on screen.
 
 ## 59. Timecode generated: MTC and LTC cues
 

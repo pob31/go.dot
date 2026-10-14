@@ -170,6 +170,29 @@ A **process cue** holds a Pure Data patch and runs it while the cue runs, at con
 - **Interface trouble.** If the audio interface disappears, the show pauses and resumes when it returns. If its sample rate changes, Go.dot follows it.
 - **Double-click a `.wfg`** to open the show (Windows installer, Linux .deb, macOS).
 
+### Two computers: a main and a backup (new)
+
+Two computers can play one show together. The **main** plays it and talks to the rig; the **backup** follows it a moment behind, starting each sound on the same sample, and takes over if the main stops.
+
+**What each computer needs.** Its own copy of the show folder, sounds and movies included: nothing is copied between the two over the network. Its own audio interface, and its own video outputs if the show has pictures. The sound and the pictures are changed over on your console or matrix: Go.dot does not switch them. The two on one network, or on two for a spare path.
+
+**Setting it up.** On each computer, *Show settings > Redundancy*: say whether this computer is the *Main* or the *Backup*, give the other computer's address (its IP address; port 5010 is assumed; two addresses separated by a space for two networks), and how long a silence counts as losing the link (1 s by default). These settings belong to the computer, not to the show: copying the show to the other computer does not carry them.
+
+**What it says.** Beside the show's name at the top of the window each computer says what it is: *Main - sending*, *Main - alone* (no backup with it), *Backup - following*, *Backup - waiting* (it has not found its main since it started), *Backup - sending* (it took over), *Main - following* (a main started again after its backup took over). When something needs a hand, a banner under that line says so, with the button that answers it:
+
+| The banner | What it means | The button |
+| --- | --- | --- |
+| *Backup - waiting* | The backup has not found its main; it sends nothing | **Take over**: it sends from now on |
+| *Two mains!* | Both computers are sending, usually after the link came back from a takeover: every command reaches the devices twice | **Make this the main**, on the computer that should keep the show; the other one follows it |
+| Following, but not in step | Something differs between the two at the same moment, such as a cue running on one only | **Realign**: the backup takes the main's position again |
+| Following, but the show differs | The two shows are not the same, for example an edit made while the backup was off | **Take the main's show**: the backup takes the main's cues and settings, keeps its own interface and ports, and sets its old files aside in a dated folder of the show. Sounds are never copied: a file missing on one computer is named, and is yours to copy |
+
+The same commands, with **Hand over** (the main lets the backup send), are under *Show > Redundancy* in the menu, which works while the show is locked, on the *Redundancy* tab with what each one would do, and in the web console's line under the transport.
+
+**When the main stops.** The backup stops hearing it and, after the link timeout, takes over: it sends to the devices from then on and says *The main was lost and this machine took over*. An Esc or a double Esc pressed on the backup in that moment is applied; anything else the main had not confirmed is dropped. Change your console or matrix over to the backup. When the main is started again, it finds the backup sending and follows it.
+
+**Timing.** While it follows, the backup sends nothing to devices (OSC, MIDI, serial); a command you give it is passed on to the main. The two start each sound on the same sample, as closely as their clocks can be matched; the *Redundancy* tab shows how closely, and how much faster one computer's clock runs (one word clock for both interfaces cures that). The two interfaces' own output delays are not matched: the tab shows each one and the jump a changeover will make. Not yet checked with two computers over Dante: tell us what yours did.
+
 ## Coming next
 
 These are designed in the specification and not built yet. The order may change with what testers ask for, which is one more reason to send feedback.

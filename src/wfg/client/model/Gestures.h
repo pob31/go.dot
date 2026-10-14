@@ -482,4 +482,19 @@ namespace wfg::client::gesture
         the order. The other way it becomes true is the engine's own: the
         first media run that launches with audio says so. */
     Event setPatchSettled (bool settled);
+
+    /*  REDUNDANCY (namespace draft §58.4, RD.11): the operator's five, each the
+        one command it names and sent with no argument - the engine writes the
+        other machine's seat, or the fingerprint and folder, as applied - and
+        the three settings of the Redundancy tab, this machine's alone. The
+        timeout is a float because the command's signature says `f`; the
+        engine reads it through its own shortest text, so 1.5 typed is 1.5. */
+    Event takeOver();
+    Event handOver();
+    Event keepTheShow();
+    Event realign();
+    Event adoptShow();
+    Event setPairRole (const std::string& role);
+    Event setPairPeers (const std::string& addresses);
+    Event setPairTimeout (double seconds);
 }

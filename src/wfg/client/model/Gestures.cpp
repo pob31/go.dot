@@ -792,4 +792,28 @@ namespace wfg::client::gesture
         return { origin::window, "node.set",
                  { osc::Value::string ("/godot/document/locked"), osc::Value::boolean (locked) } };
     }
+
+    /*  THE PAIR'S (namespace draft §58.4). Nothing after the operator's five:
+        each takes its argument as applied from the engine, which is what lets a
+        replay - which sees no other machine - refuse one where the session did. */
+    Event takeOver()    { return plain ("pair.takeOver"); }
+    Event handOver()    { return plain ("pair.handOver"); }
+    Event keepTheShow() { return plain ("pair.keep"); }
+    Event realign()     { return plain ("pair.realign"); }
+    Event adoptShow()   { return plain ("pair.adoptShow"); }
+
+    Event setPairRole (const std::string& role)
+    {
+        return { origin::window, "pair.setRole", { osc::Value::string (role) } };
+    }
+
+    Event setPairPeers (const std::string& addresses)
+    {
+        return { origin::window, "pair.setPeers", { osc::Value::string (addresses) } };
+    }
+
+    Event setPairTimeout (double seconds)
+    {
+        return { origin::window, "pair.setTimeout", { osc::Value::float32 (static_cast<float> (seconds)) } };
+    }
 }

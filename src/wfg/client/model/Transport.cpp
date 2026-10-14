@@ -403,7 +403,7 @@ namespace wfg::client::model
                              r.status, r.lastError, r.rateMoved, r.rateMovedTick, r.dial, r.writeError,
                              r.warningCount, r.warningFirst, r.revision,
                              r.doh, r.dohCue, r.dohWindow, r.resume, r.dohForget, r.dohForgetCue,
-                             r.dohReport, r.dohReportList);
+                             r.dohReport, r.dohReportList, r.pair);
         };
 
         return tie (*this) == tie (other);
@@ -501,6 +501,11 @@ namespace wfg::client::model
 
         if (const auto space = reading.dohReport.find (' '); space != std::string::npos && space > 0)
             reading.dohReportList = text (snapshot, "/godot/list/" + reading.dohReport.substr (0, space) + "/name");
+
+        /*  THE PAIR'S ROWS (RD.11): read on every pass like the rest, a few
+            lookups - the run table walked only when a show that differs makes
+            it decide a button. */
+        reading.pair = readPair (snapshot);
 
         return reading;
     }

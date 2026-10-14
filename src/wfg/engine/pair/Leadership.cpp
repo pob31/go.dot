@@ -332,9 +332,11 @@ namespace wfg::pair
                 return "Waiting for the main: this backup holds and sends nothing until it finds its main and"
                        " follows it, or is told to take over.";
 
+            /*  WHAT ITS BUTTON SAYS, in the author's word for it (AGO, RD.11):
+                "Make this the main" answers "Make one of them the main". */
             case Seat::bothSending:
-                return "Both machines are sending: every command reaches the devices from both. Keep the show"
-                       " on one of them; the other will hold and follow.";
+                return "Both machines are sending: every command reaches the devices from both. Make one of them"
+                       " the main; the other will hold and follow.";
 
             case Seat::following:
             {

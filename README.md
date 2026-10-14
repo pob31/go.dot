@@ -77,7 +77,8 @@ has stood in front of the thing.
   `/ui`, plain HTML and ES modules with no build step, kept as the redundancy
   path. Both change the show only through the engine's named commands, as a
   hardware surface does. The show settings hold audio, outputs, inputs and the
-  rack, network devices, MIDI, surfaces, serial ports, video and playback.
+  rack, network devices, MIDI, surfaces, serial ports, video and playback - and,
+  for the computer rather than the show, its part in a pair (below).
 - **Sound.** Media cues play through Tracktion Engine, each with its own EQ and a
   chain of VST3, AU or LV2 plugins run in a separate process — a crashing plugin
   silences its cue, never the show, and never leaves it playing dry. A cue's
@@ -142,6 +143,16 @@ has stood in front of the thing.
 - **Importing.** Ableton Live sets (`wfg import-als`, several sets making a tour
   with a performance for each venue) and QLab 4 and 5 workspaces
   (`wfg import-qlab`), both also in the window's File menu.
+- **Two computers, a main and a backup** (namespace draft §58). Each plays the
+  show from its own copy of the folder through its own interface, the sound and
+  pictures changed over on a console or a matrix. The backup follows the main a
+  fixed delay behind and starts each sound on the main's sample, holding every
+  command meant for a device; a command given to it is passed on to the main. A
+  second of silence and it takes over; both say what they are beside the
+  transport, and a banner offers Take over, Make this the main (two mains),
+  Realign, or the main's show when the two differ. Set on a Redundancy tab of
+  Show settings, which belongs to the computer. Measured on one machine; the
+  two-computer measurement over Dante is owed to the bench.
 
 ### Not built yet
 
@@ -155,10 +166,11 @@ has stood in front of the thing.
 - **Group joins** — gap, gapless or crossfade between a sequence's members,
   decided (PRD §3.6) and waiting for the client's layout to settle.
 - **Video latency offsets and DeckLink output** (Phase 8b).
-- **Integrations and redundancy** — Choufleur, authoring a cue from a processor,
-  device templates (built as presets, namespace draft §57: twenty-four shipped, unverified until a console answers), and a backup
-  engine that takes over from the primary
-  (Phases 11 and 12).
+- **Integrations** — Choufleur, authoring a cue from a processor, device
+  templates (built as presets, namespace draft §57: twenty-four shipped,
+  unverified until a console answers) (Phase 11). The backup that takes over
+  from the main is built (above); two computers over Dante are still to be
+  measured.
 
 ---
 

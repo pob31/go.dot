@@ -9,6 +9,7 @@
 #include <wfg/client/model/SerialPorts.h>
 #include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Pair.h>
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/Rack.h>
@@ -7438,6 +7439,353 @@ namespace wfg::client::ui
             Number tolerance, jumpPast, catchUp, crossfade;
         };
 
+        /*  THIS COMPUTER IN A PAIR (namespace draft §58, RD.11; the author's
+            AGP): a main and a backup each playing the show from its own copy of
+            the show folder, through its own interface, the sound and the
+            pictures changed over downstream on a console or a matrix - and this
+            tab is where each computer is told which it is, where the other one
+            is, and how long a silence loses it.
+
+            THE MACHINE'S, NOT THE SHOW'S (AGC, AGP): the three settings are
+            `pair.setRole`, `pair.setPeers` and `pair.setTimeout`, each written to
+            pairing.xml in Go.dot's own folder - never a `node.set`, never a
+            step of undo, never carried by a show copied to the other computer -
+            and the tab says so first, because every other tab here is the show.
+            Each lands at once, as the Playback tab's numbers do; nothing waits
+            for Apply.
+
+            UNDER THEM, THE OPERATOR'S FIVE, each a button and the one command
+            it names, greyed where the engine would refuse it, with why beside it
+            in words (§4.8) - and what it does beside it where it would be taken.
+            The same five are in the Show menu (Show > Redundancy), which the
+            lock does not grey as it greys this window's tabs. AND THEN WHAT THE
+            PAIR SAYS NOW, read-only and live: the words model/Pair.h makes of
+            the rows under `/godot/pair`, a line each - the seat, the other
+            computer, the timing, the jump a changeover makes, in step, the same
+            show, what went down the link. */
+        class RedundancyPage final : public juce::Component
+        {
+        public:
+            RedundancyPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : send (std::move (dispatch)), theme (themeToUse)
+            {
+                namespace words = model::pairWords;
+
+                viewport.setViewedComponent (&inner, false);
+                viewport.setScrollBarsShown (true, false);
+                addAndMakeVisible (viewport);
+
+                intro.setText ("These settings belong to this computer, not to the show: Go.dot keeps them in its own"
+                               " folder, so a show copied to the other computer leaves them behind, and each computer"
+                               " is set here on its own. Each needs its own copy of the show folder - sounds and movies"
+                               " included, since files never travel between the two - and its own interface; the sound"
+                               " and the pictures are changed over on a console or a matrix.",
+                               juce::dontSendNotification);
+                intro.setJustificationType (juce::Justification::topLeft);
+                intro.setMinimumHorizontalScale (1.0f);
+                intro.setColour (juce::Label::textColourId, Look::colour (theme, "ink"));
+                inner.addAndMakeVisible (intro);
+
+                for (auto [label, said] : { std::pair { &roleLabel, "This computer is" },
+                                            std::pair { &peersLabel, "The other computer's address" },
+                                            std::pair { &timeoutLabel, "Link lost after" },
+                                            std::pair { &timeoutUnit, "s" } })
+                {
+                    label->setText (said, juce::dontSendNotification);
+                    inner.addAndMakeVisible (*label);
+                }
+
+                role.addItem (words::notPaired, 1);
+                role.addItem (words::mainRole, 2);
+                role.addItem (words::backupRole, 3);
+                role.setTitle (roleLabel.getText());
+                role.onChange = [this] { commitRole(); };
+                inner.addAndMakeVisible (role);
+
+                peers.setJustification (juce::Justification::centredLeft);
+                peers.setTitle (peersLabel.getText());
+                peers.onReturnKey = [this] { commitPeers(); };
+                peers.onFocusLost = [this] { commitPeers(); };
+                inner.addAndMakeVisible (peers);
+
+                timeout.setJustification (juce::Justification::centredLeft);
+                timeout.setInputRestrictions (5, "0123456789.,");
+                timeout.setTitle (timeoutLabel.getText());
+                timeout.onReturnKey = [this] { commitTimeout(); };
+                timeout.onFocusLost = [this] { commitTimeout(); };
+                inner.addAndMakeVisible (timeout);
+
+                peersExplanation.setText ("Where to find it on the network, as host:port - the port left off is 5010."
+                                          " Two addresses with a space between them, for two networks between the"
+                                          " computers: the link is lost only when both are silent.",
+                                          juce::dontSendNotification);
+                timeoutExplanation.setText ("How long the other computer may be silent before the link counts as lost"
+                                            " - and a backup that follows takes over. From 0.1 to 30 seconds.",
+                                            juce::dontSendNotification);
+
+                for (auto* explanation : { &peersExplanation, &timeoutExplanation })
+                {
+                    //  Wrapped, never squeezed onto one line.
+                    explanation->setJustificationType (juce::Justification::topLeft);
+                    explanation->setMinimumHorizontalScale (1.0f);
+                    explanation->setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
+                    inner.addAndMakeVisible (*explanation);
+                }
+
+                for (auto [heading, said] : { std::pair { &nowHeading, "Now" },
+                                              std::pair { &actsHeading, "What this computer can do now" } })
+                {
+                    heading->setText (said, juce::dontSendNotification);
+                    heading->setColour (juce::Label::textColourId, Look::colour (theme, "ink"));
+                    heading->setFont (Look::font (theme, 15.0f));
+                    inner.addAndMakeVisible (*heading);
+                }
+
+                for (auto& row : rows)
+                {
+                    row.label.setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
+                    row.label.setJustificationType (juce::Justification::topLeft);
+                    row.label.setMinimumHorizontalScale (1.0f);
+                    row.value.setJustificationType (juce::Justification::topLeft);
+                    row.value.setMinimumHorizontalScale (1.0f);
+                    inner.addChildComponent (row.label);
+                    inner.addChildComponent (row.value);
+                }
+
+                const model::PairAct order[] { model::PairAct::takeOver, model::PairAct::handOver,
+                                               model::PairAct::keep, model::PairAct::realign,
+                                               model::PairAct::adoptShow };
+
+                for (std::size_t at = 0; at < acts.size(); ++at)
+                {
+                    auto& act = acts[at];
+                    act.act = order[at];
+                    act.button.setWantsKeyboardFocus (false);
+                    act.button.onClick = [this, what = act.act] { if (send) send (model::eventFor (what)); };
+                    act.words.setJustificationType (juce::Justification::centredLeft);
+                    act.words.setMinimumHorizontalScale (1.0f);
+                    inner.addAndMakeVisible (act.button);
+                    inner.addAndMakeVisible (act.words);
+                }
+
+                show ({});
+            }
+
+            void show (const model::PairReading& pair)
+            {
+                const auto first = ! shownOnce;
+                shownOnce = true;
+                shown = pair;
+
+                const auto roleId = pair.role == "main" ? 2 : pair.role == "backup" ? 3 : pair.role == "none" ? 1 : 0;
+
+                //  Not while its list is open under the hand.
+                if (! role.isPopupActive() && role.getSelectedId() != roleId)
+                    role.setSelectedId (roleId, juce::dontSendNotification);
+
+                /*  Not while it is being typed into, or a refresh at the window's
+                    rate would take the caret back on every keystroke - the
+                    Playback tab's rule. */
+                for (auto [box, now] : { std::pair { &peers, &pair.peers }, std::pair { &timeout, &pair.timeout } })
+                    if (! box->hasKeyboardFocus (true) && box->getText() != juce::String (*now))
+                        box->setText (juce::String (*now), juce::dontSendNotification);
+
+                auto moved = first;
+                const auto said = pair.lines();
+
+                for (std::size_t at = 0; at < rows.size(); ++at)
+                {
+                    auto& row = rows[at];
+                    const auto here = at < said.size();
+                    const auto label = here ? juce::String (said[at].label) : juce::String();
+                    const auto value = here ? juce::String (said[at].value) : juce::String();
+
+                    if (row.label.getText() != label || row.value.getText() != value || row.label.isVisible() != here)
+                    {
+                        row.label.setText (label, juce::dontSendNotification);
+                        row.value.setText (value, juce::dontSendNotification);
+                        row.value.setTooltip (value);
+                        row.label.setVisible (here);
+                        row.value.setVisible (here);
+                        moved = true;
+                    }
+                }
+
+                for (auto& act : acts)
+                {
+                    const auto offered = pair.offer (act.act);
+                    const auto caption = juce::String (pair.buttonWords (act.act));
+                    const auto why = juce::String (offered.words);
+
+                    if (act.button.getButtonText() != caption)
+                        act.button.setButtonText (caption);
+
+                    if (act.button.isEnabled() != offered.open)
+                        act.button.setEnabled (offered.open);
+
+                    if (act.words.getText() != why)
+                    {
+                        act.words.setText (why, juce::dontSendNotification);
+                        act.words.setTooltip (why);
+                    }
+
+                    //  What it would do in the reading ink; why it will not, quieter.
+                    act.words.setColour (juce::Label::textColourId,
+                                         Look::colour (theme, offered.open ? "ink" : "ink-faint"));
+                }
+
+                if (moved)
+                    layOut();
+            }
+
+            void resized() override
+            {
+                viewport.setBounds (getLocalBounds());
+                layOut();
+            }
+
+        private:
+            /*  A LINE AS TALL AS ITS WORDS NEED: a value is a sentence, sometimes
+                two, and is wrapped rather than squeezed - at most three lines,
+                the whole of it on hover. */
+            static int heightFor (const juce::Label& label, int width)
+            {
+                const auto font = label.getFont();
+                const auto wide = juce::GlyphArrangement::getStringWidthInt (font, label.getText());
+                const auto lines = juce::jlimit (1, 3, width > 0 ? (wide + width - 1) / width : 1);
+
+                return juce::roundToInt (font.getHeight() * static_cast<float> (lines)) + 8;
+            }
+
+            void layOut()
+            {
+                const auto width = juce::jmax (300, viewport.getWidth() - viewport.getScrollBarThickness());
+                auto area = juce::Rectangle<int> (0, 0, width, 10000).reduced (22);
+
+                intro.setBounds (area.removeFromTop (heightFor (intro, area.getWidth()) + 6));
+                area.removeFromTop (10);
+
+                const auto setting = [&area] (juce::Label& label, juce::Component& control, int controlWidth)
+                {
+                    auto line = area.removeFromTop (30);
+                    label.setBounds (line.removeFromLeft (230));
+                    control.setBounds (line.removeFromLeft (controlWidth).reduced (0, 2));
+                    return line;
+                };
+
+                setting (roleLabel, role, 220);
+                area.removeFromTop (10);
+
+                setting (peersLabel, peers, 420);
+                peersExplanation.setBounds (area.removeFromTop (heightFor (peersExplanation, area.getWidth() - 234))
+                                              .withTrimmedLeft (234));
+                area.removeFromTop (6);
+
+                auto timeoutLine = setting (timeoutLabel, timeout, 70);
+                timeoutLine.removeFromLeft (6);
+                timeoutUnit.setBounds (timeoutLine.removeFromLeft (30));
+                timeoutExplanation.setBounds (area.removeFromTop (heightFor (timeoutExplanation, area.getWidth() - 234))
+                                                .withTrimmedLeft (234));
+
+                /*  THE FIVE BEFORE THE READOUT: what an operator reaches for when
+                    the other computer misbehaves is in view when the tab opens,
+                    and the numbers under it are for whoever has time to read. */
+                area.removeFromTop (16);
+                actsHeading.setBounds (area.removeFromTop (28));
+
+                for (auto& act : acts)
+                {
+                    auto line = area.removeFromTop (34);
+                    act.button.setBounds (line.removeFromLeft (220).reduced (0, 3));
+                    line.removeFromLeft (14);
+                    act.words.setBounds (line);
+                }
+
+                area.removeFromTop (16);
+                nowHeading.setBounds (area.removeFromTop (28));
+
+                for (auto& row : rows)
+                {
+                    if (! row.label.isVisible())
+                    {
+                        row.label.setBounds ({});
+                        row.value.setBounds ({});
+                        continue;
+                    }
+
+                    const auto valueWidth = area.getWidth() - 204;
+                    auto line = area.removeFromTop (heightFor (row.value, valueWidth));
+                    row.label.setBounds (line.removeFromLeft (200));
+                    line.removeFromLeft (4);
+                    row.value.setBounds (line);
+                }
+
+                inner.setSize (width, area.getY() + 22);
+            }
+
+            void commitRole()
+            {
+                const auto id = role.getSelectedId();
+                const char* word = id == 1 ? "none" : id == 2 ? "main" : id == 3 ? "backup" : nullptr;
+
+                if (send && word != nullptr && shown.role != word)
+                    send (gesture::setPairRole (word));
+            }
+
+            void commitPeers()
+            {
+                /*  AS TYPED: the engine reads it - spaces or commas between two,
+                    the port left off - and answers with what it took, `host:port`
+                    each, which this box then shows; a typing it cannot read is
+                    refused `bad-value`, said on the transport's line. */
+                const auto typed = peers.getText().trim().toStdString();
+
+                if (send && typed != shown.peers)
+                    send (gesture::setPairPeers (typed));
+            }
+
+            void commitTimeout()
+            {
+                /*  A COMMA IS A DECIMAL POINT HERE, as on the Playback tab: the
+                    engine reads its own text, never the locale's. */
+                const auto typed = timeout.getText().trim().replaceCharacter (',', '.').toStdString();
+                const auto value = osc::parseDouble (typed);
+
+                if (! send || ! value || std::abs (*value - osc::parseDouble (shown.timeout).value_or (-1.0)) < 1.0e-9)
+                    return;
+
+                send (gesture::setPairTimeout (*value));
+            }
+
+            struct Row
+            {
+                juce::Label label, value;
+            };
+
+            struct Act
+            {
+                model::PairAct act = model::PairAct::takeOver;
+                juce::TextButton button;
+                juce::Label words;
+            };
+
+            std::function<void (Event)> send;
+            model::Theme theme;
+            model::PairReading shown;
+            bool shownOnce = false;
+
+            juce::Viewport viewport;
+            juce::Component inner;
+            juce::Label intro, roleLabel, peersLabel, timeoutLabel, timeoutUnit, peersExplanation, timeoutExplanation,
+                        nowHeading, actsHeading;
+            juce::ComboBox role;
+            juce::TextEditor peers, timeout;
+
+            //  As many as `PairReading::lines` says at most; the ones a seat does not use, hidden.
+            std::array<Row, 14> rows;
+            std::array<Act, 5> acts;
+        };
+
         /*  WHAT TO DO FIRST, AND WHAT EACH TAB IS FOR (author, 2026-09-30:
             "Should we add a 'Getting started' tab in the settings window
             explaining what people should do? And what each tab is for..." -
@@ -7454,9 +7802,10 @@ namespace wfg::client::ui
                 : goTo (std::move (goToTab))
             {
                 intro.setText ("A show needs to know what it plays through before it plays anything. Work down"
-                               " this list once for each show - everything on these tabs is saved with it, so"
-                               " a show carried to another machine only needs its Audio and patches looked at"
-                               " again. The tabs with nothing for your show can be left as they are.",
+                               " this list once for each show - everything on these tabs is saved with it but"
+                               " Redundancy, which is this computer's, so a show carried to another machine only"
+                               " needs its Audio and patches looked at again. The tabs with nothing for your show"
+                               " can be left as they are.",
                                juce::dontSendNotification);
 
                 outro.setText ("Then close this window and build the show: the Add row over the cue list makes"
@@ -7476,6 +7825,10 @@ namespace wfg::client::ui
                     { "Input patch",  "Which physical inputs feed each named input." },
                     { "Network",      "The devices the show talks to over OSC - a desk, a processor, a video"
                                       " server - and where their addresses begin." },
+                    { model::pairWords::tab,
+                                      "Two computers playing one show, a main and a backup that takes over if the"
+                                      " main stops: which one this is, where the other is, and how the two are"
+                                      " doing. This computer's, not the show's. Nothing to do for one computer." },
                     { "MIDI",         "The MIDI ports cues send to and triggers listen on." },
                     { "Serial",       "Serial ports - an Arduino on USB - whose lines a process cue's patch hears"
                                       " and sends." },
@@ -7636,6 +7989,7 @@ namespace wfg::client::ui
             outputList = std::make_unique<OutputPage> (theme, send);
             inputList = std::make_unique<InputPage> (theme, send);
             network = std::make_unique<NetworkPage> (theme, send);
+            redundancy = std::make_unique<RedundancyPage> (theme, send);
             midi = std::make_unique<MidiPage> (theme, send);
             serialPage = std::make_unique<SerialPage> (theme, send);
             surfaces = std::make_unique<SurfacesPage> (theme, send);
@@ -7718,6 +8072,11 @@ namespace wfg::client::ui
             tabs.addTab ("Inputs", background, inputList.get(), false);
             tabs.addTab ("Input patch", background, inputs.get(), false);
             tabs.addTab ("Network", background, network.get(), false);
+
+            /*  AFTER NETWORK (the author's AGP, namespace draft §58.2): the other
+                computer is found over the network, and this tab, like Audio, is
+                about this computer rather than the show - and says so. */
+            tabs.addTab (model::pairWords::tab, background, redundancy.get(), false);
             tabs.addTab ("MIDI", background, midi.get(), false);
 
             /*  AFTER MIDI: the other ports a show talks through, an Arduino on
@@ -7842,6 +8201,11 @@ namespace wfg::client::ui
                            juce::String (model::text (snapshot, "/godot/network/refused")).getIntValue(),
                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
                            model::readPresets (snapshot));
+
+            /*  THE PAIR (RD.11): the machine's settings and what the pair says
+                now, re-read every pass - every line is live, and each setting
+                lands at once as its own machine-local command. */
+            redundancy->show (model::readPair (snapshot));
 
             /*  The ports are the document's and the device lists are the
                 engine's, both re-read every pass for the reason the outputs
@@ -8148,6 +8512,7 @@ namespace wfg::client::ui
         model::Theme warpTheme;
         std::unique_ptr<TemplatesPage> templates;
         std::unique_ptr<NetworkPage> network;
+        std::unique_ptr<RedundancyPage> redundancy;
         std::unique_ptr<MidiPage> midi;
         std::unique_ptr<SerialPage> serialPage;
         std::unique_ptr<SurfacesPage> surfaces;

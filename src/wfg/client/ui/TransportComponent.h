@@ -49,6 +49,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <optional>
 
 namespace wfg::client::ui
 {
@@ -81,6 +82,12 @@ namespace wfg::client::ui
             std::function<void()> discardRecovery;
             std::function<void (bool)> setLocked;
             std::function<void()> reloadTheme;
+
+            /*  THE PAIR'S BANNER BUTTON (namespace draft §58, RD.11): one of
+                the operator's five - "Make this the main", "Take over",
+                "Realign", "Take the main's show" - whichever answers the alarm
+                the banner says. One command each (model/Pair.h, `eventFor`). */
+            std::function<void (model::PairAct)> pair;
         };
 
         TransportComponent (const model::Theme& theme, Actions actions);
@@ -119,6 +126,21 @@ namespace wfg::client::ui
         model::TransportReading last;
         bool shownOnce = false;
         bool bannerShowing = false;
+
+        /*  THE PAIR (RD.11): what this computer is, in the author's words
+            (AGM), on the title line after the show's name and the lock, and
+            nothing when it is not paired; and under the title line, after the
+            recovery offer when both are up, the banner for what needs a hand -
+            "Two mains!" and "Make this the main", a backup waiting for its main
+            and "Take over", a follower not in step and "Realign", a show that
+            differs and "Take the main's show" - the engine's own sentence
+            (`pair/alarm`), and one button, greyed with the reason in words
+            when it would be refused. */
+        bool pairShowing = false;
+        std::optional<model::PairAct> pairAct;
+        juce::Rectangle<int> pairArea;
+        juce::Label pairLabel, pairHeading, pairSentence;
+        juce::TextButton pairButton;
 
         /*  The saved/unsaved line and the undo/redo line both went on the
             author's word (2026-09-18), for the headroom and because a dimmed
@@ -168,6 +190,9 @@ namespace wfg::client::ui
 
         /** Doh! in its own colour while the window is open, fading, then idle and disabled. */
         void dressDoh();
+
+        /** The pair's words on the title line and its banner, from the reading. */
+        void dressPair (const model::PairReading& pair);
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransportComponent)
     };

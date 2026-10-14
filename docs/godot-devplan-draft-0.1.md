@@ -1706,6 +1706,26 @@ green.
 with the Windows box and the Mac mini on their own interfaces, the changeover on a console, with one
 word clock and then none.
 
+**Built 2026-10-11 to 2026-10-15, RD.0-RD.11** (namespace draft §58.7 says what each did; M61 in
+§58.6): the hold switch and `--hold`; names derived from their cause; the machine's rows and commands
+apart from the show's; `pairing.xml` and the `pair` rows; the stream, the link and the heartbeat;
+following a fixed delay behind, commands passed on and device input ignored; the link lost, taking
+over, handing over, two machines both sending until one is kept; seating at the leader's position
+and the summary that says in step; the same sample through a clock map between the two machines (the
+backup's click 26-88 µs from the main's, two serves on one machine); the same show through
+fingerprints, the leader's show taken by the follower; `serve --capture` and the two-machine bench
+driver; and the screens (RD.11) - a Redundancy tab of Show settings after Network, what the computer
+is beside the show's name in the author's words, a banner with the one button that answers what
+needs a hand, the operator's five under Show > Redundancy (reachable under the lock), the web
+console's line under the transport, both tester guides. The done-when items stand as drivers:
+redundancy_failover.py (the main killed, the backup sending, each GO heard once; two mains kept on
+one), pair_follow.py and pair_sample.py. **Owed to the bench:** M61 between the PC and the Mac over
+Dante (`tests/bench/m61_dante.py --pair`; the Mac's Dante Virtual Soundcard was not running), and
+the changeover on a console with one word clock and then none. **Owed to the author:** the words of
+RD.11 and those earlier stages left for him (§58.7, RD.11's list); the main is never told its
+backup's show differs or is not in step - it says to look at the backup's screen - and saying so back
+is engine work not done. Deterministic replay as a tool is not part of it and is not built.
+
 ---
 
 ## Cross-cutting, every phase

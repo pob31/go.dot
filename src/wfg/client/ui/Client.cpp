@@ -66,6 +66,7 @@
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Pair.h>
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/ShowModel.h>
@@ -106,6 +107,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <initializer_list>
 #include <utility>
 #include <vector>
 
@@ -128,6 +130,10 @@ namespace wfg::client
             menuConvertUsed, menuConvertWhole, menuConvertUsedQuality, menuConvertWholeQuality,
             menuMovieSound, menuCancelConversion, menuDownloadFfmpeg,
             menuSaveTemplate, menuVideoMonitor, menuHideProjectors, menuCleanCache,
+
+            /*  THE PAIR'S FIVE (namespace draft §58.4, RD.11), under Show >
+                Redundancy: the operator's commands, offered under the lock too. */
+            menuTakeOver, menuHandOver, menuKeepShow, menuRealign, menuAdoptShow,
 
             /*  THE TEMPLATES APPLY TEMPLATE OFFERS, numbered from here in the
                 order the show keeps them (namespace draft §38). */
@@ -165,6 +171,9 @@ namespace wfg::client
                 actions.discardRecovery = [this] { send (gesture::discardRecovery()); };
                 actions.setLocked       = [this] (bool locked) { send (gesture::setLocked (locked)); };
                 actions.reloadTheme     = [this] { reloadTheme(); };
+
+                /*  THE PAIR'S BANNER BUTTON (RD.11): the one command it names. */
+                actions.pair            = [this] (model::PairAct act) { send (model::eventFor (act)); };
 
                 ui::CueListComponent::Actions listActions;
 
@@ -872,6 +881,11 @@ namespace wfg::client
                     case menuDownloadFfmpeg:
                     case menuCleanCache:
                     case menuSaveTemplate:
+                    case menuTakeOver:
+                    case menuHandOver:
+                    case menuKeepShow:
+                    case menuRealign:
+                    case menuAdoptShow:
                     case menuApplyTemplateFirst: break;
                 }
 
@@ -991,6 +1005,16 @@ namespace wfg::client
                         (namespace draft §38). */
                     case menuSaveTemplate:
                         return unlocked && ! templateKindOfAnchor().empty();
+
+                    /*  THE PAIR'S FIVE, WHERE THE ENGINE WOULD TAKE THEM (RD.11),
+                        and under the lock as much as not: they run the show
+                        rather than edit it, and the engine never refuses them
+                        for the lock (namespace draft §58.4). */
+                    case menuTakeOver:   return last.pair.offer (model::PairAct::takeOver).open;
+                    case menuHandOver:   return last.pair.offer (model::PairAct::handOver).open;
+                    case menuKeepShow:   return last.pair.offer (model::PairAct::keep).open;
+                    case menuRealign:    return last.pair.offer (model::PairAct::realign).open;
+                    case menuAdoptShow:  return last.pair.offer (model::PairAct::adoptShow).open;
                     case menuApplyTemplateFirst:
                         return unlocked && ! selection.empty() && ! templatesForAnchor().empty();
                 }
@@ -1094,6 +1118,27 @@ namespace wfg::client
                     /*  DOH! BESIDE THE LOCK, the two things here an operator
                         reaches for during a show rather than before it. */
                     addMenuItem (menu, menuGoDoh, "Doh! - take back the last GO");
+
+                    /*  AND THE PAIR'S FIVE BESIDE THEM (RD.11), on a computer with a
+                        role: what an operator reaches for when the other machine
+                        misbehaves - under the lock too, which greys the Redundancy
+                        tab of Show settings with every other. Each item's words are
+                        the button's (model/Pair.h). */
+                    if (last.pair.paired())
+                    {
+                        juce::PopupMenu redundancy;
+
+                        for (const auto& [item, act] : { std::pair { menuTakeOver, model::PairAct::takeOver },
+                                                         std::pair { menuHandOver, model::PairAct::handOver },
+                                                         std::pair { menuKeepShow, model::PairAct::keep },
+                                                         std::pair { menuRealign, model::PairAct::realign },
+                                                         std::pair { menuAdoptShow, model::PairAct::adoptShow } })
+                            addMenuItem (redundancy, item, juce::String (last.pair.buttonWords (act)));
+
+                        menu.addSubMenu (juce::String (model::pairWords::tab) + " - "
+                                           + juce::String (last.pair.seatWords()), redundancy);
+                    }
+
                     menu.addSeparator();
                     addMenuItem (menu, menuLoadToTime, loadingToTime ? "Stop loading to time"
                                                                      : "Load to time...");
@@ -1237,6 +1282,11 @@ namespace wfg::client
                     case menuRecord:     send (model::isYes (last.recording) ? gesture::recordStop()
                                                                              : gesture::recordStart()); break;
                     case menuSaveTemplate: askToSaveTemplate(); break;
+                    case menuTakeOver:   send (model::eventFor (model::PairAct::takeOver)); break;
+                    case menuHandOver:   send (model::eventFor (model::PairAct::handOver)); break;
+                    case menuKeepShow:   send (model::eventFor (model::PairAct::keep)); break;
+                    case menuRealign:    send (model::eventFor (model::PairAct::realign)); break;
+                    case menuAdoptShow:  send (model::eventFor (model::PairAct::adoptShow)); break;
                     default:
                         if (itemId >= menuApplyTemplateFirst)
                         {
@@ -2082,9 +2132,28 @@ namespace wfg::client
 
                 /*  THE MENU'S ENABLED STATES FOLLOW THE READING, rebuilt only
                     when one of the things they read has moved. */
+                /*  AND THE PAIR'S (RD.11): the submenu's name says the seat, and
+                    its five are offered where the engine would take them. */
+                const auto pairOffers = [] (const model::PairReading& pair)
+                {
+                    auto open = 0u;
+                    auto bit = 1u;
+
+                    for (const auto act : { model::PairAct::takeOver, model::PairAct::handOver, model::PairAct::keep,
+                                            model::PairAct::realign, model::PairAct::adoptShow })
+                    {
+                        open |= pair.offer (act).open ? bit : 0u;
+                        bit <<= 1u;
+                    }
+
+                    return open;
+                };
+
                 if (reading.locked != last.locked || reading.canUndo != last.canUndo
                       || reading.canRedo != last.canRedo || reading.dirty != last.dirty
                       || reading.recording != last.recording
+                      || reading.pair.seatWords() != last.pair.seatWords()
+                      || pairOffers (reading.pair) != pairOffers (last.pair)
                       || selection.size() != chosenAtLastMenu)
                 {
                     chosenAtLastMenu = selection.size();

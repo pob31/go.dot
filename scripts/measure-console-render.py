@@ -39,7 +39,7 @@ DevTools Protocol to it over a WebSocket, with the RFC 6455 client below.
 Then, inside the page:
 
   (a) RENDER. The page's own `render` is wrapped, and each of `renderStrip`,
-      `renderLists`, `renderAim`, `renderRuns`, `renderInspector`,
+      `renderPair`, `renderLists`, `renderAim`, `renderRuns`, `renderInspector`,
       `tree.triggersOf` and `tree.overlaps` - by name, where the page looks
       them up: on the `window.goDot` it publishes since PR 5.10, whose
       `view` every render goes through, or as the global bindings the page
@@ -177,9 +177,9 @@ CALL_TIMEOUT = 60.0
 
 # The functions M24 names, in the order render() calls them. `render` is the
 # frame every other one is attributed to and must be first.
-DEFAULT_WRAP = ["render", "renderStrip", "renderLists", "renderAim", "renderRuns",
+DEFAULT_WRAP = ["render", "renderStrip", "renderPair", "renderLists", "renderAim", "renderRuns",
                 "renderInspector", "tree.triggersOf", "tree.overlaps"]
-RENDER_PARTS = DEFAULT_WRAP[1:6]
+RENDER_PARTS = DEFAULT_WRAP[1:7]
 
 TYPED = "-m24"
 WORKSPACE_PREFIX = "go.dot-m24-"

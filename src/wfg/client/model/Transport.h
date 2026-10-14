@@ -42,6 +42,7 @@
     question, and a struct of strings has none.
 */
 
+#include <wfg/client/model/Pair.h>
 #include <wfg/client/model/Text.h>
 
 #include <cstddef>
@@ -158,6 +159,12 @@ namespace wfg::client::model
             it is not the focused one. */
         std::string dohReport;
         std::string dohReportList;
+
+        /*  WHAT THIS COMPUTER IS IN ITS PAIR (namespace draft §58, RD.11): the
+            words beside the show's name - "Backup - following" - and the banner
+            under the title line when the pair needs a hand. Nothing at all on a
+            machine that is not paired. */
+        PairReading pair;
 
         /*  THE DOH NOTICE: the report in front of the operator, whatever list
             has the focus - "Doh!: ..." on the focused list, "Doh! on Act 2: ..."

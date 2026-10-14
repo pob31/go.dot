@@ -21,6 +21,7 @@ import { tree } from "../plumbing/tree.js";
 import { command, send } from "../plumbing/link.js";
 import { gesture } from "../gestures/table.js";
 import { wantsTheKeys } from "../gestures/keys.js";
+import { readPair, paired, seatWords, seatSentence, buttonWords, offer, banner } from "../model/pair.js";
 import { el } from "./common.js";
 
 el("go").addEventListener("click", () => gesture("go", []));
@@ -101,6 +102,55 @@ el("revert").addEventListener("click", () => {
   }
 });
 
-for (const button of document.querySelectorAll("#transport [data-cmd], #recovery [data-cmd], #pane-gogo header [data-cmd]")) {
+for (const button of document.querySelectorAll("#transport [data-cmd], #pair [data-cmd], #recovery [data-cmd], " +
+                                               "#pane-gogo header [data-cmd]")) {
   button.addEventListener("click", () => command(button.dataset.cmd));
 }
+
+/*  THIS COMPUTER IN ITS PAIR (namespace draft §58, RD.11), drawn on every poll
+    from the `pair/*` rows by model/pair.js - the desktop's model/Pair.h said
+    again for a browser. Nothing on a computer with no role; on one with a role,
+    always the line: what it is, and the alarm in its place when there is one.
+
+    THE BUTTONS ARE THE SHELL'S, shown, hidden, greyed and relabelled here and
+    never made here (index.html says why). A button is shown where the engine
+    would take its command; the one that answers an alarm is shown greyed when
+    it would not, its reason in its title - and in the sentence, so the grey is
+    never the only thing that says so (§4.8). */
+function setText(node, text) {
+  if (node && node.textContent !== text) node.textContent = text;
+}
+
+function renderPair() {
+  const bar = el("pair");
+
+  if (!bar) return;
+
+  const pair = readPair(tree);
+
+  if (!paired(pair)) {
+    bar.hidden = true;
+    return;
+  }
+
+  const said = banner(pair);
+
+  bar.hidden = false;
+  bar.dataset.alarm = said ? (said.alarming ? "two" : "yes") : "no";
+
+  setText(el("pair-head"), said ? said.heading : seatWords(pair));
+  setText(el("pair-said"), said ? said.sentence : seatSentence(pair));
+
+  for (const button of bar.querySelectorAll("[data-cmd]")) {
+    const name = button.dataset.cmd;
+    const answer = offer(pair, name);
+    const answersTheAlarm = !!said && said.command === name;
+
+    button.hidden = !answer.open && !answersTheAlarm;
+    button.disabled = !answer.open;
+    button.title = answer.words;
+    setText(button, buttonWords(pair, name));
+  }
+}
+
+export { renderPair };

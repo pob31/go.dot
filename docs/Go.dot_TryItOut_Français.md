@@ -172,6 +172,29 @@ Une **cue process** contient un patch Pure Data et le fait tourner tant que la c
 - **Problèmes d'interface.** Si l'interface audio disparaît, le spectacle se met en pause et reprend à son retour. Si sa fréquence d'échantillonnage change, Go.dot suit.
 - **Double-clic sur un `.wfg`** pour ouvrir le spectacle (installateur Windows, .deb Linux, macOS).
 
+### Deux ordinateurs : un principal et un secours (nouveau)
+
+Deux ordinateurs peuvent jouer ensemble un même spectacle. Le **principal** (*Main*) le joue et parle à l'installation ; le **secours** (*Backup*) le suit avec un instant de retard, démarre chaque son sur le même échantillon, et prend la main si le principal s'arrête.
+
+**Ce qu'il faut à chaque ordinateur.** Sa propre copie du dossier du spectacle, sons et films compris : rien n'est copié de l'un à l'autre par le réseau. Sa propre interface audio, et ses propres sorties vidéo si le spectacle a des images. Le son et les images basculent sur votre console ou votre matrice : Go.dot ne les commute pas. Les deux sur un même réseau, ou sur deux pour un chemin de secours.
+
+**Le réglage.** Sur chaque ordinateur, *Show settings > Redundancy* : dites si cet ordinateur est le *Main* ou le *Backup*, donnez l'adresse de l'autre (son adresse IP ; le port 5010 est sous-entendu ; deux adresses séparées par une espace pour deux réseaux), et la durée de silence au bout de laquelle le lien est perdu (1 s par défaut). Ces réglages appartiennent à l'ordinateur, pas au spectacle : copier le spectacle sur l'autre ordinateur ne les emporte pas.
+
+**Ce qu'il dit.** À côté du nom du spectacle, en haut de la fenêtre, chaque ordinateur dit ce qu'il est : *Main - sending* (il envoie), *Main - alone* (aucun secours avec lui), *Backup - following* (il suit), *Backup - waiting* (il n'a pas trouvé son principal depuis son démarrage), *Backup - sending* (il a pris la main), *Main - following* (un principal redémarré après que son secours a pris la main). Quand il faut intervenir, un bandeau sous cette ligne le dit, avec le bouton qui y répond :
+
+| Le bandeau | Ce qu'il veut dire | Le bouton |
+| --- | --- | --- |
+| *Backup - waiting* | Le secours n'a pas trouvé son principal ; il n'envoie rien | **Take over** : il envoie désormais |
+| *Two mains!* | Les deux ordinateurs envoient, en général après le retour du lien suivant une prise de main : chaque commande arrive deux fois aux appareils | **Make this the main**, sur l'ordinateur qui doit garder le spectacle ; l'autre le suit |
+| *Following, but not in step* | Quelque chose diffère entre les deux au même instant, par exemple une cue qui ne tourne que sur l'un | **Realign** : le secours reprend la position du principal |
+| *Following, but the show differs* | Les deux spectacles ne sont pas les mêmes, par exemple une modification faite pendant que le secours était éteint | **Take the main's show** : le secours prend les cues et les réglages du principal, garde sa propre interface et ses ports, et met ses anciens fichiers de côté dans un dossier daté du spectacle. Les sons ne sont jamais copiés : un fichier absent d'un ordinateur est nommé, et c'est à vous de le copier |
+
+Les mêmes commandes, avec **Hand over** (le principal laisse le secours envoyer), se trouvent dans le menu *Show > Redundancy*, qui fonctionne spectacle verrouillé, sur l'onglet *Redundancy* avec ce que fait chacune, et sur la ligne sous le transport de la console web.
+
+**Quand le principal s'arrête.** Le secours ne l'entend plus et, après le délai du lien, prend la main : il envoie désormais aux appareils et dit *The main was lost and this machine took over*. Un Échap ou un double Échap pressé sur le secours à ce moment-là est appliqué ; tout le reste que le principal n'avait pas confirmé est abandonné. Basculez votre console ou votre matrice sur le secours. Quand le principal redémarre, il trouve le secours en train d'envoyer et le suit.
+
+**Le temps.** Tant qu'il suit, le secours n'envoie rien aux appareils (OSC, MIDI, série) ; une commande que vous lui donnez est transmise au principal. Les deux démarrent chaque son sur le même échantillon, d'aussi près que leurs horloges peuvent être accordées ; l'onglet *Redundancy* montre à quel point, et de combien l'horloge d'un ordinateur va plus vite (une horloge word clock commune aux deux interfaces y remédie). Les latences de sortie des deux interfaces ne sont pas compensées : l'onglet montre chacune et le saut que fera une bascule. Pas encore vérifié avec deux ordinateurs en Dante : dites-nous ce que le vôtre a fait.
+
 ## Ce qui vient très bientôt
 
 Ces fonctions sont conçues dans la spécification mais pas encore construites. L'ordre peut changer selon ce que demandent les testeurs : raison de plus pour envoyer vos retours.
