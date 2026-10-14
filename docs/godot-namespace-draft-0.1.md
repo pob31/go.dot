@@ -28422,6 +28422,48 @@ cable, and a code from a VTR or a desk - the bench's.
   again (`--analyse`), and the late-tick room; `wfg.replay.*` and `blackbox.timecode` (66 of 66). Left: (5); and
   how late a Windows runner's ticks run, which the engine's notes would say - they are in its log, which CI does
   not keep.
+- **TG.12's CI run, part 2**, 2026-10-14: (5) again, and what the arming of a cue does to every cue playing. The next
+  run, 38497034206 on f9a5cae, was red on macOS in C with the same burst: the timestretch chaser's at 49.144 s read
+  992.709 Hz, and its cycles said a hole - the longest 145 samples at 49.085 s, 129 of them near silence (a whole
+  128-sample block), and one short cycle (45.20) at 49.106 s. Looked for on the Mac mini (the farm, f9a5cae, Debug,
+  `ci-macos`), whose bursts are rendered by the same arm64 code as CI's. **NOT REPRODUCED**: fourteen runs, both
+  serves of each kept and read cycle by cycle - three alone, eight at once (four C, four fr_FR, as CI judges them),
+  three held to the efficient cores at background priority beside two busy loops (starved past CI: their code checks
+  failed) - and no burst held a cycle near silence; every burst within 0.05 Hz of 1 kHz. **FOUND INSTEAD, IN EVERY
+  RENDER: ARMING ANY CUE PUTS A RAMP INTO EVERY CUE PLAYING.** Arming rebuilds the graph, and on the block the new
+  graph first plays, every playing member - the LTC ones and the bursts alike - holds its last sample and fades the
+  block in from it over 40 samples: on LTC a straight ramp across a level, on the 1 kHz bursts a cycle long and the
+  next short (57.54 and 38.46, 45.53 and 50.47 samples). In this story the arms are the scene's second sound at 22.5
+  s, and the scene re-seated at the return (49.09 s) and at the locate (67.09 s), two arms each time, which here land
+  on consecutive blocks. The "splice at the catch-up's start" that part 1 read on Windows at 49.111 s was this, not
+  the catch-up. Why: patch 0002's slot carries `wasPlaying` across a rebuild (2026-09-28), so a clip found playing
+  goes on playing - but not `lastOffset`, the offset its clip was launched at, which a new slot starts at nought. Its
+  first block found the offset changed, took it for a retrigger, and told the clip's nodes the playhead had jumped;
+  the wave node, seeing a jump that was not a loop's first block, faded from its last sample. Before 2026-09-28 that
+  block was a loop's first, which does not fade; the carry made it a jump. As large as the sound itself, for under a
+  millisecond: a click. **MENDED, in patch 0002** (`SlotControlNode::prepareToPlay`): with `wasPlaying` the slot
+  carries `lastOffset`, and tells the clip's offset nodes the offset as it is prepared, before it plays - a wave node
+  that kept its state has it already and is not touched, one built anew learns it and fades in as a new reader does.
+  The rebuild's first block is now an ordinary one. Measured on the farm: four driver runs (two C, two fr_FR, as CI
+  judges them) green, no ramp left on the free runner (one at every arm in every run before), and every cycle of every
+  burst of the timestretch chaser within a sample of 48 - before, every run had odd cycles at the arms. `AudioTests`
+  gains "audio host: the block a graph rebuild lands on plays on as if there were none - no ramp from its last
+  sample": a tone at 1.001, resampled and stretched, a second voice armed mid-cue, listened to from the very block the
+  rebuild lands on (the case before it starts 50 ms after its rebuild, which is why it never heard this) against the
+  same render with no rebuild - red without the mend (0.266 resampled, 0.176 stretched, against a 0.25 tone), under
+  1e-6 with it. On the farm with the mend, in C and fr_FR: every `AudioTests` case (120), and `EditPlaybackTests`,
+  `SamplerTests`, `TimeGroupTests` and `ChaseTests` (103). Not built on Windows. **THE HOLE ITSELF, NOT SETTLED.**
+  CI's two marks are 1008 samples apart, about eight blocks: the return's two arms, which a starved runner spreads
+  apart, and the second (45.20) is the ordinary ramp. So the hole fell on the first arm's rebuild, the block that took
+  the retrigger path, and gave a block of near silence there instead of a ramp. How is not found; read and ruled out:
+  Signalsmith's silence mode (after two of its windows, 240 ms, of exact silence in its input it copies the input out
+  - which the gaps between bursts can reach, but in 256-sample chunks, and the hole is one 128-sample block); the
+  stretcher reset and primed again (a splice, never a silence; a prime fed silence by a cache read that failed would
+  fade over a window, not cut a block); the node player (it swaps a new graph without a lock and drops a block only
+  while its graph is cleared); and patch 0002's two TG.11 changes, `framesOwed` and Signalsmith re-analysing its
+  previous input (they change what a chunk takes and when it is analysed again, not whether it sounds) - not built
+  reverted, since the hole never came here to go. With the mend the rebuild's first block is no longer special, so if
+  the hole was that path's it is gone; the check stays strict, and the next macOS runs will say.
 
 ## 61. Keys, text and blur
 

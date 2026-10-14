@@ -7198,6 +7198,62 @@ TEST_CASE ("audio host: a graph rebuilt in the middle of a ramp keeps its place"
     CHECK (largest < 1.0e-6f);
 }
 
+TEST_CASE ("audio host: the block a graph rebuild lands on plays on as if there were none - no ramp from its last sample")
+{
+    /*  TG.12's CI run, part 2 (namespace draft §60.7). Arming any cue rebuilds the
+        graph. Patch 0002's slot carried on playing a clip it found playing, but not the
+        offset the clip was launched at, so the first block of every rebuild took that
+        offset for a retrigger: the wave node, told the playhead had jumped, held its
+        last sample and faded the block in from it over 40 samples - a ramp in every cue
+        playing whenever another was armed, in a 1 kHz tone a cycle and a half bent out
+        of shape. The case above starts listening 50 ms after its rebuild, which is why
+        it never heard it; this one listens from the very block the rebuild lands on,
+        resampled and stretched, at a speed a chaser runs at. */
+    for (const auto stretch : { false, true })
+    {
+        auto render = [stretch] (bool rebuild)
+        {
+            SpeedRig speed;
+            const auto tone = writeSineTone (speed.rig.storage.folder, speed.rate, 1000.0, 0.25f, 3);
+            const auto other = writeSineTone (speed.rig.storage.folder.getChildFile ("other"), speed.rate, 300.0, 0.25f, 2);
+            REQUIRE (speed.open (tone, stretch, {}, 2));
+
+            //  Both renders launch on the same sample, whatever the disk made open() pump.
+            speed.runTo (30 * speed.rate);
+            REQUIRE (speed.go (1.001));
+
+            //  Well into the cue, its stretcher primed and long since running.
+            speed.record (0.5, 0.25);
+
+            if (rebuild)
+                REQUIRE (speed.rig.host.setTrackSource (1, 0, other.getFullPathName().toStdString()));
+
+            return speed.record (0.0, 0.25);
+        };
+
+        const auto plain = render (false);
+        const auto rebuilt = render (true);
+
+        const auto* a = plain.getReadPointer (0);
+        const auto* b = rebuilt.getReadPointer (0);
+        auto largest = 0.0f;
+        auto largestAt = -1;
+
+        for (int n = 0; n < plain.getNumSamples(); ++n)
+        {
+            if (std::abs (a[n] - b[n]) > largest)
+            {
+                largest = std::abs (a[n] - b[n]);
+                largestAt = n;
+            }
+        }
+
+        INFO ((stretch ? std::string ("stretched") : std::string ("resampled"))
+              << ": largest difference from the rebuild on " << largest << " at sample " << largestAt);
+        CHECK (largest < 1.0e-6f);
+    }
+}
+
 TEST_CASE ("audio host: a cue at one is exact, bit for bit, whatever speeds the voice had before")
 {
     /*  §22.4: at exactly one from a launch on, a slot answers with Tracktion's

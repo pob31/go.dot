@@ -20,6 +20,10 @@ rebuilt in the middle of a change of speed needs nothing carried across it.
   and a slot rebuilt while its clip plays carries on playing it: a fresh slot
   told its reader the playhead had jumped, which at any ratio but one is a
   jump of a fraction of a sample - a faint tick at every arm of another cue.
+  It carries the offset the clip was launched at too (2026-10-14): carrying
+  only that it played, its first block still found the offset changed and took
+  it for a retrigger, and the wave node faded that block in from its last
+  sample over 40 samples - a ramp in every cue playing at every arm.
 - A resampled read is faded to silence as its speed nears nought (full at 0.05,
   silent at 0.01, Tracktion's own tape-stop and slowest-clip numbers) and not
   read at all below 0.01; a stretched read at nought is fed nothing and keeps
@@ -359,7 +363,7 @@ index 264346b5f0c..e023a4bef03 100644
  
  } // namespace tracktion::inline engine
 diff --git a/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
-index 90ee2402c5c..fef637df9bd 100644
+index 90ee2402c5c..a0cc72e02d3 100644
 --- a/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
 +++ b/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
 @@ -12,6 +12,23 @@
@@ -398,7 +402,7 @@ index 90ee2402c5c..fef637df9bd 100644
          if (auto mn = dynamic_cast<LoopingMidiNode*> (n))
              midiNode = mn;
      }
-@@ -92,10 +114,23 @@ void SlotControlNode::prepareToPlay (const tracktion::graph::PlaybackInitialisat
+@@ -92,10 +114,42 @@ void SlotControlNode::prepareToPlay (const tracktion::graph::PlaybackInitialisat
          return;
  
      if (auto oldGraph = info.nodeGraphToReplace)
@@ -416,13 +420,32 @@ index 90ee2402c5c..fef637df9bd 100644
 +            // other ratio a jump of a fraction of a sample - a faint tick in a sped cue every
 +            // time any other cue is armed, since arming rebuilds the graph.
 +            wasPlaying = oldNode->wasPlaying;
++
++            // MODIFIED BY GO.DOT, 2026-10-14 (patch 0002): and it carries on from the offset
++            // its clip was launched at. Carrying `wasPlaying` alone left `lastOffset` at
++            // nought, so the first block of every rebuild still found the offset changed and
++            // took it for a retrigger: it told the clip's nodes the playhead had jumped, and
++            // the wave node, seeing a jump that was not the start of a loop, held its last
++            // sample and faded the block in from it over 40 samples - a ramp in every cue
++            // playing whenever any other cue was armed, a cycle and a half of a 1 kHz tone
++            // bent out of shape (blackbox.timegroup, TG.12's CI run, part 2). The clip's nodes
++            // are told the offset here, before they play: a wave node that kept its state
++            // already has it and is not touched, and one built anew learns it as it would
++            // have on that first block, fading in as a new reader should.
++            if (wasPlaying)
++            {
++                lastOffset = oldNode->lastOffset;
++
++                for (auto n : offsetNodes)
++                    n->setDynamicOffsetBeats (lastOffset);
++            }
 +        }
 +    }
 +
      if (lastSamples)
          return;
  
-@@ -136,16 +171,23 @@ void SlotControlNode::process (ProcessContext& pc)
+@@ -136,16 +190,23 @@ void SlotControlNode::process (ProcessContext& pc)
              if (auto playedMonotonicRange = launchHandle->getPlayedMonotonicRange())
              {
                  const auto blockRange = MonotonicBeatRange { { syncRange.start.monotonicBeat.v, syncRange.end.monotonicBeat.v } };
@@ -450,7 +473,7 @@ index 90ee2402c5c..fef637df9bd 100644
                  }
              }
          }
-@@ -161,9 +203,11 @@ void SlotControlNode::process (ProcessContext& pc)
+@@ -161,9 +222,11 @@ void SlotControlNode::process (ProcessContext& pc)
                  && ! splitStatus.playing1 && splitStatus.playing2)
              {
                  const auto blockRange = MonotonicBeatRange { { syncRange.start.monotonicBeat.v, syncRange.end.monotonicBeat.v } };
