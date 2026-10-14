@@ -71,8 +71,12 @@ the render's own samples: where it is heard, where a member starts and where a
 chaser stands are the same on every machine - unless a launch came late, which
 the engine owns up to (`run.late` in whole blocks, and its log's notes that the
 tick thread ran tens of milliseconds behind, as a Debug engine loading sounds
-does), and which voids that one start's checks and nothing else. MTC is not: it
-arrives on the steady clock and reaches the samples through the tick's clock
+does), and which voids that one start's checks and nothing else. A record is
+applied on a tick, though, and a tick that ran late applied it later than the
+tick's number says: where the driver reads when something happened from a
+record's tick - the stop said, the map a chaser is held to - it allows the
+lateness the engine's log notes there, never more. MTC is not in the render's
+samples: it arrives on the steady clock and reaches them through the tick's clock
 pairs, which a starved runner takes late - so on CI where an MTC member stands,
 and how often the MTC watcher re-anchors, are printed and not judged, and off
 CI a turn's placing is judged to MTC_PLACED_MS. A chaser's steering is decided
@@ -591,6 +595,39 @@ def bursts_in(render: Render, channel: int) -> "list[tuple[float, int, float]]":
     return out
 
 
+def burst_flaws(render: Render, channel: int, centre: float, truth: "Truth") -> str:
+    """What the cycles of a burst read off its pitch say, for the report - not
+    judged: bursts_in's pitch is the rising zero crossings counted over the
+    burst, so a hole in the sound a block long (cycles missing), a splice (a
+    cycle long and the next short) and a pitch that really moved (every cycle
+    longer or shorter) read alike there, and only the cycles tell them apart.
+    Written after TG.12's CI run, where a macOS runner read one burst of 107 at
+    989 Hz, a block's worth of cycles short, and nothing else said which."""
+    burst = min(bursts_in(render, channel), key=lambda b: abs(b[0] - centre), default=None)
+    if burst is None:
+        return "no burst there"
+    begin, end = int(burst[0] - burst[1] / 2.0), int(burst[0] + burst[1] / 2.0)
+    crossings = []
+    for k in range(begin, end):
+        x0, x1 = render.sample(channel, k), render.sample(channel, k + 1)
+        if x0 < 0.0 <= x1 and x1 > x0:
+            crossings.append(k + (0.0 - x0) / (x1 - x0))
+    periods = [(a, b - a) for a, b in zip(crossings, crossings[1:])]
+    if not periods:
+        return "no cycles"
+    nominal = SAMPLE_RATE / TONE_HZ
+    odd = [(a, p) for a, p in periods if abs(p - nominal) > 1.0]
+    longest = max(periods, key=lambda x: x[1])
+    shortest = min(periods, key=lambda x: x[1])
+    median = statistics.median(p for _, p in periods)
+    quiet = max((sum(1 for k in range(int(a), int(a + p)) if abs(render.sample(channel, k)) < 0.01 * AMPLITUDE)
+                 for a, p in periods), default=0)
+    return (f"{len(periods)} cycles, median {median:.3f} samples ({SAMPLE_RATE / median:.3f} Hz), "
+            f"{len(odd)} more than a sample off a cycle's {nominal:g}: longest {longest[1]:.2f} at "
+            f"{seconds(longest[0] - truth.origin)}, shortest {shortest[1]:.2f} at {seconds(shortest[0] - truth.origin)}"
+            f", at most {quiet} samples near silence in one cycle")
+
+
 # =============================================================================
 # The engine's log
 # =============================================================================
@@ -943,8 +980,22 @@ def judge_turns(report: Report, word: str, log: Log, truth: Truth, r0: int, sour
         applied on); for a jump, how far its sample is from the frame's."""
         candidates = [h for h in mine if h.what == what and abs(h.frame - frame) <= 1]
         if what == "stopped":
+            # SAID ON A TICK, WHICH IS DUE AT ITS SAMPLE BUT RUNS AS LATE AS THE
+            # TICK THREAD DOES: the watcher decides a stop against the samples
+            # counted when the tick runs, not those the tick was due at, so a
+            # tick that ran late says it under a number whose sample can be
+            # before the line fell quiet - by as much as the tick was behind,
+            # which the engine notes in its log (TG.12's CI run, where a Windows
+            # runner's ticks around the stop had the record due before the quiet
+            # in both locales, for both codes). So a record whose tick was due
+            # before the quiet is the stop's when the tick could have run after
+            # it, by the lateness the log notes there; with no note, the tick
+            # was under two ticks behind and the watcher's own five frames of
+            # waiting put its due sample after the quiet anyway.
             quiet = truth.at(story_sample)
-            hit = next((h for h in candidates if quiet <= h.tick * TICK + r0 <= quiet + SAMPLE_RATE), None)
+            hit = next((h for h in candidates
+                        if quiet <= h.tick * TICK + r0 + log.tick_late_around(h.tick) * MS
+                        and h.tick * TICK + r0 <= quiet + SAMPLE_RATE), None)
             return hit, (None if hit is None else hit.tick * TICK + r0 - quiet)
         want = truth.of(frame, story_sample)
         hit = min(candidates, key=lambda h: abs(h.sample + r0 - want), default=None)
@@ -961,8 +1012,15 @@ def judge_turns(report: Report, word: str, log: Log, truth: Truth, r0: int, sour
     for what, frame, story_sample, words in turns:
         hit, off = turn(what, frame, story_sample)
         if what == "stopped":
+            fell = truth.at(story_sample)
+            seen = "; ".join(f"{label_of(h.frame)} on tick {h.tick}, due {(h.tick * TICK + r0 - fell) / MS:+.1f} ms"
+                             f" from the quiet, the tick noted up to {log.tick_late_around(h.tick):g} ms late"
+                             for h in mine if h.what == "stopped")
             report.check(hit is not None, f"{word}: `stopped` at {words}, on {label_of(frame)}",
-                         "none" if hit is None else f"said {off / MS:+.1f} ms after the line fell quiet")
+                         f"none; stopped said: {seen or 'never'}" if hit is None
+                         else f"said on a tick due {off / MS:+.1f} ms after the line fell quiet"
+                              + (f", the tick noted up to {log.tick_late_around(hit.tick):g} ms late"
+                                 if log.tick_late_around(hit.tick) > 0.0 else ""))
         elif exact is not None:
             report.check(hit is not None and abs(off) <= exact,
                          f"{word}: `jumped` at {words}, {label_of(frame)} on the input frame's own sample",
@@ -1117,9 +1175,49 @@ def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Tr
                  " where it should be", "no burst" if off is None else f"{off:+.3f} ms")
     a = judge_start(report, word, log, SCENE_A, tracks[SCENE_A.cue], truth, r0, True)
     b = tracks[SCENE_B.cue].onset()
-    report.check(a is not None and b is not None and abs(b - a - 1.5 * s) <= 1.0,
-                 f"{word}: the scene's second sound starts 1.5 s after its first, to the sample",
-                 f"{None if a is None or b is None else f'{(b - a) / s:.6f} s'}")
+    # A SCENE'S MEMBERS ARE PLACED ON THE CODE'S SAMPLES, NOT AFTER ONE ANOTHER
+    # (TG.7): the placed scene's start is the sample its map gives the scene's
+    # time, moved by each re-anchor until it is committed, and each member is
+    # asked for on that start plus its offset in Go.dot's samples. The first
+    # sound's offset is nought, so on time it began on the scene's start and the
+    # second 1.5 s after it, to the sample, whatever map placed them. Launched
+    # late - which the engine owns up to and which voids the first's own checks
+    # above - it says nothing of the start, and the second is held instead to
+    # the scene's start as one of the maps the engine held while the scene was
+    # placed puts it (TG.12's CI run, where a Windows runner launched the first
+    # five blocks late and the second on its own sample, 1.497589 s after the
+    # first). The second launched late itself, said by the engine, voids this.
+    _, a_on_map, a_excuse = asked(log, SCENE_A, truth, r0)
+    a_late = "" if a is None else launched_late(a, a_on_map, a_excuse, r0)
+    words = f"{word}: the scene's second sound starts 1.5 s after its first, to the sample"
+    if a is None or b is None:
+        report.check(False, words, f"first {a!r}, second {b!r}")
+    elif not a_late:
+        report.check(abs(b - a - 1.5 * s) <= 1.0, words, f"{(b - a) / s:.6f} s")
+    else:
+        scene = [r for r in log.spawns_of(SCENE) if r.tick * TICK + r0 >= truth.origin]
+        b_spawn = [r for r in log.spawns_of(SCENE_B.cue) if r.tick * TICK + r0 >= truth.origin]
+        b_fired = log.first("run.fire", b_spawn[0].args[2]) if b_spawn else None
+        held = []
+        if scene and b_fired:
+            before = log.map_before(LTC_ORIGIN, scene[0].seq)
+            held = ([before] if before is not None else []) + [
+                h for h in log.heard if h.source == LTC_ORIGIN and h.what != "stopped"
+                and scene[0].seq < h.seq < b_fired.seq]
+        # The sample a map gives a frame is the first at or after its moment
+        # (CodeMap::sampleOf), so the scene's start is that moment rounded up.
+        places = [math.ceil(h.sample_of(SCENE_A.at) + r0 - 1e-6) for h in held]
+        start = min(places, key=lambda p: abs(b - 1.5 * s - p), default=None)
+        detail = (f"{(b - a) / s:.6f} s after the first, which launched late ({a_late}); against the scene's start "
+                  + ("on no map" if start is None else
+                     f"as {len(places)} map(s) the engine held while it placed the scene put it, "
+                     f"{(b - start) / s:.6f} s after it"))
+        _, _, b_excuse = asked(log, SCENE_B, truth, r0)
+        b_late = "" if start is None else launched_late(b, start + 1.5 * s, b_excuse, r0)
+        if b_late and abs(b - start - 1.5 * s) > 1.0:
+            report.void(words, f"the second launched late too ({b_late}); {detail}")
+        else:
+            report.check(start is not None and abs(b - start - 1.5 * s) <= 1.0, words, detail)
 
     # --- the free runner ----------------------------------------------------
     free = tracks[FREE.cue]
@@ -1186,7 +1284,9 @@ def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Tr
     off = [(t, p) for t, p in pitches if abs(p - TONE_HZ) > 0.5]
     report.check(len(pitches) > 60 and not off,
                  f"{word}: the timestretch chaser keeps its pitch, 1 kHz in every burst, catching up or not",
-                 f"{len(pitches)} bursts; off: {[(seconds(t - truth.origin), round(p, 3)) for t, p in off[:4]]}")
+                 f"{len(pitches)} bursts; off: {[(seconds(t - truth.origin), round(p, 3)) for t, p in off[:4]]}"
+                 + "".join(f"; at {seconds(t - truth.origin)}, {burst_flaws(render, STRETCH.channel, t, truth)}"
+                           for t, _ in off[:2]))
     errs = truth.errors(stretch, STRETCH, at, truth.at(LOOP))
     held_to = STRETCHED_MS + (10.0 if ON_CI else 0.0)
     a_rate = stretch.rate(at + 1.5 * s, a1, 3)
@@ -1327,19 +1427,52 @@ def judge_mtc(report: Report, word: str, render: Render, log: Log, truth: Truth,
 
 def map_errors(track: Track, member: Member, log: Log, r0: int):
     """[(render sample, ms ahead)] of a member against the map of its code
-    the engine last drew before each point - where Go.dot heard the code."""
+    the engine had applied at each point - where Go.dot heard the code.
+
+    A map is applied on the tick its record names, which is due at that tick's
+    sample but runs as late as the tick thread does, and a chaser it re-seats
+    moves a launch horizon and a crossfade after that. So from the tick's due
+    sample - never before the code's own turn the map describes, its anchor -
+    until the tick could have run, by the lateness the engine's log notes there
+    (two ticks when it notes none), and the chaser moved, a point is held to
+    whichever of the maps it straddles it is nearer, and only after that to the
+    new one alone. Judged from the due sample alone, a tick that ran a hundred
+    milliseconds late at the locate back 30 s held the chaser, still in step
+    with the code before the locate, to the map after it - 30 s out - and one
+    late at the loop point 45 s (TG.12's CI run, on a Windows runner, while the
+    LTC chasers judged against the story itself were in step throughout)."""
     source = LTC_ORIGIN if member.source == "ltc" else MTC_ORIGIN
     maps = [h for h in log.heard if h.source == source]
+    reseat = 0.1 * SAMPLE_RATE
+
+    def applied(h: Heard) -> "tuple[float, float]":
+        due = h.tick * TICK + r0
+        first = due if h.what == "running" else max(due, h.sample + r0)
+        return first, due + max(log.tick_late_around(h.tick), 2 * 1000.0 * TICK / SAMPLE_RATE) * MS + reseat
+
+    spans = [applied(h) for h in maps]
+
+    def ahead(heard: Heard, t: float, file: float) -> float:
+        code = heard.frame + (t - r0 - heard.sample) * heard.speed / FRAME
+        return (file - ((code - member.at) / FPS - member.offset)) * 1000.0
+
     out = []
     k = -1
     for t, file in track.points:
-        while k + 1 < len(maps) and maps[k + 1].tick * TICK + r0 <= t:
+        while k + 1 < len(maps) and spans[k + 1][0] <= t:
             k += 1
-        if k < 0 or maps[k].what == "stopped":
+        if k < 0:
             continue
-        heard = maps[k]
-        code = heard.frame + (t - r0 - heard.sample) * heard.speed / FRAME
-        out.append((t, (file - ((code - member.at) / FPS - member.offset)) * 1000.0))
+        # The newest map applied by now, and those before it that may still have
+        # been the one in force - each newer one not yet certainly applied.
+        candidates = [maps[k]]
+        j = k
+        while j > 0 and spans[j][1] > t:
+            j -= 1
+            candidates.append(maps[j])
+        errors = [ahead(h, t, file) for h in candidates if h.what != "stopped"]
+        if errors:
+            out.append((t, min(errors, key=abs)))
     return out
 
 
@@ -1399,8 +1532,9 @@ def scenario(report: Report, room: Path, held: bool, word: str, unheld: dict) ->
 
 def starts_of(render: Render, log: Log, truth: Truth, mtc: Truth, r0: int) -> dict:
     """Where each member's sound began against its code's frame, in samples,
-    and whether it was launched late for a reason the engine owned up to:
-    {cue: (samples, late)}."""
+    whether it was launched late for a reason the engine owned up to, where it
+    began against the sample the engine's map gave its time, and that map:
+    {cue: (samples, late, samples from the map's, (frame, sample, speed))}."""
     out = {}
     for member in MEMBERS:
         if member.sound != "ltc":
@@ -1409,8 +1543,16 @@ def starts_of(render: Render, log: Log, truth: Truth, mtc: Truth, r0: int) -> di
         onset = ltc_track(render, member).onset()
         want = code.of(member.at + member.offset * FPS)
         if onset is not None and want is not None:
-            _, on_map, excuse = asked(log, member, code, r0)
-            out[member.cue] = (onset - want, bool(launched_late(onset, on_map, excuse, r0)))
+            heard, on_map, excuse = asked(log, member, code, r0)
+            # A scene's member is asked for on the scene's start plus its offset
+            # in Go.dot's samples (TG.7), so that is its own place on the map;
+            # and the sample a map gives a frame is the first at or after its
+            # moment (CodeMap::sampleOf), so a start on its map's sample is
+            # that moment rounded up, which two maps round differently.
+            place = None if on_map is None else on_map + member.offset * SAMPLE_RATE
+            out[member.cue] = (onset - want, bool(launched_late(onset, place, excuse, r0)),
+                               None if place is None else onset - math.ceil(place - 1e-6),
+                               None if heard is None else (heard.frame, heard.sample, heard.speed))
     return out
 
 
@@ -1447,14 +1589,42 @@ def analyse(report: Report, word: str, held: bool, story_pass: int, log: Log, re
                      f"{word}: held, both codes are still heard - only sends are held, and these are not sends")
         starts = starts_of(render, log, truth, mtc, r0)
         if unheld:
+            # FIRING THE SAME is starting each member where the map of its code
+            # gives its time, as unheld does. Both serves hear the same input,
+            # but each draws its map on its own ticks: a jump said on a tick
+            # that ran late has more frames in its fit, so it can already know
+            # the code's +50 ppm, and then needs no re-anchor before the members'
+            # time - TG.12's CI run, where the held serve's map (the first jump,
+            # at 1.00005) and the unheld one's (a re-anchor ten seconds on) put
+            # 01:00:02:00 two samples apart, each within a millisecond of the
+            # input's frame as judge_start holds them. So where both serves drew
+            # the same map, the two starts are held to the same sample of the
+            # code; where they drew two, each start is held to its own map's
+            # sample, the same distance from it as unheld - the hold's question,
+            # and not the watcher's.
+            def same_start(member: Member) -> bool:
+                mine, theirs = starts.get(member.cue), unheld.get(member.cue)
+                if mine is None or theirs is None:
+                    return False
+                if mine[3] is not None and mine[3] == theirs[3]:
+                    return abs(mine[0] - theirs[0]) <= 1.0
+                return mine[2] is not None and theirs[2] is not None and abs(mine[2] - theirs[2]) <= 1.0
+
+            def said(member: Member, start) -> str:
+                if start is None:
+                    return "none"
+                place = "no map" if start[2] is None else f"{start[2]:+.2f} from the map's sample"
+                drawn = "" if start[3] is None else f", the map {label_of(start[3][0])} on {start[3][1]} at {start[3][2]:.6f}"
+                return f"{start[0]:+.2f} samples from the input's frame, {place}{drawn}"
+
             ltc_members = [m for m in MEMBERS if m.source == "ltc" and m.sound == "ltc"
                            and not starts.get(m.cue, (0, False))[1] and not unheld.get(m.cue, (0, False))[1]]
-            same = [m for m in ltc_members
-                    if abs(starts.get(m.cue, (1e9,))[0] - unheld.get(m.cue, (-1e9,))[0]) <= 1.0]
+            same = [m for m in ltc_members if same_start(m)]
             report.check(bool(ltc_members) and len(same) == len(ltc_members),
-                         f"{word}: every LTC member starts on the same sample of its code as unheld - it fires the same",
-                         "; ".join(f"{m.words} {starts.get(m.cue, (float('nan'),))[0]:+.2f} against "
-                                   f"{unheld.get(m.cue, (float('nan'),))[0]:+.2f} samples" for m in ltc_members))
+                         f"{word}: every LTC member starts where its map of the code puts its time, as unheld does -"
+                         " it fires the same",
+                         "; ".join(f"{m.words} held {said(m, starts.get(m.cue))}, unheld {said(m, unheld.get(m.cue))}"
+                                   for m in ltc_members))
         return starts
 
     judge_turns(report, word, log, truth, r0, LTC_ORIGIN, LTC_ORIGIN, True)
