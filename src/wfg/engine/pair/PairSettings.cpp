@@ -431,8 +431,20 @@ namespace wfg::pair
                 if (! isRole (role) || ! taken.has_value() || sends (*taken) != sending || args[2].getString().empty())
                     return Outcome::rejected (reason::badValue);
 
+                const auto wasFollowing = pairing.seated.seat == Seat::following;
+
                 pairing.seated = { roleNamed (role), *taken, args[2].getString() };
                 ++pairing.seatCount;
+
+                /*  THE BACKUP'S HISTORY STARTS AT THE LINK (RD.10, AFY): a
+                    follow that begins forgets this machine's own steps, in the
+                    record that says it follows - so the session and its replay
+                    forget them at the same place - and a mirrored `undo`
+                    reaching further back is refused here, the shows said to
+                    differ. */
+                if (*taken == Seat::following && ! wasFollowing && pairing.followBegins)
+                    pairing.followBegins();
+
                 return Outcome::ok (args);
             };
         };
@@ -503,6 +515,45 @@ namespace wfg::pair
 
                 pairing.realignAsked = true;
                 return Outcome::ok (args);
+            } }));
+
+        /*  THE OTHER MACHINE'S SHOW, TAKEN (namespace draft §58.4, RD.10, the
+            author's AFU): the operator's, on a machine that follows and whose
+            show is said to differ from its leader's. Refused `not-following`
+            from the seat the log last said - a machine that sends, waits or is
+            not paired has no leader whose show to take - and `busy` while
+            anything runs here, before any byte is touched; then serve's act
+            (`Pairing::adoptShow`): the leader's text and descriptions as this
+            machine holds them, written over this machine's with its own
+            machine rows kept and its own files set aside, the show reloaded
+            and its history cleared (AFY), refused `not-fetched` with nothing to
+            take. Seated at the leader's position again after it (RD.8), since
+            the standby and the runs were of the show it replaced. Machine-local
+            and ONE RECORD, its arguments as applied the fingerprint taken and
+            the folder this machine's files were set aside in. */
+        registry.add (machineLocal ({ "pair.adoptShow",
+            "On a machine that follows its leader and whose show differs from it: takes the leader's show -"
+            " every cue and setting, and its device descriptions - in place of this machine's, keeping this"
+            " machine's own interface, ports, serial paths and displays, and sets this machine's files aside"
+            " in a dated folder of the show. Sounds are not copied. Refused while anything runs here.",
+            { { "fingerprint", 's', true }, { "setAside", 's', true } }, true,
+            [&pairing] (CommandContext& context, const std::vector<osc::Value>&)
+            {
+                if (pairing.seated.seat != Seat::following)
+                    return Outcome::rejected (reason::notFollowing);
+
+                if (pairing.busyNow && pairing.busyNow())
+                    return Outcome::rejected (reason::busy);
+
+                if (! pairing.adoptShow)
+                    return Outcome::rejected (reason::notFetched);
+
+                auto outcome = pairing.adoptShow (context);
+
+                if (outcome.applied)
+                    pairing.realignAsked = true;
+
+                return outcome;
             } }));
     }
 }

@@ -1259,6 +1259,22 @@ namespace wfg::doc
         return name;
     }
 
+    void ShowDocument::clearHistory()
+    {
+        /*  `adopt`'s clearing, without its swap: each domain's stack emptied and
+            the coalescing key forgotten, so the next edit opens a step of its
+            own rather than joining one that is gone. The registry is left as it
+            is - an identifier a step held stays retired, which costs a name and
+            never reuses one a client may still hold - and so are the counters:
+            no row of either file moved. An engine step still waiting for its
+            first write is dropped with the rest. */
+        for (auto& domain : histories)
+            domain->clearUndoHistory();
+
+        engineStepPending = false;
+        forgetCoalescing();
+    }
+
     const juce::UndoManager& ShowDocument::history (UndoDomain domain) const noexcept
     {
         return *histories[static_cast<std::size_t> (domain)];

@@ -57,6 +57,7 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/document/ShowFingerprint.h>
 #include <wfg/engine/log/EventLog.h>
 
 #include <juce_core/juce_core.h>
@@ -442,6 +443,44 @@ namespace wfg::doc
             reports a `namespaces/` that would not follow. */
         std::vector<std::string> carryMedia (const juce::File& destination, const juce::File& source,
                                              const std::vector<std::string>& named);
+
+        //======================================================================
+        /*  ANOTHER MACHINE'S SHOW, TAKEN HERE (namespace draft §58, RD.10; the
+            author's AFU, and AFY): `pair.adoptShow`'s act on a backup whose
+            show is not its main's. `decided` is the main's show text with no
+            machine row in it (`CanonicalXml::writeDecided`), `descriptions` its
+            `namespaces/` files.
+
+            IN THIS ORDER, and each step refuses before the next touches
+            anything. The text is read here, into a document of its own - one
+            that does not read is refused and nothing is written - and THIS
+            machine's rows are put back into it (`putMachineRowsBack`): its
+            interface, its ports' devices, its serial paths, its displays. The
+            writer is drained, as `document.revert` drains it, so nothing queued
+            lands after this. Then this machine's own files are SET ASIDE - a
+            copy of show.xml, state.xml and `namespaces/` into
+            `<folder>/<asideName>/`, or the first `<asideName>.N/` not taken,
+            created here and never deleted by anything - and only then written
+            over: show.xml with the main's show and this machine's rows,
+            state.xml with where this machine stands now (its standby, its lock;
+            the seat that follows moves it to the main's), `namespaces/` with
+            the main's descriptions and none of its own others. Each file
+            through a sibling temp and a rename, as every write here is.
+
+            THEN RELOADED AS `document.revert` RELOADS, through a scratch
+            document (`readThenAdopt`), so the history goes with the show it was
+            about - the backup's history starts again here (AFY) - and the dot
+            goes out: the folder holds exactly this show. `recovery/` goes on
+            the revert's terms. Media never travels and nothing under `media/`
+            is touched. `asideUsed` is the folder's name, for the record.
+
+            ON THE TICK THREAD, AND WAITING FOR THE DISK, which is acceptable
+            for the reason it is for a revert: an operator's deliberate gesture,
+            refused while anything runs on this machine (`busy`), on a machine
+            that holds and sends nothing to anybody. */
+        ReadResult adoptShow (ShowDocument& document, DocumentSession& session, DocumentWriter& writer,
+                              const std::string& decided, const std::vector<Description>& descriptions,
+                              const std::string& asideName, std::string& asideUsed);
 
         //======================================================================
         /*  A SHA-256 over everything a session READ: show.xml, state.xml and

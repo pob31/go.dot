@@ -110,11 +110,20 @@ namespace wfg::pair
         std::uint64_t counter = 0;      // the last record of its stream applied by then
         std::vector<Standby> standby;
         std::vector<Run> runs;
+
+        /*  ITS SHOW (namespace draft §58, RD.10; pair/ShowCheck.h): its
+            fingerprint and its media list's digest, as of this tick - each
+            empty while the machine has not worked them out for the show it
+            has now. A follower lays them against its own at the same slot as
+            the rest, so a show both machines changed alike compares alike. */
+        std::string showFingerprint;
+        std::string mediaDigest;
     };
 
     /*  `/godot/pair/summary h:tick h:counter i:lists [s:list s:cue]...
-        [s:run s:cue s:state h:playhead i:range h:loop]...`: one message, a few
-        dozen bytes a run. */
+        [s:run s:cue s:state h:playhead i:range h:loop]...
+        s:showFingerprint s:mediaDigest`: one message, a few dozen bytes a run.
+        A summary of RD.8's, with no show after its runs, still reads. */
     std::vector<std::uint8_t> summaryBytes (const Summary& summary);
     std::optional<Summary> readSummary (const osc::Packet& message);
 

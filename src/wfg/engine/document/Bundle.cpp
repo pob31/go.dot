@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -64,6 +65,10 @@ namespace wfg::doc
             and the one command whose applied record ends a replay. */
         constexpr const char* recoveredKeyword = "recovered";
         constexpr const char* recoverCommand   = "document.recover";
+
+        /*  And a backup taking its main's show (namespace draft §58, RD.10):
+            the other command whose applied record ends a replay. */
+        constexpr const char* adoptShowCommand = "pair.adoptShow";
 
         /*  The N of a `recovery.previous.N` name, or -1 for a name that is not
             one. Decimal digits and nothing else, and few enough of them to fit:
@@ -1009,16 +1014,34 @@ namespace wfg::doc
         {
             const auto& record = log.records[n];
 
-            if (record.kind != LogRecord::Kind::applied || record.command != recoverCommand)
+            if (record.kind != LogRecord::Kind::applied)
                 continue;
 
-            boundary.replayable = n;
-            boundary.refusal = "this session adopted a recovery at tick " + std::to_string (record.tick)
-                             + " (sequence " + std::to_string (record.seq) + ", " + recoverCommand
-                             + ") whose content is not in the log - the header hashes the bundle"
-                               " the session opened, and the recovered bytes were never part of"
-                               " it - so it cannot be replayed past that record";
-            return boundary;
+            if (record.command == recoverCommand)
+            {
+                boundary.replayable = n;
+                boundary.refusal = "this session adopted a recovery at tick " + std::to_string (record.tick)
+                                 + " (sequence " + std::to_string (record.seq) + ", " + recoverCommand
+                                 + ") whose content is not in the log - the header hashes the bundle"
+                                   " the session opened, and the recovered bytes were never part of"
+                                   " it - so it cannot be replayed past that record";
+                return boundary;
+            }
+
+            /*  AND ONE THAT TOOK THE OTHER MACHINE'S SHOW (namespace draft §58,
+                RD.10): the show it ran from then on came down the link, and is
+                in neither this log nor the bundle its header hashes - the
+                same boundary as a recovery, for the same reason. */
+            if (record.command == adoptShowCommand)
+            {
+                boundary.replayable = n;
+                boundary.refusal = "this session took the other machine's show at tick " + std::to_string (record.tick)
+                                 + " (sequence " + std::to_string (record.seq) + ", " + adoptShowCommand
+                                 + ") whose content is not in the log - it came down the link, and the"
+                                   " header hashes the bundle the session opened - so it cannot be"
+                                   " replayed past that record";
+                return boundary;
+            }
         }
 
         return boundary;
@@ -1386,6 +1409,158 @@ namespace wfg::doc
             writer.drain();
             settle (session, writer);
         }
+
+        /*  A NAME THAT IS ONE FILE IN ONE FOLDER, and nothing that could leave
+            it: what a description the other machine sends may be called before
+            it is written into `namespaces/`. */
+        bool isPlainFileName (const std::string& name)
+        {
+            if (name.empty() || name == "." || name == ".."
+                  || name.find_first_of ("/\\:") != std::string::npos)
+                return false;
+
+            return juce::File::createLegalFileName (juce::String (name)).toStdString() == name;
+        }
+
+        /*  `<folder>/<name>`, or the first `<name>.N` from 2 that nothing in the
+            folder is called - a file or a folder - so a second taking in the
+            same second never writes into the first's. */
+        juce::File freeChild (const juce::File& folder, const std::string& name)
+        {
+            auto candidate = folder.getChildFile (juce::String (name));
+
+            for (int n = 2; candidate.exists(); ++n)
+                candidate = folder.getChildFile (juce::String (name) + "." + juce::String (n));
+
+            return candidate;
+        }
+    }
+
+    //==============================================================================
+    ReadResult Bundle::adoptShow (ShowDocument& document, DocumentSession& session, DocumentWriter& writer,
+                                  const std::string& decided, const std::vector<Description>& descriptions,
+                                  const std::string& asideName, std::string& asideUsed)
+    {
+        asideUsed.clear();
+
+        /*  THE TEXT READS HERE, OR NOTHING IS TOUCHED: into a document of its
+            own, which refuses rather than repairs (CanonicalXml::read), so a
+            show this build cannot read - a newer format, a text cut short -
+            costs this machine nothing. Then this machine's rows go back in. */
+        ShowDocument taken;
+        const auto read = CanonicalXml::read (decided, taken);
+
+        if (! read.ok)
+        {
+            ReadResult refused;
+
+            for (const auto& problem : read.problems)
+                refused.problems.push_back ("the other machine's show: " + problem);
+
+            return refused;
+        }
+
+        for (const auto& description : descriptions)
+            if (! isPlainFileName (description.name))
+                return ReadResult::failed ("the other machine's device description \"" + description.name
+                                           + "\" is not a file name this machine can write");
+
+        putMachineRowsBack (taken.root(), document.root());
+
+        const auto showText = CanonicalXml::write (taken);
+        const auto stateText = EphemeralState::write (document);
+
+        //  Everything already asked of the writer, landed, before a file is read or set aside.
+        waitForTheDisk (session, writer);
+
+        const auto folder = session.folder;
+
+        if (! folder.isDirectory())
+            return ReadResult::failed (folder.getFullPathName().toStdString()
+                                       + " is no longer a folder; nothing was taken");
+
+        /*  SET ASIDE, AND NEVER DELETED: copies of what this machine had, made
+            before a byte of it is written over, in a folder of the bundle the
+            log header's hash never reads (`contentHash` reads show.xml,
+            state.xml and the files of namespaces/ alone) and `open` never
+            mistakes for a show (it holds no manifest). Copies rather than moves,
+            so at every moment show.xml is either this machine's whole or the
+            other's whole. */
+        const auto aside = freeChild (folder, asideName);
+
+        if (const auto made = aside.createDirectory(); made.failed())
+            return ReadResult::failed ("cannot create " + aside.getFullPathName().toStdString() + ": "
+                                       + made.getErrorMessage().toStdString());
+
+        for (const auto& file : { showFile (folder), stateFile (folder) })
+            if (file.existsAsFile() && ! file.copyFileTo (aside.getChildFile (file.getFileName())))
+                return ReadResult::failed ("could not set " + file.getFullPathName().toStdString() + " aside in "
+                                           + aside.getFullPathName().toStdString() + "; nothing was taken");
+
+        if (const auto namespaces = namespacesFolder (folder); namespaces.isDirectory())
+            if (! namespaces.copyDirectoryTo (aside.getChildFile (namespacesDir)))
+                return ReadResult::failed ("could not set " + namespaces.getFullPathName().toStdString()
+                                           + " aside in " + aside.getFullPathName().toStdString()
+                                           + "; nothing was taken");
+
+        asideUsed = aside.getFileName().toStdString();
+
+        //  Then written over, each file whole or not at all.
+        std::string error;
+
+        if (! writeBytesAtomically (showFile (folder), showText, error)
+              || ! writeBytesAtomically (stateFile (folder), stateText, error))
+            return ReadResult::failed (error);
+
+        const auto namespaces = namespacesFolder (folder);
+
+        if (! descriptions.empty() || namespaces.isDirectory())
+        {
+            if (const auto made = namespaces.createDirectory(); made.failed())
+                return ReadResult::failed ("cannot create " + namespaces.getFullPathName().toStdString() + ": "
+                                           + made.getErrorMessage().toStdString());
+
+            std::set<std::string> kept;
+
+            for (const auto& description : descriptions)
+            {
+                kept.insert (description.name);
+
+                if (! writeBytesAtomically (namespaces.getChildFile (juce::String (description.name)),
+                                            description.bytes, error))
+                    return ReadResult::failed (error);
+            }
+
+            //  A description of this machine's own the other's show has not: set aside above, gone from here.
+            for (const auto& file : namespaces.findChildFiles (juce::File::findFiles, false))
+                if (kept.count (file.getFileName().toStdString()) == 0 && ! file.deleteFile())
+                    return ReadResult::failed ("could not take " + file.getFullPathName().toStdString()
+                                               + " away; it is set aside in " + aside.getFullPathName().toStdString());
+        }
+
+        /*  RELOADED AS A REVERT RELOADS: through a scratch document, so a
+            folder that will not read back refuses with the show on screen
+            untouched, and through `adopt`, which clears the history (AFY). */
+        const auto reloaded = readThenAdopt (document,
+                                             [&folder] (ShowDocument& scratch) { return open (folder, scratch); });
+
+        if (! reloaded.ok)
+            return reloaded;
+
+        /*  AND THE SESSION AS A REVERT LEAVES IT: the folder holds this show,
+            so the dot goes out and this session's `recovery/` - a copy of the
+            show just set aside - goes too, unless an earlier session's offer
+            still lives there. */
+        session.savedRevision = document.showRevision();
+        session.savedShow = snapshotOf (document).show;
+
+        if (session.offeredRecovery != recoveryFolder (folder))
+        {
+            discardRecovery (folder);
+            session.autosavedRevision = 0;
+        }
+
+        return reloaded;
     }
 
     void registerBundleCommands (CommandRegistry& registry,

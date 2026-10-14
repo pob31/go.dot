@@ -63,6 +63,7 @@
     when the link is lost; `--hold` holds on its own, whatever the seat.
 */
 
+#include <wfg/engine/command/Command.h>
 #include <wfg/engine/pair/Leadership.h>
 
 #include <cstdint>
@@ -204,6 +205,30 @@ namespace wfg::pair
             applied with (its argument as applied), so a replay refuses alike.
             Serve's; empty everywhere else. */
         std::function<std::string()> peerNow;
+
+        //======================================================================
+        /*  RD.10's (namespace draft §58, AFU, AFY), each serve's and empty
+            elsewhere unless said.
+
+            A FOLLOW BEGINS: called by `pair.hold` as it is applied, when the
+            seat it takes is `following` and the one before was not - the
+            backup's history starts at the link (AFY), so serve and a replay
+            both hand it the document's `clearHistory`, and a replay forgets
+            the steps where the session forgot them. */
+        std::function<void()> followBegins;
+
+        /*  Whether anything runs on this machine now: a cue started and not
+            ended - what the horizon only made ready does not count.
+            `pair.adoptShow` is refused `busy` while it does. */
+        std::function<bool()> busyNow;
+
+        /*  `pair.adoptShow`'S ACT, once the command has found the seat
+            following and nothing running: the leader's show taken from what
+            the follower holds of it (pair/ShowCheck.h) and written and reloaded
+            here (`doc::Bundle::adoptShow`) - refused `not-fetched` with nothing
+            to take. Empty, as in a replay: refused `not-fetched`, and a replay
+            stops before the record anyway (`Bundle::replayBoundary`). */
+        std::function<Outcome (CommandContext& context)> adoptShow;
     };
 
     /*  `pair.setRole`, `pair.setPeers`, `pair.setTimeout`, and the engine's
@@ -214,6 +239,8 @@ namespace wfg::pair
         this machine now is and why, and the operator's `pair.takeOver`,
         `pair.handOver` and `pair.keep` - machine-local too, since each acts on
         this machine, though each also tells the other machine when it can.
-        And RD.8's `pair.realign`, the operator's on a machine that follows. */
+        And RD.8's `pair.realign`, the operator's on a machine that follows.
+        And RD.10's `pair.adoptShow`, the operator's too: the follower takes
+        its leader's show (the hooks above). */
     void registerPairCommands (CommandRegistry& registry, Pairing& pairing);
 }

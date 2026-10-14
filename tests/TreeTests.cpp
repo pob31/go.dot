@@ -1999,3 +1999,37 @@ TEST_CASE ("follow: pair/state, delay, late, differs, relayed and dropped publis
     CHECK (valueAt (snapshot, "/godot/pair/alarm", "s") == osc::Value::string (state.pairFollow.alarm));
     CHECK (valueAt (snapshot, "/godot/pair/unconfirmed", "h") == osc::Value::int64 (2));
 }
+
+/*  RD.10: whether the follower's show is its leader's, and what differs
+    (namespace draft §58.3, AFU) - published as serve reads them, read-only. */
+TEST_CASE ("same show: pair/showMatch and pair/showDiffers publish the comparison as read, read-only")
+{
+    Rig rig;
+
+    const auto nodeAt = [] (const std::shared_ptr<const TreeSnapshot>& snapshot, const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        CHECK (node->access == Access::read);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    //  Nothing compared: false, and nothing said.
+    EngineState state;
+    auto snapshot = rig.parameters.publish (1, state);
+    CHECK (nodeAt (snapshot, "/godot/pair/showMatch") == osc::Value::boolean (false));
+    CHECK (nodeAt (snapshot, "/godot/pair/showDiffers") == osc::Value::string (""));
+
+    state.pairFollow.state = "following";
+    state.pairFollow.showDiffers = "the show differs: cue 4 Rain changed; 1 sound missing here: tone.wav";
+    snapshot = rig.parameters.publish (2, state);
+    CHECK (nodeAt (snapshot, "/godot/pair/showMatch") == osc::Value::boolean (false));
+    CHECK (nodeAt (snapshot, "/godot/pair/showDiffers") == osc::Value::string (state.pairFollow.showDiffers));
+
+    state.pairFollow.showMatch = true;
+    state.pairFollow.showDiffers.clear();
+    snapshot = rig.parameters.publish (3, state);
+    CHECK (nodeAt (snapshot, "/godot/pair/showMatch") == osc::Value::boolean (true));
+    CHECK (nodeAt (snapshot, "/godot/pair/showDiffers") == osc::Value::string (""));
+}

@@ -923,6 +923,16 @@ namespace wfg::doc
         std::optional<std::string> undo (UndoDomain domain);
         std::optional<std::string> redo (UndoDomain domain);
 
+        /*  THE HISTORY STARTS AGAIN HERE, AND THE SHOW STAYS (namespace draft
+            §58, RD.10, AFY): every domain's steps forgotten, and what the last
+            write was with them, without touching a row - `adopt`'s first half,
+            for a backup whose follow of its main begins. Steps made before the
+            link are this machine's alone, and an `undo` the main mirrors later
+            must not take one of them back as though it were the main's: it is
+            refused here instead, `nothing-to-undo`, and the two shows are then
+            said to differ. Moves no revision: nothing in either file changed. */
+        void clearHistory();
+
         /*  The named history, for reading only: `canUndo`, `canRedo`,
             `undoName` and `redoName` are published in the after-tick like every
             other readout.

@@ -25389,6 +25389,27 @@ Mine, the author's to overrule:
   never wrote there - and writes at once. A following backup (RD.6) waits for the main's read-back
   instead.
 
+The author's again, 2026-10-12, the words on screen (RD.11), each picked from options whose words were
+mine:
+
+- **AGM** (the author's) **A machine says what it is beside the transport as its role and what it is
+  doing**: a backup that follows reads *Backup - following*, a main that sends *Main - sending*, a main
+  with no backup *Main - alone*. Offered as "Backup - following".
+- **AGN** (the author's) **The button that makes this machine send now reads *Take over***; its partner
+  on the machine that sends, *Hand over*. Offered as "Take over".
+- **AGO** (the author's) **Two machines that each send say *Two mains!*, and the button that keeps the
+  show on this one reads *Make this the main***. Offered as "Two mains! - Make this the main"; the
+  implementer had recommended "Both machines are sending - Keep the show here".
+- **AGP** (the author's) **The pairing settings live in a *Redundancy* tab of Show settings**, beside the
+  Audio and Network tabs that already hold this machine's own interface, the tab saying that they belong
+  to this computer and not the show. Offered as "A Redundancy tab in Show settings".
+- **AGQ** (the author's, 2026-10-14, in his own words) **No latency matching between the two machines' interfaces**:
+  *"In practice you can't start 10ms earlier unless you make the faster soundcard late. I'd rather have a slight
+  glitch in a live situation than delay the faster sound card to match the one with more latency."* The two
+  start on the same sample (AFS); the difference in their interfaces' latency is a jump at the changeover,
+  accepted; each side's reported output latency is published as information. The implementer had first
+  proposed aligning at the changeover point.
+
 ### 58.3 Rows
 
 Owner `pair`, all runtime and read-only unless said; provisional names, settled by their stage.
@@ -25412,9 +25433,9 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair/differs` | `s` | what is not in step, one sentence, the most recent cause: what the summaries showed different twice in a row (`cue 12 is running on the main, not here`), or one of the leader's records applied otherwise here, said at once with RD.6's count; empty once a summary matches again (RD.6, RD.8) |
 | `pair/relayed` | `h` | commands this backup's clients gave it that it passed on to the main (RD.6) |
 | `pair/dropped` | `h` | commands this backup's devices sent it that it ignored while following (RD.6) |
-| `pair/showMatch` | `T` | the fingerprints agree (AFU) |
-| `pair/showDiffers` | `s` | what differs: cues, settings, sounds missing or changed |
-| `pair/alarm` | `s` | the sentence the window and the page put in front of the operator - both sending, waiting for the main, the other lost and this one sending, a follower being seated at its leader's position or not in step with it, saying what differs; empty when none (RD.7, RD.8) |
+| `pair/showMatch` | `T` | on a machine that follows, its show is its leader's: the fingerprints agree - the show text with no machine row in it, and the device descriptions - and so do the files the show names; false until the first comparison after a follow begins, while anything differs, and on a machine that does not follow (AFU, RD.10) |
+| `pair/showDiffers` | `s` | on a machine that follows, what differs, in one sentence: the cues changed, added, removed or moved, the settings and descriptions changed, the files missing here, missing on the leader or not the same (`the show differs: cue 4 Rain changed`; `1 sound missing here: tone.wav`); empty when nothing does, and on a machine that does not follow (RD.10) |
+| `pair/alarm` | `s` | the sentence the window and the page put in front of the operator - both sending, waiting for the main, the other lost and this one sending, a follower being seated at its leader's position, its show not its leader's (saying what differs and what mends it, RD.10) or not in step with it, saying what differs; empty when none (RD.7, RD.8) |
 | `pair/unconfirmed` | `h` | commands this machine passed on that its leader never answered, dropped: at a takeover all but Esc and double Esc (AGJ), and one left unanswered past twice the timeout (RD.7) |
 
 ### 58.4 Commands
@@ -25429,7 +25450,7 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair.handOver` | `[s:peer]` | from the machine sending, the other there: the other sends from now on, this one holds and follows (machine) |
 | `pair.keep` | `[s:peer]` | AFQ, while both send: keep the show here; the other machine holds and follows (machine) |
 | `pair.realign` | | on a machine that follows: asks its leader where it is (`/godot/pair/seat`) and is seated there again; refused `not-following` elsewhere (machine; RD.8) |
-| `pair.adoptShow` | | the follower takes the main's show text (AFU); refused while anything runs |
+| `pair.adoptShow` | `[s:fingerprint s:setAside]` | the follower takes its leader's show text and device descriptions (AFU), keeping its own machine rows; its own files set aside in `set-aside.<date>.<time>/` of the show, the show reloaded, its history cleared (AFY), and seated again; refused while anything runs; the arguments are as applied - the fingerprint taken and the folder (machine; RD.10) |
 | `pair.lead`, `pair.hold` | `s:role s:seat s:reason` | the engine's: this machine now sends (`alone`, `leading`, `bothSending`), or holds (`following`, `waiting`), and why; logged, and where the seat lives (machine; RD.7) |
 | `pair.seat` | `s:position` | the engine's: one record seating the follower at its leader's position, the position as text in the log's own grammar on this machine's clock; refused `bad-value` for a text that does not read (machine; RD.8) |
 | `pair.launchAt` | `s:run h:sample` | the engine's: the main's launch sample, mapped onto this machine's clock |
@@ -25440,7 +25461,10 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 `takeOver` on a machine that sends; `not-sending` for `handOver` on one that holds; `not-linked` for
 `handOver` with the other machine not there; `not-both-sending` for `keep` outside AFQ (RD.7);
 `not-following` for `realign` or `adoptShow` on the machine that sends; `busy` for `adoptShow` while a cue runs; a command the backup
-passed on and the main refused comes back refused, with the main's reason.
+passed on and the main refused comes back refused, with the main's reason. RD.10's: `not-fetched` for `adoptShow` with no show of
+the leader's to take - the shows are the same, or the leader's is on its way or has moved since it came (the implementer's word);
+`bad-value` for a show text or a description name that does not read here, and `write-failed` for a folder this machine could not
+set aside or write, each with the reason after it at `/godot/engine/lastError`.
 
 ### 58.6 Stages
 
@@ -26083,6 +26107,128 @@ passed on and the main refused comes back refused, with the main's reason.
   first; the product's answer is RD.10, whose fingerprints are compared at link-up and which offers
   the main's show text to the backup. 0cf2fc4's repair (a follower hearing no beat for half a second
   from a live leader says its hello again) stays: a link must mend a lost stream whatever lost it.
+- **RD.10**, 2026-10-14: the same show, checked and not assumed (AFU, AFY) - the answer to the gap
+  found on 2026-10-12. THE FINGERPRINT (`doc::ShowFingerprint`, document/ShowFingerprint.h): what
+  someone decided - `CanonicalXml::writeDecided`, the canonical show text with every row the table
+  marks `machine` left out (RD.3: the interface, a port's device, a serial path, a display), so two
+  machines with different interfaces but the same show agree; state.xml left out, so a standby move
+  changes nothing; the device descriptions (the files of `namespaces/`, as `Bundle::contentHash`
+  reads them) in. SHA-256 over a format line, the text and each description's name, length and
+  bytes. Canonical XML sorts attributes and writes every number through `osc::formatDouble`, so a
+  show written by hand in another order, and a French machine, hash alike. UNITS, so a difference
+  can be named: the root, each container under it, each cue, and each object with an identity that
+  is not inside a cue (a list, a device, a bus), each with a hash of its own rows and of what it
+  holds that is no unit of its own - a cue's routes, feeds and sections are the cue's - and the
+  order of the units inside it. THE MEDIA LIST: every `file` a `Media` cue (a sound) or a `Video` cue
+  (a movie or a still) names, where `audio::resolveMediaPath` would find it, present or not, its size
+  and when it was written, and its content hash where the analyser has one (a sound's); a digest of
+  it. One file is the same on both machines when both analysers read the same bytes, or, until both
+  have, when it is the same size and was written within two seconds of the other. COMPUTED OFF THE
+  TICK THREAD, on `DocumentWriter`'s seam (`pair::Fingerprinter`, pair/ShowCheck.h): the tick takes
+  what only it may take and a thread of its own does the work - but where the autosave's snapshot is
+  the canonical text itself, the fingerprint's is a deep copy of the tree (`ValueTree::createCopy`),
+  handed over in the after-tick of a paired machine when the show revision moved, the worker is idle,
+  and the show has been quiet for three ticks or fifty have passed since the last copy, so a drag
+  over a show row costs a copy a second at most. The worker writes, hashes and cuts it, makes the
+  answers to the other machine's questions into messages, and publishes the lot whole behind a
+  `shared_ptr` with a counter the tick reads with one acquire load; every two seconds unasked it
+  looks at the media and the descriptions again, and publishes when either moved (a sound removed,
+  a hash learned). Cost, Debug, this bench, M23's 500-cue show: the tick's copy 0.53 ms, the worker's
+  fingerprint, units and answers 49 ms - where the canonical text alone, which the tick would
+  otherwise have paid, is 14.6 ms. THE WIRE, through the link and not an HTTP route on the leader's
+  port: a main following a backup that dialled it knows only the backup's client connection, never
+  its HTTP port, and since RD.7 the link goes either way. `hello` gains two arguments,
+  `s:showFingerprint s:mediaDigest` (eleven; nine and four still read), said at link-up; the
+  summary gains the same two after its runs (an RD.8 summary, with none, still reads), each empty
+  while the leader's worker has not made them of the show it has at that tick. New, routed by
+  `wire::boundFor` to `pair::ShowCheck` (`Bound::show`) whichever machine leads:
+  `/godot/pair/showAsk i:what` (1 the show, 2 the media list), answered down the channel it came by
+  with `/godot/pair/showText s:fingerprint i:part i:parts s:text` (the decided text in parts of whole
+  lines, 16 KB), `/godot/pair/showFile s:fingerprint s:name b:bytes` (each description),
+  `/godot/pair/showUnits s:fingerprint i:units [s:key s:element s:hash s:order s:label]...` (last, so
+  a follower with the units has the rest) and `/godot/pair/showMedia s:digest i:entries [s:path
+  s:kind i:present h:size h:modified s:hash]...`; a leader answers once its own fingerprint is of
+  the show it has now. COMPARED ON THE FOLLOWER at the summary's slot, as `InStep` compares runs:
+  the leader's fingerprint at its tick T against this machine's after local tick T + offset, when
+  both are of the show each has then - the same records applied, the same show - so an edit at the
+  main, streamed, never reads as a difference. Two summaries in a row apart, and the follower asks
+  the leader for its show (and, when the media digests are apart twice, its media list) down the
+  path relays take, again after two seconds unanswered or when the leader's fingerprint moves;
+  `pair/showDiffers` is then one sentence - `the show differs: cue 4 Rain changed`, `1 cue changed (4
+  Rain), 1 added (6 Bells), bus Front changed`, `cues moved in list Show`, `the device description
+  desk.json differs`, `1 sound missing here: tone.wav`, `1 sound missing on the main: ...`, `1 sound
+  differs: ...`, joined by semicolons - and `pair/showMatch` true once the fingerprints agree and
+  the media is the same; both reset when a follow begins or ends, and read false and empty on a
+  machine that does not follow, as `pair/inStep` does. The alarm says it before what the runs say:
+  `Following, but the show differs: cue 4 Rain changed. Take the other machine's show to make the
+  two the same.`, or for files alone `... Copy the files so both machines have the same.`
+  `pair.adoptShow [s:fingerprint s:setAside]` (machine-local, the operator's): refused
+  `not-following` where the seat does not follow (a machine that sends, a backup waiting, one not
+  paired), `busy` while a cue runs here (the horizon's preparations do not count), and `not-fetched`
+  - a new reason, the implementer's word - when the follower holds no show of its leader's that is
+  the one the leader last said (the two the same, so none was fetched; or on its way). The act
+  (`doc::Bundle::adoptShow`, through `Pairing::adoptShow`, serve's): the leader's text read into a
+  document of its own, refused `bad-value` with the reason when it does not read, nothing touched;
+  this machine's machine rows put back into it (`doc::putMachineRowsBack`: the node with the same
+  identifier, or for one without, the same element at the same place under the same parent; a port
+  the main added while the backup was away arrives bound to no device, as a followed edit would);
+  the writer drained as a revert drains it; show.xml, state.xml and `namespaces/` COPIED into
+  `<show>/set-aside.<yyyy-mm-dd>.<hh-mm-ss>/` (or the first `.N` after it not taken) and never deleted
+  - a folder `contentHash` never reads and `open` never mistakes for a show - and only then written
+  over, each file atomically: show.xml with the leader's show and this machine's rows, state.xml with
+  where this machine stands, `namespaces/` with the leader's descriptions alone; then reloaded through
+  `readThenAdopt` as `document.revert` reloads, so the history goes with the show (AFY) and the dot
+  goes out, `recovery/` on the revert's terms. Media never travels: a sound the leader names and this
+  machine lacks stays reported missing. ONE RECORD, its arguments as applied the fingerprint taken
+  and the folder; `pair.realign` is then asked, so the follower is seated again (RD.8) on the show it
+  now has. `Bundle::replayBoundary` stops a replay at an applied `pair.adoptShow`, as at
+  `document.recover`: what the session ran from then on came down the link. Not refused under the
+  show's lock - the implementer's call: a backup's lock is the main's, a backup holds and sends to
+  nobody, and taking the main's show is how its operator makes it the show being performed. AFY,
+  CHECKED AND NOT DONE BEFORE: RD.6 to RD.8 never cleared a backup's history at link-up, so a
+  mirrored `undo` could take back a step the backup made while it waited. Done here: a `pair.hold`
+  whose seat is `following`, from a seat that was not, calls `Pairing::followBegins`, which serve and
+  the replay both set to `ShowDocument::clearHistory` (new: `adopt`'s clearing without its swap - no
+  row, no revision, the registry kept), so the session and its replay forget at the same record; a
+  mirrored undo reaching further back is refused `nothing-to-undo`, counted by RD.6 in
+  `pair/differs`, and the fingerprints then say which cue differs. Rows `pair/showMatch` and
+  `pair/showDiffers`. Tests under C and fr_FR: SameShowTests (the fingerprint ignores machine rows,
+  the standby, attribute order and the locale - its text holds `level="-6.5"` whichever - and moves
+  with a level, a name, a list setting, a bus and a description; units naming one cue's level, a
+  route's gains as its cue's, a cue added and removed, a setting, cues moved, a description; the media
+  list naming a sound missing here, missing on the main and changed, hashes deciding when both have
+  one; the merge keeping this machine's rows and taking the rest, and the act on a bundle - the
+  leader's show and this machine's interface in the document and on the disk, its descriptions
+  replaced, its media untouched, its own files set aside, the history cleared, the dot out, a second
+  taking in the same second in `.2`, a text that does not read and a description named to leave
+  `namespaces/` refused with nothing touched; `pair.adoptShow` refused not-following on a leading and
+  a waiting machine, busy, not-fetched, taken as one record and seated after, and a replay stopping
+  at it; a follow that begins clearing the history, a mirrored undo then refused, a second
+  `pair.hold following` clearing nothing, and the replay alike; the summary's and the hello's new
+  arguments and the older shapes; the comparison at the slot - one summary apart says nothing, an
+  empty fingerprint breaks no run, two apart ask once, the leader's answer held until its show is
+  current and sent down the asking channel, the sentence naming the cue and the sound, the package
+  whole and no longer offered once the leader's show moves, a match once taken, a late summary and a
+  show not yet worked out never counted; the worker off the tick from a copy, and looking at the
+  media again by itself; the 500-cue cost), PeerLinkTests (the hello of eleven, and of nine),
+  TreeTests (the rows), MachineScopeTests (`pair.adoptShow` machine-local), and
+  tests/blackbox/pair_show.py: a main and a backup on copies of one show, each with its own interface
+  in its show.xml, match; the backup stopped, a level edited at the main, the backup started again
+  says the show differs, `the show differs: cue 4 Rain changed`, and its alarm says what mends it;
+  `pair.adoptShow` refused `not-following` on the main and taken on the backup - the main's level,
+  the shows matching, the backup's interface row its own in the show and on the disk, its old show
+  (-6 dB) and descriptions in one `set-aside.` folder; the backup started again with its sound removed
+  says `1 sound missing here: tone.wav`. Found and left: the leader's own `pair/showMatch` reads false
+  as `pair/inStep` does - the main is never told its backup's show differs (RD.11's to decide whether
+  the follower says so back); what the follower takes is the leader's show at the leader's last
+  quiet moment, and an edit the leader makes between that and the taking is lost here until the next
+  comparison says the shows differ again; a movie or a still, which the analyser never hashes, is
+  compared by its size and date alone, so a copy that did not keep its date reads as differing; while
+  a show is edited without pause on the leader no question is answered, the comparison waiting for
+  quiet; two machines both sending, or a backup waiting, are not compared until one follows; a
+  description changed on the disk with no show edit is seen within the worker's two seconds; a log
+  from before RD.10 whose `undo` reached back across a `pair.hold following` no longer replays (no
+  fixture has one).
 
 ## 59. Timecode generated: MTC and LTC cues
 

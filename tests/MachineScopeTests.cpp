@@ -130,7 +130,11 @@ namespace
 
         /*  And RD.8's: a follower seated at its leader's position, and an
             operator asking for it again - each this machine's alone. */
-        "pair.seat", "pair.realign"
+        "pair.seat", "pair.realign",
+
+        /*  And RD.10's: a follower taking its leader's show - this machine's
+            files written over, the other's never touched. */
+        "pair.adoptShow"
     };
 
     const std::string mainList  = "7K2QM9X4";

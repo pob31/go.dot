@@ -47,7 +47,7 @@ namespace wfg::pair
     std::vector<std::uint8_t> summaryBytes (const Summary& summary)
     {
         std::vector<osc::Value> args;
-        args.reserve (3 + 2 * summary.standby.size() + 6 * summary.runs.size());
+        args.reserve (5 + 2 * summary.standby.size() + 6 * summary.runs.size());
 
         args.push_back (osc::Value::int64 (summary.tick));
         args.push_back (osc::Value::int64 (static_cast<std::int64_t> (summary.counter)));
@@ -69,6 +69,10 @@ namespace wfg::pair
             args.push_back (osc::Value::int64 (run.loop));
         }
 
+        //  RD.10's two, after the runs: two strings can never be read as a run, which is six.
+        args.push_back (osc::Value::string (summary.showFingerprint));
+        args.push_back (osc::Value::string (summary.mediaDigest));
+
         return wire::encode (wire::summary, std::move (args));
     }
 
@@ -83,7 +87,13 @@ namespace wfg::pair
         const auto lists = static_cast<std::size_t> (a[2].getInt32());
         const auto rest = a.size() - 3;
 
-        if (rest < 2 * lists || (rest - 2 * lists) % 6 != 0)
+        if (rest < 2 * lists)
+            return std::nullopt;
+
+        //  The runs, six each, and RD.10's show after them - or, from an RD.8 machine, nothing after.
+        const auto tail = (rest - 2 * lists) % 6;
+
+        if (tail != 0 && tail != 2)
             return std::nullopt;
 
         Summary out;
@@ -100,7 +110,7 @@ namespace wfg::pair
             out.standby.push_back ({ a[at].getString(), a[at + 1].getString() });
         }
 
-        for (; at < a.size(); at += 6)
+        for (; at + tail < a.size(); at += 6)
         {
             if (! a[at].isString() || ! a[at + 1].isString() || ! a[at + 2].isString()
                   || ! a[at + 3].isInt64() || ! a[at + 4].isInt32() || ! a[at + 5].isInt64())
@@ -108,6 +118,15 @@ namespace wfg::pair
 
             out.runs.push_back ({ a[at].getString(), a[at + 1].getString(), a[at + 2].getString(),
                                   a[at + 3].getInt64(), a[at + 4].getInt32(), a[at + 5].getInt64() });
+        }
+
+        if (tail == 2)
+        {
+            if (! a[at].isString() || ! a[at + 1].isString())
+                return std::nullopt;
+
+            out.showFingerprint = a[at].getString();
+            out.mediaDigest = a[at + 1].getString();
         }
 
         return out;

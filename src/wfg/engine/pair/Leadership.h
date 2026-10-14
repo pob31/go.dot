@@ -178,6 +178,12 @@ namespace wfg::pair
         bool changedWhileWaiting = false;
         bool seating = false;
         std::string differs = {};
+
+        /*  AND WHAT DIFFERS BETWEEN THE TWO SHOWS (RD.10, pair/ShowCheck.h):
+            the sentence, and whether the show itself differs - which taking
+            the leader's mends - or only its media, which nothing sends. */
+        std::string showDiffers = {};
+        bool showTextDiffers = false;
     };
 
     /*  `pair/alarm`: the sentence the window and the page put in front of the

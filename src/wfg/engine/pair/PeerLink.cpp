@@ -246,6 +246,10 @@ namespace wfg::pair
                   || address == position || address == summary)
                 return Bound::follower;
 
+            if (address == showAsk || address == showText || address == showFile || address == showUnits
+                  || address == showMedia)
+                return Bound::show;
+
             return Bound::neither;
         }
 
@@ -304,19 +308,21 @@ namespace wfg::pair
 
         std::vector<std::uint8_t> helloBytes (const Hello& said)
         {
+            //  RD.10's two after RD.7's nine: the show as this machine last worked it out.
             return encode (hello, { osc::Value::string (said.machine), osc::Value::string (said.role),
                                     osc::Value::int64 (static_cast<std::int64_t> (std::min (said.lastCounter, fromNow))),
                                     osc::Value::string (said.stream), osc::Value::string (said.state),
                                     osc::Value::string (said.ownStream), osc::Value::int32 (said.fresh ? 1 : 0),
                                     osc::Value::int64 (said.liveRuns),
-                                    osc::Value::int64 (static_cast<std::int64_t> (said.salt)) });
+                                    osc::Value::int64 (static_cast<std::int64_t> (said.salt)),
+                                    osc::Value::string (said.showFingerprint), osc::Value::string (said.mediaDigest) });
         }
 
         std::optional<Hello> readHello (const osc::Packet& message)
         {
             const auto& a = message.args;
 
-            if (message.isBundle() || message.address != hello || (a.size() != 4 && a.size() != 9))
+            if (message.isBundle() || message.address != hello || (a.size() != 4 && a.size() != 9 && a.size() != 11))
                 return std::nullopt;
 
             if (! a[0].isString() || ! a[1].isString() || ! a[2].isInt64() || a[2].getInt64() < 0 || ! a[3].isString())
@@ -340,6 +346,16 @@ namespace wfg::pair
             out.liveRuns = a[7].getInt64();
             out.salt = static_cast<std::uint64_t> (a[8].getInt64());
             out.described = true;
+
+            if (a.size() == 11)
+            {
+                if (! a[9].isString() || ! a[10].isString())
+                    return std::nullopt;
+
+                out.showFingerprint = a[9].getString();
+                out.mediaDigest = a[10].getString();
+            }
+
             return out;
         }
     }

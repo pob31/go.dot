@@ -74,6 +74,22 @@ namespace wfg::doc
         /** The document as canonical XML, ending in a newline. */
         std::string write (const ShowDocument& document);
 
+        /*  WHAT SOMEONE DECIDED, AND NOTHING OF THIS MACHINE (namespace draft
+            §58, RD.10, AFU): `write`'s text of a show tree less every row the
+            parameter table marks `machine` (RD.3, AGC) - the interface, a
+            port's device, a serial path, a display. Two machines playing one
+            show write it alike whatever each is plugged into; it is what their
+            fingerprints hash and what a backup is handed when it takes its
+            main's show. Reads only the tree it is given, so any thread may
+            ask it of a copy nobody else is writing. */
+        std::string writeDecided (const juce::ValueTree& root);
+
+        /*  One element's opening tag as `write` spells it - `<Media
+            id="B3N8R5TW" file="tone.wav"` - with no `>` and no children:
+            what a fingerprint's units are made of (RD.10). `withMachineRows`
+            false leaves the machine's rows out, as `writeDecided` does. */
+        std::string openingOf (const juce::ValueTree& node, bool withMachineRows);
+
         /*  A FRAGMENT: copies of some cues as one `<Fragment>` holding them,
             written by the same node writer show.xml is, so a pasted cue is
             exactly the cue that was copied and the format is the one people

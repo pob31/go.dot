@@ -175,14 +175,17 @@ namespace wfg::doc
             return text;
         }
 
-        void writeNode (const juce::ValueTree& node, int depth, std::string& out)
+        /*  ONE ELEMENT'S OPENING - `<Media id="..." file="..."` - with no
+            closing of any kind, which is what `writeNode` and a fingerprint's
+            units (namespace draft §58, RD.10) both need. `withMachineRows`
+            false leaves out every row the table marks `machine` (RD.3, AGC):
+            what this computer is plugged into, which two machines playing one
+            show never share. */
+        void writeOpening (const juce::ValueTree& node, bool withMachineRows, std::string& out)
         {
             const auto elementName = node.getType().toString().toStdString();
             const auto* element = Schema::instance().element (elementName);
 
-            const std::string indent (static_cast<std::size_t> (depth) * 2, ' ');
-
-            out += indent;
             out += '<';
             out += elementName;
 
@@ -212,6 +215,9 @@ namespace wfg::doc
                     if (attribute.persist() != Persist::show)
                         continue;
 
+                    if (! withMachineRows && attribute.isMachine())
+                        continue;
+
                     if (auto text = attributeTextImpl (attribute, node))
                         sorted.emplace (std::string (attribute.name()), std::move (*text));
                 }
@@ -225,6 +231,14 @@ namespace wfg::doc
                     out += '"';
                 }
             }
+        }
+
+        void writeNode (const juce::ValueTree& node, int depth, bool withMachineRows, std::string& out)
+        {
+            const std::string indent (static_cast<std::size_t> (depth) * 2, ' ');
+
+            out += indent;
+            writeOpening (node, withMachineRows, out);
 
             if (node.getNumChildren() == 0)
             {
@@ -235,11 +249,11 @@ namespace wfg::doc
             out += ">\n";
 
             for (const auto& child : node)
-                writeNode (child, depth + 1, out);
+                writeNode (child, depth + 1, withMachineRows, out);
 
             out += indent;
             out += "</";
-            out += elementName;
+            out += node.getType().toString().toStdString();
             out += ">\n";
         }
     }
@@ -258,7 +272,26 @@ namespace wfg::doc
             more line to keep byte-identical for no reader's benefit. */
         std::string out;
         out.reserve (4096);
-        writeNode (document.root(), 0, out);
+        writeNode (document.root(), 0, true, out);
+        return out;
+    }
+
+    std::string CanonicalXml::writeDecided (const juce::ValueTree& root)
+    {
+        /*  The same writer, the same order, the same numbers - so two machines
+            whose show.xml differ only by the interface each is plugged into
+            write this text byte for byte alike, and a standby, which is state,
+            is in neither. Any thread, on a tree nobody else is writing. */
+        std::string out;
+        out.reserve (4096);
+        writeNode (root, 0, false, out);
+        return out;
+    }
+
+    std::string CanonicalXml::openingOf (const juce::ValueTree& node, bool withMachineRows)
+    {
+        std::string out;
+        writeOpening (node, withMachineRows, out);
         return out;
     }
 
@@ -559,7 +592,7 @@ namespace wfg::doc
 
         for (const auto& node : nodes)
             if (node.isValid())
-                writeNode (node, 1, out);
+                writeNode (node, 1, true, out);
 
         out += "</Fragment>\n";
         return out;
@@ -728,7 +761,7 @@ namespace wfg::doc
         out += "<Fragment part=\"" + std::string (partWords) + "\">\n";
 
         if (cue.isValid())
-            writeNode (cue, 1, out);
+            writeNode (cue, 1, true, out);
 
         out += "</Fragment>\n";
         return out;

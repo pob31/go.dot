@@ -149,6 +149,32 @@
                             [s:run s:cue s:state h:playhead i:range]...
                             every fifth tick, what an operator would look at:
                             each list's standby and each live run.
+
+    AND WHAT RD.10 ADDS, so the two machines are known to play the same show
+    (pair/ShowCheck.h; the author's AFU):
+
+      either way
+        /godot/pair/hello   ... s:showFingerprint s:mediaDigest
+                            the nine, and this machine's show fingerprint and
+                            media digest as it last worked them out
+      leader -> follower
+        /godot/pair/summary ... s:showFingerprint s:mediaDigest
+                            the same two after the runs, each empty while the
+                            leader's are not of the show it has now
+      follower -> leader, answered down the same connection
+        /godot/pair/showAsk i:what      1: the show, 2: the media list, 3: both
+        /godot/pair/showText s:fingerprint i:part i:parts s:text
+                            the leader's show text with no machine row in it,
+                            in parts of whole lines
+        /godot/pair/showFile s:fingerprint s:name b:bytes
+                            each of its device descriptions (namespaces/)
+        /godot/pair/showUnits s:fingerprint i:units
+                            [s:key s:element s:hash s:order s:label]...
+                            its units, after its text and descriptions, so a
+                            follower that has these has the rest
+        /godot/pair/showMedia s:digest i:entries
+                            [s:path s:kind i:present h:size h:modified s:hash]...
+                            every file its show names
 */
 
 #include <wfg/engine/log/EventLog.h>
@@ -204,6 +230,13 @@ namespace wfg::pair
         inline constexpr const char* position = "/godot/pair/position";
         inline constexpr const char* summary  = "/godot/pair/summary";
 
+        //  RD.10's: the same show, checked (pair/ShowCheck.h).
+        inline constexpr const char* showAsk   = "/godot/pair/showAsk";
+        inline constexpr const char* showText  = "/godot/pair/showText";
+        inline constexpr const char* showFile  = "/godot/pair/showFile";
+        inline constexpr const char* showUnits = "/godot/pair/showUnits";
+        inline constexpr const char* showMedia = "/godot/pair/showMedia";
+
         /*  HOW LONG ONE PART OF A POSITION MAY BE, in bytes of text: a
             position is cut into parts of whole lines no longer than this -
             one line longer goes alone - so a show with hundreds of runs going
@@ -241,15 +274,18 @@ namespace wfg::pair
             the follower's (`Receiver`) - a bundle of a tick's stream, a
             welcome, a gap, a record, a beat, a pong - whichever socket brought
             it. A hello goes to the leader's half AND says what the other
-            machine is; an order is neither half's (pair/Presence.h). */
-        enum class Bound { leader, follower, neither };
+            machine is; an order is neither half's (pair/Presence.h). A
+            question about the show or its answer (RD.10) is the show check's
+            (pair/ShowCheck.h), whichever machine leads. */
+        enum class Bound { leader, follower, neither, show };
         Bound boundFor (const osc::Packet& message) noexcept;
 
         //======================================================================
         /*  WHAT A MACHINE SAYS IT IS (RD.7): the hello's nine arguments, read
-            and written in one place. The first four are RD.5's and a hello of
-            only those is still read - `described` false, its role saying
-            whether it follows. */
+            and written in one place - eleven from RD.10, its show's
+            fingerprint and its media's digest after them. The first four are
+            RD.5's and a hello of only those is still read - `described` false,
+            its role saying whether it follows - and so is one of nine. */
         struct Hello
         {
             std::string machine;
@@ -262,6 +298,14 @@ namespace wfg::pair
             std::int64_t liveRuns = 0;          // cues running on it
             std::uint64_t salt = 0;             // its run-name salt (RD.2)
             bool described = false;             // all nine: an RD.7 machine's
+
+            /*  ITS SHOW (RD.10, AFU): its fingerprint and its media list's
+                digest as it last worked them out, each empty while it has not -
+                carried at link-up, as RD.10 has it; what decides is the
+                leader's summaries (pair/Summary.h), which carry the same two.
+                Two more arguments after the nine; a hello of nine says none. */
+            std::string showFingerprint;
+            std::string mediaDigest;
 
             /*  Whether it asks for the stream of the machine it says hello to:
                 following, or both sending (each applies the other's); RD.5's

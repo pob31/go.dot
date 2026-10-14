@@ -460,7 +460,9 @@ TEST_CASE ("peer link: RD.7's wire - a hello says what a machine is, both ways, 
     const auto bytes = pair::wire::helloBytes (said);
     const auto decoded = osc::decode (bytes.data(), bytes.size());
     REQUIRE (decoded.ok);
-    CHECK (decoded.packet.args.size() == 9u);
+
+    //  Eleven since RD.10: the show's fingerprint and its media's digest after RD.7's nine.
+    CHECK (decoded.packet.args.size() == 11u);
 
     const auto read = pair::wire::readHello (decoded.packet);
     REQUIRE (read.has_value());
@@ -475,6 +477,18 @@ TEST_CASE ("peer link: RD.7's wire - a hello says what a machine is, both ways, 
     CHECK (read->salt == said.salt);
     CHECK (read->described);
     CHECK (read->wantsStream());
+    CHECK (read->showFingerprint.empty());
+
+    //  RD.7's nine still read, saying no show.
+    {
+        auto nine = decoded.packet;
+        nine.args.resize (9);
+        const auto older = pair::wire::readHello (nine);
+        REQUIRE (older.has_value());
+        CHECK (older->described);
+        CHECK (older->salt == said.salt);
+        CHECK (older->mediaDigest.empty());
+    }
 
     //  What asks for the stream: following, both sending - and RD.5's backup.
     auto other = said;
@@ -1326,6 +1340,7 @@ namespace
             {
                 case pair::wire::Bound::leader:   stream.received (origin, message, Clock::now()); break;
                 case pair::wire::Bound::follower: receiver.deliver (origin, message, Clock::now()); break;
+                case pair::wire::Bound::show:
                 case pair::wire::Bound::neither:  break;
             }
         }
@@ -1384,6 +1399,7 @@ TEST_CASE ("peer link: a backup that leads streams down the path it dialled, to 
                           {
                               case pair::wire::Bound::leader:   backupStream.received (path, message, arrival); break;
                               case pair::wire::Bound::follower: backupReceiver.deliver (path, message, arrival); break;
+                              case pair::wire::Bound::show:
                               case pair::wire::Bound::neither:  break;
                           }
                       });

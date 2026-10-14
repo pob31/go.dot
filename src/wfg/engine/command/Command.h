@@ -333,6 +333,15 @@ namespace wfg
             or waits for its main, or is not paired. */
         inline constexpr const char* notFollowing    = "not-following";
 
+        /*  `pair.adoptShow` WITH NO SHOW OF THE OTHER MACHINE'S TO TAKE
+            (namespace draft §58.5, RD.10): a follower fetches its leader's show
+            text as soon as the two shows are found to differ, so this is the
+            moment after the link came up, or after the leader's show moved,
+            and before it arrived - or two shows that are the same, where
+            nothing was fetched because there is nothing to take. The
+            implementer's word, the author's to change. */
+        inline constexpr const char* notFetched      = "not-fetched";
+
         /*  Show mode is on, and the command would have changed the show half
             of the document: a create, a delete, a move, or a write to a value
             that persists in show.xml.

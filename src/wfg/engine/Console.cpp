@@ -54,6 +54,7 @@
 #include <wfg/engine/pair/Position.h>
 #include <wfg/engine/pair/Presence.h>
 #include <wfg/engine/pair/SavePump.h>
+#include <wfg/engine/pair/ShowCheck.h>
 #include <wfg/engine/pair/Summary.h>
 #include <wfg/engine/process/PatchEditor.h>
 #include <wfg/engine/process/PdInstance.h>
@@ -729,6 +730,11 @@ namespace
             machine that wrote it - its `pair.saved` is in the log as heard. */
         wfg::pair::Pairing replayedPairing;
         wfg::pair::registerPairCommands (engine.commands(), replayedPairing);
+
+        /*  AND A FOLLOW THAT BEGAN FORGETS THE STEPS BEFORE IT (RD.10, AFY), at
+            the record where the session forgot them, so an `undo` after it is
+            refused here as it was there. */
+        replayedPairing.followBegins = [&document] { document.clearHistory(); };
 
         /*  The run lifecycle, unconditionally and for the same reason. Only
             `audio.arm` reads the document, and it answers unknown-id against an
@@ -4206,6 +4212,21 @@ namespace
             pump made beside the audio settings' (below, `pairSaves`). */
         wfg::pair::registerPairCommands (engine.commands(), pairing);
 
+        /*  RD.10's (namespace draft §58, AFU, AFY): a follow that begins
+            forgets this machine's own undo steps, as a replay does at the same
+            record; and `pair.adoptShow` is refused while a cue runs here - one
+            started and not ended, never what the horizon only made ready. Its
+            act is set beside the link below, where the leader's show is held. */
+        pairing.followBegins = [&document] { document.clearHistory(); };
+        pairing.busyNow = [&runs]
+        {
+            for (const auto& run : runs.current())
+                if (! run.isFinished() && run.state != wfg::cue::runState::preparing && run.prepare.empty())
+                    return true;
+
+            return false;
+        };
+
         /*  ONE APPLIED COMMAND, ONE UNDO TRANSACTION, opened here and nowhere
             else - so a command added next year is on the stack without knowing
             the stack exists (namespace draft §14.9).
@@ -5314,6 +5335,28 @@ namespace
         const auto machineName = juce::SystemStats::getComputerName().toStdString();
         wfg::pair::Dialler dialler { linkReceiver, machineName };
 
+        /*  THE SAME SHOW, CHECKED (namespace draft §58, RD.10; the author's AFU;
+            pair/ShowCheck.h): the worker that fingerprints this machine's show
+            from a copy the tick hands it, off the tick - the autosave writer's
+            seam - and reads the analyser's hashes for the media; what it last
+            made, as the tick thread holds it; and the questions, answers and
+            comparison of the two machines' shows. The worker idles on a machine
+            that is not paired: nothing is handed to it. */
+        wfg::pair::ShowCheck showCheck;
+        wfg::pair::Fingerprinter printer { target, mediaFolder, [&mediaInfo] { return mediaInfo.snapshot(); } };
+        std::shared_ptr<const wfg::pair::ShowState> printState;
+        std::uint64_t printSeen = 0;
+        std::uint64_t printOffered = 0;
+        std::int64_t printOfferedAt = 0;
+        printer.start();
+
+        //  Whether what the worker last made is of the show this machine has now.
+        const auto printCurrent = [&printState, &document]
+        {
+            return printState != nullptr && printState->print != nullptr
+                && printState->print->revision == document.showRevision();
+        };
+
         //  The server, once it exists: what a follower at the server's end relays and says hello down (RD.7).
         wfg::oscquery::OscQueryServer* linkServer = nullptr;
 
@@ -5357,7 +5400,7 @@ namespace
         /*  WHERE WHAT THE OTHER MACHINE SAYS GOES, whichever socket brought it:
             presence hears all of it, the leader's half takes a hello, a ping, a
             relay, the follower's half a tick's stream and a pong (PeerLink.h). */
-        const auto routeLink = [&linkStream, &linkReceiver, &presence]
+        const auto routeLink = [&linkStream, &linkReceiver, &presence, &showCheck]
             (const std::string& channel, const wfg::osc::Packet& message, wfg::pair::LinkClock::time_point arrival)
         {
             presence.heard (channel, message, arrival);
@@ -5366,6 +5409,7 @@ namespace
             {
                 case wfg::pair::wire::Bound::leader:   linkStream.received (channel, message, arrival); break;
                 case wfg::pair::wire::Bound::follower: linkReceiver.deliver (channel, message, arrival); break;
+                case wfg::pair::wire::Bound::show:     showCheck.received (channel, message); break;
                 case wfg::pair::wire::Bound::neither:  break;
             }
         };
@@ -5454,10 +5498,14 @@ namespace
                                         if (pairing.seated.seat == wfg::pair::Seat::following)
                                             follower.position (leaderTick, std::move (text));
                                     });
-        linkReceiver.setOnSummary ([&inStep, &pairing] (wfg::pair::Summary summary)
+        linkReceiver.setOnSummary ([&inStep, &pairing, &showCheck] (wfg::pair::Summary summary)
                                    {
                                        if (pairing.seated.seat == wfg::pair::Seat::following)
+                                       {
+                                           //  Its show (RD.10), held to the same slot as the rest of it.
+                                           showCheck.heard (summary.tick, summary.showFingerprint, summary.mediaDigest);
                                            inStep.heard (std::move (summary));
+                                       }
                                    });
 
         /*  AND ON THE MACHINE THAT LEADS, A COMMAND ITS FOLLOWER PASSED ON (AFT),
@@ -5485,9 +5533,21 @@ namespace
                                      {
                                          return wfg::pair::toText (runner.positionNow (tick, counter));
                                      });
-        linkStream.setSummaryMaker ([&runner] (std::int64_t tick, std::uint64_t counter)
+        linkStream.setSummaryMaker ([&runner, &printState, &printCurrent] (std::int64_t tick, std::uint64_t counter)
                                     {
-                                        return wfg::pair::summaryBytes (runner.summaryNow (tick, counter));
+                                        auto summary = runner.summaryNow (tick, counter);
+
+                                        /*  AND ITS SHOW (RD.10), only when what the worker
+                                            last made is of the show this machine has now:
+                                            a fingerprint a tick behind an edit would read
+                                            as a show that differs. */
+                                        if (printCurrent())
+                                        {
+                                            summary.showFingerprint = printState->print->fingerprint;
+                                            summary.mediaDigest = printState->print->mediaDigest;
+                                        }
+
+                                        return wfg::pair::summaryBytes (summary);
                                     });
 
         /*  WHETHER THIS MACHINE HAS RUN ANYTHING SINCE IT STARTED (AGA): a GO
@@ -5578,13 +5638,15 @@ namespace
         /*  A LEADER'S STREAM GOES DOWN WHICHEVER CONNECTION ITS FOLLOWER IS AT
             THE END OF (RD.7): one the server took - `ws:` - or a path this
             machine dialled, a backup that took over leading the main it dials. */
-        linkStream.setSend ([&server, &dialler] (const std::string& origin, const std::vector<std::uint8_t>& bytes)
-                            {
-                                if (origin.rfind ("ws:", 0) == 0)
-                                    return server.sendTo (origin, bytes.data(), bytes.size());
+        const auto sendLink = [&server, &dialler] (const std::string& origin, const std::vector<std::uint8_t>& bytes)
+        {
+            if (origin.rfind ("ws:", 0) == 0)
+                return server.sendTo (origin, bytes.data(), bytes.size());
 
-                                return dialler.sendTo (origin, bytes);
-                            });
+            return dialler.sendTo (origin, bytes);
+        };
+
+        linkStream.setSend (sendLink);
 
         /*  WHAT THIS MACHINE IS, SAID TO THE OTHER (RD.7): down one connection
             the server took from it, or down all of them and every dialled path
@@ -5649,6 +5711,51 @@ namespace
         {
             return situation.linked && situation.peerSeat.has_value() ? std::string (wfg::pair::wordOf (*situation.peerSeat))
                                                                       : std::string {};
+        };
+
+        /*  `pair.adoptShow`'S ACT (namespace draft §58, RD.10; AFU, AFY): the
+            leader's show as the show check holds it - fetched as soon as the two
+            were found to differ, and the one the leader last said - written over
+            this machine's, its own machine rows kept and its own files set aside
+            in a dated folder of the show, the show reloaded and its history
+            cleared (`doc::Bundle::adoptShow`). On the tick thread, as a revert
+            is; the command has found the seat following and nothing running.
+            The folder is named by the wall clock, which no replay reaches: a
+            replay stops at this record (`Bundle::replayBoundary`). */
+        pairing.adoptShow = [&showCheck, &document, &session, &writer] (wfg::CommandContext&) -> wfg::Outcome
+        {
+            const auto* package = showCheck.package();
+
+            if (package == nullptr)
+                return wfg::Outcome::rejected (wfg::reason::notFetched);
+
+            //  `set-aside.2026-10-14.21-30-05`: digits only, whatever the locale spells a date with.
+            const auto now = juce::Time::getCurrentTime();
+            const auto two = [] (int value) { return (value < 10 ? std::string ("0") : std::string()) + std::to_string (value); };
+            const auto name = "set-aside." + std::to_string (now.getYear()) + "-" + two (now.getMonth() + 1) + "-"
+                            + two (now.getDayOfMonth()) + "." + two (now.getHours()) + "-" + two (now.getMinutes()) + "-"
+                            + two (now.getSeconds());
+
+            const auto fingerprint = package->fingerprint;
+            std::string aside;
+            const auto taken = wfg::doc::Bundle::adoptShow (document, session, writer, package->text,
+                                                            package->descriptions, name, aside);
+
+            if (! taken.ok)
+            {
+                /*  A TEXT OR A NAME THAT DOES NOT READ HERE is the other machine's
+                    to mend; anything that failed on this machine's disk is a
+                    write that failed. */
+                const auto problem = taken.problems.empty() ? std::string() : taken.problems.front();
+                auto refused = wfg::Outcome::rejected (aside.empty() && problem.rfind ("the other machine's", 0) == 0
+                                                         ? wfg::reason::badValue
+                                                         : wfg::reason::writeFailed);
+                refused.detail = problem;
+                return refused;
+            }
+
+            showCheck.adopted();
+            return wfg::Outcome::ok ({ wfg::osc::Value::string (fingerprint), wfg::osc::Value::string (aside) });
         };
 
         if (clientDirectory != juce::File())
@@ -7028,16 +7135,20 @@ namespace
                                         behind.changedWhileWaiting = seatBefore == wfg::pair::Seat::waiting && changedWhileWaiting;
                                     }
 
+                                    /*  And nothing known of the leader's show (RD.10)
+                                        until it is compared again. */
                                     if (seatBegins)
                                     {
                                         seatAsked = true;
                                         inStep.reset();
+                                        showCheck.reset();
                                         differencesRead = 0;
                                     }
                                     else if (seated.seat != wfg::pair::Seat::following)
                                     {
                                         seatAsked = false;
                                         inStep.reset();
+                                        showCheck.reset();
                                     }
 
                                     if (! wfg::pair::follows (seated.seat))
@@ -7138,8 +7249,35 @@ namespace
                                     lost for an interface restarting. What
                                     arrived waits in the follower for the next
                                     tick that has one. */
+                                /*  WHAT THE WORKER LAST MADE OF THIS MACHINE'S
+                                    SHOW (RD.10), first: taken when it moved - an
+                                    acquire load on every other tick - so the
+                                    summary below carries it, and said in the
+                                    hello from then on. */
+                                if (printer.published() != printSeen)
+                                {
+                                    printSeen = printer.published();
+                                    printState = printer.latest();
+
+                                    if (printState != nullptr && printState->print != nullptr)
+                                    {
+                                        const std::lock_guard<std::mutex> held { selfLock };
+                                        self.showFingerprint = printState->print->fingerprint;
+                                        self.mediaDigest = printState->print->mediaDigest;
+                                    }
+                                }
+
                                 linkStream.afterTick (outcome.tick, pairing.inForce.timeout);
                                 linkReceiver.drain (wfg::pair::LinkClock::now(), pairing.inForce.timeout);
+
+                                /*  THE OTHER MACHINE'S QUESTIONS ABOUT THIS ONE'S
+                                    SHOW, AND ITS ANSWERS ABOUT ITS OWN (RD.10):
+                                    read, and each question answered down the
+                                    channel it came by once what the worker made
+                                    is of the show this machine has now - bytes
+                                    made on the worker, only queued here. */
+                                showCheck.drain();
+                                showCheck.answer (printState.get(), printCurrent(), sendLink);
 
                                 /*  IN STEP (RD.8; pair/Summary.h), on a machine
                                     that follows: a seat applied this tick
@@ -7168,10 +7306,23 @@ namespace
 
                                     differencesRead = follower.differences();
                                     inStepLabels.leader = pairRole == wfg::pair::Role::backup ? "the main" : "the backup";
-                                    inStep.afterTick (outcome.tick, follower.offset(),
-                                                      follower.delayFixed() && ! seatAsked && ! follower.seatHeld(),
+                                    const auto comparable = follower.delayFixed() && ! seatAsked && ! follower.seatHeld();
+                                    inStep.afterTick (outcome.tick, follower.offset(), comparable,
                                                       [&runner, &outcome] { return runner.summaryNow (outcome.tick, 0); },
                                                       inStepLabels);
+
+                                    /*  THE SAME SHOW (RD.10, AFU): the leader's
+                                        fingerprint and digest at the same slot,
+                                        laid against this machine's when both are
+                                        of the show each has; and, twice apart,
+                                        the leader asked for what says where -
+                                        down the path relays take. */
+                                    const auto now = wfg::pair::LinkClock::now();
+                                    showCheck.afterTick (outcome.tick, follower.offset(), comparable,
+                                                         { printState.get(), printCurrent() }, inStepLabels.leader, now);
+
+                                    if (auto question = showCheck.question (now); ! question.empty())
+                                        toLeader (std::move (question));
                                 }
 
                                 /*  The runtime half of the state, refreshed
@@ -7306,6 +7457,22 @@ namespace
 
                                     if (behind.differs != differsNow)
                                         behind.differs = differsNow;
+
+                                    /*  AND WHETHER ITS SHOW IS THE LEADER'S (RD.10),
+                                        a follower's alone too: the sentence, in the
+                                        alarm as well, and whether taking the
+                                        leader's show would mend it. */
+                                    const auto& showDiffersNow = followingNow ? showCheck.differs() : noDifference;
+
+                                    if (behind.showDiffers != showDiffersNow)
+                                        behind.showDiffers = showDiffersNow;
+
+                                    behind.showTextDiffers = followingNow && showCheck.showDiffers();
+
+                                    if (follow.showDiffers != showDiffersNow)
+                                        follow.showDiffers = showDiffersNow;
+
+                                    follow.showMatch = followingNow && showCheck.matches();
 
                                     auto sentence = wfg::pair::alarm (pairing.seated, situation, behind);
 
@@ -7526,6 +7693,25 @@ namespace
                                         document, so the tick thread hands it
                                         something immutable. */
                                     publishHearing();
+                                }
+
+                                /*  THE SHOW HANDED TO ITS FINGERPRINT'S WORKER
+                                    (namespace draft §58, RD.10; pair/ShowCheck.h)
+                                    on a machine that is paired: a deep copy of the
+                                    tree, the tick's whole share - the canonical
+                                    text, its hashes and its units are the
+                                    worker's. One copy at a time, taken only while
+                                    the worker is idle, and only once the show has
+                                    been quiet for three ticks or a second has
+                                    passed since the last, so a fader dragged over
+                                    a show row costs a copy a second at most. */
+                                if (pairRole != wfg::pair::Role::none && showRevisionNow != printOffered
+                                      && (outcome.tick - session.lastChangeTick >= 3 || outcome.tick - printOfferedAt >= 50)
+                                      && printer.idle())
+                                {
+                                    printer.offer (document.root().createCopy(), showRevisionNow);
+                                    printOffered = showRevisionNow;
+                                    printOfferedAt = outcome.tick;
                                 }
 
                                 /*  And whether an earlier session's afternoon is
@@ -8722,6 +8908,9 @@ namespace
             not sit through a gigabyte of WAV. What it had not reached is
             analysed again at the next open, or read from the cache. */
         analyser.stop();
+
+        //  The show's fingerprint worker (RD.10), after the fingerprint it may be making.
+        printer.stop();
 
         udp.stop();
         engine.log().close();

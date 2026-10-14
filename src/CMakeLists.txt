@@ -217,6 +217,8 @@ add_library(wfg_engine STATIC
     wfg/engine/pair/Position.cpp
     wfg/engine/pair/Summary.h
     wfg/engine/pair/Summary.cpp
+    wfg/engine/pair/ShowCheck.h
+    wfg/engine/pair/ShowCheck.cpp
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp
     wfg/engine/serial/Slip.cpp
@@ -352,6 +354,8 @@ add_library(wfg_engine STATIC
     wfg/engine/document/Bundle.h
     wfg/engine/document/CanonicalXml.cpp
     wfg/engine/document/CanonicalXml.h
+    wfg/engine/document/ShowFingerprint.cpp
+    wfg/engine/document/ShowFingerprint.h
     wfg/engine/document/CueParts.cpp
     wfg/engine/document/CueParts.h
     wfg/engine/document/DocumentCommands.cpp

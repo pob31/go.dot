@@ -113,5 +113,14 @@ namespace wfg::pair
             serve started, every link alike. */
         std::int64_t relayed = 0;
         std::int64_t dropped = 0;
+
+        /*  WHETHER ITS SHOW IS ITS LEADER'S (RD.10, AFU; pair/ShowCheck.h):
+            the fingerprints agree and the media is the same; false until the
+            first comparison after a follow begins, while anything differs, and
+            on a machine that does not follow. And what differs, in one
+            sentence - the show's cues and settings, its sounds missing or
+            changed - empty when nothing does or nothing is known yet. */
+        bool showMatch = false;
+        std::string showDiffers = {};
     };
 }

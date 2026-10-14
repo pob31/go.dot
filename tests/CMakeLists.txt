@@ -167,6 +167,7 @@ add_executable(wfg_tests
     FollowTests.cpp
     SeatTests.cpp
     LeadershipTests.cpp
+    SameShowTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
     ClientTests.cpp)
@@ -1382,6 +1383,23 @@ add_test(NAME blackbox.pair-seat.C
 add_test(NAME blackbox.pair-seat.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_seat.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.pair-seat.C blackbox.pair-seat.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
+# -----------------------------------------------------------------------------
+# THE SAME SHOW, CHECKED (namespace draft §58, RD.10; AFU, AFY): a main and a
+# backup on copies of one show, each with its own interface in its show.xml,
+# say their shows match; the backup stopped, a level edited at the main, the
+# backup started again says on link-up that its show differs and names the cue,
+# and its alarm says so; `pair.adoptShow` refused on the main and taken on the
+# backup - the main's level, the shows matching, the backup's interface row its
+# own in the show and on disk, its old files in a set-aside folder; the backup
+# started again with its sound removed names it as missing here. Two serves on
+# the dummy clock, unbuffered, and hold's limit, for hold's reason.
+add_test(NAME blackbox.pair-show.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_show.py" --wfg-locale=C)
+add_test(NAME blackbox.pair-show.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_show.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.pair-show.C blackbox.pair-show.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------

@@ -354,6 +354,15 @@ namespace wfg::pair
                 if (behind.seating)
                     return "Following, and taking the other machine's position.";
 
+                /*  NOT THE SAME SHOW (RD.10, AFU), before anything the runs say:
+                    two shows that differ explain runs that do. What puts it
+                    right - the other machine's show taken here, or its files
+                    copied here by somebody, since sounds never travel. */
+                if (! behind.showDiffers.empty())
+                    return "Following, but " + behind.showDiffers + "."
+                         + (behind.showTextDiffers ? " Take the other machine's show to make the two the same."
+                                                   : " Copy the files so both machines have the same.");
+
                 /*  SEATED, AND APART SINCE (RD.8): the first thing the leader's
                     summaries say differs, and what puts it right. */
                 if (! behind.differs.empty())
