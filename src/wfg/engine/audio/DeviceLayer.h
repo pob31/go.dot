@@ -50,6 +50,7 @@
 
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/audio/AudioSettings.h>
+#include <wfg/engine/audio/InputCapture.h>
 
 #include <memory>
 #include <string>
@@ -127,6 +128,17 @@ namespace wfg::audio
             // Optional diagnostic capture of the final, patched device buffers.
             // Called on the audio thread; observer must outlive the open device.
             BlockSink* outputObserver = nullptr;
+
+            /*  THE INTERFACE'S INPUTS WRITTEN TO A FILE (namespace draft §58,
+                RD.9b; `serve --capture`): handed every block the device
+                delivers, as the device delivered it - before the input patch,
+                numbered as the interface numbers them - with the block's first
+                sample on the count launches are placed on. Prepared as the
+                device is brought up, before its callback is added; one that
+                will not prepare is left out and says why, and the device opens
+                regardless - a show never loses its sound to a measurement.
+                Must outlive the open device. */
+            InputCapture* inputCapture = nullptr;
 
             /*  What to ASK for. What is granted is in `settings()` afterwards,
                 and the two differ often enough that believing the request is a

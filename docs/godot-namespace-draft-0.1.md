@@ -25484,6 +25484,7 @@ set aside or write, each with the reason after it at `/godot/engine/lastError`.
 | RD.7 | The link lost, `pair.lead`, `takeOver`, `handOver`, `keep`, AFQ and AFR, AGJ, AGK; the alarm |
 | RD.8 | `pair.seat` and `realign` through `seatPlan`, `EphemeralState::read`, `seekMedia`; the summary and `inStep` |
 | RD.9 | `pair::ClockMap`, the block-start time from the audio callback, the extra lead, `pair.launchAt`; M61 |
+| RD.9b | `serve --capture`, `run/<id>/launchSample`, the two-machine bench `tests/bench/m61_dante.py`; M61 over Dante |
 | RD.10 | `doc::ShowFingerprint`, the sounds' content hashes, `pair.adoptShow` |
 | RD.11 | The Redundancy tab, the window's banner and status, the page's buttons, both guides, the README |
 
@@ -26338,6 +26339,62 @@ socket's asymmetry, which half the round trip bounds and no exchange can see.
   lane and every stop, fade and speed are placed as before - on the follower's own tick, a record lag apart from its
   sounds; the sound line follows the count the Runner reads, which an audio side opened again restarts, and is begun
   again then, its first second young.
+- **RD.9b**, 2026-10-15: the two-machine bench, its first half (AGQ, M61). WHAT THE INPUTS HEARD: `wfg serve
+  --capture=<wav> [--capture-inputs=<first>-<last>]` (`audio/InputCapture.h`) writes the interface's inputs as the
+  device handed them - before the input patch, 1-based as the interface numbers them, all of them when the range is
+  left off; under `--hosted`, the `--input-wav` channels - to a 32-bit float WAV, and beside it `<wav>.json`: the rate,
+  the block, `firstSample` - the sample of the file's first frame on the count launches are placed on, the AudioHost's
+  own, which `engine/sampleZeroAt` and `run/<id>/launchSample` read - the inputs in the file's order, the frames, the
+  frames dropped, whether it closed and why it ended early. THE AUDIO THREAD COPIES AND NOTHING ELSE: a ring of
+  block-sized slots made before the device starts (four seconds), a slot published with one release store, a full ring
+  the block dropped and counted; `--render`'s ThreadedWriter did not fit, since it wakes its writer through an event,
+  which is a mutex. A writer thread of its own polls every 5 ms; a dropped block is written as silence of its length,
+  found from the next slot's sample and the drop count the slot carries, so frame n is always sample `firstSample` +
+  n; a count that moves otherwise - back, or on by more than was dropped - ends the capture there (one file is one
+  stretch of one clock), and serve ends it too when the interface is applied again, rebuilt or follows a moved clock.
+  The WAV's header and the sidecar every second, so a serve stopped by TerminateProcess - every driver's way on Windows
+  - leaves both whole to the last second; `closed` says which. Prepared in `DeviceAudioDriver`'s bring-up before its
+  callback is added (`Request::inputCapture`) and in `HostedAudioDriver::open` (`Settings::capture`;
+  `attachCapture` for a pump already running, which a test uses); one that will not prepare is left out with its
+  reason and the interface opens regardless - a show never loses its sound to a measurement - while serve refuses to
+  start (exit 2) for a capture asked for and not taken, a range typed wrong or no interface to listen to. The row
+  `/godot/run/<id>/launchSample` (`h`, `samples`, runtime, read-only): `Run::launchedAtSample`, nought until placed and
+  in a replay. FOUND AND MENDED: `audio/inputLatency` and `audio/outputLatency` read nought for an interface opened at
+  launch - only an Apply's `audio.settingsReady` carried them - so RD.9's `pair/outputLatency` said 0 s for every
+  machine started on its interface; serve now sets them from the driver at the open, as it sets `audio/inputs` beside
+  them. THE BENCH, `tests/bench/m61_dante.py` (a tool, not in ctest): `--main-only` (the PC alone), `--pair` (the PC
+  main and the Mac backup, then swapped if that ran cleanly; it looks for "Dante Virtual Soundcard" in the Mac's
+  CoreAudio first and starts nothing without it) and `--pair --mac-hosted` (the Mac on its hosted pump: the plumbing
+  rehearsed, no M61). It makes the show - N mono clicks, one sample at -20 dBFS a tenth of a second into a two-second
+  file (clear of a new reader's fade-in), one bus on outputs 1+2, `goDebounce="0"`, no mount, port or video - copies it
+  to the Mac, starts the PC's serve on the RME with `--capture-inputs=3-6` and the Mac's over ssh (its pid said by the
+  shell that execs it, so only that process is ever stopped), waits for `pair/inStep` and `pair/mapped`, fires a GO a
+  second, reads each run's `launchSample` on the PC, finds each click's onset on 5+6 (the PC through its own Dante
+  loopback) and 3+4 (the Mac), and prints the jump, its spread, both output latencies, the engine alignment (the jump
+  less their difference), drift, Δ and residual into `build/redundancy-bench/m61-<stamp>.txt`, beside the capture, its
+  sidecar and both logs; it stops the backup first, then the main, and says what `wfg` is left on either machine.
+  MEASURED, Debug, 48 kHz, 128-frame blocks: the PC alone on "ASIO MADIface USB", 20 GOs - its click back on inputs 5+6
+  310 samples (6.458 ms) after its launch sample on every GO, to the sample (spread nought), at 0.1000; its driver
+  reports output 181 and input 131, 312 samples (6.500 ms): measured two samples (42 µs) under reported. The capture
+  dropped nothing (22 s of four channels). The rehearsal, ten GOs each way, the Mac hosted: linked, in step and mapped
+  in 7.6 to 8.8 s over the LAN; Δ 2 ticks and the main's extra lead 2; round trip 1.1 to 1.2 ms; the map known to 478
+  µs with the Mac following and 341 µs with the PC following; `pair/drift` -14.5 ppm (the Mac follows) and +15.4 ppm
+  (the PC follows) - the Mac's own crystal against the Dante network's clock, seen from both ends and agreeing; the PC
+  as a mapped follower put its clicks on its leader's samples, off its own block grid (188874, 236875, ...), and heard
+  each back at +310 to the sample. OWED TO THE BENCH: M61 itself, the two machines over Dante - the Mac's Dante Virtual
+  Soundcard was not running (its engine stopped the evening before, not ours to start); `python
+  tests/bench/m61_dante.py --pair` when CoreAudio lists it. AGQ's expectation: a jump of the Mac's reported output
+  latency less the PC's 3.771 ms, plus the engine alignment. Tests under C and fr_FR, on Windows and on the Mac farm:
+  InputCaptureTests (three cases: a capture taken up while the hosted pump runs begins on a block's first sample
+  between the counts read either side of the moment it was handed over, every frame the input file's on that sample,
+  the inputs asked for and no others; a ring a block deep with the writer held drops 20 blocks or more, counts them,
+  writes them as silence and keeps every frame after the hole on its own sample; inputs the interface does not have
+  refused, saying which, and a count that goes back ending the capture with the sidecar saying why - the two hosted
+  cases red with the capture's sample a block out, the second alone red with a hole not written as silence);
+  `generate-schema.py --check`, `check-comments.py`; the clang-tidy stand-in over the changed files, nothing found. Found and left: the capture is the session's first interface's alone - an Apply, a rebuild or a
+  followed clock ends it, and a second capture needs another serve; a stop by TerminateProcess leaves `closed` false
+  and up to a second unflushed; the sidecar's `firstSample` is on the AudioHost's count, which restarts with every
+  open, and not on the session clock's (`SessionAudioClock`), whose offset from it serve sets once the ticks start.
 
 ## 59. Timecode generated: MTC and LTC cues
 

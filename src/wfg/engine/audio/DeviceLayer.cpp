@@ -293,6 +293,15 @@ namespace wfg::audio
 
             patchInputs (inputPatch, inputChannelData, numInputChannels,
                          inputScratch.getArrayOfWritePointers(), inputScratch.getNumChannels(), numSamples);
+
+            /*  WHAT THE INPUTS HEARD, as the device handed them, on the sample
+                this block will be (RD.9b, audio/InputCapture.h): copied into a
+                ring made before the device started, or dropped and counted. A
+                block the graph does not run is not captured, so the file's
+                frames and the count stay one axis. */
+            if (capture != nullptr)
+                capture->write (inputChannelData, numInputChannels, numSamples, audioHost.clock().samplesElapsed());
+
             audioHost.setBlockTime (askedAt);
             audioHost.processBlock (inputScratch.getArrayOfReadPointers(), inputScratch.getNumChannels());
 
@@ -323,6 +332,7 @@ namespace wfg::audio
 
         AudioHost audioHost;
         DeviceSink sink;
+        InputCapture* capture = nullptr;     // set in bringUp, with no callback running
         std::vector<int> inputPatch;
         juce::AudioBuffer<float> inputScratch;
         int hardwareInputs = 0, hardwareOutputs = 0;
@@ -389,6 +399,16 @@ namespace wfg::audio
         sink.patch = request.outputPatch;
         sink.observer = request.outputObserver;
         inputScratch.setSize (settings.inputChannels, settings.blockSize);
+
+        /*  THE CAPTURE PREPARED BEFORE THE CALLBACK IS ADDED (RD.9b): its ring
+            and file made here, on the message thread, on what the device
+            gave. One that will not prepare - inputs the interface does not
+            have, a file that cannot be written, another shape than the one it
+            began on - is left out and keeps the reason; the device opens. */
+        capture = request.inputCapture != nullptr
+                      && request.inputCapture->prepare (hardwareInputs, settings.sampleRate, settings.blockSize)
+                    ? request.inputCapture
+                    : nullptr;
 
         if (settings.outputChannels <= 0)
         {

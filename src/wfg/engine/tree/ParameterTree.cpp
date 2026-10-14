@@ -3528,6 +3528,7 @@ namespace wfg::tree
             warning, asserted, seekable, roundFrom, roundLength, strip, held, solo, error,
             processState, processLate, processDropped, said, ports, iteration, iterations,
             round, pruned, seed, range, rangeIteration, timecode, chaseError, chaseState,
+            launchSample,
 
             /*  A row this publish does not know, which reads its default - a
                 row added to the table before anybody wrote its reading. */
@@ -3570,7 +3571,8 @@ namespace wfg::tree
                     { "iterations", RunRow::iterations }, { "round", RunRow::round },
                     { "pruned", RunRow::pruned }, { "seed", RunRow::seed }, { "range", RunRow::range },
                     { "rangeIteration", RunRow::rangeIteration }, { "timecode", RunRow::timecode },
-                    { "chaseError", RunRow::chaseError }, { "chaseState", RunRow::chaseState }
+                    { "chaseError", RunRow::chaseError }, { "chaseState", RunRow::chaseState },
+                    { "launchSample", RunRow::launchSample }
                 };
 
                 std::vector<RunRowEntry> entries;
@@ -5000,6 +5002,13 @@ namespace wfg::tree
                         copy, nought and empty for every run nothing chases. */
                     case RunRow::chaseError: text = osc::formatDouble (std::round (run.chaseError * 100.0) / 100.0); break;
                     case RunRow::chaseState: text = run.chaseState; break;
+
+                    /*  THE SAMPLE ITS SOUND WAS PLACED ON (namespace draft §58,
+                        RD.9b), on the audio side's own count: what a capture's
+                        sidecar ties the inputs' frames to, so the bench can put a
+                        GO and the click it heard back on one axis. Nought until it
+                        is placed, and always in a replay, which places nothing. */
+                    case RunRow::launchSample: text = std::to_string (run.launchedAtSample); break;
                     case RunRow::other:      text = std::string (entry.row->defaultText); break;
                 }
 

@@ -313,6 +313,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/HostPlayer.cpp
     wfg/engine/audio/HostedAudioDriver.h
     wfg/engine/audio/HostedAudioDriver.cpp
+    wfg/engine/audio/InputCapture.h
+    wfg/engine/audio/InputCapture.cpp
     wfg/engine/rt/RtCheck.h
     wfg/engine/rt/RtCheck.cpp
     wfg/engine/rt/RtCounters.h

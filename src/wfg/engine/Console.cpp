@@ -116,6 +116,7 @@
 #include <wfg/engine/audio/SettingsPump.h>
 #include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
+#include <wfg/engine/audio/InputCapture.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
 #include <wfg/engine/osc/SenderGate.h>
@@ -3224,6 +3225,43 @@ namespace
                                 ? args.getValueForOption ("--input-wav").toStdString()
                                 : std::string();
 
+        /*  `--capture=<wav> [--capture-inputs=<first>-<last>]` (namespace draft
+            §58, RD.9b; audio/InputCapture.h): what the interface's inputs heard,
+            block by block, written to a 32-bit float WAV, and beside it a
+            sidecar tying the WAV's first frame to the count launches are placed
+            on - which `/godot/run/<id>/launchSample` reads. M61's evidence: a
+            click from each machine of a pair heard back on one interface, on
+            one clock. The inputs 1-based, as the interface numbers them, and
+            all of them when the range is left off; an interface's under
+            `--device`, the `--input-wav` channels under `--hosted`. A range
+            typed wrong stops the start, as any value typed wrong does. */
+        const auto capturePath = args.containsOption ("--capture")
+                                   ? args.getValueForOption ("--capture").toStdString()
+                                   : std::string();
+        wfg::audio::InputCapture::Settings captureSettings;
+        captureSettings.file = capturePath;
+
+        if (args.containsOption ("--capture-inputs"))
+        {
+            const auto range = args.getValueForOption ("--capture-inputs").trim();
+            const auto from = range.upToFirstOccurrenceOf ("-", false, false).trim();
+            const auto to = range.contains ("-") ? range.fromFirstOccurrenceOf ("-", false, false).trim() : from;
+            const auto digits = juce::String ("0123456789");
+
+            if (capturePath.empty() || from.isEmpty() || to.isEmpty()
+                  || ! from.containsOnly (digits) || ! to.containsOnly (digits)
+                  || from.length() > 4 || to.length() > 4
+                  || from.getIntValue() < 1 || to.getIntValue() < from.getIntValue())
+            {
+                std::cerr << "wfg serve: --capture-inputs wants <first>-<last>, 1-based, with --capture, and \""
+                          << range << "\" is not that" << std::endl;
+                return 2;
+            }
+
+            captureSettings.firstInput = from.getIntValue();
+            captureSettings.lastInput = to.getIntValue();
+        }
+
         /*  The proxies' spin limit, for a measurement (M31); nought is the
             rule - the smaller of 250 µs and a quarter of the block. */
         const auto proxyDeadlineUs = args.containsOption ("--proxy-deadline-us")
@@ -4410,6 +4448,44 @@ namespace
             stops. */
         auto selectedAudio = wfg::audio::audioSettingsOf (document);
         const auto onDevice = args.containsOption ("--device") || (selectedAudio.enabled && ! hosted);
+
+        /*  THE CAPTURE (RD.9b), made before either driver so it outlives both:
+            the device's callback and the hosted pump write into it until they
+            stop, and it is stopped after them. Nothing to listen to without an
+            interface - the dummy clock has no inputs - so that is refused. */
+        std::unique_ptr<wfg::audio::InputCapture> capture;
+
+        if (! capturePath.empty())
+        {
+            if (! onDevice && ! hosted)
+            {
+                std::cerr << "wfg serve: --capture needs inputs to listen to: --device, or --hosted with --input-wav"
+                          << std::endl;
+                return 2;
+            }
+
+            capture = std::make_unique<wfg::audio::InputCapture> (captureSettings);
+        }
+
+        /*  Said once the interface is up, or the start stopped: a capture
+            asked for and not taken is the command line's mistake. */
+        const auto captureTaken = [&capture]
+        {
+            if (capture == nullptr)
+                return true;
+
+            if (! capture->isPrepared())
+            {
+                std::cerr << "wfg serve: --capture: " << capture->lastError() << std::endl;
+                return false;
+            }
+
+            const auto taken = capture->inputs();
+            std::cout << "wfg: capture " << capture->settings().file << " inputs "
+                      << taken.front() << "-" << taken.back() << std::endl;
+            return true;
+        };
+
         /*  THE INTERFACE'S AUDIO WORKGROUP, held for the session and handed to
             every device driver this session opens and to the tick thread, which
             joins whatever the running device published (macOS; empty
@@ -4438,6 +4514,7 @@ namespace
             if (args.containsOption ("--device-type"))
                 activeDeviceRequest.deviceType = args.getValueForOption ("--device-type").toStdString();
             if (args.containsOption ("--buffer")) activeDeviceRequest.blockSize = blockSize;
+            activeDeviceRequest.inputCapture = capture.get();
             deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
                 engineCacheFolder().getFullPathName().toStdString());
             deviceDriver->host().setProxyServices (proxyServices);
@@ -4476,6 +4553,18 @@ namespace
                 audioState.inputs = deviceDriver->inputChannels();
                 audioState.hardwareOutputs = deviceDriver->outputChannels();
                 audioState.availableBufferSizes = deviceDriver->availableBufferSizes();
+
+                /*  AND ITS OWN DELAYS, as its driver reported them at the open
+                    (found by RD.9b's bench): until now only an Apply's
+                    `audio.settingsReady` carried them, so an interface opened
+                    at launch read nought at `audio/inputLatency` and
+                    `audio/outputLatency` - and so at `pair/outputLatency`,
+                    which AGQ publishes from it - until somebody pressed Apply. */
+                audioState.inputLatency = deviceDriver->inputLatency();
+                audioState.outputLatency = deviceDriver->outputLatency();
+
+                if (! captureTaken())
+                    return 2;
             }
         }
         const auto schedule = wfg::TickClock::create (sampleRate);
@@ -6005,12 +6094,16 @@ namespace
                                         ? args.getValueForOption ("--render").toStdString()
                                         : std::string();
             hostSettings.inputFile = inputWav;
+            hostSettings.capture = capture.get();
 
             if (! driver->open (hostSettings))
             {
                 std::cerr << "wfg serve --hosted: " << driver->lastError() << std::endl;
                 return 2;
             }
+
+            if (! captureTaken())
+                return 2;
 
             /*  THE EDIT IS BUILT HERE AND NEVER AGAIN. PRD §3.25: the graph is
                 fixed at show load, and this is show load. It happens before a
@@ -8199,6 +8292,12 @@ namespace
             // Joining the sole model owner also prevents a queued GO from racing
             // device teardown. The admission check holds gestures until ready.
             ticks.stop();
+
+            /*  A CAPTURE IS ONE STRETCH OF ONE CLOCK (RD.9b): the interface
+                opened again counts again, and the file ends here, saying so. */
+            if (capture != nullptr)
+                capture->end ("the audio settings were applied and the interface opened again");
+
             const auto hadDevice = deviceDriver != nullptr;
             if (deviceDriver) deviceDriver->close();
             if (driver) driver->stop();
@@ -8318,6 +8417,10 @@ namespace
         settingsPump.rebuild = [&]
         {
             ticks.stop();
+
+            if (capture != nullptr)
+                capture->end ("the graph was built again (Load now)");
+
             player.reset();
             runner.setPlayer (nullptr);
             const auto hadDevice = deviceDriver != nullptr;
@@ -8455,6 +8558,9 @@ namespace
                 ticks.start();
                 return;
             }
+
+            if (capture != nullptr)
+                capture->end ("the interface's clock moved and the show followed it");
 
             player.reset();
             runner.setPlayer (nullptr);
@@ -9119,6 +9225,11 @@ namespace
         if (dummy != nullptr)
             dummy->stop();
 
+        /*  THE CAPTURE LAST, with nothing left to write into it: the ring
+            drained, the WAV's header whole, the sidecar saying it closed. */
+        if (capture != nullptr)
+            capture->stop();
+
         /*  THE GATE OPEN BEFORE ANYTHING IT PASSES TO GOES (RD.6): the tick
             thread that closed it has stopped, and a datagram or a patch still
             submitting while the dialler and the gate are taken down is then
@@ -9354,6 +9465,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
     app.addCommand ({ "serve",
                       "serve <bundle> --sample-rate=N --buffer=N [--proxy-deadline-us=N]"
                       " [--hosted [--render=<wav>] [--input-wav=<wav>] | --device[=<name>] [--device-type=<type>]]"
+                      " [--capture=<wav> [--capture-inputs=<first>-<last>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>] [--midi-render=<port>=<file>]"
                       " [--midi-play=<port>=<file>] [--midi-play-loop=<port>=<file>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"

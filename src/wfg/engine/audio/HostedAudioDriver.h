@@ -16,6 +16,7 @@
 #pragma once
 
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/audio/InputCapture.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -89,6 +90,14 @@ namespace wfg::audio
                 interface hears a live one. Read whole at open, at the session's
                 own rate or refused. Empty for no inputs at all. */
             std::string inputFile;
+
+            /*  WHAT THE INPUTS HEARD, WRITTEN TO A FILE (namespace draft §58,
+                RD.9b; `serve --capture`): the input file's channels as each
+                block hands them to the graph, with the block's first sample.
+                Prepared at open; one that will not prepare is left out and
+                keeps the reason, and the driver opens regardless. Not owned;
+                must outlive the driver's running. */
+            InputCapture* capture = nullptr;
         };
 
         /*  Brings the engine up and opens the hosted interface. Nothing is
@@ -151,6 +160,14 @@ namespace wfg::audio
         /** How many frames reached the render file. Zero when not rendering. */
         std::int64_t framesRendered() const noexcept;
 
+        /*  A CAPTURE TAKEN UP WHILE THE PUMP RUNS (RD.9b): prepared here, on
+            the message thread, then handed to the pump with one release store,
+            so its first block is whichever the pump runs next - which is how a
+            test sees that the sidecar's first sample is the clock's when the
+            capture began, and not nought by coincidence. False, with the
+            capture's own reason, when it will not prepare. */
+        bool attachCapture (InputCapture& capture);
+
     private:
         void run();
 
@@ -163,6 +180,9 @@ namespace wfg::audio
 
         std::unique_ptr<Render> render;
         std::unique_ptr<Input> input;
+
+        //  The pump reads it once a block; null for none.
+        std::atomic<InputCapture*> capture { nullptr };
 
         std::thread worker;
         std::mutex mutex;

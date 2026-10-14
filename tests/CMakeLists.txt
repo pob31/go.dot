@@ -169,6 +169,7 @@ add_executable(wfg_tests
     LeadershipTests.cpp
     SameShowTests.cpp
     SameSampleTests.cpp
+    InputCaptureTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
     ClientTests.cpp)

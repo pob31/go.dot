@@ -236,6 +236,24 @@ namespace wfg::audio
         }
 
         current = requested;
+
+        /*  THE CAPTURE, before the pump can reach it (RD.9b): its ring and file
+            made here; one that will not prepare is left out with its reason. */
+        capture.store (requested.capture != nullptr
+                         && requested.capture->prepare (hostSettings.inputChannels, requested.sampleRate,
+                                                        requested.blockSize)
+                           ? requested.capture
+                           : nullptr,
+                       std::memory_order_release);
+        return true;
+    }
+
+    bool HostedAudioDriver::attachCapture (InputCapture& taken)
+    {
+        if (! taken.prepare (input != nullptr ? input->channels() : 0, current.sampleRate, current.blockSize))
+            return false;
+
+        capture.store (&taken, std::memory_order_release);
         return true;
     }
 
@@ -295,6 +313,9 @@ namespace wfg::audio
 
         running.store (false, std::memory_order_relaxed);
 
+        //  The pump has stopped: no block reaches the capture from here.
+        capture.store (nullptr, std::memory_order_release);
+
         /*  The sink goes before the render does, and both go before the host.
             A pointer the audio thread reads without synchronisation is only
             safe to change with the audio stopped, which by here it is. */
@@ -353,8 +374,16 @@ namespace wfg::audio
                 its schedule, so the line through the stamps is the schedule's. */
             audioHost.setBlockTime (std::chrono::duration_cast<std::chrono::nanoseconds> (due.time_since_epoch()).count());
 
+            /*  THE INPUTS AS THE GRAPH WILL HEAR THEM, captured on the sample
+                this block will be (RD.9b, audio/InputCapture.h). */
+            const float* const* inputs = input != nullptr ? input->next (current.blockSize) : nullptr;
+
+            if (auto* taking = capture.load (std::memory_order_acquire); taking != nullptr)
+                taking->write (inputs, input != nullptr ? input->channels() : 0, current.blockSize,
+                               audioHost.clock().samplesElapsed());
+
             if (input != nullptr)
-                audioHost.processBlock (input->next (current.blockSize), input->channels());
+                audioHost.processBlock (inputs, input->channels());
             else
                 audioHost.processBlock();
 
