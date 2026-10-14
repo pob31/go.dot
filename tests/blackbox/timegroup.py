@@ -80,7 +80,12 @@ samples: it arrives on the steady clock and reaches them through the tick's cloc
 pairs, which a starved runner takes late - so on CI where an MTC member stands,
 and how often the MTC watcher re-anchors, are printed and not judged, and off
 CI a turn's placing is judged to MTC_PLACED_MS. A chaser's steering is decided
-on the tick, so on CI its bounds widen.
+on the tick, so on CI its bounds widen. A member the engine owned up to
+launching late is held to the chase law from where it began - no further from
+its code than that, and at the code's speed except where it was past the law's
+tolerance and catching up - and a run whose MTC arrived more than
+MTC_LEAD_LIMIT ahead of the render, the rig's hosted pump fallen behind the wall
+clock, says nothing of MTC: what it would say is the rig's (`mtc_lead`).
 
 By hand, `--keep=<folder>` leaves both rooms there (`main`, `held`: the show,
 the input, the MTC file, the render and the log) and `--analyse=<folder>`
@@ -384,6 +389,21 @@ MTC_PLACED_MS = 20.0
 # chunk of 256 samples on its clock, and up to three more in the stretcher
 # itself (M14) - some 21 ms at 48 kHz.
 STRETCHED_MS = 4 * 256 * 1000.0 / SAMPLE_RATE
+# THE CHASE LAW'S BAND (timecode/Chase.h, AIS): a catch-up chaser is steered
+# only once it is more than `sync/chaseTolerance` out of step, which the fixture
+# leaves at its 10 ms - within it, it is in step and runs at the code's speed.
+CHASE_TOLERANCE_MS = 10.0
+# Where a stretched voice's catch-up ends: one of the stretcher's chunks (AJC).
+STRETCH_SETTLE_MS = 256 * 1000.0 / SAMPLE_RATE
+# A TICK THAT KEPT UP WITH ITS AUDIO: the engine notes its tick thread only once
+# it is two ticks behind. Every healthy room kept notes it at most 60 ms behind
+# after its first three seconds; every overloaded one from 100 ms to seconds
+# (CI's red rooms of TG.12's CI run, part 3: 2.5 and 2.7 s).
+TICK_BEHIND_LIMIT_MS = 100.0
+TICK_WARM_UP = 150
+# How far the unheld serve's tick fell behind, handed to the held one with the
+# starts it is held to (no cue is named so).
+BEHIND_KEY = "@behind"
 
 
 def write_member(path: Path, length: float = MEMBER_SECONDS) -> None:
@@ -699,6 +719,11 @@ class Log:
             if found:
                 self.late_ticks.append((int(found.group(2)), float(found.group(1))))
 
+    def most_behind(self, after: int = 0) -> float:
+        """The most the engine said its tick thread was behind its audio, in ms,
+        in its notes from tick `after` on."""
+        return max((ms for by, ms in self.late_ticks if by >= after), default=0.0)
+
     def tick_late_around(self, tick: int) -> float:
         """The most the engine said its tick thread was late by, in ms, in the
         stretch of ticks its notes covered around `tick` - nought when it said
@@ -968,10 +993,39 @@ def serve(report: Report, room: Path, held: bool, word: str, story_until: float)
     return story_pass, Log(log), Render(render), polled
 
 
+# HOW FAR AHEAD OF THE RENDER MTC MAY ARRIVE BEFORE ITS RUN IS NOT JUDGED AS
+# MTC: see `mtc_lead`. Every healthy room kept reads at most 0.02 s; the CI
+# rooms that went red, 7.8 and 10.3 s.
+MTC_LEAD_LIMIT = 0.5
+
+
+def mtc_lead(log: Log) -> float:
+    """How far ahead of the engine's own clock the MTC arrived, at most, in
+    seconds: each MTC record's anchor - the sample its frame was placed on -
+    against the sample its tick was due at, less the lateness the log notes
+    there. The serve renders on a hosted pump, its audio clock the pump's, while
+    the MTC it plays to itself arrives on the steady clock; a pump that keeps up
+    puts a record's anchor a few frames before its tick (-0.01 to -0.3 s in every
+    healthy room kept). One a starved runner holds back falls behind the wall
+    clock, and the MTC, placed on the samples through the tick's clock pairs,
+    runs ahead of them by however far it fell - seconds, in TG.12's CI run,
+    part 3: the locate's `jumped` said on a tick due 57.7 s into the render with
+    its anchor at 67.0 s, and the MTC jump chaser re-seated nine seconds before
+    the locate, against the port's own story as against the maps. A machine on
+    its audio interface has no pump to fall behind, so what that run says of
+    MTC is the rig's, not the engine's."""
+    leads = [(h.sample - h.tick * TICK) / SAMPLE_RATE - log.tick_late_around(h.tick) / 1000.0
+             for h in log.heard if h.source == MTC_ORIGIN]
+    return max(leads, default=0.0)
+
+
 def judge_turns(report: Report, word: str, log: Log, truth: Truth, r0: int, source: str, origin: str,
-                sparse_judged: bool) -> None:
+                sparse_judged: bool, ahead: float = 0.0, overloaded: str = "") -> None:
     """`code.heard` from outside: its origin the source's own, its turns where
-    the story turns, and few of them."""
+    the story turns, and few of them. `ahead`, MTC's lead on the render
+    (`mtc_lead`): past MTC_LEAD_LIMIT, where a turn was said is the rig's."""
+    rig = (f"the MTC arrived up to {ahead:.2f} s ahead of the render: the rig's audio clock, a hosted pump, fell"
+           " behind the wall clock MTC arrives on" if ahead > MTC_LEAD_LIMIT else "")
     first, last = truth.origin - 0.5 * SAMPLE_RATE, truth.origin + LOOP + 2.0 * SAMPLE_RATE
     mine = [h for h in log.heard if h.source == source and first <= h.sample + r0 < last]
     report.check(bool(mine) and all(h.origin == origin and h.source == origin for h in mine),
@@ -1020,11 +1074,14 @@ def judge_turns(report: Report, word: str, log: Log, truth: Truth, r0: int, sour
             seen = "; ".join(f"{label_of(h.frame)} on tick {h.tick}, due {(h.tick * TICK + r0 - fell) / MS:+.1f} ms"
                              f" from the quiet, the tick noted up to {log.tick_late_around(h.tick):g} ms late"
                              for h in mine if h.what == "stopped")
-            report.check(hit is not None, f"{word}: `stopped` at {words}, on {label_of(frame)}",
-                         f"none; stopped said: {seen or 'never'}" if hit is None
-                         else f"said on a tick due {off / MS:+.1f} ms after the line fell quiet"
-                              + (f", the tick noted up to {log.tick_late_around(hit.tick):g} ms late"
-                                 if log.tick_late_around(hit.tick) > 0.0 else ""))
+            said = (f"none; stopped said: {seen or 'never'}" if hit is None
+                    else f"said on a tick due {off / MS:+.1f} ms after the line fell quiet"
+                         + (f", the tick noted up to {log.tick_late_around(hit.tick):g} ms late"
+                            if log.tick_late_around(hit.tick) > 0.0 else ""))
+            if rig and hit is None:
+                report.void(f"{word}: `stopped` at {words}, on {label_of(frame)}", f"{said}; {rig}")
+            else:
+                report.check(hit is not None, f"{word}: `stopped` at {words}, on {label_of(frame)}", said)
         elif exact is not None:
             report.check(hit is not None and abs(off) <= exact,
                          f"{word}: `jumped` at {words}, {label_of(frame)} on the input frame's own sample",
@@ -1036,9 +1093,13 @@ def judge_turns(report: Report, word: str, log: Log, truth: Truth, r0: int, sour
             # printed.
             print(f"       MTC `jumped` at {words}: "
                   + ("none" if hit is None else f"{off / MS:+.2f} ms from where the port's pass puts it"))
-            report.check(hit is not None and (ON_CI or abs(off) <= MTC_PLACED_MS * MS),
-                         f"{word}: `jumped` at {words}, {label_of(frame)} where the port played it",
-                         "none" if hit is None else f"{off / MS:+.2f} ms from where the story's moment fell")
+            placed = hit is not None and (ON_CI or abs(off) <= MTC_PLACED_MS * MS)
+            jwords = f"{word}: `jumped` at {words}, {label_of(frame)} where the port played it"
+            jdetail = "none" if hit is None else f"{off / MS:+.2f} ms from where the story's moment fell"
+            if rig and not placed:
+                report.void(jwords, f"{jdetail}; {rig}")
+            else:
+                report.check(placed, jwords, jdetail)
     # The loop point: the input begins again, the port's file again.
     loop_truth = Truth(truth.origin + LOOP)
     after_loop = [h for h in log.heard if h.source == source and h.what == "jumped" and abs(h.frame - looped) <= 1
@@ -1062,7 +1123,11 @@ def judge_turns(report: Report, word: str, log: Log, truth: Truth, r0: int, sour
     # samples through the tick's clock pairs, so on CI, where the runner holds
     # the tick back, how often it re-anchors is the runner's.
     sparse = f"{word}: {source[:3].upper()}'s code.heard is sparse - its turns and a few re-anchors, not one a frame (AIO)"
-    if sparse_judged:
+    if sparse_judged and (rig or overloaded):
+        # MTC's moments are placed on the samples through the tick's clock
+        # pairs, so a tick held back re-anchors its watcher more often (above).
+        report.void(sparse, f"{words}; {rig or overloaded}")
+    elif sparse_judged:
         report.check(len(counted) <= 12, sparse, words)
     else:
         report.void(sparse, f"{words}; MTC is placed on the samples through the tick's clock pairs, which a starved"
@@ -1160,8 +1225,12 @@ def judge_start(report: Report, word: str, log: Log, member: Member, track: Trac
     return onset
 
 
-def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Truth, r0: int) -> None:
-    """The LTC group's members, from their sound."""
+def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Truth, r0: int,
+                  overloaded: str = "") -> None:
+    """The LTC group's members, from their sound. `overloaded`, why the tick did
+    not keep up with its audio, when it did not: a scene's placing to the sample
+    rides on the tick that commits it, and is not judged against such a run when
+    it misses."""
     s = SAMPLE_RATE
     at = truth.of(FREE.at)
     tracks = {m.cue: ltc_track(render, m) for m in (FREE, JUMP, VARI, SCENE_A, SCENE_B)}
@@ -1169,14 +1238,78 @@ def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Tr
     stretch, pitches = bursts_track(render, STRETCH, truth, burst_shape())
     tracks[STRETCH.cue] = stretch
 
+    # LAUNCHED LATE, A CHASER IS HELD TO THE LAW FROM WHERE IT STARTED. A member
+    # the engine owned up to launching late (`asked`, `launched_late`) began that
+    # far behind its code, and the run's clock starts on the sample it really
+    # began on, so the chaser measures it: within the law's tolerance it is in
+    # step and only follows the code's speed, held where it began; past it, it
+    # catches up and only ever comes closer (Chase.h: proportional, so it never
+    # overshoots). Its distance from the code is therefore held to its late
+    # start plus the bounds an on-time start is held to, and its speed to the
+    # code's except where it was past the tolerance and so catching up. TG.12's
+    # CI run, part 3: a Windows runner whose tick ran up to 117 ms behind
+    # launched the free runner and both catch-up chasers three blocks late,
+    # 9.1 ms, in step by the law and held to 1-3 ms by the bounds below - and
+    # the jump and timestretch chasers with them.
+    late: "dict[str, tuple[str, float]]" = {}
     onsets = {}
     for member in (FREE, JUMP, VARI):
         onsets[member.cue] = judge_start(report, word, log, member, tracks[member.cue], truth, r0, True)
+        onset = onsets[member.cue]
+        if onset is not None:
+            _, on_map, excuse = asked(log, member, truth, r0)
+            excuse = launched_late(onset, on_map, excuse, r0)
+            if excuse:
+                late[member.cue] = (excuse, (onset - at) / MS)
     first_burst = stretch.points[0][0] - stretch.points[0][1] * SAMPLE_RATE if stretch.points else None
     off = None if first_burst is None else (first_burst - at) / MS
-    report.check(off is not None and abs(off) <= 2.0,
-                 f"{word}: {STRETCH.words} starts within 2 ms of {label_of(STRETCH.at)}, its first burst's middle"
-                 " where it should be", "no burst" if off is None else f"{off:+.3f} ms")
+    words = (f"{word}: {STRETCH.words} starts within 2 ms of {label_of(STRETCH.at)}, its first burst's middle"
+             " where it should be")
+    s_excuse = asked(log, STRETCH, truth, r0)[2]
+    if off is not None and abs(off) > 2.0 and off > 0.0 and s_excuse:
+        # A burst's middle is not a launch's sample, so `launched_late`'s block
+        # rule cannot read it: the engine's own word that it launched late is
+        # what voids it, as it voids its siblings' starts.
+        report.void(words, f"{s_excuse}; {off:+.3f} ms")
+        late[STRETCH.cue] = (s_excuse, off)
+    else:
+        report.check(off is not None and abs(off) <= 2.0, words, "no burst" if off is None else f"{off:+.3f} ms")
+
+    def catching_up(member: Member, errs, first: float, last: float) -> bool:
+        """Whether the law could have been catching a member up anywhere between
+        two samples: its hysteresis (Chase.h) replayed over the errors heard
+        from the member's start - on once it is past the tolerance, off only
+        once it is back within where a catch-up ends - each with a margin for
+        the hearing. A member launched past the tolerance is caught up from its
+        launch on, and still is a second and more later, below the tolerance
+        but not yet within the settle (TG.12's CI run, part 3: a timestretch
+        chaser launched 16.9 ms late)."""
+        settle = STRETCH_SETTLE_MS if member is STRETCH else 1.0
+        on = False
+        for t, e in errs:
+            if t >= last:
+                break
+            if not on and abs(e) > CHASE_TOLERANCE_MS - 1.0:
+                on = True
+            elif on and abs(e) <= settle + 0.5:
+                on = False
+            if on and t >= first:
+                return True
+        return False
+
+    def held_from(member: Member, errs, first: float, last: float, bound: float):
+        """The bound a member's distance from its code is held to between two
+        samples - an on-time start's, or that plus how far its late launch put
+        it - whether it was past the law's tolerance there (so catching up, not
+        held to the code's speed), and what to add to the check's detail."""
+        excuse, began = late.get(member.cue, ("", 0.0))
+        if not excuse:
+            return bound, False, ""
+        steered = catching_up(member, errs, first, last)
+        return (bound + abs(began), steered,
+                f"; launched late, {began:+.3f} ms from its code ({excuse}), so held to {bound:g} ms beyond that"
+                + ("; past the law's tolerance here, so catching up rather than at the code's speed" if steered
+                   else ""))
     a = judge_start(report, word, log, SCENE_A, tracks[SCENE_A.cue], truth, r0, True)
     b = tracks[SCENE_B.cue].onset()
     # A SCENE'S MEMBERS ARE PLACED ON THE CODE'S SAMPLES, NOT AFTER ONE ANOTHER
@@ -1197,7 +1330,20 @@ def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Tr
     if a is None or b is None:
         report.check(False, words, f"first {a!r}, second {b!r}")
     elif not a_late:
-        report.check(abs(b - a - 1.5 * s) <= 1.0, words, f"{(b - a) / s:.6f} s")
+        # The first on time, the second is held to it - unless the engine owned
+        # up to launching the second late itself (TG.12's CI run, part 3: 118
+        # samples late, its tick thread noted 343 ms behind its audio).
+        _, _, b_excuse = asked(log, SCENE_B, truth, r0)
+        b_late = launched_late(b, a + 1.5 * s, b_excuse, r0)
+        if b_late and b - a - 1.5 * s > 1.0:
+            report.void(words, f"{(b - a) / s:.6f} s; the second launched late ({b_late})")
+        elif overloaded and abs(b - a - 1.5 * s) > 1.0:
+            # TG.12's CI run, part 3: four to six samples short, only ever in a
+            # run whose tick fell behind - not explained, so judged wherever the
+            # tick kept up.
+            report.void(words, f"{(b - a) / s:.6f} s; {overloaded}")
+        else:
+            report.check(abs(b - a - 1.5 * s) <= 1.0, words, f"{(b - a) / s:.6f} s")
     else:
         scene = [r for r in log.spawns_of(SCENE) if r.tick * TICK + r0 >= truth.origin]
         b_spawn = [r for r in log.spawns_of(SCENE_B.cue) if r.tick * TICK + r0 >= truth.origin]
@@ -1220,6 +1366,8 @@ def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Tr
         b_late = "" if start is None else launched_late(b, start + 1.5 * s, b_excuse, r0)
         if b_late and abs(b - start - 1.5 * s) > 1.0:
             report.void(words, f"the second launched late too ({b_late}); {detail}")
+        elif overloaded and not (start is not None and abs(b - start - 1.5 * s) <= 1.0):
+            report.void(words, f"{detail}; {overloaded}")
         else:
             report.check(start is not None and abs(b - start - 1.5 * s) <= 1.0, words, detail)
 
@@ -1247,13 +1395,16 @@ def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Tr
     loose = 3.0 if ON_CI else 1.0
     a0, a1 = at + 1.0 * s, truth.at(STEP_AT)
     rate = vari.rate(at + 1.5 * s, a1)
-    report.check(rate is not None and abs(rate - 1.00005) <= 5e-6 and (worst(errs, a0, a1) or 99) <= loose,
+    bound, steered, why = held_from(VARI, errs, a0, a1, loose)
+    report.check(rate is not None and (abs(rate - 1.00005) <= 5e-6 or steered) and (worst(errs, a0, a1) or 99) <= bound,
                  f"{word}: the varispeed chaser follows +50 ppm: at the code's speed and within {loose:g} ms",
-                 f"speed {rate!r}, worst {worst(errs, a0, a1)!r} ms")
+                 f"speed {rate!r}, worst {worst(errs, a0, a1)!r} ms{why}")
     rate = vari.rate(truth.at(STEP_AT) + 1.5 * s, truth.at(STOP_AT))
-    report.check(rate is not None and abs(rate - 1.001) <= 30e-6 and (worst(errs, a1, truth.at(STOP_AT)) or 99) <= 3 * loose,
+    bound, steered, why = held_from(VARI, errs, a1, truth.at(STOP_AT), 3 * loose)
+    report.check(rate is not None and (abs(rate - 1.001) <= 30e-6 or steered)
+                 and (worst(errs, a1, truth.at(STOP_AT)) or 99) <= bound,
                  f"{word}: and the step to +0.1 %, within {3 * loose:g} ms",
-                 f"speed {rate!r}, worst {worst(errs, a1, truth.at(STOP_AT))!r} ms")
+                 f"speed {rate!r}, worst {worst(errs, a1, truth.at(STOP_AT))!r} ms{why}")
     judge_stop(report, word, VARI, vari, truth)
     r0_, r1_ = truth.at(RETURN_AT), truth.at(LOCATE_AT)
     early = [e for t, e in errs if r0_ <= t < r0_ + 0.3 * s]
@@ -1276,9 +1427,12 @@ def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Tr
     jump = tracks[JUMP.cue]
     errs = truth.errors(jump, JUMP, at, truth.at(LOOP))
     rate = jump.rate(at + 1.0 * s, a1)
-    report.check(rate is not None and abs(rate - 1.0) <= 2e-6 and (worst(errs, a0, a1) or 99) <= 2.0,
+    # A jump chaser is never steered, only jumped past the tolerance, so its
+    # speed is its own however it began.
+    bound, _, why = held_from(JUMP, errs, a0, a1, 2.0)
+    report.check(rate is not None and abs(rate - 1.0) <= 2e-6 and (worst(errs, a0, a1) or 99) <= bound,
                  f"{word}: the jump chaser plays at its own speed between jumps, within 2 ms through +50 ppm",
-                 f"speed {rate!r}, worst {worst(errs, a0, a1)!r} ms")
+                 f"speed {rate!r}, worst {worst(errs, a0, a1)!r} ms{why}")
     judge_jumping(report, word, JUMP, jump, errs, truth)
     judge_stop(report, word, JUMP, jump, truth)
     judge_returned(report, word, JUMP, errs, truth)
@@ -1295,14 +1449,17 @@ def judge_chasers(report: Report, word: str, render: Render, log: Log, truth: Tr
     held_to = STRETCHED_MS + (10.0 if ON_CI else 0.0)
     a_rate = stretch.rate(at + 1.5 * s, a1, 3)
     b_rate = stretch.rate(a1 + 1.5 * s, truth.at(STOP_AT), 3)
-    report.check(a_rate is not None and abs(a_rate - 1.00005) <= 20e-6
-                 and b_rate is not None and abs(b_rate - 1.001) <= 100e-6,
+    _, a_steered, a_why = held_from(STRETCH, errs, at + 1.5 * s, a1, 0.0)
+    _, b_steered, b_why = held_from(STRETCH, errs, a1 + 1.5 * s, truth.at(STOP_AT), 0.0)
+    report.check(a_rate is not None and (abs(a_rate - 1.00005) <= 20e-6 or a_steered)
+                 and b_rate is not None and (abs(b_rate - 1.001) <= 100e-6 or b_steered),
                  f"{word}: and runs at the code's speed - 1.00005, then 1.001 - as the varispeed one does (AIS)",
-                 f"its bursts came at {a_rate!r}, then {b_rate!r}")
-    report.check((worst(errs, a0, truth.at(STOP_AT)) or 99) <= held_to,
+                 f"its bursts came at {a_rate!r}, then {b_rate!r}" + (b_why or a_why))
+    bound, _, why = held_from(STRETCH, errs, a0, truth.at(STOP_AT), held_to)
+    report.check((worst(errs, a0, truth.at(STOP_AT)) or 99) <= bound,
                  f"{word}: within {held_to:.1f} ms of the code throughout - a chunk on its clock and up to three in"
                  " the stretcher (AJC)",
-                 f"worst {worst(errs, a0, truth.at(STOP_AT))!r} ms; its bursts "
+                 f"worst {worst(errs, a0, truth.at(STOP_AT))!r} ms{why}; its bursts "
                  + ", ".join(f"{seconds(t - truth.origin)} {e:+.1f}" for t, e in errs[::12] if t < truth.at(STOP_AT)))
     judge_stop(report, word, STRETCH, stretch, truth)
     rate = stretch.rate(r0_ + 1.0 * s, r0_ + 8.0 * s, 3)
@@ -1402,9 +1559,13 @@ def judge_relocated(report: Report, word: str, member: Member, errs, truth: Trut
                  f"{out!r} ms at worst from {seconds(first - truth.origin)}, against {bound:g}")
 
 
-def judge_mtc(report: Report, word: str, render: Render, log: Log, truth: Truth, r0: int) -> None:
+def judge_mtc(report: Report, word: str, render: Render, log: Log, truth: Truth, r0: int,
+              ahead: float = 0.0) -> None:
     """The MTC group's members, against where the engine heard the port's
-    pass begin."""
+    pass begin. `ahead`, MTC's lead on the render (`mtc_lead`): past
+    MTC_LEAD_LIMIT the chaser followed the rig's MTC, not the port's, and its
+    step with the code is not judged - the free runner, which follows nothing,
+    still is."""
     for member in (MTC_FREE, MTC_JUMP):
         track = ltc_track(render, member)
         judge_start(report, word, log, member, track, truth, r0, not ON_CI)
@@ -1423,10 +1584,14 @@ def judge_mtc(report: Report, word: str, render: Render, log: Log, truth: Truth,
             for first, last, what in ((RETURN_AT, LOCATE_AT, "back from the stop"),
                                       (LOCATE_AT, LOOP - 0.5 * SAMPLE_RATE, "after the locate back 30 s")):
                 out = worst(errs, truth.at(first) + 0.5 * SAMPLE_RATE, truth.at(last))
-                report.check(out is not None and out <= bound,
-                             f"{word}: {what}, the MTC jump chaser is in step within half a second with the code as"
-                             f" Go.dot hears it, never more than {bound:g} ms out (jump)",
-                             f"{out!r} ms at worst, against {bound:g}")
+                cwords = (f"{word}: {what}, the MTC jump chaser is in step within half a second with the code as"
+                          f" Go.dot hears it, never more than {bound:g} ms out (jump)")
+                cdetail = f"{out!r} ms at worst, against {bound:g}"
+                if ahead > MTC_LEAD_LIMIT and not (out is not None and out <= bound):
+                    report.void(cwords, f"{cdetail}; the MTC arrived up to {ahead:.2f} s ahead of the render: the"
+                                        " rig's audio clock, a hosted pump, fell behind the wall clock MTC arrives on")
+                else:
+                    report.check(out is not None and out <= bound, cwords, cdetail)
 
 
 def map_errors(track: Track, member: Member, log: Log, r0: int):
@@ -1480,16 +1645,20 @@ def map_errors(track: Track, member: Member, log: Log, r0: int):
     return out
 
 
-def judge_polled(report: Report, word: str, polled: Polled, truth: Truth, r0: int) -> None:
-    """The readouts the window shows, read while the story ran."""
+def judge_polled(report: Report, word: str, polled: Polled, truth: Truth, r0: int, why: str = "") -> None:
+    """The readouts the window shows, read while the story ran: polled over
+    HTTP on the driver's clock against the story on the render's, so a run whose
+    rig fell behind the wall clock, or whose tick fell behind its audio, read
+    them at moments the story had not reached - `why` says which."""
     def rows(first: float, last: float):
         return [row for row in polled.rows if truth.at(first) <= row["tick"] * TICK + r0 < truth.at(last)]
 
     def judged(ok: bool, words: str, detail: str) -> None:
         if not polled.rows:
             report.void(words, "nothing was read while the story ran (a room judged again)")
-        elif not ok and ON_CI:
-            report.void(words, f"{detail}; read over HTTP while the story ran, which a starved runner reads late")
+        elif not ok and (ON_CI or why):
+            report.void(words, f"{detail}; " + (why or "read over HTTP while the story ran, which a starved runner"
+                                                        " reads late"))
         else:
             report.check(ok, words, detail)
 
@@ -1624,19 +1793,56 @@ def analyse(report: Report, word: str, held: bool, story_pass: int, log: Log, re
             ltc_members = [m for m in MEMBERS if m.source == "ltc" and m.sound == "ltc"
                            and not starts.get(m.cue, (0, False))[1] and not unheld.get(m.cue, (0, False))[1]]
             same = [m for m in ltc_members if same_start(m)]
-            report.check(bool(ltc_members) and len(same) == len(ltc_members),
-                         f"{word}: every LTC member starts where its map of the code puts its time, as unheld does -"
-                         " it fires the same",
-                         "; ".join(f"{m.words} held {said(m, starts.get(m.cue))}, unheld {said(m, unheld.get(m.cue))}"
-                                   for m in ltc_members))
+            fwords = (f"{word}: every LTC member starts where its map of the code puts its time, as unheld does -"
+                      " it fires the same")
+            fdetail = "; ".join(f"{m.words} held {said(m, starts.get(m.cue))}, unheld {said(m, unheld.get(m.cue))}"
+                                for m in ltc_members)
+            # Each serve draws its maps and commits its scene on its own ticks,
+            # so where either serve's tick fell behind its audio the two may
+            # differ by what the late ticks changed - the scene's second sound
+            # four to six samples, in TG.12's CI run, part 3 - not by what the
+            # hold does.
+            behind = max(log.most_behind(TICK_WARM_UP), unheld.get(BEHIND_KEY, 0.0))
+            fired = bool(ltc_members) and len(same) == len(ltc_members)
+            if not fired and behind >= TICK_BEHIND_LIMIT_MS:
+                report.void(fwords, f"{fdetail}; a serve's tick noted up to {behind:g} ms behind its audio,"
+                                    " an overloaded run")
+            else:
+                report.check(fired, fwords, fdetail)
         return starts
 
     judge_turns(report, word, log, truth, r0, LTC_ORIGIN, LTC_ORIGIN, True)
-    judge_turns(report, word, log, mtc, r0, MTC_ORIGIN, MTC_ORIGIN, not ON_CI)
-    judge_chasers(report, word, render, log, truth, r0)
-    judge_mtc(report, word, render, log, mtc, r0)
-    judge_polled(report, word, polled, truth, r0)
-    return starts_of(render, log, truth, mtc, r0)
+    # THE TICK KEPT UP WITH ITS AUDIO, judged once and on its own: everything
+    # below that a tick held back changes - MTC placed through its clock pairs,
+    # the readouts it publishes - is not judged against a run where it did not,
+    # so an overloaded machine says so in one check rather than in a scatter of
+    # others. Not voided where it is judged: an engine grown slow is what this
+    # driver caught in TG.11's faults, part 3 (the tick 15.8 s behind after
+    # thirty passes). On CI a runner's starvation is not the engine's, and a
+    # show machine is not overloaded (the author, 2026-10-14).
+    behind = log.most_behind(TICK_WARM_UP)
+    kept_up = (f"{word}: the engine's tick kept up with its audio - never noted {TICK_BEHIND_LIMIT_MS:g} ms behind or"
+               " more after its first three seconds")
+    if behind >= TICK_BEHIND_LIMIT_MS and ON_CI:
+        report.void(kept_up, f"noted up to {behind:g} ms behind; a CI runner's, not a show machine's")
+    else:
+        report.check(behind < TICK_BEHIND_LIMIT_MS, kept_up,
+                     f"noted up to {behind:g} ms behind" + ("" if behind < TICK_BEHIND_LIMIT_MS else
+                     "; the machine overloaded, or the engine grown slow - what a tick held back changes is not"
+                     " judged as the engine's below"))
+    overloaded = (f"the engine's tick noted up to {behind:g} ms behind its audio, an overloaded run"
+                  if behind >= TICK_BEHIND_LIMIT_MS else "")
+    ahead = mtc_lead(log)
+    print(f"       MTC arrived at most {ahead:+.3f} s ahead of the render (its records' anchors against their ticks)")
+    judge_turns(report, word, log, mtc, r0, MTC_ORIGIN, MTC_ORIGIN, not ON_CI, ahead, overloaded)
+    judge_chasers(report, word, render, log, truth, r0, overloaded)
+    judge_mtc(report, word, render, log, mtc, r0, ahead)
+    judge_polled(report, word, polled, truth, r0,
+                 f"the MTC arrived up to {ahead:.2f} s ahead of the render: the rig's audio clock, a hosted pump, fell"
+                 " behind the wall clock the driver polls on" if ahead > MTC_LEAD_LIMIT else overloaded)
+    starts = starts_of(render, log, truth, mtc, r0)
+    starts[BEHIND_KEY] = behind
+    return starts
 
 
 # =============================================================================

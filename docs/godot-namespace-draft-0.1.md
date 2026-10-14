@@ -28464,6 +28464,55 @@ cable, and a code from a VTR or a desk - the bench's.
   previous input (they change what a chunk takes and when it is analysed again, not whether it sounds) - not built
   reverted, since the hole never came here to go. With the mend the rebuild's first block is no longer special, so if
   the hole was that path's it is gone; the check stays strict, and the next macOS runs will say.
+- **TG.12's CI run, part 3**, 2026-10-14 evening: Windows red on every run, and what an overloaded run may be
+  held to. Every Windows run of 296a9db (the JUCE String patch) and f9a5cae rerun the same day failed
+  `blackbox.timegroup` in both locales, its unit shards taking 2357-2450 s where f9a5cae's green run took 1669 (the
+  same check went red at ff8f5ac on a 2093 s runner): a slow runner, not a change. `timegroup.py` now keeps its
+  rooms when red under `WFG_KEEP_ROOMS`, and CI uploads them (f2d608b); the first rooms said four things.
+  (1) LATE LAUNCHES. The tick thread ran up to 343 ms behind its audio, and the engine owned up to launching the
+  members 3 to 8 blocks late (`run.late`); the start checks were voided for it, but what follows was held to the
+  bounds of an on-time start - the varispeed chaser to 1-3 ms through the drift when it began 9.1 ms behind, which
+  by the chase law (Chase.h, AIS) is in step, the run's clock starting on the sample it really began on; the jump
+  chaser to 2 ms; the timestretch chaser's start, not voided as its siblings' are. A member launched late is now
+  held to the law from where it began: no further from its code than its late start plus the on-time bound, and
+  at the code's speed except where the law could have been catching it up - its hysteresis replayed over the
+  errors heard from its launch, on past the 10 ms tolerance, off only back within the settle (a millisecond; a
+  stretcher's chunk for a stretched voice), so a timestretch chaser launched 16.9 ms late is still catching up a
+  second and more on. (2) THE RIG FELL BEHIND THE WALL CLOCK. The serve renders on a hosted pump while the MTC it
+  plays to itself arrives on the steady clock; the starved pump fell seconds behind, and MTC, placed on the
+  samples through the tick's clock pairs, ran that far ahead of them - the locate's `jumped` said on a tick due
+  57.7 s into the render with its anchor at 67.0 s, the MTC jump chaser re-seated nine seconds before the locate
+  (against the port's own story as against the maps: 29999 ms), no `stopped` said in the stop at all. The LTC
+  side, on the render's own clock, was right throughout. `mtc_lead` measures it - each MTC record's anchor against
+  its tick's due sample, less the noted lateness: at most +0.02 s in every healthy room kept here and on the farm,
+  +7.8 and +10.3 s in CI's, up to +67 s in rooms starved past CI - and past 0.5 s the MTC turns' placing, the MTC
+  chaser's step and the readouts (polled on the driver's wall clock against the story on the render's) are
+  voided, the MTC free runner, which follows nothing, still judged. (3) THE TICK THAT DID NOT KEEP UP is now
+  judged once, on its own: "the engine's tick kept up with its audio - never noted 100 ms behind or more after its
+  first three seconds" (every healthy room kept: at most 60 ms; every overloaded one 100 ms to seconds, CI's 2.5
+  and 2.7 s). Off CI it is a check, so an overloaded machine says so in one sentence and an engine grown slow -
+  what this driver caught in TG.11's faults, part 3 - still fails; on CI it is voided, a runner's starvation not
+  the engine's and a show machine not overloaded (the author, that evening: "usually a show ready computer is not
+  overloaded"). What a tick held back changes is then voided by it: MTC's sparse count (its watcher re-anchors
+  through the tick's clock pairs), the readouts it publishes, and - when they miss - a scene's placing to the
+  sample and the held serve's "fires the same", which ride on the ticks that commit the scene and draw its maps.
+  WHY THE TICK FALLS BEHIND here and on Windows CI, and not on a show machine (M68, the publish nearly all of
+  it): a tick median of 0.44 ms in Release on the NUC, 6.4 ms in its GCC Debug build, 21-22 ms in MSVC's Debug
+  build on the author's laptop - against a tick of 20 ms. A show build uses 2 % of its tick; MSVC's Debug build
+  sits at its budget once a time group applies records, and on a warm laptop or a slow runner falls steadily
+  behind (0.6 ms a tick in one run here, 4.7 s by its end). The author: "This laptop, like a lot of Windows laptops,
+  sometimes has long interrupts, more than 2 ms ... This is not a computer I would trust 100% for a show." (4) The scene's second sound,
+  launched 118 samples late itself while the first was on time, was held to the sample; its own late launch now
+  voids it. Re-judged with `--analyse`: CI's two rooms green (29 and 30 void, each with the engine's, the rig's or the runner's
+  reason); every healthy room kept (sixteen in CI mode, six of them in local mode too) the same verdict as before
+  and one check more, the tick's; the rooms starved past CI still red. NOT EXPLAINED, its check strict wherever the tick kept up: in two
+  earlier CI runs and two runs here that evening, each overloaded, the scene's second sound began four to six samples
+  short of 72000 after the scene's start, as if placed at 1.5 s of code at +50 ppm; a committed scene's start is frozen and its members
+  placed on it in Go.dot's samples (`placedTick`, its rate the tick's exact 48000) - no room of it was kept, and
+  the next red keeps one. The click mend (part 2) ruled out as the cause of the 4.5 ms re-seat seen once in six
+  fr_FR runs that morning: eight fr_FR runs here with it and eight without, alternated, and six and six on the Mac
+  (all twelve green), every chaser re-seated within 0.37-0.39 ms after the locate either way; the later runs here
+  went red on (1), (2) and (3) in both builds alike, this laptop under a sustained load.
 
 ## 61. Keys, text and blur
 
