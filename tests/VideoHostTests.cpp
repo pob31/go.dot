@@ -1126,14 +1126,22 @@ TEST_CASE ("video host: a renderer with no window blurs the edge on its canvas's
 
         std::int64_t seen = -1;
         std::uint32_t colour = 0;
+        int probes = 0;
+
+        /*  SAID BEFORE THE WAIT, so a run that never sees the grey says what it
+            saw instead: the colour last read, how many probes came, and the
+            renderer's state (macOS CI missed it once in C, 2026-10-14). */
+        INFO ("the middle last read " << colour << " over " << probes << " probe(s); the renderer "
+                                      << host.readouts().renderer);
         CHECK (tickUntil (host, clock, [&]
         {
+            const auto before = seen;
             colour = probeOf (r, 0, seen);
+            probes += seen != before ? 1 : 0;
             const auto red = static_cast<int> ((colour >> 16) & 0xffu);
             return red > 96 && red < 160;
         }));
 
-        INFO ("the middle reads " << colour);
         CHECK (((colour >> 16) & 0xffu) == (colour & 0xffu));
     }
 
