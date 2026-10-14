@@ -245,4 +245,19 @@ namespace wfg::timecode
         //  THROUGH THE PAIRS' MIDDLE, where a line through them is surest whatever its slope.
         return fitted.positionAt (fitted.meanSample) + slope * (at - fitted.meanSample);
     }
+
+    double CountLine::momentAt (double sample) const noexcept
+    {
+        auto error = 0.0;
+        const auto slope = slopeNow (error);
+
+        if (! (slope > 0.0))
+            return 0.0;
+
+        //  The same two lines `sampleAt` reads, read the other way.
+        if (! fitted.valid)
+            return pairs.empty() ? 0.0 : (pairs.back().sample + (sample - pairs.back().position) / slope) * 1.0e6;
+
+        return (fitted.meanSample + (sample - fitted.positionAt (fitted.meanSample)) / slope) * 1.0e6;
+    }
 }

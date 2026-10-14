@@ -73,6 +73,22 @@ namespace wfg::audio
         std::int64_t samplesElapsed() const noexcept override { return offset + source->samplesElapsed(); }
         void use (const SampleClock& next, std::int64_t boundary)
         { source = &next; offset = boundary - next.samplesElapsed(); }
+
+        // The block clock this one counts from, and what it adds to that clock's
+        // count (namespace draft §58, RD.9): the session's sample less the
+        // device's. Read on the tick thread, which `use` only runs beside joined.
+        const SampleClock& counting() const noexcept { return *source; }
+        std::int64_t sessionOffset() const noexcept { return offset; }
+
+        // The device's block stamp moved onto the session's count (RD.9).
+        bool lastBlock (BlockStamp::Reading& out) const noexcept override
+        {
+            if (! source->lastBlock (out))
+                return false;
+
+            out.sample += offset;
+            return true;
+        }
     private:
         const SampleClock* source;
         std::int64_t offset = 0;

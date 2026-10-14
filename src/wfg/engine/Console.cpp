@@ -5335,6 +5335,30 @@ namespace
         const auto machineName = juce::SystemStats::getComputerName().toStdString();
         wfg::pair::Dialler dialler { linkReceiver, machineName };
 
+        /*  THE SAME SAMPLE (namespace draft §58, RD.9; AFS, AGI, AGQ;
+            pair/ClockMap.h), the tick thread's: this machine's sound line,
+            fitted through the audio side's own block stamps and forgotten when
+            the audio side is another; the other host clock as this machine's
+            pings measure it, when it dials - a link lost forgets it; the
+            leader's sound line and its measure of this machine's host clock
+            (when the leader dials), as it last said them; the map composed of
+            them each tick a machine follows, and whether it was trusted; the
+            late launches counted before this follow began; the other
+            machine's output latency as it last said it; and when this machine
+            last said its own clocks. */
+        wfg::pair::SoundLineFit soundLine;
+        const wfg::SampleClock* soundLineSource = nullptr;
+        wfg::pair::HostOffset hostOffset;
+        wfg::pair::SoundLine leaderLine;
+        wfg::pair::OffsetLine leaderMeasured;
+        wfg::pair::ClockMap clockMap;
+        auto clockTrusted = false;
+        std::int64_t lateLaunchesBefore = 0;
+        double peerOutputLatency = 0.0;
+        std::int64_t clockSaidAt = -1000000;
+        int clockSaidLead = -1, clockSaidDelay = -1;
+        auto clockSaidOnTicks = false, clockSaidHosts = false;
+
         /*  THE SAME SHOW, CHECKED (namespace draft §58, RD.10; the author's AFU;
             pair/ShowCheck.h): the worker that fingerprints this machine's show
             from a copy the tick hands it, off the tick - the autosave writer's
@@ -5498,6 +5522,26 @@ namespace
                                         if (pairing.seated.seat == wfg::pair::Seat::following)
                                             follower.position (leaderTick, std::move (text));
                                     });
+        /*  THE LEADER'S WORD ON ITS CLOCKS (RD.9), in the stream's order: its
+            sound line and its measure of this machine's host clock taken at
+            once - a line is true at any tick - and its lead held to the slot
+            of the tick it is true of (`Follower::clockSaid`); and every pong's
+            four stamps, which a machine that dials measures the other host
+            clock by, whichever leads. */
+        linkReceiver.setOnClock ([&follower, &pairing, &leaderLine, &leaderMeasured, &peerOutputLatency]
+                                 (const wfg::pair::wire::ClockSaid& said)
+                                 {
+                                     peerOutputLatency = said.outputLatency;
+
+                                     if (pairing.seated.seat != wfg::pair::Seat::following)
+                                         return;
+
+                                     leaderLine = said.line;
+                                     leaderMeasured = said.hosts;
+                                     follower.clockSaid (said);
+                                 });
+        linkReceiver.setOnHostSample ([&hostOffset] (const wfg::pair::HostSample& sample) { hostOffset.add (sample); });
+
         linkReceiver.setOnSummary ([&inStep, &pairing, &showCheck] (wfg::pair::Summary summary)
                                    {
                                        if (pairing.seated.seat == wfg::pair::Seat::following)
@@ -6226,6 +6270,55 @@ namespace
                                      const auto roundTrip = std::max (linkReceiver.roundTripToSay(),
                                                                       presence.roundTrip (now, timeout));
 
+                                     /*  THIS MACHINE'S SOUND LINE (RD.9): the audio side's
+                                         last block stamp on its own count - the count the
+                                         Runner places launches on - fed once a tick, a
+                                         stamp seen before not twice; forgotten when the
+                                         audio side is another, whose count starts again.
+                                         And the other host clock forgotten with the link,
+                                         so a link that comes back measures afresh. */
+                                     {
+                                         const auto& counting = sessionClock.counting();
+
+                                         if (&counting != soundLineSource)
+                                         {
+                                             soundLine.forget();
+                                             soundLineSource = &counting;
+                                         }
+
+                                         wfg::BlockStamp::Reading stamp;
+
+                                         if (counting.lastBlock (stamp))
+                                             soundLine.feed (stamp, ticks.sampleRate());
+
+                                         if (! presence.linked (now, timeout) && hostOffset.line().valid)
+                                             hostOffset.forget();
+                                     }
+
+                                     /*  THE MAP FROM THE LEADER'S SAMPLES TO THIS MACHINE'S,
+                                         composed before the leader's records of this tick go
+                                         in, so a `code.heard` and a seat are moved through it:
+                                         the host clocks as this machine measured them when it
+                                         dials, as the leader measured them when it is the
+                                         one that dialled. Trusted or not by ClockMap's rules,
+                                         held once trusted until its error doubles. */
+                                     if (seated.seat == wfg::pair::Seat::following && follower.isFollowing())
+                                     {
+                                         const auto mine = hostOffset.line().valid;
+                                         clockMap = wfg::pair::ClockMap::compose (
+                                             leaderLine, soundLine.line(), mine ? hostOffset.line() : leaderMeasured,
+                                             mine ? wfg::pair::ClockMap::MeasuredBy::follower
+                                                  : wfg::pair::ClockMap::MeasuredBy::leader,
+                                             clockTrusted);
+                                     }
+                                     else
+                                     {
+                                         clockMap = {};
+                                     }
+
+                                     clockTrusted = clockMap.trusted();
+                                     follower.setClockMap (clockMap);
+
                                      if (follower.isFollowing())
                                      {
                                          //  The samples a main's code map is moved onto this clock at (TG.5).
@@ -6249,6 +6342,49 @@ namespace
                                              takeover's to settle (AGJ). */
                                          if (seated.seat == wfg::pair::Seat::following)
                                              followGate.expire (now, 2.0 * timeout);
+                                     }
+
+                                     /*  WHERE THIS TICK'S LAUNCHES GO (RD.9, AFS;
+                                         cue::Runner::LaunchPlacing), said to the Runner
+                                         before its hooks run: on this machine's tick grid
+                                         with the follower's Δ added while it leads a
+                                         follower (one until the follower has said it); on
+                                         the leader's samples while it follows with the map
+                                         trusted and the leader's lead of this slot known;
+                                         else as they always were - a follower not yet
+                                         mapped adding the extra lead its leader adds, so
+                                         its sounds stay on the record clock. The tick grid
+                                         on the count the launches are placed on. */
+                                     {
+                                         wfg::cue::Runner::LaunchPlacing placing;
+                                         placing.tickZero = ticks.sampleForTick (0) - sessionClock.sessionOffset();
+
+                                         if (seated.seat == wfg::pair::Seat::following && follower.isFollowing()
+                                               && follower.delayFixed())
+                                         {
+                                             if (const auto* said = follower.leaderClock(); said != nullptr && said->onTicks)
+                                             {
+                                                 placing.extraLeadTicks = said->extraTicks;
+
+                                                 if (clockTrusted && said->samplesPerTick > 0)
+                                                 {
+                                                     placing.mapped = true;
+                                                     placing.map = clockMap;
+                                                     placing.offsetTicks = follower.offset();
+                                                     placing.leaderTickZero = said->tickZero;
+                                                     placing.leaderSamplesPerTick = said->samplesPerTick;
+                                                     placing.leaderLeadTicks = said->leadTicks;
+                                                 }
+                                             }
+                                         }
+                                         else if (seated.seat == wfg::pair::Seat::leading && linkStream.followerCount() > 0)
+                                         {
+                                             const auto& heard = linkStream.followerClock();
+                                             placing.onTicks = true;
+                                             placing.extraLeadTicks = heard.has_value() && heard->delay > 0 ? heard->delay : 1;
+                                         }
+
+                                         runner.setLaunchPlacing (placing);
                                      }
 
                                      //  WHAT THIS MACHINE KNOWS THIS TICK.
@@ -7135,6 +7271,20 @@ namespace
                                         behind.changedWhileWaiting = seatBefore == wfg::pair::Seat::waiting && changedWhileWaiting;
                                     }
 
+                                    /*  THE SAME SAMPLE (RD.9): a follow that begins
+                                        knows nothing of its leader's clocks until
+                                        it says them, and counts its late launches
+                                        from here; a seat that moves at all says its
+                                        clocks again on the next tick. */
+                                    if (seated.seat != seatBefore)
+                                    {
+                                        leaderLine = {};
+                                        leaderMeasured = {};
+                                        clockTrusted = false;
+                                        lateLaunchesBefore = runner.lateLaunches();
+                                        clockSaidAt = -1000000;
+                                    }
+
                                     /*  And nothing known of the leader's show (RD.10)
                                         until it is compared again. */
                                     if (seatBegins)
@@ -7267,6 +7417,63 @@ namespace
                                     }
                                 }
 
+                                /*  WHAT THIS MACHINE SAYS OF ITS CLOCKS (RD.9,
+                                    `/godot/pair/clock`): a leader in this tick's
+                                    bundle - its grid, the lead its launches were
+                                    placed at this tick, its sound line, its output
+                                    latency, and the follower's host clock when it
+                                    dials - a follower to its leader down the path
+                                    relays take, with its Δ. Every half second, and
+                                    on the tick the lead or Δ moves. */
+                                {
+                                    const auto& placing = runner.launchPlacing();
+                                    const auto rate = ticks.sampleRate();
+                                    const auto seat = pairing.seated.seat;
+                                    const auto leads = seat == wfg::pair::Seat::leading;
+                                    const auto follows = seat == wfg::pair::Seat::following && follower.isFollowing();
+
+                                    if (leads || follows)
+                                    {
+                                        wfg::pair::wire::ClockSaid said;
+                                        said.tick = outcome.tick;
+                                        said.samplesPerTick = ticks.samplesPerTick();
+                                        said.tickZero = placing.tickZero;
+                                        said.leadTicks = runner.latencyTicks() + (leads ? placing.extraLeadTicks : 0);
+                                        said.onTicks = leads && placing.onTicks;
+                                        said.extraTicks = leads ? placing.extraLeadTicks : 0;
+                                        said.delay = follows ? follower.delay() : 0;
+                                        said.outputLatency = rate > 0 ? static_cast<double> (audioState.outputLatency) / rate : 0.0;
+
+                                        /*  AND ON THE TICK ITS MEASURE OF THE OTHER HOST CLOCK
+                                            BECOMES ONE TO MAP BY - a leader that dials, whose
+                                            follower listens and never pings, so the follower's
+                                            map waits on it. */
+                                        const auto hostsUsable = hostOffset.line().valid
+                                                                   && hostOffset.line().samples >= wfg::pair::ClockMap::fewestExchanges;
+                                        const auto moved = said.leadTicks != clockSaidLead || said.onTicks != clockSaidOnTicks
+                                                             || said.delay != clockSaidDelay || hostsUsable != clockSaidHosts;
+
+                                        if (moved || outcome.tick - clockSaidAt >= 25)
+                                        {
+                                            said.line = soundLine.line();
+
+                                            if (hostOffset.line().valid)
+                                                said.hosts = hostOffset.line();
+
+                                            clockSaidAt = outcome.tick;
+                                            clockSaidLead = said.leadTicks;
+                                            clockSaidOnTicks = said.onTicks;
+                                            clockSaidDelay = said.delay;
+                                            clockSaidHosts = hostsUsable;
+
+                                            if (leads)
+                                                linkStream.sayClock (wfg::pair::wire::clockBytes (said));
+                                            else
+                                                toLeader (wfg::pair::wire::clockBytes (said));
+                                        }
+                                    }
+                                }
+
                                 linkStream.afterTick (outcome.tick, pairing.inForce.timeout);
                                 linkReceiver.drain (wfg::pair::LinkClock::now(), pairing.inForce.timeout);
 
@@ -7307,8 +7514,12 @@ namespace
                                     differencesRead = follower.differences();
                                     inStepLabels.leader = pairRole == wfg::pair::Role::backup ? "the main" : "the backup";
                                     const auto comparable = follower.delayFixed() && ! seatAsked && ! follower.seatHeld();
+                                    /*  THIS MACHINE'S OWN ON THE RECORD CLOCK (RD.9): a sound
+                                        placed on the leader's sample has the record lag taken
+                                        back off, so it is laid against the leader's summary of
+                                        the same record moment as a sound Δ behind would be. */
                                     inStep.afterTick (outcome.tick, follower.offset(), comparable,
-                                                      [&runner, &outcome] { return runner.summaryNow (outcome.tick, 0); },
+                                                      [&runner, &outcome] { return runner.summaryNow (outcome.tick, 0, true); },
                                                       inStepLabels);
 
                                     /*  THE SAME SHOW (RD.10, AFU): the leader's
@@ -7365,6 +7576,7 @@ namespace
                                 state.samplesPerTick = ticks.samplesPerTick();
                                 if (audioState.bufferSize > 0) state.blockSize = audioState.bufferSize;
                                 state.launchLatencyTicks = runner.latencyTicks();
+                                state.sampleZeroAt = soundLine.line().sampleZeroNanos();
 
                                 state.lateness = ticks.lateness();
                                 state.latenessMax = ticks.latenessMax();
@@ -7479,8 +7691,28 @@ namespace
                                     if (follow.alarm != sentence)
                                         follow.alarm = std::move (sentence);
 
-                                    follow.delay = follower.delay();
-                                    follow.late = follower.late();
+                                    /*  THE SAME SAMPLE (RD.9): Δ on a follower, the extra
+                                        lead its launches are placed at on a leader; the
+                                        late records and the late launches; whether this
+                                        machine's launches are on its leader's samples, the
+                                        two sound clocks' drift and how well the map is
+                                        known, while it follows; each side's output
+                                        latency, as information (AGQ). */
+                                    const auto& placing = runner.launchPlacing();
+                                    follow.delay = placing.onTicks ? placing.extraLeadTicks : follower.delay();
+                                    follow.late = follower.late() + (followingNow ? runner.lateLaunches() - lateLaunchesBefore : 0);
+                                    follow.mapped = followingNow && placing.mapped;
+                                    follow.drift = followingNow && clockMap.residualMicroseconds() > 0.0
+                                                     ? clockMap.driftPartsPerMillion() : 0.0;
+                                    follow.clockResidual = followingNow ? clockMap.residualMicroseconds() : 0.0;
+                                    follow.outputLatency = ticks.sampleRate() > 0
+                                                             ? static_cast<double> (audioState.outputLatency) / ticks.sampleRate()
+                                                             : 0.0;
+                                    if (! followingNow)
+                                        if (const auto& heard = linkStream.followerClock(); heard.has_value())
+                                            peerOutputLatency = heard->outputLatency;
+
+                                    follow.peerOutputLatency = peerOutputLatency;
 
                                     if (follow.differs != differsNow)
                                         follow.differs = differsNow;

@@ -1421,7 +1421,7 @@ TEST_CASE ("seat: each incoming code's map rides the position as a code line - r
         CHECK (ltc.frame == 107'892);
         CHECK (std::bit_cast<std::uint64_t> (ltc.speed) == std::bit_cast<std::uint64_t> (1.00005));
         CHECK (moved.codes.at ("mtc:P0000001").sample == 2'400'000 + 960'000);
-        CHECK (pair::sampleOnThisClock (2'400'000, -3, 44100) == 2'400'000 - 3 * 882);
+        CHECK (pair::ClockMap {}.sampleOnThisClock (2'400'000, -3, 44100) == 2'400'000 - 3 * 882);
     }
 
     /*  ANOTHER BUILD'S FORMAT, REFUSED WHOLE AND SAID: the format before TG.5

@@ -136,6 +136,19 @@ namespace wfg::timecode
             nominal (or kept) one. Only when `known`. */
         double sampleAt (std::int64_t nanos) const noexcept;
 
+        /*  AND BACK (namespace draft §58, RD.9): the steady moment, in
+            nanoseconds, at which the count reaches `sample`, on the same line
+            `sampleAt` reads - its inverse. Only when `known`. */
+        double momentAt (double sample) const noexcept;
+
+        /*  THE SLOPE `sampleAt` READS AT, samples a steady millisecond - the
+            line's own weighed with the nominal or kept one - and how well it is
+            known, the same units. */
+        double samplesPerMillisecond (double& error) const noexcept { return slopeNow (error); }
+
+        //  The steady millisecond of the newest pair fitted through; nought before one.
+        double newestMillisecond() const noexcept { return pairs.empty() ? 0.0 : pairs.back().sample; }
+
         //======================================================================
         //  Two minutes of pairs, young for a second, fitted twice a second once it is not.
         static constexpr double pairSeconds = 120.0;

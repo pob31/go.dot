@@ -216,6 +216,12 @@ namespace wfg::tree
             AND put a hole in it. */
         int launchLatencyTicks = 0;
 
+        /*  WHERE THIS ENGINE'S SAMPLE NOUGHT SITS ON THE STEADY CLOCK, in
+            nanoseconds (`engine/sampleZeroAt`; namespace draft §58, RD.9): read
+            off the line through the audio side's own block stamps. A
+            diagnostic; nought until the line has three stamps. */
+        std::int64_t sampleZeroAt = 0;
+
         std::uint64_t rtViolations = 0;
         std::uint64_t rtForeignAllocations = 0;
 

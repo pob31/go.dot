@@ -281,6 +281,54 @@ namespace wfg::cue
         return launchLatencyTicks (audio->blockSize(), samplesPerTick);
     }
 
+    //==============================================================================
+    std::int64_t Runner::sampleOfTick (std::int64_t localTick) const noexcept
+    {
+        /*  A MAPPED FOLLOWER (namespace draft §58, RD.9): the leader's tick of
+            the same record moment - the follower applies the leader's tick T
+            at its own T + offset - where the leader's grid puts it, read on
+            this machine's count through the clock map. */
+        if (placingNow.mapped && placingNow.leaderSamplesPerTick > 0)
+            return placingNow.map.onThisClock (placingNow.leaderTickZero
+                                               + (localTick - placingNow.offsetTicks)
+                                                   * static_cast<std::int64_t> (placingNow.leaderSamplesPerTick));
+
+        //  Every other machine: its own grid, tick nought where serve says it sits on the audio side's count.
+        return placingNow.tickZero + localTick * static_cast<std::int64_t> (samplesPerTick);
+    }
+
+    std::int64_t Runner::launchTarget (std::int64_t tick, std::int64_t now, int ticksAhead) const noexcept
+    {
+        /*  ON THE LEADER'S SAMPLE: its tick of this record moment, its own
+            lead on - the launch latency and the extra lead it said, held to
+            this slot - so this sound starts where the leader's does. */
+        if (placingNow.mapped && placingNow.leaderSamplesPerTick > 0)
+            return sampleOfTick (tick + placingNow.leaderLeadTicks);
+
+        const auto ahead = static_cast<std::int64_t> (ticksAhead + placingNow.extraLeadTicks)
+                         * static_cast<std::int64_t> (samplesPerTick);
+
+        /*  A LEADER WITH A FOLLOWER: on its own tick grid, a pure function of
+            the tick, which is what lets the follower place the same sample;
+            the extra lead is AFS's, so the follower Δ behind has it in time. */
+        if (placingNow.onTicks)
+            return placingNow.tickZero + tick * static_cast<std::int64_t> (samplesPerTick) + ahead;
+
+        /*  EVERY OTHER: the launch latency ahead of the count as this tick
+            found it - and on a follower not yet mapped, the extra lead its
+            leader adds, so its sounds stay on the record clock. */
+        return now + ahead;
+    }
+
+    double Runner::recordLagSeconds (std::int64_t tick) const noexcept
+    {
+        if (! placingNow.mapped || audio == nullptr || audio->sampleRate() <= 0)
+            return 0.0;
+
+        const auto ownGrid = placingNow.tickZero + tick * static_cast<std::int64_t> (samplesPerTick);
+        return static_cast<double> (ownGrid - sampleOfTick (tick)) / static_cast<double> (audio->sampleRate());
+    }
+
     std::string Runner::textOf (const juce::ValueTree& cue, const char* name) const
     {
         const auto id = cue[idProperty].toString().toStdString();
@@ -320,6 +368,39 @@ namespace wfg::cue
 
             return std::copysign (std::min (std::abs (wanted), stretchLimit), wanted);
         }
+    }
+
+    bool Runner::launchIntoFile (Engine& engine, std::int64_t tick, Run& run, std::int64_t wanted, int ticksAhead)
+    {
+        /*  A PLAIN FILE PLAYED FORWARDS: a sound playing ranges is a playlist
+            whose loop the lateness could carry past, and one played backwards
+            starts from its end - neither is moved, and both start late. */
+        if (audio == nullptr || run.kind != "media" || run.direction < 0 || samplesPerTick <= 0
+              || audio->sampleRate() <= 0)
+            return false;
+
+        if (const auto cue = document.findById (run.cue); ! cue.isValid() || ! rangesOf (cue).empty())
+            return false;
+
+        /*  ON A LATER SAMPLE OF THE LEADER'S, a seat's lead on - the time a
+            cold arm is given - and into the file by as much as that is after
+            the sample it wanted, at the speed it plays. */
+        const auto later = sampleOfTick (tick + placingNow.leaderLeadTicks + seatLeadTicks);
+        const auto now = audio->samplesElapsed();
+
+        if (later - now < static_cast<std::int64_t> (ticksAhead) * samplesPerTick || later <= wanted)
+            return false;
+
+        const auto speed = std::abs (voiceRateOf (run, audio->stretchSpeedLimit()));
+        const auto into = static_cast<double> (later - wanted) / static_cast<double> (audio->sampleRate()) * speed;
+
+        if (! seekMedia (engine, tick, run.id, run.positionOrigin + into, false))
+            return false;
+
+        run.launchNotBefore = later;
+        run.recordLag = recordLagSeconds (tick);
+        run.recordLagFixed = true;
+        return true;
     }
 
     namespace
@@ -14619,7 +14700,7 @@ namespace wfg::cue
     }
 
     void Runner::launchTimecode (Engine& engine, std::int64_t tick, std::int64_t now, std::int64_t blockSize,
-                                 std::int64_t lead)
+                                 std::int64_t lead, std::int64_t placed)
     {
         for (auto& job : timecoding)
         {
@@ -14653,7 +14734,7 @@ namespace wfg::cue
                 its way out lets the code go without it. Its group's alone: two
                 cues fired side by side in a list are two GOs, and were never
                 promised one sample. */
-            auto target = std::max (now + lead, run->launchNotBefore);
+            auto target = run->launchNotBefore > 0 ? std::max (now + lead, run->launchNotBefore) : placed;
             auto waits = false;
 
             if (! run->parent.empty())
@@ -19829,6 +19910,14 @@ namespace wfg::cue
         const auto now = audio->samplesElapsed();
         const auto blockSize = static_cast<std::int64_t> (audio->blockSize());
 
+        /*  WHERE THIS TICK PUTS A LAUNCH (namespace draft §58, RD.9): the one
+            function, for every run with no sample of its own - a GO, a group's
+            member, a follow-on, a code with its sounds. A run that has one - a
+            seated sound, a time group's member on its code's sample - keeps
+            it, those samples being worked out on the map already. */
+        const auto placed = launchTarget (tick, now, ticksAhead);
+        const auto lead = static_cast<std::int64_t> (ticksAhead) * samplesPerTick;
+
         /*  ONCE PER TICK AT MOST, for the patch-settled record below. The row
             it reads only turns true when the command it submits is applied,
             which is the next tick - so a scene launching eight media cues in
@@ -19892,14 +19981,34 @@ namespace wfg::cue
             /*  OR LATER, FOR A SOUND A FOLLOWER WAS SEATED WITH (RD.8): at the
                 sample its offset was worked out for, when its disk answered in
                 time - the second the leader's sound is at then. */
-            const auto target = std::max (now + static_cast<std::int64_t> (ticksAhead) * samplesPerTick,
-                                          run->launchNotBefore);
+            auto target = run->launchNotBefore > 0 ? std::max (now + lead, run->launchNotBefore) : placed;
 
             /*  The guarantee the arithmetic exists to provide, checked rather
                 than assumed. A tick thread that overslept would otherwise place
-                a launch too close and buy a hole in the cue. */
+                a launch too close and buy a hole in the cue.
+
+                ON A MAPPED FOLLOWER (RD.9) the leader's sample does not come
+                round again a tick later - the next tick's is a tick further on,
+                as the leader's own would have been - so one already too close
+                when this tick found it is gone: the sound is moved into its file
+                by the lateness and launched on a later sample of the leader's,
+                as a seat's is, and where it cannot be moved it starts as soon
+                as it can, from its top. Either is counted (`pair/late`). */
             if (target - now < 2 * blockSize)
-                continue;
+            {
+                if (! placingNow.mapped || run->launchNotBefore > 0)
+                    continue;
+
+                ++lateLaunchCount;
+
+                if (launchIntoFile (engine, tick, *run, target, ticksAhead))
+                    continue;
+
+                target = now + lead;
+
+                if (target - now < 2 * blockSize)
+                    continue;
+            }
 
             /*  SLOT NOUGHT UNLESS SOMEBODY JUMPED INTO A LATER RANGE.
 
@@ -19922,6 +20031,14 @@ namespace wfg::cue
                 run->launchRequested = false;
                 run->launchedAtSample = target;
                 run->launchNotBefore = 0;
+
+                /*  ON THE LEADER'S SAMPLES OR NOT (RD.9): a summary laid
+                    against the leader's takes this back off its playhead -
+                    as the map stood when its sample was decided. */
+                if (! run->recordLagFixed)
+                    run->recordLag = placingNow.mapped ? recordLagSeconds (tick) : 0.0;
+
+                run->recordLagFixed = false;
 
                 /*  THE SPEED FROM THE LAUNCH (namespace draft §22.4): the run's
                     clock starts on the launch's sample at the run's speed, and
@@ -20155,8 +20272,7 @@ namespace wfg::cue
             and one whose sound launched only now, its disk having answered,
             starts on that sound's. */
         if (! timecoding.empty())
-            launchTimecode (engine, tick, now, blockSize,
-                            static_cast<std::int64_t> (ticksAhead) * samplesPerTick);
+            launchTimecode (engine, tick, now, blockSize, lead, placed);
     }
 
     void Runner::advanceRanges (Engine& engine)

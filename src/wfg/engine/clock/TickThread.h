@@ -260,6 +260,13 @@ namespace wfg
         int sampleRate() const noexcept     { return schedule.sampleRate(); }
         int samplesPerTick() const noexcept { return schedule.samplesPerTick(); }
 
+        /*  WHERE TICK `index` SITS on the session's count (TickClock's rule),
+            for a tick before the last rebase too by its ratio now: what serve
+            reads to place a tick on the audio side's own count (namespace draft
+            §58, RD.9). The tick thread's, or anyone's while it is stopped: the
+            schedule moves only in `rebaseAudio`. */
+        std::int64_t sampleForTick (std::int64_t index) const noexcept { return schedule.sampleForTick (index); }
+
         /** What elevateCurrentThreadForTicking() actually managed on this
             thread; see the comment on that function. */
         bool hasElevatedPriority() const noexcept

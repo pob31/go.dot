@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 
 namespace wfg::audio
 {
@@ -254,6 +255,14 @@ namespace wfg::audio
                 loop of the last 3 ms, at full level, for as long as it lasts. */
             const Answering answering { *this, juce::Time::getHighResolutionTicks() };
 
+            /*  AND THE SAME MOMENT ON THE STEADY CLOCK the link times everything
+                on (namespace draft §58, RD.9; clock/BlockStamp.h), for the
+                block's stamp: read here, at the entry, which is when the device
+                asked for the block. A counter read as the line above is - no
+                lock, no allocation. */
+            const auto askedAt = std::chrono::duration_cast<std::chrono::nanoseconds> (
+                                     std::chrono::steady_clock::now().time_since_epoch()).count();
+
             if (const auto previous = lastCallbackAt.exchange (answering.enteredAt, std::memory_order_relaxed);
                 previous != 0 && answering.enteredAt - previous > gapThreshold.load (std::memory_order_relaxed))
             {
@@ -284,6 +293,7 @@ namespace wfg::audio
 
             patchInputs (inputPatch, inputChannelData, numInputChannels,
                          inputScratch.getArrayOfWritePointers(), inputScratch.getNumChannels(), numSamples);
+            audioHost.setBlockTime (askedAt);
             audioHost.processBlock (inputScratch.getArrayOfReadPointers(), inputScratch.getNumChannels());
 
             sink.destination = nullptr;

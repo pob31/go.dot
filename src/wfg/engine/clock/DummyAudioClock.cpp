@@ -91,6 +91,12 @@ namespace wfg
                 mutex protects. */
             lock.unlock();
 
+            /*  STAMPED WITH THE MOMENT IT WAS DUE (namespace draft §58, RD.9;
+                clock/BlockStamp.h), on the steady clock the link uses: a block
+                woken late is still the block of that moment, and the schedule
+                catches up with it, so the line the tick thread puts through
+                these stamps is the schedule's and not the scheduler's. */
+            source.stampBlock (std::chrono::duration_cast<std::chrono::nanoseconds> (due.time_since_epoch()).count());
             source.advance (block);
 
             const auto late = durationToSamples (

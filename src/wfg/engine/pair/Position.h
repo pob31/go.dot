@@ -81,8 +81,10 @@
     records are applied at (AGF's slot, RD.6) before it submits the seat - so
     the record it logs speaks this machine's ticks, and a replay of it needs
     nothing else. And every SAMPLE with them - a code map's anchor (TG.5) -
-    through `sampleOnThisClock`, the one place a leader's sample is read on a
-    follower's clock.
+    through `ClockMap::sampleOnThisClock` (pair/ClockMap.h, RD.9), the one
+    place a leader's sample is read on a follower's clock: the leader's own
+    moment on this machine's samples once the map is trusted, the ticks'
+    worth of samples until then.
 
     A NEW THING IS A NEW WORD, never a new atom on a line an older build
     writes (TG.5's `code`), and a word this build does not know is refused in
@@ -94,6 +96,7 @@
 #include <wfg/engine/cue/GroupJob.h>
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/RunNames.h>
+#include <wfg/engine/pair/ClockMap.h>
 #include <wfg/engine/timecode/CodeMap.h>
 
 #include <cstdint>
@@ -105,17 +108,6 @@
 
 namespace wfg::pair
 {
-    /*  A LEADER'S SAMPLE ON THIS MACHINE'S CLOCK (namespace draft §60, AIP):
-        the sample moved by the ticks the follower applies the leader's records
-        behind - the same offset `Position::rebase` moves a tick by - at the
-        map's own rate. The record clock RD.8 seats sounds on: a code map the
-        leader heard lands here as far behind as every record of the leader's
-        does, so a chaser on the follower sits that far late until RD.9's
-        `ClockMap` maps the two sound clocks properly. THE ONE FUNCTION RD.9
-        swaps: the follower's `code.heard` (pair/Follow.cpp) and a position's
-        code maps both come through here. */
-    std::int64_t sampleOnThisClock (std::int64_t leaderSample, std::int64_t byTicks, int sampleRate) noexcept;
-
     /*  ONE RUN, as the leader holds it. Every tick is absolute, on the clock of
         the machine the position is in; `position` and `slicePlayed` are the
         readouts at the position's tick. */
@@ -247,8 +239,10 @@ namespace wfg::pair
             tick in it, so `rebase` leaves it alone. */
         std::map<std::string, std::string> fields;
 
-        /** Every tick in it moved by `by`, and every sample with it: the leader's clock read as this machine's. */
-        void rebase (std::int64_t by);
+        /*  Every tick in it moved by `by`, and every sample with it - through
+            `map` (RD.9), which moves a sample by the ticks until it is trusted:
+            the leader's clock read as this machine's. */
+        void rebase (std::int64_t by, const ClockMap& map = ClockMap {});
 
         const SeatedRun* runNamed (const std::string& id) const;
     };
@@ -260,6 +254,6 @@ namespace wfg::pair
         is not one, a format this build does not write, or a text cut short. */
     std::optional<Position> readPosition (std::string_view text, std::string* why = nullptr);
 
-    /** Read, moved by `by`, and written again: what a follower submits. */
-    std::optional<std::string> rebasedText (std::string_view text, std::int64_t by);
+    /** Read, moved by `by` (its samples through `map`), and written again: what a follower submits. */
+    std::optional<std::string> rebasedText (std::string_view text, std::int64_t by, const ClockMap& map = ClockMap {});
 }

@@ -1392,6 +1392,20 @@ namespace wfg::audio
                 number after this returns must not inherit it. */
             const juce::ScopedNoDenormals denormalsOffWhileAudioRuns;
 
+            /*  WHEN THIS BLOCK BEGAN (namespace draft §58, RD.9): its first
+                sample - the count as it stands, moved only at the end of this
+                function - against the moment the caller said the block was
+                for, written once a block into the clock's seqlock for the tick
+                thread's line (clock/BlockStamp.h). Here, after the running
+                test, so a block that is not run stamps nothing: a count that
+                stood still beside a clock that moved would read as a slip.
+                Ours, and allocation-free: two relaxed stores and a fence. */
+            if (blockTime >= 0)
+            {
+                samples.stampBlock (blockTime);
+                blockTime = -1;
+            }
+
             scratch.clear();
             for (int channel = 0; channel < std::min (numInputs, current.inputChannels); ++channel)
                 if (inputs != nullptr && inputs[channel] != nullptr)
@@ -2588,6 +2602,13 @@ namespace wfg::audio
         AudioClockSource samples;
         std::atomic<std::int64_t> blocks { 0 };
 
+        /*  THE MOMENT THE NEXT BLOCK IS FOR (namespace draft §58, RD.9), as its
+            caller said it - the device callback's entry, the hosted pump's
+            deadline - on the steady clock's nanoseconds; -1 for none. The
+            audio thread's alone: written by the caller just before the block,
+            read and cleared inside it. */
+        std::int64_t blockTime = -1;
+
         HostSettings current;
         BlockSink* sink = nullptr;
         bool running = false;
@@ -2612,6 +2633,8 @@ namespace wfg::audio
     void AudioHost::processBlock()                         { impl->processBlock(); }
     void AudioHost::processBlock (const float* const* inputs, int numInputs)
     { impl->processBlock (inputs, numInputs); }
+
+    void AudioHost::setBlockTime (std::int64_t hostNanos) noexcept { impl->blockTime = hostNanos; }
 
     void AudioHost::setBlockSink (BlockSink* sink) noexcept { impl->sink = sink; }
 

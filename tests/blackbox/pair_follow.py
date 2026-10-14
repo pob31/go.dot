@@ -175,7 +175,11 @@ def run() -> int:
             report.check(1 <= delay <= MOST_DELAY,
                          f"the delay is between 1 and {MOST_DELAY} ticks between two serves on one machine",
                          f"delay {delay}")
-            report.equal(read_main("/godot/pair/delay"), "0", "the main has no delay of its own")
+            # FROM RD.9 THE MAIN'S pair/delay IS THE EXTRA LEAD its launches take
+            # (AFS): the backup's delay as the backup said it - one until it has.
+            report.check(wait_for(lambda: as_int(read_main("/godot/pair/delay")) == delay, 3.0),
+                         "the main's launches take the backup's delay as their extra lead",
+                         f"main {read_main('/godot/pair/delay')!r}, backup {delay}")
 
             # --- an edit at the main reaches the backup's show ---------------------
             send_main("node.set", [f"/godot/mount/{DESK}/port", str(desk.port)])

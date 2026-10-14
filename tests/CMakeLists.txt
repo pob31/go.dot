@@ -168,6 +168,7 @@ add_executable(wfg_tests
     SeatTests.cpp
     LeadershipTests.cpp
     SameShowTests.cpp
+    SameSampleTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
     ClientTests.cpp)
@@ -1400,6 +1401,22 @@ add_test(NAME blackbox.pair-show.C
 add_test(NAME blackbox.pair-show.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_show.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.pair-show.C blackbox.pair-show.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
+
+# -----------------------------------------------------------------------------
+# THE SAME SAMPLE (namespace draft §58, RD.9; AFS, AGI, AGQ; M61): a main and a
+# backup on copies of one show, hosted and each writing its render; the backup
+# follows and says its launches are on the main's samples, the drift between
+# the two sound clocks near nought, the map's error, each side's output
+# latency; a GO at the main, and the click's onset in each render put on the
+# steady clock through that engine's engine/sampleZeroAt - within a millisecond
+# of each other (a block on CI); M61 printed: the distance, and Δ. Two serves,
+# unbuffered, and hold's limit, for hold's reason.
+add_test(NAME blackbox.pair-sample.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_sample.py" --wfg-locale=C)
+add_test(NAME blackbox.pair-sample.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pair_sample.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.pair-sample.C blackbox.pair-sample.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>;PYTHONUNBUFFERED=1" TIMEOUT 400)
 
 # -----------------------------------------------------------------------------

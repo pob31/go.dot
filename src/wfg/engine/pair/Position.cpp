@@ -18,7 +18,6 @@
 
 #include <wfg/engine/video/Blanks.h>
 
-#include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <cmath>
@@ -158,18 +157,7 @@ namespace wfg::pair
     }
 
     //==========================================================================
-    std::int64_t sampleOnThisClock (std::int64_t leaderSample, std::int64_t byTicks, int sampleRate) noexcept
-    {
-        /*  A tick is a fiftieth of a second's samples, exactly, at every rate a
-            show can run at (TickClock.h); a rate that is not a sound clock's
-            moves nothing rather than a guess. */
-        if (sampleRate <= 0)
-            return leaderSample;
-
-        return leaderSample + byTicks * static_cast<std::int64_t> (sampleRate) / TickClock::rateHz;
-    }
-
-    void Position::rebase (std::int64_t by)
+    void Position::rebase (std::int64_t by, const ClockMap& map)
     {
         /*  A TICK THAT IS SET STAYS SET: moved onto a clock that started later,
             a moment before it started is below nought, and one that lands
@@ -219,11 +207,11 @@ namespace wfg::pair
             anchor is. The frame a time group crossed is the code's, and stays. */
         for (auto& job : groups)
             if (job.codeSample > 0)
-                job.codeSample = sampleOnThisClock (job.codeSample, by, job.codeRate);
+                job.codeSample = map.sampleOnThisClock (job.codeSample, by, job.codeRate);
 
         //  A CODE MAP'S ANCHOR IS A SAMPLE of the leader's clock, moved with its ticks (TG.5).
-        for (auto& [source, map] : codes)
-            map.sample = sampleOnThisClock (map.sample, by, map.sampleRate);
+        for (auto& [source, codeMap] : codes)
+            codeMap.sample = map.sampleOnThisClock (codeMap.sample, by, codeMap.sampleRate);
     }
 
     const SeatedRun* Position::runNamed (const std::string& id) const
@@ -845,14 +833,14 @@ namespace wfg::pair
         return at;
     }
 
-    std::optional<std::string> rebasedText (std::string_view text, std::int64_t by)
+    std::optional<std::string> rebasedText (std::string_view text, std::int64_t by, const ClockMap& map)
     {
         auto at = readPosition (text);
 
         if (! at.has_value())
             return std::nullopt;
 
-        at->rebase (by);
+        at->rebase (by, map);
         return toText (*at);
     }
 }

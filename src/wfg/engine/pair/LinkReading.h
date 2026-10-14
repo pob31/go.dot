@@ -122,5 +122,18 @@ namespace wfg::pair
             changed - empty when nothing does or nothing is known yet. */
         bool showMatch = false;
         std::string showDiffers = {};
+
+        /*  THE SAME SAMPLE (RD.9, AFS; pair/ClockMap.h): whether this machine,
+            following, places its launches on its leader's samples, the drift
+            between the two sound clocks in parts per million (AGI) and how
+            well the map is known, in microseconds - nought and false on a
+            machine that does not follow; and each side's interface output
+            delay as its driver reports it, in seconds, shown and never
+            compensated (AGQ). */
+        bool mapped = false;
+        double drift = 0.0;
+        double clockResidual = 0.0;
+        double outputLatency = 0.0;
+        double peerOutputLatency = 0.0;
     };
 }

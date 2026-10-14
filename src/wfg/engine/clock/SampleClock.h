@@ -34,6 +34,8 @@
     Vendor-free on purpose: this header is reachable from the engine facade.
 */
 
+#include <wfg/engine/clock/BlockStamp.h>
+
 #include <atomic>
 #include <cstdint>
 
@@ -46,6 +48,17 @@ namespace wfg
 
         /** Total samples elapsed since the engine started. Any thread. */
         virtual std::int64_t samplesElapsed() const noexcept = 0;
+
+        /*  THE LAST BLOCK'S STAMP (namespace draft §58, RD.9; BlockStamp.h):
+            its first sample on this count and the steady clock's moment it was
+            asked for at, as the audio side wrote it - false where nothing
+            stamps blocks, which is every clock but the audio side's own and a
+            test that stamps by hand. Any thread but the audio one. */
+        virtual bool lastBlock (BlockStamp::Reading& out) const noexcept
+        {
+            (void) out;
+            return false;
+        }
     };
 
     /*  A counter advanced by hand: the audio side calls advance() once per
@@ -76,7 +89,18 @@ namespace wfg
             return samples.load (std::memory_order_relaxed);
         }
 
+        /*  A block's stamp written by hand, as the audio side writes one
+            (RD.9): `firstSample` at the steady clock's `hostNanos`. Tests and
+            nothing else. */
+        void stampBlock (std::int64_t firstSample, std::int64_t hostNanos) noexcept
+        {
+            stamp.write (firstSample, hostNanos);
+        }
+
+        bool lastBlock (BlockStamp::Reading& out) const noexcept override { return stamp.read (out); }
+
     private:
         std::atomic<std::int64_t> samples { 0 };
+        BlockStamp stamp;
     };
 }

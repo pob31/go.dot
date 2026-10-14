@@ -3747,6 +3747,7 @@ namespace wfg::tree
             else if (name == "serialPorts")    text = state.serialPorts;
             else if (name == "mediaCacheSweep") text = state.mediaCacheSweep;
             else if (name == "editRender")      text = state.editRender;
+            else if (name == "sampleZeroAt")    text = std::to_string (state.sampleZeroAt);
             else                               text = std::string (row->defaultText);
 
             engineValue (*row, "engine", text);
@@ -3784,6 +3785,11 @@ namespace wfg::tree
             else if (name == "unconfirmed") text = std::to_string (state.pairFollow.unconfirmed);
             else if (name == "showMatch") text = state.pairFollow.showMatch ? "true" : "false";
             else if (name == "showDiffers") text = state.pairFollow.showDiffers;
+            else if (name == "mapped")    text = state.pairFollow.mapped ? "true" : "false";
+            else if (name == "drift")     text = osc::formatDouble (state.pairFollow.drift);
+            else if (name == "clockResidual") text = osc::formatDouble (state.pairFollow.clockResidual);
+            else if (name == "outputLatency") text = osc::formatDouble (state.pairFollow.outputLatency);
+            else if (name == "peerOutputLatency") text = osc::formatDouble (state.pairFollow.peerOutputLatency);
             else                          text = std::string (row->defaultText);
 
             engineValue (*row, "pair", text);

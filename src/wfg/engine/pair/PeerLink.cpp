@@ -239,7 +239,9 @@ namespace wfg::pair
 
             const auto& address = message.address;
 
-            if (address == hello || address == ping || address == relay || address == seat)
+            /*  A machine's word on its clocks (RD.9) alone is a follower's to
+                its leader; a leader's rides in its tick's bundle, above. */
+            if (address == hello || address == ping || address == relay || address == seat || address == clockLine)
                 return Bound::leader;
 
             if (address == welcome || address == gap || address == record || address == beat || address == pong
@@ -358,6 +360,87 @@ namespace wfg::pair
 
             return out;
         }
+
+        std::vector<std::uint8_t> clockBytes (const ClockSaid& said)
+        {
+            const auto& line = said.line;
+            const auto& hosts = said.hosts;
+
+            return encode (clockLine, { osc::Value::int64 (said.tick), osc::Value::int32 (said.samplesPerTick),
+                                        osc::Value::int64 (said.tickZero), osc::Value::int32 (said.leadTicks),
+                                        osc::Value::int32 (said.onTicks ? 1 : 0), osc::Value::int32 (said.extraTicks),
+                                        osc::Value::int32 (said.delay), osc::Value::float64 (said.outputLatency),
+                                        osc::Value::int32 (line.valid ? 1 : 0), osc::Value::int32 (line.rate),
+                                        osc::Value::int64 (line.sample), osc::Value::int64 (line.nanos),
+                                        osc::Value::float64 (line.nanosPerSample), osc::Value::float64 (line.errorNanos),
+                                        osc::Value::float64 (line.seconds),
+                                        osc::Value::int32 (hosts.valid ? 1 : 0), osc::Value::int64 (hosts.at),
+                                        osc::Value::float64 (hosts.offset), osc::Value::float64 (hosts.slope),
+                                        osc::Value::float64 (hosts.errorNanos), osc::Value::float64 (hosts.bestTripNanos),
+                                        osc::Value::int32 (hosts.samples) });
+        }
+
+        std::optional<ClockSaid> readClock (const osc::Packet& message)
+        {
+            const auto& a = message.args;
+
+            if (message.isBundle() || message.address != clockLine || a.size() != 22)
+                return std::nullopt;
+
+            //  The shape, every argument: one out of place is a message of another build, and says nothing.
+            static constexpr char shape[] = "hihiiiidiihhdddihddddi";
+
+            for (std::size_t at = 0; at < a.size(); ++at)
+            {
+                const auto ok = shape[at] == 'h' ? a[at].isInt64()
+                              : shape[at] == 'i' ? a[at].isInt32()
+                                                 : a[at].isFloat64();
+
+                if (! ok)
+                    return std::nullopt;
+            }
+
+            ClockSaid out;
+            out.tick = a[0].getInt64();
+            out.samplesPerTick = a[1].getInt32();
+            out.tickZero = a[2].getInt64();
+            out.leadTicks = a[3].getInt32();
+            out.onTicks = a[4].getInt32() != 0;
+            out.extraTicks = a[5].getInt32();
+            out.delay = a[6].getInt32();
+            out.outputLatency = a[7].getFloat64();
+
+            auto& line = out.line;
+            line.valid = a[8].getInt32() != 0;
+            line.rate = a[9].getInt32();
+            line.sample = a[10].getInt64();
+            line.nanos = a[11].getInt64();
+            line.nanosPerSample = a[12].getFloat64();
+            line.errorNanos = a[13].getFloat64();
+            line.seconds = a[14].getFloat64();
+
+            auto& hosts = out.hosts;
+            hosts.valid = a[15].getInt32() != 0;
+            hosts.at = a[16].getInt64();
+            hosts.offset = a[17].getFloat64();
+            hosts.slope = a[18].getFloat64();
+            hosts.errorNanos = a[19].getFloat64();
+            hosts.bestTripNanos = a[20].getFloat64();
+            hosts.samples = a[21].getInt32();
+
+            //  A number that is not one makes the line it is in say nothing, rather than a map from it.
+            if (! std::isfinite (line.nanosPerSample) || ! std::isfinite (line.errorNanos) || ! std::isfinite (line.seconds))
+                line.valid = false;
+
+            if (! std::isfinite (hosts.offset) || ! std::isfinite (hosts.slope) || ! std::isfinite (hosts.errorNanos)
+                  || ! std::isfinite (hosts.bestTripNanos))
+                hosts.valid = false;
+
+            if (! std::isfinite (out.outputLatency))
+                out.outputLatency = 0.0;
+
+            return out;
+        }
     }
 
     //==========================================================================
@@ -437,6 +520,12 @@ namespace wfg::pair
             oldest = last - capacity + 1;
     }
 
+    void Stream::sayClock (std::vector<std::uint8_t> message)
+    {
+        clockMessage = std::move (message);
+        clockFresh = ! clockMessage.empty();
+    }
+
     bool Stream::heardWithin (LinkClock::time_point at, double timeoutSeconds) const
     {
         return heardAny && within (lastHeard, at, timeoutSeconds);
@@ -461,9 +550,22 @@ namespace wfg::pair
         {
             /*  ANSWERED HERE AND AT ONCE, on the server's thread, with what this
                 machine's tick is: the round trip is what a ping is for, and one
-                that waited for the next tick would measure the tick. */
+                that waited for the next tick would measure the tick. AND NTP'S
+                MIDDLE TWO (RD.9; pair/ClockMap.h): when the ping arrived and
+                when the pong leaves, on this machine's steady clock - the
+                pinger has the other two, and with all four the two host clocks'
+                offset and the trip that bounds its error. */
             if (send)
-                send (origin, wire::encode (wire::pong, { a[0], osc::Value::int64 (tickNow.load (std::memory_order_relaxed)) }));
+            {
+                const auto nanosOf = [] (LinkClock::time_point at)
+                {
+                    return std::chrono::duration_cast<std::chrono::nanoseconds> (at.time_since_epoch()).count();
+                };
+
+                send (origin, wire::encode (wire::pong, { a[0], osc::Value::int64 (tickNow.load (std::memory_order_relaxed)),
+                                                          osc::Value::int64 (nanosOf (arrival)),
+                                                          osc::Value::int64 (nanosOf (LinkClock::now())) }));
+            }
 
             Arrival ping;
             ping.kind = Arrival::Kind::ping;
@@ -522,6 +624,23 @@ namespace wfg::pair
             return;
         }
 
+        /*  A FOLLOWER'S WORD ON ITS CLOCKS (RD.9): its Δ, which this machine's
+            launch lead takes (AFS), and its output latency. Read on the next
+            tick, whatever this machine is - a word on clocks changes nothing
+            until a tick reads it. */
+        if (auto said = wire::readClock (message))
+        {
+            Arrival clockArrival;
+            clockArrival.kind = Arrival::Kind::clock;
+            clockArrival.origin = origin;
+            clockArrival.at = arrival;
+            clockArrival.clock = std::move (*said);
+
+            const std::lock_guard<std::mutex> held { inboxLock };
+            inbox.push_back (std::move (clockArrival));
+            return;
+        }
+
         if (const auto said = wire::readHello (message))
         {
             Arrival hello;
@@ -559,6 +678,10 @@ namespace wfg::pair
         {
             case Arrival::Kind::closed:
                 followers.erase (arrival.origin);
+                return;
+
+            case Arrival::Kind::clock:
+                heardClock = arrival.clock;
                 return;
 
             case Arrival::Kind::seat:
@@ -708,6 +831,10 @@ namespace wfg::pair
         const auto summaryDue = makeSummary && tick % summaryEveryTicks == 0;
         const auto summaryMessage = summaryDue ? makeSummary (tick, last) : std::vector<std::uint8_t> {};
 
+        //  THIS MACHINE'S WORD ON ITS CLOCKS (RD.9): this tick's, or a follower's first bundle.
+        const auto clockNow = clockFresh;
+        clockFresh = false;
+
         for (auto at = followers.begin(); at != followers.end();)
         {
             auto& follower = at->second;
@@ -758,6 +885,11 @@ namespace wfg::pair
                 for (const auto& part : positionParts)
                     addToBundle (frame, part);
             }
+
+            /*  AFTER THE RECORDS AND THE POSITION, so a follower holds the lead
+                it says to the slot of this tick as it holds those (RD.9). */
+            if (! clockMessage.empty() && (clockNow || ! follower.welcomed))
+                addToBundle (frame, clockMessage);
 
             if (summaryDue)
                 addToBundle (frame, summaryMessage);
@@ -886,11 +1018,21 @@ namespace wfg::pair
             item.kind = Item::Kind::gap;
             item.first = a[0].getInt64();
         }
-        else if (is (wire::pong) && a.size() == 2 && a[0].isInt64() && a[1].isInt64())
+        else if (is (wire::pong) && (a.size() == 2 || a.size() == 4) && a[0].isInt64() && a[1].isInt64()
+                   && (a.size() == 2 || (a[2].isInt64() && a[3].isInt64())))
         {
+            /*  RD.9's two after RD.5's: when the ping reached the other machine
+                and when the pong left it, its clock; nought for a pong of two. */
             item.kind = Item::Kind::pong;
             item.first = a[0].getInt64();
             item.second = a[1].getInt64();
+            item.third = a.size() == 4 ? a[2].getInt64() : 0;
+            item.fourth = a.size() == 4 ? a[3].getInt64() : 0;
+        }
+        else if (auto said = is (wire::clockLine) ? wire::readClock (message) : std::nullopt)
+        {
+            item.kind = Item::Kind::clock;
+            item.clock = std::move (*said);
         }
         else if (is (wire::position) && a.size() == 5 && counterOf (a[0]).has_value() && a[1].isInt64()
                    && a[2].isInt32() && a[3].isInt32() && a[2].getInt32() >= 0 && a[3].getInt32() > a[2].getInt32()
@@ -1164,6 +1306,14 @@ namespace wfg::pair
                 return;
             }
 
+            case Item::Kind::clock:
+            {
+                if (onClock)
+                    onClock (item.clock);
+
+                return;
+            }
+
             case Item::Kind::pong:
             {
                 /*  THERE AND BACK ON THIS MACHINE'S OWN CLOCK: the ping carried
@@ -1179,6 +1329,12 @@ namespace wfg::pair
                 trips[tripAt] = { item.at, seconds };
                 tripAt = (tripAt + 1) % trips.size();
                 tripsKept = std::min (tripsKept + 1, trips.size());
+
+                //  AND ALL FOUR STAMPS, for the two host clocks' offset (RD.9; pair/ClockMap.h).
+                if (onHostSample && (item.third != 0 || item.fourth != 0))
+                    onHostSample ({ item.first, item.third, item.fourth,
+                                    std::chrono::duration_cast<std::chrono::nanoseconds> (item.at.time_since_epoch()).count() });
+
                 return;
             }
         }

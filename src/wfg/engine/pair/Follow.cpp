@@ -261,6 +261,12 @@ namespace wfg::pair
         differenceCount = 0;
         differsText.clear();
         firstDifference.clear();
+
+        /*  NOT the leader's words on its clocks held so far (RD.9): its first
+            comes in the bundle that welcomes this follow, read before the beat
+            that starts it - held, it goes in at its slot like the records. A
+            follow that ended forgot them (`stop`). */
+        hasLeaderClock = false;
     }
 
     void Follower::stop()
@@ -269,6 +275,18 @@ namespace wfg::pair
         submitDue (0, true);
         fixed = false;
         beats.clear();
+        clocksHeld.clear();
+        hasLeaderClock = false;
+    }
+
+    void Follower::clockSaid (const wire::ClockSaid& said)
+    {
+        /*  A few seconds of them at most, said every half second: more is a
+            follow whose ticks have stopped reading them. */
+        if (clocksHeld.size() >= 64)
+            clocksHeld.pop_front();
+
+        clocksHeld.push_back (said);
     }
 
     void Follower::beat (std::int64_t mainTick, LinkClock::time_point arrival)
@@ -343,7 +361,19 @@ namespace wfg::pair
         }
 
         if (fixed)
+        {
+            /*  THE LEADER'S WORD ON ITS CLOCKS AT ITS SLOT (RD.9), before the
+                records of this tick go in - the launches they cause are
+                placed with the lead the leader placed its own with. */
+            while (! clocksHeld.empty() && clocksHeld.front().tick + slotOffset <= localTick)
+            {
+                leaderClockNow = std::move (clocksHeld.front());
+                hasLeaderClock = true;
+                clocksHeld.pop_front();
+            }
+
             submitDue (localTick, false);
+        }
     }
 
     void Follower::submitDue (std::int64_t localTick, bool all)
@@ -377,7 +407,7 @@ namespace wfg::pair
             if (entry.seat)
             {
                 auto rebased = fixed && ! next.args.empty() && next.args[0].isString()
-                                 ? rebasedText (next.args[0].getString(), slotOffset)
+                                 ? rebasedText (next.args[0].getString(), slotOffset, clockMap)
                                  : std::nullopt;
 
                 held.pop_front();
@@ -397,17 +427,19 @@ namespace wfg::pair
             }
 
             /*  A MAIN'S CODE MAP, ON THIS MACHINE'S CLOCK (namespace draft §60,
-                TG.5; AIP): its anchor's sample moved as the record's tick is,
-                in the record kept to compare too, so the record logged here
-                holds this machine's sample - a replay of it never maps - and
-                is what the main's says, mapped. Not when no offset was ever
-                fixed: the main's ticks cannot be read as this machine's then. */
+                TG.5; AIP): its anchor's sample moved onto this machine's - the
+                leader's own moment once the clock map is trusted (RD.9), as
+                far behind as the record's tick until then - in the record kept
+                to compare too, so the record logged here holds this machine's
+                sample - a replay of it never maps - and is what the main's
+                says, mapped. Not when no offset was ever fixed: the main's
+                ticks cannot be read as this machine's then. */
             if (next.command == timecode::codeheard::command && fixed
                   && next.args.size() > timecode::codeheard::sampleArg
                   && next.args[timecode::codeheard::sampleArg].isInt64())
             {
                 auto& sample = next.args[timecode::codeheard::sampleArg];
-                sample = osc::Value::int64 (sampleOnThisClock (sample.getInt64(), slotOffset, sampleRate));
+                sample = osc::Value::int64 (clockMap.sampleOnThisClock (sample.getInt64(), slotOffset, sampleRate));
             }
 
             Event event;

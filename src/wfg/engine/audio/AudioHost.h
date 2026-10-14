@@ -221,6 +221,15 @@ namespace wfg::audio
         void processBlock();
         void processBlock (const float* const* inputs, int numInputs);
 
+        /*  THE MOMENT THE NEXT BLOCK IS FOR (namespace draft §58, RD.9;
+            clock/BlockStamp.h), in nanoseconds of `std::chrono::steady_clock`:
+            the device callback's entry, or the hosted pump's deadline. Said by
+            the audio thread just before `processBlock`, which stamps the
+            block's first sample with it - once, and only for a block it runs.
+            A block with nothing said is not stamped: a test driving blocks by
+            hand stamps none. The audio thread's; a plain store. */
+        void setBlockTime (std::int64_t hostNanos) noexcept;
+
         /** Blocks processed since the last start. Any thread. */
         std::int64_t blocksProcessed() const noexcept;
 

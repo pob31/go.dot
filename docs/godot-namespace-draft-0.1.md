@@ -25426,9 +25426,13 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair/gaps` | `h` | records missed this link, as gaps (RD.5) |
 | `pair/sending` | `T` | this machine sends to devices; false while it holds |
 | `pair/state` | `s` | `alone`, `following`, `leading`, `bothSending`, `waiting` (AGK): the seat the log last said, `pair.lead`/`pair.hold` (RD.7) |
-| `pair/delay` | `i` | Δ in ticks (AGF); the extra launch lead while linked |
-| `pair/late` | `i` | records applied after their slot, this link |
-| `pair/drift` | `f` | parts per million between the two sound clocks (AGI) |
+| `pair/delay` | `i` | on a follower Δ in ticks (AGF); on a machine that leads a follower the extra lead its launches take, the follower's Δ as it said it and one until it has (AFS, RD.9) |
+| `pair/late` | `i` | records applied after their slot, and launches a mapped follower could not place on its leader's sample because it had gone (RD.9), this link |
+| `pair/drift` | `f` | on a machine that follows, how many parts per million its sound clock runs faster than its leader's (AGI): shown, never corrected (RD.9) |
+| `pair/clockResidual` | `f` | on a machine that follows, how well the map from its leader's samples to its own is known, in microseconds: the three lines' errors summed in quadrature; under 5000 the map is trusted, past 10000 no longer (RD.9) |
+| `pair/mapped` | `T` | on a machine that follows, its launches are placed on its leader's samples - the map trusted and the leader's lead known; false while it is not, when each sound starts Δ behind as before RD.9, and on a machine that does not follow (AFS, RD.9) |
+| `pair/outputLatency` | `f` | this machine's interface output delay as its driver reports it, in seconds - `audio/outputLatency` at the session's rate - said to the other machine (AGQ, RD.9) |
+| `pair/peerOutputLatency` | `f` | the other machine's, as it last said it, in seconds: information beside `pair/outputLatency`, never compensated - the difference is the jump a changeover makes (AGQ, RD.9) |
 | `pair/inStep` | `T` | on a machine that follows, the leader's last summary matched what this machine had at the same moment of the record clock - each list's standby, each live run's state and playhead, two ticks of tolerance; false until the first summary after a seat, after two in a row differ or a record came out otherwise, and on a machine that does not follow (RD.8) |
 | `pair/differs` | `s` | what is not in step, one sentence, the most recent cause: what the summaries showed different twice in a row (`cue 12 is running on the main, not here`), or one of the leader's records applied otherwise here, said at once with RD.6's count; empty once a summary matches again (RD.6, RD.8) |
 | `pair/relayed` | `h` | commands this backup's clients gave it that it passed on to the main (RD.6) |
@@ -25453,7 +25457,7 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair.adoptShow` | `[s:fingerprint s:setAside]` | the follower takes its leader's show text and device descriptions (AFU), keeping its own machine rows; its own files set aside in `set-aside.<date>.<time>/` of the show, the show reloaded, its history cleared (AFY), and seated again; refused while anything runs; the arguments are as applied - the fingerprint taken and the folder (machine; RD.10) |
 | `pair.lead`, `pair.hold` | `s:role s:seat s:reason` | the engine's: this machine now sends (`alone`, `leading`, `bothSending`), or holds (`following`, `waiting`), and why; logged, and where the seat lives (machine; RD.7) |
 | `pair.seat` | `s:position` | the engine's: one record seating the follower at its leader's position, the position as text in the log's own grammar on this machine's clock; refused `bad-value` for a text that does not read (machine; RD.8) |
-| `pair.launchAt` | `s:run h:sample` | the engine's: the main's launch sample, mapped onto this machine's clock |
+| `pair.launchAt` | `s:run h:sample` | the engine's: the main's launch sample, mapped onto this machine's clock - *not built*: RD.9 places every launch from the tick that decided it, on both machines, so the leader's sample is worked out on the follower rather than sent; left for a launch the leader placed late on a cold arm of its own alone |
 
 ### 58.5 Refused
 
@@ -25485,6 +25489,14 @@ set aside or write, each with the reason after it at `/godot/engine/lastError`.
 
 **M61** (planned): two `serve`s on dummy clocks, the distance between the samples a GO launches on, and
 Δ as the link measures it.
+
+**M61**, measured 2026-10-14 (RD.9), by `tests/blackbox/pair_sample.py`: two `serve --hosted --render` on the author's
+Windows laptop, Debug, 48 kHz, 128-frame blocks, one machine's clock under both; a GO at the main, each render's click
+onset put on the steady clock through its `engine/sampleZeroAt`. Seven runs, C and fr_FR: the backup's click 26 to 88 µs
+before the main's (78, 56, 85, 29, 26, 65, and 88 in the first run), Δ 1 or 2 ticks and the main's extra lead the same;
+the map's own error said 170 to 223 µs; the drift within 5 ppm of nought a few seconds after the GO. Before RD.9 the
+backup's click came Δ ticks - 20 or 40 ms - after the main's. The constant lean of the backup early is the loopback
+socket's asymmetry, which half the round trip bounds and no exchange can see.
 
 ### 58.7 Built so far
 
@@ -26229,6 +26241,103 @@ set aside or write, each with the reason after it at `/godot/engine/lastError`.
   description changed on the disk with no show edit is seen within the worker's two seconds; a log
   from before RD.10 whose `undo` reached back across a `pair.hold following` no longer replays (no
   fixture has one).
+- **RD.9**, 2026-10-14: the same sample (AFS, AGF, AGI, AGQ). Up to RD.8 a follower placed every launch on its own
+  tick grid, Δ ticks behind its leader's; now it starts each on the leader's sample, as near as three measured lines
+  know it. THE STAMP (`clock/BlockStamp.h`): once a block, before its count moves, the audio side writes the block's
+  first sample and the moment it was asked for, in nanoseconds of `std::chrono::steady_clock` - `pair::LinkClock`, so a
+  machine's stamps and its pings speak one clock and nothing is converted - into a seqlock of three atomics: two relaxed
+  stores between two stores of a sequence number and a release fence, no allocation, no lock, and no call but the clock
+  read a callback already made beside `getHighResolutionTicks`. A reader that meets a write under way tries eight times
+  and reads nothing that tick rather than spin against the audio thread; a torn pair is never handed out (a test races
+  a writer with a reader: 8 000 to 29 000 reads, none torn). The device's callback stamps its entry
+  (`AudioHost::setBlockTime`, consumed inside `processBlock` after its running test, so a block not run stamps nothing
+  and a count standing still beside a moving clock never reads as a slip); the hosted pump and the dummy clock stamp
+  the block's DEADLINE, their own schedule, which a block woken late catches up with. `SampleClock::lastBlock` reads it;
+  `SessionAudioClock` moves it onto the session's count and says which device clock it counts and its offset. THE SOUND
+  LINE (`pair::SoundLineFit`): the last stamp of the count the Runner places launches on, once a tick (a stamp seen
+  twice fed once), through `timecode::CountLine` - two minutes of LineFit, a slip told and the slope kept across it,
+  a late callback not fitted through - and never `ClockEstimate`, as TG.6 measured; `CountLine` gains `momentAt` and
+  `samplesPerMillisecond`. Valid from three stamps, forgotten when the audio side is another; `engine/sampleZeroAt`
+  publishes its sample nought on the steady clock, a diagnostic. THE HOST CLOCKS (`pair::HostOffset`): `pong` carries
+  NTP's middle two, the moment the ping reached the answering machine's server thread and the moment the pong left it
+  (`pong h:sent h:tick h:received h:left`; RD.5's two still read, and time the trip); the dialler's receiver hands on all
+  four (`Receiver::setOnHostSample`); offset ((t1 - t0) + (t2 - t3)) / 2, trip (t3 - t0) - (t2 - t1). The fastest
+  exchange of each second that holds three or more, two minutes of them, a straight line through them (the host clocks'
+  own drift in it), its slope weighed with nought, a hundred parts per million its error, as CountLine weighs a crystal;
+  its error the line's and half the fastest trip, which bounds the asymmetry no exchange can see. Three a second because
+  the second still filling may hold one exchange and that one queued, and at the newest end of the line it is the lever:
+  with every second taken the map was half a millisecond out a few seconds in; with three, ten microseconds over ten
+  minutes. Only a machine that dials pings (RD.5), so a main following a backup that took over has the backup measure
+  and say it (`ClockMap::MeasuredBy::leader`). THE MAP (`pair::ClockMap`, pure): leader sample, leader host, follower
+  host, follower sample, and back; the drift between the two SOUND clocks in parts per million (`pair/drift`, AGI -
+  shown, its correction still *(proposed)*); the residual, the three errors in quadrature, in microseconds
+  (`pair/clockResidual`). TRUSTED, the implementer's thresholds: both sound lines of three stamps or more, three
+  exchanges or more, the clocks within a thousand parts per million, and an error under five milliseconds - a quarter
+  of a tick: the record clock it replaces is a tick or two out, so a map known that well is four times better at the
+  least, and one known worse has a broken input (a sound clock scattering by milliseconds, a network whose fastest round
+  trip is past ten) rather than a rough one - held once trusted until the error passes ten, so a map at the edge does
+  not flap between launches. Until then the record clock stands and nothing gets worse. IT REPLACES
+  `pair::sampleOnThisClock`, removed: `ClockMap::sampleOnThisClock` maps when trusted and moves by the ticks otherwise,
+  and Follow.cpp's `code.heard` and `Position::rebase`'s scene and code samples go through the follower's map
+  (`Follower::setClockMap`) - one function, as §60 promised. THE WIRE: `/godot/pair/clock` (22 arguments: the tick it
+  is true of, the tick grid and where its tick nought sits on the audio side's count, the launch lead and whether
+  launches sit on the grid, the extra lead, Δ, the output latency, the sound line, the host offset when it dials). A
+  leader's rides its tick's bundle after the records and the position and before the summary and the beat
+  (`Stream::sayClock`), and the first bundle of a follower welcomed later; the follower holds it to the slot of its tick
+  as it holds a record (`Follower::clockSaid`, `leaderClock` - not dropped by the follow's start, since the first comes
+  in the welcome), so a lead that moves moves for the same launches on both machines. A follower's goes to its leader
+  down the path relays take (`Stream::followerClock`) - beside the ping or the hello as the brief offered, but a main
+  following a backup listens and never pings, and a hello is said only when the seat moves. Every half second, and on the
+  tick the lead or Δ moves. THE EXTRA LEAD (AFS): a machine that leads a follower places every launch on its own tick
+  grid - its tick nought on the audio side's count, `TickThread::sampleForTick (0)` less the session's offset - the
+  launch latency and the follower's Δ further on, one tick until the follower has said it; `pair/delay` on the leader
+  reads it. Δ was 1 or 2 on this machine, one network's worth; the author is told when one ever reads more. THE ONE
+  PLACE (`cue::Runner::LaunchPlacing`, `sampleOfTick`, `launchTarget`): every launch `launchIfDue` places from a tick - a
+  GO from the stream, a group's member, a follow-on, a code fired with its sounds (`launchTimecode` takes the same
+  target) - and a seat's sounds (`seatAt`'s `launchNotBefore`); a run that has a sample of its own - a time group's
+  member on its code's sample, mapped already by `code.heard` - keeps it. A follower mapped (the map trusted and its
+  leader's lead of that slot known) places a launch decided on local tick k at the map of the leader's tick k - offset,
+  the leader's lead on; one not mapped places it as always and adds the extra lead its leader adds, so its sound stays on
+  the record clock, Δ behind, as before RD.9. A TARGET ALREADY GONE when this machine's tick places it (its tick late, or
+  a lead too short for its blocks): the sound is moved into its file by the lateness (`seekMedia`) and launched on a
+  later sample of the leader's, a seat's lead on, as a seated sound is; one that cannot be moved (ranges, played
+  backwards, not a sound) starts as soon as it can, from its top; either counted in `pair/late`. RD.8's seat lands on the
+  leader's sample now, as its own notes foresaw. THE RECORD CLOCK KEPT FOR THE SUMMARIES: a sound on the leader's sample
+  sounds the record lag early (`Run::recordLag`, fixed with its sample for a seat's and one moved into its file), and the
+  follower's own summary takes it back off (`summaryNow (tick, counter, true)`), so RD.8's in-step comparison - the
+  leader's tick T against the follower's T + offset - reads as it did. NO LATENCY MATCHING (AGQ): each side's output
+  latency is said over the link and shown in seconds, `pair/outputLatency` beside `pair/peerOutputLatency`; nothing is
+  delayed to make two interfaces meet. Rows `pair/mapped`, `pair/clockResidual`, `pair/outputLatency`,
+  `pair/peerOutputLatency`, `engine/sampleZeroAt`; `pair/drift` filled; `pair/delay` and `pair/late` as above (58.3).
+  Tests under C and fr_FR: SameSampleTests (new, twelve cases: the map from simulated clocks hours apart, host clocks
+  twelve parts per million fast and seven slow, sound clocks fifty apart either way, blocks of 64, 256 and 512 stamped
+  with ±0.15 ms of jitter, pings with exponential jitter and the odd 1-4 ms queue, ten minutes: at worst 0.10, 0.04 and
+  0.05 ms, the drift within 0.15 ppm after two minutes, the leader-measured map the same, a 50 ms slip told once and 13
+  µs after it - red at 0.5 ms with every second's exchange fitted; trust and its thresholds, the record clock when
+  untrusted; the stamp never torn; the dummy clock and the hosted pump stamping each block at its deadline, an audio host
+  driven by hand stamping only a block it was told the time of, the session clock moving a stamp; the pong's four stamps
+  and a pong of two; the clock message exact in either locale, in the bundle after the records and before the beat, in a
+  later follower's first bundle, a follower's reaching the leader's half; the one function alone, leading, unmapped,
+  mapped, and moved into its file and counted, a summary on the record clock; and TWO ENGINES joined by the real stream
+  and receiver, the backup's sound clock starting 3.71 s later and 30 ppm fast, host clocks days apart - the seated
+  bed, a GO and both members of a timeline scene within a block of the main's sample (the GO 0.08 samples apart), the
+  summaries in step on the record clock for 825 ticks, the drift read 30.3 ppm; never pinged, never mapped, the GO 1.49
+  ticks behind with Δ 1, the record lag), PeerLinkTests (the pong of four), TreeTests (the rows), and
+  `tests/blackbox/pair_sample.py` (M61 above). `pair_seat.py` judges a bed seated on the leader's sample as well as one
+  a delay behind - a seat that lands before the map is trusted is on the record clock still - and says which.
+  Found and left: a launch the leader placed late on its own cold arm, its follower's warm, lands on the leader's sample
+  for the tick it was decided on and not the one the leader placed it on (`pair.launchAt` would carry it); a late record
+  launches on the leader's grid at the tick it went in, late from its top by its lateness, counted by RD.6 and not moved
+  into its file - the Runner does not know which record made a run; a seat applied before the map is trusted lands on
+  the record clock and stays there until a realign moves it more than two ticks - a backup that dials is mostly mapped by
+  its seat (the seat waits for Δ, about as long as three exchanges take), but a main started again that follows the
+  backup which took over is not: it never pings, the backup measures and says it, and its seat lands first
+  (`pair_seat.py` shows both, and says which); the follower's first word on its clocks is not sent until its Δ is fixed, so
+  a leader places its first launches one tick ahead rather than Δ; a sample of a code map is mapped onto this machine's
+  count but keeps the leader's rate, which two machines at two rates would need moved too; movies, a code's own MTC
+  lane and every stop, fade and speed are placed as before - on the follower's own tick, a record lag apart from its
+  sounds; the sound line follows the count the Runner reads, which an audio side opened again restarts, and is begun
+  again then, its first second young.
 
 ## 59. Timecode generated: MTC and LTC cues
 

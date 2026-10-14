@@ -350,7 +350,7 @@ namespace wfg::cue
     }
 
     //==========================================================================
-    pair::Summary Runner::summaryNow (std::int64_t tick, std::uint64_t counter) const
+    pair::Summary Runner::summaryNow (std::int64_t tick, std::uint64_t counter, bool onRecordClock) const
     {
         pair::Summary out;
         out.tick = tick;
@@ -378,8 +378,18 @@ namespace wfg::cue
 
             const auto looping = run.kind == "media" && run.range >= 0 && run.passSamples > 0 && samplesPerTick > 0;
 
+            /*  A SOUND PLACED ON THE LEADER'S SAMPLE (RD.9) sounds the record
+                lag before the record clock: taken back off, read as a follower
+                Δ behind would read it, which is what the leader's summary of
+                the same record moment is laid against. */
+            auto playhead = playheadOf (run, tick);
+
+            if (onRecordClock && std::abs (run.recordLag) > 0.0 && run.launchedAtSample > 0 && ! run.isWaiting()
+                  && (run.kind == "media" || run.kind == "mic"))
+                playhead -= run.recordLag * std::abs (run.rateNow);
+
             out.runs.push_back ({ run.id, run.cue, run.state,
-                                  static_cast<std::int64_t> (std::llround (playheadOf (run, tick) / tickSeconds)),
+                                  static_cast<std::int64_t> (std::llround (playhead / tickSeconds)),
                                   run.kind == "media" ? run.range : -1,
                                   looping ? static_cast<std::int64_t> (std::llround (static_cast<double> (run.passSamples)
                                                                                       / static_cast<double> (samplesPerTick)))
@@ -722,8 +732,11 @@ namespace wfg::cue
 
         /*  AND EACH SOUND IT MADE LAUNCHED ON THE SAMPLE ITS OFFSET IS FOR, not
             as soon as its cold arm answers; its launch asked for then too, so
-            one launched on time is not reported late. */
-        const auto launchSample = (tick + launchIn) * static_cast<std::int64_t> (samplesPerTick);
+            one launched on time is not reported late. That sample through the
+            one function (RD.9): the leader's own moment once the clock map is
+            trusted - where the leader's sound is at that playhead - and this
+            machine's tick of the record clock until then, Δ behind it. */
+        const auto launchSample = sampleOfTick (tick + launchIn);
 
         for (const auto& wants : wanted)
             if (wants.when == planned::sounding)
@@ -733,6 +746,8 @@ namespace wfg::cue
                     {
                         sound->launchNotBefore = launchSample;
                         sound->launchRequestedAtTick = tick + seatLeadTicks;
+                        sound->recordLag = recordLagSeconds (tick);
+                        sound->recordLagFixed = true;
 
                         /*  A CODE (TC.7) on that same sample, and with the sounds
                             of its group seated beside it - waited for when one
@@ -903,6 +918,8 @@ namespace wfg::cue
                 {
                     run->launchNotBefore = launchSample;
                     run->launchRequestedAtTick = tick + seatLeadTicks;
+                    run->recordLag = recordLagSeconds (tick);
+                    run->recordLagFixed = true;
                 }
             }
 

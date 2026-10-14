@@ -2033,3 +2033,52 @@ TEST_CASE ("same show: pair/showMatch and pair/showDiffers publish the compariso
     CHECK (nodeAt (snapshot, "/godot/pair/showMatch") == osc::Value::boolean (true));
     CHECK (nodeAt (snapshot, "/godot/pair/showDiffers") == osc::Value::string (""));
 }
+
+/*  RD.9: the same sample (namespace draft §58.3, AFS, AGI, AGQ) - whether the
+    follower's launches are on its leader's samples, the drift between the two
+    sound clocks, how well the map is known, each side's output latency in
+    seconds, and the diagnostic sample nought on the steady clock - published as
+    serve reads them, read-only, a French machine's numbers as a C one's. */
+TEST_CASE ("same sample: pair/mapped, drift, clockResidual, outputLatency, peerOutputLatency and engine/sampleZeroAt publish as read, read-only")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+
+    const auto valueAt = [] (const std::shared_ptr<const TreeSnapshot>& snapshot, const std::string& address,
+                             const std::string& typeTags)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        CHECK (node->access == Access::read);
+        CHECK (node->typeTags == typeTags);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    //  Nothing measured: unmapped, nought.
+    EngineState state;
+    auto snapshot = rig.parameters.publish (1, state);
+    CHECK (valueAt (snapshot, "/godot/pair/mapped", "T") == osc::Value::boolean (false));
+    CHECK (valueAt (snapshot, "/godot/pair/drift", "f") == osc::Value::float32 (0.0f));
+    CHECK (valueAt (snapshot, "/godot/pair/clockResidual", "f") == osc::Value::float32 (0.0f));
+    CHECK (valueAt (snapshot, "/godot/pair/outputLatency", "f") == osc::Value::float32 (0.0f));
+    CHECK (valueAt (snapshot, "/godot/pair/peerOutputLatency", "f") == osc::Value::float32 (0.0f));
+    CHECK (valueAt (snapshot, "/godot/engine/sampleZeroAt", "h") == osc::Value::int64 (0));
+
+    //  A follower on its leader's samples.
+    state.pairFollow.state = "following";
+    state.pairFollow.mapped = true;
+    state.pairFollow.drift = -12.5;
+    state.pairFollow.clockResidual = 143.25;
+    state.pairFollow.outputLatency = 0.0015;
+    state.pairFollow.peerOutputLatency = 0.010;
+    state.sampleZeroAt = 1'234'567'890'123'456;
+    snapshot = rig.parameters.publish (2, state);
+    CHECK (valueAt (snapshot, "/godot/pair/mapped", "T") == osc::Value::boolean (true));
+    CHECK (valueAt (snapshot, "/godot/pair/drift", "f") == osc::Value::float32 (-12.5f));
+    CHECK (valueAt (snapshot, "/godot/pair/clockResidual", "f") == osc::Value::float32 (143.25f));
+    CHECK (valueAt (snapshot, "/godot/pair/outputLatency", "f") == osc::Value::float32 (static_cast<float> (0.0015)));
+    CHECK (valueAt (snapshot, "/godot/pair/peerOutputLatency", "f") == osc::Value::float32 (static_cast<float> (0.010)));
+    CHECK (valueAt (snapshot, "/godot/engine/sampleZeroAt", "h") == osc::Value::int64 (1'234'567'890'123'456));
+}

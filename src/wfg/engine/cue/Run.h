@@ -1153,6 +1153,20 @@ namespace wfg::cue
         /** The sample the launch was placed at. Zero before it is placed. */
         std::int64_t launchedAtSample = 0;
 
+        /*  HOW FAR AHEAD OF THE RECORD CLOCK ITS LAUNCH WAS PLACED, seconds
+            (namespace draft §58, RD.9): a follower's sound placed on its
+            leader's sample sounds this much before its own tick grid would
+            have put it, the delay the leader's records are applied at; a
+            summary laid against the leader's takes it back off the playhead
+            (`Runner::summaryNow`). Nought for every launch that was not mapped
+            - a leader's, a lone machine's, a follower's before its map was
+            trusted - and on a replay, which places none. A sound whose sample was
+            decided before its launch - a seat's, one moved into its file - has
+            it decided with that sample (`recordLagFixed`), whatever the map
+            says by the time the launch is placed. */
+        double recordLag = 0.0;
+        bool recordLagFixed = false;
+
         /*  NOT BEFORE THIS SAMPLE (namespace draft §58, RD.8): a sound a
             follower was seated with is armed cold, and armed at the second the
             leader's sound will have reached at this sample - a few ticks on,

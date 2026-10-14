@@ -219,6 +219,8 @@ add_library(wfg_engine STATIC
     wfg/engine/pair/Summary.cpp
     wfg/engine/pair/ShowCheck.h
     wfg/engine/pair/ShowCheck.cpp
+    wfg/engine/pair/ClockMap.h
+    wfg/engine/pair/ClockMap.cpp
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp
     wfg/engine/serial/Slip.cpp
@@ -316,6 +318,7 @@ add_library(wfg_engine STATIC
     wfg/engine/rt/RtCounters.h
     wfg/engine/rt/RtAllocatorHook.cpp
     wfg/engine/clock/AudioClockSource.h
+    wfg/engine/clock/BlockStamp.h
     wfg/engine/clock/ClockEstimate.h
     wfg/engine/clock/DummyAudioClock.cpp
     wfg/engine/clock/DummyAudioClock.h

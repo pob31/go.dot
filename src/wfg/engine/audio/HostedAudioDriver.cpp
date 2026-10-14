@@ -22,6 +22,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -344,6 +345,13 @@ namespace wfg::audio
                 wait behind one, and nothing the graph touches is protected by
                 this mutex. */
             lock.unlock();
+
+            /*  THE BLOCK STAMPED WITH ITS DEADLINE (namespace draft §58, RD.9;
+                clock/BlockStamp.h): the moment it was due on the steady clock
+                the link uses, as the dummy clock stamps its own - a block woken
+                late is still that moment's block, and the pump catches up with
+                its schedule, so the line through the stamps is the schedule's. */
+            audioHost.setBlockTime (std::chrono::duration_cast<std::chrono::nanoseconds> (due.time_since_epoch()).count());
 
             if (input != nullptr)
                 audioHost.processBlock (input->next (current.blockSize), input->channels());

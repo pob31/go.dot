@@ -175,11 +175,40 @@
         /godot/pair/showMedia s:digest i:entries
                             [s:path s:kind i:present h:size h:modified s:hash]...
                             every file its show names
+
+    AND WHAT RD.9 ADDS, so the two start a sound on the same sample (pair/
+    ClockMap.h; the author's AFS):
+
+      the machine that listens -> the one that pings
+        /godot/pair/pong    h:sent h:tick h:received h:left
+                            RD.5's two, and the answering machine's steady
+                            clock when the ping arrived and when the pong left -
+                            NTP's t1 and t2, so the pinger has all four. A pong
+                            of two still reads, and gives a round trip and no
+                            offset.
+      either way
+        /godot/pair/clock   h:tick i:samplesPerTick h:tickZero i:leadTicks
+                            i:onTicks i:extraTicks i:delay d:outputLatency
+                            i:lineValid i:rate h:sample h:nanos d:nanosPerSample
+                            d:lineError d:lineSeconds
+                            i:hostsValid h:at d:offset d:slope d:hostsError
+                            d:bestTrip i:exchanges
+                            what a machine says of its clocks (`ClockSaid`): the
+                            leader's in its tick's bundle - its tick grid, the
+                            lead its launches are placed at from that tick on,
+                            its sound line, its output latency (AGQ), and, when
+                            it dials, the follower's host clock against its own
+                            - every half second and whenever the lead moves; the
+                            follower's to the leader down the path relays take,
+                            every half second and when Δ moves - Δ, which is
+                            what the leader adds to its launch lead (AFS), and
+                            its own output latency.
 */
 
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/pair/ClockMap.h>
 #include <wfg/engine/pair/LinkReading.h>
 #include <wfg/engine/pair/Summary.h>
 
@@ -236,6 +265,9 @@ namespace wfg::pair
         inline constexpr const char* showFile  = "/godot/pair/showFile";
         inline constexpr const char* showUnits = "/godot/pair/showUnits";
         inline constexpr const char* showMedia = "/godot/pair/showMedia";
+
+        //  RD.9's: what a machine says of its clocks (pair/ClockMap.h).
+        inline constexpr const char* clockLine = "/godot/pair/clock";
 
         /*  HOW LONG ONE PART OF A POSITION MAY BE, in bytes of text: a
             position is cut into parts of whole lines no longer than this -
@@ -315,6 +347,33 @@ namespace wfg::pair
 
         std::vector<std::uint8_t> helloBytes (const Hello& hello);
         std::optional<Hello> readHello (const osc::Packet& message);
+
+        //======================================================================
+        /*  WHAT A MACHINE SAYS OF ITS CLOCKS (RD.9, `/godot/pair/clock`): its
+            tick grid on its own count, the lead it places a launch at ahead
+            of the tick that decided it, from `tick` on - and whether those
+            launches sit on that grid, as a leader's do while it has a
+            follower, rather than on its count as it stood - the extra lead it
+            adds (AFS), Δ as it measured it following, its interface's
+            reported output delay (AGQ), its sound line, and - from a machine
+            that dials, which alone pings - the other machine's host clock
+            against its own. */
+        struct ClockSaid
+        {
+            std::int64_t tick = 0;
+            int samplesPerTick = 0;
+            std::int64_t tickZero = 0;          // where its tick nought sits on its audio side's count
+            int leadTicks = 0;                  // the launch latency and the extra lead
+            bool onTicks = false;
+            int extraTicks = 0;
+            int delay = 0;
+            double outputLatency = 0.0;         // seconds
+            SoundLine line;
+            OffsetLine hosts;                   // the OTHER machine's host clock less this one's, in this one's time
+        };
+
+        std::vector<std::uint8_t> clockBytes (const ClockSaid& said);
+        std::optional<ClockSaid> readClock (const osc::Packet& message);
 
         /*  A follow that starts now asks for what the leader keeps from now
             on, never what it kept before (RD.7): this counter, on the leader's
@@ -443,6 +502,19 @@ namespace wfg::pair
         /** Positions sent, to any follower: what a test and a black box count. */
         std::int64_t positionsSent() const noexcept { return positionCount; }
 
+        /*  WHAT THIS MACHINE SAYS OF ITS CLOCKS (RD.9, `wire::clockBytes`):
+            carried in this tick's bundle to every follower, after the records
+            and before the summary and the beat, and in the first bundle of
+            every follower welcomed until the next is said - so a follower has
+            the leader's lead in the stream's order, and from its first tick.
+            The tick thread's, before `afterTick`. */
+        void sayClock (std::vector<std::uint8_t> message);
+
+        /*  WHAT A FOLLOWER LAST SAID OF ITS CLOCKS (RD.9): its Δ and its
+            output latency, taken in `afterTick`; nothing before one has
+            spoken. The tick thread's. */
+        const std::optional<wire::ClockSaid>& followerClock() const noexcept { return heardClock; }
+
         /*  THE HEARTBEAT, from serve's after-tick: what arrived since the last
             tick is read, then each follower is sent what it has not had - its
             welcome and any gap first, then the records, `backlogPerTick` at
@@ -478,7 +550,7 @@ namespace wfg::pair
     private:
         struct Arrival
         {
-            enum class Kind { hello, ping, closed, seat };
+            enum class Kind { hello, ping, closed, seat, clock };
 
             Kind kind = Kind::hello;
             std::string origin;
@@ -490,6 +562,7 @@ namespace wfg::pair
             bool described = false;             // an RD.7 hello, which says what the machine is
             double roundTrip = 0.0;
             LinkClock::time_point at {};
+            wire::ClockSaid clock;              // a follower's word on its clocks (RD.9)
         };
 
         struct Follower
@@ -517,6 +590,11 @@ namespace wfg::pair
         PositionMaker makePosition;
         SummaryMaker makeSummary;
         std::int64_t positionCount = 0;
+
+        //  RD.9's: this machine's word on its clocks, whether this tick says it, and a follower's last.
+        std::vector<std::uint8_t> clockMessage;
+        bool clockFresh = false;
+        std::optional<wire::ClockSaid> heardClock;
 
         //  Written on the tick thread, read on the server's too (a relay).
         std::atomic<bool> leading { false };
@@ -632,6 +710,21 @@ namespace wfg::pair
         using OnSummary = std::function<void (Summary summary)>;
         void setOnSummary (OnSummary callback) { onSummary = std::move (callback); }
 
+        /*  WHAT THE LEADER SAYS OF ITS CLOCKS (RD.9), in the stream's order,
+            each as it is drained - a second path's copy too, which says the
+            same. Tick thread. */
+        using OnClock = std::function<void (const wire::ClockSaid& said)>;
+        void setOnClock (OnClock callback) { onClock = std::move (callback); }
+
+        /*  EACH PONG'S FOUR STAMPS (RD.9; NTP's): the ping's departure and the
+            pong's arrival on this machine's clock, the ping's arrival and the
+            pong's departure on the other's - a pong of RD.5's two carries no
+            offset and is not handed on. Whoever leads: only a machine that
+            dials pings, and what it measures is the other's clock either way.
+            Tick thread. */
+        using OnHostSample = std::function<void (const HostSample& sample)>;
+        void setOnHostSample (OnHostSample callback) { onHostSample = std::move (callback); }
+
         /*  A FOLLOW STARTS NOW, on the leader whose stream is `leaderStream`
             (RD.7): what this receiver held of any stream is forgotten, the
             next hello asks for what the leader keeps from now on
@@ -643,15 +736,16 @@ namespace wfg::pair
     private:
         struct Item
         {
-            enum class Kind { welcome, gap, record, beat, pong, position, summary };
+            enum class Kind { welcome, gap, record, beat, pong, position, summary, clock };
 
             Kind kind = Kind::beat;
             std::string path;
             LinkClock::time_point at {};
-            std::int64_t first = 0, second = 0, third = 0;
+            std::int64_t first = 0, second = 0, third = 0, fourth = 0;
             std::string stream;                 // a welcome's stream; a position part's text
             LogRecord record;
             Summary summary;
+            wire::ClockSaid clock;              // the leader's word on its clocks (RD.9)
         };
 
         /*  A POSITION COMING IN PARTS, by the path bringing it: what has come,
@@ -686,6 +780,8 @@ namespace wfg::pair
         OnBeat onBeat;
         OnPosition onPosition;
         OnSummary onSummary;
+        OnClock onClock;
+        OnHostSample onHostSample;
 
         //  RD.8's: positions in parts by path, and the last handed on.
         std::map<std::string, Partial> partials;

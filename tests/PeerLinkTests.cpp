@@ -779,7 +779,15 @@ TEST_CASE ("peer link: a ping is answered at once; what is not the link's gramma
     auto got = wire.take (followerA);
     REQUIRE (got.size() == 1);
     CHECK (got[0].address == pair::wire::pong);
-    CHECK (got[0].args == std::vector<osc::Value> { h (nanos (t0)), h (77) });
+    REQUIRE (got[0].args.size() == 4);
+    CHECK (std::vector<osc::Value> (got[0].args.begin(), got[0].args.begin() + 2)
+           == std::vector<osc::Value> { h (nanos (t0)), h (77) });
+
+    /*  AND NTP'S MIDDLE TWO (RD.9): when the ping arrived - the moment it was
+        handed in with - and when the pong left, on this machine's clock. */
+    CHECK (got[0].args[2] == h (nanos (t0)));
+    REQUIRE (got[0].args[3].isInt64());
+    CHECK (got[0].args[3].getInt64() > 0);
 
     stream.received (followerA, osc::Packet::message ("/godot/pair/nonsense", {}), t0);
     stream.received (followerA, osc::Packet::message (pair::wire::hello, { s ("only a name") }), t0);

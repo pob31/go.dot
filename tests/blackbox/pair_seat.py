@@ -176,15 +176,22 @@ def as_int(value):
 def playheads(read_leader, read_follower, run, delay_ticks):
     """The leader's playhead and the follower's, read close together: the
     leader's twice around the follower's, so the reading's own time is known,
-    and the follower's moved on by the delay it applies the leader's records at."""
+    and the follower's moved on by the delay it applies the leader's records at
+    - or not, from RD.9: a follower whose launches are on its leader's samples
+    (`pair/mapped`) seats its sound where the leader's is, no delay behind. A
+    seat that landed before the clock map was trusted is on the record clock
+    still, so the nearer of the two readings is the one judged, and said."""
     address = f"/godot/run/{run}/position"
     before = as_float(read_leader(address))
     theirs = as_float(read_follower(address))
     after = as_float(read_leader(address))
     leader = (before + after) / 2.0
     skew = abs(after - before) / 2.0
-    apart = abs(theirs + delay_ticks * TICK - leader)
-    return leader, theirs, apart, skew
+    behind = abs(theirs + delay_ticks * TICK - leader)
+    aligned = abs(theirs - leader)
+    print(f"  note the follower's playhead {behind * 1000:.0f} ms from the leader's a delay behind,"
+          f" {aligned * 1000:.0f} ms from it on the same sample")
+    return leader, theirs, min(behind, aligned), skew
 
 
 def run() -> int:

@@ -69,6 +69,7 @@
 #include <wfg/engine/cue/TextFields.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/pair/ClockMap.h>
 #include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/pair/Position.h>
 #include <wfg/engine/pair/Summary.h>
@@ -755,6 +756,77 @@ namespace wfg::cue
 
         /** How many samples make a tick. Set once, from the tick schedule. */
         void setSamplesPerTick (int samples) noexcept { samplesPerTick = samples; }
+
+        //======================================================================
+        /*  WHERE A LAUNCH GOES ON THE AUDIO SIDE'S COUNT (namespace draft §58,
+            RD.9; AFS, AGF), as serve says it each tick from the pair. Left as
+            it is made - alone, unpaired, a replay, every rig - every launch is
+            placed as it always was: the launch latency ahead of the count as
+            the tick that places it found it.
+
+            A MACHINE THAT LEADS WITH A FOLLOWER places every launch on its own
+            tick grid (`onTicks`): the tick it was decided on, the launch
+            latency and the EXTRA LEAD (AFS) further on - the follower's Δ,
+            which it measured and said, so a follower Δ behind has the launch
+            in time - a pure function of the tick, which the follower can work
+            out too.
+
+            A MACHINE THAT FOLLOWS, once its clock map is trusted (`mapped`),
+            places a launch decided on local tick k where the leader placed
+            the same launch: the leader's tick k - `offsetTicks` on the
+            leader's grid, its lead on (said in the stream's order, so a lead
+            that moves moves for the same launches on both), read on this
+            machine's count through the map - the same sample, as near as the
+            three lines know it. Until the map is trusted it places it as it
+            always did, the launch latency ahead, and adds the extra lead its
+            leader adds (`extraLeadTicks`), so each sound stays on the record
+            clock, Δ behind the leader's - RD.8's, and what every summary is
+            laid against. */
+        struct LaunchPlacing
+        {
+            std::int64_t tickZero = 0;          // where this machine's tick nought sits on the audio side's count
+            int extraLeadTicks = 0;             // AFS: a leader's Δ, or what an unmapped follower's leader adds
+            bool onTicks = false;               // a leader with a follower: launches on the tick grid
+            bool mapped = false;                // a follower: launches on the leader's samples
+            pair::ClockMap map;
+            std::int64_t offsetTicks = 0;       // local tick = the leader's tick + this
+            std::int64_t leaderTickZero = 0;
+            int leaderSamplesPerTick = 0;
+            int leaderLeadTicks = 0;            // the leader's launch latency and extra lead
+        };
+
+        void setLaunchPlacing (const LaunchPlacing& placing) { placingNow = placing; }
+        const LaunchPlacing& launchPlacing() const noexcept { return placingNow; }
+
+        /*  THE ONE PLACE A TICK BECOMES A SAMPLE (RD.9): where local tick
+            `localTick` sits on the audio side's count - on a mapped follower,
+            where the leader's tick of the same moment of the record clock sits,
+            read through the map; otherwise this machine's own grid. A seat's
+            sounds are launched here (`seatAt`), and through `launchTarget`
+            every launch a tick decides. */
+        std::int64_t sampleOfTick (std::int64_t localTick) const noexcept;
+
+        /*  THE SAMPLE A LAUNCH DECIDED ON `tick` STARTS ON, `ticksAhead` the
+            launch latency and `now` the count as the tick found it - for a GO,
+            a group's member, a follow-on, a code fired with a sound alike,
+            since every one of them comes through `launchIfDue`. */
+        std::int64_t launchTarget (std::int64_t tick, std::int64_t now, int ticksAhead) const noexcept;
+
+        /*  HOW FAR AHEAD OF THE RECORD CLOCK a sound placed on the leader's
+            samples sounds, in seconds: a follower applies the leader's records
+            a fixed delay late, and its own tick k sits that much later than
+            the leader's tick of the same record moment. What a summary made to
+            be laid against the leader's takes back off such a sound's
+            playhead (`summaryNow`); nought unless mapped. */
+        double recordLagSeconds (std::int64_t tick) const noexcept;
+
+        /*  LAUNCHES A MAPPED FOLLOWER COULD NOT PLACE ON THE LEADER'S SAMPLE,
+            its tick having found that sample too close or gone: a sound moved
+            into its file by the lateness and launched on a later sample of the
+            leader's (RD.9), or, where it cannot be moved, launched as soon as
+            it could. Counted since the Runner was made; serve says those of
+            this link in `pair/late`. */
+        std::int64_t lateLaunches() const noexcept { return lateLaunchCount; }
 
         /*  Where the show's media lives: the bundle's `media/` folder.
 
@@ -1854,7 +1926,12 @@ namespace wfg::cue
         /*  WHAT AN OPERATOR WOULD LOOK AT, every five ticks on a leader and on
             a follower to compare (pair/Summary.h): each list's standby and each
             live run's state and playhead. */
-        pair::Summary summaryNow (std::int64_t tick, std::uint64_t counter) const;
+        /*  `onRecordClock` - a follower's own, to lay against its leader's -
+            takes the record lag back off each sound placed on the leader's
+            samples (RD.9, `recordLagSeconds`), so a playhead reads as it would
+            had the sound started on this machine's own tick grid, where the
+            leader's records are applied. */
+        pair::Summary summaryNow (std::int64_t tick, std::uint64_t counter, bool onRecordClock = false) const;
 
         /** A cue as the operator reads it: its number and name, or its name, or its identifier. */
         std::string labelOf (const std::string& cueId) const { return cueLabel (cueId); }
@@ -2518,7 +2595,15 @@ namespace wfg::cue
             the port has nothing behind it (`no-port`), either when its start
             never read (`bad-message`). */
         void launchTimecode (Engine& engine, std::int64_t tick, std::int64_t now, std::int64_t blockSize,
-                             std::int64_t lead);
+                             std::int64_t lead, std::int64_t placed);
+
+        /*  A MAPPED FOLLOWER'S SOUND WHOSE SAMPLE HAS GONE (RD.9): moved into
+            its file by as much as it is late and launched on a later sample of
+            the leader's, a seat's lead on, as a seated sound is - so it plays
+            where the leader's does. True when it was; false for a sound that
+            cannot be moved (not a plain forward file), which is then launched
+            as soon as it can be. */
+        bool launchIntoFile (Engine& engine, std::int64_t tick, Run& run, std::int64_t wanted, int ticksAhead);
 
         /*  Why an LTC run cannot be drawn (AHR), or empty: the show's output
             for it missing, not an output, or wider than one channel; or its
@@ -2888,6 +2973,10 @@ namespace wfg::cue
         video::Sink* videoSink = nullptr;
         TakeTable* takes = nullptr;
         int samplesPerTick = 0;
+
+        //  RD.9's: where launches go, as serve last said, and those a follower placed late.
+        LaunchPlacing placingNow;
+        std::int64_t lateLaunchCount = 0;
         std::string mediaFolder;
         std::string pluginsFolder;
 

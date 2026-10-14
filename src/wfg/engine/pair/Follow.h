@@ -246,10 +246,29 @@ namespace wfg::pair
         /*  THIS MACHINE'S SAMPLES A SECOND, which a main's `code.heard` sample
             is moved onto this clock at (namespace draft §60, TG.5; AIP): by
             the offset the records are applied at, through
-            `sampleOnThisClock`, before it is submitted - so the record this
-            machine logs holds its own sample, a replay of it never maps, and
-            what the main sent compares equal to what was applied. */
+            `ClockMap::sampleOnThisClock`, before it is submitted - so the
+            record this machine logs holds its own sample, a replay of it never
+            maps, and what the main sent compares equal to what was applied. */
         void setSampleRate (int rate) noexcept { sampleRate = rate; }
+
+        /*  THE MAP FROM THE LEADER'S SAMPLES TO THIS MACHINE'S (namespace
+            draft §58, RD.9; pair/ClockMap.h), as serve composes it each tick:
+            a main's `code.heard` and a position's code maps and scenes are
+            moved through it - the leader's own moment, once it is trusted; the
+            ticks' worth of samples until then. Untrusted until set. */
+        void setClockMap (const ClockMap& map) noexcept { clockMap = map; }
+        const ClockMap& clockMapInUse() const noexcept { return clockMap; }
+
+        /*  WHAT THE LEADER SAID OF ITS CLOCKS (RD.9, `/godot/pair/clock`), in
+            the stream's order: held to the slot of the tick it is true of, as
+            a record of that tick is, so the lead a launch here is placed with
+            is the lead the leader placed the same launch with. */
+        void clockSaid (const wire::ClockSaid& said);
+
+        /*  The leader's word on its clocks as of the last slot passed - what
+            its launches of the tick this one applies were placed with; null
+            before its first. */
+        const wire::ClockSaid* leaderClock() const noexcept { return hasLeaderClock ? &leaderClockNow : nullptr; }
 
         /*  How many of the main's beats are measured before the offset is
             fixed: a fifth of a second of them at 50 Hz, enough to see the
@@ -346,6 +365,12 @@ namespace wfg::pair
         Submit submit;
         double tickSeconds = 0.02;
         int sampleRate = 0;
+        ClockMap clockMap;
+
+        //  RD.9's: the leader's words on its clocks waiting for their slot, and the one in force.
+        std::deque<wire::ClockSaid> clocksHeld;
+        wire::ClockSaid leaderClockNow;
+        bool hasLeaderClock = false;
 
         bool following = false;
         bool fixed = false;

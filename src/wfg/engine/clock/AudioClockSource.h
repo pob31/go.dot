@@ -69,7 +69,20 @@ namespace wfg
             return samples.load (std::memory_order_relaxed);
         }
 
+        /*  THE AUDIO THREAD, once per block and BEFORE `advance` - the block's
+            first sample is the count as it stands - with the steady clock's
+            moment the block was asked for (namespace draft §58, RD.9;
+            BlockStamp.h). Two relaxed stores and a fence inside a seqlock: the
+            lipogram holds. */
+        void stampBlock (std::int64_t hostNanos) noexcept
+        {
+            stamp.write (samples.load (std::memory_order_relaxed), hostNanos);
+        }
+
+        bool lastBlock (BlockStamp::Reading& out) const noexcept override { return stamp.read (out); }
+
     private:
         std::atomic<std::int64_t> samples { 0 };
+        BlockStamp stamp;
     };
 }
