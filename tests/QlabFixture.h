@@ -298,7 +298,7 @@ namespace wfg::test::qlab
                                                                            { "NSLineHeightMultiple", Value::number (run.lineHeight) } }) });
             if (run.colour >= 0)
                 entries.push_back ({ key ("NSColor"), run.colour });
-            if (run.strokeWidth != 0.0)
+            if (std::abs (run.strokeWidth) > 0.0)     // GCC's -Wfloat-equal refuses != 0.0
             {
                 entries.push_back ({ key ("NSStrokeWidth"), cues.add (Value::number (run.strokeWidth)) });
                 if (run.strokeColour >= 0)

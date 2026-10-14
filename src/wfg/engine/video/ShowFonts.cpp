@@ -340,7 +340,13 @@ namespace wfg::video
             sources.push_back (juce::File (juce::String::fromUTF8 (job.subject.c_str())));
         else if (installed)
             for (const auto& path : installed (job.subject))
-                sources.push_back (juce::File (juce::String::fromUTF8 (path.c_str())));
+            {
+                /*  OpenType only: a system may keep a family's older faces as Type 1
+                    (.pfb) or Macintosh resources (.dfont), which no other system reads. */
+                const juce::File file (juce::String::fromUTF8 (path.c_str()));
+                if (fontfile::isFontFileName (file.getFileName().toStdString()))
+                    sources.push_back (file);
+            }
 
         if (sources.empty())
             return done ("not-installed", {});

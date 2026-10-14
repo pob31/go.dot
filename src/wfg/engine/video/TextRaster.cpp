@@ -126,9 +126,16 @@ namespace wfg::video
                     return juce::Font (juce::FontOptions (typeface).withPointHeight (em));
 
             const auto style = (look.bold ? juce::Font::bold : 0) | (look.italic ? juce::Font::italic : 0);
-            const auto options = look.font.empty() ? juce::FontOptions (em, style)
-                                                   : juce::FontOptions (juce::String::fromUTF8 (look.font.c_str()), em, style);
-            return juce::Font (options.withPointHeight (em));
+            const auto fallback = juce::Font (juce::FontOptions (em, style).withPointHeight (em));
+
+            if (look.font.empty())
+                return fallback;
+
+            /*  A FAMILY THIS MACHINE HAS NOT GOT draws in the default sans-serif
+                (61, AKL): on Linux JUCE finds no typeface for it at all, and
+                the words would draw nothing; Windows and macOS pick one of their own. */
+            const juce::Font named (juce::FontOptions (juce::String::fromUTF8 (look.font.c_str()), em, style).withPointHeight (em));
+            return named.getTypefacePtr() != nullptr ? named : fallback;
         }
 
         /*  WHAT A FACE LACKS, DRAWN BY GO.DOT (AKZ): the slant of an oblique,
