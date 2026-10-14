@@ -54,6 +54,10 @@ from common import HarnessError, Report, Server
 ON_CI = os.environ.get("GITHUB_ACTIONS") == "true"
 PLAYHEAD_TICKS = 4 if ON_CI else 2
 TAKEOVER_SLACK = 3.0 if ON_CI else 1.0
+# A WAIT FOR SOMETHING TO COME ABOUT, not a claim of how soon, is three times as
+# patient on CI: a Debug runner loaded enough to miss timecode and time-group checks
+# took more than three seconds to answer its first node.set (run 38636177195).
+PATIENCE = 3.0 if ON_CI else 1.0
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "bundles" / "phase2"
 
@@ -212,13 +216,13 @@ def run() -> int:
             read_main, send_main = reader(main), sender(main)
 
             send_main("node.set", [f"/godot/list/{LIST}/standby", BED])
-            report.check(wait_for(lambda: read_main(f"/godot/list/{LIST}/standby") == BED, 3.0), "the standby on the bed")
+            report.check(wait_for(lambda: read_main(f"/godot/list/{LIST}/standby") == BED, 3.0 * PATIENCE), "the standby on the bed")
             send_main("go")
-            report.check(wait_for(lambda: len(live_runs(read_main, BED)) == 1, 5.0), "the main plays the bed")
+            report.check(wait_for(lambda: len(live_runs(read_main, BED)) == 1, 5.0 * PATIENCE), "the main plays the bed")
             send_main("node.set", [f"/godot/list/{LIST}/standby", SCENE])
             time.sleep(0.3)
             send_main("go")
-            report.check(wait_for(lambda: len(live_runs(read_main, SCENE)) == 1 and len(live_runs(read_main, RAIN)) == 1, 5.0),
+            report.check(wait_for(lambda: len(live_runs(read_main, SCENE)) == 1 and len(live_runs(read_main, RAIN)) == 1, 5.0 * PATIENCE),
                          "and the scene, its sound playing")
             bed_run = (live_runs(read_main, BED) or [""])[0]
             scene_run = (live_runs(read_main, SCENE) or [""])[0]
@@ -231,10 +235,10 @@ def run() -> int:
             servers.append(backup)
             read_backup, send_backup = reader(backup), sender(backup)
 
-            report.check(wait_for(lambda: read_backup("/godot/pair/state") == "following", 6.0),
+            report.check(wait_for(lambda: read_backup("/godot/pair/state") == "following", 6.0 * PATIENCE),
                          "the backup started late follows its main",
                          f"state {read_backup('/godot/pair/state')!r}")
-            report.check(wait_for(lambda: read_backup("/godot/pair/inStep") == "true", 8.0),
+            report.check(wait_for(lambda: read_backup("/godot/pair/inStep") == "true", 8.0 * PATIENCE),
                          "it is seated at the main's position and says it is in step",
                          f"inStep {read_backup('/godot/pair/inStep')!r}, differs {read_backup('/godot/pair/differs')!r},"
                          f" alarm {read_backup('/godot/pair/alarm')!r}")
@@ -256,11 +260,11 @@ def run() -> int:
 
             # === REALIGNED ON DEMAND =================================================
             send_backup("pair.realign")
-            report.check(wait_for(lambda: "position" in read_backup("/godot/pair/alarm"), 2.0)
+            report.check(wait_for(lambda: "position" in read_backup("/godot/pair/alarm"), 2.0 * PATIENCE)
                          or read_backup("/godot/pair/inStep") == "true",
                          "pair.realign is taken by the backup")
             time.sleep(1.0)
-            report.check(wait_for(lambda: read_backup("/godot/pair/inStep") == "true", 4.0),
+            report.check(wait_for(lambda: read_backup("/godot/pair/inStep") == "true", 4.0 * PATIENCE),
                          "after pair.realign the backup is still in step",
                          f"inStep {read_backup('/godot/pair/inStep')!r}, differs {read_backup('/godot/pair/differs')!r}")
             report.equal(live_runs(read_backup, BED), [bed_run], "the bed still under the main's name")
@@ -268,7 +272,7 @@ def run() -> int:
             report.check(apart <= PLAYHEAD_TICKS * TICK + skew,
                          "and still within the playhead's tolerance", f"main {leader:.3f}, backup {theirs:.3f}")
             send_main("pair.realign")
-            report.check(wait_for(lambda: "not-following" in read_main("/godot/engine/lastError"), 3.0),
+            report.check(wait_for(lambda: "not-following" in read_main("/godot/engine/lastError"), 3.0 * PATIENCE),
                          "pair.realign on the main, which leads, is refused not-following",
                          f"lastError {read_main('/godot/engine/lastError')!r}")
 
@@ -296,10 +300,10 @@ def run() -> int:
             servers.append(main)
             read_main = reader(main)
 
-            report.check(wait_for(lambda: read_main("/godot/pair/state") == "following", 10.0),
+            report.check(wait_for(lambda: read_main("/godot/pair/state") == "following", 10.0 * PATIENCE),
                          "the main started again follows the backup that took over",
                          f"main {read_main('/godot/pair/state')!r}")
-            report.check(wait_for(lambda: read_main("/godot/pair/inStep") == "true", 8.0),
+            report.check(wait_for(lambda: read_main("/godot/pair/inStep") == "true", 8.0 * PATIENCE),
                          "and is seated where the backup is, in step",
                          f"inStep {read_main('/godot/pair/inStep')!r}, differs {read_main('/godot/pair/differs')!r},"
                          f" alarm {read_main('/godot/pair/alarm')!r}")
