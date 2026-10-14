@@ -28358,6 +28358,72 @@ cable, and a code from a VTR or a desk - the bench's.
   driver plays the MTC it judges from inside the engine (`--midi-play-loop`), so a starved machine makes its
   own sender late; run one after the other, both were green. `tests/CMakeLists.txt` now has it hold every
   lane, so no other timing driver runs beside it; CI, one lane, ran it so already and voids that check.
+- **TG.12's CI run**, 2026-10-14: the first CI run to carry `blackbox.timegroup` (38488379049, on ff8f5ac) was
+  green on Linux and red on Windows in both locales (4 and 5 of 86 checks) and on macOS in fr_FR (1 of 96). Four
+  of the five failures were the driver's, each reading a starved runner's late tick as the engine's doing; the
+  fifth is not settled. Only `tests/blackbox/timegroup.py` changed; the engine did not. (1) **`stopped` at the
+  stop, "none", for LTC and MTC** (Windows, both locales). The watcher decides a stop against the samples counted
+  when the tick runs (`videoClockNow`), and the record goes in under the tick's number, whose sample is where the
+  tick was due; the judge took that number for the moment the stop was said and wanted it after the line fell
+  quiet. The watcher waits five frames and a tick and a block, so a tick some 240 ms late puts the record's number
+  before the quiet. A record whose tick was due before the quiet is now the stop's when the tick could have run
+  after it, by the lateness the engine's log notes around it (`tick_late_around`, as `launched_late` already reads
+  it); a stop not found now says which `stopped` records there were, each tick against the quiet and its noted
+  lateness. (2) **The scene's second sound 1.5 s after its first "to the sample"** (Windows, both locales):
+  1.497589 s in C, where the first launched five blocks late (`run.late`, its own checks voided) and the second
+  0.2 samples from the map's sample for the scene's time plus 1.5 s - TG.7 places a scene's members on the scene's
+  start plus their offsets, not after one another. When the first was late, the second is now held, to the sample
+  still, to the scene's start as one of the maps the engine held while it placed the scene puts it, rounded up as
+  the engine rounds it, since a re-anchor moves a scene's start until it is committed; the second launched late
+  itself voids it. The fr_FR run's second sound, 1.496125 s after a first launched one block late, was 3.8 samples
+  from that first's map; that run wrote one LTC re-anchor more than C's, but whether it fell while the scene was
+  placed CI's output cannot say - the log is not kept. (3) **Held, every LTC member on the same sample of its code
+  as unheld** (Windows, C): "-0.20 against +1.80 samples", the jump chaser the only member compared. The two
+  serves fired under different maps of the code. The unheld one's was the usual re-anchor at 00:59:50:00, which
+  puts 01:00:02:00 on 1055948.20; the engine takes the first sample at or after a frame's moment
+  (`CodeMap::sampleOf`), so the chaser began on 1055949, 1.8 samples after the input's frame. The held serve's
+  free runner was asked under the first jump, already at 1.00005 (00:59:40:02 on 3840, putting the frame on
+  1055947.39 - its speed read back from those numbers; a jump said on a late tick fits more frames, so can know
+  the +50 ppm at once and then needs no re-anchor), and its jump chaser began on 1055947, under a map putting the
+  frame no later than that. Honest lines all, 0.04 ms apart at the members' time, each start on its own map's
+  sample and within a millisecond of the input's frame, as judge_start holds them: which turn a watcher writes,
+  and when, depends on its ticks, not on the hold. Where both serves drew the same map the starts are still held
+  to the same sample of the code; where they drew two, each to its own map's sample rounded up, the same distance
+  from it as unheld (a scene's member's place includes its offset, which `starts_of` had left out); the detail
+  prints both maps. (4) **The MTC jump chaser 30000.46 and 45119.83 ms out**, back from the stop and after the
+  locate (Windows, fr_FR): `map_errors` switched the map a point is held to at its record's tick's due sample, so
+  a tick some 80 ms late at the locate held the chaser, still in step before the locate, to the map after it - 30
+  s - and one some 600 ms late at the loop point to the loop's - 45.12 s, the loop's distance at that moment. The
+  LTC chasers, judged against the story itself, were in step in the same run. A map now holds from its tick's due
+  sample, never before its own turn's anchor, and until the tick could have run (the noted lateness, two ticks
+  when none is noted) and the chaser moved (0.1 s: a launch horizon and the crossfade) a point is held to
+  whichever of the maps it straddles it is nearer; after that to the new one alone, so a chaser that never moves
+  is still caught. (5) **macOS, fr_FR: the timestretch chaser's burst at 49.144 s read 989.099 Hz**, one of 107 -
+  not settled. That burst straddles the return, where the catch-up begins. Here the same burst reads 1000.001 Hz
+  with a splice at the catch-up's start (a cycle of 57.54 samples and the next 38.46, at 49.111 s), which leaves
+  the count whole; and every burst of the catch-up carries a short wobble a hundred milliseconds in (three or four
+  cycles of 43 to 55 samples) that nets out, each burst within 0.025 Hz - the stretcher's, at a speed off one. 989
+  Hz is the crossings counted some three short over the burst: what a stretch of near-silence two or three
+  milliseconds long in the voice reads as - a hole, or a splice whose crossfade cancels - and no clean splice
+  could. A render that dropped a block would have moved the free runner, which was not moved. Not reproduced here:
+  every burst of the fourteen starved renders below that kept their tick read within 0.025 Hz. The check is left
+  strict; for a burst off pitch its detail now says what its cycles say (`burst_flaws`: the median, the longest
+  and shortest and where, the most near-silent samples in one cycle), so the next one says hole, splice or pitch.
+  REPRODUCED, AND NOT, in `build/tgf4/`: the driver run as CI judges it (`GITHUB_ACTIONS=true`), it and its serves
+  held to four, two or one of this machine's efficient cores (an Intel Core Ultra 7 255H) beside a unit shard
+  (AudioTests 1-20 or 21-27) held there too, with and without busy loops, stayed green in both locales - the tick
+  runs at TIME_CRITICAL, and contention alone noted it at most 59 ms late; its two low-power cores, or one of them
+  with an efficient one, ran the tick away (seconds behind, 46 s by the end) and turned everything red, (1) and
+  (4) among them. So the late ticks were made instead: a green fr_FR room's log, its records at the stop, the
+  locate and the loop renumbered as if their ticks had run 300, 150 and 720 ms late, with notes saying so, its
+  render untouched - a late tick changes when a record is applied, not what the sound did. TG.12's driver fails it
+  on exactly (1), both codes, and (4), 29999.15 and 45119.31 ms against CI's 30000.46 and 45119.83; the mended one
+  passes it. And in the runaway run the mended driver finds the stop said on a tick due 22 s before the quiet,
+  noted 23 s late. Green with the mended driver, in C and fr_FR: `blackbox.timegroup` through ctest, unstarved;
+  the same driver as CI judges it, on four efficient cores beside an AudioTests shard; every room kept here judged
+  again (`--analyse`), and the late-tick room; `wfg.replay.*` and `blackbox.timecode` (66 of 66). Left: (5); and
+  how late a Windows runner's ticks run, which the engine's notes would say - they are in its log, which CI does
+  not keep.
 
 ## 61. Keys, text and blur
 
