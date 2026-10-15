@@ -179,6 +179,14 @@ namespace
                                                           h (static_cast<std::int64_t> (last)), s (std::move (stream)) });
     }
 
+    /** One message's bytes read back, as the server hands them on. */
+    osc::Packet packetOf (const std::vector<std::uint8_t>& bytes)
+    {
+        const auto decoded = osc::decode (bytes.data(), bytes.size());
+        REQUIRE (decoded.ok);
+        return decoded.packet;
+    }
+
     std::int64_t nanos (Clock::time_point at)
     {
         return static_cast<std::int64_t> (std::chrono::duration_cast<std::chrono::nanoseconds> (at.time_since_epoch()).count());
@@ -602,6 +610,174 @@ TEST_CASE ("peer link: a hello that follows asks from now; one that says it no l
     CHECK (receiver.reading (t0, 1.0).gaps == 0);
     CHECK (receiver.streamId() == "S-lead");
     CHECK (receiver.resumePoint() == std::make_pair (std::uint64_t { 7 }, std::string ("S-lead")));
+}
+
+//==============================================================================
+/*  RD.12: WHAT A FOLLOWER SAYS OF ITSELF. Its own message, not five more
+    arguments on the clock's; strings and integers, so a French machine's is a
+    C one's; each sentence clipped - written and read - on a character's first
+    byte; and the leader takes it only from a connection that follows it, only
+    while it says it is following, and only while it is fresh. */
+TEST_CASE ("peer link: RD.12's verdict crosses the wire exactly and clipped, and the leader holds it only from a follower, only while fresh")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    using Bound = pair::wire::Bound;
+
+    pair::FollowerVerdict said;
+    said.inStep = false;
+    said.differs = "cue 4,5 Pluie d'\xc3\xa9t\xc3\xa9 is running on the main, not here";
+    said.showMatch = std::nullopt;
+    said.seat = "following";
+
+    //  THE WIRE: i s i s s, the address the leader's half takes.
+    const auto bytes = pair::wire::verdictBytes (said);
+    const auto decoded = osc::decode (bytes.data(), bytes.size());
+    REQUIRE (decoded.ok);
+    CHECK (decoded.packet.address == std::string (pair::wire::verdict));
+    REQUIRE (decoded.packet.args.size() == 5u);
+    CHECK (decoded.packet.args[0] == osc::Value::int32 (0));
+    CHECK (decoded.packet.args[2] == osc::Value::int32 (-1));
+    CHECK (pair::wire::boundFor (decoded.packet) == Bound::leader);
+
+    const auto read = pair::wire::readVerdict (decoded.packet);
+    REQUIRE (read.has_value());
+    CHECK (*read == said);
+
+    //  Every answer, each way.
+    for (const auto inStep : { std::optional<bool> {}, std::optional<bool> { true }, std::optional<bool> { false } })
+        for (const auto showMatch : { std::optional<bool> {}, std::optional<bool> { true }, std::optional<bool> { false } })
+        {
+            pair::FollowerVerdict one;
+            one.inStep = inStep;
+            one.showMatch = showMatch;
+            one.showDiffers = showMatch == false ? "1 sound missing here: tone.wav" : "";
+            one.seat = "following";
+            const auto back = pair::wire::readVerdict (packetOf (pair::wire::verdictBytes (one)));
+            REQUIRE (back.has_value());
+            CHECK (*back == one);
+        }
+
+    CHECK (std::string (pair::verdictWord (std::nullopt)) == "unknown");
+    CHECK (std::string (pair::verdictWord (true)) == "yes");
+    CHECK (std::string (pair::verdictWord (false)) == "no");
+
+    /*  CLIPPED, on a character's first byte: a sentence of two-byte letters
+        cut to the bound, never half a letter, and ended "..." - written, and
+        read from a build that did not clip. */
+    std::string longSentence;
+
+    for (int n = 0; n < 1000; ++n)
+        longSentence += "\xc3\xa9";
+
+    const auto cut = pair::wire::clipped (longSentence);
+    CHECK (cut.size() <= pair::wire::verdictTextBytes);
+    CHECK (cut.size() >= pair::wire::verdictTextBytes - 4);
+    REQUIRE (cut.size() > 3u);
+    CHECK (cut.substr (cut.size() - 3) == "...");
+    CHECK ((cut.size() - 3) % 2 == 0);
+    CHECK (longSentence.rfind (cut.substr (0, cut.size() - 3), 0) == 0);
+    CHECK (pair::wire::clipped ("short") == "short");
+
+    pair::FollowerVerdict wordy = said;
+    wordy.showMatch = false;
+    wordy.showDiffers = longSentence;
+    const auto wordyBack = pair::wire::readVerdict (packetOf (pair::wire::verdictBytes (wordy)));
+    REQUIRE (wordyBack.has_value());
+    CHECK (wordyBack->showDiffers == cut);
+
+    const auto unclipped = pair::wire::readVerdict (osc::Packet::message (pair::wire::verdict,
+        { osc::Value::int32 (0), s (longSentence), osc::Value::int32 (1), s (""), s ("following") }));
+    REQUIRE (unclipped.has_value());
+    CHECK (unclipped->differs == cut);
+
+    //  NOT A VERDICT: a shape of another build says nothing; an answer it does not know is not known.
+    CHECK_FALSE (pair::wire::readVerdict (osc::Packet::message (pair::wire::verdict, { osc::Value::int32 (1) })).has_value());
+    CHECK_FALSE (pair::wire::readVerdict (osc::Packet::message (pair::wire::verdict,
+        { s ("1"), s (""), osc::Value::int32 (1), s (""), s ("following") })).has_value());
+
+    const auto odd = pair::wire::readVerdict (osc::Packet::message (pair::wire::verdict,
+        { osc::Value::int32 (7), s (""), osc::Value::int32 (1), s (""), s ("following") }));
+    REQUIRE (odd.has_value());
+    CHECK_FALSE (odd->inStep.has_value());
+    CHECK (odd->showMatch == true);
+
+    /*  THE LEADER'S HALF: held from a connection that follows, while fresh;
+        a shorter timeout than a second still holds it a second, twice the
+        follower's interval; not known when stale, from a connection that is
+        no follower, from a follower saying it does not follow, and once its
+        connection has closed or this machine no longer leads. */
+    Wire wire;
+    pair::Stream stream { "S-lead" };
+    stream.setSend (wire.send());
+    stream.setLeading (true);
+
+    pair::wire::Hello follows;
+    follows.machine = "FOLLOWER";
+    follows.role = "backup";
+    follows.lastCounter = pair::wire::fromNow;
+    follows.stream = "S-lead";
+    follows.state = "following";
+    follows.ownStream = "S-follow";
+    follows.described = true;
+
+    std::int64_t tick = 1;
+    stream.received (followerA, packetOf (pair::wire::helloBytes (follows)), t0);
+    stream.afterTick (tick++, 1.0);
+    REQUIRE (stream.followerCount() == 1);
+    CHECK (stream.followerVerdict (t0, 1.0) == nullptr);       // nothing said yet
+
+    stream.received (followerA, packetOf (pair::wire::verdictBytes (said)), t0);
+    stream.afterTick (tick++, 1.0);
+
+    const auto* held = stream.followerVerdict (t0 + 500ms, 1.0);
+    REQUIRE (held != nullptr);
+    CHECK (*held == said);
+    CHECK (stream.followerVerdict (t0 + 1000ms, 1.0) != nullptr);
+    CHECK (stream.followerVerdict (t0 + 1001ms, 1.0) == nullptr);
+    CHECK (stream.followerVerdict (t0 + 900ms, 0.1) != nullptr);
+    CHECK (stream.followerVerdict (t0 + 1500ms, 2.0) != nullptr);
+
+    pair::FollowReading rows;
+    pair::verdictRowsInto (rows, held);
+    CHECK (rows.peerInStep == "no");
+    CHECK (rows.peerDiffers == said.differs);
+    CHECK (rows.peerShowMatch == "unknown");
+    CHECK (rows.peerShowDiffers.empty());
+    pair::verdictRowsInto (rows, nullptr);
+    CHECK (rows.peerInStep == "unknown");
+    CHECK (rows.peerDiffers.empty());
+
+    //  From a connection that does not follow this machine: not taken.
+    stream.received (followerB, packetOf (pair::wire::verdictBytes (said)), t0);
+    stream.afterTick (tick++, 1.0);
+    CHECK (stream.followerVerdict (t0, 1.0) == nullptr);
+
+    //  From a follower that says it is not following: not known.
+    auto notFollowing = said;
+    notFollowing.seat = "bothSending";
+    stream.received (followerA, packetOf (pair::wire::verdictBytes (notFollowing)), t0);
+    stream.afterTick (tick++, 1.0);
+    CHECK (stream.followerVerdict (t0, 1.0) == nullptr);
+
+    //  Its connection closed: not known.
+    stream.received (followerA, packetOf (pair::wire::verdictBytes (said)), t0);
+    stream.afterTick (tick++, 1.0);
+    REQUIRE (stream.followerVerdict (t0, 1.0) != nullptr);
+    stream.closed (followerA);
+    stream.afterTick (tick++, 1.0);
+    CHECK (stream.followerVerdict (t0, 1.0) == nullptr);
+
+    //  This machine no longer leads: not known.
+    stream.received (followerA, packetOf (pair::wire::helloBytes (follows)), t0);
+    stream.received (followerA, packetOf (pair::wire::verdictBytes (said)), t0);
+    stream.afterTick (tick++, 1.0);
+    REQUIRE (stream.followerVerdict (t0, 1.0) != nullptr);
+    stream.setLeading (false);
+    CHECK (stream.followerVerdict (t0, 1.0) == nullptr);
+    stream.afterTick (tick++, 1.0);
+    stream.setLeading (true);
+    CHECK (stream.followerVerdict (t0, 1.0) == nullptr);
 }
 
 //==============================================================================

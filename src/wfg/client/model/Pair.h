@@ -144,6 +144,14 @@ namespace wfg::client::model
         std::string showDiffers;        ///< `pair/showDiffers`, clipped
         Flag mapped = Flag::unsaid;     ///< `pair/mapped`
 
+        /*  WHAT THE FOLLOWER SAID OF ITSELF, on the machine it follows (RD.12):
+            `pair/peerInStep` and `pair/peerShowMatch` - yes, no, or unsaid for
+            the engine's `unknown` - and their sentences, in the follower's words. */
+        Flag peerInStep = Flag::unsaid;     ///< `pair/peerInStep`
+        std::string peerDiffers;            ///< `pair/peerDiffers`, clipped
+        Flag peerShowMatch = Flag::unsaid;  ///< `pair/peerShowMatch`
+        std::string peerShowDiffers;        ///< `pair/peerShowDiffers`, clipped
+
         //  The numbers, as the engine wrote them.
         std::string roundTrip;          ///< `pair/roundTrip`, seconds
         std::string delay;              ///< `pair/delay`, ticks

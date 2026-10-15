@@ -33,7 +33,9 @@
     runs in parts and whole again; what it all costs. And (namespace draft
     §60, TG.5) each incoming code's map as a `code` line of its own, moved
     with the ticks, the format bumped and an older one refused in a sentence,
-    and handed over by a seat.
+    and handed over by a seat. And (RD.12) the machine followed told what its
+    follower judged - not in step, its show not this one's - in its rows and
+    its alarm, and nothing known once the follower is silent or gone.
 
     Every case runs under fr_FR as well as C: a position's numbers are text.
 */
@@ -62,9 +64,11 @@
 #include <wfg/engine/log/Replay.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/pair/Follow.h>
+#include <wfg/engine/pair/Leadership.h>
 #include <wfg/engine/pair/PairSettings.h>
 #include <wfg/engine/pair/PeerLink.h>
 #include <wfg/engine/pair/Position.h>
+#include <wfg/engine/pair/ShowCheck.h>
 #include <wfg/engine/pair/Summary.h>
 
 #include <algorithm>
@@ -76,6 +80,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <random>
 #include <set>
@@ -841,6 +846,323 @@ TEST_CASE ("seat: two engines on one show - a follower that joins late is seated
     CHECK (seats.size() == static_cast<std::size_t> (following.seats()));
     CHECK (std::all_of (seats.begin(), seats.end(), [] (const LogRecord& record)
                         { return record.kind == LogRecord::Kind::applied && record.origin == origin::engine; }));
+}
+
+//==============================================================================
+/*  RD.12: THE MACHINE FOLLOWED HEARS WHAT ITS FOLLOWER JUDGED. Two engines on
+    one show joined by the real stream and receiver, as above, and on the
+    follower RD.10's show check beside RD.8's: the follower says its verdicts
+    up the link as serve says them (`pair::verdictOf`, `wire::verdictBytes`,
+    every half second and on a change), and the leader's rows and alarm are
+    read as serve reads them (`Stream::followerVerdict`, `verdictRowsInto`,
+    `pair::alarm`). In step and the same show, the leader says nothing; a cue
+    killed on the follower alone, and its alarm says so in the follower's words
+    with what mends it - on the follower; realigned, in step again; a cue's
+    level changed on the follower alone, and the leader's alarm says the show
+    differs, naming the cue; the follower silent for the timeout, and the rows
+    read not known; a verdict again, then its connection closed - not known at
+    once. */
+TEST_CASE ("seat: the machine followed hears its follower's verdicts - not in step, a show that differs, said in its rows and its alarm; silent or gone, not known (RD.12)")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const Show show;
+    Machine main { show.text }, backup { show.text };
+    backup.runIds.drawSeed();
+    backup.runner.runNames().setSalt (backup.runner.runNames().salt() ^ 0x0f0f0f0fu);
+
+    //  EACH MACHINE'S SHOW, FINGERPRINTED as its worker would: again whenever its show moves.
+    const pair::Fingerprinter mainPrinter { juce::File(), {}, {} };
+    const pair::Fingerprinter backupPrinter { juce::File(), {}, {} };
+    std::shared_ptr<const pair::ShowState> mainPrint, backupPrint;
+
+    const auto printsNow = [&]
+    {
+        if (mainPrint == nullptr || mainPrint->print->revision != main.document.showRevision())
+            mainPrint = mainPrinter.make (main.document.root(), main.document.showRevision());
+
+        if (backupPrint == nullptr || backupPrint->print->revision != backup.document.showRevision())
+            backupPrint = backupPrinter.make (backup.document.root(), backup.document.showRevision());
+    };
+
+    printsNow();
+
+    //  THE LEADER'S HALF, as serve wires it: the stream, its position, its summaries with its show, its show check.
+    pair::Stream stream { "S1" };
+    stream.setLeading (true);
+    main.engine.setAfterRecord ([&stream] (const LogRecord& record, const Command* command) { stream.keep (record, command); });
+    stream.setPositionMaker ([&main] (std::int64_t at, std::uint64_t counter)
+                             { return pair::toText (main.runner.positionNow (at, counter)); });
+    stream.setSummaryMaker ([&main, &mainPrint] (std::int64_t at, std::uint64_t counter)
+                            {
+                                auto summary = main.runner.summaryNow (at, counter);
+                                summary.showFingerprint = mainPrint->print->fingerprint;
+                                summary.mediaDigest = mainPrint->print->mediaDigest;
+                                return pair::summaryBytes (summary);
+                            });
+
+    JitteryWire wire { 11 };
+    stream.setSend (wire.send());
+    pair::ShowCheck leaderCheck;
+
+    //  THE FOLLOWER'S, as serve wires it.
+    pair::Receiver receiver;
+    pair::Follower following { [&backup] (Event event) { return backup.engine.submit (std::move (event)); } };
+    pair::InStep inStep;
+    pair::ShowCheck showCheck;
+    pair::Labels labels;
+    labels.cue = [&backup] (const std::string& id) { return backup.runner.labelOf (id); };
+    labels.list = labels.cue;
+
+    receiver.setOnRecord ([&following] (std::uint64_t, const LogRecord& record) { following.record (record); });
+    receiver.setOnBeat ([&following] (std::int64_t mainTick, Clock::time_point at) { following.beat (mainTick, at); });
+    receiver.setOnPosition ([&following] (std::uint64_t, std::int64_t mainTick, std::string text)
+                            { following.position (mainTick, std::move (text)); });
+    receiver.setOnSummary ([&inStep, &showCheck] (pair::Summary summary)
+                           {
+                               showCheck.heard (summary.tick, summary.showFingerprint, summary.mediaDigest);
+                               inStep.heard (std::move (summary));
+                           });
+
+    pair::FollowGate gate { backup.engine.commands(), [] (std::vector<std::uint8_t>) { return true; } };
+    backup.engine.setGate ([&gate] (Event& event) { return gate.take (event); });
+    backup.engine.setAfterRecord ([&following, &inStep, &backup] (const LogRecord& record, const Command*)
+                                  {
+                                      following.applied (record);
+
+                                      if (record.command == "pair.seat" && record.kind == LogRecord::Kind::applied)
+                                          inStep.seated (record.tick + backup.runner.seatSettleTicks());
+                                  });
+
+    const std::string followerOrigin = "ws:127.0.0.1:50001";
+    constexpr std::int64_t clockBase = 2000;
+    const auto mainDue = [] (std::int64_t at) { return t0 + 20ms * at; };
+    const auto backupDue = [] (std::int64_t local) { return t0 + 20ms * (local - clockBase) + 7ms; };
+
+    //  THE MAIN'S EVENING, then the backup joins and follows from now.
+    std::int64_t mainTick = 50;
+    playEvening (main, show, mainTick);
+
+    for (; mainTick < 200; ++mainTick)
+    {
+        main.tickOnce (mainTick);
+        printsNow();
+        wire.sentAt = mainDue (mainTick) + 2ms;
+        stream.afterTick (mainTick, 1.0);
+    }
+
+    pair::wire::Hello hello;
+    hello.machine = "backup";
+    hello.role = "backup";
+    hello.lastCounter = pair::wire::fromNow;
+    hello.stream = "S1";
+    hello.state = "following";
+    hello.ownStream = "S2";
+    hello.described = true;
+    stream.received (followerOrigin, packetOf (pair::wire::helloBytes (hello)), mainDue (mainTick));
+    receiver.startAfresh ("S1");
+    following.start();
+    backup.engine.setGated (true);
+
+    /*  WHAT THE LEADER READS, AS SERVE READS IT: its rows from what the
+        follower last said, and its alarm - a main leading a follower that is
+        there. */
+    pair::Situation linked;
+    linked.role = pair::Role::main;
+    linked.linked = true;
+    linked.peerSeat = pair::Seat::following;
+    const pair::Seated leading { pair::Role::main, pair::Seat::leading, "follower-linked" };
+
+    pair::FollowReading rows;
+    std::string alarm;
+
+    const auto readLeader = [&] (Clock::time_point now)
+    {
+        const auto* said = stream.followerVerdict (now, 1.0);
+        pair::verdictRowsInto (rows, said);
+        alarm = pair::alarm (leading, linked, {}, said != nullptr ? *said : pair::FollowerVerdict {});
+    };
+
+    //  WHAT THE FOLLOWER SAYS, AS SERVE SAYS IT - unless it has fallen silent.
+    pair::FollowerVerdict said;
+    std::int64_t saidAt = -1000000, verdictsSent = 0;
+    auto silent = false;
+
+    std::int64_t localTick = clockBase + mainTick + 3;
+    const auto lastMainTick = mainTick + 1400;
+
+    //  The milestones, each the main's tick it was read at.
+    std::int64_t toldInStep = -1, planted = -1, toldApart = -1, toldBack = -1, edited = -1, toldShow = -1,
+                 silentFrom = -1, toldUnknown = -1, spokeAgain = -1, closedAt = -1;
+    std::string apartRows, apartAlarm, showRows, showAlarm, followerShowSaid, unknownAlarm = "(never read)";
+    std::string rainLevel;
+
+    while (mainTick <= lastMainTick && closedAt < 0)
+    {
+        if (mainDue (mainTick) <= backupDue (localTick))
+        {
+            main.tickOnce (mainTick);
+            printsNow();
+            wire.sentAt = mainDue (mainTick) + 2ms;
+            stream.afterTick (mainTick, 1.0);
+
+            //  The follower's questions about the show, answered down the channel they came by.
+            leaderCheck.drain();
+            leaderCheck.answer (mainPrint.get(), true, [&showCheck] (const std::string&, const std::vector<std::uint8_t>& bytes)
+                                {
+                                    showCheck.received ("127.0.0.1:5010", packetOf (bytes));
+                                    return true;
+                                });
+
+            readLeader (mainDue (mainTick));
+
+            //  IN STEP AND THE SAME SHOW: the leader's rows say so, and its alarm nothing.
+            if (toldInStep < 0 && rows.peerInStep == "yes" && rows.peerShowMatch == "yes")
+            {
+                toldInStep = mainTick;
+                CHECK (alarm.empty());
+                CHECK (rows.peerDiffers.empty());
+                CHECK (rows.peerShowDiffers.empty());
+            }
+
+            //  OUT OF STEP, SAID ON THE LEADER - and the follower asks to be seated again.
+            if (planted >= 0 && toldApart < 0 && rows.peerInStep == "no")
+            {
+                toldApart = mainTick;
+                apartRows = rows.peerDiffers;
+                apartAlarm = alarm;
+                stream.received (followerOrigin, osc::Packet::message (pair::wire::seat, {}), mainDue (mainTick));
+            }
+
+            //  IN STEP AGAIN, SAID ON THE LEADER - and then a cue's level changed on the follower alone.
+            if (toldApart >= 0 && toldBack < 0 && following.seats() > 1 && rows.peerInStep == "yes")
+            {
+                toldBack = mainTick;
+                CHECK (alarm.empty());
+
+                const auto rain = "/godot/cue/" + show.rain + "/level";
+                REQUIRE (backup.document.setAttribute (rain, "-12").ok);
+                rainLevel = backup.document.getAttribute (rain).value_or (std::string {});
+                edited = mainTick;
+            }
+
+            //  THE SHOW DIFFERS, SAID ON THE LEADER - and the follower then falls silent.
+            if (edited >= 0 && toldShow < 0 && rows.peerShowMatch == "no")
+            {
+                toldShow = mainTick;
+                showRows = rows.peerShowDiffers;
+                showAlarm = alarm;
+                followerShowSaid = showCheck.differs();
+                CHECK (rows.peerInStep == "yes");
+                silent = true;
+                silentFrom = mainTick;
+            }
+
+            //  SILENT FOR THE TIMEOUT: nothing known - and then it speaks again.
+            if (silentFrom >= 0 && toldUnknown < 0 && rows.peerInStep == "unknown" && rows.peerShowMatch == "unknown")
+            {
+                toldUnknown = mainTick;
+                unknownAlarm = alarm;
+                CHECK (rows.peerDiffers.empty());
+                CHECK (rows.peerShowDiffers.empty());
+                silent = false;
+                saidAt = -1000000;
+            }
+
+            //  SPEAKING AGAIN, and then its connection closes: nothing known, at once.
+            if (toldUnknown >= 0 && spokeAgain < 0 && rows.peerShowMatch == "no")
+            {
+                spokeAgain = mainTick;
+                stream.closed (followerOrigin);
+                stream.afterTick (mainTick, 1.0);
+                readLeader (mainDue (mainTick));
+                closedAt = mainTick;
+            }
+
+            ++mainTick;
+            continue;
+        }
+
+        const auto now = backupDue (localTick);
+        wire.deliverUpTo (now, receiver);
+        receiver.drain (now, 1.0);
+        showCheck.drain();
+        const auto seatsBefore = following.seats();
+        following.beforeTick (localTick, now, 0.0004);
+        backup.tickOnce (localTick, following.seats() == seatsBefore);
+        printsNow();
+
+        const auto comparable = following.delayFixed() && ! following.seatHeld();
+        inStep.afterTick (localTick, following.offset(), comparable,
+                          [&backup, localTick] { return backup.runner.summaryNow (localTick, 0); }, labels);
+        showCheck.afterTick (localTick, following.offset(), comparable, { backupPrint.get(), true }, "the main", now);
+
+        if (auto question = showCheck.question (now); ! question.empty())
+            leaderCheck.received (followerOrigin, packetOf (question));
+
+        //  THE BED KILLED HERE ALONE, once the leader has been told in step a while.
+        if (toldInStep >= 0 && planted < 0 && mainTick > toldInStep + 30)
+        {
+            const auto bed = backup.runOf (show.bed);
+            REQUIRE (! bed.empty());
+            REQUIRE (backup.engine.submit (std::string (origin::engine), "run.kill", { s (bed) }));
+            planted = mainTick;
+        }
+
+        if (! silent)
+        {
+            auto verdict = pair::verdictOf (inStep, showCheck, true, "following");
+
+            if (verdict != said || localTick - saidAt >= pair::wire::verdictEveryTicks)
+            {
+                stream.received (followerOrigin, packetOf (pair::wire::verdictBytes (verdict)), now);
+                said = std::move (verdict);
+                saidAt = localTick;
+                ++verdictsSent;
+            }
+        }
+
+        ++localTick;
+    }
+
+    MESSAGE ("verdicts sent " << verdictsSent << "; the leader told in step at its tick " << toldInStep
+             << ", apart " << toldApart << " (planted " << planted << "), in step again " << toldBack
+             << ", the show differs " << toldShow << " (edited " << edited << "), not known " << toldUnknown
+             << " (silent from " << silentFrom << "), closed " << closedAt
+             << "; the follower's show sentence: \"" << followerShowSaid << "\"");
+
+    //  IN STEP AND THE SAME SHOW, TOLD.
+    REQUIRE (toldInStep >= 0);
+
+    //  NOT IN STEP: the follower's own words in the leader's row, and the leader's alarm saying what mends it, where.
+    REQUIRE (toldApart >= 0);
+    CHECK (apartRows == "cue Bed is running on the main, not here");
+    CHECK (apartAlarm == "The backup is not in step: it says cue Bed is running on the main, not here. Realign on the"
+                         " backup to take this machine's position again.");
+
+    //  REALIGNED: in step again, and the alarm quiet.
+    REQUIRE (toldBack >= 0);
+    CHECK (rainLevel == "-12");
+
+    //  THE SHOW DIFFERS ON THE FOLLOWER ALONE: the cue named, and taking this machine's show there.
+    REQUIRE (toldShow >= 0);
+    CHECK (showRows == followerShowSaid);
+    CHECK (showRows.rfind ("the show differs: ", 0) == 0);
+    CHECK (showRows.find ("Rain changed") != std::string::npos);
+    CHECK (showAlarm == "The backup says " + showRows + ". Take the main's show on the backup to make the two the same.");
+
+    //  SILENT PAST THE TIMEOUT: not known, never the last thing it said - and no alarm from it.
+    REQUIRE (toldUnknown >= 0);
+    CHECK (toldUnknown - silentFrom >= 1000 / 20 - 1);
+    CHECK (toldUnknown - silentFrom <= 1000 / 20 + pair::wire::verdictEveryTicks + 2);
+    CHECK (unknownAlarm.empty());
+
+    //  GONE: not known at once.
+    REQUIRE (closedAt >= 0);
+    CHECK (rows.peerInStep == "unknown");
+    CHECK (rows.peerShowMatch == "unknown");
+    CHECK (rows.peerShowDiffers.empty());
+    CHECK (alarm.empty());
 }
 
 //==============================================================================

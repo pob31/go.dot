@@ -21,7 +21,7 @@ import { tree } from "../plumbing/tree.js";
 import { command, send } from "../plumbing/link.js";
 import { gesture } from "../gestures/table.js";
 import { wantsTheKeys } from "../gestures/keys.js";
-import { readPair, paired, seatWords, seatSentence, buttonWords, offer, banner } from "../model/pair.js";
+import { readPair, paired, seatWords, seatSentence, buttonWords, offer, banner, peerLines } from "../model/pair.js";
 import { el } from "./common.js";
 
 el("go").addEventListener("click", () => gesture("go", []));
@@ -140,6 +140,14 @@ function renderPair() {
 
   setText(el("pair-head"), said ? said.heading : seatWords(pair));
   setText(el("pair-said"), said ? said.sentence : seatSentence(pair));
+
+  /*  ON THE COMPUTER FOLLOWED, WHAT ITS FOLLOWER SAID OF ITSELF (RD.12): the
+      alarm above already carries its bad news; the line's title says both
+      verdicts, good or not known, for whoever wants to know before a changeover. */
+  const told = peerLines(pair).map((line) => line.label + ": " + line.value).join("\n");
+  const saidLine = el("pair-said");
+
+  if (saidLine && saidLine.title !== told) saidLine.title = told;
 
   for (const button of bar.querySelectorAll("[data-cmd]")) {
     const name = button.dataset.cmd;

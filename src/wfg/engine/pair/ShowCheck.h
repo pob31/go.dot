@@ -319,4 +319,14 @@ namespace wfg::pair
         mutable std::mutex lock;
         std::vector<Item> inbox;
     };
+
+    //==========================================================================
+    /*  WHAT A FOLLOWER SAYS OF ITSELF UP THE LINK (namespace draft §58, RD.12;
+        pair/Leadership.h `FollowerVerdict`): its two verdicts as its own rows
+        and its own alarm read them - in step once a summary matched, not once
+        one said what differs; the same show once everything agrees, not once
+        something was named, NOT KNOWN while this machine's own fingerprint is
+        not of the show it has now (`showCurrent`) - each sentence clipped for
+        the wire, and its seat in `pair/state`'s word. */
+    FollowerVerdict verdictOf (const InStep& inStep, const ShowCheck& show, bool showCurrent, std::string seat);
 }

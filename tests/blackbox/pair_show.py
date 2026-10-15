@@ -34,7 +34,11 @@ own:
     main's, `pair/showMatch` true, the backup's own interface row unchanged in
     the show and on its disk, its old files in a set-aside folder of the show;
     on the main the same command is refused `not-following`;
-  - a sound removed from the backup's copy is named as missing here.
+  - a sound removed from the backup's copy is named as missing here;
+  - and the MAIN is told (RD.12): the backup says its verdict up the link, so
+    the main's `pair/peerShowMatch` reads yes, then no with the backup's own
+    sentence in `pair/peerShowDiffers` and its alarm naming the cue and what
+    mends it on the backup, then yes again once the backup took its show.
 
 TWO SERVES ON ONE MACHINE, on the dummy clock, on COPIES of the phase 2
 fixture whose show is rewritten here, each with its own temporary engine
@@ -181,6 +185,9 @@ def run() -> int:
                          f"showMatch {read_backup('/godot/pair/showMatch')!r}, "
                          f"showDiffers {read_backup('/godot/pair/showDiffers')!r}")
             report.equal(read_backup("/godot/pair/showDiffers"), "", "and nothing is said to differ")
+            report.check(wait_for(lambda: read_main("/godot/pair/peerShowMatch") == "yes", SETTLE),
+                         "the main is told so by the backup: its pair/peerShowMatch reads yes (RD.12)",
+                         f"peerShowMatch {read_main('/godot/pair/peerShowMatch')!r}")
             report.equal(read_main("/godot/audio/outputDevice"), "Main Interface", "the main's interface is its own")
             report.equal(read_backup("/godot/audio/outputDevice"), "Backup Interface",
                          "and the backup's is its own")
@@ -210,6 +217,19 @@ def run() -> int:
                          "the alarm says it, and what mends it",
                          f"alarm {read_backup('/godot/pair/alarm')!r}")
 
+            # THE MAIN TOLD (RD.12): the machine the show is run on hears it from
+            # the backup, in the backup's words, and its alarm says what mends it -
+            # on the backup, whose button it is.
+            report.check(wait_for(lambda: read_main("/godot/pair/peerShowMatch") == "no", SETTLE),
+                         "the main is told by the backup: its pair/peerShowMatch reads no",
+                         f"peerShowMatch {read_main('/godot/pair/peerShowMatch')!r}")
+            report.equal(read_main("/godot/pair/peerShowDiffers"), "the show differs: cue 4 Rain changed",
+                         "in the backup's own words")
+            main_alarm = read_main("/godot/pair/alarm")
+            report.check("cue 4 Rain changed" in main_alarm and "Take the main's show on the backup" in main_alarm,
+                         "and the main's alarm names the cue, and says to take its show on the backup",
+                         f"alarm {main_alarm!r}")
+
             # === TAKEN ==============================================================
             errors_before = read_main("/godot/engine/errorCount")
             send_main("pair.adoptShow")
@@ -228,6 +248,13 @@ def run() -> int:
                          f"showMatch {read_backup('/godot/pair/showMatch')!r}, "
                          f"showDiffers {read_backup('/godot/pair/showDiffers')!r}")
             report.equal(read_backup("/godot/pair/showDiffers"), "", "with nothing said to differ")
+            report.check(wait_for(lambda: read_main("/godot/pair/peerShowMatch") == "yes", SETTLE),
+                         "and the main is told the shows match again",
+                         f"peerShowMatch {read_main('/godot/pair/peerShowMatch')!r}, "
+                         f"peerShowDiffers {read_main('/godot/pair/peerShowDiffers')!r}")
+            report.check(wait_for(lambda: "show" not in read_main("/godot/pair/alarm"), SETTLE),
+                         "its alarm no longer speaks of the show",
+                         f"alarm {read_main('/godot/pair/alarm')!r}")
             report.equal(read_backup("/godot/audio/outputDevice"), "Backup Interface",
                          "the backup's own interface row is unchanged")
             report.equal(read_main("/godot/audio/outputDevice"), "Main Interface", "and the main's is its own still")
@@ -267,6 +294,13 @@ def run() -> int:
             report.check("Copy the files" in read_backup("/godot/pair/alarm"),
                          "the alarm says so, and that the sound is not sent",
                          f"alarm {read_backup('/godot/pair/alarm')!r}")
+            report.check(wait_for(lambda: read_main("/godot/pair/peerShowDiffers") == "1 sound missing here: tone.wav",
+                                  SETTLE),
+                         "the main is told which sound the backup lacks",
+                         f"peerShowDiffers {read_main('/godot/pair/peerShowDiffers')!r}")
+            report.check("Copy the files" in read_main("/godot/pair/alarm"),
+                         "and its alarm says to copy the files",
+                         f"alarm {read_main('/godot/pair/alarm')!r}")
         finally:
             for server in (backup, main):
                 if server is not None:

@@ -18,6 +18,7 @@
 
 #include <wfg/engine/command/Command.h>
 
+#include <string_view>
 #include <utility>
 
 namespace wfg::pair
@@ -93,6 +94,60 @@ namespace wfg::pair
         {
             return role == Role::backup ? "main" : "backup";
         }
+
+        /*  The follower's sentence as the end of one of this machine's: its
+            own full stop kept, never a second one after it. */
+        std::string closed (const std::string& sentence)
+        {
+            return ! sentence.empty() && sentence.back() == '.' ? sentence : sentence + ".";
+        }
+
+        /*  WHAT THE FOLLOWER SAID OF ITSELF THAT AN OPERATOR HERE MUST KNOW
+            (RD.12), in its own words: they are reported - "the backup says" -
+            so its "here" reads as the backup's. ONE THING AT A TIME, AND THE
+            SHOW FIRST, as the follower's own alarm has it (RD.10): two shows
+            that differ explain runs that do, and taking the show seats the
+            follower again, so a Realign asked first would mend nothing. What
+            mends it is pressed on the follower - the buttons are its, never
+            this machine's - and the sentence says so, naming the button by the
+            word the follower's screen gives it ("Take the main's show"). */
+        std::string followerNews (Role role, const FollowerVerdict& said)
+        {
+            const std::string other = otherOf (role);
+            const std::string self = wordOf (role);
+
+            if (said.showMatch == false && ! said.showDiffers.empty())
+            {
+                //  The show's text, or only its files - the follower's sentence opens with which (ShowCheck.cpp).
+                const auto textDiffers = std::string_view (said.showDiffers).starts_with ("the show differs");
+
+                return "The " + other + " says " + closed (said.showDiffers)
+                     + (textDiffers ? " Take the " + self + "'s show on the " + other + " to make the two the same."
+                                    : std::string (" Copy the files so both machines have the same."));
+            }
+
+            if (said.inStep == false && ! said.differs.empty())
+                return "The " + other + " is not in step: it says " + closed (said.differs) + " Realign on the "
+                     + other + " to take this machine's position again.";
+
+            return {};
+        }
+
+        std::string joined (std::string first, const std::string& then)
+        {
+            if (first.empty())
+                return then;
+
+            if (! then.empty())
+                first += " " + then;
+
+            return first;
+        }
+    }
+
+    const char* verdictWord (std::optional<bool> said) noexcept
+    {
+        return ! said.has_value() ? "unknown" : *said ? "yes" : "no";
     }
 
     //==========================================================================
@@ -321,7 +376,7 @@ namespace wfg::pair
     }
 
     //==========================================================================
-    std::string alarm (const Seated& now, const Situation& s, const NotInStep& behind)
+    std::string alarm (const Seated& now, const Situation& s, const NotInStep& behind, const FollowerVerdict& follower)
     {
         if (now.role == Role::none)
             return {};
@@ -378,21 +433,22 @@ namespace wfg::pair
             case Seat::leading:
             {
                 //  Taken over and sending, with nothing following it yet.
-                if (peerFollows (s))
-                    return {};
+                std::string own;
 
-                const std::string other = otherOf (now.role);
+                if (! peerFollows (s))
+                {
+                    const std::string other = otherOf (now.role);
 
-                if (now.reason == "link-lost")
-                    return "The " + other + " was lost and this machine took over: it sends now.";
+                    if (now.reason == "link-lost")
+                        own = "The " + other + " was lost and this machine took over: it sends now.";
+                    else if (now.reason == "leader-restarted")
+                        own = "The " + other + " started again and this machine took over: it sends now.";
+                    else if (now.reason == "take-over")
+                        own = "This machine took over: it sends now, and the " + other + " does not follow it.";
+                }
 
-                if (now.reason == "leader-restarted")
-                    return "The " + other + " started again and this machine took over: it sends now.";
-
-                if (now.reason == "take-over")
-                    return "This machine took over: it sends now, and the " + other + " does not follow it.";
-
-                return {};
+                //  AND WHAT ITS FOLLOWER SAID OF ITSELF (RD.12), after its own.
+                return joined (std::move (own), followerNews (now.role, follower));
             }
         }
 

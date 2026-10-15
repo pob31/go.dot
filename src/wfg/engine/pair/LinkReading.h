@@ -135,5 +135,16 @@ namespace wfg::pair
         double clockResidual = 0.0;
         double outputLatency = 0.0;
         double peerOutputLatency = 0.0;
+
+        /*  WHAT THE FOLLOWER SAID OF ITSELF, on the machine it follows (RD.12;
+            pair/Leadership.h `FollowerVerdict`): whether it is in step and
+            whether its show is this one's - `yes`, `no` or `unknown` - and
+            each one's sentence in the follower's words. `unknown` and empty
+            on a machine that does not lead a follower, and once its follower
+            has not said it within the link's timeout. */
+        std::string peerInStep = "unknown";
+        std::string peerDiffers = {};
+        std::string peerShowMatch = "unknown";
+        std::string peerShowDiffers = {};
     };
 }

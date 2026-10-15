@@ -15,7 +15,7 @@
 */
 
 /*  WHAT THIS COMPUTER IS IN ITS PAIR, as the page says it (namespace draft §58,
-    RD.11): model/pair.js, the desktop's model/Pair.h said again for a browser.
+    RD.11, RD.12): model/pair.js, the desktop's model/Pair.h said again for a browser.
     The same seats, the same words and the same refusals as ClientTests pins for
     the window - the author's where he chose them (AGM-AGO), and a test that
     fails here when one client's words move and the other's do not. */
@@ -23,7 +23,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { readPair, paired, seatWords, seatSentence, buttonWords, offer, banner, COMMANDS } =
+const { readPair, paired, seatWords, seatSentence, buttonWords, offer, banner, peerLines, COMMANDS } =
   await import("../../clients/console/model/pair.js");
 
 /*  A tree as the engine serves one, for the rows this reads and nothing else. */
@@ -144,4 +144,44 @@ test("a main sending can hand over only while the backup is there", () => {
   assert.equal(offer(pairOf("main", "leading", { "/godot/pair/linked": true }), "pair.handOver").open, true);
   assert.equal(offer(pairOf("main", "alone", { "/godot/pair/linked": false }), "pair.handOver").reason, "not-linked");
   assert.equal(offer(pairOf("main", "leading", { "/godot/pair/linked": true }), "pair.realign").reason, "not-following");
+});
+
+test("the main told by its backup: the backup's news in the banner, nothing to press here, its verdicts in words", () => {
+  //  The engine's own sentence (pair/Leadership.cpp), as serve publishes it at pair/alarm.
+  const apart = pairOf("main", "leading", {
+    "/godot/pair/linked": true,
+    "/godot/pair/alarm": "The backup is not in step: it says cue Bed is running on the main, not here." +
+                         " Realign on the backup to take this machine's position again.",
+    "/godot/pair/peerInStep": "no",
+    "/godot/pair/peerDiffers": "cue Bed is running on the main, not here",
+    "/godot/pair/peerShowMatch": "yes",
+  });
+  const said = banner(apart);
+
+  assert.equal(said.heading, "Main - sending");
+  assert.equal(said.alarming, false);
+  assert.equal(said.command, "");
+  assert.match(said.sentence, /^The backup is not in step: it says cue Bed/);
+  assert.deepEqual(peerLines(apart), [
+    { label: "In step", value: "No - the backup says cue Bed is running on the main, not here" },
+    { label: "Same show", value: "Yes - the backup has the same cues, settings and files" },
+  ]);
+
+  //  Nothing known: where to look, as before RD.12 - and a row not there reads the same.
+  const unknown = pairOf("main", "leading", { "/godot/pair/linked": true, "/godot/pair/peerInStep": "unknown" });
+  assert.equal(banner(unknown), null);
+  assert.deepEqual(peerLines(unknown).map((line) => line.value),
+                   ["Checked on the backup - look at its screen", "Checked on the backup - look at its screen"]);
+
+  //  Its show not this one's.
+  const show = pairOf("main", "leading", { "/godot/pair/linked": true, "/godot/pair/peerInStep": "yes",
+                                           "/godot/pair/peerShowMatch": "no",
+                                           "/godot/pair/peerShowDiffers": "the show differs: cue 4 Rain changed" });
+  assert.deepEqual(peerLines(show).map((line) => line.value),
+                   ["Yes - the backup has the same standby and the same cues, at the same place",
+                    "No - the backup says the show differs: cue 4 Rain changed"]);
+
+  //  Only on a computer that sends with the other there.
+  assert.deepEqual(peerLines(pairOf("backup", "following", { "/godot/pair/linked": true })), []);
+  assert.deepEqual(peerLines(pairOf("main", "alone", { "/godot/pair/linked": false })), []);
 });

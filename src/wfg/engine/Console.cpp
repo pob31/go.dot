@@ -5541,6 +5541,12 @@ namespace
         auto seatLanded = false;
         std::int64_t differencesRead = 0;
 
+        /*  WHAT THIS MACHINE LAST SAID OF ITSELF TO ITS LEADER, AND WHEN
+            (namespace draft §58, RD.12): its two verdicts, said again every half
+            second and on the tick either moves. */
+        wfg::pair::FollowerVerdict verdictSaid;
+        std::int64_t verdictSaidAt = -1000000;
+
         //  How the sentence names a cue and a list: as the operator reads them.
         wfg::pair::Labels inStepLabels;
         inStepLabels.cue = [&runner] (const std::string& id) { return runner.labelOf (id); };
@@ -5830,6 +5836,7 @@ namespace
         wfg::pair::LinkClock::time_point followSince {};
         wfg::pair::NotInStep behind;
         const std::string noDifference;
+        const wfg::pair::FollowerVerdict noVerdict;
         std::int64_t liveRunsSaid = 0;
         auto freshSaid = true;
 
@@ -7627,6 +7634,24 @@ namespace
 
                                     if (auto question = showCheck.question (now); ! question.empty())
                                         toLeader (std::move (question));
+
+                                    /*  AND WHAT IT JUDGED, SAID TO THE LEADER (RD.12):
+                                        the main's operator is otherwise never told
+                                        that this machine would not be a safe
+                                        changeover. Down the path relays take, as its
+                                        clocks go; on the tick a verdict or its
+                                        sentence moves, and every half second so a
+                                        leader can tell a verdict still given from
+                                        one a follower stopped giving. */
+                                    auto verdict = wfg::pair::verdictOf (inStep, showCheck, printCurrent(),
+                                                                         wfg::pair::wordOf (pairing.seated.seat));
+
+                                    if (verdict != verdictSaid || outcome.tick - verdictSaidAt >= wfg::pair::wire::verdictEveryTicks)
+                                    {
+                                        toLeader (wfg::pair::wire::verdictBytes (verdict));
+                                        verdictSaid = std::move (verdict);
+                                        verdictSaidAt = outcome.tick;
+                                    }
                                 }
 
                                 /*  The runtime half of the state, refreshed
@@ -7779,7 +7804,19 @@ namespace
 
                                     follow.showMatch = followingNow && showCheck.matches();
 
-                                    auto sentence = wfg::pair::alarm (pairing.seated, situation, behind);
+                                    /*  AND ON THE MACHINE IT FOLLOWS, WHAT THE
+                                        FOLLOWER SAID OF ITSELF (RD.12): published, and
+                                        its bad news in this machine's alarm - none,
+                                        and nothing known, unless a follower is linked
+                                        and said it within the timeout. */
+                                    const auto* const peerSaid
+                                        = state.pairLink.linked
+                                            ? linkStream.followerVerdict (wfg::pair::LinkClock::now(), pairing.inForce.timeout)
+                                            : nullptr;
+                                    wfg::pair::verdictRowsInto (follow, peerSaid);
+
+                                    auto sentence = wfg::pair::alarm (pairing.seated, situation, behind,
+                                                                      peerSaid != nullptr ? *peerSaid : noVerdict);
 
                                     if (follow.alarm != sentence)
                                         follow.alarm = std::move (sentence);

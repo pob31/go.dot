@@ -899,4 +899,43 @@ namespace wfg::pair
         askedPrint.clear();
         askedDigest.clear();
     }
+
+    //==========================================================================
+    FollowerVerdict verdictOf (const InStep& inStep, const ShowCheck& show, bool showCurrent, std::string seat)
+    {
+        FollowerVerdict said;
+        said.seat = std::move (seat);
+
+        /*  IN STEP, as `pair/inStep` and the alarm read it here: a summary
+            matched; or one said what differs (or a record came out otherwise,
+            RD.6); or neither yet - a follow just begun, nothing compared. */
+        if (inStep.inStep())
+        {
+            said.inStep = true;
+        }
+        else if (! inStep.differs().empty())
+        {
+            said.inStep = false;
+            said.differs = wire::clipped (inStep.differs());
+        }
+
+        /*  THE SAME SHOW, as `pair/showMatch` and the alarm read it here - and
+            NOT KNOWN while this machine's fingerprint is a moment behind its
+            own show, after an edit: the last comparison is of a show it no
+            longer has. */
+        if (showCurrent)
+        {
+            if (show.matches())
+            {
+                said.showMatch = true;
+            }
+            else if (! show.differs().empty())
+            {
+                said.showMatch = false;
+                said.showDiffers = wire::clipped (show.differs());
+            }
+        }
+
+        return said;
+    }
 }

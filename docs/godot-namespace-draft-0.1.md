@@ -25439,7 +25439,11 @@ Owner `pair`, all runtime and read-only unless said; provisional names, settled 
 | `pair/dropped` | `h` | commands this backup's devices sent it that it ignored while following (RD.6) |
 | `pair/showMatch` | `T` | on a machine that follows, its show is its leader's: the fingerprints agree - the show text with no machine row in it, and the device descriptions - and so do the files the show names; false until the first comparison after a follow begins, while anything differs, and on a machine that does not follow (AFU, RD.10) |
 | `pair/showDiffers` | `s` | on a machine that follows, what differs, in one sentence: the cues changed, added, removed or moved, the settings and descriptions changed, the files missing here, missing on the leader or not the same (`the show differs: cue 4 Rain changed`; `1 sound missing here: tone.wav`); empty when nothing does, and on a machine that does not follow (RD.10) |
-| `pair/alarm` | `s` | the sentence the window and the page put in front of the operator - both sending, waiting for the main, the other lost and this one sending, a follower being seated at its leader's position, its show not its leader's (saying what differs and what mends it, RD.10) or not in step with it, saying what differs; empty when none (RD.7, RD.8) |
+| `pair/peerInStep` | `s` | on a machine that leads, whether its follower says it is in step: `yes`, `no` or `unknown` - the follower's `pair/inStep` said up the link (`/godot/pair/verdict`) every half second and on a change; `unknown` before it has said, on a machine that does not lead a follower, and once it has not said within `pair/timeout` (a second at least): never a verdict the follower stopped giving (RD.12) |
+| `pair/peerDiffers` | `s` | on a machine that leads, its follower's `pair/differs` in the follower's words (`cue Bed is running on the main, not here`, "here" the follower), at most 512 bytes; empty unless `pair/peerInStep` is `no` (RD.12) |
+| `pair/peerShowMatch` | `s` | on a machine that leads, whether its follower says its show is this one's: `yes`, `no` or `unknown` - as `pair/peerInStep`, and `unknown` too while the follower's own fingerprint is a moment behind an edit (RD.12) |
+| `pair/peerShowDiffers` | `s` | on a machine that leads, its follower's `pair/showDiffers` in the follower's words, at most 512 bytes; empty unless `pair/peerShowMatch` is `no` (RD.12) |
+| `pair/alarm` | `s` | the sentence the window and the page put in front of the operator - both sending, waiting for the main, the other lost and this one sending, a follower being seated at its leader's position, its show not its leader's (saying what differs and what mends it, RD.10) or not in step with it, saying what differs; on a machine that leads, after its own, what its follower said of itself - its show not this one's, or else not in step - in the follower's words, with what mends it on the follower (RD.12); empty when none (RD.7, RD.8) |
 | `pair/unconfirmed` | `h` | commands this machine passed on that its leader never answered, dropped: at a takeover all but Esc and double Esc (AGJ), and one left unanswered past twice the timeout (RD.7) |
 
 ### 58.4 Commands
@@ -25487,6 +25491,7 @@ set aside or write, each with the reason after it at `/godot/engine/lastError`.
 | RD.9b | `serve --capture`, `run/<id>/launchSample`, the two-machine bench `tests/bench/m61_dante.py`; M61 over Dante |
 | RD.10 | `doc::ShowFingerprint`, the sounds' content hashes, `pair.adoptShow` |
 | RD.11 | The Redundancy tab, the window's banner and status, the page's buttons, both guides, the README |
+| RD.12 | `/godot/pair/verdict`: the follower's two verdicts said up the link; the leader's `pair/peer*` rows, its alarm, its tab |
 
 **M61** (planned): two `serve`s on dummy clocks, the distance between the samples a GO launches on, and
 Δ as the link measures it.
@@ -26462,6 +26467,77 @@ socket's asymmetry, which half the round trip bounds and no exchange can see.
   RD.10 (the show differs ... Take the other machine's show, Copy the files). The alarms say *machine* where
   the screens say *computer* (AGP's word): one of the two, the author's to pick. RD.9's trust thresholds are
   not on screen.
+- **RD.12**, 2026-10-15: the main hears its backup's verdicts (PRD §3.15, "the two machines compare" - true
+  now of both). THE GAP RD.10 AND RD.11 LEFT: only the follower compares - RD.8's summaries, RD.10's
+  fingerprints - so the operator at the main, the machine the show is run on, could not see that the backup
+  would not be a safe changeover without walking to the backup's screen. THE WIRE: `/godot/pair/verdict
+  i:inStep s:differs i:showMatch s:showDiffers s:seat`, follower to leader down the path relays take
+  (serve's `toLeader`, as its clock goes); 1 yes, 0 no, -1 not known, and any other number read as not
+  known; each sentence CLIPPED to 512 bytes on a character's first byte and ended `...`, when it is written
+  and again when it is read (`wire::clipped`), so what reaches a leader's rows and alarm is bounded whatever
+  the other build sends; the seat a word of 32 bytes at most. Strings and integers, so a French machine's is
+  a C one's. A message of its own, not five more arguments on RD.9's clock: a build before RD.12 routes an
+  address it does not know nowhere (`boundFor`, `neither`) and would refuse a clock of another length whole.
+  Said every 25 ticks and on the tick any part of it changes (`FollowerVerdict`'s `==`). THE VERDICTS
+  (`pair::verdictOf`, pair/ShowCheck.h), as the follower's own rows and alarm read them: in step yes once a
+  summary matched, no once `InStep` has a sentence - two summaries apart, a record applied otherwise, a
+  seat's note - and not known before either; the same show yes once `ShowCheck` matches, no once it has a
+  sentence, not known before, and not known while the follower's own fingerprint is not of the show it has
+  now (the brief's rule) - a moment after every edit, streamed or not. THE LEADER (`Stream::followerVerdict`):
+  read on its next tick from the connection it came down, and NOT KNOWN - never stale - unless this machine
+  leads, that connection still follows it, the follower said `following`, and it is no older than the
+  link's timeout or a second, whichever is longer: the second is the implementer's floor, twice the
+  interval, since a timeout set to a tenth would otherwise read every verdict stale between two of them (the
+  brief said the timeout alone); serve passes none while `pair/linked` is false, and the stream forgets it
+  when its connection closes, stops following or the machine stops leading. `pair::verdictRowsInto` makes the
+  rows `pair/peerInStep` and `pair/peerShowMatch` (`yes`, `no`, `unknown`: the implementer's words, an `s`
+  row since a `T` has no third answer) and `pair/peerDiffers` and `pair/peerShowDiffers` (58.3). THE ALARM:
+  `pair::alarm` takes what the follower said (a fourth argument, none by default), and on a machine that
+  sends, after its own sentence, ONE piece of the follower's bad news, the show first - the follower's own
+  alarm's order (RD.10): two shows that differ explain runs that do, and taking the show seats the follower
+  again, so a Realign pressed first would mend nothing; the rows carry both. The follower's words are
+  REPORTED - "the backup says" - so its "here" reads as the backup's; what mends it is pressed ON THE
+  BACKUP, whose buttons they are, named by the word its screen gives the button; no button on the main.
+  The words kept say *machine*, as the alarms around them do (AGP's *computer* still the author's to pick).
+  THE SCREENS: `client::model::PairReading` reads the four rows (`unknown` as unsaid); the Redundancy tab of a
+  machine that sends, the other there, says the backup's verdicts in its In step and Same show lines, and
+  RD.11's "Checked on the backup - look at its screen" only while nothing is known; the banner shows the new
+  sentences under "Main - sending", no button. The page: model/pair.js reads the rows and `peerLines` says the
+  same two lines in the same words, carried as the title of the `#pair` line on a computer that sends with
+  the other there (it has no tab); its banner, unchanged, shows the alarm. Tests under C and fr_FR:
+  PeerLinkTests (one case: the message exact, a French sentence and all; every answer each way; clipped on
+  a character's first byte, written and read; a shape of another build refused and an unknown answer read as
+  not known; the leader holding it only from a follower, only while it says it follows and only while fresh -
+  a second at least under a tenth's timeout - and not once its connection closed or the machine stopped
+  leading), SeatTests (one case, two engines on one show joined by the real stream and receiver, RD.10's show
+  check on the follower beside RD.8's: the leader's rows `yes`/`yes` and its alarm quiet; the bed killed on
+  the follower alone, told 9 ticks later in the follower's words with "Realign on the backup"; realigned, in
+  step again; a cue's level changed on the follower alone, told 11 ticks later as `the show differs: cue Rain
+  changed` with "Take the main's show on the backup", in step still; the follower silent, `unknown` and the
+  alarm quiet 50 ticks later; speaking again and then its connection closed, `unknown` at once), TreeTests
+  (the four rows, read-only), LeadershipTests, ClientTests (the main's banner with each sentence and no
+  button; the backup that took over saying the backup's show; the readout's two lines, and where to look once
+  nothing is known), ShowSettingsUiTests (two more states, `main-told-apart` and `main-told-show-differs`: the
+  tab's lines and the transport's banner), console.unit (tests/console/pair.test.mjs), blackbox.client,
+  client.boundary, source.comments, schema.generated, wfg.schema, and the drivers: pair_show.py (the main's
+  `pair/peerShowMatch` yes; after the edit made while the backup was away, no, with the backup's sentence and
+  the main's alarm naming cue 4 Rain and "Take the main's show on the backup"; yes again after the backup took
+  the main's show, its alarm no longer about the show; the sound missing on the backup told to the main with
+  "Copy the files") and pair_seat.py (the main's `pair/peerInStep` yes once the backup is in step, and the
+  backup that took over told yes by the main that follows it). Pictures in `build/redundancy-shots/`
+  (`redundancy-tab-main-told-*.png`, `transport-main-told-*.png`), offscreen. THE IMPLEMENTER'S WORDS, for the
+  author's review: "The backup is not in step: it says <its words>. Realign on the backup to take this
+  machine's position again."; "The backup says <its words>. Take the main's show on the backup to make the
+  two the same."; "The backup says <its words>. Copy the files so both machines have the same." (the last
+  sentence RD.10's); the roles swapped on a backup that took over ("The main says ... Take the backup's show
+  on the main ..."); the tab's "Yes - the backup has the same standby and the same cues, at the same place",
+  "Yes - the backup has the same cues, settings and files", "No - the backup says <its words>"; the rows'
+  `yes`, `no`, `unknown`; and two calls: one piece of news at a time, the show's first, and the one-second
+  floor. Found and left: while a show is edited without pause at the main, the backup's fingerprint is
+  rarely current, so the main's `pair/peerShowMatch` reads `unknown` between edits and its alarm about a
+  differing show comes and goes with them; a verdict is the follower's at the moment it said it, a link's
+  delay and up to half a second ago; two machines both sending, or a backup waiting, judge nothing and say
+  nothing; a leader with two followers (a pair set up wrong) holds the last verdict of either.
 
 ## 59. Timecode generated: MTC and LTC cues
 

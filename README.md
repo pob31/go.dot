@@ -150,9 +150,10 @@ has stood in front of the thing.
   command meant for a device; a command given to it is passed on to the main. A
   second of silence and it takes over; both say what they are beside the
   transport, and a banner offers Take over, Make this the main (two mains),
-  Realign, or the main's show when the two differ. Set on a Redundancy tab of
-  Show settings, which belongs to the computer. Measured on one machine; the
-  two-computer measurement over Dante is owed to the bench.
+  Realign, or the main's show when the two differ - and the main is told, in
+  the backup's words, when its backup is not in step or its show differs. Set
+  on a Redundancy tab of Show settings, which belongs to the computer. Measured
+  on one machine; the two-computer measurement over Dante is owed to the bench.
 
 ### Not built yet
 

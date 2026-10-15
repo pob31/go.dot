@@ -2034,6 +2034,50 @@ TEST_CASE ("same show: pair/showMatch and pair/showDiffers publish the compariso
     CHECK (nodeAt (snapshot, "/godot/pair/showDiffers") == osc::Value::string (""));
 }
 
+/*  RD.12: what the follower said of itself, on the machine it follows
+    (namespace draft §58.3) - two words and two sentences, read-only, `unknown`
+    and empty until it has said them. */
+TEST_CASE ("follower's verdicts: pair/peerInStep, peerDiffers, peerShowMatch and peerShowDiffers publish as read, read-only")
+{
+    Rig rig;
+
+    const auto valueAt = [] (const std::shared_ptr<const TreeSnapshot>& snapshot, const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        CHECK (node->access == Access::read);
+        CHECK (node->typeTags == "s");
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    //  Nothing said: not known.
+    EngineState state;
+    auto snapshot = rig.parameters.publish (1, state);
+    CHECK (valueAt (snapshot, "/godot/pair/peerInStep") == osc::Value::string ("unknown"));
+    CHECK (valueAt (snapshot, "/godot/pair/peerDiffers") == osc::Value::string (""));
+    CHECK (valueAt (snapshot, "/godot/pair/peerShowMatch") == osc::Value::string ("unknown"));
+    CHECK (valueAt (snapshot, "/godot/pair/peerShowDiffers") == osc::Value::string (""));
+
+    //  A main whose backup said it is apart and its show is not this one.
+    state.pairFollow.state = "leading";
+    state.pairFollow.peerInStep = "no";
+    state.pairFollow.peerDiffers = "cue Bed is running on the main, not here";
+    state.pairFollow.peerShowMatch = "no";
+    state.pairFollow.peerShowDiffers = "the show differs: cue 4 Rain changed";
+    snapshot = rig.parameters.publish (2, state);
+    CHECK (valueAt (snapshot, "/godot/pair/peerInStep") == osc::Value::string ("no"));
+    CHECK (valueAt (snapshot, "/godot/pair/peerDiffers") == osc::Value::string (state.pairFollow.peerDiffers));
+    CHECK (valueAt (snapshot, "/godot/pair/peerShowMatch") == osc::Value::string ("no"));
+    CHECK (valueAt (snapshot, "/godot/pair/peerShowDiffers") == osc::Value::string (state.pairFollow.peerShowDiffers));
+
+    state.pairFollow.peerInStep = "yes";
+    state.pairFollow.peerDiffers.clear();
+    snapshot = rig.parameters.publish (3, state);
+    CHECK (valueAt (snapshot, "/godot/pair/peerInStep") == osc::Value::string ("yes"));
+    CHECK (valueAt (snapshot, "/godot/pair/peerDiffers") == osc::Value::string (""));
+}
+
 /*  RD.9: the same sample (namespace draft §58.3, AFS, AGI, AGQ) - whether the
     follower's launches are on its leader's samples, the drift between the two
     sound clocks, how well the map is known, each side's output latency in

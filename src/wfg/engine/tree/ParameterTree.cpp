@@ -3761,7 +3761,8 @@ namespace wfg::tree
             as it is in force (RD.4) - the timeout written by the log's own
             formatter, so a French machine publishes 1.5 and not 1,5; what
             the link says about itself (RD.5), the round trip the same way; and
-            what following says (RD.6). */
+            what following says (RD.6) - and, on the machine followed, what its
+            follower said of itself (RD.12). */
         for (const auto* row : doc::Schema::rowsForOwner ("pair"))
         {
             const auto name = std::string (row->name);
@@ -3792,6 +3793,10 @@ namespace wfg::tree
             else if (name == "clockResidual") text = osc::formatDouble (state.pairFollow.clockResidual);
             else if (name == "outputLatency") text = osc::formatDouble (state.pairFollow.outputLatency);
             else if (name == "peerOutputLatency") text = osc::formatDouble (state.pairFollow.peerOutputLatency);
+            else if (name == "peerInStep")      text = state.pairFollow.peerInStep;
+            else if (name == "peerDiffers")     text = state.pairFollow.peerDiffers;
+            else if (name == "peerShowMatch")   text = state.pairFollow.peerShowMatch;
+            else if (name == "peerShowDiffers") text = state.pairFollow.peerShowDiffers;
             else                          text = std::string (row->defaultText);
 
             engineValue (*row, "pair", text);

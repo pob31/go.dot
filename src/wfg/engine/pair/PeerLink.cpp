@@ -240,8 +240,10 @@ namespace wfg::pair
             const auto& address = message.address;
 
             /*  A machine's word on its clocks (RD.9) alone is a follower's to
-                its leader; a leader's rides in its tick's bundle, above. */
-            if (address == hello || address == ping || address == relay || address == seat || address == clockLine)
+                its leader; a leader's rides in its tick's bundle, above. A
+                follower's word on itself (RD.12) is only ever a follower's. */
+            if (address == hello || address == ping || address == relay || address == seat || address == clockLine
+                  || address == verdict)
                 return Bound::leader;
 
             if (address == welcome || address == gap || address == record || address == beat || address == pong
@@ -441,6 +443,88 @@ namespace wfg::pair
 
             return out;
         }
+
+        std::string clipped (std::string sentence, std::size_t most)
+        {
+            if (sentence.size() <= most)
+                return sentence;
+
+            constexpr std::string_view ellipsis = "...";
+
+            //  Back to a character's first byte, never into the middle of one.
+            auto cut = most > ellipsis.size() ? most - ellipsis.size() : std::size_t { 0 };
+
+            while (cut > 0 && (static_cast<unsigned char> (sentence[cut]) & 0xC0u) == 0x80u)
+                --cut;
+
+            sentence.resize (cut);
+            sentence += ellipsis;
+            return sentence;
+        }
+
+        namespace
+        {
+            //  A verdict on the wire: 1 yes, 0 no, -1 not known.
+            osc::Value verdictValue (std::optional<bool> said)
+            {
+                return osc::Value::int32 (! said.has_value() ? -1 : *said ? 1 : 0);
+            }
+
+            //  Anything but 1 and 0 is not known: a verdict this build cannot read says nothing.
+            std::optional<bool> saidOf (std::int32_t value) noexcept
+            {
+                if (value == 1)
+                    return true;
+
+                if (value == 0)
+                    return false;
+
+                return std::nullopt;
+            }
+        }
+
+        std::vector<std::uint8_t> verdictBytes (const FollowerVerdict& said)
+        {
+            return encode (verdict, { verdictValue (said.inStep), osc::Value::string (clipped (said.differs)),
+                                      verdictValue (said.showMatch), osc::Value::string (clipped (said.showDiffers)),
+                                      osc::Value::string (said.seat) });
+        }
+
+        std::optional<FollowerVerdict> readVerdict (const osc::Packet& message)
+        {
+            const auto& a = message.args;
+
+            if (message.isBundle() || message.address != verdict || a.size() != 5
+                  || ! a[0].isInt32() || ! a[1].isString() || ! a[2].isInt32() || ! a[3].isString() || ! a[4].isString())
+                return std::nullopt;
+
+            FollowerVerdict out;
+            out.inStep = saidOf (a[0].getInt32());
+            out.differs = clipped (a[1].getString());
+            out.showMatch = saidOf (a[2].getInt32());
+            out.showDiffers = clipped (a[3].getString());
+            out.seat = clipped (a[4].getString(), 32);
+            return out;
+        }
+    }
+
+    //==========================================================================
+    void verdictRowsInto (FollowReading& rows, const FollowerVerdict* said)
+    {
+        static const FollowerVerdict nothingKnown;
+        const auto& verdict = said != nullptr ? *said : nothingKnown;
+
+        if (const auto* inStepWord = verdictWord (verdict.inStep); rows.peerInStep != inStepWord)
+            rows.peerInStep = inStepWord;
+
+        if (rows.peerDiffers != verdict.differs)
+            rows.peerDiffers = verdict.differs;
+
+        if (const auto* showWord = verdictWord (verdict.showMatch); rows.peerShowMatch != showWord)
+            rows.peerShowMatch = showWord;
+
+        if (rows.peerShowDiffers != verdict.showDiffers)
+            rows.peerShowDiffers = verdict.showDiffers;
     }
 
     //==========================================================================
@@ -518,6 +602,21 @@ namespace wfg::pair
 
         if (last - oldest + 1 > capacity)
             oldest = last - capacity + 1;
+    }
+
+    const FollowerVerdict* Stream::followerVerdict (LinkClock::time_point now, double timeoutSeconds) const
+    {
+        /*  NEVER STALE (RD.12): a verdict is the follower's word on itself at
+            one moment, and an operator here must never read "in step" from a
+            follower that has stopped saying it - gone, taken over, followed
+            by another connection, or silent past the timeout. Each of those
+            reads as not known. */
+        if (! heardVerdict.has_value() || ! isLeading() || followers.count (verdictFrom) == 0
+              || heardVerdict->seat != wordOf (Seat::following))
+            return nullptr;
+
+        const auto lasts = std::max (timeoutSeconds, wire::verdictLastsAtLeastSeconds);
+        return within (verdictAt, now, lasts) ? &*heardVerdict : nullptr;
     }
 
     void Stream::sayClock (std::vector<std::uint8_t> message)
@@ -641,6 +740,22 @@ namespace wfg::pair
             return;
         }
 
+        /*  A FOLLOWER'S WORD ON ITSELF (RD.12): whether it is in step and
+            whether its show is this one's, read on the next tick - and taken
+            for what it says only from a connection that follows this machine. */
+        if (auto said = wire::readVerdict (message))
+        {
+            Arrival verdictArrival;
+            verdictArrival.kind = Arrival::Kind::verdict;
+            verdictArrival.origin = origin;
+            verdictArrival.at = arrival;
+            verdictArrival.verdict = std::move (*said);
+
+            const std::lock_guard<std::mutex> held { inboxLock };
+            inbox.push_back (std::move (verdictArrival));
+            return;
+        }
+
         if (const auto said = wire::readHello (message))
         {
             Arrival hello;
@@ -682,6 +797,12 @@ namespace wfg::pair
 
             case Arrival::Kind::clock:
                 heardClock = arrival.clock;
+                return;
+
+            case Arrival::Kind::verdict:
+                heardVerdict = arrival.verdict;
+                verdictAt = arrival.at;
+                verdictFrom = arrival.origin;
                 return;
 
             case Arrival::Kind::seat:
@@ -814,9 +935,12 @@ namespace wfg::pair
 
         /*  A machine that no longer leads streams to nobody: its followers are
             forgotten, and if it leads again it takes them from their next hello
-            (RD.7). */
+            (RD.7) - and what one said of itself with them (RD.12). */
         if (! isLeading())
             followers.clear();
+
+        if (heardVerdict.has_value() && followers.count (verdictFrom) == 0)
+            heardVerdict.reset();
 
         if (followers.empty())
             return;

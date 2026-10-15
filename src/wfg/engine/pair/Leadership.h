@@ -186,9 +186,47 @@ namespace wfg::pair
         bool showTextDiffers = false;
     };
 
+    //==========================================================================
+    /*  WHAT A FOLLOWER SAYS OF ITSELF, UP THE LINK (namespace draft §58,
+        RD.12): only the follower compares (RD.8's summaries, RD.10's
+        fingerprints), so the machine that leads - the one an operator is
+        running the show on - would otherwise never know that its follower
+        would not be a safe changeover until somebody walked to the follower's
+        screen. The follower says its two verdicts and their sentences, as its
+        own rows read them, and its seat; the leader publishes them as its
+        `pair/peer*` rows and puts the bad news in its alarm.
+
+        Each verdict is yes, no or not known: in step once a summary matched,
+        not in step once one said what differs, not known before either (a
+        follow just begun, a seat on its way); the same show once the
+        fingerprints and the files agree, not once something was named, not
+        known before - and while the follower's own fingerprint is not of the
+        show it has now, a moment after every edit. The sentences are the
+        follower's own words - "cue Bed is running on the main, not here", "the
+        show differs: cue 4 Rain changed" - so "here" in them is the follower. */
+    struct FollowerVerdict
+    {
+        std::optional<bool> inStep = std::nullopt;
+        std::string differs = {};
+        std::optional<bool> showMatch = std::nullopt;
+        std::string showDiffers = {};
+        std::string seat = {};                  // the follower's `pair/state` word
+
+        bool operator== (const FollowerVerdict& other) const = default;
+    };
+
+    /*  A VERDICT AS THE `pair/peer*` ROWS SAY IT: `yes`, `no`, or `unknown`
+        for one not known - which is also what a leader with no follower, or
+        whose follower has not spoken within the link's timeout, reads. */
+    const char* verdictWord (std::optional<bool> said) noexcept;
+
     /*  `pair/alarm`: the sentence the window and the page put in front of the
         operator when there is something to act on - both machines sending,
         waiting for the main, the other machine lost and this one sending, a
-        follower not in step - and empty otherwise. */
-    std::string alarm (const Seated& now, const Situation& situation, const NotInStep& behind);
+        follower not in step - and empty otherwise. On a machine that sends,
+        what its follower said of itself (RD.12) after its own: the follower's
+        show not this one's, or the follower not in step, in the follower's
+        words, with what mends it - on the follower. */
+    std::string alarm (const Seated& now, const Situation& situation, const NotInStep& behind,
+                       const FollowerVerdict& follower = {});
 }

@@ -8,6 +8,7 @@
 #include <wfg/client/model/Pair.h>
 #include <wfg/client/model/Transport.h>
 #include <wfg/engine/pair/Leadership.h>
+#include <wfg/engine/pair/PeerLink.h>
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/MidiPorts.h>
@@ -2195,6 +2196,25 @@ namespace
         pair::NotInStep apart;
         apart.differs = "cue Bed is running on the main, not here";
 
+        /*  RD.12: A MAIN TOLD BY ITS BACKUP - not in step, or its show not this
+            one's - the alarm the engine makes of it, and the rows it publishes. */
+        pair::Situation backupThere;
+        backupThere.role = Role::main;
+        backupThere.linked = true;
+        backupThere.peerSeat = Seat::following;
+
+        pair::FollowerVerdict backupApart;
+        backupApart.inStep = false;
+        backupApart.differs = apart.differs;
+        backupApart.showMatch = true;
+        backupApart.seat = "following";
+
+        pair::FollowerVerdict backupShow;
+        backupShow.inStep = true;
+        backupShow.showMatch = false;
+        backupShow.showDiffers = showDiffers.showDiffers;
+        backupShow.seat = "following";
+
         const auto timing = [] (tree::EngineState& state, bool follows)
         {
             state.pairLink.roundTrip = 0.0011;
@@ -2243,6 +2263,14 @@ namespace
             { "main-following", "main", "following", true, {},
               [timing] (tree::EngineState& s) { timing (s, true); s.pairLink.peer = "ws:192.168.1.21:52344";
                                                  s.pairFollow.inStep = true; s.pairFollow.showMatch = true; } },
+            { "main-told-apart", "main", "leading", true,
+              pair::alarm ({ Role::main, Seat::leading, "follower-linked" }, backupThere, inStep, backupApart),
+              [timing, backupApart] (tree::EngineState& s) { timing (s, false); s.pairLink.peer = "ws:192.168.1.21:52344";
+                                                             pair::verdictRowsInto (s.pairFollow, &backupApart); } },
+            { "main-told-show-differs", "main", "leading", true,
+              pair::alarm ({ Role::main, Seat::leading, "follower-linked" }, backupThere, inStep, backupShow),
+              [timing, backupShow] (tree::EngineState& s) { timing (s, false); s.pairLink.peer = "ws:192.168.1.21:52344";
+                                                            pair::verdictRowsInto (s.pairFollow, &backupShow); } },
         };
     }
 
@@ -2384,6 +2412,17 @@ TEST_CASE ("show settings UI: the Redundancy tab sits after Network, and its thr
         panel.setSize (1200, 740);
     }
 
+    /*  RD.12: THE MAIN'S READOUT SAYS WHAT ITS BACKUP JUDGED, in the backup's
+        words, where RD.11's said only to look at the backup's screen. */
+    for (const auto& state : pairStates())
+        if (std::string (state.name) == "main-told-show-differs")
+            seatThe (rig.state, state);
+
+    panel.refresh (*rig.publish());
+    CHECK (labelSaying (*page, "Yes - the backup has the same standby and the same cues, at the same place") != nullptr);
+    CHECK (labelSaying (*page, "No - the backup says the show differs: cue 4 Rain changed") != nullptr);
+    CHECK (labelSaying (*page, "Checked on the backup - look at its screen") == nullptr);
+
     //  The readout of a backup following: the jump a changeover makes, said with what makes up for it - nothing.
     seatThe (rig.state, pairStates()[3]);
     panel.refresh (*rig.publish());
@@ -2468,7 +2507,10 @@ TEST_CASE ("transport UI: what this computer is beside the show's name, and the 
                                 Wanted { "show-differs", "Backup - following", "Backup - following",
                                          "Take the main's show", client::model::PairAct::adoptShow },
                                 Wanted { "backup-took-over", "Backup - sending", "Backup - sending", nullptr, std::nullopt },
-                                Wanted { "main-following", "Main - following", nullptr, nullptr, std::nullopt } })
+                                Wanted { "main-following", "Main - following", nullptr, nullptr, std::nullopt },
+                                Wanted { "main-told-apart", "Main - sending", "Main - sending", nullptr, std::nullopt },
+                                Wanted { "main-told-show-differs", "Main - sending", "Main - sending", nullptr,
+                                         std::nullopt } })
     {
         INFO (wanted.name);
 

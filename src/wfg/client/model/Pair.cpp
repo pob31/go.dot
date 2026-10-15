@@ -97,6 +97,13 @@ namespace wfg::client::model
             //  Fifty ticks a second: each one is 20 ms.
             return std::to_string (many) + (many == 1 ? " tick (" : " ticks (") + std::to_string (many * 20) + " ms)";
         }
+
+        /*  A FOLLOWER'S VERDICT AS THE LEADER PUBLISHES IT (RD.12): `yes`, `no`,
+            and anything else - `unknown`, or a row not there - not known. */
+        Flag verdictFlag (const std::string& word)
+        {
+            return word == "yes" ? Flag::yes : word == "no" ? Flag::no : Flag::unsaid;
+        }
     }
 
     //==========================================================================
@@ -477,10 +484,24 @@ namespace wfg::client::model
         }
         else if (leads && there)
         {
-            /*  A MACHINE THAT LEADS IS NEVER TOLD (RD.10's left question): the
-                follower compares, and its screen says so. */
-            stepLine = "Checked on the " + them + " - look at its screen";
-            showLine = "Checked on the " + them + " - look at its screen";
+            /*  A MACHINE THAT LEADS IS TOLD (RD.12): the follower compares and
+                says its verdicts up the link, in its own words - reported, so
+                its "here" reads as the follower's. Where to look only while
+                nothing is known: before it has said, or once it has not said
+                for the link's timeout. */
+            const auto lookThere = "Checked on the " + them + " - look at its screen";
+            const auto reported = [&them] (const std::string& sentence)
+            {
+                return sentence.empty() ? std::string ("No") : "No - the " + them + " says " + sentence;
+            };
+
+            stepLine = isYes (peerInStep) ? "Yes - the " + them + " has the same standby and the same cues, at the same place"
+                     : peerInStep == Flag::no ? reported (peerDiffers)
+                                              : lookThere;
+
+            showLine = isYes (peerShowMatch) ? "Yes - the " + them + " has the same cues, settings and files"
+                     : peerShowMatch == Flag::no ? reported (peerShowDiffers)
+                                                 : lookThere;
         }
 
         said.push_back ({ "In step", stepLine });
@@ -509,6 +530,7 @@ namespace wfg::client::model
         {
             return std::tie (r.role, r.peers, r.timeout, r.state, r.sending, r.linked, r.peer, r.alarm,
                              r.inStep, r.differs, r.showMatch, r.showDiffers, r.mapped,
+                             r.peerInStep, r.peerDiffers, r.peerShowMatch, r.peerShowDiffers,
                              r.roundTrip, r.delay, r.drift, r.clockResidual, r.outputLatency, r.peerOutputLatency,
                              r.received, r.gaps, r.late, r.relayed, r.dropped, r.unconfirmed, r.busy);
         };
@@ -553,6 +575,12 @@ namespace wfg::client::model
         reading.showMatch = flag (snapshot, "/godot/pair/showMatch");
         reading.showDiffers = clipped (text (snapshot, "/godot/pair/showDiffers"));
         reading.mapped = flag (snapshot, "/godot/pair/mapped");
+
+        //  RD.12's: a word, not a flag - `unknown` is the third answer, read as unsaid.
+        reading.peerInStep = verdictFlag (text (snapshot, "/godot/pair/peerInStep"));
+        reading.peerDiffers = clipped (text (snapshot, "/godot/pair/peerDiffers"));
+        reading.peerShowMatch = verdictFlag (text (snapshot, "/godot/pair/peerShowMatch"));
+        reading.peerShowDiffers = clipped (text (snapshot, "/godot/pair/peerShowDiffers"));
 
         reading.roundTrip = text (snapshot, "/godot/pair/roundTrip");
         reading.delay = text (snapshot, "/godot/pair/delay");

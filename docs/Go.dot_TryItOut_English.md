@@ -187,6 +187,8 @@ Two computers can play one show together. The **main** plays it and talks to the
 | Following, but not in step | Something differs between the two at the same moment, such as a cue running on one only | **Realign**: the backup takes the main's position again |
 | Following, but the show differs | The two shows are not the same, for example an edit made while the backup was off | **Take the main's show**: the backup takes the main's cues and settings, keeps its own interface and ports, and sets its old files aside in a dated folder of the show. Sounds are never copied: a file missing on one computer is named, and is yours to copy |
 
+The main is told too: when the backup is not in step or its show differs, the main's banner says so in the backup's words, and its *Redundancy* tab shows whether the backup is in step and has the same show - the buttons that mend it are on the backup.
+
 The same commands, with **Hand over** (the main lets the backup send), are under *Show > Redundancy* in the menu, which works while the show is locked, on the *Redundancy* tab with what each one would do, and in the web console's line under the transport.
 
 **When the main stops.** The backup stops hearing it and, after the link timeout, takes over: it sends to the devices from then on and says *The main was lost and this machine took over*. An Esc or a double Esc pressed on the backup in that moment is applied; anything else the main had not confirmed is dropped. Change your console or matrix over to the backup. When the main is started again, it finds the backup sending and follows it.

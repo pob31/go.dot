@@ -203,12 +203,27 @@
                             every half second and when Δ moves - Δ, which is
                             what the leader adds to its launch lead (AFS), and
                             its own output latency.
+
+    AND WHAT RD.12 ADDS, so the machine that leads knows what only its
+    follower can judge (pair/Leadership.h `FollowerVerdict`):
+
+      follower -> leader, down the path relays take
+        /godot/pair/verdict i:inStep s:differs i:showMatch s:showDiffers s:seat
+                            whether it is in step and whether its show is the
+                            leader's - 1 yes, 0 no, -1 not known - each with
+                            its sentence, clipped, and its seat; every half
+                            second and on the tick any of it changes. A
+                            message of its own rather than five more arguments
+                            on the clock's twenty-two: a build before RD.12
+                            ignores an address it does not know, and would
+                            refuse a clock of another length whole.
 */
 
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/pair/ClockMap.h>
+#include <wfg/engine/pair/Leadership.h>
 #include <wfg/engine/pair/LinkReading.h>
 #include <wfg/engine/pair/Summary.h>
 
@@ -268,6 +283,9 @@ namespace wfg::pair
 
         //  RD.9's: what a machine says of its clocks (pair/ClockMap.h).
         inline constexpr const char* clockLine = "/godot/pair/clock";
+
+        //  RD.12's: what a follower says of itself (pair/Leadership.h `FollowerVerdict`).
+        inline constexpr const char* verdict = "/godot/pair/verdict";
 
         /*  HOW LONG ONE PART OF A POSITION MAY BE, in bytes of text: a
             position is cut into parts of whole lines no longer than this -
@@ -375,11 +393,41 @@ namespace wfg::pair
         std::vector<std::uint8_t> clockBytes (const ClockSaid& said);
         std::optional<ClockSaid> readClock (const osc::Packet& message);
 
+        //======================================================================
+        /*  WHAT A FOLLOWER SAYS OF ITSELF (RD.12, `/godot/pair/verdict`): its
+            verdicts and their sentences, and its seat. A sentence names cues,
+            and a cue's name is whatever somebody typed, so each is CLIPPED -
+            written and read - to `verdictTextBytes`, cut on a character's first
+            byte and ended "...": what reaches the leader's rows and its alarm
+            is bounded whatever the follower's build sends. Strings and integers
+            only, so a French machine writes and reads it as a C one does. */
+        inline constexpr std::size_t verdictTextBytes = 512;
+
+        /** A sentence no longer than `most` bytes: cut on a character's first byte and ended "..." when it was longer. */
+        std::string clipped (std::string sentence, std::size_t most = verdictTextBytes);
+
+        std::vector<std::uint8_t> verdictBytes (const FollowerVerdict& said);
+        std::optional<FollowerVerdict> readVerdict (const osc::Packet& message);
+
+        /*  HOW OFTEN A FOLLOWER SAYS IT, in ticks - half a second - besides the
+            tick any of it changes; and HOW OLD A LEADER LETS IT BE before it
+            reads as not known: the link's timeout, but never less than twice
+            the interval, so a timeout set under a second does not read every
+            verdict stale between two of them. */
+        inline constexpr std::int64_t verdictEveryTicks = 25;
+        inline constexpr double verdictLastsAtLeastSeconds = 1.0;
+
         /*  A follow that starts now asks for what the leader keeps from now
             on, never what it kept before (RD.7): this counter, on the leader's
             own stream, reads as "after your last". */
         inline constexpr std::uint64_t fromNow = static_cast<std::uint64_t> (std::numeric_limits<std::int64_t>::max());
     }
+
+    /*  THE `pair/peer*` ROWS OF THE MACHINE FOLLOWED (RD.12), from what its
+        follower last said - `Stream::followerVerdict`, null for nothing known:
+        `unknown` and empty then. Each copied only when it moved, as serve's
+        rows are. Serve's, and a test's. */
+    void verdictRowsInto (FollowReading& rows, const FollowerVerdict* said);
 
     /*  HOW MANY RECORDS A MAIN KEEPS FOR A BACKUP THAT RECONNECTS. A backup
         whose cable came out for a moment asks for what it missed by counter,
@@ -515,6 +563,13 @@ namespace wfg::pair
             spoken. The tick thread's. */
         const std::optional<wire::ClockSaid>& followerClock() const noexcept { return heardClock; }
 
+        /*  WHAT A FOLLOWER LAST SAID OF ITSELF (RD.12, `wire::readVerdict`),
+            taken in `afterTick`: null - NOT KNOWN, never stale - unless this
+            machine leads, the connection it came down still follows, its
+            follower said it was following, and it is no older than the
+            timeout (and `wire::verdictLastsAtLeastSeconds`). The tick thread's. */
+        const FollowerVerdict* followerVerdict (LinkClock::time_point now, double timeoutSeconds) const;
+
         /*  THE HEARTBEAT, from serve's after-tick: what arrived since the last
             tick is read, then each follower is sent what it has not had - its
             welcome and any gap first, then the records, `backlogPerTick` at
@@ -550,7 +605,7 @@ namespace wfg::pair
     private:
         struct Arrival
         {
-            enum class Kind { hello, ping, closed, seat, clock };
+            enum class Kind { hello, ping, closed, seat, clock, verdict };
 
             Kind kind = Kind::hello;
             std::string origin;
@@ -563,6 +618,7 @@ namespace wfg::pair
             double roundTrip = 0.0;
             LinkClock::time_point at {};
             wire::ClockSaid clock;              // a follower's word on its clocks (RD.9)
+            FollowerVerdict verdict;            // and on itself (RD.12)
         };
 
         struct Follower
@@ -595,6 +651,11 @@ namespace wfg::pair
         std::vector<std::uint8_t> clockMessage;
         bool clockFresh = false;
         std::optional<wire::ClockSaid> heardClock;
+
+        //  RD.12's: a follower's last word on itself, when it came and down which connection.
+        std::optional<FollowerVerdict> heardVerdict;
+        LinkClock::time_point verdictAt {};
+        std::string verdictFrom;
 
         //  Written on the tick thread, read on the server's too (a relay).
         std::atomic<bool> leading { false };

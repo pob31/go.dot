@@ -30,7 +30,10 @@ graph:
   - `pair.realign`, asked of the backup, seats it again and it stays in step;
   - the main killed, the backup takes over (RD.7) and goes on playing; the main
     started again follows the backup that took over - and is seated where the
-    backup is, in step, its sound where the backup's is.
+    backup is, in step, its sound where the backup's is;
+  - and the machine followed is told (RD.12): once its follower says it is in
+    step, the leader's `pair/peerInStep` reads yes - the main's while the
+    backup follows it, and the backup's once the main follows it.
 
 SERVES ON ONE MACHINE, hosted - a Tracktion graph under a dummy clock - on
 COPIES of the phase 2 fixture whose show is rewritten for this driver, each
@@ -249,6 +252,11 @@ def run() -> int:
                          "the standby is the main's")
             report.equal(read_backup("/godot/pair/alarm"), "", "and the alarm says nothing")
             report.equal(read_backup("/godot/pair/sending"), "false", "the backup holds")
+            report.check(wait_for(lambda: read_main("/godot/pair/peerInStep") == "yes", 4.0 * PATIENCE),
+                         "the main is told so by the backup: its pair/peerInStep reads yes (RD.12)",
+                         f"peerInStep {read_main('/godot/pair/peerInStep')!r}, "
+                         f"peerDiffers {read_main('/godot/pair/peerDiffers')!r}, alarm {read_main('/godot/pair/alarm')!r}")
+            report.equal(read_main("/godot/pair/peerDiffers"), "", "with nothing said to differ")
 
             delay = as_int(read_backup("/godot/pair/delay"))
             leader, theirs, apart, skew = playheads(read_main, read_backup, bed_run, delay)
@@ -307,6 +315,10 @@ def run() -> int:
                          "and is seated where the backup is, in step",
                          f"inStep {read_main('/godot/pair/inStep')!r}, differs {read_main('/godot/pair/differs')!r},"
                          f" alarm {read_main('/godot/pair/alarm')!r}")
+            report.check(wait_for(lambda: read_backup("/godot/pair/peerInStep") == "yes", 4.0 * PATIENCE),
+                         "and the backup, which leads now, is told so by the main",
+                         f"peerInStep {read_backup('/godot/pair/peerInStep')!r}, "
+                         f"peerDiffers {read_backup('/godot/pair/peerDiffers')!r}")
             report.equal(live_runs(read_main, BED), [bed_run], "the bed under its name on the main again")
             report.equal(live_runs(read_main, SCENE), [scene_run], "and the scene")
 

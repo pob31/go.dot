@@ -84,6 +84,11 @@ function readPair(tree = served) {
     differs: words(tree.get("/godot/pair/differs", "")),
     showMatch: isYes(tree.get("/godot/pair/showMatch", false)),
     showDiffers: words(tree.get("/godot/pair/showDiffers", "")),
+    // RD.12's, on the computer followed: "yes", "no" or "unknown", and the follower's own words.
+    peerInStep: words(tree.get("/godot/pair/peerInStep", "unknown")),
+    peerDiffers: words(tree.get("/godot/pair/peerDiffers", "")),
+    peerShowMatch: words(tree.get("/godot/pair/peerShowMatch", "unknown")),
+    peerShowDiffers: words(tree.get("/godot/pair/peerShowDiffers", "")),
     busy: false,
   };
 
@@ -246,4 +251,28 @@ function banner(pair) {
   };
 }
 
-export { WORDS, COMMANDS, readPair, paired, other, seatWords, seatSentence, buttonWords, offer, banner };
+/*  WHAT THE FOLLOWER SAID OF ITSELF, on the computer it follows (RD.12): the
+    desktop tab's "In step" and "Same show" lines in the same words, the
+    follower's sentences reported - "the backup says ..." - so its "here" reads
+    as the follower's; where to look only while nothing is known. None on a
+    computer that does not send with the other there. */
+function peerLines(pair) {
+  const leads = pair.state === "leading" || pair.state === "bothSending";
+
+  if (!paired(pair) || !leads || !pair.linked) return [];
+
+  const them = other(pair);
+  const lookThere = "Checked on the " + them + " - look at its screen";
+  const reported = (sentence) => sentence ? "No - the " + them + " says " + sentence : "No";
+
+  return [
+    { label: "In step",
+      value: pair.peerInStep === "yes" ? "Yes - the " + them + " has the same standby and the same cues, at the same place"
+           : pair.peerInStep === "no" ? reported(pair.peerDiffers) : lookThere },
+    { label: "Same show",
+      value: pair.peerShowMatch === "yes" ? "Yes - the " + them + " has the same cues, settings and files"
+           : pair.peerShowMatch === "no" ? reported(pair.peerShowDiffers) : lookThere },
+  ];
+}
+
+export { WORDS, COMMANDS, readPair, paired, other, seatWords, seatSentence, buttonWords, offer, banner, peerLines };

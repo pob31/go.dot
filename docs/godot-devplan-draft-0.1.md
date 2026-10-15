@@ -1692,6 +1692,7 @@ Phases 10 and 11; no phase is renumbered.
 | RD.9 | The same sample: the clock map, the extra lead, the launch placed on the mapped sample (M61) | RD.6 |
 | RD.10 | The same show: fingerprints, the main's show text copied to the backup | RD.5 |
 | RD.11 | The clients, the drivers, the close-out | all |
+| RD.12 | The main hears its backup's verdicts: in step and the same show said up the link | RD.11 |
 
 - **Deterministic replay** promoted from test harness to a tool: record a rehearsal, replay it,
   diff the outputs. Not part of the RD stages.
@@ -1706,7 +1707,7 @@ green.
 with the Windows box and the Mac mini on their own interfaces, the changeover on a console, with one
 word clock and then none.
 
-**Built 2026-10-11 to 2026-10-15, RD.0-RD.11** (namespace draft §58.7 says what each did; M61 in
+**Built 2026-10-11 to 2026-10-15, RD.0-RD.12** (namespace draft §58.7 says what each did; M61 in
 §58.6): the hold switch and `--hold`; names derived from their cause; the machine's rows and commands
 apart from the show's; `pairing.xml` and the `pair` rows; the stream, the link and the heartbeat;
 following a fixed delay behind, commands passed on and device input ignored; the link lost, taking
@@ -1717,14 +1718,16 @@ fingerprints, the leader's show taken by the follower; `serve --capture` and the
 driver; and the screens (RD.11) - a Redundancy tab of Show settings after Network, what the computer
 is beside the show's name in the author's words, a banner with the one button that answers what
 needs a hand, the operator's five under Show > Redundancy (reachable under the lock), the web
-console's line under the transport, both tester guides. The done-when items stand as drivers:
+console's line under the transport, both tester guides; and the main told what its backup judged
+(RD.12) - whether it is in step and whether its show is the main's, said up the link, in the main's
+`pair/peer*` rows, its alarm and its Redundancy tab, with what mends it on the backup. The done-when
+items stand as drivers:
 redundancy_failover.py (the main killed, the backup sending, each GO heard once; two mains kept on
 one), pair_follow.py and pair_sample.py. **Owed to the bench:** M61 between the PC and the Mac over
 Dante (`tests/bench/m61_dante.py --pair`; the Mac's Dante Virtual Soundcard was not running), and
 the changeover on a console with one word clock and then none. **Owed to the author:** the words of
-RD.11 and those earlier stages left for him (§58.7, RD.11's list); the main is never told its
-backup's show differs or is not in step - it says to look at the backup's screen - and saying so back
-is engine work not done. Deterministic replay as a tool is not part of it and is not built.
+RD.11 and RD.12 and those earlier stages left for him (§58.7, RD.11's and RD.12's lists). Deterministic
+replay as a tool is not part of it and is not built.
 
 ---
 

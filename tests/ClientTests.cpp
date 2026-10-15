@@ -143,6 +143,7 @@
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/pair/Leadership.h>
 #include <wfg/engine/pair/PairSettings.h>
+#include <wfg/engine/pair/PeerLink.h>
 
 #include <juce_core/juce_core.h>
 
@@ -14291,6 +14292,83 @@ TEST_CASE ("client: the pair's banner says the engine's alarm, with the one butt
         CHECK_FALSE (seen.bannerShowing());
         CHECK (seen.offer (model::PairAct::adoptShow).reason == "same-show");
     }
+
+    /*  RD.12: THE MAIN TOLD BY ITS BACKUP. The engine's own sentence, with the
+        backup's words reported and what mends it - on the backup, whose
+        buttons they are: nothing to press here. */
+    SUBCASE ("the main, its backup not in step: the backup's words, and Realign on the backup - no button here")
+    {
+        rig.pairState.pairLink.linked = true;
+        pair::Situation linked;
+        linked.role = Role::main;
+        linked.linked = true;
+        linked.peerSeat = Seat::following;
+
+        pair::FollowerVerdict told;
+        told.inStep = false;
+        told.differs = "cue Bed is running on the main, not here";
+        told.showMatch = true;
+        told.seat = "following";
+        pair::verdictRowsInto (rig.pairState.pairFollow, &told);
+
+        const auto alarm = pair::alarm ({ Role::main, Seat::leading, "follower-linked" }, linked, inStep, told);
+        const auto seen = banner ("main", "leading", alarm);
+
+        REQUIRE (seen.bannerShowing());
+        CHECK (seen.bannerHeading() == "Main - sending");
+        CHECK_FALSE (seen.bannerAlarming());
+        CHECK_FALSE (seen.bannerAct().has_value());
+        CHECK (seen.bannerSentence() == "The backup is not in step: it says cue Bed is running on the main, not here."
+                                        " Realign on the backup to take this machine's position again.");
+    }
+
+    SUBCASE ("the main, its backup's show not this one: the cue named, and the main's show taken on the backup")
+    {
+        rig.pairState.pairLink.linked = true;
+        pair::Situation linked;
+        linked.role = Role::main;
+        linked.linked = true;
+        linked.peerSeat = Seat::following;
+
+        pair::FollowerVerdict told;
+        told.inStep = false;
+        told.differs = "cue 4 Rain is running on the main, not here";
+        told.showMatch = false;
+        told.showDiffers = "the show differs: cue 4 Rain changed";
+        told.seat = "following";
+        pair::verdictRowsInto (rig.pairState.pairFollow, &told);
+
+        //  The show first, alone, as the backup's own alarm has it: taking the show seats it again.
+        const auto alarm = pair::alarm ({ Role::main, Seat::leading, "follower-linked" }, linked, inStep, told);
+        CHECK (alarm == "The backup says the show differs: cue 4 Rain changed. Take the main's show on the backup to make"
+                        " the two the same.");
+
+        const auto seen = banner ("main", "leading", alarm);
+        REQUIRE (seen.bannerShowing());
+        CHECK_FALSE (seen.bannerAct().has_value());
+        CHECK (seen.bannerSentence() == alarm);
+
+        //  Files alone: copied, never sent.
+        told.showDiffers = "1 sound missing here: tone.wav";
+        CHECK (pair::alarm ({ Role::main, Seat::leading, "follower-linked" }, linked, inStep, told)
+               == "The backup says 1 sound missing here: tone.wav. Copy the files so both machines have the same.");
+
+        //  A backup that took over, its main following: the backup's show taken on the main.
+        told.showDiffers = "the show differs: cue 4 Rain changed";
+        linked.role = Role::backup;
+        CHECK (pair::alarm ({ Role::backup, Seat::leading, "take-over" }, linked, inStep, told)
+               == "The main says the show differs: cue 4 Rain changed. Take the backup's show on the main to make the two"
+                  " the same.");
+
+        //  In step and the same show, or nothing known: nothing said.
+        CHECK (pair::alarm ({ Role::main, Seat::leading, "follower-linked" }, linked, inStep, {}).empty());
+        pair::FollowerVerdict well;
+        well.inStep = true;
+        well.showMatch = true;
+        well.seat = "following";
+        linked.role = Role::main;
+        CHECK (pair::alarm ({ Role::main, Seat::leading, "follower-linked" }, linked, inStep, well).empty());
+    }
 }
 
 TEST_CASE ("client: the pair's readout says the delay, the clocks and the jump a changeover makes")
@@ -14334,16 +14412,49 @@ TEST_CASE ("client: the pair's readout says the delay, the clocks and the jump a
     CHECK (value ("Changeover jump").rfind ("6.2 ms - the main's sound comes out 6.2 ms later than this computer's", 0) == 0);
     CHECK (value ("Changeover jump").find ("Nothing makes up for it") != std::string::npos);
 
-    /*  A MAIN IS NEVER TOLD (RD.10's question): it says where to look. */
+    /*  A MAIN IS TOLD (RD.12) what its backup judged, in the backup's words;
+        where to look only while nothing is known - before the backup has said,
+        or once it has not said for the link's timeout. */
     rig.pairState.pairFollow.delay = 2;
-    const auto main = rig.seat ("main", "leading").lines();
-    auto sameShow = std::string();
 
-    for (const auto& line : main)
-        if (line.label == "Same show")
-            sameShow = line.value;
+    const auto mainLine = [&rig] (const std::string& label)
+    {
+        for (const auto& line : rig.seat ("main", "leading").lines())
+            if (line.label == label)
+                return line.value;
 
-    CHECK (sameShow == "Checked on the backup - look at its screen");
+        FAIL ("no line " << label);
+        return std::string();
+    };
+
+    CHECK (mainLine ("In step") == "Checked on the backup - look at its screen");
+    CHECK (mainLine ("Same show") == "Checked on the backup - look at its screen");
+
+    pair::FollowerVerdict told;
+    told.inStep = true;
+    told.showMatch = false;
+    told.showDiffers = "the show differs: cue 4 Rain changed";
+    told.seat = "following";
+    pair::verdictRowsInto (rig.pairState.pairFollow, &told);
+
+    CHECK (mainLine ("In step") == "Yes - the backup has the same standby and the same cues, at the same place");
+    CHECK (mainLine ("Same show") == "No - the backup says the show differs: cue 4 Rain changed");
+
+    told.inStep = false;
+    told.differs = "cue Bed is running on the main, not here";
+    told.showMatch = true;
+    told.showDiffers.clear();
+    pair::verdictRowsInto (rig.pairState.pairFollow, &told);
+
+    CHECK (mainLine ("In step") == "No - the backup says cue Bed is running on the main, not here");
+    CHECK (mainLine ("Same show") == "Yes - the backup has the same cues, settings and files");
+
+    //  The same reading twice is equal, and a verdict moved is not - the window redraws on it.
+    const auto before = model::readTransport (*rig.publishPair (3));
+    CHECK (model::readTransport (*rig.publishPair (3)) == before);
+    pair::verdictRowsInto (rig.pairState.pairFollow, nullptr);
+    CHECK (model::readTransport (*rig.publishPair (3)) != before);
+    CHECK (mainLine ("In step") == "Checked on the backup - look at its screen");
 }
 
 TEST_CASE ("client: the pair's five and three settings are real commands, greyed exactly where the engine refuses")

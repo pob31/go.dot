@@ -36,6 +36,8 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_engine_spaceMouse[] = { "off", "searching", "connected", "driver" };
     inline constexpr std::string_view enum_pair_role[] = { "none", "main", "backup" };
     inline constexpr std::string_view enum_pair_state[] = { "alone", "following", "leading", "bothSending", "waiting" };
+    inline constexpr std::string_view enum_pair_peerInStep[] = { "unknown", "yes", "no" };
+    inline constexpr std::string_view enum_pair_peerShowMatch[] = { "unknown", "yes", "no" };
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
@@ -549,6 +551,38 @@ namespace wfg::doc::generated
           "s", 1.0, false, "park",
           "",
           "The other machine's interface output delay as its driver reports it, in seconds, as it last said it (namespace draft 58, RD.9; AGQ): information, beside pair/outputLatency, never compensated - the author's ruling: a slight glitch at a changeover rather than the faster interface made late. Nought until the other machine has said it, and kept after the link is lost." },
+        { "pair", "peerInStep",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "unknown",
+          false, 0.0, false, 0.0,
+          enum_pair_peerInStep, 3,
+          "", 1.0, false, "park",
+          "",
+          "On a machine that leads, whether the machine following it says it is in step with this one (namespace draft 58, RD.12): only the follower compares - the leader's summaries against what it has at the same moment, pair/inStep on the follower - and it says its verdict up the link every half second and whenever it changes. yes once the follower's summary matched, no once it said what differs (pair/peerDiffers), unknown before it has said either, on a machine that does not lead a follower, and once the follower has not said it within pair/timeout (or a second, when the timeout is shorter): never a verdict the follower has stopped giving. The machine's, never the show's: never stored and never logged." },
+        { "pair", "peerDiffers",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "On a machine that leads, what the machine following it says is not in step, in its own words (namespace draft 58, RD.12): its pair/differs as it last said it - cue Bed is running on the main, not here, where here is the follower - at most 512 bytes. Said in pair/alarm too, with what mends it: Realign, on the follower. Empty while the follower is in step or has said nothing, and whenever pair/peerInStep is not no." },
+        { "pair", "peerShowMatch",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "unknown",
+          false, 0.0, false, 0.0,
+          enum_pair_peerShowMatch, 3,
+          "", 1.0, false, "park",
+          "",
+          "On a machine that leads, whether the machine following it says its show is this one's (namespace draft 58, RD.12; AFU): only the follower compares the two fingerprints and the files - pair/showMatch on the follower - and it says its verdict up the link every half second and whenever it changes. yes once everything agrees, no once the follower named what differs (pair/peerShowDiffers), unknown before it has compared, while its own fingerprint is a moment behind an edit, on a machine that does not lead a follower, and once the follower has not said it within pair/timeout (or a second, when the timeout is shorter). The machine's, never the show's: never stored and never logged." },
+        { "pair", "peerShowDiffers",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "On a machine that leads, what the machine following it says differs between the two shows, in its own words (namespace draft 58, RD.12): its pair/showDiffers as it last said it - the show differs: cue 4 Rain changed, or 1 sound missing here: tone.wav, where here is the follower - at most 512 bytes. Said in pair/alarm too, with what mends it on the follower: taking this machine's show there, or copying the files. Empty while the shows are the same or nothing is known, and whenever pair/peerShowMatch is not no." },
         { "document", "path",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
