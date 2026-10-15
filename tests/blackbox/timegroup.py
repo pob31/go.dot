@@ -1104,8 +1104,16 @@ def judge_turns(report: Report, word: str, log: Log, truth: Truth, r0: int, sour
     loop_truth = Truth(truth.origin + LOOP)
     after_loop = [h for h in log.heard if h.source == source and h.what == "jumped" and abs(h.frame - looped) <= 1
                   and loop_truth.at(0) - 0.5 * SAMPLE_RATE <= h.sample + r0 <= loop_truth.at(0) + SAMPLE_RATE]
-    report.check(bool(after_loop), f"{word}: and `jumped` at the loop point, back to {label_of(looped - 1)}",
-                 f"{[(h.what, label_of(h.frame)) for h in mine[-3:]]}")
+    lwords = f"{word}: and `jumped` at the loop point, back to {label_of(looped - 1)}"
+    ldetail = f"{[(h.what, label_of(h.frame)) for h in mine[-3:]]}"
+    if rig and not after_loop:
+        # As the return and the locate above: a turn the rig's MTC brings is
+        # said on the first tick that drains it, anchored where the code had
+        # got to by then (99c90da's macOS run: 00:59:40:03, the return and the
+        # locate 23 and 21 frames on, the MTC 53.7 s ahead of the render).
+        report.void(lwords, f"{ldetail}; {rig}")
+    else:
+        report.check(bool(after_loop), lwords, ldetail)
 
     counted = [h for h in mine if truth.origin <= h.sample + r0 < truth.origin + LOOP]
     frames = sum(p[4] for p in STORY.pieces if p[0] == "code")
@@ -1565,16 +1573,32 @@ def judge_mtc(report: Report, word: str, render: Render, log: Log, truth: Truth,
     pass begin. `ahead`, MTC's lead on the render (`mtc_lead`): past
     MTC_LEAD_LIMIT the chaser followed the rig's MTC, not the port's, and its
     step with the code is not judged - the free runner, which follows nothing,
-    still is."""
+    still is, up to a second firing the rig's MTC made (below)."""
     for member in (MTC_FREE, MTC_JUMP):
         track = ltc_track(render, member)
         judge_start(report, word, log, member, track, truth, r0, not ON_CI)
         if member is MTC_FREE:
-            rate = track.rate(truth.of(member.at) + SAMPLE_RATE, truth.at(STOP_AT))
-            jumps = track.moves(truth.of(member.at), truth.at(LOCATE_AT) + 4 * SAMPLE_RATE)
+            # FIRED AGAIN IS NOT MOVED. A code that runs into a member's time
+            # again after a jump back starts it again, the run still playing
+            # stopped as the new one starts (AIR, RunnerTime.cpp). The port's
+            # code never does so in the span judged here; an MTC ahead of the
+            # render can: its locate back 30 s, anchored seconds ahead of the
+            # tick that applied it, puts the code before the member's time at
+            # that tick (99c90da's macOS run: 16.8 s ahead, fired again at
+            # 51.86 s, read as a step of -29.86 s). Past MTC_LEAD_LIMIT it is
+            # judged up to its group's next spawn of it, which comes before the
+            # launch, and what follows is the rig's.
+            last = truth.at(LOCATE_AT) + 4 * SAMPLE_RATE
+            again = [r.tick * TICK + r0 for r in log.spawns_of(member.cue)
+                     if truth.of(member.at) < r.tick * TICK + r0 < last]
+            cut = min(again) if again and ahead > MTC_LEAD_LIMIT else None
+            rate = track.rate(truth.of(member.at) + SAMPLE_RATE, min(truth.at(STOP_AT), cut or last))
+            jumps = track.moves(truth.of(member.at), cut or last)
             report.check(rate is not None and abs(rate - 1.0) <= 2e-6 and not jumps,
                          f"{word}: the MTC free runner plays at its own speed and is never moved",
-                         f"speed {rate!r}, steps {[(seconds(t - truth.origin), round(d, 2)) for t, d in jumps[:3]]}")
+                         f"speed {rate!r}, steps {[(seconds(t - truth.origin), round(d, 2)) for t, d in jumps[:3]]}"
+                         + ("" if cut is None else f"; judged to {seconds(cut - truth.origin)}, where its group"
+                            f" spawned it again on an MTC {ahead:.2f} s ahead of the render"))
         else:
             # IN STEP WITH THE CODE AS GO.DOT HEARS IT: against the map the
             # engine's own `code.heard` drew at each moment, so what is judged
