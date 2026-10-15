@@ -1803,7 +1803,8 @@ namespace wfg::cue
             /*  A PROCESS CUE IS ASSERTED AS A SOUND IS (namespace draft §51,
                 ACL; PRD §3.29): relaunched when it is not running, from its
                 patch's beginning. */
-            if (element == "Media" || element == "Midi" || element == "Mic" || element == "Process")
+            if (element == "Media" || element == "Midi" || element == "Mic" || element == "Process"
+                  || element == "Script")
             {
                 PlannedRun run;
                 run.cue = id;

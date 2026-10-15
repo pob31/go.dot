@@ -63,11 +63,22 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 namespace wfg::cue
 {
+    /*  A KIND WHOSE RUN IS A PROGRAM ON THE PROCESS HOST (namespace draft §51,
+        §66): a process cue's patch or a script cue's script. Both run from GO
+        until something stops them, a second GO does nothing, Esc ends them at
+        once, the persistent section starts them again, and what they send is
+        routed alike; only the text they run, and what runs it, differ. */
+    inline bool isProcessLike (std::string_view kind) noexcept
+    {
+        return kind == "process" || kind == "script";
+    }
+
     /*  The states a run passes through, spelled as the parameter table spells
         them. They are strings on the wire because that is what a client reads;
         the enum is what the engine switches on.
@@ -584,7 +595,8 @@ namespace wfg::cue
         static constexpr double silentDb = -120.0;
         double meter = silentDb;
 
-        /*  A PROCESS CUE'S PATCH, AS ITS HOST LAST SAW IT (namespace draft §51):
+        /*  A PROCESS CUE'S PATCH, OR A SCRIPT CUE'S SCRIPT (§66), AS ITS HOST
+            LAST SAW IT (namespace draft §51):
             starting, running, late or stuck; how many ticks it has been late;
             how many of its sends were dropped past the cap. READOUTS like the
             meter: written by the tick hook from the host, never logged, empty

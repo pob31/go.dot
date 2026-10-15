@@ -142,7 +142,7 @@ namespace wfg::cue
             movie, a patch, an OSC cue's curves. */
         bool refiredKind (const pair::SeatedRun& run)
         {
-            return run.kind == "video" || run.kind == "process" || (run.kind == "osc" && run.curving);
+            return run.kind == "video" || isProcessLike (run.kind) || (run.kind == "osc" && run.curving);
         }
 
         /*  A run asked for and not yet begun by anything: armed, its launch

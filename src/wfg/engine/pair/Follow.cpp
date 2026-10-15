@@ -86,7 +86,7 @@ namespace wfg::pair
             return Gate::passOn;
 
         /*  A DEVICE'S, AND ANYTHING UNKNOWN (AGD): `udp:`, `mount:`, `serial:`,
-            `link:`, `midi:`, a patch's `process:` - the main heard it too, and
+            `link:`, `midi:`, a patch's `process:`, a script's `script:` (§66) - the main heard it too, and
             its copy arrives in the stream. */
         return Gate::ignore;
     }

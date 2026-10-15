@@ -1996,6 +1996,12 @@ namespace wfg::cue
         std::string textOf (const juce::ValueTree& cue, const char* name) const;
         double numberOf (const juce::ValueTree& cue, const char* name) const;
 
+        /*  What a process cue or a script cue runs (§51, §66): a patch's text
+            or a script's source; and in what - empty for a patch, a script's
+            `language` row for a script. */
+        std::string processTextOf (const juce::ValueTree& cue) const;
+        std::string processLanguageOf (const juce::ValueTree& cue) const;
+
         /*  A group's `mode` and `advance` through the same door, for the
             questions GroupMode.h names (namespace draft §60, TG.2) - asked by
             what they mean, never by comparing the words here. Two empty words
@@ -3120,7 +3126,8 @@ namespace wfg::cue
         {
             std::string self;
             std::string cue;
-            std::string patch;
+            std::string patch;          // a patch's text, or a script's source
+            std::string language;       // empty for a patch; a script's (§66)
             std::uint64_t revision = 0;
             bool finished = false;
             bool failed = false;

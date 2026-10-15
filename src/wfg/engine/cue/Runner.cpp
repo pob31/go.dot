@@ -347,6 +347,16 @@ namespace wfg::cue
         return osc::parseDouble (textOf (cue, name)).value_or (0.0);
     }
 
+    std::string Runner::processTextOf (const juce::ValueTree& cue) const
+    {
+        return textOf (cue, cue.hasType ("Script") ? "source" : "patch");
+    }
+
+    std::string Runner::processLanguageOf (const juce::ValueTree& cue) const
+    {
+        return cue.hasType ("Script") ? textOf (cue, "language") : std::string {};
+    }
+
     GroupMode Runner::groupMode (const juce::ValueTree& cue) const
     {
         return { textOf (cue, "mode"), textOf (cue, "advance") };
@@ -816,7 +826,7 @@ namespace wfg::cue
             §51, ACL; PRD §3.8's table), as on a sound: its patch is running,
             and a second patch beside it would be a second process nobody asked
             for. */
-        if (fireAtOnce && kind == "process")
+        if (fireAtOnce && isProcessLike (kind))
             if (const auto* live = liveUntakenRunOf (cueId))
                 return live->id;
 
@@ -2167,7 +2177,7 @@ namespace wfg::cue
                     everything else, and the next step arms it again. A stop cue
                     before the pointer suspends it, as it suspends a bed; the
                     pane's kill for the session. */
-                if (kind == "media" || kind == "mic" || kind == "process" || kind == "group")
+                if (kind == "media" || kind == "mic" || isProcessLike (kind) || kind == "group")
                 {
                     /*  STILL SOUNDING, and left alone - unless it is the run
                         Esc paused, still on its way out over the panic fade:
@@ -5056,8 +5066,9 @@ namespace wfg::cue
         /*  A PROCESS CUE (namespace draft §51): playing from its GO, its patch
             run by the host from the next tick's hook - made and opened at the
             first quiet point - and running until something stops it (ACL). The
-            job is handler state, so a replay makes it too and runs no patch. */
-        if (kind == "process")
+            job is handler state, so a replay makes it too and runs no patch.
+            A SCRIPT CUE THE SAME (§66): its source in its language. */
+        if (isProcessLike (kind))
         {
             if (auto* run = runs.find (runId))
             {
@@ -5068,7 +5079,8 @@ namespace wfg::cue
             ProcessJob job;
             job.self = runId;
             job.cue = cue[idProperty].toString().toStdString();
-            job.patch = textOf (cue, "patch");
+            job.patch = processTextOf (cue);
+            job.language = processLanguageOf (cue);
             job.revision = document.revision();
             processing.push_back (std::move (job));
             return;
@@ -11143,7 +11155,7 @@ namespace wfg::cue
                 const auto silentSound = (run->kind == "media" || run->kind == "mic" || run->kind == "timecode")
                                            && run->startedAtTick < 0;
                 const auto sender = run->kind == "osc" || run->kind == "midi" || run->kind == "memo"
-                                      || run->kind == "start" || run->kind == "process";
+                                      || run->kind == "start" || isProcessLike (run->kind);
 
                 if (silentSound || sender || run->isWaiting())
                     endHere (id, tick);
@@ -13931,12 +13943,13 @@ namespace wfg::cue
                     continue;
                 }
 
-                job.patch = textOf (cue, "patch");
+                job.patch = processTextOf (cue);
+                job.language = processLanguageOf (cue);
                 job.revision = document.revision();
             }
 
             if (! job.failed)
-                wanted.push_back ({ job.self, job.cue, job.patch });
+                wanted.push_back ({ job.self, job.cue, job.patch, job.language });
         }
 
         processing.erase (std::remove_if (processing.begin(), processing.end(),
@@ -14083,7 +14096,7 @@ namespace wfg::cue
     {
         const auto* run = runs.find (runId);
 
-        if (run == nullptr || run->kind != "process" || run->isFinished())
+        if (run == nullptr || ! isProcessLike (run->kind) || run->isFinished())
             return false;
 
         auto& waiting = patchInputs[runId];
@@ -14098,7 +14111,10 @@ namespace wfg::cue
     void Runner::applyProcessSends (Engine& engine, const std::string& runId, const std::string& cueId,
                                     const std::vector<process::Sent>& sent)
     {
-        const auto from = "process:" + runId;
+        /*  Its origin names the kind: `process:<run>` for a patch, `script:<run>`
+            for a script (§66), so a log says which made a change. */
+        const auto* sender = runs.find (runId);
+        const auto from = (sender != nullptr && sender->kind == "script" ? "script:" : "process:") + runId;
 
         for (const auto& message : sent)
         {

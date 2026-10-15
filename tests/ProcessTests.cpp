@@ -604,6 +604,18 @@ namespace
             return id;
         }
 
+        /*  A script cue (namespace draft §66, SC.4), JavaScript unless said. */
+        std::string makeScript (const std::string& source, const std::string& language = "javascript",
+                                const std::string& parent = {})
+        {
+            const auto made = document.createCue (parent.empty() ? listId : parent,
+                                                  parent.empty() ? index++ : 0, "script", "Script", {},
+                                                  { { "language", language } });
+            REQUIRE (made.ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + made.id + "/source", source).ok);
+            return made.id;
+        }
+
         std::string makeMemo (const std::string& name)
         {
             const auto id = document.createCue (listId, index++, "memo", name).id;
@@ -1124,6 +1136,306 @@ TEST_CASE ("process cue: a patch hearing /godot/puck asks for the SpaceMouse and
     rig.runner.notePuck (std::nullopt);
     rig.tickOnce();
     CHECK_FALSE (rig.listener.valueAt ("/dev/out", 100).has_value());
+}
+
+//==============================================================================
+/*  SC.4: A SCRIPT CUE ON THE RUNNER (namespace draft §66, AMM). Every road a
+    patch's run takes, with the script written in JavaScript: what it hears and
+    sends, what it fires and under which origin, Esc, an edit, the persistent
+    section, a replay, stuck, MIDI, its said line and ports, process.send, the
+    SpaceMouse. */
+namespace
+{
+    const std::string jsDoubling = "godot.hear('/dev/in', (x) => godot.send('/dev/out', x * 2));\n";
+}
+
+TEST_CASE ("script cue: a script doubles what a device reports, on the wire the tick it is heard")
+{
+    ProcessRig rig ("sc4-double");
+    const auto cue = rig.makeScript (jsDoubling);
+
+    rig.fire (cue);
+    REQUIRE (rig.runOf (cue) != nullptr);
+    CHECK (rig.runOf (cue)->kind == "script");
+    CHECK (rig.runOf (cue)->state == wfg::cue::runState::playing);
+    REQUIRE (rig.running (cue));
+
+    rig.listener.clear();
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+
+    const auto sent = rig.listener.valueAt ("/dev/out");
+    REQUIRE (sent.has_value());
+    CHECK (sameNumber (*sent, 0.5));
+}
+
+TEST_CASE ("script cue: a script fires a cue by id and by number, under its own origin, and ends its own run with self")
+{
+    ProcessRig rig ("sc4-fire");
+    wfg::tree::RawSender nowhere;
+    wfg::tree::registerAuthoringCommands (rig.engine.commands(), rig.document, nowhere);
+
+    const auto bell = rig.makeMemo ("Bell");
+    const auto gong = rig.makeMemo ("Gong");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + gong + "/number", "3.1").ok);
+
+    const auto cue = rig.makeScript ("godot.hear('/dev/in', () => {\n"
+                                     "    godot.fire('" + bell + "');\n"
+                                     "    godot.fire(3.1);\n"
+                                     "    godot.command('run/stop', godot.self);\n"
+                                     "});\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    const auto scriptRun = rig.runOf (cue)->id;
+
+    rig.hear ("/dev/in", 1.0f);
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->isFinished(); }, 10));
+    CHECK (rig.runOf (cue)->state == wfg::cue::runState::done);
+    CHECK (rig.runsOf (bell) == 1u);
+    CHECK (rig.runsOf (gong) == 1u);
+
+    const auto records = rig.records();
+    const auto fired = std::find_if (records.begin(), records.end(), [&] (const auto& r)
+    {
+        return r.command == "cue.fire" && ! r.args.empty() && r.args.front().getString() == bell;
+    });
+    REQUIRE (fired != records.end());
+    CHECK (fired->origin == "script:" + scriptRun);
+    CHECK (std::any_of (records.begin(), records.end(), [&] (const auto& r)
+    {
+        return r.command == "cue.fireNumber" && r.origin == "script:" + scriptRun;
+    }));
+}
+
+TEST_CASE ("script cue: a script sets a row of the show, as a node.set under its own origin")
+{
+    ProcessRig rig ("sc4-set");
+    const auto bell = rig.makeMemo ("Bell");
+    const auto cue = rig.makeScript ("godot.hear('/dev/in', () => godot.set('cue/" + bell + "/name', 'Rung'));\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    rig.hear ("/dev/in", 1.0f);
+    rig.tickOnce();
+    rig.tickOnce();
+    CHECK (rig.document.getAttribute ("/godot/cue/" + bell + "/name") == std::optional<std::string> ("Rung"));
+}
+
+TEST_CASE ("script cue: Esc ends the run at once and its script is closed; a second GO does nothing")
+{
+    ProcessRig rig ("sc4-esc");
+    const auto cue = rig.makeScript (jsDoubling);
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    rig.fire (cue);
+    CHECK (rig.runsOf (cue) == 1u);
+    CHECK (rig.host.instances() == 1u);
+
+    rig.submit ("run.stopAll");
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->isFinished(); }, 5));
+    REQUIRE (rig.tickUntil ([&] { return rig.host.instances() == 0u; }, 20));
+
+    rig.listener.clear();
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+    CHECK_FALSE (rig.listener.valueAt ("/dev/out", 100).has_value());
+}
+
+TEST_CASE ("script cue: an edit opens the running script again, from its beginning")
+{
+    ProcessRig rig ("sc4-edit");
+    const auto cue = rig.makeScript ("let n = 0;\n"
+                                     "godot.hear('/dev/in', (x) => godot.send('/dev/out', x * 2 + 0 * ++n));\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + cue + "/source",
+                                        "godot.hear('/dev/in', (x) => godot.send('/dev/out', x * 3));\n").ok);
+
+    std::optional<double> seen;
+    for (int n = 0; n < 50 && ! (seen.has_value() && sameNumber (*seen, 0.75)); ++n)
+    {
+        rig.listener.clear();
+        rig.hear ("/dev/in", 0.25f);
+        rig.tickOnce();
+        seen = rig.listener.valueAt ("/dev/out", 200);
+    }
+    REQUIRE (seen.has_value());
+    CHECK (sameNumber (*seen, 0.75));
+    CHECK (rig.runsOf (cue) == 1u);
+}
+
+TEST_CASE ("script cue: in the persistent section it is started again at the next step")
+{
+    ProcessRig rig ("sc4-persistent");
+    const auto memo = rig.makeMemo ("Scene");
+    const auto section = rig.document.createPersistent (rig.listId);
+    REQUIRE (section.ok);
+    const auto cue = rig.makeScript (jsDoubling, "javascript", section.id);
+
+    const auto step = [&]
+    {
+        rig.submit ("standby.set", { wfg::osc::Value::string (memo) });
+        rig.submit ("go");
+        rig.tickOnce();
+    };
+
+    step();
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue) != nullptr; }, 40));
+    const auto first = rig.runOf (cue)->id;
+    REQUIRE (rig.running (cue));
+
+    rig.submit ("run.stopAll");
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->isFinished(); }, 5));
+    step();
+    REQUIRE (rig.tickUntil ([&] { const auto* run = rig.runOf (cue); return run != nullptr && run->id != first; }, 40));
+    REQUIRE (rig.running (cue));
+}
+
+TEST_CASE ("script cue: with no host - a replay - the run plays and ends as the log says")
+{
+    ProcessRig rig ("sc4-replay", false);
+    const auto cue = rig.makeScript (jsDoubling);
+    rig.fire (cue);
+    REQUIRE (rig.runOf (cue) != nullptr);
+    CHECK (rig.runOf (cue)->state == wfg::cue::runState::playing);
+    CHECK (rig.runOf (cue)->processState == "starting");
+
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+    CHECK_FALSE (rig.listener.valueAt ("/dev/out", 100).has_value());
+
+    rig.submit ("run.stopAll");
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->isFinished(); }, 5));
+}
+
+TEST_CASE ("script cue: a stuck script fails its run and is freed; patches open and run beside it")
+{
+    using clock = std::chrono::steady_clock;
+    ProcessRig rig ("sc4-stuck");
+    rig.document.setAttribute ("/godot/list/processStuckAfter", "5");
+
+    const auto steady = rig.makeProcess (doubling());
+    rig.fire (steady);
+    REQUIRE (rig.running (steady));
+
+    const auto loop = rig.makeScript ("godot.hear('/dev/in', () => { for (;;) {} });\n");
+    rig.fire (loop);
+    REQUIRE (rig.running (loop));
+    rig.document.setAttribute ("/godot/list/processBudget", "2");
+
+    rig.hear ("/dev/in", 1.0f);
+    auto longest = clock::duration::zero();
+    for (int n = 0; n < 500 && ! rig.runOf (loop)->isFinished(); ++n)
+    {
+        const auto started = clock::now();
+        rig.tickOnce();
+        longest = std::max (longest, clock::now() - started);
+        std::this_thread::sleep_for (2ms);
+    }
+
+    CHECK (rig.runOf (loop)->state == wfg::cue::runState::failed);
+    CHECK (rig.runOf (loop)->error == "process-stuck");
+    CHECK (longest < std::chrono::milliseconds (200));
+    CHECK_FALSE (rig.host.anyStuck());
+
+    //  Interrupted, closed and freed: only the patch is left.
+    REQUIRE (rig.tickUntil ([&] { return rig.host.instances() == 1u; }, 50));
+
+    //  The patch runs on, and a patch asked for now opens.
+    rig.listener.clear();
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+    REQUIRE (rig.listener.valueAt ("/dev/out").has_value());
+
+    const auto later = rig.makeProcess (doubling ("3"));
+    rig.fire (later);
+    REQUIRE (rig.running (later));
+    CHECK (rig.runOf (later)->error.empty());
+}
+
+TEST_CASE ("script cue: MIDI on the port its cue listens on reaches midi.hear, and midi.send leaves on the port it names")
+{
+    ProcessRig rig ("sc4-midi");
+    const auto cue = rig.makeScript ("godot.midi.hear((status, note, velocity) => {\n"
+                                     "    godot.send('/dev/out', note);\n"
+                                     "    godot.midi.send(0x91, note, velocity);\n"
+                                     "});\n");
+    rig.document.setAttribute ("/godot/cue/" + cue + "/midiIn", "PORTA001");
+    rig.document.setAttribute ("/godot/cue/" + cue + "/midiOut", "PORTB002");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    rig.listener.clear();
+    rig.midiInbox.push ("PORTB002", { 0x90, 61, 100 });   // another port: not heard
+    rig.midiInbox.push ("PORTA001", { 0x90, 60, 100 });
+    rig.tickOnce();
+
+    const auto pitch = rig.listener.valueAt ("/dev/out");
+    REQUIRE (pitch.has_value());
+    CHECK (sameNumber (*pitch, 60.0));
+    CHECK (rig.listener.packets().size() == 1u);
+
+    REQUIRE (rig.midiSink.sent.size() == 1u);
+    CHECK (rig.midiSink.sent[0].first == "PORTB002");
+    CHECK (rig.midiSink.sent[0].second == wfg::midi::Bytes { 0x91, 60, 100 });
+}
+
+TEST_CASE ("script cue: what a script prints is the run's said line, a failure with its line, and its ports their last values")
+{
+    ProcessRig rig ("sc4-said");
+    const auto cue = rig.makeScript ("godot.hear('/dev/in', (x) => {\n"
+                                     "    godot.send('/dev/out', x * 2);\n"
+                                     "    print('level:', x);\n"
+                                     "});\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+
+    const auto* run = rig.runOf (cue);
+    CHECK (run->processSaid == "level: 0.25");
+    CHECK (run->processPorts.find ("/dev/out 0.5\n") != std::string::npos);
+    CHECK (run->processPorts.find ("/dev/in 0.25\n") != std::string::npos);
+
+    //  A script that does not read says so on the run, with its line.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + cue + "/source", "godot.hear('/dev/in',\n").ok);
+    REQUIRE (rig.tickUntil ([&] { return rig.runOf (cue)->processSaid.find ("(line") != std::string::npos; }, 50));
+}
+
+TEST_CASE ("script cue: process.send hands values to an address the script hears")
+{
+    ProcessRig rig ("sc4-send");
+    const auto cue = rig.makeScript ("godot.hear('/knob', (v) => godot.send('/dev/out', v));\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    const auto runId = rig.runOf (cue)->id;
+
+    rig.listener.clear();
+    rig.submit ("process.send", { wfg::osc::Value::string (runId), wfg::osc::Value::string ("/knob"),
+                                  wfg::osc::Value::float64 (0.75) });
+    rig.tickOnce();
+    const auto sent = rig.listener.valueAt ("/dev/out");
+    REQUIRE (sent.has_value());
+    CHECK (sameNumber (*sent, 0.75));
+}
+
+TEST_CASE ("script cue: a script hearing /godot/puck asks for the SpaceMouse and hears its axes")
+{
+    ProcessRig rig ("sc4-puck");
+    const auto cue = rig.makeScript ("godot.hear('/godot/puck', (x, y, z) => godot.send('/dev/out', z));\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    rig.tickOnce();
+    CHECK (rig.runner.processesWantPuck());
+
+    rig.listener.clear();
+    rig.runner.notePuck (std::array<double, 6> { 0.1, 0.2, -0.5, 0.0, 0.0, 0.0 });
+    rig.tickOnce();
+    const auto z = rig.listener.valueAt ("/dev/out");
+    REQUIRE (z.has_value());
+    CHECK (sameNumber (*z, -0.5));
 }
 
 //==============================================================================
