@@ -29732,7 +29732,7 @@ the show; a replay takes it and opens nothing.
 | **AME** | **Pd fitted to the screen it is on**, by `pd/godot-screen-plugin.tcl`, which Pd's window loads from that folder: from 125 per cent the menus, dialogs and main window Pd sets on Windows at eleven pixels get eleven times the scale; from 150 per cent each patch window is zoomed when it first shows and made twice the size as far as the screen goes, and "Zoom New Windows" is set. The Mac, which scales Pd itself, is left alone. A first version zoomed from the scale the window sent with `process.edit` and opened the patch by `-send` messages; the plugin replaced it, judged on Pd's own screen, and fixes the menus as well. | the author's report; the means mine |
 | **AMF** | **One Pd for every patch**: the first starts Pd with `GODOT_PD_EDITOR` (a port and a word) in its environment; `pd/godot-open-plugin.tcl` listens there on 127.0.0.1; each later patch, and the help patch, is `<word> open <file>` (its window brought in front, or the file opened) or `<word> reopen <file>` (changed in Go.dot since Pd had it: closed - Pd asking first if it holds edits not saved - and opened again). Asked while Pd starts, it waits up to fifteen seconds; a Pd gone or silent is replaced. | the author's ask ("only a single Pd instance"); the means mine |
 | **AMG** | **The help card is a patch in Pd**, `pd/godot-help.pd`, written by `scripts/make-pd-patches.py`: what a patch hears and sends - OSC from a device, Go.dot's own commands and rows, MIDI, a serial port, the SpaceMouse, any address through `[r in]`/`[s out]`, `[print]` - each with the boxes to copy; not through a socket of the patch's own; MQTT not yet; the ready-made patches. A **?** right of the canvas's door opens it (`process.help`), in the same program and the same one Pd; the starter patch's comment points to it. | the author's (offered as "Pd help patch + button") |
-| **AMH** | **MQTT: the card says not yet.** A device that speaks MQTT cannot reach a patch; MQTT gets a design talk of its own (broker, topics, how a topic becomes an address). | the author's (offered as "Card says 'not yet'") |
+| **AMH** | **MQTT: the card says not yet.** A device that speaks MQTT cannot reach a patch; MQTT gets a design talk of its own (broker, topics, how a topic becomes an address). *That talk is §67 (2026-10-15): built, and the card says MQTT.* | the author's (offered as "Card says 'not yet'") |
 | **AMI** | **A save from Pd keeps the patch's own window**: the place and size on its first line as Go.dot handed them out, the font and the rest as saved - the window is where this machine's screen put it, and a zoomed window grown to fit would grow the patch at every save. | mine |
 | **AMJ** | **Copy for a patch**: a cue in the list, and a port in Show settings > Serial, put on the clipboard the boxes a patch needs with their ids - a cue's `[; /godot/cmd/cue/fire <id>(`, a port's `[r /godot/serial/<id>/in]` and `[s /godot/serial/<id>/out]` - as Pd's own text, which pastes onto Go.dot's canvas or into Pd. The words "Copy for a patch" are mine, for review. | the author's (offered as "Copy for a patch") |
 | **AMK** | **A cue dragged onto the canvas** drops a message box that fires it, `[; /godot/cmd/cue/fire <id>(`, where it is let go. | the author's (offered as "Drag a cue onto the canvas") |
@@ -29891,7 +29891,7 @@ its running patch: no live values on its lines, no state, and its live boxes had
 
 ### 66.8 Not built
 
-MQTT (AMH, for patches and scripts alike); a module loader, or one script calling another - each is
+MQTT (AMH, for patches and scripts alike - built since, §67); a module loader, or one script calling another - each is
 one cue's text; JavaScript coloured as JavaScript (JUCE has no tokeniser for it; C++'s stands in); a
 memory cap on JavaScript, which JUCE's engine does not reach (Lua has one); the source edited on the
 browser console's page beyond a text row (AMZ); a script's MIDI heard in the log (as a patch's, §51.8).
@@ -29936,8 +29936,8 @@ sensor back without a socket.
 | **ANF** | **A topic that cannot be an address is dropped**: one with a space or any of `# * , ? [ ] { }`, counted as the link's dropped. Out, every address is a topic. Publishes leave at QoS 0, not retained; a subscription asks QoS 0. | mine |
 | **ANG** | **The broker's scope**: MQTT 3.1.1 and 3.1; level 5 refused (CONNACK `0x01`), which a client of MQTT 5 is told to set down from. Clean sessions only (session present always nought). Subscriptions are granted QoS 0 - the specification allows it, and it is what keeps the broker from tracking acknowledgements it never needs; a client's QoS 1 publish is acknowledged, a QoS 2 one walked through PUBREC, PUBREL, PUBCOMP. Retained messages kept and handed to a new subscriber; a will sent when a client goes without saying; a client silent for one and a half times its keepalive dropped; `+` and `#` in a filter, `$` topics hidden from `#`. One thread listens, one thread a client, each read bounded; nothing on them touches the show. | mine |
 | **ANH** | **Held, and heard** (§58): a backup's MQTT devices stay connected and subscribed - what arrives is the show's input, as a serial port's lines are (AGH) - and publish nothing, answering `sent` (AGG). With a broker elsewhere that is the whole of redundancy. With Go.dot's own broker, a sensor aimed at the main's address does not move at a failover; the guides say so, and say which to choose: a broker elsewhere when the devices must survive the main, or an empty host on both machines when each has its own. The broker itself is this machine's service, not the show's state: the hold does not touch it. | mine |
-| **ANI** | **Heard as a device's report**: every publish taken is written into the namespace on the tick thread under the origin `mqtt:<device>`, as a connection's packets are under `link:<device>` (DP.6), so the hearing rule gives it to the device, the log holds it, and a replay opens no socket. | mine |
-| **ANJ** | **The window**: ADD in the Network tab offers "MQTT device" (a host and a port, 1883) and "MQTT device on Go.dot's broker" (an empty host); the Kind column says **MQTT**, Where says `host:port` or "Go.dot's broker", and an mqtt row has a **Topics** cell for its filters. Under the table, beside the OSC filter: "MQTT broker", off or on, its port, and how many clients tonight. The words "MQTT device", "Go.dot's broker" and "Topics" are mine, for review. | mine |
+| **ANI** | **Heard as a device's report**: every publish taken is written into the namespace on the tick thread under the origin `mqtt:<device>`, as a connection's packets are under `link:<device>` (DP.6) - the namespace reads the three origins alike - so the hearing rule gives it to the device, the log holds it as `mount.heard`, and a replay opens no socket. | mine |
+| **ANJ** | **The window**: the address cell's menu in the Network tab - the one that offers a datagram, a connection, a serial port and a MIDI port - gains "On an MQTT broker, at an address..." (the host then typed in place), "On Go.dot's MQTT broker" (the host emptied, which is what names it) and, for a device on one, "Topics: <filters>..." typed in place; the Kind column says **MQTT**, the address cell the broker or "Go.dot's broker", the port cell 1883 when the row says nothing, and the link line what the engine says of the connection. Under the table, beside the OSC filter: "MQTT broker: Off" or "On" (one write of `network/broker`), the port beside it while it is on, and after the filter's sentence what the broker is doing - listening on its port with its clients, or its problem. As planned this was two ADD entries and a Topics column; built as the tab's own pattern. The words "On Go.dot's MQTT broker", "Topics" and "MQTT broker" are mine, for review. | mine |
 | **ANK** | **The help cards say MQTT** where they said "not yet": the Pd card, the JavaScript and Lua cards, each with the device to add and the two lines to copy. No "Copy for a patch" on an MQTT device: its addresses are a device's, typed as any device's are. | mine |
 
 ### 67.3 Rows
@@ -29962,9 +29962,11 @@ Every new row has a default, so an old show opens and saves unchanged.
 ### 67.4 Refused
 
 At the load, on `mount/problem`: `the mqtt wire rides the mqtt transport only - set the transport to
-mqtt`; `an mqtt transport carries the mqtt wire only - set the wire to mqtt`; `readback is a described
-device's way; an MQTT device is heard by its topics`; `it is on Go.dot's broker, which this machine has
-off - turn it on in Show settings > Network, or name a broker`. A run to a device whose link is closed
+mqtt`; `an mqtt transport carries the mqtt wire only - set the wire to mqtt`; `readback <word> is a
+described device's way; an MQTT device is heard by its topics - set it to none`; `topic filter "<f>" is
+not one a broker takes - + alone in its level, # alone and last`; `it subscribes to nothing - name a topic
+filter, # for everything`; `it is on Go.dot's broker, which the show has off - turn it on in Show settings >
+Network, or name a broker` (the row is the show's, so it is the show that has it off). A run to a device whose link is closed
 **fails**, as to a closed connection (AFJ). A publish on a topic the broker refuses is dropped and
 counted; a refused CONNECT is on `linkProblem` and the link waits as a connection does.
 
@@ -29972,22 +29974,29 @@ counted; a refused CONNECT is on `linkProblem` and the link waits as a connectio
 
 | Stage | What | Built |
 |---|---|---|
-| MQ.0 | This section; PRD §3.21, §3.22, §5, §6.9, §6.11; the devplan; the README | |
-| MQ.1 | The codec and topic matching, `MqttTests` | |
-| MQ.2 | The rows, the schema, the load's refusals, `PresetTable::carries` | |
-| MQ.3 | The client hears: the `mqtt` framing, the session, the tick's take, the hearing rule | |
-| MQ.4 | The client publishes: the destination, the `mqtt` wire, the sink; the hold | |
-| MQ.5 | The broker, its rows, `--mqtt-port`, a device on Go.dot's broker | |
-| MQ.6 | The Network tab: the two ADD entries, Kind, Where, Topics, the broker under the table | |
-| MQ.7 | The help cards, a ready-made script, the guides, the README | |
-| MQ.8 | `blackbox.mqtt`, M72, M73, the whole suite, CI | |
+| MQ.0 | This section; PRD §3.21, §3.22, §5, §6.9, §6.11; the devplan; the README | a24c41b |
+| MQ.1 | The codec and topic matching, a topic as an address and a payload as values, `MqttTests` | 76b8886 |
+| MQ.2 | The rows, the schema, the load's refusals (`PresetTable` left alone: a described MQTT device is not built) | 171698f |
+| MQ.3 | The client hears: the `mqtt` framing, the openings count, the session, the tick's take, the hearing rule | 9072223 |
+| MQ.4 | The client publishes: the destination, the `mqtt` wire, the sink asking the session; the hold | 4a99e75 |
+| MQ.5 | The broker, its rows, `--mqtt-port`, a device on Go.dot's broker through a link with no socket | 5eff74a |
+| MQ.6 | The Network tab: the address cell's three menu entries, Kind, the link line, the broker under the table | 07d0663 |
+| MQ.7 | The help cards, the relay in each language, the guides, the README | d5ed2e3 |
+| MQ.8 | `blackbox.mqtt`, M72, M73, the namespace reading the `mqtt:` origin, the whole suite, CI | |
 
 ### 67.6 Measurements
 
 - **M72** - a publish from a client, through Go.dot's broker, heard by a script and its answer
   published back to the client: expected on the tick, as M57 and §66.6's end to end (33 to 66 ms).
+  *Measured 2026-10-15* (`blackbox.mqtt`, MSVC, Debug, Windows, the author's laptop): 61 to 82 ms,
+  publish to echo, over ten - one tick more than a datagram's road, since the device's link is a thread
+  of its own between the broker and the tick, and the answer crosses it again.
 - **M73** - fifty clients publishing twenty a second each to Go.dot's broker, with a script hearing
-  them all: the tick's cost and nothing dropped, Release.
+  them all: the tick's cost and nothing dropped, Release. *Measured 2026-10-15*, Debug, the fifty clients
+  threads of one Python process on the same laptop: 3 000 publishes in 3.0 s, every one heard by the
+  script and counted; the script's run late on 2 to 15 of the 150 ticks (a Debug tick, with fifty
+  publishing threads beside it), `latenessMax` 192 to 384 samples. Release, on a machine of its own,
+  still owed.
 
 ### 67.7 Not built
 

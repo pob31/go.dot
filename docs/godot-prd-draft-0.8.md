@@ -4432,7 +4432,10 @@ Mackie vs HUI first — first week with the D700.
 - **MQTT** (§3.21, 2026-10-15, namespace draft §67): **M72** - a publish from a client, through
   Go.dot's broker, heard by a script and answered back to the client, end to end; **M73** - fifty
   clients publishing twenty a second each to Go.dot's broker with a script hearing them all, the
-  tick's cost and nothing dropped. *(Planned.)*
+  tick's cost and nothing dropped. *Measured 2026-10-15* (§67.6), Debug, Windows: a publish heard
+  by a script and its answer back at the client in 61 to 82 ms; 3 000 publishes from fifty clients
+  in three seconds every one heard, the script's run late on a few Debug ticks of the 150; Release
+  on a machine of its own still owed.
 
 ---
 

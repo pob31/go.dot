@@ -1,0 +1,17 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="7K2QM9X4" name="Main">
+      <Script id="SCRP0001" name="Relay" number="1" source="// Doubles what the sensor publishes at /house/room1/temp onto /house/room1/echo;&#10;// a temperature rising past 25 fires Bell, once until it falls below again;&#10;// and counts what arrives under /house/storm/, said once a second.&#10;let above = false;&#10;let heard = 0;&#10;godot.hear('/house/room1/temp', (t) =&gt; {&#10;    godot.send('/house/room1/echo', t * 2);&#10;    if (! above &amp;&amp; t &gt; 25) {&#10;        above = true;&#10;        godot.fire('B3NK0001');&#10;    } else if (above &amp;&amp; t &lt; 25) {&#10;        above = false;&#10;    }&#10;});&#10;godot.hearAll((address) =&gt; {&#10;    if (address.indexOf('/house/storm/') === 0) heard += 1;&#10;});&#10;godot.every(1, () =&gt; godot.send('/house/stats/heard', heard));&#10;"/>
+      <Cue id="B3NK0001" name="Bell" number="2"/>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="H0SEMNT1" name="House" host="" port="1883" prefix="/house" rx="true" transport="mqtt" wire="mqtt"/>
+  </Mounts>
+  <Audio tracks="0"/>
+  <MidiPorts/>
+  <Network broker="true" brokerPort="18830"/>
+  <Surfaces/>
+  <Dcas/>
+  <Sync/>
+</Show>

@@ -1196,6 +1196,7 @@ heard and answered by process and script cues, and by OSC cues - a broker as a d
 its topics as addresses under the device's prefix; a client to any broker, and a broker of Go.dot's
 own for a device that has nowhere else to publish (namespace draft §67; PRD §3.21, §3.22, §6.9). The
 author's decisions are ANA-ANC; AND-ANK are the implementer's, the author's to overrule.
+*Built 2026-10-15*, MQ.0-MQ.8 (§67.5).
 
 | Stage | What | Depends on |
 |---|---|---|

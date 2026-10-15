@@ -1843,6 +1843,22 @@ add_test(NAME blackbox.script.fr_FR
 set_tests_properties(blackbox.script.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# MQTT END TO END (namespace draft 67, MQ.8): serve with its own broker on, a
+# device of the show on it with no socket, and a script cue hearing it - driven
+# by MQTT packets written in Python from the specification: a publish doubled
+# and back at a client (M72), Bell fired past a line, fifty clients publishing
+# at once heard whole (M73), Esc, and the session replayed.
+add_test(NAME blackbox.mqtt.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/mqtt.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.mqtt.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.mqtt.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/mqtt.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.mqtt.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # TIMECODE GENERATED END TO END (namespace draft 59, TC.9): serve --hosted
 # --render with --midi-render=TC=<file>, the show fired by GO, and what came out
 # read by a third implementation of the standards in Python - a biphase decoder

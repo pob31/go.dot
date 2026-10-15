@@ -147,8 +147,10 @@ namespace wfg::oscquery
         /*  AND A DEVICE ON A SERIAL PORT (namespace draft §51, PC.11), known by
             its port rather than a host: the heard rule keys it `serial:<id>`,
             the origin serve stamps on what the port said. A device over a
-            connection the same way, keyed `link:<id>` (§57, DP.6). */
-        if (heard != nullptr && (origin.rfind ("serial:", 0) == 0 || origin.rfind ("link:", 0) == 0)
+            connection the same way, keyed `link:<id>` (§57, DP.6); and one
+            on an MQTT broker by its session, keyed `mqtt:<id>` (§67, ANI). */
+        if (heard != nullptr
+              && (origin.rfind ("serial:", 0) == 0 || origin.rfind ("link:", 0) == 0 || origin.rfind ("mqtt:", 0) == 0)
               && heard->take (origin, packet.address, packet.args))
             return;
 
