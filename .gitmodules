@@ -25,3 +25,6 @@
 [submodule "ThirdParty/pure-data"]
 	path = ThirdParty/pure-data
 	url = https://github.com/pure-data/pure-data.git
+[submodule "ThirdParty/lua"]
+	path = ThirdParty/lua
+	url = https://github.com/lua/lua.git

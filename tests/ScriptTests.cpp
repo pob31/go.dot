@@ -531,3 +531,230 @@ TEST_CASE ("script: the ready-made scripts do what their comment says")
         CHECK (fired (tickOnce (*js, heard (0.7))) == std::vector<std::string> { "3.2" });
     }
 }
+
+//==============================================================================
+/*  SC.9: LUA'S INSTANCE ALONE (AMX), every JavaScript case again in Lua - the
+    same API in Lua's words - and what is Lua's own: whole numbers that stay
+    whole, an interrupt pcall cannot catch, a memory cap. */
+#include <wfg/engine/process/LuaLanguage.h>
+
+namespace
+{
+    std::unique_ptr<ScriptInstance> lua (ScriptInstance::Settings settings = {})
+    {
+        return std::make_unique<ScriptInstance> (wfg::process::makeLua, settings);
+    }
+}
+
+TEST_CASE ("script: a Lua script doubles what it hears, on a thread of its own")
+{
+    auto script = lua();
+    CHECK_FALSE (script->sharesLock());
+    const auto atOpen = makeAndOpen (*script, "godot.hear('/a', function (x) godot.send('/b', x * 2) end)\n");
+    CHECK (atOpen.sent.empty());
+    CHECK (script->receives() == std::vector<std::string> { "/a" });
+
+    const auto outbox = tickOnce (*script, { { "/a", { Atom::of (21.0) } } });
+    REQUIRE (outbox.sent.size() == 1);
+    CHECK (outbox.sent[0].to == "/b");
+    CHECK (outbox.sent[0].atoms == Atoms { Atom::of (42.0) });
+    CHECK (tickOnce (*script).sent.empty());
+    CHECK (tickOnce (*script, { { "/nobody", { Atom::of (1.0) } } }).sent.empty());
+}
+
+TEST_CASE ("script: what a Lua script sends leaves as JavaScript's does")
+{
+    auto script = lua();
+    const auto atOpen = makeAndOpen (*script,
+        "godot.send('/dev/x', 0.5, 'up')\n"
+        "godot.send('/dev/bang')\n"
+        "godot.send('/dev/list', {1, 2}, true)\n"
+        "godot.set('cue/ABC/level', -6)\n"
+        "godot.set('/godot/cue/ABC/name', 'Rain')\n"
+        "godot.command('cue.stop', godot.self)\n"
+        "godot.fire('3.1')\n"
+        "godot.midi.send(0x90, 60, 100)\n");
+
+    REQUIRE (atOpen.sent.size() == 8);
+    CHECK (atOpen.sent[0].atoms == Atoms { Atom::of (0.5), Atom::of (std::string ("up")) });
+    CHECK (atOpen.sent[1].selector == "bang");
+    CHECK (atOpen.sent[2].atoms == Atoms { Atom::of (1.0), Atom::of (2.0), Atom::of (1.0) });
+    CHECK (atOpen.sent[3].to == "/godot/cue/ABC/level");
+    CHECK (atOpen.sent[4].to == "/godot/cue/ABC/name");
+    CHECK (atOpen.sent[5].to == "/godot/cmd/cue/stop");
+    CHECK (atOpen.sent[5].atoms == Atoms { Atom::of (std::string ("self")) });
+    CHECK (atOpen.sent[6].to == "/godot/cmd/cue/fire");
+    CHECK (atOpen.sent[7].to == wfg::process::midiName);
+    CHECK (atOpen.sent[7].atoms == Atoms { Atom::of (144.0), Atom::of (60.0), Atom::of (100.0) });
+}
+
+TEST_CASE ("script: in Lua everything heard reaches hearAll, MIDI reaches midi.hear, and whole numbers stay whole")
+{
+    auto script = lua();
+    makeAndOpen (*script,
+        "godot.hearAll(function (address, ...) godot.send('/all', address, ...) end)\n"
+        "godot.midi.hear(function (status, a, b) print(status, a, b, math.type(a)) end)\n");
+
+    const auto outbox = tickOnce (*script, { { "/dev/y", { Atom::of (0.25), Atom::of (std::string ("w")) } },
+                                             { wfg::process::midiName, { Atom::of (144.0), Atom::of (60.0), Atom::of (1.0) } } });
+    REQUIRE (outbox.sent.size() == 1);
+    CHECK (outbox.sent[0].atoms == Atoms { Atom::of (std::string ("/dev/y")), Atom::of (0.25), Atom::of (std::string ("w")) });
+    REQUIRE (outbox.printed.size() == 1);
+    CHECK (outbox.printed[0] == "144 60 1 integer");
+}
+
+TEST_CASE ("script: in Lua time is the tick too")
+{
+    auto script = lua();
+    makeAndOpen (*script,
+        "godot.every(0.1, function () godot.send('/every') end)\n"
+        "godot.after(1, function () godot.send('/after') end)\n"
+        "local never = godot.after(0.5, function () godot.send('/never') end)\n"
+        "godot.cancel(never)\n"
+        "godot.tick(function (n) if n == 3 then godot.send('/third', n) end end)\n");
+
+    std::vector<int> every, after, third;
+    for (int tick = 1; tick <= 60; ++tick)
+        for (const auto& sent : tickOnce (*script).sent)
+        {
+            if (sent.to == "/every") every.push_back (tick);
+            if (sent.to == "/after") after.push_back (tick);
+            if (sent.to == "/third") third.push_back (tick);
+            CHECK (sent.to != "/never");
+        }
+    CHECK (every == std::vector<int> { 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60 });
+    CHECK (after == std::vector<int> { 50 });
+    CHECK (third == std::vector<int> { 3 });
+}
+
+TEST_CASE ("script: Lua reads 2.5 as 2.5 and prints it so under any locale")
+{
+    auto script = lua();
+    const auto atOpen = makeAndOpen (*script, "godot.send('/n', 2.5 * 1) print(2.5, 0.1 + 0.2, 'mot', 1e21, 7 // 2)\n");
+    REQUIRE (numbersSentTo (atOpen, "/n").size() == 1);
+    CHECK (near (numbersSentTo (atOpen, "/n")[0], 2.5));
+    REQUIRE (atOpen.printed.size() == 1);
+    CHECK (atOpen.printed[0] == "2.5 0.3 mot 1e+21 3");
+
+    openAgain (*script, "godot.hear('/x', function (x) print(x, math.type(x)) end)\n");
+    const auto outbox = tickOnce (*script, { { "/x", { Atom::of (0.125) } } });
+    REQUIRE (outbox.printed.size() == 1);
+    CHECK (outbox.printed[0] == "0.125 float");
+}
+
+TEST_CASE ("script: a Lua script that does not read says why and on which line, and is not run")
+{
+    auto script = lua();
+    REQUIRE (script->make());
+    REQUIRE (script->finished (5s));
+
+    REQUIRE (script->open ("godot.hear('/a', function (x) godot.send('/b', x) end)\nlocal y = \n"));
+    REQUIRE (script->finished (5s));
+    CHECK_FALSE (script->opened());
+    INFO (script->problem());
+    CHECK (script->problem().find ("(line 3)") != std::string::npos);
+    CHECK (script->receives().empty());
+
+    REQUIRE (script->open ("\n\nnoSuchThing()\n"));
+    REQUIRE (script->finished (5s));
+    CHECK_FALSE (script->opened());
+    CHECK (script->problem().find ("noSuchThing") != std::string::npos);
+    CHECK (script->problem().find ("(line 3)") != std::string::npos);
+
+    openAgain (*script, "godot.hear('/a', function (x) godot.send('/b', x) end)\n");
+    CHECK (script->problem().empty());
+}
+
+TEST_CASE ("script: a failure inside a Lua script's own function is printed with its line, and the rest run on")
+{
+    auto script = lua();
+    makeAndOpen (*script,
+        "godot.hear('/a', function (x)\n"
+        "    local t = x.no.such\n"
+        "end)\n"
+        "godot.hear('/a', function (x) godot.send('/b', x) end)\n");
+
+    const auto outbox = tickOnce (*script, { { "/a", { Atom::of (1.0) } } });
+    REQUIRE (outbox.printed.size() == 1);
+    INFO (outbox.printed[0]);
+    CHECK (outbox.printed[0].find ("(line 2)") != std::string::npos);
+    CHECK (numbersSentTo (outbox, "/b") == std::vector<double> { 1.0 });
+}
+
+TEST_CASE ("script: the Lua sandbox - no io, os, package, debug, file or binary chunk, and godot cannot be changed")
+{
+    auto script = lua();
+    const auto atOpen = makeAndOpen (*script,
+        "print(type(io), type(os), type(package), type(debug), type(require), type(dofile), type(loadfile), type(string.dump))\n"
+        "print(pcall(function () godot.send = nil end))\n"
+        "print(load('\\27Lua'))\n"
+        "print(type(godot.send), type(godot.midi.send), math.type(1), utf8.char(233), coroutine.isyieldable())\n");
+    REQUIRE (atOpen.printed.size() == 4);
+    CHECK (atOpen.printed[0] == "nil nil nil nil nil nil nil nil");
+    CHECK (atOpen.printed[1].rfind ("false", 0) == 0);
+    CHECK (atOpen.printed[1].find ("godot cannot be changed") != std::string::npos);
+    CHECK (atOpen.printed[2].rfind ("nil", 0) == 0);
+    CHECK (atOpen.printed[3].rfind ("function function integer", 0) == 0);
+}
+
+TEST_CASE ("script: a Lua script's sends past the cap are counted, not kept")
+{
+    ScriptInstance::Settings settings;
+    settings.maxSent = 5;
+    auto script = lua (settings);
+    makeAndOpen (*script, "godot.hear('/go', function (n) for i = 1, n do godot.send('/many', i) end end)\n");
+    const auto outbox = tickOnce (*script, { { "/go", { Atom::of (12.0) } } });
+    CHECK (outbox.sent.size() == 5);
+    CHECK (outbox.dropped == 7);
+}
+
+TEST_CASE ("script: a Lua script stuck in a loop is interrupted - pcall and coroutines cannot keep it - and freed")
+{
+    for (const auto* loop : { "godot.hear('/loop', function () while true do end end)\n",
+                              "godot.hear('/loop', function () while true do pcall(function () while true do end end) end end)\n",
+                              "godot.hear('/loop', function () while true do coroutine.resume(coroutine.create(function () while true do end end)) end end)\n" })
+    {
+        INFO (loop);
+        auto script = lua();
+        makeAndOpen (*script, std::string (loop) + "godot.hear('/loop', function () godot.send('/after') end)\n");
+        REQUIRE (script->tick ({ { "/loop", {} } }));
+        CHECK_FALSE (script->finished (200ms));
+
+        const auto asked = std::chrono::steady_clock::now();
+        CHECK (script->interrupt());
+        REQUIRE (script->finished (5s));
+        CHECK (std::chrono::steady_clock::now() - asked < 1s);
+
+        const auto outbox = script->takeOutbox();
+        CHECK (std::none_of (outbox.sent.begin(), outbox.sent.end(), [] (const Sent& s) { return s.to == "/after"; }));
+        REQUIRE (script->close());
+        REQUIRE (script->finished (5s));
+        CHECK_FALSE (script->made());
+    }
+}
+
+TEST_CASE ("script: a Lua script that eats memory is stopped by the cap, and says so")
+{
+    auto script = lua();
+    makeAndOpen (*script, "godot.hear('/eat', function () local t = {} for i = 1, 1e9 do t[i] = string.rep('x', 1000) .. i end end)\n"
+                          "godot.hear('/fine', function () godot.send('/ok') end)\n");
+    const auto outbox = tickOnce (*script, { { "/eat", {} } });
+    REQUIRE_FALSE (outbox.printed.empty());
+    CHECK (outbox.printed[0].find ("memory") != std::string::npos);
+
+    //  And it runs on afterwards.
+    CHECK (tickOnce (*script, { { "/fine", {} } }).sent.size() == 1u);
+}
+
+TEST_CASE ("script: Lua's prelude has every function the JavaScript card names")
+{
+    const auto prelude = std::string (wfg::process::luaPrelude());
+    for (const auto* name : { "hear", "hearAll", "send", "set", "command", "fire", "tick", "after", "every", "cancel", "self" })
+    {
+        INFO (name);
+        CHECK ((prelude.find (std::string (name) + " = function") != std::string::npos
+                || prelude.find (std::string (name) + " = '") != std::string::npos));
+    }
+    CHECK (wfg::process::luaProblem ("script:7: attempt to index a nil value") == "attempt to index a nil value (line 7)");
+    CHECK (wfg::process::luaProblem ("not a position") == "not a position");
+}

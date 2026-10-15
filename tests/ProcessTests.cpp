@@ -45,6 +45,7 @@
 #include <wfg/engine/process/PatchThread.h>
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/process/JsLanguage.h>
+#include <wfg/engine/process/LuaLanguage.h>
 #include <wfg/engine/process/ScriptInstance.h>
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/tree/Mount.h>
@@ -1357,6 +1358,62 @@ TEST_CASE ("script cue: a stuck script fails its run and is freed; patches open 
     CHECK (rig.runOf (later)->error.empty());
 }
 
+TEST_CASE ("script cue: a Lua script doubles what a device reports, and a stuck one is interrupted and freed")
+{
+    ProcessRig rig ("sc9-lua");
+    rig.document.setAttribute ("/godot/list/processStuckAfter", "5");
+    const auto cue = rig.makeScript ("godot.hear('/dev/in', function (x)\n"
+                                     "    if x > 0.9 then while true do end end\n"
+                                     "    godot.send('/dev/out', x * 2)\n"
+                                     "end)\n", "lua");
+    rig.fire (cue);
+    REQUIRE (rig.runOf (cue)->kind == "script");
+    REQUIRE (rig.running (cue));
+
+    rig.listener.clear();
+    rig.hear ("/dev/in", 0.25f);
+    rig.tickOnce();
+    const auto sent = rig.listener.valueAt ("/dev/out");
+    REQUIRE (sent.has_value());
+    CHECK (sameNumber (*sent, 0.5));
+
+    rig.document.setAttribute ("/godot/list/processBudget", "2");
+    rig.hear ("/dev/in", 1.0f);
+    for (int n = 0; n < 500 && ! rig.runOf (cue)->isFinished(); ++n)
+    {
+        rig.tickOnce();
+        std::this_thread::sleep_for (2ms);
+    }
+    CHECK (rig.runOf (cue)->error == "process-stuck");
+    REQUIRE (rig.tickUntil ([&] { return rig.host.instances() == 0u; }, 50));
+}
+
+TEST_CASE ("script cue: a running script whose language changes is opened again in the new one")
+{
+    ProcessRig rig ("sc9-language");
+    const auto cue = rig.makeScript (jsDoubling);
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+
+    //  Lua's words for the same, and the language with them: one edit, then the other.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + cue + "/source",
+                                        "godot.hear('/dev/in', function (x) godot.send('/dev/out', x * 3) end)\n").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + cue + "/language", "lua").ok);
+
+    std::optional<double> seen;
+    for (int n = 0; n < 80 && ! (seen.has_value() && sameNumber (*seen, 0.75)); ++n)
+    {
+        rig.listener.clear();
+        rig.hear ("/dev/in", 0.25f);
+        rig.tickOnce();
+        seen = rig.listener.valueAt ("/dev/out", 200);
+    }
+    REQUIRE (seen.has_value());
+    CHECK (sameNumber (*seen, 0.75));
+    CHECK (rig.runsOf (cue) == 1u);
+    CHECK (rig.host.instances() == 1u);
+}
+
 TEST_CASE ("script cue: MIDI on the port its cue listens on reaches midi.hear, and midi.send leaves on the port it names")
 {
     ProcessRig rig ("sc4-midi");
@@ -2484,12 +2541,52 @@ TEST_CASE ("M69: a tick of a JavaScript script doing a fifty-object patch's work
     CHECK (micros < 20000.0);
 }
 
-TEST_CASE ("M70: ten JavaScript scripts at once, each on its own thread, against the budget")
+TEST_CASE ("M69: a tick of a Lua script doing the same work")
 {
-    wfg::process::ProcessHost host (hostSettings ("m70"));
+    wfg::process::ScriptInstance script (wfg::process::makeLua, {});
+    REQUIRE (script.make());
+    REQUIRE (script.finished (5s));
+    REQUIRE (script.open ("godot.hear('/in', function (x)\n"
+                          "    local v = x\n"
+                          "    for i = 1, 48 do v = v + 1 end\n"
+                          "    godot.send('/out', v)\n"
+                          "end)\n"));
+    REQUIRE (script.finished (5s));
+    REQUIRE (script.opened());
+
+    constexpr int ticks = 500;
+    double last = 0.0;
+    const auto start = std::chrono::steady_clock::now();
+    for (int tick = 0; tick < ticks; ++tick)
+    {
+        REQUIRE (script.tick ({ { "/in", { Atom::of (static_cast<double> (tick)) } } }));
+        REQUIRE (script.finished (5s));
+        const auto out = numbersSentTo (script.takeOutbox(), "/out");
+        REQUIRE (out.size() == 1u);
+        last = out[0];
+    }
+    const auto micros = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - start).count() / ticks;
+    CHECK (sameNumber (last, 499.0 + 48.0));
+    MESSAGE ("M69: a tick of a Lua script doing a fifty-object patch's work, a value in and out, " << micros
+             << " us on average, the hand-off to its thread and back included");
+    CHECK (micros < 20000.0);
+}
+
+TEST_CASE ("M70: ten scripts at once, each on its own thread, against the budget")
+{
+    std::string language = "javascript", source = fortyEightAdditions(), word = "JavaScript";
+    SUBCASE ("JavaScript") {}
+    SUBCASE ("Lua")
+    {
+        language = "lua";
+        word = "Lua";
+        source = "godot.hear('/in', function (x) local v = x for i = 1, 48 do v = v + 1 end godot.send('/out', v) end)\n";
+    }
+
+    wfg::process::ProcessHost host (hostSettings ("m70-" + language));
     std::vector<wfg::process::WantedProcess> wanted;
     for (int i = 0; i < 10; ++i)
-        wanted.push_back ({ "RUN" + std::to_string (i), "CUE" + std::to_string (i), fortyEightAdditions(), "javascript" });
+        wanted.push_back ({ "RUN" + std::to_string (i), "CUE" + std::to_string (i), source, language });
 
     double value = 0.0;
     const auto inputs = [&value] (const std::string&, const std::vector<std::string>&)
@@ -2531,16 +2628,25 @@ TEST_CASE ("M70: ten JavaScript scripts at once, each on its own thread, against
         }
     }
 
-    MESSAGE ("M70: ten JavaScript scripts at once, a tick in " << total / ticks << " ms on average, "
+    MESSAGE ("M70: ten " << word << " scripts at once, a tick in " << total / ticks << " ms on average, "
              << worst << " ms at worst, " << late << " late of " << ticks * 10 << ", " << answered << " answers");
     CHECK (answered >= ticks * 10 / 2);
     CHECK_FALSE (host.anyStuck());
 }
 
-TEST_CASE ("M71: a JavaScript script in an endless loop, from its first late tick to its instance freed")
+TEST_CASE ("M71: a script in an endless loop, from its first late tick to its instance freed")
 {
-    wfg::process::ProcessHost host (hostSettings ("m71"));
-    std::vector<wfg::process::WantedProcess> wanted { { "RUNS", "CUES", "godot.hear('/loop', () => { for (;;) {} });\n", "javascript" } };
+    std::string language = "javascript", source = "godot.hear('/loop', () => { for (;;) {} });\n", word = "JavaScript";
+    SUBCASE ("JavaScript") {}
+    SUBCASE ("Lua")
+    {
+        language = "lua";
+        word = "Lua";
+        source = "godot.hear('/loop', function () while true do end end)\n";
+    }
+
+    wfg::process::ProcessHost host (hostSettings ("m71-" + language));
+    std::vector<wfg::process::WantedProcess> wanted { { "RUNS", "CUES", source, language } };
 
     bool loop = false;
     const auto inputs = [&loop] (const std::string&, const std::vector<std::string>&)
@@ -2584,7 +2690,7 @@ TEST_CASE ("M71: a JavaScript script in an endless loop, from its first late tic
     REQUIRE (freed.has_value());
 
     const auto ms = [] (auto a, auto b) { return std::chrono::duration<double, std::milli> (b - a).count(); };
-    MESSAGE ("M71: an endless loop failed process-stuck " << ms (looped, *failed) << " ms after it began, and its"
+    MESSAGE ("M71: an endless " << word << " loop failed process-stuck " << ms (looped, *failed) << " ms after it began, and its"
              " instance was freed " << ms (*failed, *freed) << " ms after that");
     CHECK_FALSE (host.anyStuck());
     CHECK (ms (*failed, *freed) < 1000.0);

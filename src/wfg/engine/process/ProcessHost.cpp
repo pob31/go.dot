@@ -16,6 +16,7 @@
 
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/process/JsLanguage.h>
+#include <wfg/engine/process/LuaLanguage.h>
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/ScriptInstance.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -81,6 +82,10 @@ namespace wfg::process
         //  A script cue's JavaScript (namespace draft §66, SC.3).
         if (slot.language == javascriptLanguage)
             return std::make_unique<ScriptInstance> (makeJavascript, ScriptInstance::Settings {});
+
+        //  And its Lua (SC.9).
+        if (slot.language == luaLanguage)
+            return std::make_unique<ScriptInstance> (makeLua, ScriptInstance::Settings {});
 
         return nullptr;
     }

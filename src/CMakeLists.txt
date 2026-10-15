@@ -201,6 +201,8 @@ add_library(wfg_engine STATIC
     wfg/engine/process/ScriptInstance.cpp
     wfg/engine/process/JsLanguage.h
     wfg/engine/process/JsLanguage.cpp
+    wfg/engine/process/LuaLanguage.h
+    wfg/engine/process/LuaLanguage.cpp
     wfg/engine/process/ScriptText.h
     wfg/engine/process/ScriptText.cpp
     wfg/engine/process/ScriptEditing.h

@@ -205,6 +205,22 @@ modified. Full text: in the header named above, where QuickJS's licence is repro
 
 ---
 
+## Lua
+
+- **Website**: https://www.lua.org, https://github.com/lua/lua
+- **Version**: tag `v5.4.9`, commit `312b9efaa1061c2c4cad08554dbc1351c3270eef`
+- **Licence**: MIT
+- **Copyright**: (C) 1994-2026 Lua.org, PUC-Rio
+
+What runs a script cue's Lua (namespace draft §66). A pinned submodule at
+`ThirdParty/lua`, of which the core and the base, string, table, math, utf8 and
+coroutine libraries are compiled into a static library, `wfg_lua`
+(`cmake/WfgThirdParty.cmake`) - not its io, os, package or debug libraries, nor
+its programs. Nothing of it is modified. Full text: the notice at the end of
+`ThirdParty/lua/lua.h`.
+
+---
+
 ## HarfBuzz
 
 - **Website**: https://harfbuzz.github.io

@@ -854,6 +854,31 @@ unset(_def)
 unset(_libpd)
 unset(_pd)
 
+# LUA 5.4 (namespace draft §66, AMX): what runs a script cue's Lua, built here
+# from a pinned submodule at ThirdParty/lua (the lua/lua mirror, a release tag)
+# with nothing of Lua's own makefile. The core and the six libraries a script
+# has - base, string, table, math, utf8, coroutine - and NOT linit, io, os,
+# loadlib or the debug library: what a script must never reach is not even in
+# the binary. Nor lua.c, luac.c, onelua.c or ltests.c, which are programs and
+# Lua's own tests. Its headers are included inside extern "C" by
+# process/LuaLanguage.cpp, the one file that uses them.
+set(_lua "${CMAKE_SOURCE_DIR}/ThirdParty/lua")
+add_library(wfg_lua STATIC)
+foreach(_file lapi lauxlib lbaselib lcode lcorolib lctype ldebug ldo ldump lfunc lgc llex
+              lmathlib lmem lobject lopcodes lparser lstate lstring lstrlib ltable ltablib
+              ltm lundump lutf8lib lvm lzio)
+    target_sources(wfg_lua PRIVATE "${_lua}/${_file}.c")
+endforeach()
+target_include_directories(wfg_lua SYSTEM PUBLIC "${_lua}")
+target_compile_options(wfg_lua PRIVATE $<IF:$<C_COMPILER_ID:MSVC>,/w,-w>)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(wfg_lua PUBLIC m)
+endif()
+set_target_properties(wfg_lua PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(wfg_deps INTERFACE wfg_lua)
+unset(_file)
+unset(_lua)
+
 add_library(wfg::thirdparty ALIAS wfg_thirdparty)
 
 # The engine will eventually be linked into things that are themselves shared objects
