@@ -12073,7 +12073,7 @@ TEST_CASE ("client: a patch opened in plugdata or Pd, and Pd downloaded - two ge
     Rig rig;
     wfg::process::editor::registerCommands (rig.engine.commands(), rig.document, nullptr, nullptr);
 
-    for (const auto& event : { gesture::editPatch ("PRCS0001"), gesture::installPd() })
+    for (const auto& event : { gesture::editPatch ("PRCS0001"), gesture::installPd(), gesture::patchHelp() })
     {
         INFO ("gesture sends " << event.command);
         CHECK (event.origin == std::string (origin::window));

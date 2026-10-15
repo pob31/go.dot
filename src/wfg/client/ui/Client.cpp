@@ -561,6 +561,7 @@ namespace wfg::client
 
                 footActions.editPatch = [this] (const std::string& cueId) { send (gesture::editPatch (cueId)); };
                 footActions.getPd = [this] { askToDownloadPd(); };
+                footActions.patchHelp = [this] { send (gesture::patchHelp()); };
                 footActions.playPatch = [this] (const std::string& runId, const std::string& name, const process::Atoms& atoms)
                 {
                     send (gesture::processSend (runId, name, atoms));

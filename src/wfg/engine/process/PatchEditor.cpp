@@ -217,6 +217,44 @@ namespace wfg::process::editor
         return command;
     }
 
+    std::string keepWindow (const std::string& saved, const std::string& before)
+    {
+        //  The first line's words up to its semicolon: #N canvas x y w h font
+        const auto words = [] (const std::string& text)
+        {
+            std::vector<std::string> found;
+            std::string word;
+            for (std::size_t i = 0; i < std::min (text.find (';'), text.size()); ++i)
+            {
+                if (text[i] == ' ' || text[i] == '\n' || text[i] == '\r' || text[i] == '\t')
+                {
+                    if (! word.empty())
+                        found.push_back (std::move (word));
+                    word.clear();
+                }
+                else
+                {
+                    word += text[i];
+                }
+            }
+            if (! word.empty())
+                found.push_back (std::move (word));
+            return found;
+        };
+
+        const auto mine = words (saved);
+        const auto theirs = words (before);
+        const auto isWindow = [] (const std::vector<std::string>& w)
+        {
+            return w.size() == 7 && w[0] == "#N" && w[1] == "canvas";
+        };
+        if (! isWindow (mine) || ! isWindow (theirs))
+            return saved;
+
+        return "#N canvas " + theirs[2] + " " + theirs[3] + " " + theirs[4] + " " + theirs[5] + " " + mine[6]
+                 + saved.substr (saved.find (';'));
+    }
+
     //==========================================================================
     Installer::~Installer()
     {
@@ -380,34 +418,15 @@ namespace wfg::process::editor
         if (! file.replaceWithText (juce::String::fromUTF8 (text.c_str()), false, false, "\n"))
             return "the patch could not be written to " + file.getFullPathName().toStdString();
 
-        const auto path = file.getFullPathName().toStdString();
-        const auto started = ! program.program.empty();
+        //  Asked to open the patch afresh when it changed here since Pd had it.
+        const auto before = std::find_if (out.begin(), out.end(), [&cueId] (const Out& one) { return one.cue == cueId; });
+        const std::string verb = before != out.end() && before->text != text ? "reopen" : "open";
+
         std::unique_ptr<plugin::ChildLaunch> child;
-
-        if (started && program.isPd())
-        {
-            //  The one Pd: asked, waited for while it starts, or started. Asked
-            //  to open the patch afresh when it changed here since Pd had it.
-            const auto before = std::find_if (out.begin(), out.end(), [&cueId] (const Out& one) { return one.cue == cueId; });
-            const std::string verb = before != out.end() && before->text != text ? "reopen" : "open";
-
-            if (pd.child != nullptr && pd.child->isRunning() && askPd (verb, path))
-                pd.child->allowForeground();
-            else if (pdStarting())
-                waiting.emplace_back (verb, path);
-            else if (! startPd (program, path))
-                return "the editor could not be started: " + program.program;
-        }
-        else if (started)
-        {
-            child = std::make_unique<plugin::ChildLaunch>();
-            if (! child->start (commandFor (program, path, searchPaths)))
-                return "the editor could not be started: " + program.program;
-            child->allowForeground();
-        }
+        if (const auto problem = hand (program, verb, file.getFullPathName().toStdString(), child); ! problem.empty())
+            return problem;
 
         const auto modified = file.getLastModificationTime().toMilliseconds();
-        const auto raiseUntil = started ? juce::Time::currentTimeMillis() + 10000 : std::int64_t { 0 };
         for (auto& one : out)
             if (one.cue == cueId)
             {
@@ -415,11 +434,60 @@ namespace wfg::process::editor
                 one.modified = modified;
                 one.text = text;
                 one.child = std::move (child);
-                one.raiseUntil = raiseUntil;
                 return {};
             }
 
-        out.push_back ({ cueId, file.getFullPathName().toStdString(), modified, text, std::move (child), raiseUntil });
+        out.push_back ({ cueId, file.getFullPathName().toStdString(), modified, text, std::move (child) });
+        return {};
+    }
+
+    std::string Watch::openHelp (const Found& program)
+    {
+        for (const auto& folder : searchPaths)
+        {
+            const auto file = fileOf (folder).getChildFile ("godot-help.pd");
+            if (! file.existsAsFile())
+                continue;
+
+            std::unique_ptr<plugin::ChildLaunch> child;
+            if (auto problem = hand (program, "open", file.getFullPathName().toStdString(), child); ! problem.empty())
+                return problem;
+            if (child != nullptr)
+                helpChild = std::move (child);
+            return {};
+        }
+        return "Go.dot's help patch is not beside it";
+    }
+
+    std::string Watch::hand (const Found& program, const std::string& verb, const std::string& path,
+                             std::unique_ptr<plugin::ChildLaunch>& child)
+    {
+        if (program.program.empty())
+            return {};
+
+        if (program.isPd())
+        {
+            //  The one Pd: asked, waited for while it starts, or started.
+            if (pd.child != nullptr && pd.child->isRunning() && askPd (verb, path))
+                pd.child->allowForeground();
+            else if (pdStarting())
+                waiting.emplace_back (verb, path);
+            else if (! startPd (program, path))
+                return "the editor could not be started: " + program.program;
+        }
+        else
+        {
+            child = std::make_unique<plugin::ChildLaunch>();
+            if (! child->start (commandFor (program, path, searchPaths)))
+                return "the editor could not be started: " + program.program;
+            child->allowForeground();
+        }
+
+        //  Its window, to be brought in front when it shows.
+        const auto title = fileOf (path).getFileName().toStdString();
+        raising.erase (std::remove_if (raising.begin(), raising.end(), [&title] (const auto& r) { return r.first == title; }),
+                       raising.end());
+        raising.emplace_back (title, juce::Time::currentTimeMillis() + 10000);
         return {};
     }
 
@@ -437,13 +505,9 @@ namespace wfg::process::editor
                                waiting.end());
         }
 
-        for (auto& one : out)
-        {
-            if (one.raiseUntil == 0)
-                continue;
-            if (now > one.raiseUntil || app::raiseWindowTitled (one.cue + ".pd"))
-                one.raiseUntil = 0;
-        }
+        raising.erase (std::remove_if (raising.begin(), raising.end(), [now] (const auto& r)
+                                       { return now > r.second || app::raiseWindowTitled (r.first); }),
+                       raising.end());
     }
 
     bool Watch::startPd (const Found& program, const std::string& file)
@@ -500,7 +564,7 @@ namespace wfg::process::editor
                 continue;
 
             one.modified = modified;
-            auto text = file.loadFileAsString().toStdString();
+            auto text = keepWindow (file.loadFileAsString().toStdString(), one.text);
             if (text.empty() || text == one.text)
                 continue;
             one.text = text;
@@ -544,6 +608,27 @@ namespace wfg::process::editor
                             const auto text = document.getAttribute ("/godot/cue/" + cueId + "/patch").value_or (std::string {});
                             if (const auto problem = watch->open (*program, cueId, text); ! problem.empty())
                                 return Outcome::rejected ("pd-missing");
+
+                            return Outcome::ok (args);
+                        } }));
+
+        registry.add (machineLocal ({ "process.help",
+                        "Opens Go.dot's help patch - how a process cue's patch hears and sends - in plugdata or"
+                        " Pure Data, as process.edit opens a patch. Taken under the lock: it changes nothing of the"
+                        " show. pd-missing on a machine with neither.",
+                        {},
+                        false,
+                        [watch] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (watch == nullptr)
+                                return Outcome::ok (args);
+
+                            const auto program = find();
+                            if (! program.has_value())
+                                return Outcome::rejected ("pd-missing");
+
+                            if (const auto problem = watch->openHelp (*program); ! problem.empty())
+                                return Outcome::rejected ("help-missing");
 
                             return Outcome::ok (args);
                         } }));

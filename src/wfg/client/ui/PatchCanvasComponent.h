@@ -74,6 +74,10 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId)> openInEditor;
             std::function<void()> getEditor;
 
+            /*  The "?" beside it: Go.dot's help patch, how a patch hears and
+                sends, in the same program (the author, 2026-10-15). */
+            std::function<void()> openHelp;
+
             /*  ATOMS FOR A NAME THE RUNNING PATCH HEARS (PC.8): what a hand on
                 a toggle, a bang, a slider or a number box sends while playing. */
             std::function<void (const std::string& runId, const std::string& name, const process::Atoms&)> send;
@@ -108,6 +112,7 @@ namespace wfg::client::ui
         std::optional<std::size_t> typingBox() const noexcept { return typing; }
         juce::TextEditor& typingEditor() noexcept { return editor; }
         juce::TextButton& editorButton() noexcept { return openButton; }
+        juce::TextButton& helpButtonForTest() noexcept { return helpButton; }
         bool isPlaying() const noexcept { return playing; }
         void commitTyping();
 
@@ -115,6 +120,7 @@ namespace wfg::client::ui
         model::Theme theme;
         Actions actions;
         juce::TextButton openButton;
+        juce::TextButton helpButton { "?" };
 
         model::PatchReading reading;
         std::string drawnText;              // the text the view was made from

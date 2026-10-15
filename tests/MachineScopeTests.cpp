@@ -120,7 +120,7 @@ namespace
         "audio.testSignal", "audio.testStop", "audio.editBuilt",
         "plugin.scan", "plugin.scanRetry", "plugin.scanned", "plugin.failed", "plugin.restart",
         "document.saveAs", "document.autosave", "document.recover", "document.discardRecovery",
-        "media.cleanCache", "ffmpeg.install", "pd.install", "process.edit",
+        "media.cleanCache", "ffmpeg.install", "pd.install", "process.edit", "process.help",
         "videoOutput.identify", "video.hideProjectors", "spacemouse.closeDriver",
         "pair.setRole", "pair.setPeers", "pair.setTimeout", "pair.saved",
 

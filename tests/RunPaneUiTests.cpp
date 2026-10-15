@@ -6111,6 +6111,41 @@ TEST_CASE ("patch canvas: its door opens the patch in plugdata or Pd, or offers 
     CHECK_FALSE (canvas.editorButton().isEnabled());
 }
 
+TEST_CASE ("patch canvas: its ? opens Go.dot's help patch, even locked, or offers Pd where neither is there (the author, 2026-10-15)")
+{
+    int helped = 0;
+    int offered = 0;
+    wfg::client::ui::PatchCanvasComponent::Actions actions;
+    actions.set = [] (const std::string&, const std::string&) {};
+    actions.say = [] (const juce::String&) {};
+    actions.openHelp = [&helped] { ++helped; };
+    actions.getEditor = [&offered] { ++offered; };
+
+    wfg::client::ui::PatchCanvasComponent canvas (wfg::client::model::Theme {}, std::move (actions));
+    canvas.setSize (600, 300);
+
+    wfg::client::model::PatchReading reading;
+    reading.cueId = "PRCS0001";
+    reading.text = "#N canvas 0 50 450 300 12;\n";
+    reading.editor = "Pd";
+    reading.locked = true;
+    canvas.show (reading);
+
+    //  In the corner, right of the door, and read only: the lock leaves it alone.
+    auto& help = canvas.helpButtonForTest();
+    CHECK (help.isVisible());
+    CHECK (help.isEnabled());
+    CHECK (help.getX() > canvas.editorButton().getRight() - 1);
+    help.onClick();
+    CHECK (helped == 1);
+
+    reading.editor.clear();
+    canvas.show (reading);
+    help.onClick();
+    CHECK (offered == 1);
+    CHECK (helped == 1);
+}
+
 TEST_CASE ("patch canvas: Ctrl+E plays the patch - a toggle and a slider reach their names, nothing is written")
 {
     std::vector<std::string> written;

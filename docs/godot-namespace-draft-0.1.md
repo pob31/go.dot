@@ -25634,7 +25634,7 @@ millisecond. The jump fell 6.4 ms with the setting's 6; the Mac's reported outpu
   `.setup`, `.defaults`, `.defaultsReady`, `.settingsReady`, `.clockMoved`, `.reconnect`,
   `.connection`, `.testSignal`, `.testStop`, `.editBuilt`; `plugin.scan`, `.scanRetry`,
   `.scanned`, `.failed`, `.restart`; `document.saveAs`, `.autosave`, `.recover`,
-  `.discardRecovery`; `media.cleanCache`, `ffmpeg.install`, `pd.install`, `process.edit`,
+  `.discardRecovery`; `media.cleanCache`, `ffmpeg.install`, `pd.install`, `process.edit`, `process.help`,
   `videoOutput.identify`, `video.hideProjectors`, `spacemouse.closeDriver`. One predicate,
   `pair::isMachineLocal (command, args)` - a marked command, or a `node.set` or `node.setMany`
   whose every address is a machine row - is asked by both transaction hooks, and RD.5's link will
@@ -29702,3 +29702,45 @@ of the cell. `schema.*`, `client.boundary`, `source.comments`. By hand, headless
 `phase4`: `midi.rescan` moved `port/scans` from 1 to 2 with the lists read again, `serial.rescan`
 moved `serialScans`. Pictures in `build/problem-shots` (`cue-list-problems.png`,
 `transport-problems.png`, `show-settings-problems.png`), with `WFG_SNAPSHOT_DIR`.
+
+## 65. A patch's ways in and out, and Pd as its editor
+
+Asked by the author on 2026-10-15, opening a process cue (§51) in Pd: *"When opening in Pd the basic
+default patch doesn't appear in the Pd patch window. How do we connect MIDI, OSC or something else into
+the Pd patch?"*; then *"The content of Pd boxes in Go.dot go beyond the edge"*, *"Pd doesn't scale on
+hidpi screens"*, *"Menus in Pd are still microscopic"*, *"Is it possible to have only a single Pd
+instance opened? There are as many console windows as opened patches and you can't tell which console
+belongs to which patch"*, and *"I think we need a detailed help card explaining how Pd gets data (OSC,
+MQTT, MIDI) into and out of it."* Decisions run from AMC. The window in front, the search folders, the
+plugins and the one Pd are also told in §51's ACN, where Pd as the editor is decided.
+
+### 65.1 Commands
+
+| Command | Node | Params | Notes |
+|---|---|---|---|
+| `process.help` | `/godot/cmd/process/help` | — | Go.dot's help patch opened in plugdata or Pd, as `process.edit` opens a patch (AMG); taken under the lock; `pd-missing` with neither, `help-missing` when `godot-help.pd` is not beside Go.dot |
+
+Machine-local (§58, RD.3), as `process.edit` is: never sent to a backup, no step of undo, nothing in
+the show; a replay takes it and opens nothing.
+
+### 65.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **AMC** | **The canvas's words fit Pd's boxes**: the face is the tallest fixed-width face whose character fits Pd's width and whose line fits Pd's height, as Pd's own window chooses (`fit_font_into_metrics`); sized by the height alone, Consolas ran a character in nine past the box. | the author's report; the rule Pd's |
+| **AMD** | **Pd looks where Go.dot's Pd looks**: started with `-path` for Go.dot's `pd` folder and the show's, so `[go.edge]` is a box in its window too. | mine |
+| **AME** | **Pd fitted to the screen it is on**, by `pd/godot-screen-plugin.tcl`, which Pd's window loads from that folder: from 125 per cent the menus, dialogs and main window Pd sets on Windows at eleven pixels get eleven times the scale; from 150 per cent each patch window is zoomed when it first shows and made twice the size as far as the screen goes, and "Zoom New Windows" is set. The Mac, which scales Pd itself, is left alone. A first version zoomed from the scale the window sent with `process.edit` and opened the patch by `-send` messages; the plugin replaced it, judged on Pd's own screen, and fixes the menus as well. | the author's report; the means mine |
+| **AMF** | **One Pd for every patch**: the first starts Pd with `GODOT_PD_EDITOR` (a port and a word) in its environment; `pd/godot-open-plugin.tcl` listens there on 127.0.0.1; each later patch, and the help patch, is `<word> open <file>` (its window brought in front, or the file opened) or `<word> reopen <file>` (changed in Go.dot since Pd had it: closed - Pd asking first if it holds edits not saved - and opened again). Asked while Pd starts, it waits up to fifteen seconds; a Pd gone or silent is replaced. | the author's ask ("only a single Pd instance"); the means mine |
+| **AMG** | **The help card is a patch in Pd**, `pd/godot-help.pd`, written by `scripts/make-pd-patches.py`: what a patch hears and sends - OSC from a device, Go.dot's own commands and rows, MIDI, a serial port, the SpaceMouse, any address through `[r in]`/`[s out]`, `[print]` - each with the boxes to copy; not through a socket of the patch's own; MQTT not yet; the ready-made patches. A **?** right of the canvas's door opens it (`process.help`), in the same program and the same one Pd; the starter patch's comment points to it. | the author's (offered as "Pd help patch + button") |
+| **AMH** | **MQTT: the card says not yet.** A device that speaks MQTT cannot reach a patch; MQTT gets a design talk of its own (broker, topics, how a topic becomes an address). | the author's (offered as "Card says 'not yet'") |
+| **AMI** | **A save from Pd keeps the patch's own window**: the place and size on its first line as Go.dot handed them out, the font and the rest as saved - the window is where this machine's screen put it, and a zoomed window grown to fit would grow the patch at every save. | mine |
+| **AMJ** | **Copy for a patch**: a cue in the list, and a port in Show settings > Serial, put on the clipboard the boxes a patch needs with their ids - a cue's `[; /godot/cmd/cue/fire <id>(`, a port's `[r /godot/serial/<id>/in]` and `[s /godot/serial/<id>/out]` - as Pd's own text, which pastes onto Go.dot's canvas or into Pd. The words "Copy for a patch" are mine, for review. | the author's (offered as "Copy for a patch") |
+| **AMK** | **A cue dragged onto the canvas** drops a message box that fires it, `[; /godot/cmd/cue/fire <id>(`, where it is let go. | the author's (offered as "Drag a cue onto the canvas") |
+| **AML** | **A patch fires a cue by its number too**: `cue/fire 3.1` from a patch finds the cue numbered 3.1 when no cue has that id; two cues numbered alike, or none, and it is refused in words. A number is read as text first, then as a number, so `3.10` and `3.1` are the same cue when only one of them exists. Only a patch: a datagram still names a cue by its id. | the author's (offered as "Fire by number"); the details mine |
+
+### 65.3 Stages
+
+- **PN.0** (43c57e5): AMC. **PN.1** (5e4d47f): AMD, AME, AMF and the window in front (§51 ACN).
+- **PN.2**: AMG, AMH, AMI - the help patch, `process.help`, the canvas's ?, the screen plugin growing a
+  zoomed window, a save keeping the patch's window.
+- **PN.3**: AMJ. **PN.4**: AMK. **PN.5**: AML. **PN.6**: the tester guides.

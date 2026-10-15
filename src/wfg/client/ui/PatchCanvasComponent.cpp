@@ -77,6 +77,25 @@ namespace wfg::client::ui
             }
         };
 
+        /*  THE "?" BESIDE IT: how a patch hears and sends, Go.dot's help patch
+            opened in the same program - or Pd offered, as the door offers it.
+            Read only, so the lock leaves it alone. */
+        addAndMakeVisible (helpButton);
+        helpButton.setTooltip ("How a patch hears and sends: OSC, MIDI, serial, the SpaceMouse and Go.dot itself."
+                               " Opens Go.dot's help patch in plugdata or Pure Data");
+        helpButton.onClick = [this]
+        {
+            if (reading.editor.empty())
+            {
+                if (actions.getEditor)
+                    actions.getEditor();
+            }
+            else if (actions.openHelp)
+            {
+                actions.openHelp();
+            }
+        };
+
         addChildComponent (editor);
         editor.setMultiLine (false);
         editor.setReturnKeyStartsNewLine (false);
@@ -279,7 +298,9 @@ namespace wfg::client::ui
 
     void PatchCanvasComponent::resized()
     {
-        openButton.setBounds (getLocalBounds().removeFromTop (30).removeFromRight (150).reduced (4));
+        auto corner = getLocalBounds().removeFromTop (30);
+        helpButton.setBounds (corner.removeFromRight (34).reduced (4));
+        openButton.setBounds (corner.removeFromRight (150).reduced (4));
         repaint();
     }
 

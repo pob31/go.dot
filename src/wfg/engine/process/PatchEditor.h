@@ -82,6 +82,13 @@ namespace wfg::process::editor
     std::vector<std::string> commandFor (const Found& program, const std::string& file,
                                          const std::vector<std::string>& searchPaths);
 
+    /*  A SAVE FROM PD KEEPS THE PATCH'S OWN WINDOW: the place and size on the
+        first line, `#N canvas x y w h font`, as Go.dot handed them out - they
+        are where this machine's screen put the window, not the show's, and a
+        zoomed window would grow them each time - with the font and all the
+        rest as saved. Text that is not such a patch comes back as it is. */
+    std::string keepWindow (const std::string& saved, const std::string& before);
+
     /*  Where Go.dot's own Pd lives: `<application data>/Go.dot/pd`. */
     std::string installFolder();
 
@@ -134,6 +141,12 @@ namespace wfg::process::editor
             program with no name starts nothing (a test's). */
         std::string open (const Found& program, const std::string& cueId, const std::string& text);
 
+        /*  GO.DOT'S HELP PATCH, `godot-help.pd` from the ready-made folder:
+            how a patch hears and sends (the author, 2026-10-15). Opened in the
+            same program, and the same one Pd, as the patches; read, never
+            watched for saves. */
+        std::string openHelp (const Found& program);
+
         /*  Every half second. THE PATCH'S WINDOW BROUGHT IN FRONT: Pd's
             windows belong to a program Pd starts, which Windows does not let
             take the front, so they opened behind Go.dot's; each window still
@@ -160,8 +173,12 @@ namespace wfg::process::editor
             std::int64_t modified = 0;
             std::string text;
             std::unique_ptr<plugin::ChildLaunch> child;     // plugdata's; Pd's is the one below
-            std::int64_t raiseUntil = 0;        // ms; nought once raised
         };
+
+        /*  The file handed to the program, its window to be raised: Pd's one,
+            asked or started, or plugdata started with `child` filled. */
+        std::string hand (const Found& program, const std::string& verb, const std::string& path,
+                          std::unique_ptr<plugin::ChildLaunch>& child);
 
         /*  ONE PD FOR EVERY PATCH (the author, 2026-10-15: "There are as many
             console windows as opened patches and you can't tell which console
@@ -189,6 +206,8 @@ namespace wfg::process::editor
         std::vector<std::string> searchPaths;
         std::vector<Out> out;
         OnePd pd;
+        std::unique_ptr<plugin::ChildLaunch> helpChild;     // plugdata on the help patch
+        std::vector<std::pair<std::string, std::int64_t>> raising;  // a window's file name, until (ms)
         std::vector<std::pair<std::string, std::string>> waiting;     // verb and file, asked while the Pd started
     };
 

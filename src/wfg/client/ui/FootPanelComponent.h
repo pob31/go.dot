@@ -77,6 +77,7 @@ namespace wfg::client::ui
                 where neither is on the machine (namespace draft §51, PC.7). */
             std::function<void (const std::string& cueId)> editPatch;
             std::function<void()> getPd;
+            std::function<void()> patchHelp;    // Go.dot's help patch, in the same program
 
             /*  Atoms for a name a running patch hears (PC.8). */
             std::function<void (const std::string& runId, const std::string& name, const process::Atoms&)> playPatch;

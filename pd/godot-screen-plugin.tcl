@@ -24,7 +24,8 @@
 #   - from 125 per cent, the menus, dialogs and main window get their eleven
 #     pixels times the scale (Windows: the only one that fixes them in pixels);
 #   - from 150 per cent, each patch window is zoomed the first time it shows,
-#     as Ctrl and + zoom it, so the patch is drawn twice the size; and Pd's own
+#     as Ctrl and + zoom it, so the patch is drawn twice the size, and the
+#     window made twice the size as far as the screen goes; and Pd's own
 #     "Zoom New Windows" is set for what is opened from its menus. Pd's
 #     setting alone does not reach the patch it was started on, which is the
 #     one Go.dot hands it. A window zoomed out by hand stays as the hand left it.
@@ -44,6 +45,20 @@ proc ::godot_screen::patch_shown {window} {
     }
     lappend zoomed $window
     pdsend "$window zoom 2"
+    after idle [list ::godot_screen::grow $window]
+}
+
+# Twice the size too, as far as the screen goes: Pd's zoom leaves the window
+# as it was, so a zoomed patch showed its top left quarter. The size Pd saves
+# grows with it; Go.dot keeps the patch's own when it takes a save back.
+proc ::godot_screen::grow {window} {
+    if {! [winfo exists $window]
+            || [scan [wm geometry $window] {%dx%d+%d+%d} width height x y] != 4} {
+        return
+    }
+    set width [expr {min(2 * $width, [winfo screenwidth $window] - 40)}]
+    set height [expr {min(2 * $height, [winfo screenheight $window] - 120)}]
+    wm geometry $window ${width}x${height}
 }
 
 proc ::godot_screen::patch_gone {window} {

@@ -421,6 +421,7 @@ namespace wfg::process
     {
         return "#N canvas 0 50 640 400 12;\n"
                "#X text 20 20 [r /address] hears a device or a row of the show - [s /address] writes to it"
-               " - [s /godot/cmd/cue/fire] fires a cue;\n";
+               " - [s /godot/cmd/cue/fire] fires a cue. The ? at the canvas's corner shows how a patch hears"
+               " and sends.;\n";
     }
 }

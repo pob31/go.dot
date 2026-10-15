@@ -62,8 +62,9 @@ class Patch:
     def atom(self, name, x, y, width=5):
         self._add(name, f'#X floatatom {x} {y} {width} 0 0 0 - - - 0;')
 
-    def text(self, x, y, words):
-        self._add(None, f'#X text {x} {y} {pd_escape(words)};')
+    def text(self, x, y, words, width=None):
+        wrap = f', f {width}' if width else ''
+        self._add(None, f'#X text {x} {y} {pd_escape(words)}{wrap};')
 
     def c(self, a, outlet, b, inlet):
         self.lines.append(f'#X connect {self.names[a]} {outlet} {self.names[b]} {inlet};')
@@ -662,4 +663,137 @@ help_patch('go.ratelimit', 'go.ratelimit - at most one message every so many ms.
            [('go.ratelimit 200', [('atom', '', 0), ('msg', '1 2 3', 0), ('msg', 'reset', 0), ('atom', '', 1)], 1)],
            ['Thins a sensor that sends hundreds a second to what a device can take. A number, a word or a list.',
             'reset forgets what waits. Right inlet: the time (100 ms by default).'])
+
+# =============================================================================
+#  godot-help.pd: how a process cue's patch hears and sends (the author,
+#  2026-10-15: "a detailed help card explaining how Pd gets data (OSC, MQTT,
+#  MIDI) into and out of it"). Opened by the canvas's "?" in Pd; each section
+#  a few words and the boxes to copy. Not one of the ready-made patches: it is
+#  read, not used.
+# =============================================================================
+
+def help_card():
+    p = Patch(820, 0)
+    y = 14
+
+    def say(words, gap=34, width=96, x=20):
+        nonlocal y
+        p.text(x, y, words, width)
+        y += gap
+
+    def heading(words):
+        nonlocal y
+        y += 14
+        say(words.upper(), 30)
+
+    say('How a patch hears and sends - a process cue in Go.dot', 30)
+    say('A process cue\'s patch runs inside Go.dot while its cue runs - not in this window. Here you write it: '
+        'save (Ctrl+S) and Go.dot takes the patch, and a running cue starts it again. So nothing arrives in this '
+        'window, and nothing sent here leaves it. A patch names what it hears and where it sends by address - '
+        'there is nothing to set up beside it.', 70)
+
+    heading('OSC from a device')
+    say('Add the device in Show settings > Network: where it is, the start of its addresses (its prefix), and Rx '
+        'on. It sends to Go.dot\'s OSC port - 8010 unless the show says another - and Go.dot hands each value '
+        'to the patches listening for its address.', 54)
+    p.obj('oscIn', 20, y, 'r /wfs/source/1/x')
+    p.obj('oscPrint', 20, y + 40, 'print x')
+    p.c('oscIn', 0, 'oscPrint', 0)
+    p.text(260, y, 'the last value the device reported at that address, the tick it came in: a number, a word or a list', 60)
+    y += 80
+    p.atom('oscValue', 20, y, 6)
+    p.obj('oscOut', 20, y + 30, 's /wfs/source/1/y')
+    p.c('oscValue', 0, 'oscOut', 0)
+    p.text(260, y, 'writes to the device, as an OSC cue aimed there would', 60)
+    y += 70
+
+    heading('Go.dot itself')
+    p.msg('fireNumber', 20, y, '; /godot/cmd/cue/fire 3.1')
+    p.text(300, y, 'fires cue 3.1 by its number, as a button on a surface would. Two cues numbered alike, or none, '
+           'and it is refused', 56)
+    y += 60
+    p.msg('fireId', 20, y, '; /godot/cmd/cue/fire B3NK0001')
+    p.text(300, y, 'fires a cue by its id, which a renumbering does not break. Right-click the cue in the list, '
+           'Copy for a patch - or drag the cue onto Go.dot\'s canvas', 56)
+    y += 60
+    p.msg('go', 20, y, '; /godot/cmd/go')
+    p.text(300, y, 'GO. Any named command is /godot/cmd/ and its name: standby/set, run/stopAll... '
+           'Enable, Disable and Jump to are transport cues, fired by number or id', 56)
+    y += 60
+    p.obj('rowIn', 20, y, 'r /godot/dca/K2M9X4QA/trim')
+    p.text(300, y, 'a row of the show or of the engine - here a DCA\'s trim - each time it changes. Go.dot\'s '
+           'OSC console, the page in a browser, lists every address', 56)
+    y += 60
+    p.atom('rowValue', 20, y, 6)
+    p.obj('rowOut', 20, y + 30, 's /godot/dca/K2M9X4QA/trim')
+    p.c('rowValue', 0, 'rowOut', 0)
+    p.text(300, y, 'sets a row, as the window would - refused while the show is locked. In a command\'s words, '
+           'self is this cue or its run: cue/fire self fires this cue', 56)
+    y += 70
+
+    heading('MIDI')
+    say('Pick the ports in the cue\'s inspector: MIDI in, MIDI out. Pd\'s own MIDI settings play no part.', 30)
+    for i, box in enumerate(['notein', 'ctlin', 'pgmin', 'bendin', 'touchin', 'polytouchin', 'midiin', 'sysexin']):
+        p.obj(f'midiIn{i}', 20 + 112 * i, y, box)
+    y += 34
+    say('note, controller, program, bend, aftertouch, poly aftertouch - [midiin] every byte, [sysexin] system exclusive', 40)
+    for i, box in enumerate(['noteout', 'ctlout', 'pgmout', 'bendout', 'touchout', 'polytouchout', 'midiout']):
+        p.obj(f'midiOut{i}', 20 + 125 * i, y, box)
+    y += 44
+
+    heading('Serial: an Arduino and the like')
+    say('Add the port in Show settings > Serial; Copy for a patch on its row gives these two boxes with its id.', 34)
+    p.obj('serialIn', 20, y, 'r /godot/serial/K7Q2M9X4/in')
+    p.obj('serialUnpack', 20, y + 40, 'unpack f f')
+    p.c('serialIn', 0, 'serialUnpack', 0)
+    p.text(300, y, 'each line it sends, split on spaces and commas, numbers as numbers - every line, not only a '
+           'changed one', 56)
+    y += 80
+    p.msg('serialLine', 20, y, 'led 1')
+    p.obj('serialOut', 20, y + 30, 's /godot/serial/K7Q2M9X4/out')
+    p.c('serialLine', 0, 'serialOut', 0)
+    p.text(300, y, 'a line to the port, its words joined by spaces', 56)
+    y += 70
+
+    heading('The SpaceMouse')
+    p.obj('puck', 20, y, 'r /godot/puck')
+    p.obj('puckAxes', 20, y + 40, 'unpack f f f f f f')
+    p.c('puck', 0, 'puckAxes', 0)
+    p.text(300, y, 'its six axes, each tick, while the patch listens: tx ty tz rx ry rz, each -1 to 1', 56)
+    y += 80
+
+    heading('Any address')
+    p.obj('anyIn', 20, y, 'r in')
+    p.obj('anyRoute', 20, y + 40, 'route /wfs/source/1/x')
+    p.c('anyIn', 0, 'anyRoute', 0)
+    p.text(300, y, 'everything this patch could hear, as an address and its values - for names a patch builds as it runs', 56)
+    y += 80
+    p.msg('anyLine', 20, y, '/wfs/source/2/x 0.5')
+    p.obj('anyOut', 20, y + 30, 's out')
+    p.c('anyLine', 0, 'anyOut', 0)
+    p.text(300, y, 'any of the sends above, the address first', 56)
+    y += 70
+
+    heading('What a patch says')
+    p.obj('said', 20, y, 'print')
+    p.text(300, y, 'its last line shows in the cue\'s running pane, and on the canvas while the cue runs', 56)
+    y += 40
+
+    heading('Not this way')
+    say('[netreceive], [netsend] and [oscparse] on a port of the patch\'s own: Go.dot already listens, the port may '
+        'be Go.dot\'s, and what comes in that way is not in the show\'s log, so a replay cannot play it back. '
+        'Add the device instead.', 54)
+    heading('Not yet')
+    say('MQTT: to come. A device that speaks MQTT cannot reach a patch yet.', 30)
+
+    heading('Ready-made')
+    say('go.avg, go.minmax, go.smooth, go.scale, go.deadband, go.change, go.edge, go.hold, go.ratelimit - '
+        'right-click one in a patch and choose Help.', 40)
+
+    #  As tall as what is in it, the notice at its foot below the last words.
+    p.h = y + 50
+    p.write('godot-help.pd')
+
+
+help_card()
 print('written to', OUT)

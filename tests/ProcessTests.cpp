@@ -1184,6 +1184,46 @@ TEST_CASE ("process editor: Pd is started looking where the show's patches look 
     const auto open = read ("godot-open-plugin.tcl");
     CHECK (open.find ("GODOT_PD_EDITOR") != std::string::npos);
     CHECK (open.find ("-myaddr 127.0.0.1") != std::string::npos);
+
+    //  And the help patch the canvas's ? opens: a patch Pd reads whole, naming
+    //  each way in and out, and MQTT as not yet.
+    const auto help = read ("godot-help.pd");
+    CHECK (parsePatch (help).problem.empty());
+    for (const auto* named : { "r /wfs/source/1/x", "/godot/cmd/cue/fire 3.1", "notein", "ctlout",
+                               "r /godot/serial/", "r /godot/puck", "r in", "s out", "MQTT" })
+    {
+        INFO (named);
+        CHECK (help.find (named) != std::string::npos);
+    }
+}
+
+TEST_CASE ("process editor: a save from Pd keeps the patch's own window place and size, and the rest as saved")
+{
+    using wfg::process::editor::keepWindow;
+    const std::string before = "#N canvas 0 50 640 400 12;\n#X obj 20 20 r /a;\n";
+
+    //  A zoomed window, grown and moved, saved with a new box and a new font.
+    CHECK (keepWindow ("#N canvas 312 140 1280 800 16;\n#X obj 20 20 r /a;\n#X obj 20 60 print;\n", before)
+           == "#N canvas 0 50 640 400 16;\n#X obj 20 20 r /a;\n#X obj 20 60 print;\n");
+
+    //  Nothing to keep, or nothing to keep it from: as saved.
+    CHECK (keepWindow ("#X obj 20 20 r /a;\n", before) == "#X obj 20 20 r /a;\n");
+    CHECK (keepWindow ("#N canvas 9 9 99 99 10;\n", "") == "#N canvas 9 9 99 99 10;\n");
+    CHECK (keepWindow ("#N canvas 9 9 99 99 10;\n", before) == "#N canvas 0 50 640 400 10;\n");
+}
+
+TEST_CASE ("process editor: process.help is taken even under the lock, and in a replay opens nothing")
+{
+    ProcessRig rig ("pc7-help", false);
+    wfg::process::editor::registerCommands (rig.engine.commands(), rig.document, nullptr, nullptr);
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+
+    REQUIRE (rig.engine.submit ("cli", "process.help", {}));
+    rig.tickOnce();
+    const auto records = rig.records();
+    const auto last = std::find_if (records.rbegin(), records.rend(), [] (const auto& r) { return r.command == "process.help"; });
+    REQUIRE (last != records.rend());
+    CHECK (last->kind == wfg::LogRecord::Kind::applied);
 }
 
 TEST_CASE ("process editor: a child is started with a name set in its environment beside what it inherits")
@@ -1563,7 +1603,7 @@ TEST_CASE ("ready-made: every help patch opens with nothing printed against it")
         CHECK (troubleIn (outbox).empty());
         ++opened;
     }
-    CHECK (opened == 9);
+    CHECK (opened == 10);       // the nine ready-made patches' and godot-help.pd, the canvas's ?
 }
 
 TEST_CASE ("ready-made: the example show opens, and its two patches play with the ready-made ones found")

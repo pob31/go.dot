@@ -144,6 +144,7 @@ namespace wfg::client::ui
                 drawing.set = actions.set;
                 drawing.openInEditor = actions.editPatch;
                 drawing.getEditor = actions.getPd;
+                drawing.openHelp = actions.patchHelp;
                 drawing.send = actions.playPatch;
                 drawing.say = [this] (const juce::String& sentence)
                 {

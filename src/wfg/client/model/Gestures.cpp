@@ -690,6 +690,11 @@ namespace wfg::client::gesture
         return { origin::window, "pd.install", {} };
     }
 
+    Event patchHelp()
+    {
+        return { origin::window, "process.help", {} };
+    }
+
     Event processSend (const std::string& runId, const std::string& name, const process::Atoms& atoms)
     {
         std::vector<osc::Value> args { osc::Value::string (runId), osc::Value::string (name) };

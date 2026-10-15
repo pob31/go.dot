@@ -467,6 +467,10 @@ namespace wfg::client::gesture
     Event editPatch (const std::string& cueId);
     Event installPd();
 
+    /*  Go.dot's help patch - how a patch hears and sends - opened in plugdata
+        or Pd (the author, 2026-10-15). */
+    Event patchHelp();
+
     /*  ATOMS FOR A NAME A RUNNING PATCH HEARS (namespace draft §51, PC.8): a
         toggle, a slider, a bang or a number box played on the canvas. */
     Event processSend (const std::string& runId, const std::string& name, const process::Atoms& atoms);
