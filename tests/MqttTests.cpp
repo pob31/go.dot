@@ -30,6 +30,10 @@
 
 #include <cstdint>
 #include <string>
+#include <chrono>
+#include <functional>
+#include <optional>
+#include <thread>
 #include <vector>
 
 using namespace wfg::mqtt;
@@ -631,4 +635,367 @@ TEST_CASE ("mqtt session: a changed filter list is carried to the broker in plac
     session.want (wanted);
     CHECK (session.tick (openLink (1), 5).empty());
     CHECK (session.wanted().login == "other word");
+}
+
+//==============================================================================
+/*  MQ.5: GO.DOT'S OWN BROKER (namespace draft §67, AND, ANG), against raw
+    socket clients that speak the bytes themselves: the fan-out, retained
+    messages, a will, the keepalive, QoS 1 and 2 answered, MQTT 5 and a bad
+    login refused, and the link with no socket a device of the show takes. */
+#include <wfg/engine/mqtt/Broker.h>
+
+#include <juce_core/juce_core.h>
+
+namespace
+{
+    /*  A client at the end of a socket: sends packets, waits for one back. */
+    struct RawClient
+    {
+        juce::StreamingSocket socket;
+        std::string partial;
+
+        bool connectTo (int port)
+        {
+            return socket.connect ("127.0.0.1", port, 2000);
+        }
+
+        bool send (const Packet& packet)
+        {
+            std::string problem;
+            const auto bytes = encode (packet, problem);
+            REQUIRE_MESSAGE (bytes.has_value(), problem);
+            return socket.write (bytes->data(), static_cast<int> (bytes->size())) == static_cast<int> (bytes->size());
+        }
+
+        std::optional<Packet> expect (int timeoutMs = 2000)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds (timeoutMs);
+
+            for (;;)
+            {
+                std::string problem;
+                const auto whole = frameLength (reinterpret_cast<const std::uint8_t*> (partial.data()), partial.size(), problem);
+                if (whole > 0 && partial.size() >= whole)
+                {
+                    const auto decoded = decode (reinterpret_cast<const std::uint8_t*> (partial.data()), whole);
+                    partial.erase (0, whole);
+                    REQUIRE_MESSAGE (decoded.ok, decoded.problem);
+                    return decoded.packet;
+                }
+
+                if (std::chrono::steady_clock::now() > deadline)
+                    return std::nullopt;
+
+                const auto ready = socket.waitUntilReady (true, 20);
+                if (ready < 0)
+                    return std::nullopt;
+                if (ready == 0)
+                    continue;
+
+                char buffer[4096];
+                const auto got = socket.read (buffer, static_cast<int> (sizeof (buffer)), false);
+                if (got <= 0)
+                    return std::nullopt;
+                partial.append (buffer, static_cast<std::size_t> (got));
+            }
+        }
+
+        bool closedByBroker (int timeoutMs = 2000)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds (timeoutMs);
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                const auto ready = socket.waitUntilReady (true, 20);
+                if (ready < 0)
+                    return true;
+                if (ready > 0)
+                {
+                    char buffer[64];
+                    if (socket.read (buffer, static_cast<int> (sizeof (buffer)), false) <= 0)
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        /*  CONNECT and the CONNACK back, accepted. */
+        void join (int port, const std::string& id, std::uint16_t keepAlive = 60)
+        {
+            REQUIRE (connectTo (port));
+            REQUIRE (send (Packet::connectWith (id, keepAlive)));
+            const auto ack = expect();
+            REQUIRE (ack.has_value());
+            REQUIRE (ack->type == Type::connack);
+            REQUIRE (ack->returnCode == connack::accepted);
+            CHECK_FALSE (ack->sessionPresent);
+        }
+
+        void subscribe (const std::string& filter, std::uint16_t packetId = 1)
+        {
+            REQUIRE (send (Packet::subscribeTo (packetId, { { filter, 0 } })));
+            const auto ack = expect();
+            REQUIRE (ack.has_value());
+            REQUIRE (ack->type == Type::suback);
+            CHECK (ack->packetId == packetId);
+            REQUIRE (ack->returnCodes.size() == 1u);
+            CHECK (ack->returnCodes[0] == 0);
+        }
+    };
+
+    bool within (std::chrono::milliseconds limit, const std::function<bool()>& done)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + limit;
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            if (done())
+                return true;
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+        return done();
+    }
+}
+
+TEST_CASE ("mqtt broker: clients connect, subscribe and hear each other, with the retained message a late one is handed")
+{
+    Broker broker;
+    REQUIRE (broker.start (0, {}));
+    const auto port = broker.stateNow().port;
+    REQUIRE (port > 0);
+    CHECK (broker.stateNow().state == "listening");
+
+    RawClient sensor, lights, late;
+    sensor.join (port, "sensor");
+    lights.join (port, "lights");
+    lights.subscribe ("house/#");
+    CHECK (within (std::chrono::seconds (2), [&] { return broker.stateNow().clients == 2u; }));
+
+    //  A publish reaches the subscriber, not the publisher, at QoS 0.
+    REQUIRE (sensor.send (Packet::publishOf ("house/room1/temp", "23.5")));
+    const auto heard = lights.expect();
+    REQUIRE (heard.has_value());
+    CHECK (heard->type == Type::publish);
+    CHECK (heard->topic == "house/room1/temp");
+    CHECK (heard->payload == "23.5");
+    CHECK (heard->qos == 0);
+    CHECK_FALSE (heard->retain);
+    CHECK_FALSE (sensor.expect (200).has_value());
+
+    //  One not under the filter is not heard.
+    REQUIRE (sensor.send (Packet::publishOf ("garden/temp", "12")));
+    CHECK_FALSE (lights.expect (200).has_value());
+
+    //  QoS 1 is acknowledged, QoS 2 walked through; the subscriber still gets QoS 0.
+    auto qos1 = Packet::publishOf ("house/a", "1", 1);
+    qos1.packetId = 7;
+    REQUIRE (sensor.send (qos1));
+    auto ack = sensor.expect();
+    REQUIRE (ack.has_value());
+    CHECK (ack->type == Type::puback);
+    CHECK (ack->packetId == 7);
+    CHECK (lights.expect()->qos == 0);
+
+    auto qos2 = Packet::publishOf ("house/b", "2", 2);
+    qos2.packetId = 8;
+    REQUIRE (sensor.send (qos2));
+    ack = sensor.expect();
+    REQUIRE (ack.has_value());
+    CHECK (ack->type == Type::pubrec);
+    REQUIRE (sensor.send (Packet::acknowledgement (Type::pubrel, 8)));
+    ack = sensor.expect();
+    REQUIRE (ack.has_value());
+    CHECK (ack->type == Type::pubcomp);
+    CHECK (lights.expect()->topic == "house/b");
+
+    //  A retained message is handed to a late subscriber, its retain flag set.
+    REQUIRE (sensor.send (Packet::publishOf ("house/room1/setpoint", "21", 0, true)));
+    CHECK (lights.expect()->retain == false);
+    late.join (port, "late");
+    late.subscribe ("house/+/setpoint");
+    const auto kept = late.expect();
+    REQUIRE (kept.has_value());
+    CHECK (kept->topic == "house/room1/setpoint");
+    CHECK (kept->payload == "21");
+    CHECK (kept->retain);
+
+    //  An empty retained payload forgets it (the live copy reaching `lights`
+    //  is the moment the broker has taken it).
+    REQUIRE (sensor.send (Packet::publishOf ("house/room1/setpoint", "", 0, true)));
+    CHECK (lights.expect()->payload.empty());
+    RawClient later;
+    later.join (port, "later");
+    later.subscribe ("house/#");
+    CHECK_FALSE (later.expect (200).has_value());
+
+    //  PINGREQ is answered; UNSUBSCRIBE stops the hearing.
+    REQUIRE (lights.send (Packet::plain (Type::pingreq)));
+    while (const auto p = lights.expect (300))
+        if (p->type == Type::pingresp)
+            break;
+    REQUIRE (lights.send (Packet::unsubscribeFrom (3, { "house/#" })));
+    while (const auto p = lights.expect (300))
+        if (p->type == Type::unsuback)
+            break;
+    REQUIRE (sensor.send (Packet::publishOf ("house/c", "3")));
+    CHECK_FALSE (lights.expect (200).has_value());
+    CHECK (later.expect()->topic == "house/c");     // the one still subscribed hears it
+
+    //  A $ topic is kept from the root wildcards.
+    REQUIRE (sensor.send (Packet::publishOf ("$SYS/x", "y")));
+    CHECK_FALSE (later.expect (200).has_value());
+
+    //  DISCONNECT lets go; the count follows.
+    REQUIRE (sensor.send (Packet::plain (Type::disconnect)));
+    CHECK (within (std::chrono::seconds (2), [&] { return broker.stateNow().clients == 3u; }));
+
+    broker.stop();
+    CHECK (broker.stateNow().state == "off");
+    CHECK (lights.closedByBroker());
+}
+
+TEST_CASE ("mqtt broker: a will when a client goes without saying, a silent client dropped, and what is refused")
+{
+    Broker broker;
+    REQUIRE (broker.start (0, "stage secret"));
+    const auto port = broker.stateNow().port;
+
+    //  The login: wrong or missing is CONNACK 4 and the socket closed.
+    RawClient stranger;
+    REQUIRE (stranger.connectTo (port));
+    REQUIRE (stranger.send (Packet::connectWith ("stranger", 10)));
+    auto ack = stranger.expect();
+    REQUIRE (ack.has_value());
+    CHECK (ack->returnCode == connack::badLogin);
+    CHECK (stranger.closedByBroker());
+
+    //  MQTT 5 is CONNACK 1.
+    RawClient modern;
+    REQUIRE (modern.connectTo (port));
+    {
+        const std::vector<std::uint8_t> v5 { 0x10, 0x0D, 0x00, 0x04, 'M', 'Q', 'T', 'T', 0x05, 0x02, 0x00, 0x3C, 0x00, 0x01, 'z' };
+        REQUIRE (modern.socket.write (v5.data(), static_cast<int> (v5.size())) == static_cast<int> (v5.size()));
+    }
+    ack = modern.expect();
+    REQUIRE (ack.has_value());
+    CHECK (ack->returnCode == connack::badProtocol);
+    CHECK (modern.closedByBroker());
+
+    //  The right login is taken; a subscriber waits for the will.
+    const auto login = [] (RawClient& client, int at, const std::string& id, std::uint16_t keepAlive, std::optional<Will> will)
+    {
+        REQUIRE (client.connectTo (at));
+        auto connect = Packet::connectWith (id, keepAlive);
+        connect.user = "stage";
+        connect.password = "secret";
+        connect.will = std::move (will);
+        REQUIRE (client.send (connect));
+        const auto answer = client.expect();
+        REQUIRE (answer.has_value());
+        REQUIRE (answer->returnCode == connack::accepted);
+    };
+
+    RawClient watcher, fragile, silent;
+    login (watcher, port, "watcher", 60, std::nullopt);
+    watcher.subscribe ("status/#");
+    login (fragile, port, "fragile", 60, Will { "status/fragile", "gone", 0, false });
+    login (silent, port, "silent", 1, Will { "status/silent", "quiet", 0, true });
+    CHECK (within (std::chrono::seconds (2), [&] { return broker.stateNow().clients == 3u; }));
+
+    //  Gone without saying: the socket dropped, the will published.
+    fragile.socket.close();
+    auto will = watcher.expect (3000);
+    REQUIRE (will.has_value());
+    CHECK (will->topic == "status/fragile");
+    CHECK (will->payload == "gone");
+
+    //  Silent past one and a half times a one-second keepalive: dropped, its will out and retained.
+    will = watcher.expect (4000);
+    REQUIRE (will.has_value());
+    CHECK (will->topic == "status/silent");
+    CHECK (will->payload == "quiet");
+    CHECK (silent.closedByBroker (3000));
+
+    RawClient afterwards;
+    login (afterwards, port, "afterwards", 60, std::nullopt);
+    afterwards.subscribe ("status/silent");
+    const auto kept = afterwards.expect();
+    REQUIRE (kept.has_value());
+    CHECK (kept->retain);
+    CHECK (kept->payload == "quiet");
+
+    //  A second client of one id evicts the first.
+    RawClient twin;
+    login (twin, port, "watcher", 60, std::nullopt);
+    CHECK (watcher.closedByBroker());
+
+    //  A port already taken is said.
+    Broker second;
+    CHECK_FALSE (second.start (port, {}));
+    CHECK (second.stateNow().state == "problem");
+    CHECK (second.stateNow().problem.find ("cannot be bound") != std::string::npos);
+}
+
+TEST_CASE ("mqtt broker: a link with no socket speaks to the broker in this process")
+{
+    Broker broker;
+    std::string problem;
+    CHECK (broker.localLink (problem) == nullptr);
+    CHECK (problem == "Go.dot's broker is off");
+
+    REQUIRE (broker.start (0, {}));
+    const auto port = broker.stateNow().port;
+
+    auto link = broker.localLink (problem);
+    REQUIRE (link != nullptr);
+
+    const auto bytesOf = [] (const Packet& packet)
+    {
+        std::string why;
+        const auto bytes = encode (packet, why);
+        REQUIRE_MESSAGE (bytes.has_value(), why);
+        return std::string (bytes->begin(), bytes->end());
+    };
+
+    //  CONNECT in, CONNACK out, on the writer's own thread.
+    REQUIRE (link->write (bytesOf (Packet::connectWith ("godot-MQ000001-laptop", 30))));
+    auto got = link->read (std::chrono::milliseconds (500));
+    REQUIRE (got.has_value());
+    auto decoded = decode (reinterpret_cast<const std::uint8_t*> (got->data()), got->size());
+    REQUIRE (decoded.ok);
+    CHECK (decoded.packet.type == Type::connack);
+    CHECK (decoded.packet.returnCode == connack::accepted);
+    CHECK (within (std::chrono::seconds (2), [&] { return broker.stateNow().clients == 1u; }));
+
+    REQUIRE (link->write (bytesOf (Packet::subscribeTo (1, { { "house/#", 0 } }))));
+    got = link->read (std::chrono::milliseconds (500));
+    REQUIRE (got.has_value());
+    CHECK (decode (reinterpret_cast<const std::uint8_t*> (got->data()), got->size()).packet.type == Type::suback);
+
+    //  A socket client's publish reaches the link; the link's publish reaches the socket.
+    RawClient sensor;
+    sensor.join (port, "sensor");
+    sensor.subscribe ("house/lights/#");
+    REQUIRE (sensor.send (Packet::publishOf ("house/room1/temp", "23.5")));
+    got = link->read (std::chrono::milliseconds (1000));
+    REQUIRE (got.has_value());
+    decoded = decode (reinterpret_cast<const std::uint8_t*> (got->data()), got->size());
+    REQUIRE (decoded.ok);
+    CHECK (decoded.packet.topic == "house/room1/temp");
+    CHECK (decoded.packet.payload == "23.5");
+
+    REQUIRE (link->write (bytesOf (Packet::publishOf ("house/lights/1", "1"))));
+    const auto heard = sensor.expect();
+    REQUIRE (heard.has_value());
+    CHECK (heard->topic == "house/lights/1");
+
+    //  The link subscribed to house/#, so it hears its own publish back, as any client does.
+    got = link->read (std::chrono::milliseconds (500));
+    REQUIRE (got.has_value());
+    CHECK (decode (reinterpret_cast<const std::uint8_t*> (got->data()), got->size()).packet.topic == "house/lights/1");
+
+    //  Nothing to read is an empty string, as a quiet port's; the broker stopping closes the link.
+    CHECK (link->read (std::chrono::milliseconds (50)) == std::string {});
+    broker.stop();
+    CHECK_FALSE (link->read (std::chrono::milliseconds (500)).has_value());
+    CHECK_FALSE (link->write (bytesOf (Packet::plain (Type::pingreq))));
+    link.reset();
 }

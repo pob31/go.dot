@@ -4031,8 +4031,11 @@ namespace wfg::tree
             const auto name = std::string (row->name);
             std::string text;
 
-            if (name == "refused") text = std::to_string (state.refusedDatagrams);
-            else                   text = std::string (row->defaultText);
+            if (name == "refused")            text = std::to_string (state.refusedDatagrams);
+            else if (name == "brokerState")   text = state.brokerState;
+            else if (name == "brokerProblem") text = state.brokerProblem;
+            else if (name == "brokerClients") text = std::to_string (state.brokerClients);
+            else                              text = std::string (row->defaultText);
 
             engineValue (*row, "network", text);
         }

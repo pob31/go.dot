@@ -313,6 +313,13 @@ namespace wfg::tree
             read here once a tick, like everything else in this struct. */
         std::uint64_t refusedDatagrams = 0;
 
+        /*  WHAT GO.DOT'S OWN MQTT BROKER IS DOING (namespace draft §67, AND;
+            MQ.5): `network/brokerState`, `brokerProblem` and `brokerClients`,
+            copied here from the broker once a tick as the count above is. */
+        std::string brokerState = "off";
+        std::string brokerProblem;
+        std::uint64_t brokerClients = 0;
+
         /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN (namespace draft §59.3):
             `sync/mtcLate` and `sync/mtcWorst` as the MIDI sender's MTC lane
             counts them, `sync/ltcLate` as the audio side's LTC generator does.

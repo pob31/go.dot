@@ -62,6 +62,7 @@
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/serial/TcpLink.h>
+#include <wfg/engine/mqtt/Broker.h>
 #include <wfg/engine/mqtt/Packet.h>
 #include <wfg/engine/mqtt/Session.h>
 #include <wfg/engine/tree/Wires.h>
@@ -2954,7 +2955,11 @@ namespace
             if (port <= 0)
                 port = 1883;
 
-            if (! host.empty() && port <= 65535)
+            /*  AN EMPTY HOST IS GO.DOT'S OWN BROKER (AND): the word the
+                opener reads as "no socket, the broker in this process". */
+            if (host.empty())
+                link.path = "broker";
+            else if (port <= 65535)
                 link.path = wfg::serial::hostPortOf (host, port);
 
             link.framing = "mqtt";
@@ -4051,7 +4056,53 @@ namespace
             lines are (AGH) - and the CONNECT, SUBSCRIBE and PINGREQ that keep
             it so must go out; what the show publishes is held before it
             reaches here, by the sender (AGG). */
-        wfg::serial::SerialTable mqttLinks { wfg::serial::openTcpLink };
+        /*  GO.DOT'S OWN BROKER (namespace draft §67, AND, ANG; MQ.5), before
+            the table whose local links hold its clients - destroyed after it,
+            so a link never outlives the hub it reads. On and off by the show's
+            rows, the port overridden on this machine by --mqtt-port. */
+        wfg::mqtt::Broker broker;
+        const auto requestedMqtt = args.containsOption ("--mqtt-port")
+                                     ? args.getValueForOption ("--mqtt-port").getIntValue()
+                                     : 0;
+        bool brokerOnNow = false;
+        int brokerPortNow = 0;
+        std::string brokerLoginNow;
+        const auto reconcileBroker = [&broker, &document, &requestedMqtt, &brokerOnNow, &brokerPortNow, &brokerLoginNow]
+        {
+            const bool on = document.getAttribute ("/godot/network/broker").value_or (std::string ("false")) == "true";
+            const auto rowPort = static_cast<int> (wfg::osc::parseDouble (document.getAttribute ("/godot/network/brokerPort")
+                                                                            .value_or (std::string ("1883"))).value_or (1883.0));
+            const auto port = requestedMqtt > 0 ? requestedMqtt : rowPort;
+            const auto login = document.getAttribute ("/godot/network/brokerLogin").value_or (std::string {});
+
+            if (on == brokerOnNow && port == brokerPortNow && login == brokerLoginNow)
+                return;
+
+            brokerOnNow = on;
+            brokerPortNow = port;
+            brokerLoginNow = login;
+
+            if (! on)
+            {
+                broker.stop();
+                return;
+            }
+
+            if (! broker.start (port, login))
+                std::cerr << "wfg serve: the MQTT broker cannot listen on port " << port
+                          << " - " << broker.stateNow().problem << std::endl;
+        };
+
+        /*  The opener: a word for the broker in this process, else a host
+            and a port over TCP. */
+        const auto openMqttLink = [&broker] (const std::string& path, int baud, std::string& problem)
+                                    -> std::unique_ptr<wfg::serial::Link>
+        {
+            if (path == "broker")
+                return broker.localLink (problem);
+            return wfg::serial::openTcpLink (path, baud, problem);
+        };
+        wfg::serial::SerialTable mqttLinks { openMqttLink };
         std::map<std::string, wfg::mqtt::Session> mqttSessions;
         const auto mqttMachine = juce::SystemStats::getComputerName().toStdString();
         const auto reconcileMqtt = [&mqttLinks, &mqttSessions, &document, &mqttMachine]
@@ -4429,6 +4480,7 @@ namespace
         //  The serial ports, opened as the show declares them (declared above).
         serialPorts.reconcile (serialWantedOf (document));
         reconcileLinks();
+        reconcileBroker();
         reconcileMqtt();
         runner.setSerialPorts (&serialPorts);
         sender.setMounts (&mounts);
@@ -7913,6 +7965,7 @@ namespace
 
                                 if (machineHold.held() != linksReconciledHeld)
                                     reconcileLinks();
+                                    reconcileBroker();
                                     reconcileMqtt();
 
                                 if (pairing.revision != pairingPublished)
@@ -8244,6 +8297,7 @@ namespace
                                         never waits for one. */
                                     serialPorts.reconcile (serialWantedOf (document));
                                     reconcileLinks();
+                                    reconcileBroker();
                                     reconcileMqtt();
 
                                     if (portBinder.want (portWishesOf (document)))
@@ -8386,6 +8440,15 @@ namespace
 
                                 state.refusedDatagrams =
                                     refusedDatagrams.load (std::memory_order_relaxed);
+
+                                /*  AND WHAT GO.DOT'S BROKER IS DOING (namespace
+                                    draft §67, AND; MQ.5), for its three rows. */
+                                {
+                                    const auto brokerNow = broker.stateNow();
+                                    state.brokerState = brokerNow.state;
+                                    state.brokerProblem = brokerNow.problem;
+                                    state.brokerClients = brokerNow.clients;
+                                }
 
                                 /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN
                                     (namespace draft §59): MTC as its lane
