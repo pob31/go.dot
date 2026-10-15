@@ -148,7 +148,16 @@ namespace wfg::client::model
         auto at = origin.rfind ("ws:", 0) == 0 ? origin.substr (3) : origin;
         const auto colon = at.rfind (':');
 
-        return colon == std::string::npos ? at : at.substr (0, colon);
+        if (colon != std::string::npos)
+            at = at.substr (0, colon);
+
+        /*  AN IPv4 ADDRESS IN IPv6'S CLOTHES: the server listens on both, so a
+            tablet on 192.168.1.20 is `::ffff:192.168.1.20` to it (seen on the
+            author's tablet, 2026-10-15). A person reads the four numbers. */
+        if (at.rfind ("::ffff:", 0) == 0 && at.find ('.') != std::string::npos)
+            at = at.substr (7);
+
+        return at;
     }
 
     std::vector<RemoteRow> readRemotes (const std::string& text)

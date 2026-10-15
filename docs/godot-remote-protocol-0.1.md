@@ -101,8 +101,9 @@ argument: `{"MIN": …, "MAX": …}` or `{"VALS": […]}` for a closed set), `UN
   tablet is the same tablet across reconnects; `<name>` is what the operator called it. It writes
   nothing to the show and is in no log: who is connected is a fact about tonight.
 - **`/godot/network/remotes`** (read-only, runtime) lists the connections that said HELLO, one a line:
-  `<origin>\t<id>\t<name>`, the origin as the event log spells it (`ws:<ip>:<port>`). The app finds
-  its own line by its `<id>`, which is how it learns its origin (§6).
+  `<origin>\t<id>\t<name>`, the origin as the event log spells it (`ws:<ip>:<port>`; the server
+  listens on both address families, so an IPv4 tablet reads `ws:::ffff:192.168.1.20:57069`). The app
+  finds its own line by its `<id>`, which is how it learns its origin (§6).
 - **`remote.find <id> [seconds]`** - machine-local, as `videoOutput.identify` is - sends `FIND` to
   every connection whose HELLO carried that `<id>`; 30 seconds when none is given. The app flashes its
   screen, sounds an alarm and vibrates until the time is up or the screen is touched. Show settings >

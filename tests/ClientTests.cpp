@@ -14878,6 +14878,11 @@ TEST_CASE ("client: the remotes connected are read one a line, each once, and Fi
 
     CHECK (model::readRemotes ("").empty());
 
+    //  The server listens on both families: an IPv4 tablet arrives IPv6-mapped.
+    const auto mapped = model::readRemotes ("ws:::ffff:192.168.1.20:57069\tT4BLET01\tHouse left");
+    REQUIRE (mapped.size() == 1);
+    CHECK (mapped[0].address() == "192.168.1.20");
+
     const auto find = gesture::findRemote ("T4BLET01");
     CHECK (find.command == "remote.find");
     REQUIRE (find.args.size() == 1);
