@@ -226,6 +226,19 @@ namespace wfg::oscquery
         std::mutex streamsMutex;
         std::map<ConnectionId, Stream> streams;
 
+        /*  WHO SAID HELLO (namespace draft §68, ANT): a remote's own identifier
+            and the name somebody gave it, by connection, under the streams'
+            lock. A fact about tonight and never about the show: nothing here
+            reaches the document or the log, and a connection's entry goes with
+            it. */
+        struct Hello
+        {
+            std::string id;
+            std::string name;
+        };
+
+        std::map<ConnectionId, Hello> hellos;
+
         /*  Every frame of the stream carries the tick first, under this address
             whatever the prefix: it is the heartbeat (ANQ). */
         static constexpr const char* tickAddress = "/godot/engine/tick";
@@ -569,6 +582,7 @@ namespace wfg::oscquery
             {
                 const std::lock_guard<std::mutex> lock (streamsMutex);
                 streams.erase (connection);
+                hellos.erase (connection);
             }
 
             /*  And the touches. A surface that crashed mid-gesture would
@@ -605,6 +619,29 @@ namespace wfg::oscquery
                 return;
 
             const auto& address = data->asString();
+
+            /*  HELLO is not an address: `<id>\t<name>` (ANT). An id is what the
+                remote drew at install, so a tablet is the same tablet across
+                reconnects; one with no id, or a tab or a line break inside
+                either part, is not kept - each would break the one-a-line,
+                tab-separated row it is read back from. */
+            if (command->asString() == "HELLO")
+            {
+                const auto tab = address.find ('\t');
+                Hello hello { address.substr (0, tab), tab == std::string::npos ? std::string {} : address.substr (tab + 1) };
+
+                const auto clean = [] (const std::string& part)
+                {
+                    return part.find_first_of ("\t\r\n") == std::string::npos;
+                };
+
+                if (hello.id.empty() || ! clean (hello.id) || ! clean (hello.name))
+                    return;
+
+                const std::lock_guard<std::mutex> lock (streamsMutex);
+                hellos.insert_or_assign (connection, std::move (hello));
+                return;
+            }
 
             /*  A pattern is not a subscription. The decoder refuses patterns
                 everywhere else, and accepting one here would make this the only
@@ -1031,6 +1068,56 @@ namespace wfg::oscquery
     {
         const std::lock_guard<std::mutex> lock (impl->streamsMutex);
         return impl->streams.size();
+    }
+
+    //==========================================================================
+    std::string OscQueryServer::remotesText() const
+    {
+        const std::lock_guard<std::mutex> lock (impl->streamsMutex);
+        std::string text;
+
+        for (const auto& [connection, hello] : impl->hellos)
+        {
+            if (! text.empty())
+                text += '\n';
+
+            text += connection + '\t' + hello.id + '\t' + hello.name;
+        }
+
+        return text;
+    }
+
+    int OscQueryServer::find (const std::string& remoteId, int seconds)
+    {
+        if (! running.load (std::memory_order_relaxed) || remoteId.empty())
+            return 0;
+
+        std::vector<ConnectionId> found;
+
+        {
+            const std::lock_guard<std::mutex> lock (impl->streamsMutex);
+
+            for (const auto& [connection, hello] : impl->hellos)
+                if (hello.id == remoteId)
+                    found.push_back (connection);
+        }
+
+        const auto frame = "{\"COMMAND\": \"FIND\", \"DATA\": \"" + std::to_string (seconds) + "\"}";
+        int told = 0;
+
+        for (const auto& connection : found)
+        {
+            const auto socket = impl->server.connectionMap[juce::String (connection.substr (3))];   // drop "ws:"
+
+            if (socket == nullptr)
+                continue;
+
+            socket->send (frame);
+            outbound.fetch_add (1, std::memory_order_relaxed);
+            ++told;
+        }
+
+        return told;
     }
 
     void OscQueryServer::broadcastText (const std::string& message)

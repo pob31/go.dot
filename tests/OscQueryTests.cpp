@@ -49,10 +49,12 @@
 
 #include <wfg/engine/oscquery/EngineNamespace.h>
 #include <wfg/engine/oscquery/OscQueryServer.h>
+#include <wfg/engine/oscquery/RemoteCommands.h>
 #include <wfg/engine/oscquery/Subscriptions.h>
 #include <wfg/engine/oscquery/TimbreRoute.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/cue/CueCommands.h>
@@ -1205,6 +1207,97 @@ TEST_CASE ("stream: a connection that stops reading is let go, and the tick neve
     CHECK (std::chrono::duration_cast<std::chrono::milliseconds> (slowest).count() < 100);
 
     stalled.close();
+}
+
+TEST_CASE ("remotes: HELLO names a connection, FIND reaches only its remote, and a close forgets it")
+{
+    /*  Namespace draft §68, ANT: who is connected as a remote is a fact about
+        tonight, kept beside the connection and read back one a line; FIND is a
+        text frame to the connections of one remote and nobody else. */
+    Rig rig;
+    REQUIRE (rig.started);
+
+    Client tablet, phone, page;
+
+    for (auto* client : { &tablet, &phone, &page })
+    {
+        client->connect (rig.port());
+        REQUIRE (waitUntil ([client] { return client->open.load(); }));
+    }
+
+    CHECK (rig.server.remotesText().empty());
+
+    tablet.socket.send (juce::String ("{\"COMMAND\": \"HELLO\", \"DATA\": \"T4BLET01\\tHouse left\"}"));
+    phone.socket.send (juce::String ("{\"COMMAND\": \"HELLO\", \"DATA\": \"PH0NE002\\tPierre's phone\"}"));
+
+    //  Not kept: no id, and a line break that would split the row.
+    page.socket.send (juce::String ("{\"COMMAND\": \"HELLO\", \"DATA\": \"\\tNobody\"}"));
+    page.socket.send (juce::String ("{\"COMMAND\": \"HELLO\", \"DATA\": \"X\\tTwo\\nlines\"}"));
+
+    REQUIRE (waitUntil ([&rig]
+    {
+        const auto text = rig.server.remotesText();
+        return text.find ("T4BLET01") != std::string::npos && text.find ("PH0NE002") != std::string::npos;
+    }));
+
+    std::this_thread::sleep_for (std::chrono::milliseconds { 200 });
+
+    {
+        const auto text = rig.server.remotesText();
+        INFO (text);
+
+        //  One a line, `ws:<ip>:<port>\t<id>\t<name>`, and only the two.
+        CHECK (std::count (text.begin(), text.end(), '\n') == 1);
+        CHECK (text.find ("\tT4BLET01\tHouse left") != std::string::npos);
+        CHECK (text.find ("\tPH0NE002\tPierre's phone") != std::string::npos);
+        CHECK (text.rfind ("ws:", 0) == 0);
+        CHECK (text.find ("Nobody") == std::string::npos);
+        CHECK (text.find ("Two") == std::string::npos);
+    }
+
+    //  FIND reaches the tablet and nobody else.
+    CHECK (rig.server.find ("T4BLET01", 45) == 1);
+    REQUIRE (waitUntil ([&tablet] { return tablet.textCount() == 1; }));
+    {
+        const std::lock_guard<std::mutex> lock { tablet.mutex };
+        CHECK (tablet.text[0].contains ("\"FIND\""));
+        CHECK (tablet.text[0].contains ("\"45\""));
+    }
+
+    CHECK (rig.server.find ("NOBODY00", 30) == 0);
+    std::this_thread::sleep_for (std::chrono::milliseconds { 200 });
+    CHECK (phone.textCount() == 0);
+    CHECK (page.textCount() == 0);
+
+    //  A remote gone is a remote forgotten.
+    tablet.socket.stop();
+    REQUIRE (waitUntil ([&rig] { return rig.server.remotesText().find ("T4BLET01") == std::string::npos; }));
+    CHECK (rig.server.find ("T4BLET01", 30) == 0);
+}
+
+TEST_CASE ("remotes: remote.find is this machine's, clamps its time, and with no server does nothing")
+{
+    CommandRegistry registry;
+    registerRemoteCommands (registry, nullptr);
+
+    const auto* command = registry.find ("remote.find");
+    REQUIRE (command != nullptr);
+    CHECK (command->machineLocal);
+    CHECK (command->mutates == false);
+
+    CommandContext context;
+
+    const auto told = command->handler (context, { osc::Value::string ("T4BLET01") });
+    CHECK (told.applied);
+    REQUIRE (told.appliedArgs.size() == 2);
+    CHECK (told.appliedArgs[1] == osc::Value::int32 (30));
+
+    const auto longest = command->handler (context, { osc::Value::string ("T4BLET01"), osc::Value::int32 (100000) });
+    CHECK (longest.appliedArgs[1] == osc::Value::int32 (300));
+
+    const auto empty = command->handler (context, { osc::Value::string ("") });
+    CHECK_FALSE (empty.applied);
+    CHECK (empty.reason == reason::badValue);
 }
 
 //==============================================================================

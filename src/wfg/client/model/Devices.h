@@ -236,6 +236,25 @@ namespace wfg::client::model
     /** Every installed preset, by vendor then model. One pass, as `readDevices`. */
     std::vector<PresetRow> readPresets (const tree::TreeSnapshot& snapshot);
 
+    /*  A REMOTE CONNECTED TO THIS MACHINE (namespace draft §68, ANT), as
+        `/godot/network/remotes` lists it: one a line, the connection's origin,
+        the identifier the remote drew at install, the name somebody gave it,
+        tab-separated. The Network tab's Find takes the identifier. */
+    struct RemoteRow
+    {
+        std::string origin;     // ws:<ip>:<port>
+        std::string id;
+        std::string name;
+
+        /** Where it is, for a person: the address without `ws:` and the port. */
+        std::string address() const;
+    };
+
+    /*  Every remote in the row's order; a line that is not three fields is
+        not one. One remote with two connections - a reconnect not yet noticed
+        as a close - is listed once, by its first. */
+    std::vector<RemoteRow> readRemotes (const std::string& text);
+
     /*  WHAT KIND OF DEVICE A ROW IS, in words for its Kind cell: the preset's
         vendor and model when it was made from one (its slug when that preset
         is not installed any more), "OSC" for a device made by hand, and

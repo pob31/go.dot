@@ -30074,8 +30074,8 @@ Go.dot (this repository):
 
 | Stage | What | Built |
 |---|---|---|
-| RM.0 | This section, the contract document, PRD §3.17, the devplan's Phase 7, the README | |
-| RM.1 | `STREAM`/`UNSTREAM`, the bundle a tick, the stalled connection let go, `HOST_INFO`, `blackbox.remote` | |
+| RM.0 | This section, the contract document, PRD §3.17, the devplan's Phase 7, the README | fe1894c |
+| RM.1 | `STREAM`/`UNSTREAM`, the bundle a tick, the stalled connection let go, `HOST_INFO`, `blackbox.remote` | d4ee330 |
 | RM.2 | `HELLO`, `network/remotes`, `remote.find`, the Network tab's remotes | |
 | RM.3 | Only if M74 asks: a snapshot of values without descriptions | |
 

@@ -2433,6 +2433,11 @@ namespace wfg::client::ui
 
                 addAndMakeVisible (summary);
                 summary.setJustificationType (juce::Justification::centredLeft);
+
+                addAndMakeVisible (remotesLabel);
+                remotesLabel.setJustificationType (juce::Justification::centredLeft);
+                remotesLabel.setTooltip ("The Android remotes connected to this machine now. Find makes one"
+                                         " show itself, as WFS-DIY's remote is found from its desk.");
             }
 
             void show (std::vector<model::DeviceRow> devices, bool strictNow,
@@ -2525,6 +2530,14 @@ namespace wfg::client::ui
                 brokerPortBox.setBounds (foot.removeFromLeft (64).reduced (3, 4));
                 foot.removeFromLeft (10);
                 summary.setBounds (foot);
+
+                //  The remotes' line, above the filter's (§68, ANT).
+                auto remoteLine = area.removeFromBottom (30);
+                remotesLabel.setBounds (remoteLine.removeFromLeft (remotes.empty() ? 260 : 80));
+
+                for (auto* button : findButtons)
+                    if (remoteLine.getWidth() > 40)
+                        button->setBounds (remoteLine.removeFromLeft (180).reduced (3, 2));
 
                 area.removeFromTop (6);
                 heading = area.removeFromTop (20);
@@ -3050,9 +3063,51 @@ namespace wfg::client::ui
                 list.repaint();
             }
 
+            /*  THE REMOTES CONNECTED TO THIS MACHINE (namespace draft §68, ANT),
+                a Find for each, on a line of their own above the filter's:
+                rebuilt only when who is connected changes, so a button is not
+                taken from under the pointer every pass. Not the show's - a fact
+                about tonight - so Find works under the lock as Identify does. */
+            void showRemotes (std::vector<model::RemoteRow> now)
+            {
+                const auto same = now.size() == remotes.size()
+                                    && std::equal (now.begin(), now.end(), remotes.begin(),
+                                                   [] (const model::RemoteRow& a, const model::RemoteRow& b)
+                                                   {
+                                                       return a.id == b.id && a.name == b.name && a.origin == b.origin;
+                                                   });
+                if (same)
+                    return;
+
+                remotes = std::move (now);
+                findButtons.clear();
+
+                for (const auto& remote : remotes)
+                {
+                    const auto named = remote.name.empty() ? remote.address() : remote.name;
+                    auto* button = findButtons.add (new juce::TextButton ("Find " + juce::String (named)));
+                    button->setTooltip (juce::String (named) + ", at " + juce::String (remote.address())
+                                        + ": its screen flashes and it sounds until somebody touches it,"
+                                          " or for thirty seconds.");
+                    button->onClick = [this, id = remote.id]
+                    {
+                        if (send)
+                            send (gesture::findRemote (id));
+                    };
+                    addAndMakeVisible (button);
+                }
+
+                remotesLabel.setText (remotes.empty() ? "Remotes: none connected." : "Remotes:",
+                                      juce::dontSendNotification);
+                resized();
+            }
+
         private:
             std::vector<model::SerialRow> serials;
             std::vector<model::PortRow> midiPorts;
+            std::vector<model::RemoteRow> remotes;
+            juce::OwnedArray<juce::TextButton> findButtons;
+            juce::Label remotesLabel { {}, "Remotes: none connected." };
 
             /*  EDITED IN PLACE, the output list's gesture exactly: one click
                 opens an editor over the cell, Return or clicking away commits,
@@ -8808,6 +8863,7 @@ namespace wfg::client::ui
                 next tick through the engine's own re-read. */
             network->showSerials (model::readSerialPorts (snapshot));
             network->showPorts (model::readPorts (snapshot));
+            network->showRemotes (model::readRemotes (model::text (snapshot, "/godot/network/remotes")));
             model::BrokerRow broker;
             broker.on = model::isYes (model::flag (snapshot, "/godot/network/broker"));
             broker.port = juce::String (model::text (snapshot, "/godot/network/brokerPort")).getIntValue();

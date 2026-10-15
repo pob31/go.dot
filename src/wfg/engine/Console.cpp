@@ -130,6 +130,7 @@
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/oscquery/EngineNamespace.h>
 #include <wfg/engine/oscquery/OscQueryServer.h>
+#include <wfg/engine/oscquery/RemoteCommands.h>
 #include <wfg/engine/oscquery/TimbreRoute.h>
 #include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/tree/AuthoringCommands.h>
@@ -426,6 +427,7 @@ namespace
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
+        wfg::oscquery::registerRemoteCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
         wfg::doc::registerSectionCommands (engine.commands(), document);
@@ -754,6 +756,7 @@ namespace
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
+        wfg::oscquery::registerRemoteCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
         wfg::doc::registerSectionCommands (engine.commands(), document);
@@ -1460,6 +1463,7 @@ namespace
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
+        wfg::oscquery::registerRemoteCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
         wfg::doc::registerSectionCommands (engine.commands(), document);
@@ -5960,6 +5964,10 @@ namespace
         server.setPeerDoor (std::string (wfg::pair::wire::prefix), &linkDoor);
         linkServer = &server;
 
+        /*  `remote.find` (namespace draft §68, ANT) reaches the remotes through
+            the server their connections are on. */
+        wfg::oscquery::registerRemoteCommands (engine.commands(), &server);
+
         /*  A LEADER'S STREAM GOES DOWN WHICHEVER CONNECTION ITS FOLLOWER IS AT
             THE END OF (RD.7): one the server took - `ws:` - or a path this
             machine dialled, a backup that took over leading the main it dials. */
@@ -8447,6 +8455,10 @@ namespace
                                     state.brokerProblem = brokerNow.problem;
                                     state.brokerClients = brokerNow.clients;
                                 }
+
+                                /*  AND WHO IS CONNECTED AS A REMOTE (namespace
+                                    draft §68, ANT), for network/remotes. */
+                                state.remotes = server.remotesText();
 
                                 /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN
                                     (namespace draft §59): MTC as its lane

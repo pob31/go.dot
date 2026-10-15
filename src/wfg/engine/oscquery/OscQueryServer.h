@@ -345,6 +345,18 @@ namespace wfg::oscquery
             the tick never waits for it. How many connections are streaming: */
         std::size_t streamCount() const;
 
+        /*  WHO IS CONNECTED AS A REMOTE (namespace draft §68, ANT): every
+            connection that sent `{"COMMAND": "HELLO", "DATA": "<id>\t<name>"}`,
+            one a line, `<origin>\t<id>\t<name>`, in origin order - what
+            `/godot/network/remotes` publishes. Any thread. */
+        std::string remotesText() const;
+
+        /*  FIND (ANT, ANP): the text frame `{"COMMAND": "FIND", "DATA":
+            "<seconds>"}` to every connection whose HELLO carried `remoteId`, so
+            the tablet shows itself. How many were told; nought for an id nobody
+            said, or no server. Any thread, and never waits on the network. */
+        int find (const std::string& remoteId, int seconds);
+
         //======================================================================
         //  Diagnostics, for tests and for /godot/engine.
         std::size_t connectionCount() const;

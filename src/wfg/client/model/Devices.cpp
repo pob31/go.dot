@@ -143,6 +143,46 @@ namespace wfg::client::model
         return rows;
     }
 
+    std::string RemoteRow::address() const
+    {
+        auto at = origin.rfind ("ws:", 0) == 0 ? origin.substr (3) : origin;
+        const auto colon = at.rfind (':');
+
+        return colon == std::string::npos ? at : at.substr (0, colon);
+    }
+
+    std::vector<RemoteRow> readRemotes (const std::string& text)
+    {
+        std::vector<RemoteRow> rows;
+        std::size_t start = 0;
+
+        while (start <= text.size())
+        {
+            auto end = text.find ('\n', start);
+            if (end == std::string::npos)
+                end = text.size();
+
+            const auto line = text.substr (start, end - start);
+            const auto first = line.find ('\t');
+            const auto second = first == std::string::npos ? std::string::npos : line.find ('\t', first + 1);
+
+            if (second != std::string::npos)
+            {
+                RemoteRow row { line.substr (0, first), line.substr (first + 1, second - first - 1), line.substr (second + 1) };
+
+                const auto already = std::any_of (rows.begin(), rows.end(),
+                                                  [&row] (const RemoteRow& r) { return r.id == row.id; });
+
+                if (! row.id.empty() && ! already)
+                    rows.push_back (std::move (row));
+            }
+
+            start = end + 1;
+        }
+
+        return rows;
+    }
+
     std::vector<PresetRow> readPresets (const tree::TreeSnapshot& snapshot)
     {
         static constexpr const char* presetPrefix = "/godot/preset/";

@@ -4035,6 +4035,7 @@ namespace wfg::tree
             else if (name == "brokerState")   text = state.brokerState;
             else if (name == "brokerProblem") text = state.brokerProblem;
             else if (name == "brokerClients") text = std::to_string (state.brokerClients);
+            else if (name == "remotes")       text = state.remotes;
             else                              text = std::string (row->defaultText);
 
             engineValue (*row, "network", text);

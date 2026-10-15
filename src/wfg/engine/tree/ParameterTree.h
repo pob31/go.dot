@@ -320,6 +320,11 @@ namespace wfg::tree
         std::string brokerProblem;
         std::uint64_t brokerClients = 0;
 
+        /*  WHO IS CONNECTED AS A REMOTE (namespace draft §68, ANT):
+            `network/remotes`, one a line, copied from the OSCQuery server's
+            connections once a tick as the broker's rows are. */
+        std::string remotes;
+
         /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN (namespace draft §59.3):
             `sync/mtcLate` and `sync/mtcWorst` as the MIDI sender's MTC lane
             counts them, `sync/ltcLate` as the audio side's LTC generator does.

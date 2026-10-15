@@ -67,6 +67,7 @@
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/document/SchemaTable.generated.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/oscquery/RemoteCommands.h>
 #include <wfg/engine/pair/MachineLocal.h>
 #include <wfg/engine/pair/PairSettings.h>
 #include <wfg/engine/plugin/PluginCommands.h>
@@ -139,7 +140,10 @@ namespace
         "pair.adoptShow",
 
         /*  And §64's: this machine's devices looked for again. */
-        "midi.rescan", "serial.rescan"
+        "midi.rescan", "serial.rescan",
+
+        /*  And §68's: a tablet connected to this machine asked to show itself. */
+        "remote.find"
     };
 
     const std::string mainList  = "7K2QM9X4";
@@ -196,6 +200,7 @@ namespace
             audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
             audio::registerAnalyserCommands (engine.commands(), nullptr);
             video::registerVideoCommands (engine.commands(), nullptr);
+            oscquery::registerRemoteCommands (engine.commands(), nullptr);
             video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
             video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
             registerRescanCommands (engine.commands(), {}, {});

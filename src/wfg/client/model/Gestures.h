@@ -447,6 +447,11 @@ namespace wfg::client::gesture
     /** An output's test pattern on or off, to find which projector is which: tonight's. */
     Event identifyVideoOutput (const std::string& outputId, bool on);
 
+    /*  `remote.find <id>` (namespace draft §68, ANT): a tablet connected to
+        this machine asked to show itself - its screen flashing, an alarm - the
+        Network tab's Find beside each remote. */
+    Event findRemote (const std::string& remoteId);
+
     /** The projectors' windows put away while the show is unlocked, or brought back: tonight's (§39). */
     Event hideProjectors (bool on);
 

@@ -133,6 +133,7 @@
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/DocumentWriter.h>
+#include <wfg/engine/oscquery/RemoteCommands.h>
 #include <wfg/engine/surface/DcaColour.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfaceTable.h>
@@ -690,13 +691,16 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     //  And the two looks for this machine's devices (§64).
     registerRescanCommands (rig.engine.commands(), {}, {});
 
+    //  And the Network tab's Find for a remote (§68, ANT), with no server.
+    oscquery::registerRemoteCommands (rig.engine.commands(), nullptr);
+
     const std::vector<Event> gestures
     {
         gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneRec ("level", true),
         gesture::laneFree(), gesture::laneRecord (0.0), gesture::laneRecord (12.5), gesture::laneStop(),
 
         gesture::go(), gesture::doh(), gesture::flagLastGo(), gesture::standbyNext(), gesture::standbyPrevious(),
-        gesture::midiRescan(), gesture::serialRescan(),
+        gesture::midiRescan(), gesture::serialRescan(), gesture::findRemote ("T4BLET01"),
         gesture::stopAll(), gesture::killAll(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::seek ("R4NID001", 12.5),
@@ -14850,6 +14854,34 @@ TEST_CASE ("client: Shift+F's refusals are said in words")
 
     reading.lastError = "5601 31 window unknown-id go.flag";
     CHECK (reading.errorLine() == "Nothing flagged: the cue the last GO fired has been deleted");
+}
+
+//==============================================================================
+TEST_CASE ("client: the remotes connected are read one a line, each once, and Find names its identifier")
+{
+    /*  Namespace draft §68, ANT: `/godot/network/remotes` is one line a
+        connection that said HELLO, `<origin>\t<id>\t<name>`. A line short of
+        a field is not a remote; a remote with two connections - a reconnect
+        whose close is not yet noticed - is listed once. */
+    const auto rows = model::readRemotes ("ws:192.168.1.20:53211\tT4BLET01\tHouse left\n"
+                                          "ws:192.168.1.31:40100\tPH0NE002\t\n"
+                                          "broken line\n"
+                                          "ws:192.168.1.20:53999\tT4BLET01\tHouse left");
+
+    REQUIRE (rows.size() == 2);
+    CHECK (rows[0].id == "T4BLET01");
+    CHECK (rows[0].name == "House left");
+    CHECK (rows[0].address() == "192.168.1.20");
+    CHECK (rows[1].id == "PH0NE002");
+    CHECK (rows[1].name.empty());
+    CHECK (rows[1].address() == "192.168.1.31");
+
+    CHECK (model::readRemotes ("").empty());
+
+    const auto find = gesture::findRemote ("T4BLET01");
+    CHECK (find.command == "remote.find");
+    REQUIRE (find.args.size() == 1);
+    CHECK (find.args[0].getString() == "T4BLET01");
 }
 
 //==============================================================================

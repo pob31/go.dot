@@ -224,12 +224,17 @@ def session(report: Report, server: Server) -> None:
         name_address = made() or ""
         new_cue = name_address.split("/")[3] if name_address.count("/") >= 4 else ""
 
+        def carried_index(events):
+            return next((i for i, (kind, payload) in enumerate(events)
+                         if kind == "bundle" and any(a == name_address and v == ["Fresh"]
+                                                     for a, v in (payload or [])[1:])), None)
+
+        # The bundle follows the announcement on the wire; wait for it to be read.
+        wait_for(lambda: carried_index(remote.snapshot_events()[before:]) is not None)
         events = remote.snapshot_events()[before:]
         announced_at = next((i for i, (kind, payload) in enumerate(events)
                              if kind == "text" and name_address in payload), None)
-        carried_at = next((i for i, (kind, payload) in enumerate(events)
-                           if kind == "bundle" and any(a == name_address and v == ["Fresh"]
-                                                       for a, v in (payload or [])[1:])), None)
+        carried_at = carried_index(events)
         report.check(carried_at is not None, "the new cue's name is in the tick's bundle, with its value",
                      name_address)
         report.check(announced_at is not None and carried_at is not None and announced_at < carried_at,
@@ -264,6 +269,31 @@ def session(report: Report, server: Server) -> None:
             quiet_bundles = [e for e in quiet.events if e[0] == "bundle"]
         report.check(not quiet_bundles, "a connection that did not ask is streamed nothing")
 
+        # HELLO and FIND (§68, ANT): who is connected, and a tablet found.
+        remote.send_text(json.dumps({"COMMAND": "HELLO", "DATA": "T4BLET01\tHouse left"}))
+
+        def remotes_row() -> str:
+            return common.http_json(port, "/godot/network/remotes?VALUE").get("VALUE", [""])[0]
+
+        report.check(wait_for(lambda: "\tT4BLET01\tHouse left" in remotes_row()),
+                     "HELLO lists the remote at /godot/network/remotes", repr(remotes_row()))
+        report.check(remotes_row().startswith("ws:") and remotes_row().split("\t")[0].count(":") >= 2,
+                     "by the origin the log will name it with, ws:<address>:<port>", repr(remotes_row()))
+        report.check(remotes_row().count("\n") == 0, "and the quiet page, which said no HELLO, is not a remote")
+
+        before_find = len(remote.snapshot_events())
+        common.send_udp(server.osc_port, common.osc_encode("/godot/cmd/remote/find", ["T4BLET01", 12]))
+
+        def found():
+            return [payload for kind, payload in remote.snapshot_events()[before_find:]
+                    if kind == "text" and '"FIND"' in payload]
+
+        report.check(wait_for(lambda: bool(found())), "remote.find reaches the tablet as a FIND frame")
+        report.check(bool(found()) and '"12"' in found()[0], "carrying the seconds asked for", str(found()[:1]))
+        with quiet._lock:
+            quiet_finds = [e for e in quiet.events if e[0] == "text" and '"FIND"' in e[1]]
+        report.check(not quiet_finds, "and nobody else")
+
         remote.unstream()
         time.sleep(0.3)
         count = len(remote.bundles())
@@ -272,6 +302,10 @@ def session(report: Report, server: Server) -> None:
     finally:
         remote.close()
         quiet.close()
+
+    # A remote gone is no longer listed.
+    report.check(wait_for(lambda: common.http_json(port, "/godot/network/remotes?VALUE").get("VALUE", [""])[0] == ""),
+                 "a closed remote leaves /godot/network/remotes")
 
 
 def run(locale: "str | None") -> int:
