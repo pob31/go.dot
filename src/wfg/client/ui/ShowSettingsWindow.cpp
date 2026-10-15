@@ -30,6 +30,7 @@
 #include <initializer_list>
 #include <map>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -7786,14 +7787,298 @@ namespace wfg::client::ui
             std::array<Act, 5> acts;
         };
 
-        /*  WHAT TO DO FIRST, AND WHAT EACH TAB IS FOR (author, 2026-09-30:
+        /*  THE WINDOW'S PAGES, IN SECTIONS AND IN ORDER (author, 2026-10-15:
+            "It's a bit crowded in the tabs ... we should have a few sections
+            Show, Audio, Video, Network, Controllers, Getting started" - Network
+            then put among the controllers - and the sections in a list down
+            the left rather than as a second strip of tabs).
+
+            The one place the order lives: the pages are added from it, the
+            list down the left draws it, and Getting started walks it, so the
+            three cannot come apart when a page moves. A section of one page -
+            Video, Getting started - is that page, under the section's name.
+            `what` is the page's sentence on Getting started (author,
+            2026-09-30: "And what each tab is for"). */
+        struct PageWords
+        {
+            const char* section;
+            const char* name;
+            const char* what;
+        };
+
+        constexpr const char* gettingStartedName = "Getting started";
+
+        /*  The page the window opens on: what a show is set up with first
+            (author, 2026-09-30, "Audio stays the tab the window opens on"),
+            although its section is the second. */
+        constexpr const char* openingPage = "Audio interface";
+
+        constexpr PageWords pageWords[] {
+            /*  THE SHOW ITSELF: how GO and Esc behave, what a new cue can be
+                born with, and the other computer playing it - which is this
+                computer's setting rather than the show's, and says so (AGP). */
+            { "Show",        "Playback",        "How GO, Doh! and Esc behave: the least time between two GOs, how"
+                                                " long after a GO it can be taken back, and how long the panic fade"
+                                                " takes." },
+            { "Show",        "Templates",       "Cue templates: a cue's settings kept under a name, for new cues to be"
+                                                " born with from the Add lists." },
+            { "Show",        model::pairWords::tab,
+                                                "Two computers playing one show, a main and a backup that takes over if the"
+                                                " main stops: which one this is, where the other is, and how the two are"
+                                                " doing. This computer's, not the show's. Nothing to do for one computer." },
+
+            /*  THE SOUND. Each side of the interface whole, the outputs first:
+                what the show's outputs are and then where they land on the
+                hardware, then the same two for the inputs (author, 2026-09-30:
+                "keep the output and output patch first and the input and input
+                patch second, but in a similar order"); then the rack's channels
+                and the plugins they and a cue's FX are made of. */
+            { "Audio",       openingPage,       "The interface the show plays through, its sample rate and buffer size."
+                                                " Choose it first: GO turns yellow once the audio is running." },
+            { "Audio",       "Outputs",         "The show's own outputs - mono or stereo, direct or mixes - which cues"
+                                                " are routed to by name, never by hardware channel." },
+            { "Audio",       "Output patch",    "Where each output lands on the interface's physical outputs: a new venue"
+                                                " is a new patch, and no cue changes." },
+            { "Audio",       "Inputs",          "Named inputs for mic cues and live sampling - Voix solo, Keys - mono or"
+                                                " stereo. Nothing to do for a show that only plays files." },
+            { "Audio",       "Input patch",     "Which physical inputs feed each named input." },
+            { "Audio",       "Rack",            "Rack channels: chains of plugins that mic cues play through, and the"
+                                                " ones that sample." },
+            { "Audio",       "Plugins",         "Scanning this machine for plugins, and the set a cue's FX can switch in." },
+
+            //  THE PICTURES (Phase 8a, decision VB): one page for the canvases and the outputs.
+            { "Video",       "Video",           "Canvases - the pictures video cues are laid onto - and the outputs that"
+                                                " show them on this machine's displays. Nothing to do for a show with"
+                                                " no picture." },
+
+            /*  WHAT THE SHOW TALKS TO AND HEARS FROM: devices over the network,
+                MIDI ports, the surfaces reached through those ports, timecode
+                going out and coming in, and serial ports. */
+            { "Controllers", "Network",         "The devices the show talks to over OSC - a desk, a processor, a video"
+                                                " server - and where their addresses begin." },
+            { "Controllers", "MIDI",            "The MIDI ports cues send to and triggers listen on." },
+            { "Controllers", "Surfaces",        "Control surfaces and what their faders, pads and dials do, and the DCAs"
+                                                " that trim groups of cues." },
+            { "Controllers", model::timecodeWords::tab,
+                                                "The timecode the show sends a desk or a server: its frame rate, the MIDI"
+                                                " port MTC leaves on and the output LTC plays on - and the timecode its"
+                                                " time groups follow: where LTC and MTC come in and how their members"
+                                                " keep up. Nothing to do for a show that sends and follows none." },
+            { "Controllers", "Serial",          "Serial ports - an Arduino on USB - whose lines a process cue's patch hears"
+                                                " and sends." },
+
+            /*  AND LAST, what to do first (author, 2026-09-30): where somebody
+                looks who does not know which page they want. */
+            { gettingStartedName, gettingStartedName, nullptr },
+        };
+
+        /*  A section's heading, in the list down the left and on Getting
+            started alike: small capitals in the dim ink, as the page's pane
+            headings are drawn. */
+        juce::Font headingFont (const model::Theme& theme)
+        {
+            return Look::font (theme, 12.0f).boldened().withExtraKerningFactor (0.06f);
+        }
+
+        /*  THE PAGES, ONE SHOWING AT A TIME: a strip of tabs with no strip,
+            the list down the left being what moves it. It keeps JUCE's own
+            rule that a page is a live child only while it shows - which is
+            what stops a held output test when its page is left - and it is
+            framed whole, since no tab bar draws its top edge any more. */
+        class Pages final : public juce::TabbedComponent
+        {
+        public:
+            Pages() : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop)
+            {
+                setTabBarDepth (0);
+                setOutline (0);
+                getTabbedButtonBar().setVisible (false);
+            }
+
+            std::function<void (const juce::String&)> changed;
+
+            void currentTabChanged (int, const juce::String& name) override
+            {
+                if (changed)
+                    changed (name);
+            }
+
+            void paintOverChildren (juce::Graphics& g) override
+            {
+                g.setColour (findColour (juce::TabbedComponent::outlineColourId));
+                g.drawRect (getLocalBounds());
+            }
+        };
+
+        /*  THE LIST DOWN THE LEFT (author, 2026-10-15, choosing it over a
+            second strip of tabs): every page one click away, and all of them
+            in sight at once. A section's heading goes to its first page; a
+            section of one page is its heading alone. The page showing has a
+            bar down its row's edge and a raised panel behind it, and its
+            section's heading is lit - a shape and a place as well as a
+            colour (§4.8). It scrolls when the window is shorter than it. */
+        class PageList final : public juce::Component
+        {
+        public:
+            PageList (const model::Theme& themeToUse, std::function<void (const juce::String&)> goToPage)
+                : goTo (std::move (goToPage))
+            {
+                const Style style { Look::colour (themeToUse, "ink"), Look::colour (themeToUse, "ink-dim"),
+                                    Look::colour (themeToUse, "panel-high"), Look::colour (themeToUse, "picked"),
+                                    Look::font (themeToUse, 15.0f), headingFont (themeToUse) };
+                std::string_view section;
+
+                for (const auto& page : pageWords)
+                {
+                    const auto alone = std::string_view (page.section) == page.name;
+
+                    if (page.section != section)
+                    {
+                        section = page.section;
+                        add (style, page.section, page.section, page.name, alone ? page.name : "", true);
+
+                        if (alone)
+                            continue;
+                    }
+
+                    add (style, page.name, page.section, page.name, page.name, false);
+                }
+
+                /*  NEVER THE KEYBOARD'S: always showing, and the first thing in
+                    the window, so a viewport wanting focus (JUCE's default)
+                    would take it from the page whenever the window comes
+                    forward - and a patch matrix losing focus stops its test. */
+                viewport.setViewedComponent (&inner, false);
+                viewport.setScrollBarsShown (true, false);
+                viewport.setWantsKeyboardFocus (false);
+                addAndMakeVisible (viewport);
+                setComponentID ("pageList");
+            }
+
+            /*  The page now showing, marked; its section's heading lit. */
+            void showing (const juce::String& name)
+            {
+                juce::String section;
+
+                for (const auto& page : pageWords)
+                    if (name == page.name)
+                        section = page.section;
+
+                for (auto& entry : entries)
+                {
+                    entry->setToggleState (entry->marks.isNotEmpty() && entry->marks == name, juce::dontSendNotification);
+                    entry->lit = entry->heading && entry->section == section;
+                    entry->repaint();
+                }
+            }
+
+            void resized() override
+            {
+                viewport.setBounds (getLocalBounds());
+
+                auto height = 0;
+                for (const auto& entry : entries)
+                    height += rowHeight (*entry);
+
+                const auto width = viewport.getWidth() - (height > viewport.getHeight() ? viewport.getScrollBarThickness() : 0);
+                auto y = 0;
+
+                for (auto& entry : entries)
+                {
+                    const auto tall = rowHeight (*entry);
+                    entry->setBounds (0, y + tall - rowOf (*entry), width, rowOf (*entry));
+                    y += tall;
+                }
+
+                inner.setSize (width, y + 6);
+            }
+
+        private:
+            struct Style
+            {
+                juce::Colour ink, dim, raised, picked;
+                juce::Font entryType, headingType;
+            };
+
+            class Entry final : public juce::Button
+            {
+            public:
+                Entry (const Style& styleToUse, const juce::String& words, bool headingToUse)
+                    : juce::Button (words), heading (headingToUse), style (styleToUse)
+                {
+                    setWantsKeyboardFocus (false);
+                }
+
+                const bool heading;
+                juce::String section, goesTo, marks;
+                bool lit = false;
+
+                void paintButton (juce::Graphics& g, bool over, bool down) override
+                {
+                    auto area = getLocalBounds();
+                    const auto alpha = isEnabled() ? 1.0f : 0.45f;
+
+                    if (getToggleState())
+                    {
+                        g.setColour (style.raised.withMultipliedAlpha (alpha));
+                        g.fillRect (area);
+                        g.setColour (style.picked.withMultipliedAlpha (alpha));
+                        g.fillRect (area.removeFromLeft (3));
+                    }
+                    else if (isEnabled() && (over || down))
+                    {
+                        g.setColour (style.raised.withMultipliedAlpha (0.6f));
+                        g.fillRect (area);
+                    }
+
+                    const auto bright = getToggleState() || lit || ! heading;
+                    g.setColour ((bright ? style.ink : style.dim).withMultipliedAlpha (alpha));
+                    g.setFont (heading ? style.headingType : style.entryType);
+                    g.drawText (heading ? getButtonText().toUpperCase() : getButtonText(),
+                                getLocalBounds().withTrimmedLeft (heading ? 12 : 26).withTrimmedRight (6),
+                                juce::Justification::centredLeft, true);
+                }
+
+            private:
+                const Style style;
+            };
+
+            void add (const Style& style, const char* words, const char* section, const char* goesTo,
+                      const char* marks, bool heading)
+            {
+                auto entry = std::make_unique<Entry> (style, words, heading);
+                entry->section = section;
+                entry->goesTo = goesTo;
+                entry->marks = marks;
+                entry->onClick = [this, page = entry->goesTo] { if (goTo) goTo (page); };
+                inner.addAndMakeVisible (*entry);
+                entries.push_back (std::move (entry));
+            }
+
+            //  A row's own height, and the room above it: a heading after the first stands clear of the section before.
+            static int rowOf (const Entry& entry)  { return entry.heading ? 28 : 27; }
+            int rowHeight (const Entry& entry) const
+            {
+                return rowOf (entry) + (entry.heading && &entry != entries.front().get() ? 10 : 0);
+            }
+
+            std::function<void (const juce::String&)> goTo;
+            juce::Viewport viewport;
+            juce::Component inner;
+            std::vector<std::unique_ptr<Entry>> entries;
+        };
+
+        /*  WHAT TO DO FIRST, AND WHAT EACH PAGE IS FOR (author, 2026-09-30:
             "Should we add a 'Getting started' tab in the settings window
             explaining what people should do? And what each tab is for..." -
-            as the LAST tab, so Audio stays the first thing the window shows).
+            as the LAST page, so the audio interface stays the first thing the
+            window shows).
 
-            Every tab in the order a show is set up, each a button that goes
-            there and one sentence on what it holds. Words only: nothing here
-            is a setting, and a tab that changed the show would be a tab this
+            Every other page under its section's heading, in the list's order
+            (author, 2026-10-15: "Getting started should be reordered and the
+            links should match the new layout"), each a button that goes there
+            and one sentence on what it holds. Words only: nothing here is a
+            setting, and a page that changed the show would be a page this
             list had to explain too. */
         class GettingStartedPage final : public juce::Component
         {
@@ -7801,11 +8086,12 @@ namespace wfg::client::ui
             GettingStartedPage (const model::Theme& themeToUse, std::function<void (const juce::String&)> goToTab)
                 : goTo (std::move (goToTab))
             {
-                intro.setText ("A show needs to know what it plays through before it plays anything. Work down"
-                               " this list once for each show - everything on these tabs is saved with it but"
-                               " Redundancy, which is this computer's, so a show carried to another machine only"
-                               " needs its Audio and patches looked at again. The tabs with nothing for your show"
-                               " can be left as they are.",
+                intro.setText ("A show needs to know what it plays through before it plays anything: begin with"
+                               " Audio interface, under Audio. Then work down this list once for each show -"
+                               " everything on these tabs is saved with it but Redundancy, which is this"
+                               " computer's, so a show carried to another machine only needs its audio interface"
+                               " and patches looked at again. The tabs with nothing for your show can be left as"
+                               " they are.",
                                juce::dontSendNotification);
 
                 outro.setText ("Then close this window and build the show: the Add row over the cue list makes"
@@ -7813,61 +8099,41 @@ namespace wfg::client::ui
                                " Show settings... in the Show menu brings this window back.",
                                juce::dontSendNotification);
 
-                const std::pair<const char*, const char*> tabs[] {
-                    { "Audio",        "The interface the show plays through, its sample rate and buffer size."
-                                      " Choose it first: GO turns yellow once the audio is running." },
-                    { "Outputs",      "The show's own outputs - mono or stereo, direct or mixes - which cues"
-                                      " are routed to by name, never by hardware channel." },
-                    { "Output patch", "Where each output lands on the interface's physical outputs: a new venue"
-                                      " is a new patch, and no cue changes." },
-                    { "Inputs",       "Named inputs for mic cues and live sampling - Voix solo, Keys - mono or"
-                                      " stereo. Nothing to do for a show that only plays files." },
-                    { "Input patch",  "Which physical inputs feed each named input." },
-                    { "Network",      "The devices the show talks to over OSC - a desk, a processor, a video"
-                                      " server - and where their addresses begin." },
-                    { model::pairWords::tab,
-                                      "Two computers playing one show, a main and a backup that takes over if the"
-                                      " main stops: which one this is, where the other is, and how the two are"
-                                      " doing. This computer's, not the show's. Nothing to do for one computer." },
-                    { "MIDI",         "The MIDI ports cues send to and triggers listen on." },
-                    { "Serial",       "Serial ports - an Arduino on USB - whose lines a process cue's patch hears"
-                                      " and sends." },
-                    { "Surfaces",     "Control surfaces and what their faders, pads and dials do, and the DCAs"
-                                      " that trim groups of cues." },
-                    { "Plugins",      "Scanning this machine for plugins, and the set a cue's FX can switch in." },
-                    { "Rack",         "Rack channels: chains of plugins that mic cues play through, and the"
-                                      " ones that sample." },
-                    { "Video",        "Canvases - the pictures video cues are laid onto - and the outputs that"
-                                      " show them on this machine's displays. Nothing to do for a show with"
-                                      " no picture." },
-                    { "Templates",    "Cue templates: a cue's settings kept under a name, for new cues to be"
-                                      " born with from the Add lists." },
-                    { model::timecodeWords::tab,
-                                      "The timecode the show sends a desk or a server: its frame rate, the MIDI"
-                                      " port MTC leaves on and the output LTC plays on - and the timecode its"
-                                      " time groups follow: where LTC and MTC come in and how their members"
-                                      " keep up. Nothing to do for a show that sends and follows none." },
-                    { "Playback",     "How GO, Doh! and Esc behave: the least time between two GOs, how"
-                                      " long after a GO it can be taken back, and how long the panic fade"
-                                      " takes." },
-                };
+                std::string_view section;
 
-                for (const auto& [name, what] : tabs)
+                for (const auto& page : pageWords)
                 {
-                    auto step = std::make_unique<Step>();
-                    step->go.setButtonText (name);
-                    step->go.setTooltip (juce::String ("Go to the ") + name + " tab");
-                    step->go.setWantsKeyboardFocus (false);
-                    step->go.onClick = [this, tab = juce::String (name)] { if (goTo) goTo (tab); };
+                    if (page.what == nullptr)
+                        continue;
 
-                    step->what.setText (what, juce::dontSendNotification);
+                    if (page.section != section)
+                    {
+                        section = page.section;
+
+                        auto heading = std::make_unique<juce::Label>();
+                        heading->setText (juce::String (page.section).toUpperCase(), juce::dontSendNotification);
+                        heading->setFont (headingFont (themeToUse));
+                        heading->setJustificationType (juce::Justification::bottomLeft);
+                        heading->setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
+                        heading->setBorderSize ({});
+                        inner.addAndMakeVisible (*heading);
+                        rows.push_back ({ std::move (heading), nullptr });
+                    }
+
+                    auto step = std::make_unique<Step>();
+                    step->go.setButtonText (page.name);
+                    step->go.setTooltip (juce::String ("Go to the ") + page.name + " tab");
+                    step->go.setWantsKeyboardFocus (false);
+                    step->go.onClick = [this, tab = juce::String (page.name)] { if (goTo) goTo (tab); };
+
+                    step->what.setText (page.what, juce::dontSendNotification);
                     step->what.setJustificationType (juce::Justification::centredLeft);
                     step->what.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
                     step->what.setMinimumHorizontalScale (1.0f);
 
                     inner.addAndMakeVisible (step->go);
                     inner.addAndMakeVisible (step->what);
-                    steps.push_back (std::move (step));
+                    rows.push_back ({ nullptr, std::move (step) });
                 }
 
                 for (auto* words : { &intro, &outro })
@@ -7893,19 +8159,25 @@ namespace wfg::client::ui
                 const auto width = juce::jmax (300, viewport.getWidth() - viewport.getScrollBarThickness());
                 auto area = juce::Rectangle<int> (0, 0, width, 10000).reduced (22);
 
-                intro.setBounds (area.removeFromTop (58));
-                area.removeFromTop (8);
+                intro.setBounds (area.removeFromTop (heightOf (intro, area.getWidth())));
+                area.removeFromTop (4);
 
-                for (auto& step : steps)
+                for (auto& row : rows)
                 {
+                    if (row.heading != nullptr)
+                    {
+                        row.heading->setBounds (area.removeFromTop (30).withTrimmedBottom (4));
+                        continue;
+                    }
+
                     auto line = area.removeFromTop (34);
-                    step->go.setBounds (line.removeFromLeft (120).reduced (0, 3));
+                    row.step->go.setBounds (line.removeFromLeft (140).reduced (0, 3));
                     line.removeFromLeft (14);
-                    step->what.setBounds (line);
+                    row.step->what.setBounds (line);
                 }
 
                 area.removeFromTop (12);
-                outro.setBounds (area.removeFromTop (58));
+                outro.setBounds (area.removeFromTop (heightOf (outro, area.getWidth())));
 
                 inner.setSize (width, outro.getBottom() + 22);
             }
@@ -7917,11 +8189,30 @@ namespace wfg::client::ui
                 juce::Label what;
             };
 
+            //  A heading, or a page's button and its sentence.
+            struct Row
+            {
+                std::unique_ptr<juce::Label> heading;
+                std::unique_ptr<Step> step;
+            };
+
+            /*  As tall as its words need at this width, wrapped rather than
+                squeezed: the opening paragraph is longer than it was. */
+            static int heightOf (const juce::Label& label, int width)
+            {
+                const auto font = label.getFont();
+                const auto wide = juce::GlyphArrangement::getStringWidthInt (font, label.getText());
+                const auto usable = juce::jmax (100, width - 60);     // what wrapping at words wastes
+                const auto lines = juce::jmax (1, (wide + usable - 1) / usable);
+
+                return juce::roundToInt (font.getHeight() * static_cast<float> (lines)) + 12;
+            }
+
             std::function<void (const juce::String&)> goTo;
             juce::Viewport viewport;
             juce::Component inner;
             juce::Label intro, outro;
-            std::vector<std::unique_ptr<Step>> steps;
+            std::vector<Row> rows;
         };
     }
 
@@ -7930,7 +8221,7 @@ namespace wfg::client::ui
     public:
         Panel (const model::Theme& theme, const tree::TreeSnapshot& snapshot,
                std::function<void (Event)> dispatch, std::function<void()> close)
-            : send (std::move (dispatch)), tabs (juce::TabbedButtonBar::TabsAtTop)
+            : send (std::move (dispatch))
         {
             initial = audio::readAudioSettings ([&] (const std::string& name)
             { return model::text (snapshot, "/godot/audio/" + name); });
@@ -8006,13 +8297,12 @@ namespace wfg::client::ui
             timecode = std::make_unique<TimecodePage> (theme, send);
             playback = std::make_unique<PlaybackPage> (theme, send);
 
-            /*  A tab named in the list is found by its name, so the list and
-                the strip cannot come apart when a tab moves. */
-            gettingStarted = std::make_unique<GettingStartedPage> (theme, [this] (const juce::String& name)
-            {
-                if (const auto at = tabs.getTabNames().indexOf (name); at >= 0)
-                    tabs.setCurrentTabIndex (at);
-            });
+            /*  A page is found by its name, from Getting started and from the
+                list down the left alike, so neither can come apart from the
+                pages when one moves. */
+            gettingStarted = std::make_unique<GettingStartedPage> (theme, [this] (const juce::String& name) { showPage (name); });
+            pageList = std::make_unique<PageList> (theme, [this] (const juce::String& name) { showPage (name); });
+            tabs.changed = [this] (const juce::String& name) { pageList->showing (name); };
 
             /*  THE FIRST HAND EDIT OF THE OUTPUT PATCH IS WHAT SETTLES IT
                 (PRD §6.2). Sent BEFORE the edit lands, so that the engine's own
@@ -8052,69 +8342,38 @@ namespace wfg::client::ui
                 send (gesture::setInputPatchSettled (false));
             };
 
+            addAndMakeVisible (*pageList);
             addAndMakeVisible (tabs);
+
+            /*  IN THE TABLE'S ORDER, each page found by its name (`pageWords`,
+                above): the sections and their order are decided there. The
+                audio interface's page is "Audio interface" and no longer
+                "Audio", which names its section now (author, 2026-10-15). */
+            const std::map<std::string_view, juce::Component*> pageFor {
+                { "Playback", playback.get() }, { "Templates", templates.get() },
+                { model::pairWords::tab, redundancy.get() },
+                { openingPage, &interfacePage }, { "Outputs", outputList.get() }, { "Output patch", outputs.get() },
+                { "Inputs", inputList.get() }, { "Input patch", inputs.get() }, { "Rack", rackPage.get() },
+                { "Plugins", plugins.get() },
+                { "Video", video.get() },
+                { "Network", network.get() }, { "MIDI", midi.get() }, { "Surfaces", surfaces.get() },
+                { model::timecodeWords::tab, timecode.get() }, { "Serial", serialPage.get() },
+                { gettingStartedName, gettingStarted.get() },
+            };
+
             const auto background = Look::colour (theme, "panel");
-            /*  "Audio" and not "Interface", since this window stopped being
-                only about audio (2026-09-22): the tab at the end is about the
-                network, and two tabs named after the thing they configure read
-                better than one named after a word both could use. */
-            tabs.addTab ("Audio", background, &interfacePage, false);
 
-            /*  EACH SIDE OF THE INTERFACE WHOLE, the outputs first: what the
-                show's outputs are and then where they land on the hardware,
-                then the same two for the inputs, in the same order (author,
-                2026-09-30: "keep the output and output patch first and the
-                input and input patch second, but in a similar order"). The
-                inputs are the other side, named and read the same way
-                (Phase 9b). */
-            tabs.addTab ("Outputs", background, outputList.get(), false);
-            tabs.addTab ("Output patch", background, outputs.get(), false);
-            tabs.addTab ("Inputs", background, inputList.get(), false);
-            tabs.addTab ("Input patch", background, inputs.get(), false);
-            tabs.addTab ("Network", background, network.get(), false);
+            for (const auto& page : pageWords)
+            {
+                const auto found = pageFor.find (page.name);
+                jassert (found != pageFor.end());
 
-            /*  AFTER NETWORK (the author's AGP, namespace draft §58.2): the other
-                computer is found over the network, and this tab, like Audio, is
-                about this computer rather than the show - and says so. */
-            tabs.addTab (model::pairWords::tab, background, redundancy.get(), false);
-            tabs.addTab ("MIDI", background, midi.get(), false);
+                if (found != pageFor.end())
+                    tabs.addTab (page.name, background, found->second, false);
+            }
 
-            /*  AFTER MIDI: the other ports a show talks through, an Arduino on
-                USB and its kind (namespace draft §51, PC.10). */
-            tabs.addTab ("Serial", background, serialPage.get(), false);
+            showPage (openingPage);
 
-            /*  AFTER MIDI, because a surface is reached through the ports
-                declared there: the tab a person fills in first comes first. */
-            tabs.addTab ("Surfaces", background, surfaces.get(), false);
-
-            /*  AFTER SURFACES: the set is what a cue's FX switches in, and the
-                tab is where a plugin is declared before a cue can (Phase 9a). */
-            tabs.addTab ("Plugins", background, plugins.get(), false);
-
-            /*  AFTER PLUGINS: a channel's chain is made of what the machine's
-                scan found, and the scan is on the tab before (Phase 9b). */
-            tabs.addTab ("Rack", background, rackPage.get(), false);
-            /*  AFTER THE RACK, the pictures' side of the show (Phase 8a,
-                decision VB): one tab for the canvases and the outputs. */
-            tabs.addTab ("Video", background, video.get(), false);
-
-            /*  AFTER THE VIDEO: the cue templates the Add lists offer
-                (namespace draft §38), made from cues and kept with the show. */
-            tabs.addTab ("Templates", background, templates.get(), false);
-
-            /*  AFTER THE TEMPLATES AND BEFORE PLAYBACK (namespace draft §59,
-                AHW): what the show sends a desk, set once its ports and outputs
-                are - and Playback stays the last tab that sets anything. */
-            tabs.addTab (model::timecodeWords::tab, background, timecode.get(), false);
-
-            /*  AFTER THE RACK: the two numbers that say how GO and Esc behave,
-                set once a show is otherwise ready to run (2026-09-28). */
-            tabs.addTab ("Playback", background, playback.get(), false);
-
-            /*  AND LAST, what to do first (author, 2026-09-30): Audio stays the
-                tab the window opens on, and this is where somebody looks when
-                they do not know which tab they want. */
-            tabs.addTab ("Getting started", background, gettingStarted.get(), false);
             for (auto* component : std::initializer_list<juce::Component*> { &enabled, &type, &output, &input,
                      &buffer, &typeLabel, &outputLabel, &inputLabel, &bufferLabel, &rate, &explanation, &rescan })
                 interfacePage.addAndMakeVisible (*component);
@@ -8353,14 +8612,22 @@ namespace wfg::client::ui
             const auto locked = model::isYes (model::flag (snapshot, "/godot/document/locked"));
             apply.setEnabled (! waiting && state != "applying" && ! locked);
             tabs.setEnabled (! waiting && state != "applying" && ! locked);
+            pageList->setEnabled (tabs.isEnabled());
             if (locked) status.setText ("Unlock the show to change the show settings.", juce::dontSendNotification);
         }
 
         void stopTest() { outputs->stopTest(); }
 
+        /*  What the list down the left takes from the window's width, the
+            gap beside it included: the window is that much wider, so a page
+            keeps the width it had under a strip of tabs. */
+        static constexpr int pageListWidth = 200;
+
         void resized() override
         {
             auto area = getLocalBounds().reduced (14);
+            pageList->setBounds (area.removeFromLeft (pageListWidth - 12));
+            area.removeFromLeft (12);
             auto buttons = area.removeFromBottom (34);
             cancel.setBounds (buttons.removeFromRight (110)); buttons.removeFromRight (8);
             apply.setBounds (buttons.removeFromRight (150));
@@ -8381,6 +8648,12 @@ namespace wfg::client::ui
             rate.setBounds (form.removeFromTop (42)); explanation.setBounds (form);
         }
     private:
+        void showPage (const juce::String& name)
+        {
+            if (const auto at = tabs.getTabNames().indexOf (name); at >= 0)
+                tabs.setCurrentTabIndex (at);
+        }
+
         bool readCapabilities (const tree::TreeSnapshot& snapshot)
         {
             // Only the engine owns an open device. Constructing a second ASIO
@@ -8521,11 +8794,12 @@ namespace wfg::client::ui
         std::unique_ptr<TimecodePage> timecode;
         std::unique_ptr<PlaybackPage> playback;
         std::unique_ptr<GettingStartedPage> gettingStarted;
+        std::unique_ptr<PageList> pageList;
         bool settled = false;
 
         /*  The input patch's own regime, the twin of `settled` (Phase 9b). */
         bool inputSettled = false;
-        juce::TabbedComponent tabs;
+        Pages tabs;
         juce::ComboBox type, output, input, buffer;
         juce::Label typeLabel, outputLabel, inputLabel, bufferLabel, rate, explanation, status;
         juce::ToggleButton enabled { "Enable audio interface" }, save { "Save show for next launch" }, defaults { "Use as defaults for new shows" };
@@ -8539,11 +8813,15 @@ namespace wfg::client::ui
 
     ShowSettingsWindow::ShowSettingsWindow (const model::Theme& theme, const tree::TreeSnapshot& snapshot,
                                              std::function<void (Event)> send, std::function<void()> onPanic)
-        : DocumentWindow ("Audio settings", Look::colour (theme, "ground"), juce::DocumentWindow::closeButton),
+        /*  NAMED AS THE MENU ITEM THAT OPENS IT (author, 2026-10-15: "The
+            window is still called Audio Settings. We renamed the menu item to
+            Show Settings. The window should say this too"). */
+        : DocumentWindow ("Show settings", Look::colour (theme, "ground"), juce::DocumentWindow::closeButton),
           panic (std::move (onPanic))
     {
         panel = std::make_unique<Panel> (theme, snapshot, std::move (send), [this] { closeButtonPressed(); });
-        setUsingNativeTitleBar (true); setResizable (true, false); setResizeLimits (740, 550, 1500, 1100);
+        setUsingNativeTitleBar (true); setResizable (true, false);
+        setResizeLimits (740 + Panel::pageListWidth, 550, 1500 + Panel::pageListWidth, 1100);
         setContentNonOwned (panel.get(), true);
 
         /*  TALL ENOUGH FOR THE GETTING STARTED LIST WHOLE (author, 2026-09-30:
@@ -8551,8 +8829,10 @@ namespace wfg::client::ui
             pop up window be slightly taller"); the page scrolls on a screen
             that cannot give it this much. AND WIDER, by about a third (author,
             2026-10-07: "can be 25% to 50% wider by default, things are really
-            cramped now"), never past the screen it opens on. */
-        auto width = 1200;
+            cramped now") - and wider again by the list down the left
+            (2026-10-15), so that a page keeps the width it had beside a strip
+            of tabs - never past the screen it opens on. */
+        auto width = 1200 + Panel::pageListWidth;
         auto height = 740;
 
         if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
@@ -8561,7 +8841,7 @@ namespace wfg::client::ui
             height = juce::jmin (height, juce::roundToIntAccurate (display->userBounds.getHeight()) - 40);
         }
 
-        centreWithSize (juce::jmax (740, width), juce::jmax (550, height));
+        centreWithSize (juce::jmax (740 + Panel::pageListWidth, width), juce::jmax (550, height));
         setAlwaysOnTop (true);
         setVisible (true);
        #if ! JUCE_LINUX

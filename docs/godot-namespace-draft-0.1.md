@@ -21835,6 +21835,45 @@ screen."
 - **Show > Hide the projectors while unlocked**, ticked while asked; offered under the lock too,
   where it waits for the unlock. *The words are mine.*
 
+### 39.14 Show settings in sections (2026-10-15)
+
+The author: the window still said "Audio settings" although the menu item that opens it had become
+*Show settings...*, and seventeen tabs in one strip were crowded. The window is now called **Show
+settings**, and its tabs stand in a list down the left, each section a heading over its pages:
+
+- **Show**: Playback, Templates, Redundancy
+- **Audio**: Audio interface, Outputs, Output patch, Inputs, Input patch, Rack, Plugins
+- **Video**: one page
+- **Controllers**: Network, MIDI, Surfaces, Timecode, Serial
+- **Getting started**
+
+The sections, their pages and their order are the author's. So is the list down the left rather
+than a second strip of tabs under the first, the option I recommended (the words of both options
+were mine). The author's message named Network both as a section and as a Controllers page;
+asked, the author put it among the controllers. The page that was "Audio" is "Audio interface", the
+author's name for it, since "Audio" now names its section. The author's "Surface" is read as the
+existing *Surfaces*.
+
+The implementer's, for the author's review:
+
+- **The window still opens on Audio interface**, though its section is the second: what a show is
+  set up with first (the author's 2026-09-30 rule, "Audio stays the tab the window opens on").
+- **A heading goes to its section's first page**; a section of one page (Video, Getting started) is
+  its heading alone. The page showing has a bar down its row's edge and a raised panel behind it, and
+  its section's heading is lit - not colour alone (§4.8). Under the lock the list greys with the
+  pages, as the strip did.
+- **The window is 200 px wider** (1400 by 740, never past the screen), so a page keeps the width it
+  had under the strip (§39.6).
+- **Getting started** lists every other page under its section's heading, in the list's order. Its
+  opening paragraph no longer says to work down the list from the top, since the top is now Playback:
+  it begins "begin with Audio interface, under Audio". *The words are mine.*
+- One table in `ShowSettingsWindow.cpp` (`pageWords`) holds the sections, the pages, their order and
+  Getting started's sentences; the pages are added from it, the list draws it and Getting started
+  walks it. The pages are still a `juce::TabbedComponent`, its bar hidden, so a page is a live child
+  only while it shows and a held output test still stops when its page is left.
+- The send mixer's notice named the old path ("Show, Audio settings, Outputs"); it now says "add one
+  in Show settings, on the Outputs tab", as the other notices do.
+
 ## 40. Several canvases on one output, their warps drawn, and a monitor for the canvases
 
 Written 2026-10-08, overnight. Two of the author's niggles of 2026-10-07 (§39): *"A canvas should be

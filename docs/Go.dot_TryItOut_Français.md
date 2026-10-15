@@ -46,13 +46,13 @@ Quelques vérifications depuis un terminal (sous Windows, `wfg.exe` dans le doss
 - `wfg plugins --scan` — trouver vos plugins VST3, AU et LV2
 - `wfg validate <spectacle>` — vérifier un dossier de spectacle et lister chaque problème
 
-Le dernier onglet de *Show settings*, **Getting started**, reprend chaque onglet de réglages dans l'ordre où l'on monte un spectacle, avec une phrase sur son rôle.
+*Show settings* range ses onglets à gauche en cinq sections : Show, Audio, Video, Controllers et Getting started. La dernière, **Getting started**, reprend chaque autre onglet sous sa section, avec une phrase sur son rôle.
 
 ## Votre premier spectacle en dix minutes
 
 Un spectacle est un dossier avec au moins un fichier `.wfg` et un dossier `media/` où Go.dot copie vos sons. Rangez-le où vous voulez, emportez-le sur une autre machine : seuls les réglages audio sont à revoir.
 
-1. **Choisir l'interface audio.** *Show > Show settings… > Audio*. Le bouton GO passe au jaune quand l'audio tourne.
+1. **Choisir l'interface audio.** *Show > Show settings… > Audio interface*. Le bouton GO passe au jaune quand l'audio tourne.
 2. **Créer et nommer les sorties** (canaux de mixage ou sorties directes, mono ou stéréo). Dans *Outputs*, créez les sorties du spectacle (« Face G/D », « Sub », « Retours »). Dans *Output patch*, indiquez sur quel canal physique chacune arrive. Les cues visent des noms : changer de salle, c'est changer de patch, sans toucher aux cues.
 3. **Ajouter des sons.** Glissez des fichiers WAV, AIFF, FLAC ou Ogg sur la liste. Chacun devient une cue média au nom du fichier. Déposez-en un sur une cue existante pour remplacer son fichier.
 4. **Ajouter d'autres cues** depuis la rangée *Add* au-dessus de la liste : `memo`, `media`, `mic`, `video`, `fade`, `transport`, `osc`, `midi`, `process`, `group`. Ceux qui portent un ▾ ouvrent un petit menu de variantes.

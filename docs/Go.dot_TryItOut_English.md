@@ -44,13 +44,13 @@ Useful checks from a terminal (on Windows, `wfg.exe` in the install folder; on m
 - `wfg plugins --scan` — find your VST3, AU and LV2 plugins
 - `wfg validate <show>` — check a show folder and list every problem
 
-The last tab of *Show settings*, **Getting started**, lists every settings tab in the order a show is set up, with one sentence on what each is for.
+*Show settings* lists its tabs down the left in five sections: Show, Audio, Video, Controllers and Getting started. The last, **Getting started**, lists every other tab under its section, with one sentence on what each is for.
 
 ## Your first show in ten minutes
 
 A show is a folder that contains one or more `.wfg` files plus a `media/` folder that Go.dot copies your sounds into. Save it anywhere, carry it to another machine, and only the audio settings need a second look.
 
-1. **Pick the audio interface.** *Show > Show settings… > Audio*. The GO button turns yellow once audio is running.
+1. **Pick the audio interface.** *Show > Show settings… > Audio interface*. The GO button turns yellow once audio is running.
 2. **Create and name your outputs** (mix channels or direct outs, mono or stereo). On *Outputs*, create the show's outputs ("Main L/R", "Sub", "Foldback"). On *Output patch*, say which physical channel each one lands on. Cues are routed by name, so a new venue is a new patch and no cue changes.
 3. **Add sounds.** Drag WAV, AIFF, FLAC or Ogg files onto the cue list. Each becomes a media cue named after its file. Drop one on an existing cue to replace its file.
 4. **Add other cues** from the *Add* row above the list: `memo`, `media`, `mic`, `video`, `fade`, `transport`, `osc`, `midi`, `process`, `group`. The ones with a ▾ open a short menu of kinds.

@@ -55,6 +55,13 @@ namespace
             if (auto* found = button (*child, text)) return found;
         return nullptr;
     }
+    juce::Component* withId (juce::Component& root, const juce::String& id)
+    {
+        if (root.getComponentID() == id) return &root;
+        for (auto* child : root.getChildren())
+            if (auto* found = withId (*child, id)) return found;
+        return nullptr;
+    }
 
     struct Rig
     {
@@ -147,12 +154,12 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
 
     /*  A TAB'S CONTENT IS ONLY A LIVE CHILD WHILE IT SHOWS, which is
         `juce::TabbedComponent`'s own arrangement - so the page has to be
-        selected before anything in it can be found. Outputs is the second tab,
-        between Interface and the two patches. */
+        selected before anything in it can be found. Found by its name, as
+        every page is: where each stands is the layout case's to say. */
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
-    CHECK (tabs->getTabNames()[1] == "Outputs");
-    tabs->setCurrentTabIndex (1);
+    REQUIRE (tabs->getTabNames().contains ("Outputs"));
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Outputs"));
 
     /*  THE FOUR ADD BUTTONS ARE THE WHOLE STRUCTURE GESTURE. Everything else
         on this tab - the name, the cross, the drag - is a click on a row,
@@ -453,8 +460,9 @@ TEST_CASE ("show settings UI: the Rack tab makes channels, and says each chain's
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
 
+    //  Before Plugins, among the audio's pages (2026-10-15).
     const auto names = tabs->getTabNames();
-    CHECK (names.indexOf ("Rack") == names.indexOf ("Plugins") + 1);
+    CHECK (names.indexOf ("Rack") == names.indexOf ("Plugins") - 1);
     tabs->setCurrentTabIndex (names.indexOf ("Rack"));
 
     auto* page = tabs->getCurrentContentComponent();
@@ -545,11 +553,9 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
 
-    //  The last tab that sets anything; only the Getting started words come after it.
+    //  The first page of the Show section (2026-10-15; the layout case has the order).
     const auto names = tabs->getTabNames();
     REQUIRE (names.contains ("Playback"));
-    CHECK (names.indexOf ("Playback") == names.size() - 2);
-    CHECK (names[names.size() - 1] == "Getting started");
     tabs->setCurrentTabIndex (names.indexOf ("Playback"));
 
     auto* page = tabs->getCurrentContentComponent();
@@ -649,11 +655,153 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     The author found it by looking: two program changes, then a note-on, and
     the note-on's words stuck to everything picked afterwards.
 */
-TEST_CASE ("show settings UI: Getting started names every other tab, in order, and goes to it")
+TEST_CASE ("show settings UI: the window is called Show settings, and its pages stand in sections down the left")
+{
+    /*  Author, 2026-10-15: "The window is still called Audio Settings. We
+        renamed the menu item to Show Settings. The window should say this
+        too", and "It's a bit crowded in the tabs ... a vertical tab list to
+        the left ... a few sections Show, Audio, Video, ... Controllers,
+        Getting started" - Network among the controllers, and the sections in
+        a list down the left rather than a second strip of tabs. */
+    Rig rig;
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    CHECK (panel.getName() == "Show settings");
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    //  Every page, in the author's order, and no strip of tabs to show them.
+    const juce::StringArray pages { "Playback", "Templates", "Redundancy",
+                                    "Audio interface", "Outputs", "Output patch", "Inputs", "Input patch", "Rack", "Plugins",
+                                    "Video",
+                                    "Network", "MIDI", "Surfaces", "Timecode", "Serial",
+                                    "Getting started" };
+    CHECK (tabs->getTabNames() == pages);
+    CHECK_FALSE (tabs->getTabbedButtonBar().isVisible());
+
+    //  It opens on the audio interface, what a show is set up with first, though its section is the second.
+    CHECK (tabs->getCurrentTabName() == "Audio interface");
+
+    //  THE LIST DOWN THE LEFT: each section's heading over its pages; a section of one page is its heading alone.
+    auto* list = withId (panel, "pageList");
+    REQUIRE (list != nullptr);
+
+    std::vector<juce::Button*> rows;
+
+    const std::function<void (juce::Component&)> collect = [&] (juce::Component& at)
+    {
+        if (auto* b = dynamic_cast<juce::Button*> (&at))
+            rows.push_back (b);
+
+        for (auto* child : at.getChildren())
+            collect (*child);
+    };
+
+    collect (*list);
+
+    std::vector<juce::String> words;
+    for (auto* row : rows)
+        words.push_back (row->getButtonText());
+
+    CHECK (words == std::vector<juce::String> { "Show", "Playback", "Templates", "Redundancy",
+                                                "Audio", "Audio interface", "Outputs", "Output patch", "Inputs",
+                                                "Input patch", "Rack", "Plugins",
+                                                "Video",
+                                                "Controllers", "Network", "MIDI", "Surfaces", "Timecode", "Serial",
+                                                "Getting started" });
+
+    //  The page showing is marked, and nothing else is.
+    const auto marked = [&rows]
+    {
+        std::vector<juce::String> on;
+
+        for (auto* row : rows)
+            if (row->getToggleState())
+                on.push_back (row->getButtonText());
+
+        return on;
+    };
+
+    CHECK (marked() == std::vector<juce::String> { "Audio interface" });
+
+    const auto press = [&rows] (const juce::String& text)
+    {
+        for (auto* row : rows)
+            if (row->getButtonText() == text)
+            {
+                REQUIRE (row->onClick != nullptr);
+                row->onClick();
+                return;
+            }
+
+        FAIL ("no row reads " << text);
+    };
+
+    //  A page goes there, and the mark moves with it.
+    press ("MIDI");
+    CHECK (tabs->getCurrentTabName() == "MIDI");
+    CHECK (marked() == std::vector<juce::String> { "MIDI" });
+
+    //  A heading goes to its section's first page.
+    press ("Show");
+    CHECK (tabs->getCurrentTabName() == "Playback");
+    CHECK (marked() == std::vector<juce::String> { "Playback" });
+    press ("Audio");
+    CHECK (tabs->getCurrentTabName() == "Audio interface");
+    press ("Controllers");
+    CHECK (tabs->getCurrentTabName() == "Network");
+
+    //  And a section of one page is that page, its heading marked.
+    press ("Video");
+    CHECK (tabs->getCurrentTabName() == "Video");
+    CHECK (marked() == std::vector<juce::String> { "Video" });
+
+    //  Moved from anywhere else - Getting started's buttons - the list follows.
+    tabs->setCurrentTabIndex (pages.indexOf ("Rack"));
+    CHECK (marked() == std::vector<juce::String> { "Rack" });
+
+    /*  A LOOK, with no screen: the window at the size it opens at, on the
+        audio interface and on Getting started, painted into PNGs when
+        WFG_SNAPSHOT_DIR is set and skipped otherwise. */
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.setSize (1400, 740);
+
+        for (const auto& [page, name] : { std::pair { "Audio interface", "show-settings.png" },
+                                          std::pair { "Getting started", "show-settings-getting-started.png" } })
+        {
+            tabs->setCurrentTabIndex (pages.indexOf (page));
+            panel.refresh (*rig.publish());
+
+            const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+            const juce::File file { juce::File (dir).getChildFile (name) };
+            file.getParentDirectory().createDirectory();
+            file.deleteFile();
+
+            juce::FileOutputStream out { file };
+            REQUIRE (out.openedOk());
+
+            juce::PNGImageFormat png;
+            CHECK (png.writeImageToStream (picture, out));
+            MESSAGE ("wrote " << file.getFullPathName().toStdString());
+        }
+    }
+
+    //  Under the lock the list goes dead with the pages, as the strip of tabs did.
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (tabs->isEnabled());
+    CHECK_FALSE (list->isEnabled());
+}
+
+TEST_CASE ("show settings UI: Getting started names every other page under its section, in order, and goes to it")
 {
     /*  Author, 2026-09-30: "Should we add a 'Getting started' tab in the
         settings window explaining what people should do? And what each tab is
-        for..." - as the last tab, Audio staying the first. */
+        for..." - as the last page. Then 2026-10-15: "Getting started should
+        be reordered and the links should match the new layout". */
     Rig rig;
     client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
         [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
@@ -662,21 +810,28 @@ TEST_CASE ("show settings UI: Getting started names every other tab, in order, a
     REQUIRE (tabs != nullptr);
 
     const auto names = tabs->getTabNames();
-    CHECK (names[0] == "Audio");
     REQUIRE (names[names.size() - 1] == "Getting started");
-    CHECK (tabs->getCurrentTabIndex() == 0);    // the window still opens on Audio
 
     tabs->setCurrentTabIndex (names.size() - 1);
     auto* page = tabs->getCurrentContentComponent();
     REQUIRE (page != nullptr);
 
-    //  A button for every other tab, in the strip's own order.
-    std::vector<juce::String> listed;
+    /*  A button for every other page, in the list's own order, each under its
+        section's heading - the headings in capitals, as down the left; the
+        sentences beside the buttons are the only other words, and none of
+        them is in capitals. */
+    std::vector<juce::String> listed, buttons;
 
     const std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
     {
         if (auto* b = dynamic_cast<juce::Button*> (&at))
+        {
             listed.push_back (b->getButtonText());
+            buttons.push_back (b->getButtonText());
+        }
+        else if (auto* label = dynamic_cast<juce::Label*> (&at);
+                 label != nullptr && label->getText() == label->getText().toUpperCase())
+            listed.push_back (label->getText());
 
         for (auto* child : at.getChildren())
             walk (*child);
@@ -684,12 +839,19 @@ TEST_CASE ("show settings UI: Getting started names every other tab, in order, a
 
     walk (*page);
 
+    CHECK (listed == std::vector<juce::String> { "SHOW", "Playback", "Templates", "Redundancy",
+                                                 "AUDIO", "Audio interface", "Outputs", "Output patch", "Inputs",
+                                                 "Input patch", "Rack", "Plugins",
+                                                 "VIDEO", "Video",
+                                                 "CONTROLLERS", "Network", "MIDI", "Surfaces", "Timecode", "Serial" });
+
+    //  The buttons alone are every other page, in the window's own order.
     std::vector<juce::String> others;
 
     for (int at = 0; at < names.size() - 1; ++at)
         others.push_back (names[at]);
 
-    CHECK (listed == others);
+    CHECK (buttons == others);
 
     //  And pressing one goes there.
     auto* rack = button (*page, "Rack");
@@ -924,8 +1086,8 @@ TEST_CASE ("show settings UI: the Network tab declares devices and switches the 
         strip is where that shows: the first one is named after the hardware it
         configures rather than after "Interface", which the network tab could
         equally have claimed. */
-    CHECK (tabs->getTabNames()[0] == "Audio");
-    CHECK (tabs->getTabNames().indexOf ("Network") > tabs->getTabNames().indexOf ("Input patch"));
+    CHECK (tabs->getTabNames().contains ("Audio interface"));
+    CHECK (tabs->getTabNames().contains ("Network"));
 
     tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
 
@@ -1010,9 +1172,8 @@ TEST_CASE ("show settings UI: the MIDI tab declares ports and offers this machin
 
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
-    //  After Network and the Redundancy tab beside it (namespace draft §58, AGP).
-    CHECK (tabs->getTabNames().indexOf ("MIDI") == tabs->getTabNames().indexOf ("Redundancy") + 1);
-    CHECK (tabs->getTabNames().indexOf ("Redundancy") == tabs->getTabNames().indexOf ("Network") + 1);
+    //  After Network, among the controllers (2026-10-15).
+    CHECK (tabs->getTabNames().indexOf ("MIDI") == tabs->getTabNames().indexOf ("Network") + 1);
 
     tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("MIDI"));
 
@@ -1255,7 +1416,7 @@ TEST_CASE ("audio settings UI: held output tests clear on tab exit and window cl
         CHECK (signal->getSelectedId() == 3);
         CHECK (hold->getToggleState());
         if (close) panel.closeButtonPressed();
-        else tabs->setCurrentTabIndex (0);
+        else tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Audio interface"));
         CHECK (rig.sent.back().command == "audio.testStop");
         CHECK (signal->getSelectedId() == 1);
         CHECK_FALSE (hold->getToggleState());
@@ -1717,8 +1878,9 @@ TEST_CASE ("show settings UI: the Serial tab declares a port and says what this 
 
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
+    //  The last of the controllers (2026-10-15).
     const auto index = tabs->getTabNames().indexOf ("Serial");
-    REQUIRE (index == tabs->getTabNames().indexOf ("MIDI") + 1);
+    REQUIRE (index == tabs->getTabNames().indexOf ("Timecode") + 1);
     tabs->setCurrentTabIndex (index);
 
     auto* page = tabs->getTabContentComponent (index);
@@ -1775,11 +1937,11 @@ TEST_CASE ("show settings UI: the Timecode tab sits before Playback, and each of
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
 
-    //  After the templates, and just before Playback - which stays the last tab that sets anything.
+    //  Among the controllers, after Surfaces and before Serial (2026-10-15).
     const auto names = tabs->getTabNames();
     REQUIRE (names.contains ("Timecode"));
-    CHECK (names.indexOf ("Timecode") == names.indexOf ("Playback") - 1);
-    CHECK (names.indexOf ("Timecode") == names.indexOf ("Templates") + 1);
+    CHECK (names.indexOf ("Timecode") == names.indexOf ("Surfaces") + 1);
+    CHECK (names.indexOf ("Timecode") == names.indexOf ("Serial") - 1);
     tabs->setCurrentTabIndex (names.indexOf ("Timecode"));
 
     auto* page = tabs->getCurrentContentComponent();
@@ -2311,11 +2473,10 @@ TEST_CASE ("show settings UI: the Redundancy tab sits after Network, and its thr
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
 
-    //  The author's word for the tab (AGP), after Network and before MIDI.
+    //  The author's word for the tab (AGP), the last of the Show section's (2026-10-15).
     const auto names = tabs->getTabNames();
     REQUIRE (names.contains ("Redundancy"));
-    CHECK (names.indexOf ("Redundancy") == names.indexOf ("Network") + 1);
-    CHECK (names.indexOf ("MIDI") == names.indexOf ("Redundancy") + 1);
+    CHECK (names.indexOf ("Redundancy") == names.indexOf ("Templates") + 1);
 
     tabs->setCurrentTabIndex (names.indexOf ("Redundancy"));
     auto* page = tabs->getCurrentContentComponent();
@@ -2441,7 +2602,7 @@ TEST_CASE ("show settings UI: the Redundancy tab sits after Network, and its thr
     CHECK (rig.sent.back().command == "pair.takeOver");
     CHECK (rig.sent.back().args.empty());
 
-    //  And Getting started lists it after Network, with what it is for.
+    //  And Getting started lists it, with what it is for.
     tabs->setCurrentTabIndex (names.indexOf ("Getting started"));
     auto* started = tabs->getCurrentContentComponent();
     REQUIRE (started != nullptr);

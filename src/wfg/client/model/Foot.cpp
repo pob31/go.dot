@@ -563,8 +563,8 @@ namespace wfg::client::model
             if (out.cueKind != "media" && out.cueKind != "mic")
                 out.notice = "Only an audio or a mic cue has send levels.";
             else if (out.sends.empty())
-                out.notice = "This show declares no mix channels yet - Show, Audio settings, "
-                             "Outputs, add a mix channel.";
+                out.notice = "This show declares no mix channels yet: add one in Show settings, "
+                             "on the Outputs tab.";
         }
 
         /*  "6 CUES" IN THE HEAD, where one cue's name would stand (§30.11). */
