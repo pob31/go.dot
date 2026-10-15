@@ -121,8 +121,8 @@ namespace wfg::client::model
                                "stopWhenDone" } },
                 { "transport", { "target", "verb", "andGo", "range", "curve" } },
                 { "start",   { "target" } },
-                //  A process cue (namespace draft §51): its patch, then its MIDI.
-                { "process", { "patch", "midiIn", "midiOut" } },
+                //  A process cue (namespace draft §51): its MIDI; its patch is the canvas's (§65, AMY).
+                { "process", { "midiIn", "midiOut" } },
                 /*  A SCRIPT CUE (namespace draft §66): its language, then its
                     MIDI - its source is the editor's at the foot, not the
                     inspector's (AMO, the author: "No need to show the script
@@ -303,7 +303,7 @@ namespace wfg::client::model
             else if (name == "loops")      field.control = Control::loopCount;
             else if (name == "file")       field.control = Control::file;
             else if (name == "target")     field.control = Control::cueRef;
-            else if (name == "notes" || name == "patch" || name == "words") field.control = Control::longText;
+            else if (name == "notes" || name == "words") field.control = Control::longText;
             else                           field.control = Control::text;
 
             return field;
@@ -1834,6 +1834,14 @@ namespace wfg::client::model
             room, its colours and its lines. The Code opener is the door. */
         if (out.kind == "script")
             std::erase_if (decided, [] (const Field& field) { return field.name == "source"; });
+
+        /*  AND A PATCH IS ITS CANVAS'S (namespace draft §65, AMY; the author,
+            2026-10-15: "we can remove in the inspector the preview of the
+            content of the text of the patch. I think it's not really
+            helping"): read and edited at the foot or in Pd. The Patch opener
+            is the door. */
+        if (out.kind == "process")
+            std::erase_if (decided, [] (const Field& field) { return field.name == "patch"; });
 
         //  The four blocks, in the order somebody fills them in.
         auto kindRows = [&out]

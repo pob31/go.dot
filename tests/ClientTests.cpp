@@ -11790,7 +11790,7 @@ TEST_CASE ("client: a process cue has its own icon and accent, and its button ma
     CHECK (model::bornWith ("memo").empty());
 }
 
-TEST_CASE ("client: a process cue is inspected by its patch, as long text, then its two MIDI ports")
+TEST_CASE ("client: a process cue is inspected by its two MIDI ports, its patch left to the canvas (§65)")
 {
     Rig rig;
     rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
@@ -11804,21 +11804,14 @@ TEST_CASE ("client: a process cue is inspected by its patch, as long text, then 
     REQUIRE_FALSE (panel.empty());
     CHECK (panel.kind == "process");
 
+    //  The patch's text is not shown: the canvas at the foot is where it is read and edited.
     std::vector<std::string> order;
-    const model::Field* patch = nullptr;
     for (const auto& block : panel.blocks)
         for (const auto& field : block.fields)
-        {
             if (field.name == "patch" || field.name == "midiIn" || field.name == "midiOut")
                 order.push_back (field.name);
-            if (field.name == "patch")
-                patch = &field;
-        }
 
-    CHECK (order == std::vector<std::string> { "patch", "midiIn", "midiOut" });
-    REQUIRE (patch != nullptr);
-    CHECK (patch->control == model::Control::longText);
-    CHECK (patch->value == wfg::process::starterPatch());
+    CHECK (order == std::vector<std::string> { "midiIn", "midiOut" });
 }
 
 TEST_CASE ("client: a process run says what its patch is doing, beside its name")
