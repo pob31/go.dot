@@ -256,6 +256,7 @@ target_compile_definitions(wfg_deps INTERFACE
     JUCE_MODULE_AVAILABLE_juce_graphics=1
     JUCE_MODULE_AVAILABLE_juce_gui_basics=1
     JUCE_MODULE_AVAILABLE_juce_gui_extra=1
+    JUCE_MODULE_AVAILABLE_juce_javascript=1
     JUCE_MODULE_AVAILABLE_juce_opengl=1
     JUCE_MODULE_AVAILABLE_tracktion_core=1
     JUCE_MODULE_AVAILABLE_tracktion_engine=1
@@ -885,6 +886,10 @@ target_link_libraries(wfg_thirdparty
                                         # renderer's windows, drawn in a child process
                                         # (`wfg video-render`); the engine itself draws
                                         # nothing with it.
+        juce::juce_javascript           # A script cue's JavaScript (namespace draft §66,
+                                        # AMM): JUCE's JavascriptEngine, QuickJS inside,
+                                        # run on the script's own thread, never the
+                                        # audio thread.
         juce::juce_cryptography         # SHA256, for the event log's bundle hash. The log
                                         # header records a hash over show.xml, state.xml and
                                         # namespaces/*, so a replay can refuse a log that was

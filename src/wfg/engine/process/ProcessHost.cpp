@@ -15,7 +15,9 @@
 */
 
 #include <wfg/engine/process/ProcessHost.h>
+#include <wfg/engine/process/JsLanguage.h>
 #include <wfg/engine/process/PdInstance.h>
+#include <wfg/engine/process/ScriptInstance.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -75,6 +77,11 @@ namespace wfg::process
             pd.searchPaths = settings.searchPaths;
             return std::make_unique<PdInstance> (pd);
         }
+
+        //  A script cue's JavaScript (namespace draft §66, SC.3).
+        if (slot.language == javascriptLanguage)
+            return std::make_unique<ScriptInstance> (makeJavascript, ScriptInstance::Settings {});
+
         return nullptr;
     }
 

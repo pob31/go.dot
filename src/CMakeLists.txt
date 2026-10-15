@@ -197,6 +197,10 @@ add_library(wfg_engine STATIC
     wfg/engine/process/PatchThread.cpp
     wfg/engine/process/ProcessHost.h
     wfg/engine/process/ProcessHost.cpp
+    wfg/engine/process/ScriptInstance.h
+    wfg/engine/process/ScriptInstance.cpp
+    wfg/engine/process/JsLanguage.h
+    wfg/engine/process/JsLanguage.cpp
     wfg/engine/process/PatchEditor.h
     wfg/engine/process/PatchEditor.cpp
     wfg/engine/pair/Hold.h

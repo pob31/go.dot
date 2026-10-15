@@ -191,6 +191,20 @@ wrapper header the test suite uses.
 
 ---
 
+## QuickJS (in JUCE's juce_javascript)
+
+- **Website**: https://bellard.org/quickjs/, https://github.com/bellard/quickjs
+- **Version**: as JUCE's pin carries it, at `modules/juce_javascript/choc/javascript/choc_javascript_QuickJS.h`
+- **Licence**: MIT; wrapped by choc (ISC) and JUCE's `juce_javascript` module (AGPLv3 or commercial, as JUCE)
+- **Copyright**: (c) 2017-2021 Fabrice Bellard, (c) 2017-2021 Charlie Gordon
+
+What runs a script cue's JavaScript (namespace draft §66): JUCE's `JavascriptEngine`,
+one per running script, on the script's own thread, never the audio thread. Linked
+through JUCE's `juce_javascript` module (`cmake/WfgThirdParty.cmake`); nothing of it is
+modified. Full text: in the header named above, where QuickJS's licence is reproduced.
+
+---
+
 ## HarfBuzz
 
 - **Website**: https://harfbuzz.github.io

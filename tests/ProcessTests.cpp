@@ -1950,6 +1950,86 @@ TEST_CASE ("process host: a run in a language Go.dot does not run says so, and a
     CHECK_FALSE (host.anyStuck());
 }
 
+/*  SC.3: A STUCK SCRIPT HOLDS NOTHING (namespace draft §66, AMP, AMQ). A
+    script in an endless loop is stuck as a patch would be, and its run fails
+    process-stuck; but it is interrupted, closed and freed, and Pd's gate stays
+    open: the patch beside it runs on, and a patch asked for afterwards opens. */
+TEST_CASE ("process host: a stuck script is interrupted and freed, and patches open and run beside it")
+{
+    wfg::process::ProcessHost host (hostSettings ("sc3-stuck-script"));
+    std::vector<wfg::process::WantedProcess> wanted;
+    wanted.push_back ({ "RUNA", "CUEA", fiftyObjects() });
+    wanted.push_back ({ "RUNS", "CUES", "godot.hear('/loop', () => { for (;;) {} });\n", "javascript" });
+
+    bool loop = false;
+    const auto inputs = [&loop] (const std::string& run, const std::vector<std::string>&)
+    {
+        wfg::process::TickInputs in;
+        in.heard.push_back ({ "/in", { Atom::of (1.0) } });
+        if (loop && run == "RUNS")
+            in.heard.push_back ({ "/loop", {} });
+        return in;
+    };
+
+    const auto states = [&] (const std::vector<wfg::process::ProcessResult>& results, const std::string& run)
+    {
+        for (const auto& result : results)
+            if (result.run == run)
+                return result.state;
+        return std::string {};
+    };
+
+    constexpr auto budget = std::chrono::microseconds (20000);
+    constexpr int stuckAfter = 5;
+    const auto giveUp = std::chrono::steady_clock::now() + std::chrono::seconds (30);
+
+    //  Both open.
+    bool bothRunning = false;
+    while (! bothRunning && std::chrono::steady_clock::now() < giveUp)
+    {
+        const auto results = host.tick (wanted, inputs, budget, stuckAfter);
+        bothRunning = states (results, "RUNA") == "running" && states (results, "RUNS") == "running";
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+    REQUIRE (bothRunning);
+
+    //  The script stuck: failed process-stuck, and nothing of Pd held.
+    loop = true;
+    std::string failure;
+    while (failure.empty() && std::chrono::steady_clock::now() < giveUp)
+    {
+        for (const auto& result : host.tick (wanted, inputs, budget, stuckAfter))
+            if (result.run == "RUNS" && ! result.failure.empty())
+                failure = result.failure;
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+    CHECK (failure == "process-stuck");
+    CHECK_FALSE (host.anyStuck());
+
+    //  Its run ended, as the Runner ends a failed one: closed and freed.
+    loop = false;
+    wanted.pop_back();
+    while (host.instances() > 1 && std::chrono::steady_clock::now() < giveUp)
+    {
+        host.tick (wanted, inputs, budget, stuckAfter);
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+    CHECK (host.instances() == 1u);
+
+    //  A patch asked for now opens - no pd-held - and the first one runs on.
+    wanted.push_back ({ "RUNB", "CUEB", fiftyObjects() });
+    bool opened = false;
+    while (! opened && std::chrono::steady_clock::now() < giveUp)
+    {
+        const auto results = host.tick (wanted, inputs, budget, stuckAfter);
+        for (const auto& result : results)
+            CHECK (result.failure.empty());
+        opened = states (results, "RUNB") == "running" && states (results, "RUNA") == "running";
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+    CHECK (opened);
+}
+
 //==============================================================================
 /*  RD.1: A PATCH'S OWN [netsend] HELD WITH THE MACHINE (namespace draft §58,
     AGG). Pd's x_net.c is amended by the build to ask a hook before it sends;

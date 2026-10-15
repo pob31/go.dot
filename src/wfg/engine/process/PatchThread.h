@@ -54,6 +54,12 @@ namespace wfg::process
         ends the program, as one leaving a std::thread's function does. */
     bool startPatchThread (std::function<void()> work, std::size_t stackBytes = patchThreadStackBytes);
 
+    /*  THE CALLING THREAD'S NUMBERS IN C, the process's left as they are
+        (ACQ): Pd and QuickJS read and write numbers through the C library, and
+        under a French locale "2.5" would read as 2. Called first thing on a
+        patch's or a script's own thread; the rest of Go.dot keeps its locale. */
+    void numbersInCOnThisThread();
+
     /*  How large the calling thread's stack is, as the system set it aside;
         nought where the system cannot say. What the tests hold the patch
         threads to. */

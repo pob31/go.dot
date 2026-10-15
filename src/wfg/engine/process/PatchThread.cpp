@@ -20,6 +20,16 @@
 #include <utility>
 
 #if defined (_WIN32)
+ #include <locale.h>
+ #include <clocale>
+#else
+ #include <locale.h>
+ #if __has_include (<xlocale.h>)
+  #include <xlocale.h>
+ #endif
+#endif
+
+#if defined (_WIN32)
  #ifndef NOMINMAX
   #define NOMINMAX
  #endif
@@ -34,6 +44,19 @@
 
 namespace wfg::process
 {
+    void numbersInCOnThisThread()
+    {
+       #if defined (_WIN32)
+        _configthreadlocale (_ENABLE_PER_THREAD_LOCALE);
+        std::setlocale (LC_NUMERIC, "C");
+       #else
+        const auto base = ::duplocale (LC_GLOBAL_LOCALE);
+        const auto c = ::newlocale (LC_NUMERIC_MASK, "C", base);
+        if (c != static_cast<locale_t> (nullptr))
+            ::uselocale (c);
+       #endif
+    }
+
     namespace
     {
         /*  What the new thread is handed, and owns from its first line: the
