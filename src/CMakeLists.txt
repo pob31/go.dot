@@ -190,6 +190,7 @@ add_library(wfg_engine STATIC
     wfg/engine/surface/SpaceMouse.cpp
     wfg/engine/process/PatchText.h
     wfg/engine/process/PatchText.cpp
+    wfg/engine/process/ProcessInstance.h
     wfg/engine/process/PdInstance.h
     wfg/engine/process/PdInstance.cpp
     wfg/engine/process/PatchThread.h

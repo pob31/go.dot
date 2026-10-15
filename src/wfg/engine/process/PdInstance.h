@@ -56,6 +56,7 @@
 */
 
 #include <wfg/engine/process/PatchText.h>
+#include <wfg/engine/process/ProcessInstance.h>
 
 #include <chrono>
 #include <cstddef>
@@ -70,42 +71,7 @@ namespace wfg::process
     inline constexpr int pdSampleRate = 12800;
     inline constexpr int pdBlocksPerTick = 4;
 
-    /*  THE NAME MIDI TRAVELS UNDER, in and out (namespace draft §51, PC.3): an
-        Input or a Sent `to` this carries one MIDI message as its bytes, each a
-        number. In, it reaches Pd's [notein], [ctlin], [pgmin], [bendin],
-        [touchin], [polytouchin] and [midiin]; out, it is what [noteout],
-        [ctlout], [pgmout], [bendout], [touchout], [polytouchout] and
-        [midiout] sent. Starts with a character no address does. */
-    inline constexpr const char* midiName = "#midi";
-
-    /*  What a patch sent to a name Go.dot listens on: the name, Pd's selector -
-        "bang", "float", "symbol", "list", or a message's first word - and the
-        atoms after it. */
-    struct Sent
-    {
-        std::string to;
-        std::string selector;
-        Atoms atoms;
-    };
-
-    /*  Something for a patch to hear: delivered to the receive name `to` when
-        the patch has one, and to its catch-all `in` as the message
-        "<to> <atoms...>" when it has that. */
-    struct Input
-    {
-        std::string to;
-        Atoms atoms;
-    };
-
-    /*  What one job left behind. */
-    struct Outbox
-    {
-        std::vector<Sent> sent;
-        std::vector<std::string> printed;
-        std::size_t dropped = 0;    // sends past the cap, counted and not kept
-    };
-
-    class PdInstance
+    class PdInstance final : public ProcessInstance
     {
     public:
         struct Settings
@@ -130,7 +96,7 @@ namespace wfg::process
         /*  Frees the instance if its thread is idle - which takes Pd's shared
             lock, so the host destroys one only at a quiet point - and abandons
             it if not. */
-        ~PdInstance();
+        ~PdInstance() override;
 
         PdInstance (const PdInstance&) = delete;
         PdInstance& operator= (const PdInstance&) = delete;
@@ -139,36 +105,41 @@ namespace wfg::process
             when the last job has not finished, or the instance is not in a
             state the job needs. `make` first, then `open`, any number of ticks,
             `open` again for a new text, `close` last. */
-        bool make();
-        bool open (std::string patchText);
-        bool tick (std::vector<Input> inputs);
-        bool close();
+        bool make() override;
+        bool open (std::string patchText) override;
+        bool tick (std::vector<Input> inputs) override;
+        bool close() override;
 
         /*  Waits for the job at most `limit`; true when it has finished. */
-        bool finished (std::chrono::microseconds limit);
+        bool finished (std::chrono::microseconds limit) override;
 
         /*  The instance is let go without being freed when this object goes:
             for when another patch is stuck, and freeing - which waits for Pd's
             shared lock - would wait for ever and stop every patch (ACK). Its
             memory is kept until Go.dot ends. */
-        void leaveUnfreed();
+        void leaveUnfreed() override;
 
         /*  Whether a job is running. */
-        bool busy() const;
+        bool busy() const override;
 
         /*  What the jobs since the last call sent and printed. Call only when
             finished. */
-        Outbox takeOutbox();
+        Outbox takeOutbox() override;
 
         /*  What the last finished job found. */
-        bool made() const;
-        bool opened() const;
-        std::string problem() const;
+        bool made() const override;
+        bool opened() const override;
+        std::string problem() const override;
 
         /*  The names the open patch was bound to (PatchText's namesIn): what it
             sends that Go.dot answers, and what it hears. */
-        std::vector<std::string> sends() const;
-        std::vector<std::string> receives() const;
+        std::vector<std::string> sends() const override;
+        std::vector<std::string> receives() const override;
+
+        /*  Pd's instances share one lock (ACK), and a job stuck inside Pd
+            cannot be asked to end (ACJ). */
+        bool sharesLock() const noexcept override { return true; }
+        bool interrupt() override { return false; }
 
         struct Shared;
 

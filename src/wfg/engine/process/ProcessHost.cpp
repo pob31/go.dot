@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/process/ProcessHost.h>
+#include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -55,9 +56,26 @@ namespace wfg::process
     ProcessHost::~ProcessHost()
     {
         for (auto& slot : slots)
-            if (slot->instance != nullptr && (stuck || slot->busy))
+            if (slot->instance != nullptr && (slot->busy || (slot->sharesLock && stuck)))
                 slot->instance->leaveUnfreed();
         slots.clear();
+    }
+
+    bool ProcessHost::sharesLockFor (const std::string& language)
+    {
+        return language.empty();
+    }
+
+    std::unique_ptr<ProcessInstance> ProcessHost::makeInstance (const Slot& slot) const
+    {
+        if (slot.language.empty())
+        {
+            PdInstance::Settings pd;
+            pd.patchFile = (std::filesystem::path (settings.cacheFolder) / (slot.cue + ".pd")).string();
+            pd.searchPaths = settings.searchPaths;
+            return std::make_unique<PdInstance> (pd);
+        }
+        return nullptr;
     }
 
     void ProcessHost::remember (std::vector<Input>& pending, Input input)
@@ -122,15 +140,29 @@ namespace wfg::process
     {
         const auto deadline = Clock::now() + budget;
 
-        //  WHAT SHOULD BE RUNNING, against what is.
+        //  WHAT SHOULD BE RUNNING, against what is: a run no longer wanted, or
+        //  wanted in another language, is closed - and made again in the new one.
+        for (auto& slot : slots)
+        {
+            if (slot->phase == Phase::closing)
+                continue;
+            const auto want = std::find_if (wanted.begin(), wanted.end(), [&] (const auto& w) { return w.run == slot->run; });
+            if (want == wanted.end() || want->language != slot->language)
+                slot->phase = Phase::closing;
+        }
         for (const auto& want : wanted)
         {
-            auto found = std::find_if (slots.begin(), slots.end(), [&] (const auto& s) { return s->run == want.run; });
+            auto found = std::find_if (slots.begin(), slots.end(), [&] (const auto& s)
+            {
+                return s->run == want.run && s->phase != Phase::closing;
+            });
             if (found == slots.end())
             {
                 auto slot = std::make_unique<Slot>();
                 slot->run = want.run;
                 slot->cue = want.cue;
+                slot->language = want.language;
+                slot->sharesLock = sharesLockFor (want.language);
                 slot->wanted = want.patch;
                 slot->result.run = want.run;
                 slots.push_back (std::move (slot));
@@ -139,12 +171,6 @@ namespace wfg::process
             {
                 (*found)->wanted = want.patch;
             }
-        }
-        for (auto& slot : slots)
-        {
-            const auto stillWanted = std::any_of (wanted.begin(), wanted.end(), [&] (const auto& w) { return w.run == slot->run; });
-            if (! stillWanted)
-                slot->phase = Phase::closing;
         }
 
         for (auto& slot : slots)
@@ -156,7 +182,8 @@ namespace wfg::process
         //  1. WHAT CAME BACK SINCE THE LAST TICK, and what is late again.
         for (auto& slot : slots)
         {
-            if (! slot->busy || slot->stuck)
+            //  A stuck patch never comes back; a stuck script, interrupted, does.
+            if (! slot->busy || (slot->stuck && slot->sharesLock))
                 continue;
 
             if (slot->instance->finished (std::chrono::microseconds (0)))
@@ -166,7 +193,7 @@ namespace wfg::process
                 if (wasStep)
                     stepped (*slot);
             }
-            else
+            else if (! slot->stuck)
             {
                 //  A step counts as a tick does: a patch whose [loadbang] never
                 //  ends holds Pd's shared lock as it opens, and is stuck too.
@@ -175,21 +202,30 @@ namespace wfg::process
                      && Clock::now() - slot->posted >= std::chrono::milliseconds (20) * stuckAfter)
                 {
                     slot->stuck = true;
-                    stuck = true;
                     slot->result.failure = "process-stuck";
+                    if (slot->sharesLock)
+                        stuck = true;
+                    else
+                        slot->instance->interrupt();
                 }
             }
         }
 
-        //  2. THE QUIET POINT: made, opened, opened again, closed.
-        const auto quiet = ! stuck && std::none_of (slots.begin(), slots.end(), [] (const auto& s) { return s->busy; });
+        //  2. THE QUIET POINT, for Pd: made, opened, opened again, closed. A
+        //  script, sharing no lock, steps whenever it is not mid-job.
+        const auto pdQuiet = ! stuck && std::none_of (slots.begin(), slots.end(), [] (const auto& s)
+        {
+            return s->sharesLock && s->busy;
+        });
 
         std::vector<Slot*> stepping;
 
-        if (quiet)
         {
             for (auto& slot : slots)
             {
+                if (slot->sharesLock ? ! pdQuiet : slot->busy)
+                    continue;
+
                 if (slot->phase == Phase::closing)
                 {
                     if (slot->instance != nullptr && slot->instance->made())
@@ -207,10 +243,13 @@ namespace wfg::process
 
                 if (slot->phase == Phase::needsMake)
                 {
-                    PdInstance::Settings pd;
-                    pd.patchFile = (std::filesystem::path (settings.cacheFolder) / (slot->cue + ".pd")).string();
-                    pd.searchPaths = settings.searchPaths;
-                    slot->instance = std::make_unique<PdInstance> (pd);
+                    slot->instance = makeInstance (*slot);
+                    if (slot->instance == nullptr)
+                    {
+                        slot->failed = true;
+                        slot->result.printed.push_back ("Go.dot does not run " + slot->language);
+                        continue;
+                    }
                     slot->instance->make();
                     slot->posted = Clock::now();
                     slot->busy = true;
@@ -238,13 +277,13 @@ namespace wfg::process
                 stepped (*slot);
             }
         }
-        else if (stuck)
+        if (stuck)
         {
-            //  NOTHING IS OPENED OR CLOSED AGAIN (ACK): a run that would need it
-            //  fails, and an instance no longer wanted is let go unfreed.
+            //  NOTHING IS OPENED OR CLOSED AGAIN IN PD (ACK): a patch's run that
+            //  would need it fails, and an instance no longer wanted is let go unfreed.
             for (auto& slot : slots)
             {
-                if (slot->stuck || slot->failed)
+                if (! slot->sharesLock || slot->stuck || slot->failed)
                     continue;
 
                 if (slot->phase == Phase::needsMake || slot->phase == Phase::needsOpen)
@@ -254,9 +293,13 @@ namespace wfg::process
             }
         }
 
-        //  A step still out - this tick's or an earlier one's - may be holding,
-        //  or waiting for, Pd's shared lock: a tick posted now would wait behind it.
-        const auto stepsOut = std::any_of (slots.begin(), slots.end(), [] (const auto& s) { return s->busy && ! s->ticking; });
+        //  A patch's step still out - this tick's or an earlier one's - may be
+        //  holding, or waiting for, Pd's shared lock: a patch's tick posted now
+        //  would wait behind it. A script's tick never would.
+        const auto stepsOut = std::any_of (slots.begin(), slots.end(), [] (const auto& s)
+        {
+            return s->sharesLock && s->busy && ! s->ticking;
+        });
 
         //  3. THE TICK, unless a step is still holding Pd's shared lock.
         std::vector<Slot*> ticking;
@@ -278,7 +321,7 @@ namespace wfg::process
                 remember (slot->pending, std::move (row));
             }
 
-            if (slot->busy || stepsOut)
+            if (slot->busy || (slot->sharesLock && stepsOut))
                 continue;
 
             //  What it is handed at a name it hears, for the ports readout.
@@ -343,7 +386,13 @@ namespace wfg::process
                 return false;
             if (slot->instance == nullptr)
                 return true;
-            if (stuck || slot->stuck)
+            if (slot->sharesLock && (stuck || slot->stuck))
+            {
+                slot->instance->leaveUnfreed();
+                return true;
+            }
+            //  A stuck script still ending its job: its own thread frees it.
+            if (! slot->sharesLock && slot->stuck && slot->busy)
             {
                 slot->instance->leaveUnfreed();
                 return true;

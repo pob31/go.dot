@@ -17,11 +17,13 @@
 #pragma once
 
 /*
-    EVERY RUNNING PATCH, ONCE A TICK (namespace draft 51, ACE, ACI-ACK).
+    EVERY RUNNING PATCH AND SCRIPT, ONCE A TICK (namespace draft 51, ACE,
+    ACI-ACK; §66 AMP, AMQ).
 
-    The Runner says which process runs should be running and with which text;
-    this makes it so, one Pd instance per run, and hands back what each patch
-    sent. It is the tick thread's, and one call a tick does all of it, never
+    The Runner says which process and script runs should be running, with which
+    text in which language; this makes it so, one instance per run - Pd's for a
+    patch, a script's for JavaScript or Lua (ProcessInstance.h) - and hands back
+    what each sent. It is the tick thread's, and one call a tick does all of it, never
     waiting longer than the budget in all:
 
       1. What finished since the last tick is collected - a patch that was late
@@ -42,15 +44,21 @@
     a second - which in a show are the same thing; a test's ticks take no time,
     and are judged by the clock as the show's are.
 
-    ONCE A PATCH IS STUCK NOTHING IS OPENED OR CLOSED AGAIN (ACK): waiting for
-    the shared lock would stop every patch. A run that would need it fails
-    with `pd-held`; one that ends has its instance let go unfreed.
+    ONCE A PATCH IS STUCK NOTHING IS OPENED OR CLOSED AGAIN IN PD (ACK): waiting
+    for the shared lock would stop every patch. A patch's run that would need it
+    fails with `pd-held`; one that ends has its instance let go unfreed.
+
+    ONLY PD SHARES A LOCK (AMP). The quiet point, and the gate a stuck patch
+    shuts, are Pd's instances' alone: a script is made, opened and closed
+    whenever it is not mid-job, whatever the patches are doing. A STUCK SCRIPT
+    IS INTERRUPTED (AMQ): its run fails `process-stuck` as a patch's does, and
+    its instance, once the interrupt has ended its job, is closed and freed.
 
     No clock of its own and no Engine: the Runner passes the deadline's length,
     the inputs and the threshold, and turns what comes back into records.
 */
 
-#include <wfg/engine/process/PdInstance.h>
+#include <wfg/engine/process/ProcessInstance.h>
 #include <wfg/engine/midi/MidiSink.h>
 
 #include <chrono>
@@ -64,12 +72,16 @@
 
 namespace wfg::process
 {
-    /*  A process run that should be running, and the patch it should run. */
+    /*  A process or script run that should be running, and what it should run:
+        a patch's text, or a script's source in `language` - `javascript` or
+        `lua`; empty is a patch (§66). A run whose language changes is closed
+        and opened again in the new one. */
     struct WantedProcess
     {
         std::string run;
         std::string cue;
         std::string patch;
+        std::string language {};
     };
 
     /*  What a patch may hear this tick: what devices reported since the last
@@ -163,7 +175,8 @@ namespace wfg::process
         std::vector<ProcessResult> tick (const std::vector<WantedProcess>& wanted, const InputsFor& inputsFor,
                                          std::chrono::microseconds budget, int stuckAfter);
 
-        /*  Whether a patch is stuck: nothing will be opened or closed again. */
+        /*  Whether a patch is stuck: nothing will be opened or closed again in
+            Pd. A stuck script does not count: it is interrupted. */
         bool anyStuck() const noexcept { return stuck; }
 
         /*  How many instances exist, made or being made. */
@@ -176,6 +189,8 @@ namespace wfg::process
         {
             std::string run;
             std::string cue;
+            std::string language;       // empty for a patch
+            bool sharesLock = true;     // Pd's (ProcessInstance::sharesLock)
             std::string text;           // what is open, or about to be
             std::string wanted;         // what the Runner asks for
             Phase phase = Phase::needsMake;
@@ -190,9 +205,14 @@ namespace wfg::process
             std::vector<Input> pending; // inputs waiting while it is late, newest per address
             std::map<std::string, Atoms> rowsHanded;
             std::map<std::string, Atoms> portValues;   // the ports readout's
-            std::unique_ptr<PdInstance> instance;
+            std::unique_ptr<ProcessInstance> instance;
             ProcessResult result;       // what this tick has gathered
         };
+
+        /*  The instance a slot's language is run by; null for a language
+            Go.dot does not run. */
+        std::unique_ptr<ProcessInstance> makeInstance (const Slot& slot) const;
+        static bool sharesLockFor (const std::string& language);
 
         void collect (Slot& slot);
         void stepped (Slot& slot);

@@ -1912,6 +1912,44 @@ TEST_CASE ("M58: ten patches of fifty objects at once, each on its own thread, a
     CHECK_FALSE (host.anyStuck());
 }
 
+/*  SC.1: THE HOST DRIVES AN INTERFACE (namespace draft §66, AMP). A run in a
+    language the host does not run is said, and fails nothing else: the patch
+    beside it opens and answers as ever. */
+TEST_CASE ("process host: a run in a language Go.dot does not run says so, and a patch beside it runs")
+{
+    wfg::process::ProcessHost host (hostSettings ("sc1-language"));
+    std::vector<wfg::process::WantedProcess> wanted;
+    wanted.push_back ({ "RUNA", "CUEA", fiftyObjects() });
+    wanted.push_back ({ "RUNB", "CUEB", "whatever", "cobol" });
+
+    const auto inputs = [] (const std::string&, const std::vector<std::string>&)
+    {
+        wfg::process::TickInputs in;
+        in.heard.push_back ({ "/in", { Atom::of (1.0) } });
+        return in;
+    };
+
+    std::string said;
+    bool patchRunning = false;
+    const auto giveUp = std::chrono::steady_clock::now() + std::chrono::seconds (30);
+    while (! (patchRunning && ! said.empty()) && std::chrono::steady_clock::now() < giveUp)
+    {
+        for (const auto& result : host.tick (wanted, inputs, std::chrono::microseconds (20000), 50))
+        {
+            if (result.run == "RUNA")
+                patchRunning = patchRunning || result.state == "running";
+            if (result.run == "RUNB")
+                for (const auto& line : result.printed)
+                    said = line;
+        }
+        std::this_thread::sleep_for (std::chrono::milliseconds (5));
+    }
+    CHECK (patchRunning);
+    CHECK (said == "Go.dot does not run cobol");
+    CHECK (host.instances() == 2u);
+    CHECK_FALSE (host.anyStuck());
+}
+
 //==============================================================================
 /*  RD.1: A PATCH'S OWN [netsend] HELD WITH THE MACHINE (namespace draft §58,
     AGG). Pd's x_net.c is amended by the build to ask a hook before it sends;
