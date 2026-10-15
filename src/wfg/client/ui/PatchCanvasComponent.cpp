@@ -31,6 +31,27 @@ namespace wfg::client::ui
         constexpr double margin = 12.0;     // the empty border around a patch, in canvas pixels
         constexpr double minScale = 0.25;
         constexpr double maxScale = 4.0;
+
+        /*  PD'S CELL, FILLED AS PD FILLS IT (pd-gui.tcl, fit_font_into_metrics):
+            the tallest fixed-width face whose character is no wider than the
+            font's width and whose line is no taller than its height. A box is
+            as wide as its characters at Pd's width, so a face sized by its
+            height alone - Consolas on Windows is one - ran its words past the
+            box's edge, a character in nine at size 12. */
+        juce::Font pdFace (const model::PdFont& font, double scale)
+        {
+            static const auto name = juce::Font::getDefaultMonospacedFontName();
+            static const auto widthPerHeight = []
+            {
+                const juce::Font probe (juce::FontOptions (name, 100.0f, juce::Font::plain));
+                return juce::GlyphArrangement::getStringWidth (probe, "0000000000") / 1000.0f;
+            }();
+
+            auto height = static_cast<float> (font.lineHeight * scale * 0.82);
+            if (widthPerHeight > 0.0f)
+                height = std::min (height, static_cast<float> (font.charWidth * scale) / widthPerHeight);
+            return juce::Font (juce::FontOptions (name, height, juce::Font::plain));
+        }
     }
 
     PatchCanvasComponent::PatchCanvasComponent (const model::Theme& themeToUse, Actions actionsToUse)
@@ -83,9 +104,7 @@ namespace wfg::client::ui
 
         typing = box;
         const auto at = onScreen (shown->x, shown->y);
-        editor.setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(),
-                                                       static_cast<float> (view.font.lineHeight * scale * 0.82),
-                                                       juce::Font::plain)));
+        editor.setFont (pdFace (view.font, scale));
         editor.setBounds (juce::Rectangle<float> (at.x, at.y,
                                                   std::max (static_cast<float> (shown->w * scale), 140.0f),
                                                   static_cast<float> ((view.font.lineHeight + 6.0) * scale))
@@ -347,8 +366,7 @@ namespace wfg::client::ui
 
         //  ITS WORDS, Pd's lines, in a fixed-width face the size Pd's are.
         g.setColour (ink);
-        const auto fontHeight = static_cast<float> (view.font.lineHeight * scale * 0.82);
-        g.setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), fontHeight, juce::Font::plain)));
+        g.setFont (pdFace (view.font, scale));
 
         if (box.lines.empty())
         {

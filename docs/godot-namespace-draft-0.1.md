@@ -24038,7 +24038,7 @@ made before it may hold one, and a patch cannot fire that cue by its id.
   patch is stuck after" (ticks). The browser console lists the kind and its rows.
 - **PC.5**: the canvas, round one (ACD). A process cue picked opens its patch at the foot - shut by
   hand, it stays shut for that cue - drawn where Pd draws it: Pd's own font table and margins
-  (`model/Patch`: a `[metro 100]` at size 12 is 67 by 21), message boxes with Pd's flag, atom boxes
+  (`model/Patch`: a `[metro 100]` at size 12 is 67 by 21), its words in the tallest fixed-width face whose character fits Pd's width and whose line fits Pd's height, as Pd's own window picks its face (sized by the height alone until 2026-10-15, Consolas ran a character in nine past the box), message boxes with Pd's flag, atom boxes
   with their corner cut, comments with no outline, GUI boxes their own size; inlets and outlets from a
   table of the vanilla objects a show uses, a subpatch's from its `[inlet]`s and `[outlet]`s, anything
   else from its lines. Panned by the wheel or Alt-drag, zoomed with Ctrl/Cmd on the wheel or a pinch;

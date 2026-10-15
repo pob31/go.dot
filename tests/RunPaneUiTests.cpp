@@ -6238,6 +6238,58 @@ TEST_CASE ("M59: the patch canvas draws two hundred boxes and their lines")
     CHECK (ms < 250.0);
 }
 
+TEST_CASE ("patch canvas: a box's words stay inside the box, at Pd's width (the author, 2026-10-15)")
+{
+    /*  "The content of Pd boxes in Go.dot go beyond the edge": the face was
+        sized by Pd's line height alone, and Consolas at that height is wider
+        than Pd's seven pixels a character, so [r /dev/in] ran a character
+        past its box. Each size Pd has, at the canvas's own scale and zoomed. */
+    wfg::client::ui::PatchCanvasComponent::Actions actions;
+    actions.set = [] (const std::string&, const std::string&) {};
+    actions.say = [] (const juce::String&) {};
+    wfg::client::ui::PatchCanvasComponent canvas (wfg::client::model::Theme {}, std::move (actions));
+    canvas.setSize (900, 400);
+
+    for (const auto size : { 10, 12, 16 })
+    {
+        wfg::client::model::PatchReading reading;
+        reading.cueId = "PRCS0001";
+        reading.text = "#N canvas 0 50 600 300 " + std::to_string (size) + ";\n#X obj 20 20 r /dev/in;\n";
+        canvas.show (reading);
+
+        const auto view = wfg::client::model::viewPatch (wfg::process::parsePatch (reading.text));
+        const auto* box = view.viewOf (0);
+        REQUIRE (box != nullptr);
+
+        juce::Image image (juce::Image::ARGB, canvas.getWidth(), canvas.getHeight(), true);
+        {
+            juce::Graphics g (image);
+            canvas.paintEntireComponent (g, false);
+        }
+
+        const auto panel = image.getPixelAt (canvas.getWidth() - 2, canvas.getHeight() - 2);
+        const auto topLeft = canvas.onScreen (box->x, box->y).toInt();
+        const auto bottomRight = canvas.onScreen (box->x + box->w, box->y + box->h).toInt();
+
+        //  Nothing past the box's right edge, along the box's height.
+        int outside = 0;
+        for (int x = bottomRight.x + 2; x < bottomRight.x + 40; ++x)
+            for (int y = topLeft.y + 2; y < bottomRight.y - 2; ++y)
+                if (image.getPixelAt (x, y) != panel)
+                    ++outside;
+        CHECK_MESSAGE (outside == 0, "size " << size << ": " << outside << " pixels drawn past the box");
+
+        //  And its words are still drawn inside it: the middle third, clear of the ports.
+        const auto third = (bottomRight.y - topLeft.y) / 3;
+        int inside = 0;
+        for (int x = topLeft.x + 3; x < bottomRight.x - 3; ++x)
+            for (int y = topLeft.y + third; y < bottomRight.y - third; ++y)
+                if (image.getPixelAt (x, y) != panel)
+                    ++inside;
+        CHECK_MESSAGE (inside > 20, "size " << size << ": the words are not drawn");
+    }
+}
+
 TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a new order, a join's crossfade, and the buttons (namespace draft §55)")
 {
     /*  A thirty-second sound in three pieces. A press on the verse picks it
