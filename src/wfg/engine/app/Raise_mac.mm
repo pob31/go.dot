@@ -41,4 +41,9 @@ namespace wfg::app
             return [application activateWithOptions: NSApplicationActivateAllWindows] == YES;
         }
     }
+
+    bool raiseWindowTitled (const std::string&)
+    {
+        return false;
+    }
 }

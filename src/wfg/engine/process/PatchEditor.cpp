@@ -16,11 +16,14 @@
 
 #include <wfg/engine/process/PatchEditor.h>
 
+#include <wfg/engine/app/Raise.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/PipedChild.h>
 
 #include <juce_core/juce_core.h>
+
+#include <algorithm>
 
 
 namespace wfg::process::editor
@@ -32,6 +35,12 @@ namespace wfg::process::editor
         juce::File fileOf (const std::string& path)
         {
             return juce::File (juce::String::fromUTF8 (path.c_str()));
+        }
+
+        /*  A path as Pd writes one, with forward slashes. */
+        std::string slashed (const juce::String& path)
+        {
+            return path.replaceCharacter ('\\', '/').toStdString();
         }
 
         /*  A program by its name, on the path. */
@@ -192,6 +201,22 @@ namespace wfg::process::editor
         return from.has_value() ? juce::URL (from->url).getDomain().toStdString() : std::string {};
     }
 
+    std::vector<std::string> commandFor (const Found& program, const std::string& file,
+                                         const std::vector<std::string>& searchPaths)
+    {
+        std::vector<std::string> command { program.program };
+
+        if (program.isPd())
+            for (const auto& folder : searchPaths)
+            {
+                command.push_back ("-path");
+                command.push_back (slashed (juce::String::fromUTF8 (folder.c_str())));
+            }
+
+        command.push_back (file);
+        return command;
+    }
+
     //==========================================================================
     Installer::~Installer()
     {
@@ -348,19 +373,41 @@ namespace wfg::process::editor
         return fileOf (files).getChildFile (juce::String (cueId) + ".pd").getFullPathName().toStdString();
     }
 
-    std::string Watch::open (const std::string& program, const std::string& cueId, const std::string& text)
+    std::string Watch::open (const Found& program, const std::string& cueId, const std::string& text)
     {
         const auto file = fileOf (fileFor (cueId));
         file.getParentDirectory().createDirectory();
         if (! file.replaceWithText (juce::String::fromUTF8 (text.c_str()), false, false, "\n"))
             return "the patch could not be written to " + file.getFullPathName().toStdString();
 
-        auto child = std::make_unique<plugin::ChildLaunch>();
-        if (! program.empty() && ! child->start ({ program, file.getFullPathName().toStdString() }))
-            return "the editor could not be started: " + program;
-        child->allowForeground();
+        const auto path = file.getFullPathName().toStdString();
+        const auto started = ! program.program.empty();
+        std::unique_ptr<plugin::ChildLaunch> child;
+
+        if (started && program.isPd())
+        {
+            //  The one Pd: asked, waited for while it starts, or started. Asked
+            //  to open the patch afresh when it changed here since Pd had it.
+            const auto before = std::find_if (out.begin(), out.end(), [&cueId] (const Out& one) { return one.cue == cueId; });
+            const std::string verb = before != out.end() && before->text != text ? "reopen" : "open";
+
+            if (pd.child != nullptr && pd.child->isRunning() && askPd (verb, path))
+                pd.child->allowForeground();
+            else if (pdStarting())
+                waiting.emplace_back (verb, path);
+            else if (! startPd (program, path))
+                return "the editor could not be started: " + program.program;
+        }
+        else if (started)
+        {
+            child = std::make_unique<plugin::ChildLaunch>();
+            if (! child->start (commandFor (program, path, searchPaths)))
+                return "the editor could not be started: " + program.program;
+            child->allowForeground();
+        }
 
         const auto modified = file.getLastModificationTime().toMilliseconds();
+        const auto raiseUntil = started ? juce::Time::currentTimeMillis() + 10000 : std::int64_t { 0 };
         for (auto& one : out)
             if (one.cue == cueId)
             {
@@ -368,11 +415,78 @@ namespace wfg::process::editor
                 one.modified = modified;
                 one.text = text;
                 one.child = std::move (child);
+                one.raiseUntil = raiseUntil;
                 return {};
             }
 
-        out.push_back ({ cueId, file.getFullPathName().toStdString(), modified, text, std::move (child) });
+        out.push_back ({ cueId, file.getFullPathName().toStdString(), modified, text, std::move (child), raiseUntil });
         return {};
+    }
+
+    void Watch::tend()
+    {
+        const auto now = juce::Time::currentTimeMillis();
+
+        if (! waiting.empty())
+        {
+            if (! pdStarting() && (pd.child == nullptr || ! pd.child->isRunning()))
+                waiting.clear();        // it went, or never listened: the next ask starts another
+            else
+                waiting.erase (std::remove_if (waiting.begin(), waiting.end(),
+                                               [this] (const auto& asked) { return askPd (asked.first, asked.second); }),
+                               waiting.end());
+        }
+
+        for (auto& one : out)
+        {
+            if (one.raiseUntil == 0)
+                continue;
+            if (now > one.raiseUntil || app::raiseWindowTitled (one.cue + ".pd"))
+                one.raiseUntil = 0;
+        }
+    }
+
+    bool Watch::startPd (const Found& program, const std::string& file)
+    {
+        //  A port nobody holds now, and a word nobody else knows.
+        juce::StreamingSocket probe;
+        if (! probe.createListener (0, "127.0.0.1"))
+            return false;
+        const auto port = probe.getBoundPort();
+        probe.close();
+
+        juce::Random random;
+        const auto word = juce::String::toHexString (random.nextInt64()) + juce::String::toHexString (random.nextInt64());
+
+        auto child = std::make_unique<plugin::ChildLaunch>();
+        if (! child->start (commandFor (program, file, searchPaths),
+                            { { "GODOT_PD_EDITOR", std::to_string (port) + " " + word.toStdString() } }))
+            return false;
+        child->allowForeground();
+
+        waiting.clear();
+        pd = { std::move (child), port, word.toStdString(), juce::Time::currentTimeMillis() };
+        return true;
+    }
+
+    bool Watch::askPd (const std::string& verb, const std::string& file) const
+    {
+        if (pd.port <= 0)
+            return false;
+
+        juce::StreamingSocket socket;
+        if (! socket.connect ("127.0.0.1", pd.port, 250))
+            return false;
+
+        const auto line = pd.word + " " + verb + " " + slashed (juce::String::fromUTF8 (file.c_str())) + "\n";
+        return socket.write (line.data(), static_cast<int> (line.size())) == static_cast<int> (line.size());
+    }
+
+    bool Watch::pdStarting() const
+    {
+        //  Pd's window takes a second or two to load the plugin that listens.
+        return pd.child != nullptr && pd.child->isRunning()
+                 && juce::Time::currentTimeMillis() - pd.started < 15000;
     }
 
     std::vector<std::pair<std::string, std::string>> Watch::saved()
@@ -428,7 +542,7 @@ namespace wfg::process::editor
                                 return Outcome::rejected ("pd-missing");
 
                             const auto text = document.getAttribute ("/godot/cue/" + cueId + "/patch").value_or (std::string {});
-                            if (const auto problem = watch->open (program->program, cueId, text); ! problem.empty())
+                            if (const auto problem = watch->open (*program, cueId, text); ! problem.empty())
                                 return Outcome::rejected ("pd-missing");
 
                             return Outcome::ok (args);

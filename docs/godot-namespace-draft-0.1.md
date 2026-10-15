@@ -23833,6 +23833,26 @@ Mine, proposed:
   the running patch under Go.dot; and the window's start blocks the patch's thread until it connects,
   for ever if it never does. A program of its own can do none of that. `process.edit` is refused
   under the lock, and `pd-missing` on a machine with neither.
+  HOW PD IS STARTED (the author, 2026-10-15: the patch window "empty", `[go.edge]` broken in Pd, "Pd
+  doesn't scale on hidpi screens", "Menus in Pd are still microscopic"). Pd is told to look where
+  Go.dot's own Pd looks - Go.dot's `pd` folder and the show's (`-path`) - so a ready-made patch is a box
+  in its window too. Pd's window loads the plugins it finds there, and `pd/godot-screen-plugin.tcl` fits
+  it to the screen Pd is on, as Tk measures it: from 125 per cent, the menus, dialogs and main window that
+  Pd sets on Windows at eleven pixels get eleven times the scale; from 150 per cent, each patch window is
+  zoomed the first time it shows, as Ctrl and + zoom it, and Pd's "Zoom New Windows" is set for what its
+  menus open (that setting alone misses the patch Pd was started on). A window zoomed out by hand stays
+  so; the window keeps the patch's size, as Pd's own zoom leaves it; the Mac, which scales Pd itself, is
+  left alone. On Windows the patch's window is brought in front once it shows (ten seconds at most): it
+  belongs to the program Pd starts for its windows, which Windows did not let take the front, so it
+  opened behind Go.dot's. ONE PD FOR EVERY PATCH (the author, the same day: "There are as many console
+  windows as opened patches and you can't tell which console belongs to which patch"): the first patch
+  starts Pd with `GODOT_PD_EDITOR` - a port and a word - in its environment, and
+  `pd/godot-open-plugin.tcl` listens there, on this machine only; each later patch is a line to it,
+  `<word> open <file>`, which brings the patch's window in front or opens it, or `<word> reopen <file>`
+  when the patch changed in Go.dot since Pd had it, which closes that window - Pd asking first if it
+  holds edits not saved - and opens the file again. A patch asked for while Pd starts waits for it
+  (fifteen seconds); a Pd that has gone, or does not answer after that, is replaced by a new one.
+  plugdata is handed the file alone.
 - **ACO** **Where it is found, and Pd downloaded on first use.** `WFG_PD` names one; else plugdata
   where it installs itself; else the Pd Go.dot downloaded for itself; else a Pd installed on the machine
   (`/godot/engine/patchEditor` says which, looked for every five seconds). Where there is none, the

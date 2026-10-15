@@ -1150,6 +1150,72 @@ TEST_CASE ("process editor: process.edit is refused on what is not a process cue
     rig.tickOnce();
 }
 
+TEST_CASE ("process editor: Pd is started looking where the show's patches look (the author, 2026-10-15)")
+{
+    using wfg::process::editor::commandFor;
+    using wfg::process::editor::Found;
+
+    const std::string file = "C:/cache/edit/PRCS0001.pd";
+    const std::vector<std::string> paths { "/ready/pd", "C:\\the show" };
+
+    //  plugdata is handed the file alone.
+    CHECK (commandFor (Found { "plugdata.exe", "plugdata" }, file, paths)
+           == std::vector<std::string> { "plugdata.exe", file });
+
+    //  Pd looks where Go.dot's own Pd looks, each folder with forward slashes as Pd writes them.
+    const auto pd = commandFor (Found { "pd.exe", "Pd 0.56-5" }, file, paths);
+    REQUIRE (pd.size() == 6u);
+    CHECK (pd[1] == "-path");
+    CHECK (pd[2] == "/ready/pd");
+    CHECK (pd[3] == "-path");
+    CHECK (pd[4].find ('\\') == std::string::npos);
+    CHECK (pd[5] == file);
+
+    //  The plugins Pd's window loads from there: one fits it to a scaled
+    //  screen, one listens for the next patch so every patch shares one Pd.
+    const auto read = [] (const char* name)
+    {
+        std::ifstream in (std::filesystem::path (std::string (WFG_REPO_ROOT)) / "pd" / name, std::ios::binary);
+        return std::string ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    };
+    const auto screen = read ("godot-screen-plugin.tcl");
+    CHECK (screen.find ("font configure menufont") != std::string::npos);
+    CHECK (screen.find ("zoom 2") != std::string::npos);
+    const auto open = read ("godot-open-plugin.tcl");
+    CHECK (open.find ("GODOT_PD_EDITOR") != std::string::npos);
+    CHECK (open.find ("-myaddr 127.0.0.1") != std::string::npos);
+}
+
+TEST_CASE ("process editor: a child is started with a name set in its environment beside what it inherits")
+{
+    /*  How the one Pd learns where Go.dot will ask it for the next patch: the
+        system's shell writes what it was given to a file. */
+    const auto folder = scratch ("pc7-environment");
+    std::filesystem::create_directories (folder);
+    const auto file = folder / "said.txt";
+    std::filesystem::remove (file);
+
+    //  The file is named by a second name, so no quoting stands between the
+    //  shell and it (the system's temporary folder, here and on CI, has no space).
+    wfg::plugin::ChildLaunch child;
+   #if JUCE_WINDOWS
+    const std::vector<std::string> command { "cmd.exe", "/c", "echo", "%GODOT_TEST_SAID%>%GODOT_TEST_FILE%" };
+   #else
+    const std::vector<std::string> command { "/bin/sh", "-c", "echo \"$GODOT_TEST_SAID\" > \"$GODOT_TEST_FILE\"" };
+   #endif
+    REQUIRE (child.start (command, { { "GODOT_TEST_SAID", "4711 word" }, { "GODOT_TEST_FILE", file.string() } }));
+
+    for (int wait = 0; wait < 200 && (child.isRunning() || ! std::filesystem::exists (file)); ++wait)
+        std::this_thread::sleep_for (std::chrono::milliseconds (25));
+
+    std::ifstream in (file, std::ios::binary);
+    std::string said;
+    std::getline (in, said);
+    if (! said.empty() && said.back() == '\r')
+        said.pop_back();
+    CHECK (said == "4711 word");
+}
+
 //==============================================================================
 /*  PC.9: GO.DOT'S READY-MADE PATCHES (namespace draft §51, ACU), each played
     through a patch that uses it - [r /in] and [r /right] into its inlets, a

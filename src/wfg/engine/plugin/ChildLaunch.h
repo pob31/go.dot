@@ -40,6 +40,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::plugin
@@ -55,6 +56,12 @@ namespace wfg::plugin
 
         /** The executable, then its words. False when the process could not be made. */
         bool start (const std::vector<std::string>& command);
+
+        /*  The same, with names set in the child's environment beside what it
+            inherits (a Pd told where Go.dot will ask it to open a patch). Off
+            Windows the command is run through /usr/bin/env, which sets them. */
+        bool start (const std::vector<std::string>& command,
+                    const std::vector<std::pair<std::string, std::string>>& environment);
 
         bool isRunning() const;
 

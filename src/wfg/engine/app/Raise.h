@@ -28,6 +28,8 @@
     STD ONLY, so that <windows.h> and AppKit stay in the .cpp and the .mm.
 */
 
+#include <string>
+
 namespace wfg::app
 {
     /*  This process, as the system numbers it. */
@@ -36,4 +38,11 @@ namespace wfg::app
     /*  True when the window came forward, or at least the system was asked
         and did not refuse. */
     bool raiseProcessWindows (long processId);
+
+    /*  A visible top-level window whose title begins with `title`, whoever's
+        it is, brought to the front: a process cue's patch in Pd's window,
+        which belongs to a program Pd started and not to the one Go.dot did
+        (namespace draft §51). True when one was found. Windows only; the Mac
+        and Linux answer false. */
+    bool raiseWindowTitled (const std::string& title);
 }

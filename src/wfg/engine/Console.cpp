@@ -4304,18 +4304,24 @@ namespace
             Go.dot's own `pd` folder - beside the binary, or in the bundle's
             Resources on macOS - and in the show's folder. Serve only: a replay
             runs no patch, and what a patch made Go.dot do is in the log. */
-        wfg::process::ProcessHost processes ([&path]
+        const auto patchSearchPaths = [&path]
         {
-            wfg::process::ProcessHost::Settings settings;
-            settings.cacheFolder = engineCacheFolder().getChildFile ("process").getFullPathName().toStdString();
-
+            std::vector<std::string> folders;
             const auto program = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
             for (const auto& folder : { program.getChildFile ("pd"),
                                         program.getSiblingFile ("Resources").getChildFile ("pd") })
                 if (folder.isDirectory())
-                    settings.searchPaths.push_back (folder.getFullPathName().toStdString());
+                    folders.push_back (folder.getFullPathName().toStdString());
 
-            settings.searchPaths.push_back (juce::File (path).getFullPathName().toStdString());
+            folders.push_back (juce::File (path).getFullPathName().toStdString());
+            return folders;
+        }();
+
+        wfg::process::ProcessHost processes ([&patchSearchPaths]
+        {
+            wfg::process::ProcessHost::Settings settings;
+            settings.cacheFolder = engineCacheFolder().getChildFile ("process").getFullPathName().toStdString();
+            settings.searchPaths = patchSearchPaths;
             return settings;
         }());
         runner.setProcesses (&processes);
@@ -5143,9 +5149,11 @@ namespace
 
         /*  A PROCESS CUE'S PATCH OPENED IN PLUGDATA OR PD (namespace draft §51,
             ACN, ACO): its file in the engine's cache, watched for saves, and Pd
-            downloaded on first use where neither is on the machine. */
+            downloaded on first use where neither is on the machine. Pd looks
+            where the show's own patches look. */
         wfg::process::editor::Watch patchEditing (engineCacheFolder().getChildFile ("process")
-                                                     .getChildFile ("edit").getFullPathName().toStdString());
+                                                     .getChildFile ("edit").getFullPathName().toStdString(),
+                                                  patchSearchPaths);
         wfg::process::editor::Installer pdInstaller;
         wfg::process::editor::registerCommands (engine.commands(), document, &patchEditing, &pdInstaller);
         std::string patchEditorFound;
@@ -6763,7 +6771,11 @@ namespace
 
                                  /*  A SAVE IN PLUGDATA OR PD, every half second:
                                      the cue's patch as it was saved, one `node.set`
-                                     from `pd` (namespace draft §51, ACN). */
+                                     from `pd` (namespace draft §51, ACN); a
+                                     window just opened brought in front, and a
+                                     patch handed to the one Pd once it listens. */
+                                 if (tickIndex % 25 == 0)
+                                     patchEditing.tend();
                                  if (tickIndex % 25 == 0)
                                      for (auto& [cue, text] : patchEditing.saved())
                                          engine.submit ("pd", "node.set",

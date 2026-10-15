@@ -19,6 +19,8 @@
 
 #include <juce_core/juce_core.h>
 
+#include <cwchar>
+
 namespace wfg::plugin
 {
     struct ChildLaunch::Impl
@@ -52,10 +54,49 @@ namespace wfg::plugin
 
     bool ChildLaunch::start (const std::vector<std::string>& command)
     {
+        return start (command, {});
+    }
+
+    bool ChildLaunch::start (const std::vector<std::string>& command,
+                             const std::vector<std::pair<std::string, std::string>>& environment)
+    {
         impl->close();
         impl->pid = 0;
 
        #if JUCE_WINDOWS
+        /*  THE CHILD'S ENVIRONMENT: this process's, a name given here taking
+            the place of the same name inherited; none given, it inherits. */
+        std::vector<wchar_t> block;
+
+        if (! environment.empty())
+        {
+            const auto given = [&environment] (const juce::String& entry)
+            {
+                for (const auto& [name, value] : environment)
+                    if (entry.startsWithIgnoreCase (juce::String::fromUTF8 (name.c_str()) + "="))
+                        return true;
+                return false;
+            };
+
+            const auto append = [&block] (const juce::String& entry)
+            {
+                block.insert (block.end(), entry.toWideCharPointer(), entry.toWideCharPointer() + entry.length());
+                block.push_back (L'\0');
+            };
+
+            if (auto* inherited = ::GetEnvironmentStringsW(); inherited != nullptr)
+            {
+                for (auto* at = inherited; *at != L'\0'; at += std::wcslen (at) + 1)
+                    if (const juce::String entry (at); ! given (entry))
+                        append (entry);
+                ::FreeEnvironmentStringsW (inherited);
+            }
+
+            for (const auto& [name, value] : environment)
+                append (juce::String::fromUTF8 (name.c_str()) + "=" + juce::String::fromUTF8 (value.c_str()));
+            block.push_back (L'\0');
+        }
+
         juce::String line;
 
         for (const auto& text : command)
@@ -80,7 +121,7 @@ namespace wfg::plugin
 
         if (! ::CreateProcessW (nullptr, mutableLine.data(), nullptr, nullptr, FALSE,
                                 CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
-                                nullptr, nullptr, &startup, &info))
+                                block.empty() ? nullptr : block.data(), nullptr, &startup, &info))
             return false;
 
         ::CloseHandle (info.hThread);
@@ -89,6 +130,13 @@ namespace wfg::plugin
         return true;
        #else
         juce::StringArray words;
+
+        if (! environment.empty())
+        {
+            words.add ("/usr/bin/env");
+            for (const auto& [name, value] : environment)
+                words.add (juce::String::fromUTF8 ((name + "=" + value).c_str()));
+        }
 
         for (const auto& text : command)
             words.add (juce::String::fromUTF8 (text.c_str()));

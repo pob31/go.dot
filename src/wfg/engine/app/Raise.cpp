@@ -104,8 +104,62 @@ namespace wfg::app
         SetForegroundWindow (search.best);
         return true;
     }
+
+    namespace
+    {
+        struct Titled
+        {
+            std::wstring title;
+            HWND found = nullptr;
+        };
+
+        BOOL CALLBACK titled (HWND window, LPARAM parameter)
+        {
+            auto& search = *reinterpret_cast<Titled*> (parameter);
+
+            if (! IsWindowVisible (window) || GetWindow (window, GW_OWNER) != nullptr)
+                return TRUE;
+
+            wchar_t text[512] {};
+            GetWindowTextW (window, text, 512);
+
+            if (std::wstring (text).rfind (search.title, 0) != 0)
+                return TRUE;
+
+            search.found = window;
+            return FALSE;
+        }
+    }
+
+    bool raiseWindowTitled (const std::string& title)
+    {
+        if (title.empty())
+            return false;
+
+        Titled search;
+        const auto length = MultiByteToWideChar (CP_UTF8, 0, title.data(), static_cast<int> (title.size()), nullptr, 0);
+        search.title.resize (static_cast<std::size_t> (length));
+        MultiByteToWideChar (CP_UTF8, 0, title.data(), static_cast<int> (title.size()), search.title.data(), length);
+        EnumWindows (titled, reinterpret_cast<LPARAM> (&search));
+
+        if (search.found == nullptr)
+            return false;
+
+        if (IsIconic (search.found))
+            ShowWindow (search.found, SW_RESTORE);
+
+        //  Allowed while Go.dot is the program in front, which it is when the
+        //  hand has just asked for the patch; refused, the button flashes.
+        SetForegroundWindow (search.found);
+        return true;
+    }
    #else
     bool raiseProcessWindows (long)
+    {
+        return false;
+    }
+
+    bool raiseWindowTitled (const std::string&)
     {
         return false;
     }
