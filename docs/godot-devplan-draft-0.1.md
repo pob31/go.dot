@@ -1723,9 +1723,11 @@ console's line under the transport, both tester guides; and the main told what i
 `pair/peer*` rows, its alarm and its Redundancy tab, with what mends it on the backup. The done-when
 items stand as drivers:
 redundancy_failover.py (the main killed, the backup sending, each GO heard once; two mains kept on
-one), pair_follow.py and pair_sample.py. **Owed to the bench:** M61 between the PC and the Mac over
-Dante (`tests/bench/m61_dante.py --pair`; the Mac's Dante Virtual Soundcard was not running), and
-the changeover on a console with one word clock and then none. **Owed to the author:** the words of
+one), pair_follow.py and pair_sample.py. **M61 over Dante, measured 2026-10-15** between the PC
+(RME Digiface Dante) and the Mac (Dante Virtual Soundcard): the follower within about a tenth of a
+millisecond of its leader's sample either way round; the changeover jump about 10 ms, the two
+interfaces' latencies, accepted (AGQ). **Owed to the bench:** the changeover on a console with one
+word clock and then none. **Owed to the author:** the words of
 RD.11 and RD.12 and those earlier stages left for him (§58.7, RD.11's and RD.12's lists). Deterministic
 replay as a tool is not part of it and is not built.
 

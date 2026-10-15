@@ -25504,6 +25504,22 @@ the map's own error said 170 to 223 µs; the drift within 5 ppm of nought a few 
 backup's click came Δ ticks - 20 or 40 ms - after the main's. The constant lean of the backup early is the loopback
 socket's asymmetry, which half the round trip bounds and no exchange can see.
 
+**M61 over Dante**, measured 2026-10-15 (RD.9b's bench, `python tests/bench/m61_dante.py --pair`, aac6998, Debug on both,
+48 kHz, 128-frame blocks, 20 GOs each way, clicks at -20 dBFS): the author's PC on its RME Digiface Dante (ASIO) and the
+Mac mini on Dante Virtual Soundcard (CoreAudio, DVS latency 10 ms), one Dante network, so one PTP clock under both. The
+PC's capture heard its own click back on inputs 5+6 and the Mac's on 3+4. PC main, Mac backup: linked, in step and mapped
+9.5 s after the backup started; the jump at a changeover (the Mac's onset less the PC's) +9.999 ms mean, +9.875 to
++10.125, sd 0.076 ms. Mac main, PC backup: mapped after 8.1 s; +10.165 ms, +10.146 to +10.208, sd 0.021 ms. Both
+orders: round trip 0.7 ms, Δ 2 and the leader's extra lead 2 ticks, the map's residual 321-376 µs, no launch late, no
+frame dropped. WHAT IT SAYS: a follower that placed its sounds late would add its error to the jump in one order and
+take it away in the other; the two orders differ by 0.17 ms, so the follower lands within about a tenth of a
+millisecond of its leader's sample. The rest - ten milliseconds - is the two interfaces (AGQ: accepted, not matched).
+The reported output latencies (PC 3.771 ms, Mac 12.667 ms) account for 8.9 ms of it; the 1.1-1.3 ms left is the same
+in both orders, so it is a latency of the Dante path that neither driver reports, not the engine's. `pair/drift` read
++9.9 ppm with the Mac following and +0.3 ppm with the PC following, both under 25 s of fit against a two-minute line -
+with one PTP clock under both it should read nought, and a reading of 10 ppm over 25 s is a quarter of a millisecond,
+the spread of that order. Files: `build/redundancy-bench/m61-20261015-061630.*`.
+
 ### 58.7 Built so far
 
 - **RD.0**, 2026-10-11: this section, PRD §3.15 and §6.9, the devplan's Phase 12.
@@ -26386,10 +26402,10 @@ socket's asymmetry, which half the round trip bounds and no exchange can see.
   µs with the Mac following and 341 µs with the PC following; `pair/drift` -14.5 ppm (the Mac follows) and +15.4 ppm
   (the PC follows) - the Mac's own crystal against the Dante network's clock, seen from both ends and agreeing; the PC
   as a mapped follower put its clicks on its leader's samples, off its own block grid (188874, 236875, ...), and heard
-  each back at +310 to the sample. OWED TO THE BENCH: M61 itself, the two machines over Dante - the Mac's Dante Virtual
-  Soundcard was not running (its engine stopped the evening before, not ours to start); `python
-  tests/bench/m61_dante.py --pair` when CoreAudio lists it. AGQ's expectation: a jump of the Mac's reported output
-  latency less the PC's 3.771 ms, plus the engine alignment. Tests under C and fr_FR, on Windows and on the Mac farm:
+  each back at +310 to the sample. M61 itself, the two machines over Dante, waited for the Mac's Dante Virtual
+  Soundcard (its engine stopped the evening before, not ours to start) and was measured the next morning, once the
+  author had it running: see "M61 over Dante" in 58.6 - a jump of about ten milliseconds either way round, the
+  follower within a tenth of a millisecond of its leader's sample. Tests under C and fr_FR, on Windows and on the Mac farm:
   InputCaptureTests (three cases: a capture taken up while the hosted pump runs begins on a block's first sample
   between the counts read either side of the moment it was handed over, every frame the input file's on that sample,
   the inputs asked for and no others; a ring a block deep with the writer held drops 20 blocks or more, counts them,

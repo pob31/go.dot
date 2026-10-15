@@ -153,7 +153,8 @@ has stood in front of the thing.
   Realign, or the main's show when the two differ - and the main is told, in
   the backup's words, when its backup is not in step or its show differs. Set
   on a Redundancy tab of Show settings, which belongs to the computer. Measured
-  on one machine; the two-computer measurement over Dante is owed to the bench.
+  between two computers over Dante: the backup starts each sound within about
+  a tenth of a millisecond of the main's sample.
 
 ### Not built yet
 
@@ -170,8 +171,7 @@ has stood in front of the thing.
 - **Integrations** — Choufleur, authoring a cue from a processor, device
   templates (built as presets, namespace draft §57: twenty-four shipped,
   unverified until a console answers) (Phase 11). The backup that takes over
-  from the main is built (above); two computers over Dante are still to be
-  measured.
+  from the main is built and measured over Dante (above).
 
 ---
 
