@@ -29737,6 +29737,7 @@ the show; a replay takes it and opens nothing.
 | **AMJ** | **Copy for a patch**: a cue in the list, and a port in Show settings > Serial, put on the clipboard the boxes a patch needs with their ids - a cue's `[; /godot/cmd/cue/fire <id>(`, a port's `[r /godot/serial/<id>/in]` and `[s /godot/serial/<id>/out]` - as Pd's own text, which pastes onto Go.dot's canvas or into Pd. The words "Copy for a patch" are mine, for review. | the author's (offered as "Copy for a patch") |
 | **AMK** | **A cue dragged onto the canvas** drops a message box that fires it, `[; /godot/cmd/cue/fire <id>(`, where it is let go. | the author's (offered as "Drag a cue onto the canvas") |
 | **AML** | **A patch fires a cue by its number too**: `cue/fire 3.1` from a patch that names no cue's id is `cue.fireNumber 3.1` (§56), by its rule - the focused list first, then the others, the number as written - so a renumbered cue is missed, as it would be by a surface. A number Pd carries as a float is written as Pd writes it, six figures in no locale's way (3.0999999 is `3.1`). No cue with that number: refused `unknown-id`, as `cue.fireNumber` refuses it. Only a patch: a datagram still names a cue by its id. | the author's (offered as "Fire by number"); the details mine |
+| **AMY** | **A process cue's inspector shows no patch text**: its MIDI in and MIDI out only. The patch is read and edited on the canvas at the foot, or in Pd; the long text of Pd's records was no help there. As a script cue's source is left to its editor (§66, AMO). | the author's ("we can remove in the inspector the preview of the content of the text of the patch. I think it's not really helping") |
 
 ### 65.3 Stages
 
@@ -29745,7 +29746,7 @@ the show; a replay takes it and opens nothing.
   zoomed window, a save keeping the patch's window.
 - **PN.3-PN.5**: AMJ - the cue list's and the Serial tab's right-click, words pasted on the canvas as
   boxes (`patchWordsPasted`); AMK - the canvas a drop target for the list's row drag; AML - in the
-  Runner's patch path. **PN.6**: the tester guides.
+  Runner's patch path. **PN.6**: the tester guides. **PN.7**: AMY.
 
 ## 66. Script cues: JavaScript, then Lua
 
