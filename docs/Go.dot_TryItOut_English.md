@@ -1,6 +1,6 @@
 # Go.dot — Try it out
 
-Oct 9, 2026 · @Pierre-Olivier Boulant
+Oct 15, 2026 · @Pierre-Olivier Boulant
 
 ## What Go.dot is
 
@@ -45,8 +45,6 @@ Useful checks from a terminal (on Windows, `wfg.exe` in the install folder; on m
 - `wfg validate <show>` — check a show folder and list every problem
 
 *Show settings* lists its tabs down the left in five sections: Show, Audio, Video, Controllers and Getting started. The last, **Getting started**, lists every other tab under its section, with one sentence on what each is for.
-
-**When something is missing.** A cue that needs something this computer lacks tonight - the audio interface, the screen an output was given, a MIDI port's device, a plugin, a video input or insert, a network device - or whose file is missing wears a warning triangle and a word (*no audio*, *no screen*, *no port*...) after its name; hover over it for why. The main window's title line shows a button for each *Show settings* tab with a problem, with how many: press it to open that tab. The missing-files button picks the next cue whose file is missing. *Show settings* marks the same tabs and their sections. The device menus (the audio interface, a display, a MIDI device, a serial port) look again when you open them, so a device plugged in a moment ago is in the list.
 
 ## Your first show in ten minutes
 
@@ -126,13 +124,13 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | OSC cues | Send to a desk, a processor or a video server, from a list of the device's addresses: several messages or bundles in one cue, and curves played on the cue's clock, recorded from the device's own reports or a SpaceMouse | *Add > osc*; *Show settings > Network* |
 | Cues written by WFS-DIY and S21_HiJack (new) | Store a snapshot in WFS-DIY or S21_HiJack and it lands in Go.dot as one cue after the standby; store it again and the same cue is updated. Each declares itself as a device, and its own addresses and snapshot names become menus, one per part of the address, under the cue's *target* | WFS-DIY: *Network* tab, protocol Go.dot, then *Write to Go.dot*; S21_HiJack: *Setup > Cueing system: Go.dot* |
 | Address and value menus (new) | On a device that describes itself, pick the address part by part and the value from its list | Cue inspector, under *target* |
-| Device presets (new) | Make a device from a preset for your desk or processor - Yamaha, DiGiCo, Allen & Heath, Behringer and Midas, SSL Live, ETC Eos, grandMA, Holophonix, L-ISA, d&b Soundscape, Spat Revolution, ADM-OSC, MIDI Show Control. Every protocol the device speaks is a preset of its own, the cue's menus follow it, and the message leaves on the device's own wire: OSC over UDP or TCP, Yamaha's RCP, a telnet line or MIDI. The device's rows say where it is (the Where cell: by datagram, over a connection, a serial port or a MIDI port) and how it is heard back. Built from the vendors' public documents and not yet checked against a console: tell us what your desk did | *Show settings > Network > PRESET* |
+| Device presets (new) | Make a device from a preset for your desk or processor - Yamaha, DiGiCo, Allen & Heath, Behringer and Midas, SSL Live, ETC Eos, grandMA, Holophonix, L-ISA, d&b Soundscape, Spat Revolution, ADM-OSC, MIDI Show Control. Every protocol the device speaks is a preset of its own, the cue's menus follow it, and the message leaves on the device's own wire: OSC over UDP or TCP, Yamaha's RCP, a telnet line or MIDI. The device's rows say where it is (the Where cell: by datagram, over a connection, a serial port or a MIDI port) and how it is heard back. | *Show settings > Network > PRESET* |
 | Doh! rollback | When a GO is taken back, send each device the command that undoes it | Cue inspector; *Network* tab |
 | MIDI cues | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
-| Timecode out (new) | MTC on a MIDI port, or SMPTE LTC on an audio output, from a cue. It starts at the label you give it (01:00:00:00 unless you say otherwise) and runs until it is stopped, or for a length. Put it in a group with a song and both start on the same sample; a second timecode cue takes the line over; Esc stops it on a frame boundary; Doh! pauses it and the next GO picks it up where it stopped; drag it in the running pane to jump. Pick the frame rate, the MIDI port and the output once for the show, and give LTC an output of its own: it carries nothing else. Not yet checked against a desk or a timecode reader: tell us what yours did | *Add > midi > MTC*, *Add > audio > LTC timecode*; *Show settings > Timecode* |
-| Timecode in (new) | Start sounds, pictures, timeline groups and automatic sequences when incoming timecode reaches their time. Pick the cues, choose *Add > group > Time group*, say what it *follows* (*LTC in*, *MTC in* or *the clock* of the computer) and give each member the time it *starts at*. GO arms the group and it stays armed until stopped, as a sampler bank does; in the Persistent section it stays armed all show, and the standby never moves when a member fires. A member started by LTC starts on the very sample the code reaches its time. Each member also says how it keeps up with the code, its *chase*: *free run* plays at its own speed once started; *jump* jumps back into step over a 10 ms crossfade when it is more than 10 ms out; *catch up, varispeed* and *catch up, timestretch* play up to 1 % faster or slower until back in step, the first bending the pitch and the second keeping it, and jump instead when more than a quarter of a second out. When the code stops, members keep playing; when it jumps, the chasing members are put where it says and the free runners are left alone. Go.dot keeps its own clock and measures the code against it, so the rest of the show keeps its own time whatever the code does. Pick the LTC input and the MIDI port the code comes in on, and how closely members chase, once for the show; the tab shows what is arriving. Not yet checked against a tape machine, a DAW or a desk sending timecode: tell us what yours did | *Add > group > Time group*; *Show settings > Timecode > Coming in* |
+| Timecode out (new) | MTC on a MIDI port, or SMPTE LTC on an audio output, from a cue. It starts at the label you give it (01:00:00:00 unless you say otherwise) and runs until it is stopped, or for a length. Put it in a group with a song and both start on the same sample; a second timecode cue takes the line over; Esc stops it on a frame boundary; Doh! pauses it and the next GO picks it up where it stopped; drag it in the running pane to jump. Pick the frame rate, the MIDI port and the output once for the show, and give LTC an output of its own: it carries nothing else. | *Add > midi > MTC*, *Add > audio > LTC timecode*; *Show settings > Timecode* |
+| Timecode in (new) | Start sounds, pictures, timeline groups and automatic sequences when incoming timecode reaches their time. Pick the cues, choose *Add > group > Time group*, say what it *follows* (*LTC in*, *MTC in* or *the clock* of the computer) and give each member the time it *starts at*. GO arms the group and it stays armed until stopped, as a sampler bank does; in the Persistent section it stays armed all show, and the standby never moves when a member fires. A member started by LTC starts on the very sample the code reaches its time. Each member also says how it keeps up with the code, its *chase*: *free run* plays at its own speed once started; *jump* jumps back into step over a 10 ms crossfade when it is more than 10 ms out; *catch up, varispeed* and *catch up, timestretch* play up to 1 % faster or slower until back in step, the first bending the pitch and the second keeping it, and jump instead when more than a quarter of a second out. When the code stops, members keep playing; when it jumps, the chasing members are put where it says and the free runners are left alone. Go.dot keeps its own clock and measures the code against it, so the rest of the show keeps its own time whatever the code does. Pick the LTC input and the MIDI port the code comes in on, and how closely members chase, once for the show; the tab shows what is arriving. | *Add > group > Time group*; *Show settings > Timecode > Coming in* |
 | Network monitor | See every message in and out | *Show > Network monitor…* |
-| Control surfaces | Faders, pads, dials and DCAs. Full support for the Asparion D700: faders, EQ and plugin pages on the rotaries, a master dial, standby on the arrows | *Show > Surfaces…* |
+| Control surfaces | Faders, pads, dials and DCAs, on a Mackie Control surface or a virtual panel on screen. Full support for the Asparion D700: faders, EQ and plugin pages on the rotaries, a master dial, standby on the arrows | *Show > Surfaces…* |
 | Web console | The same show in a browser, on any machine on the network | `http://<this machine>:5010/ui` |
 | Serial ports | Hear an Arduino's lines in a process cue and send lines back | Show settings > Serial |
 
@@ -157,7 +155,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 
 Pictures are drawn by a separate process that Go.dot watches, so a slow movie cannot hold up a sound cue.
 
-### Process cues: Pure Data inside (new, being finished)
+### Process cues: Pure Data inside (new)
 
 A **process cue** holds a Pure Data patch and runs it while the cue runs, at control rate, never in the audio path. It hears what arrives (device reports, OSC, MIDI, serial lines) and sends to devices, to MIDI and to Go.dot's own commands. Edit the patch on Go.dot's canvas at the foot of the window, where values move live and toggles, bangs, sliders and number boxes play, or open it in plugdata or Pure Data and each save comes back. Ready-made abstractions cover the usual chores: `go.avg`, `go.minmax`, `go.smooth`, `go.scale`, `go.deadband`, `go.change`, `go.edge`, `go.hold` and `go.ratelimit`, each with a help patch, plus an example show. *Add > process*.
 
@@ -170,7 +168,8 @@ A **process cue** holds a Pure Data patch and runs it while the cue runs, at con
 
 - **Undo history** for every edit (Ctrl+Shift+U), and continuous autosave.
 - **Lock** the show during performance (Ctrl+L): GO, Esc and Doh! still work, editing does not.
-- **Flags (new).** Something to fix? Press F on the picked cue, or Shift+F for the cue the last GO fired, even with the show locked. A flag stands before the cue's name until F takes it off. Flags are kept with the standby, so they reach the disk when the show is next saved: save before closing to keep them.
+- **What this computer lacks, shown (new).** A cue that needs something missing tonight - the audio interface, a screen, a MIDI device, a plugin, a file - wears a warning and a word after its name (*no audio*, *no screen*...); hover for why. A button on the title line opens the *Show settings* tab concerned.
+- **Flags (new).** Something to fix? Press F on the picked cue, or Shift+F for the cue the last GO fired, even with the show locked. A flag stands before the cue's name until F takes it off. Flags are kept when the show is saved.
 - **Show and performances.** A show is the piece; each night is a performance, a copy you can change without touching the original. *File > New performance…*. At the end, Go.dot lists what changed, cue by cue, so you can bring the good changes back into the show.
 - **Interface trouble.** If the audio interface disappears, the show pauses and resumes when it returns. If its sample rate changes, Go.dot follows it.
 - **Double-click a `.wfg`** to open the show (Windows installer, Linux .deb, macOS).
@@ -198,7 +197,7 @@ The same commands, with **Hand over** (the main lets the backup send), are under
 
 **When the main stops.** The backup stops hearing it and, after the link timeout, takes over: it sends to the devices from then on and says *The main was lost and this machine took over*. An Esc or a double Esc pressed on the backup in that moment is applied; anything else the main had not confirmed is dropped. Change your console or matrix over to the backup. When the main is started again, it finds the backup sending and follows it.
 
-**Timing.** While it follows, the backup sends nothing to devices (OSC, MIDI, serial); a command you give it is passed on to the main. The two start each sound on the same sample, as closely as their clocks can be matched; the *Redundancy* tab shows how closely, and how much faster one computer's clock runs (one word clock for both interfaces cures that). The two interfaces' own output delays are not matched: the tab shows each one and the jump a changeover will make. Checked with two computers on one Dante network (a PC with an RME Digiface Dante, a Mac with Dante Virtual Soundcard): both started each sound within about a tenth of a millisecond of the same sample, and a changeover jumped about 10 ms - the difference between the two interfaces' latencies. Tell us what yours did.
+**Timing.** While it follows, the backup sends nothing to devices (OSC, MIDI, serial); a command you give it is passed on to the main. The two start each sound on the same sample: on two computers over Dante, within about a tenth of a millisecond. The *Redundancy* tab shows how closely they keep together, and each interface's output delay.
 
 ## Coming next
 
@@ -224,9 +223,8 @@ Set a projector's delay once, and sound is held back to line up with the picture
 | **XOA / Tight-WFS** | The same, for ambisonic and WFS rendering |
 | **S21-HiJack** | Drive it as a sidecar for the DiGiCo S21, under its own branch of addresses. Writing its snapshots into Go.dot and being driven by Go.dot's GO already work (above) |
 | **Choufleur** (script following) | Show the script position and upcoming cues next to the cue list. Choufleur never fires anything, by design |
-| **ADM-OSC** processors | Built-in template for any object-based spatial processor that speaks ADM-OSC |
 | **Millumin** | The escape hatch for shows whose video outgrows Go.dot |
-| Any OSCQuery device | Discovered automatically, with its parameters listed and checked |
+| Any OSCQuery device | Found on the network by itself. Today you give its address, and a device that describes itself already offers its addresses as menus (above) |
 
 WFS-DIY, XOA/Tight-WFS, S21-HiJack and Choufleur come from the same author as Go.dot. They stay separate applications, possibly on other machines; Go.dot directs them over the network.
 
@@ -234,7 +232,7 @@ WFS-DIY, XOA/Tight-WFS, S21-HiJack and Choufleur come from the same author as Go
 
 - **Sound consoles**: snapshot recall, fader and channel moves, and Doh! rollback, as presets (above): DiGiCo, Yamaha, Allen & Heath, Behringer and Midas, SSL Live; any desk that speaks OSC or MIDI also works as an opaque device.
 - **Lighting consoles**: GO and cue recall over OSC, MIDI and MIDI Show Control - ETC Eos and grandMA presets (above) - and sACN as an input source.
-- **Control surfaces**: Mackie Control in v1; HUI, Icon, Behringer, PreSonus and Stream Deck after. A SpaceMouse already moves OSC cue curves.
+- **Control surfaces**: HUI, Icon, Behringer, PreSonus and Stream Deck, after Mackie Control and the D700 (already built, above). A SpaceMouse already moves OSC cue curves.
 - **Device templates**: a shared library of device descriptions, written by users, for the desks and processors that cannot describe themselves. The presets above are its first entries.
 
 ## Sending feedback
@@ -259,5 +257,6 @@ A test build exists so that people other than the author can say what they found
 - Interfaces, drivers and operating systems we have not tried.
 - Control surfaces and desks you would like Go.dot to talk to, with a link to their OSC or MIDI documentation.
 - QLab workspaces and Live sets you would be willing to share for testing the importers.
+- Your desk, processor or timecode source with Go.dot: the device presets and timecode in and out were built from the published documents, so tell us what yours did.
 
 **Code contributions** are welcome too. Build instructions and the repository's conventions are in the README, under *Building* and *Contributing*. Go.dot is GPL-3: what you contribute stays free.

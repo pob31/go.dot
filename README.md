@@ -76,9 +76,10 @@ has stood in front of the thing.
   engine, which the launchers open; and a web console the engine serves at
   `/ui`, plain HTML and ES modules with no build step, kept as the redundancy
   path. Both change the show only through the engine's named commands, as a
-  hardware surface does. The show settings hold audio, outputs, inputs and the
-  rack, network devices, MIDI, surfaces, serial ports, video and playback - and,
-  for the computer rather than the show, its part in a pair (below).
+  hardware surface does. The show settings, in five sections down the left,
+  hold audio, outputs, inputs and the rack, plugins, network devices, MIDI,
+  surfaces, timecode, serial ports, video, playback and cue templates - and, for
+  the computer rather than the show, its part in a pair (below).
 - **Sound.** Media cues play through Tracktion Engine, each with its own EQ and a
   chain of VST3, AU or LV2 plugins run in a separate process — a crashing plugin
   silences its cue, never the show, and never leaves it playing dry. A cue's
@@ -111,7 +112,12 @@ has stood in front of the thing.
 - **OSC.** Network devices with an address, ports and receive and send switches;
   OSC cues carrying several messages, sent as one bundle per device; curves
   played on the cue's clock and recorded from what a device reports or from a
-  SpaceMouse; a monitor of every message in and out.
+  SpaceMouse; a monitor of every message in and out. Devices made from presets
+  for sound and lighting consoles and spatial processors, each speaking its own
+  protocol - OSC, Yamaha's RCP, a telnet line or MIDI (namespace draft §57); and
+  WFS-DIY and S21_HiJack writing their snapshots into Go.dot as cues, offering
+  their own addresses as menus (§56,
+  [`docs/godot-authoring-protocol-0.1.md`](docs/godot-authoring-protocol-0.1.md)).
 - **Process cues.** A Pure Data patch inside a cue, running while the cue runs at
   control rate and never in the audio path. It hears device reports, OSC, MIDI
   and serial lines, and sends to devices, to MIDI and to Go.dot's own commands.
@@ -176,10 +182,10 @@ has stood in front of the thing.
 - **Group joins** — gap, gapless or crossfade between a sequence's members,
   decided (PRD §3.6) and waiting for the client's layout to settle.
 - **Video latency offsets and DeckLink output** (Phase 8b).
-- **Integrations** — Choufleur, authoring a cue from a processor, device
-  templates (built as presets, namespace draft §57: twenty-four shipped,
-  unverified until a console answers) (Phase 11). The backup that takes over
-  from the main is built and measured over Dante (above).
+- **Integrations** — Choufleur, OSCQuery devices found on the network by
+  themselves, and commanding WFS-DIY's and XOA's sources with claims per cue
+  (Phase 11). The device presets (twenty-four shipped) wait for a console to
+  answer them.
 
 ---
 
@@ -199,7 +205,7 @@ the code.
   reproduce a session record for record. A replay fixture per phase runs in CI.
 - **Every serialising test runs twice**, under `C` and under `fr_FR`, because a
   number written with a decimal comma is a premiere-night bug.
-- **Measurements, numbered M1 to M59 so far**, report rather than gate: where a
+- **Measurements, numbered M1 to M68 so far**, report rather than gate: where a
   launch lands to the sample, how closely a rendered fade follows its curve, what
   a D700 refresh costs a tick, how long a Pd patch takes. They sit in the
   namespace draft beside the design they tested, and several changed a decision.
@@ -244,6 +250,11 @@ and says afterwards what was built against what was drawn.
 | Process cues | Pure Data inside a cue, serial ports | §51 |
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
 | Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
+| Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |
+| Authoring | WFS-DIY and S21_HiJack write cues into Go.dot | §56, [authoring protocol](docs/godot-authoring-protocol-0.1.md) |
+| Device presets | Consoles, lighting desks and spatial processors, each protocol a preset | §57 |
+| Redundancy | A main and a backup playing one show, measured over Dante | §58 |
+| The operator's window | Show settings in sections; flags; what is missing, said where it is used | §39.14, §63, §64 |
 
 The documents, besides the PRD and the devplan:
 
