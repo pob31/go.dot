@@ -35,6 +35,9 @@ background, so the only question is what travels on it.
 
 ## 2. Connecting
 
+0. `GET http://<host>:<port>/?HOST_INFO`. A Go.dot whose `EXTENSIONS` has no `"STREAM": true` is older
+   than this contract: the app says so in words and asks again every few seconds, rather than
+   waiting for bundles that will never come.
 1. Open a WebSocket to `ws://<host>:<port>/` (the path is `/`; the page uses the same).
 2. Send the text frame `{"COMMAND": "STREAM", "DATA": "/godot"}`. From the next tick on, binary
    frames arrive (§3). Keep them; do not apply them yet.
@@ -105,8 +108,9 @@ argument: `{"MIN": …, "MAX": …}` or `{"VALS": […]}` for a closed set), `UN
   listens on both address families, so an IPv4 tablet reads `ws:::ffff:192.168.1.20:57069`). The app
   finds its own line by its `<id>`, which is how it learns its origin (§6).
 - **`remote.find <id> [seconds]`** - machine-local, as `videoOutput.identify` is - sends `FIND` to
-  every connection whose HELLO carried that `<id>`; 30 seconds when none is given. The app flashes its
-  screen, sounds an alarm and vibrates until the time is up or the screen is touched. Show settings >
+  every connection whose HELLO carried that `<id>`; 30 seconds when none is given, never more than 300.
+  `<seconds>` in the FIND frame is a whole number. The app flashes its screen, sounds an alarm and
+  vibrates until the time is up or the screen is touched. Show settings >
   Network lists the remotes with a button for it.
 
 ## 6. Writing
