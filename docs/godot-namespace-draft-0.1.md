@@ -25518,7 +25518,12 @@ The reported output latencies (PC 3.771 ms, Mac 12.667 ms) account for 8.9 ms of
 in both orders, so it is a latency of the Dante path that neither driver reports, not the engine's. `pair/drift` read
 +9.9 ppm with the Mac following and +0.3 ppm with the PC following, both under 25 s of fit against a two-minute line -
 with one PTP clock under both it should read nought, and a reading of 10 ppm over 25 s is a quarter of a millisecond,
-the spread of that order. Files: `build/redundancy-bench/m61-20261015-061630.*`.
+the spread of that order. Files: `build/redundancy-bench/m61-20261015-061630.*`. THE SAME WITH DVS AT 4 MS, at the
+author's suggestion, to show the jump is that latency: PC main +3.609 ms (+3.542 to +3.667, sd 0.035, Δ 1), Mac main
++3.839 ms (+3.708 to +3.896, sd 0.041, Δ 2), the orders 0.23 ms apart - the follower still within about a tenth of a
+millisecond. The jump fell 6.4 ms with the setting's 6; the Mac's reported output latency fell exactly 6 ms (12.667 to
+6.667), so CoreAudio reports DVS's latency; the part no driver reports went from 1.1-1.3 to 0.7-0.9 ms. `pair/drift`
++4.8 and -3.1 ppm. Files: `build/redundancy-bench/m61-20261015-062125.*`.
 
 ### 58.7 Built so far
 
