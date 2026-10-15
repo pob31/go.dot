@@ -99,7 +99,8 @@ namespace wfg::doc
                 at every press is a locate nobody asked for. */
             return element == "Cue" || element == "Group" || element == "Mic"
                 || element == "Fade" || element == "Transport" || element == "Osc" || element == "Midi"
-                || element == "Start" || element == "Process" || element == "Timecode";
+                || element == "Start" || element == "Process" || element == "Timecode"
+                || element == "Script";
         }
 
         bool samplerRefuses (const juce::ValueTree& parent, const juce::ValueTree& node,
@@ -464,6 +465,7 @@ namespace wfg::doc
         if (kind == "start") return "Start";
         if (kind == "process") return "Process";
         if (kind == "timecode") return "Timecode";
+        if (kind == "script") return "Script";
         return {};
     }
 
@@ -537,7 +539,8 @@ namespace wfg::doc
         if (element == "Cue" || element == "Group" || element == "Media"
               || element == "Mic" || element == "Video" || element == "Fade"
               || element == "Transport" || element == "Osc" || element == "Midi"
-              || element == "Start" || element == "Process" || element == "Timecode") return "cue";
+              || element == "Start" || element == "Process" || element == "Timecode"
+              || element == "Script") return "cue";
         if (element == "Lists")                     return "lists";
         /*  A header and a footer are addressed by nothing: they carry no
             attribute but their identifier, and the cues inside them are

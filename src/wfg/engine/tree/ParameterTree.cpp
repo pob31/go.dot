@@ -1334,6 +1334,7 @@ namespace wfg::tree
             const auto isStart = element == "Start";
             const auto isProcess = element == "Process";
             const auto isTimecode = element == "Timecode";
+            const auto isScript = element == "Script";
             const auto id = node[idProperty].toString().toStdString();
 
             if (id.empty())
@@ -1445,6 +1446,11 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("timecode"))
                     rows.push_back (row);
 
+            //  A script cue's language, source and ports (namespace draft §66).
+            if (isScript)
+                for (auto* row : doc::Schema::rowsForOwner ("script"))
+                    rows.push_back (row);
+
             for (const auto* row : rows)
             {
                 const doc::Attribute attribute { element, row };
@@ -1506,6 +1512,7 @@ namespace wfg::tree
                              : isStart ? "start"
                              : isProcess ? "process"
                              : isTimecode ? "timecode"
+                             : isScript ? "script"
                                          : "memo";
                         break;
 

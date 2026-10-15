@@ -93,6 +93,7 @@ add_executable(wfg_tests
     NetworkCueTests.cpp
     AuthoringTests.cpp
     ProcessTests.cpp
+    ScriptTests.cpp
     TimecodeTests.cpp
     LtcReader.h
     TimecodeRunTests.cpp

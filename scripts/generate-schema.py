@@ -99,6 +99,9 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 "mark",
                 # A process cue: its patch, as Pure Data-s text (namespace draft 51).
                 "process",
+                # A script cue (namespace draft 66, AMM): its language, its source
+                # and its MIDI ports.
+                "script",
                 # A timecode cue (namespace draft 59, AHD): MTC or LTC, where its
                 # code starts and how long it runs.
                 "timecode",

@@ -130,10 +130,10 @@ namespace wfg::doc
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
                 { "List",   true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                     "Midi", "Start", "Process", "Timecode", "Persistent" }, { "list" } },
+                                     "Midi", "Start", "Process", "Timecode", "Script", "Persistent" }, { "list" } },
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                     "Midi", "Start", "Process", "Timecode", "Header", "Footer", "Trigger" },
+                                     "Midi", "Start", "Process", "Timecode", "Script", "Header", "Footer", "Trigger" },
                                                                           { "cue", "group", "mark", "timed" } },
 
                 /*  A HEADER AND A FOOTER ARE ORDINARY CUE LISTS (§3.6), which
@@ -156,9 +156,9 @@ namespace wfg::doc
                     validate() would be paying a great deal for a smaller
                     diagnostic. */
                 { "Header", true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                     "Midi", "Start", "Process", "Timecode" }, {} },
+                                     "Midi", "Start", "Process", "Timecode", "Script" }, {} },
                 { "Footer", true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                     "Midi", "Start", "Process", "Timecode" }, {} },
+                                     "Midi", "Start", "Process", "Timecode", "Script" }, {} },
 
                 /*  THE PERSISTENT SECTION IS A LIST'S, not a group's (§3.29,
                     decision S): the thing that should be running at all times
@@ -168,7 +168,7 @@ namespace wfg::doc
                     put there is a validate WARNING that the section ignores
                     rather than a file that refuses to open. */
                 { "Persistent", true, { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
-                                        "Midi", "Start", "Process", "Timecode" }, {} },
+                                        "Midi", "Start", "Process", "Timecode", "Script" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
                     pattern a Group already set. `kind` stays derived from the
@@ -305,6 +305,10 @@ namespace wfg::doc
                 /*  A PROCESS CUE (namespace draft §51): a Pure Data patch that runs
                     while the cue runs, its text one row of its own. */
                 { "Process", true, { "Trigger" },                     { "cue", "process" } },
+                /*  A SCRIPT CUE (namespace draft §66, AMM): the same processor as a
+                    process cue, written as text in JavaScript or Lua - its
+                    language, its source and its MIDI ports, rows of its own. */
+                { "Script",  true, { "Trigger" },                     { "cue", "script" } },
 
                 /*  A TIMECODE CUE (namespace draft §59, AHD): MTC or LTC, one
                     element for both - the list that made it says which in

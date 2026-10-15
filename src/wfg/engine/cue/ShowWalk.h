@@ -81,7 +81,8 @@ namespace wfg::cue
         return element == "Cue"  || element == "Group" || element == "Media"
             || element == "Mic"  || element == "Video" || element == "Fade"
             || element == "Transport" || element == "Osc" || element == "Midi"
-            || element == "Start" || element == "Process" || element == "Timecode";
+            || element == "Start" || element == "Process" || element == "Timecode"
+            || element == "Script";
     }
 
     //======================================================================
@@ -122,6 +123,8 @@ namespace wfg::cue
                                        "mark",
                                        //  A process cue's patch (namespace draft §51).
                                        "process",
+                                       //  A script cue's language and source (namespace draft §66).
+                                       "script",
                                        //  A timecode cue's start and length (namespace draft §59).
                                        "timecode",
                                        //  A time group's member: its start and its chase (§60).

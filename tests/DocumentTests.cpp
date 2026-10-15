@@ -3266,7 +3266,7 @@ TEST_CASE ("time group: the rows - mode gains time, timeSource on a group, timed
             CHECK (chase->isEnumValue (word));
     }
 
-    for (const auto* element : { "Cue", "Mic", "Fade", "Transport", "Osc", "Midi", "Start", "Process", "Timecode" })
+    for (const auto* element : { "Cue", "Mic", "Fade", "Transport", "Osc", "Midi", "Start", "Process", "Timecode", "Script" })
     {
         INFO ("element " << element);
         CHECK (schema.attribute (element, "chase") == nullptr);
@@ -3346,7 +3346,7 @@ TEST_CASE ("time group: holds sounds, pictures, timelines and automatic sequence
         { "group", { { "mode", "sampler" } } },
         { "group", { { "mode", "time" } } },
         { "timecode", {} }, { "memo", {} }, { "fade", {} }, { "transport", {} }, { "osc", {} },
-        { "midi", {} }, { "start", {} }, { "process", {} }, { "mic", {} } };
+        { "midi", {} }, { "start", {} }, { "process", {} }, { "script", {} }, { "mic", {} } };
 
     for (const auto& [kind, born] : refused)
     {

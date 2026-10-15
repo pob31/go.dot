@@ -38,7 +38,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_pair_state[] = { "alone", "following", "leading", "bothSending", "waiting" };
     inline constexpr std::string_view enum_pair_peerInStep[] = { "unknown", "yes", "no" };
     inline constexpr std::string_view enum_pair_peerShowMatch[] = { "unknown", "yes", "no" };
-    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode" };
+    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode", "script" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
@@ -60,11 +60,12 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
     inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
     inline constexpr std::string_view enum_midi_doh[] = { "device", "takeBack", "leave" };
+    inline constexpr std::string_view enum_script_language[] = { "javascript", "lua" };
     inline constexpr std::string_view enum_timecode_format[] = { "mtc", "ltc" };
     inline constexpr std::string_view enum_port_doh[] = { "takeBack", "leave" };
     inline constexpr std::string_view enum_serial_framing[] = { "lines", "slip" };
     inline constexpr std::string_view enum_serial_state[] = { "closed", "opening", "open", "retrying" };
-    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode" };
+    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode", "script" };
     inline constexpr std::string_view enum_run_phase[] = { "entering", "preparing", "prepared", "header", "members", "footer" };
     inline constexpr std::string_view enum_run_state[] = { "preparing", "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
     inline constexpr std::string_view enum_run_warning[] = { "no-channel", "revoked", "not-sent", "left-to-operator", "sought" };
@@ -915,7 +916,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "memo",
           false, 0.0, false, 0.0,
-          enum_cue_kind, 12,
+          enum_cue_kind, 13,
           "", 50.0, false, "park",
           "",
           "What kind of cue this is, derived from the element rather than stored: a Group is a group and a Media is media. Deriving it is what stops a client turning one kind into another by writing a word, and what lets the grammar refuse a file attribute on a cue that plays nothing." },
@@ -2319,6 +2320,38 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "port",
           "The identifier of the declared <Port> this process cue-s patch sends MIDI on (namespace draft 51, PC.3): what its [noteout], [ctlout], [pgmout], [bendout], [touchout], [polytouchout] and [midiout] send goes out there as a cue-s message does - not at all when the port-s tx is off, and dropped by a double Esc while it is still queued. Empty for none." },
+        { "script", "language",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "javascript",
+          false, 0.0, false, 0.0,
+          enum_script_language, 2,
+          "", 50.0, false, "park",
+          "",
+          "What this script cue-s source is written in (namespace draft 66, AMM): javascript - the default - or lua. Changing it while the cue runs closes the script and opens it again, from its beginning, in the new language." },
+        { "script", "source",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "The script this cue runs, as text in its language (namespace draft 66). While the cue runs its script runs on a thread of its own, once a tick: it hears what devices report at the addresses it names (godot.hear('/wfs/source/1/x', ...)) and the rows of the show it names, and what it sends to an address (godot.send) is written to that device, or done by Go.dot - godot.fire with a cue-s id or number fires it. Edited in the editor at the foot of the window; a change opens the running script again, from its beginning. Loading a show never runs it. Empty is a script that does nothing." },
+        { "script", "midiIn",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "port",
+          "The identifier of the declared <Port> whose input this script cue-s script hears with godot.midi.hear (namespace draft 66), after a control surface on that port has taken what is its own, and as long as the port-s rx is not off - as a process cue-s midiIn. Empty for none." },
+        { "script", "midiOut",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "port",
+          "The identifier of the declared <Port> this script cue-s godot.midi.send goes out on (namespace draft 66), as a process cue-s midiOut: not at all when the port-s tx is off, and dropped by a double Esc while it is still queued. Empty for none." },
         { "timecode", "format",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "mtc",
@@ -2555,7 +2588,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
           false, 0.0, false, 0.0,
-          enum_run_kind, 12,
+          enum_run_kind, 13,
           "", 50.0, false, "park",
           "",
           "The kind of the cue this run instantiates, copied at launch so a client reading a run does not have to go and look the cue up - and so the answer survives the cue being edited underneath it." },
@@ -2846,7 +2879,7 @@ namespace wfg::doc::generated
           enum_run_processState, 4,
           "", 50.0, false, "park",
           "",
-          "Where a process cue-s patch is (namespace draft 51): starting until Pure Data has opened it - which waits for a moment when no patch is mid-tick - running, late when its last tick has not finished inside the budget, and stuck when it has been late for processStuckAfter ticks in a row. Empty for every other kind." },
+          "Where a process cue-s patch is (namespace draft 51), or a script cue-s script (namespace draft 66): starting until Pure Data - or the script-s language - has opened it - which waits for a moment when no patch is mid-tick - running, late when its last tick has not finished inside the budget, and stuck when it has been late for processStuckAfter ticks in a row. Empty for every other kind." },
         { "run", "processLate",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",
@@ -2854,7 +2887,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "How many ticks this process cue-s patch has been late for since it started (namespace draft 51, ACJ): a tick whose work had not finished when the budget ran out. A patch late now and then is a heavy tick; one late every tick is too much for the budget." },
+          "How many ticks this process cue-s patch, or script cue-s script, has been late for since it started (namespace draft 51, ACJ): a tick whose work had not finished when the budget ran out. A patch late now and then is a heavy tick; one late every tick is too much for the budget." },
         { "run", "processDropped",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",
@@ -2862,7 +2895,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "How many of the things this process cue-s patch sent were dropped since it started, because one tick sent more than 256 (namespace draft 51, ACI). Nought for any patch that is not flooding." },
+          "How many of the things this process cue-s patch, or script cue-s script, sent were dropped since it started, because one tick sent more than 256 (namespace draft 51, ACI). Nought for any patch that is not flooding." },
         { "run", "said",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
@@ -2870,7 +2903,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "The last line this process cue-s patch printed - its [print], or Pure Data-s own complaint about a box it could not make (namespace draft 51, PC.3). Empty until it says something." },
+          "The last line this process cue-s patch printed - its [print], or Pure Data-s own complaint about a box it could not make (namespace draft 51, PC.3) - or a script cue-s script printed, or its language-s complaint about a line, with the line-s number (namespace draft 66). Empty until it says something." },
         { "run", "ports",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
@@ -2878,7 +2911,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "The last value on each name this process cue-s patch sends to or hears that Go.dot answers, one per line as the name then the value - what the canvas draws beside a line (namespace draft 51, PC.3, PC.8). At most 64 lines." },
+          "The last value on each name this process cue-s patch, or script cue-s script, sends to or hears that Go.dot answers, one per line as the name then the value - what the canvas draws beside a line (namespace draft 51, PC.3, PC.8). At most 64 lines." },
         { "run", "timecode",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",

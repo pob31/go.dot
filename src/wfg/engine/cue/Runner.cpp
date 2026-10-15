@@ -119,6 +119,7 @@ namespace wfg::cue
             if (element == "Start") return "start";
             if (element == "Process") return "process";
             if (element == "Timecode") return "timecode";
+            if (element == "Script") return "script";
 
             return {};
         }
