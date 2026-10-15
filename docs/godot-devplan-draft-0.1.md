@@ -456,6 +456,34 @@ while the desktop shows the cue list.
 **Needs from the author:** modifier vocabulary decisions as they arise (PRD
 §6.7) — designed once across desktop, tablet and hardware.
 
+### The Android remote (2026-10-15)
+
+The author asked for a native Android app beside the page: a background link
+that keeps the whole state, so the tablet is live the moment it is looked at;
+current and next cue, GO, Doh! and Panic always on screen; tabs for the cue list
+(levels first, no structure edits), the running cues, a stand-in surface and the
+video mapping; and WFS-DIY's *find my device*. Its own repository,
+`github.com/pob31/go.dot-remote` (ANL); the contract is
+`docs/godot-remote-protocol-0.1.md`; decisions ANL-ANW in namespace draft §68.
+
+| Stage | Where | What |
+|---|---|---|
+| RM.0 | Go.dot | §68, the contract, PRD §3.17, this entry, the README. Docs only |
+| RM.1 | Go.dot | `STREAM`: a bundle a tick of what changed under a prefix; a stalled connection let go; `blackbox.remote` |
+| RM.2 | Go.dot | `HELLO`, `network/remotes`, `remote.find`, the remotes in Show settings > Network |
+| RM.3 | Go.dot | Only if M74 asks: a lighter snapshot |
+| A.0-A.2 | app | Skeleton, theme, words in two languages; the OSC codec; the link service and the copy of the state |
+| A.3-A.4 | app | Machines (typed address, main and backup, find me); the transport header |
+| A.5-A.8 | app | Running cues; the cue list and inspector; the surface; the mapping |
+| A.9-A.11 | app | Waveforms and show folders; guides and a release; M74 on the author's tablet |
+
+**Done when:** the author runs a show's GOs, kills and levels from the tablet in
+the house, swaps to WFS-DIY's remote and back without waiting, and aligns a
+zone at the wall.
+
+**Needs from the author:** a review of the app's own words (§68.2, ANW); a show
+of their own for M74.
+
 ---
 
 ## Phase 8 — Video · L

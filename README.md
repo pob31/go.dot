@@ -191,7 +191,10 @@ has stood in front of the thing.
   touch, latch and write modes (PRD §3.10). Today a surface reaches parameters
   through Go.dot's own pages.
 - **The tablet** (Phase 7) — the console runs in a tablet's browser, but as a
-  mouse-and-keyboard page, without the touch gestures PRD §3.17 describes.
+  mouse-and-keyboard page, without the touch gestures PRD §3.17 describes. A
+  native Android remote that stays live in the background is being built in its
+  own repository, [go.dot-remote](https://github.com/pob31/go.dot-remote)
+  (namespace draft §68).
 - **Group joins** — gap, gapless or crossfade between a sequence's members,
   decided (PRD §3.6) and waiting for the client's layout to settle.
 - **Video latency offsets and DeckLink output** (Phase 8b).
@@ -852,7 +855,10 @@ Two directories that do **not** exist here, and will not:
   toolchain at all, served from disk rather than compiled in, which is what lets
   the page be edited and refreshed while a show is running — the only loop that
   suits work decided by looking at it. A web toolchain inside a CMake tree still
-  helps nobody.
+  helps nobody. The native Android companion PRD §3.17 allows on top of the page
+  keeps its Gradle toolchain in a repository of its own,
+  [go.dot-remote](https://github.com/pob31/go.dot-remote); what it says to the
+  engine is `docs/godot-remote-protocol-0.1.md`.
 - The Phase 11 Rust BLE sidecar lives in the permissively licensed
   [Choufleur](https://github.com/pob31/choufleur_prompt) repo (MIT OR Apache-2.0)
   and is pulled in as a `ThirdParty/` submodule if it is needed at all. There is

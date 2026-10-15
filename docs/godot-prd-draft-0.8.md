@@ -1467,6 +1467,18 @@ Two consequences for the design, and neither is a change of direction:
   continuity. On Android a companion can remove the staleness entirely; that is a
   bonus on one platform, not the baseline the others are held to.
 
+*Amended in 0.8, at the author's direction (2026-10-15) — namespace draft §68,
+ANL-ANW.* **The Android companion is built**, in a repository of its own
+(`github.com/pob31/go.dot-remote`). It talks to the engine over the same
+WebSocket as the page, never the UDP port, so a backup passes its commands on to
+the main (§3.15); Go.dot sends it one bundle a tick of everything that changed,
+so it holds the whole state in the background and is live the moment it is
+looked at. It is pointed at a machine by a typed address and port — no discovery,
+against the recommendation. It may adjust levels, sends, EQ, DCAs, waits, speed,
+the on/off switches, flags, notes and a mapping's mesh, and never the shape of
+the cue list. The desk can ask it to show itself (WFS-DIY's *find my device*).
+The web client stays primary and complete on its own.
+
 Modifier vocabulary is **deferred until the needs are clear**, then designed
 once across desktop, tablet and hardware together — two of the three have no
 keyboard, so per-feature decisions produce shift-clicks with no touch
@@ -4138,7 +4150,8 @@ from AFV in §58.2 are the author's to overrule:
 
 What the work leaves out: correcting the drift between two sound clocks by speed; a backup's TCP
 connections open but silent, for consoles that take two sessions; a shared secret on the link; finding
-the other machine by itself on the network (mDNS), left for the remote app.
+the other machine by itself on the network (mDNS), left for the remote app - which the author then
+chose to point at its machines by a typed address (2026-10-15, namespace draft §68, ANN).
 
 Added 2026-10-12 *(proposed)*, with outgoing timecode (§3.14, namespace draft §59). The implementer's
 calls from AHD in §59.2 are the author's to overrule:

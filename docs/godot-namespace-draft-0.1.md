@@ -30004,3 +30004,95 @@ TLS (port 8883) and MQTT over WebSocket - nothing in the tree speaks TLS; MQTT 5
 and QoS above nought on the way out; retained, or a QoS, chosen per cue; a described MQTT device - a
 preset whose nodes are topics (§57) - the opaque device being enough for a sensor; the broker's `$SYS`
 topics; a bridge between Go.dot's broker and another.
+
+## 68. The remote: an Android app that holds the show while it is in the background
+
+Asked by the author on 2026-10-15, the MQTT round finishing beside it: *"plan for the Android
+application"* - a background link that collects Go.dot's state all the time, so that switching between
+it and WFS-DIY's remote on one tablet takes a fraction of a second and survives the app being swiped off
+the screen; the current and next cues, GO, Panic and Doh! always on screen; and four tabs - the cue list
+"so the user can make edits eventually" (*"The level editing is really important to have. But making real
+changes to the overall structure of the cuelist is out of scope"*), the running cues with kill for cues and
+groups, a surface "as a replacement when the MIDI devices aren't available or when walking around the
+house", and the mapping window for the canvases and zones on the video outputs. Then: *"Please put the
+'find my device' helper on the app like on the WFS-DIY remote."* Devplan Phase 7; PRD §3.17. The
+contract the app implements is `docs/godot-remote-protocol-0.1.md`. Decisions run from ANL.
+
+### 68.1 What it is, before its names
+
+PRD §3.17 has the tablet as a second surface, and the web page in a tablet's browser already reaches
+Go.dot from the house. What the page cannot do is stay: a browser tab swiped away is suspended, and coming
+back means reloading, rebuilding and re-reading the whole show. On Android a program can keep a
+connection open while it is not on screen - WFS-DIY's remote does - so a native app can be **live the
+moment it is looked at**, with nothing to fetch.
+
+So the app keeps one connection to Go.dot open in the background, and Go.dot sends it, once a tick, what
+changed - the whole show's state, not one value at a time. The app holds a copy of the state and draws
+from it; coming back to it is a redraw. The rest is what an operator does with a tablet in the house:
+GO, Panic and Doh! under the thumb, the running cues with kill, levels and EQ, a stand-in surface, and
+the mapping at the wall.
+
+### 68.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **ANL** | **The app is a repository of its own**, `github.com/pob31/go.dot-remote`, Kotlin and Jetpack Compose as WFS-DIY's remote is. Go.dot keeps the engine's side and the contract document, as it does for the authoring protocol (§56). | the author's (offered as "Its own repo", recommended; the alternative was `clients/android` in this repository) |
+| **ANM** | **The WebSocket, carrying OSC**, on the HTTP port as the page's - never the UDP port. TCP loses nothing, so no dump-and-verify; and a following backup passes a WebSocket command on to its main while it ignores a datagram (AGD). | the author's (offered as "WebSocket, OSC frames", recommended) |
+| **ANN** | **A typed address, no discovery.** The operator types a machine's address and port; the app remembers them. No mDNS from Go.dot. | the author's, AGAINST my recommendation (mDNS beside a typed fallback; PRD §6.9 had left discovery "for the remote app") |
+| **ANO** | **What the tablet may change**: a cue's level, its sends, its EQ, the DCAs, the waits, the speed, the on/off switches (enabled, for this run), flags and notes; a run's trim; a mapping's mesh, opacity and blend. **Never the shape of the cue list**: no cue made, deleted, moved, renamed or renumbered from the tablet. | the author's (offered as "Also timing and switches" over "Levels, sends, EQ, DCAs", recommended); the mapping rows are mine, from the author's mapping tab |
+| **ANP** | **Find the tablet** as WFS-DIY's remote is found: the desk asks, the tablet flashes its screen, sounds and vibrates until touched. | the author's request |
+| **ANQ** | **`STREAM`**: one text frame asks for a subtree; from the next tick the connection gets one OSC bundle per tick, `/godot/engine/tick` first, then every node under the prefix that changed or appeared, with its value. A tick with nothing else sends the tick alone: the heartbeat. Nothing is withheld from the client that caused a change - the app's copy is the engine's, and the app ignores pushes under the operator's finger. One prefix per connection. | mine |
+| **ANR** | **A stream never waits for a tablet.** A connection with 100 frames written and not yet taken (two seconds of ticks) is no longer streamed to and is closed; the app connects again. The bundle is encoded once a tick for every connection on a prefix. | mine |
+| **ANS** | **After the snapshot, values come from the stream only**; an added node's description comes from an HTTP read of its object, metadata only, once a burst - or from another object of the same owner, whose rows share it. The app sends STREAM before its snapshot GET and drops the bundles the snapshot already holds, by tick. | mine |
+| **ANT** | **HELLO and `network/remotes`**: a connection names itself with an id the app drew at install and a name; the server keeps it beside the connection, writes nothing to the show and nothing to the log; `network/remotes` lists them, one a line. **`remote.find <id> [seconds]`**, machine-local, sends `FIND` to that tablet's connections (30 s when no time is given); Show settings > Network lists the remotes with a Find button. | mine |
+| **ANU** | **Staleness** in the app: stale after half a second with no bundle, said and greyed; gone after three seconds with no bundle and no answer to a ping, then connected again at 0.5, 1, 2 and every 5 seconds. A link that answers with no ticks is Go.dot's clock standing still, said as such. | mine |
+| **ANV** | **Two machines**: the app may hold a main and its backup at once, each its own connection and copy; one is on screen. Commands go to the machine on screen; a pair command to the machine whose button was pressed. | mine |
+| **ANW** | **What is always on screen**: the current cue (the last the focused list fired), the next (its standby), GO, Doh! and Panic - Doh! left of Panic with air between, Panic's second press within 750 ms the double Esc, as the desktop's. The app's own words (Machines, on screen, stale, Find) are mine, for review; GO, PANIC and Doh! are the desktop's in both languages. | the author's (what is shown); the words mine |
+
+### 68.3 Rows
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `network/remotes` | `s` | r | runtime, one a line: `<origin>\t<id>\t<name>` for each connection that said HELLO; empty when none |
+
+### 68.4 Commands and frames
+
+| | What |
+|---|---|
+| `{"COMMAND": "STREAM", "DATA": "<prefix>"}` | text frame from a client: a bundle a tick from now on (ANQ) |
+| `{"COMMAND": "UNSTREAM", "DATA": "<prefix>"}` | text frame: stop |
+| `{"COMMAND": "HELLO", "DATA": "<id>\t<name>"}` | text frame: who this connection is (ANT) |
+| `{"COMMAND": "FIND", "DATA": "<seconds>"}` | text frame from the server to a remote |
+| `remote.find <id> [seconds]` | machine-local: FIND to every connection of that remote |
+
+`HOST_INFO` says `STREAM: true` and now `PATH_CHANGED: false` - it had said true, and nothing has ever
+sent one.
+
+### 68.5 Stages
+
+Go.dot (this repository):
+
+| Stage | What | Built |
+|---|---|---|
+| RM.0 | This section, the contract document, PRD §3.17, the devplan's Phase 7, the README | |
+| RM.1 | `STREAM`/`UNSTREAM`, the bundle a tick, the stalled connection let go, `HOST_INFO`, `blackbox.remote` | |
+| RM.2 | `HELLO`, `network/remotes`, `remote.find`, the Network tab's remotes | |
+| RM.3 | Only if M74 asks: a snapshot of values without descriptions | |
+
+The app (`go.dot-remote`): A.0 skeleton, theme and words; A.1 the OSC codec; A.2 the link service and
+the copy of the state; A.3 machines and find; A.4 the transport header; A.5 running cues; A.6 the cue
+list and its inspector; A.7 the surface; A.8 the mapping; A.9 waveforms and show folders; A.10 the
+guides and a release; A.11 the bench on the author's tablet.
+
+### 68.6 Measurements
+
+- **M74** - the remote's numbers, on the author's tablet and Wi-Fi: the snapshot's bytes and seconds at
+  100 and 500 cues; the stream's bytes a tick idle, during a GO and during a fader drag; the tick's
+  lateness with none, one and two tablets streaming and with one that stopped reading (unmoved); the app
+  swiped away and back to live (under 0.3 s expected); a reconnect after the Wi-Fi drops.
+
+### 68.7 Not built
+
+Discovery (ANN). A password on the WebSocket (AGB). The canvases' pictures on the tablet - the wall is
+the picture (§40.2, XI). Sound peaks (`.tpk`): only the timbre pyramid is served. An iPad app: iOS keeps
+nothing alive in the background (PRD §3.17), so the page stays its answer.
