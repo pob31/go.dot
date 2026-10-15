@@ -895,9 +895,11 @@ add_custom_command(TARGET wfg POST_BUILD
     VERBATIM)
 
 # AND THE READY-MADE SCRIPTS (namespace draft §66, AMW): the help card and the
-# examples for a script cue's JavaScript, found beside the binary as `pd` is.
+# examples for a script cue's JavaScript and its Lua, found beside the binary as
+# `pd` is.
 add_custom_command(TARGET wfg POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/js" "$<TARGET_FILE_DIR:wfg>/js"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/lua" "$<TARGET_FILE_DIR:wfg>/lua"
     VERBATIM)
 
 # AND THE DEVICE PRESETS (namespace draft §57, AFN), the same way: serve reads

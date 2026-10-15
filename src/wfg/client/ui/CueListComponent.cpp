@@ -1180,10 +1180,12 @@ namespace wfg::client::ui
             {
                 const auto words = juce::String::fromUTF8 (model::wordsToFireCue (entry.id).c_str());
                 const auto line = juce::String::fromUTF8 (process::scriptLineToFireCue ("javascript", entry.id).c_str());
+                const auto luaLine = juce::String::fromUTF8 (wfg::process::scriptLineToFireCue ("lua", entry.id).c_str());
                 juce::PopupMenu menu;
                 menu.addItem ("Copy for a patch", [words] { juce::SystemClipboard::copyTextToClipboard (words); });
                 //  And the line a script fires it with (namespace draft §66, AMV).
                 menu.addItem ("Copy for a script", [line] { juce::SystemClipboard::copyTextToClipboard (line); });
+                menu.addItem ("Copy for a Lua script", [luaLine] { juce::SystemClipboard::copyTextToClipboard (luaLine); });
                 menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
             }
             return;

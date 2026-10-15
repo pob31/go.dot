@@ -2113,6 +2113,12 @@ namespace wfg::client::ui
                     const auto told = juce::String::fromUTF8 (process::scriptLineToSendSerial ("javascript", port.id).c_str());
                     menu.addItem ("Copy for a script: hear its lines", [heard] { juce::SystemClipboard::copyTextToClipboard (heard); });
                     menu.addItem ("Copy for a script: send it a line", [told] { juce::SystemClipboard::copyTextToClipboard (told); });
+
+                    //  And Lua's words for the same.
+                    const auto luaHeard = juce::String::fromUTF8 (wfg::process::scriptLinesToHearSerial ("lua", port.id).c_str());
+                    const auto luaTold = juce::String::fromUTF8 (wfg::process::scriptLineToSendSerial ("lua", port.id).c_str());
+                    menu.addItem ("Copy for a Lua script: hear its lines", [luaHeard] { juce::SystemClipboard::copyTextToClipboard (luaHeard); });
+                    menu.addItem ("Copy for a Lua script: send it a line", [luaTold] { juce::SystemClipboard::copyTextToClipboard (luaTold); });
                     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
                     return;
                 }

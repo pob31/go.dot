@@ -758,3 +758,101 @@ TEST_CASE ("script: Lua's prelude has every function the JavaScript card names")
     CHECK (wfg::process::luaProblem ("script:7: attempt to index a nil value") == "attempt to index a nil value (line 7)");
     CHECK (wfg::process::luaProblem ("not a position") == "not a position");
 }
+
+//==============================================================================
+/*  SC.10: LUA'S HELP CARD AND READY-MADE SCRIPTS (AMW), as JavaScript's. */
+namespace
+{
+    std::string luaReadyMade (const std::string& name)
+    {
+        std::ifstream in (std::string (WFG_REPO_ROOT) + "/lua/" + name, std::ios::binary);
+        return { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char>() };
+    }
+}
+
+TEST_CASE ("script: the Lua help card names every function a script can call, and nothing in it runs")
+{
+    const auto card = luaReadyMade ("godot-help.lua");
+    REQUIRE_FALSE (card.empty());
+    for (const auto& call : jsApi)
+    {
+        if (call == "console.log(")
+            continue;   // JavaScript's alone
+        INFO (call);
+        CHECK (card.find (call) != std::string::npos);
+    }
+
+    const auto names = wfg::process::readyMadeFiles (std::string (WFG_REPO_ROOT) + "/lua", "lua");
+    REQUIRE (names.size() >= 5u);
+    CHECK (names.front() == "godot-help.lua");
+    for (const auto& name : names)
+    {
+        INFO (name);
+        auto script = lua();
+        const auto atOpen = makeAndOpen (*script, luaReadyMade (name));
+        CHECK (atOpen.sent.empty());
+        CHECK (atOpen.printed.empty());
+    }
+}
+
+TEST_CASE ("script: the Lua ready-made scripts do what JavaScript's do")
+{
+    const auto heard = [] (double x) { return std::vector<Input> { { "/wfs/source/1/x", { Atom::of (x) } } }; };
+    {
+        auto script = lua();
+        makeAndOpen (*script, luaReadyMade ("average.lua"));
+        CHECK (numbersSentTo (tickOnce (*script, heard (1.0)), "/wfs/source/1/xAverage") == std::vector<double> { 1.0 });
+        CHECK (numbersSentTo (tickOnce (*script, heard (2.0)), "/wfs/source/1/xAverage") == std::vector<double> { 1.5 });
+        CHECK (numbersSentTo (tickOnce (*script, heard (6.0)), "/wfs/source/1/xAverage") == std::vector<double> { 3.0 });
+    }
+    {
+        auto script = lua();
+        makeAndOpen (*script, luaReadyMade ("minmax.lua"));
+        CHECK (numbersSentTo (tickOnce (*script, heard (5.0)), "/wfs/source/1/xRange") == std::vector<double> { 5.0, 5.0 });
+        CHECK (numbersSentTo (tickOnce (*script, heard (1.0)), "/wfs/source/1/xRange") == std::vector<double> { 1.0, 5.0 });
+        for (int tick = 0; tick < 100; ++tick)
+            tickOnce (*script);
+        CHECK (numbersSentTo (tickOnce (*script, heard (3.0)), "/wfs/source/1/xRange") == std::vector<double> { 3.0, 3.0 });
+    }
+    {
+        auto script = lua();
+        makeAndOpen (*script, luaReadyMade ("smooth.lua"));
+        CHECK (numbersSentTo (tickOnce (*script, heard (0.0)), "/wfs/source/1/xSmooth") == std::vector<double> { 0.0 });
+        CHECK (numbersSentTo (tickOnce (*script, heard (4.0)), "/wfs/source/1/xSmooth") == std::vector<double> { 1.0 });
+    }
+    {
+        auto script = lua();
+        makeAndOpen (*script, luaReadyMade ("edge.lua"));
+        const auto fired = [] (const Outbox& outbox)
+        {
+            std::vector<std::string> cues;
+            for (const auto& sent : outbox.sent)
+                if (sent.to == "/godot/cmd/cue/fire")
+                    cues.push_back (sent.atoms.front().word);
+            return cues;
+        };
+        CHECK (fired (tickOnce (*script, heard (0.5))).empty());
+        CHECK (fired (tickOnce (*script, heard (0.9))) == std::vector<std::string> { "3.1" });
+        CHECK (fired (tickOnce (*script, heard (0.82))).empty());
+        CHECK (fired (tickOnce (*script, heard (0.7))) == std::vector<std::string> { "3.2" });
+    }
+}
+
+TEST_CASE ("script: a Lua script's starter opens and does nothing, and its copied lines are Lua")
+{
+    auto script = lua();
+    const auto atOpen = makeAndOpen (*script, wfg::process::starterScript ("lua"));
+    CHECK (atOpen.sent.empty());
+    openAgain (*script, wfg::process::scriptLineToFireCue ("lua", "B3NK0001") + "\n"
+                        + wfg::process::scriptLinesToHearSerial ("lua", "SRL00001") + "\n"
+                        + wfg::process::scriptLineToSendSerial ("lua", "SRL00001") + "\n");
+    CHECK (script->receives() == std::vector<std::string> { "/godot/serial/SRL00001/in" });
+
+    //  And JavaScript's, in JavaScript.
+    auto js = javascript();
+    makeAndOpen (*js, wfg::process::starterScript ("javascript"));
+    openAgain (*js, wfg::process::scriptLineToFireCue ("javascript", "B3NK0001") + "\n"
+                    + wfg::process::scriptLinesToHearSerial ("javascript", "SRL00001") + "\n"
+                    + wfg::process::scriptLineToSendSerial ("javascript", "SRL00001") + "\n");
+    CHECK (js->receives() == std::vector<std::string> { "/godot/serial/SRL00001/in" });
+}

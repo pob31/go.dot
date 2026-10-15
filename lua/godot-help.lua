@@ -1,0 +1,137 @@
+-- How a script hears and sends - a script cue in Go.dot, in Lua
+-- ==============================================================
+--
+-- A script cue's script runs inside Go.dot while its cue runs, on a thread of
+-- its own, once a tick (50 times a second). Write it in the editor at the foot
+-- of the window; a finished edit starts a running cue's script again from its
+-- first line. A script names what it hears and where it sends by address -
+-- there is nothing to set up beside it.
+--
+-- Every line below is ready to copy. Nothing in this card runs: each line is a
+-- comment.
+--
+--
+-- OSC FROM A DEVICE
+-- -----------------
+-- Add the device in Show settings > Network: where it is, the start of its
+-- addresses (its prefix), and Rx on. It sends to Go.dot's OSC port - 8010
+-- unless the show says another - and Go.dot hands each value to the scripts
+-- listening for its address.
+--
+--   godot.hear('/wfs/source/1/x', function (x) print('x is', x) end)
+--       the value the device reported at that address, the tick it came in:
+--       a number, a word, or several - one argument each
+--
+--   godot.send('/wfs/source/1/y', 0.5)
+--       writes to the device, as an OSC cue aimed there would
+--
+--
+-- GO.DOT ITSELF
+-- -------------
+--   godot.fire('3.1')
+--       fires cue 3.1 by its number, as a button on a surface would - in the
+--       list in front first, then the others. No cue with that number and it
+--       is refused
+--
+--   godot.fire('B3NK0001')
+--       fires a cue by its id, which a renumbering does not break. Right-click
+--       the cue in the list, Copy for a Lua script - or drag the cue onto the
+--       editor
+--
+--   godot.command('go')
+--   godot.command('standby/set', 'B3NK0001')
+--       any named command: go, standby/set, run/stopAll... Enable, Disable and
+--       Jump to are transport cues, fired by number or id
+--
+--   godot.command('run/stop', godot.self)
+--       godot.self is this cue's run, in a command's words: here the script
+--       ends its own cue
+--
+--   godot.hear('/godot/dca/K2M9X4QA/trim', function (trim) print(trim) end)
+--       a row of the show or of the engine - here a DCA's trim - each time it
+--       changes. Go.dot's OSC console, the page in a browser, lists every address
+--
+--   godot.set('cue/B3NK0001/name', 'Rain')
+--       sets a row, as the window would - refused while the show is locked.
+--       '/godot/' is put in front when it is left out
+--
+--
+-- MIDI
+-- ----
+-- Pick the ports in the cue's inspector: MIDI in, MIDI out.
+--
+--   godot.midi.hear(function (status, data1, data2) print(status, data1, data2) end)
+--       every message on the MIDI in port, its bytes as whole numbers: a note
+--       on is 144 to 159, the note and its velocity
+--
+--   godot.midi.send(0x90, 60, 100)
+--       a message on the MIDI out port, its bytes as numbers
+--
+--
+-- SERIAL: AN ARDUINO AND THE LIKE
+-- -------------------------------
+-- Add the port in Show settings > Serial. Right-click its row, Copy for a Lua
+-- script, for these two lines with its id.
+--
+--   godot.hear('/godot/serial/SRL00001/in', function (...) print(...) end)
+--       each line it sends, split on spaces and commas, numbers as numbers -
+--       every line, not only a changed one
+--
+--   godot.send('/godot/serial/SRL00001/out', 'led', 1)
+--       a line to the port, its words joined by spaces
+--
+--
+-- THE SPACEMOUSE
+-- --------------
+--   godot.hear('/godot/puck', function (tx, ty, tz, rx, ry, rz) print(tz) end)
+--       its six axes, each tick, while the script listens: each -1 to 1
+--
+--
+-- ANY ADDRESS
+-- -----------
+--   godot.hearAll(function (address, ...) print(address, ...) end)
+--       everything this script could hear, as an address and its values -
+--       for names a script builds as it runs
+--
+--
+-- TIME
+-- ----
+-- A time is in seconds and lands on a tick of 20 ms. Go.dot's clock, not the
+-- computer's: a script's timers keep the show's time.
+--
+--   godot.tick(function (n) end)
+--       every tick; n counts them from the script's start
+--
+--   local later = godot.after(1.5, function () godot.fire('3.1') end)
+--   local often = godot.every(0.25, function () godot.send('/lights/blink', 1) end)
+--   godot.cancel(often)
+--       once after a time, every so often, and no more
+--
+--
+-- WHAT A SCRIPT SAYS
+-- ------------------
+--   print('level', 0.25)
+--       its last line shows in the cue's running pane and under the editor.
+--       A mistake says its line: attempt to index a nil value (line 7)
+--
+--
+-- NOT THIS WAY
+-- ------------
+-- A script has no file, no network and no module to load (no io, os, package
+-- or debug): what came in and went out another way would not be in the
+-- show's log, so a replay could not play it back. Add the device instead.
+--
+--
+-- NOT YET
+-- -------
+-- MQTT: to come. A device that speaks MQTT cannot reach a script yet.
+--
+--
+-- READY-MADE
+-- ----------
+-- average.lua, minmax.lua, smooth.lua and edge.lua, beside this card: open the
+-- ? in the editor and pick one, then copy what you need.
+--
+--
+-- Part of Go.dot - https://github.com/pob31/go.dot - GPL-3.0-or-later,
+-- Copyright (C) 2026 Pierre-Olivier Boulant

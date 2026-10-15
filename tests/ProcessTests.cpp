@@ -2163,6 +2163,35 @@ TEST_CASE ("ready-made: the example show opens, its two patches play with the re
     for (int tick = 0; tick < 20; ++tick)
         lightToScript (0.0);
     CHECK (scripted == std::vector<std::string> { "PXSHN001", "PXDARK01" });
+
+    //  AND IN LUA: the same two cues, once each.
+    const auto luaSource = document.getAttribute ("/godot/cue/PXSCRPT2/source");
+    REQUIRE (luaSource.has_value());
+    CHECK (document.getAttribute ("/godot/cue/PXSCRPT2/language") == std::optional<std::string> ("lua"));
+    wfg::process::ScriptInstance luaScript (wfg::process::makeLua, {});
+    REQUIRE (luaScript.make());
+    REQUIRE (luaScript.finished (5s));
+    REQUIRE (luaScript.open (*luaSource));
+    REQUIRE (luaScript.finished (5s));
+    INFO (luaScript.problem());
+    REQUIRE (luaScript.opened());
+
+    std::vector<std::string> luaFired;
+    const auto lightToLua = [&] (double value)
+    {
+        REQUIRE (luaScript.tick ({ { "/sensor/light", { Atom::of (value) } } }));
+        REQUIRE (luaScript.finished (5s));
+        for (const auto& sent : luaScript.takeOutbox().sent)
+            if (sent.to == "/godot/cmd/cue/fire")
+                luaFired.push_back (sent.atoms.front().word);
+    };
+    lightToLua (0.0);
+    for (int tick = 0; tick < 20; ++tick)
+        lightToLua (1000.0);
+    CHECK (luaFired == std::vector<std::string> { "PXSHN001" });
+    for (int tick = 0; tick < 20; ++tick)
+        lightToLua (0.0);
+    CHECK (luaFired == std::vector<std::string> { "PXSHN001", "PXDARK01" });
 }
 
 //==============================================================================

@@ -6092,6 +6092,22 @@ TEST_CASE ("script editor: the ? shows the help card read-only and the ready-mad
     CHECK (written.size() == 1u);
 }
 
+TEST_CASE ("script editor: a Lua script's ? shows Lua's card and Lua's ready-made scripts")
+{
+    wfg::client::ui::ScriptEditorComponent editor (wfg::client::model::Theme {}, {});
+    editor.setSize (700, 300);
+    editor.setReadyMadeFolder (std::string (WFG_REPO_ROOT) + "/lua");
+
+    wfg::client::model::CodeReading reading;
+    reading.cueId = "SCRP0001";
+    reading.language = "lua";
+    reading.text = "print(1)\n";
+    editor.show (reading);
+    editor.helpButtonForTest().onClick();
+    CHECK (editor.helpTextForTest().contains ("How a script hears and sends - a script cue in Go.dot, in Lua"));
+    CHECK (editor.cardsForTest().getItemText (0) == "godot-help.lua");
+}
+
 TEST_CASE ("script editor: Esc goes on to the PANIC, and Ctrl+S writes and goes on to save the show")
 {
     std::vector<std::pair<std::string, std::string>> written;
