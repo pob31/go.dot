@@ -237,7 +237,7 @@ WFS-DIY, XOA/Tight-WFS, S21-HiJack and Choufleur come from the same author as Go
 
 ## Sending feedback
 
-A test build exists so that people other than the author can say what they found. Every report helps, including "I could not work out how to…".
+A test build exists so that people other than the author can say what they found. Tell us what you liked, what you would change, and what went wrong: all three shape what comes next. Every message helps, including "I could not work out how to…".
 
 **Where:** [github.com/pob31/go.dot/issues](https://github.com/pob31/go.dot/issues). A free GitHub account is enough. Write in English or French.
 

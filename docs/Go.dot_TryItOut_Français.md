@@ -239,7 +239,7 @@ WFS-DIY, XOA/Tight-WFS, S21-HiJack et Choufleur viennent du même auteur que Go.
 
 ## Faire un retour
 
-Une version de test existe pour que d'autres que l'auteur disent ce qu'ils y ont trouvé. Chaque retour aide, y compris « je n'ai pas compris comment… ».
+Une version de test existe pour que d'autres que l'auteur disent ce qu'ils y ont trouvé. Dites-nous ce qui vous a plu, ce que vous changeriez et ce qui n'a pas marché : les trois orientent la suite. Chaque message aide, y compris « je n'ai pas compris comment… ».
 
 **Où :** [github.com/pob31/go.dot/issues](https://github.com/pob31/go.dot/issues). Un compte GitHub gratuit suffit. Écrivez en français ou en anglais.
 
