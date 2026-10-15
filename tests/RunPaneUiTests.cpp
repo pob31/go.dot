@@ -6013,6 +6013,46 @@ TEST_CASE ("script editor: typing is one write when finished, an edit elsewhere 
     CHECK (written[2].first == "/godot/cue/SCRP0002/source");
 }
 
+TEST_CASE ("script editor: Open in your editor writes first and asks for this cue; a cue dropped types the line that fires it")
+{
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::string> openedFor;
+    wfg::client::ui::ScriptEditorComponent::Actions actions;
+    actions.set = [&written] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.openInEditor = [&openedFor] (const std::string& cueId) { openedFor.push_back (cueId); };
+
+    wfg::client::ui::ScriptEditorComponent editor (wfg::client::model::Theme {}, std::move (actions));
+    editor.setSize (600, 300);
+    wfg::client::model::CodeReading reading;
+    reading.cueId = "SCRP0001";
+    reading.language = "javascript";
+    reading.text = "print(1);\nprint(2);\n";
+    editor.show (reading);
+
+    editor.documentForTest().insertText (0, "// typed\n");
+    editor.openButtonForTest().onClick();
+    REQUIRE (written.size() == 1u);
+    CHECK (written[0].second == "// typed\nprint(1);\nprint(2);\n");
+    CHECK (openedFor == std::vector<std::string> { "SCRP0001" });
+
+    //  A CUE DROPPED on the first line: the line that fires it, typed there, and written.
+    reading.text = written[0].second;
+    editor.show (reading);
+    const juce::DragAndDropTarget::SourceDetails dropped (juce::var ("B3NK0001"), nullptr, juce::Point<int> (60, 4));
+    CHECK (editor.isInterestedInDragSource (dropped));
+    editor.itemDropped (dropped);
+    REQUIRE (written.size() == 2u);
+    CHECK (written[1].second == "godot.fire('B3NK0001');\n// typed\nprint(1);\nprint(2);\n");
+
+    //  Not an id, or under the lock: not taken.
+    CHECK_FALSE (editor.isInterestedInDragSource (
+        juce::DragAndDropTarget::SourceDetails (juce::var ("preset line"), nullptr, juce::Point<int> (60, 4))));
+    reading.locked = true;
+    editor.show (reading);
+    CHECK_FALSE (editor.isInterestedInDragSource (dropped));
+    CHECK_FALSE (editor.openButtonForTest().isEnabled());
+}
+
 TEST_CASE ("script editor: Esc goes on to the PANIC, and Ctrl+S writes and goes on to save the show")
 {
     std::vector<std::pair<std::string, std::string>> written;

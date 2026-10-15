@@ -57,6 +57,7 @@
 #include <wfg/engine/pair/ShowCheck.h>
 #include <wfg/engine/pair/Summary.h>
 #include <wfg/engine/process/PatchEditor.h>
+#include <wfg/engine/process/ScriptEditing.h>
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
@@ -5156,6 +5157,12 @@ namespace
                                                   patchSearchPaths);
         wfg::process::editor::Installer pdInstaller;
         wfg::process::editor::registerCommands (engine.commands(), document, &patchEditing, &pdInstaller);
+
+        /*  AND A SCRIPT CUE'S SOURCE OPENED IN THIS MACHINE'S EDITOR (namespace
+            draft §66, AMU): its file beside the patches', watched for saves. */
+        wfg::process::scriptedit::Watch scriptEditing (engineCacheFolder().getChildFile ("process")
+                                                          .getChildFile ("scripts").getFullPathName().toStdString());
+        wfg::process::scriptedit::registerCommands (engine.commands(), document, &scriptEditing);
         std::string patchEditorFound;
         std::uint32_t mediaCacheSweepSeen = 0;
         std::uint32_t editRenderSeen = 0;
@@ -6780,6 +6787,14 @@ namespace
                                      for (auto& [cue, text] : patchEditing.saved())
                                          engine.submit ("pd", "node.set",
                                                         { wfg::osc::Value::string ("/godot/cue/" + cue + "/patch"),
+                                                          wfg::osc::Value::string (std::move (text)) });
+
+                                 /*  AND A SAVE IN THE SYSTEM'S EDITOR (§66, AMU):
+                                     the script's source, from `editor`. */
+                                 if (tickIndex % 25 == 0)
+                                     for (auto& [cue, text] : scriptEditing.saved())
+                                         engine.submit ("editor", "node.set",
+                                                        { wfg::osc::Value::string ("/godot/cue/" + cue + "/source"),
                                                           wfg::osc::Value::string (std::move (text)) });
 
                                  /*  THE PUCK, wanted while a curve with a

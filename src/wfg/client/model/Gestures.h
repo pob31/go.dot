@@ -471,6 +471,10 @@ namespace wfg::client::gesture
         or Pd (the author, 2026-10-15). */
     Event patchHelp();
 
+    /*  A SCRIPT CUE'S SOURCE OPENED IN THIS MACHINE'S EDITOR (namespace draft
+        §66, AMU): edited there, never run; each save comes back. */
+    Event editScript (const std::string& cueId);
+
     /*  ATOMS FOR A NAME A RUNNING PATCH HEARS (namespace draft §51, PC.8): a
         toggle, a slider, a bang or a number box played on the canvas. */
     Event processSend (const std::string& runId, const std::string& name, const process::Atoms& atoms);

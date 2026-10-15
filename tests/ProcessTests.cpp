@@ -1506,6 +1506,72 @@ TEST_CASE ("process editor: process.edit is refused on what is not a process cue
     rig.tickOnce();
 }
 
+/*  SC.7: A SCRIPT OPENED IN THIS MACHINE'S EDITOR (namespace draft §66, AMU).
+    Nothing is opened here: the watch is handed an opener that only counts. */
+#include <wfg/engine/process/ScriptEditing.h>
+
+TEST_CASE ("script editor: script.edit is refused on what is not a script cue and under the lock, taken in a replay")
+{
+    ProcessRig rig ("sc7-edit", false);
+    wfg::process::scriptedit::registerCommands (rig.engine.commands(), rig.document, nullptr);
+
+    const auto script = rig.makeScript ("print(1);\n");
+    const auto patch = rig.makeProcess (doubling());
+
+    const auto refusedWith = [&] (const std::string& id) -> std::string
+    {
+        REQUIRE (rig.engine.submit ("cli", "script.edit", { wfg::osc::Value::string (id) }));
+        rig.tickOnce();
+        const auto records = rig.records();
+        for (auto at = records.rbegin(); at != records.rend(); ++at)
+            if (at->command == "script.edit")
+                return at->kind == wfg::LogRecord::Kind::rejected ? at->reason : std::string ("applied");
+        return "missing";
+    };
+
+    CHECK (refusedWith (patch) == "unknown-id");
+    CHECK (refusedWith (script) == "applied");
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    CHECK (refusedWith (script) == "locked");
+}
+
+TEST_CASE ("script editor: a script written out in its language's file, each save there noticed once")
+{
+    std::vector<std::string> opened;
+    const auto folder = scratch ("sc7-watch").string();
+    wfg::process::scriptedit::Watch watch (folder, [&opened] (const std::string& path)
+    {
+        opened.push_back (path);
+        return std::string {};
+    });
+
+    CHECK (watch.open ("SCRP0001", "javascript", "print(1);\n").empty());
+    CHECK (watch.open ("SCRP0002", "lua", "").empty());
+    REQUIRE (opened.size() == 2u);
+    CHECK (opened[0] == watch.fileFor ("SCRP0001", "javascript"));
+    CHECK (opened[0].size() > 3);
+    CHECK (opened[0].substr (opened[0].size() - 3) == ".js");
+    CHECK (opened[1].substr (opened[1].size() - 4) == ".lua");
+    CHECK (juce::File (opened[0]).loadFileAsString() == "print(1);\n");
+    CHECK (juce::File (opened[1]).existsAsFile());
+    CHECK (watch.saved().empty());
+
+    //  A save there: noticed once, with its text.
+    std::this_thread::sleep_for (20ms);
+    REQUIRE (juce::File (opened[0]).replaceWithText ("print(2);\n", false, false, nullptr));
+    juce::File (opened[0]).setLastModificationTime (juce::Time::getCurrentTime() + juce::RelativeTime::seconds (2.0));
+    const auto saved = watch.saved();
+    REQUIRE (saved.size() == 1u);
+    CHECK (saved[0].first == "SCRP0001");
+    CHECK (saved[0].second == "print(2);\n");
+    CHECK (watch.saved().empty());
+
+    //  An opener that cannot: said.
+    wfg::process::scriptedit::Watch nowhere (folder, [] (const std::string& path) { return "no program edits " + path; });
+    CHECK_FALSE (nowhere.open ("SCRP0003", "javascript", "print(3);\n").empty());
+}
+
 TEST_CASE ("process editor: Pd is started looking where the show's patches look (the author, 2026-10-15)")
 {
     using wfg::process::editor::commandFor;

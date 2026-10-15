@@ -72,6 +72,7 @@
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/process/PatchEditor.h>
+#include <wfg/engine/process/ScriptEditing.h>
 #include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/VideoCommands.h>
@@ -120,7 +121,7 @@ namespace
         "audio.testSignal", "audio.testStop", "audio.editBuilt",
         "plugin.scan", "plugin.scanRetry", "plugin.scanned", "plugin.failed", "plugin.restart",
         "document.saveAs", "document.autosave", "document.recover", "document.discardRecovery",
-        "media.cleanCache", "ffmpeg.install", "pd.install", "process.edit", "process.help",
+        "media.cleanCache", "ffmpeg.install", "pd.install", "process.edit", "process.help", "script.edit",
         "videoOutput.identify", "video.hideProjectors", "spacemouse.closeDriver",
         "pair.setRole", "pair.setPeers", "pair.setTimeout", "pair.saved",
 
@@ -199,6 +200,7 @@ namespace
             video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
             registerRescanCommands (engine.commands(), {}, {});
             process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
+            process::scriptedit::registerCommands (engine.commands(), document, nullptr);
             doc::registerBundleCommands (engine.commands(), document, session, writer);
             pair::registerPairCommands (engine.commands(), pairing);
 

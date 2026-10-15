@@ -128,7 +128,7 @@ TEST_CASE ("follow: the gate's table - a client's passed on, a device's ignored,
     const auto nodeSet = plain ("node.set");
 
     //  This machine's clients: passed on to the main (AFT).
-    for (const auto* from : { "window", "cli", "pd", "ws:10.0.0.5:51000", "surface:K4QW8YSC", "surface:spacemouse" })
+    for (const auto* from : { "window", "cli", "pd", "editor", "ws:10.0.0.5:51000", "surface:K4QW8YSC", "surface:spacemouse" })
     {
         INFO (from);
         CHECK (pair::gateFor (from, &go, {}) == pair::Gate::passOn);
@@ -136,7 +136,7 @@ TEST_CASE ("follow: the gate's table - a client's passed on, a device's ignored,
 
     //  A device's: the main heard it too (AGD), and anything the table does not know.
     for (const auto* from : { "udp:10.0.0.9:9000", "mount:K3PV7WRB", "serial:S0000001", "link:E0HQDX01",
-                              "midi:P0000001", "clock", "process:RUN00001", "peer:ws:10.0.0.5:51000", "someone" })
+                              "midi:P0000001", "clock", "process:RUN00001", "script:RUN00002", "peer:ws:10.0.0.5:51000", "someone" })
     {
         INFO (from);
         CHECK (pair::gateFor (from, &go, {}) == pair::Gate::ignore);

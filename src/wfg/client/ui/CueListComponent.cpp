@@ -29,6 +29,7 @@
 #include <wfg/client/ui/Look.h>
 
 #include <wfg/engine/cue/GroupMode.h>
+#include <wfg/engine/process/ScriptText.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -1178,8 +1179,11 @@ namespace wfg::client::ui
             if (entry.rowKind == model::RowKind::cue && ! entry.id.empty())
             {
                 const auto words = juce::String::fromUTF8 (model::wordsToFireCue (entry.id).c_str());
+                const auto line = juce::String::fromUTF8 (process::scriptLineToFireCue ("javascript", entry.id).c_str());
                 juce::PopupMenu menu;
                 menu.addItem ("Copy for a patch", [words] { juce::SystemClipboard::copyTextToClipboard (words); });
+                //  And the line a script fires it with (namespace draft §66, AMV).
+                menu.addItem ("Copy for a script", [line] { juce::SystemClipboard::copyTextToClipboard (line); });
                 menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
             }
             return;

@@ -23,6 +23,7 @@
 #include <wfg/client/model/Video.h>
 #include <wfg/engine/video/Displays.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
+#include <wfg/engine/process/ScriptText.h>
 #include <spatcore/ui/patch/PatchMatrixComponent.h>
 #include <spatcore/io/TestSignalGenerator.h>
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -2106,6 +2107,12 @@ namespace wfg::client::ui
                     juce::PopupMenu menu;
                     menu.addItem ("Copy for a patch: hear its lines", [hear] { juce::SystemClipboard::copyTextToClipboard (hear); });
                     menu.addItem ("Copy for a patch: send it a line", [tell] { juce::SystemClipboard::copyTextToClipboard (tell); });
+
+                    //  And a script's lines for the same (namespace draft §66, AMV).
+                    const auto heard = juce::String::fromUTF8 (process::scriptLinesToHearSerial ("javascript", port.id).c_str());
+                    const auto told = juce::String::fromUTF8 (process::scriptLineToSendSerial ("javascript", port.id).c_str());
+                    menu.addItem ("Copy for a script: hear its lines", [heard] { juce::SystemClipboard::copyTextToClipboard (heard); });
+                    menu.addItem ("Copy for a script: send it a line", [told] { juce::SystemClipboard::copyTextToClipboard (told); });
                     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
                     return;
                 }

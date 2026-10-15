@@ -16,6 +16,7 @@
 
 #include <wfg/client/ui/ScriptEditorComponent.h>
 #include <wfg/client/ui/Look.h>
+#include <wfg/engine/process/ScriptText.h>
 
 #include <utility>
 
@@ -65,6 +66,16 @@ namespace wfg::client::ui
         : theme (themeToUse), actions (std::move (actionsToUse))
     {
         useLanguage ("javascript");
+
+        addAndMakeVisible (openButton);
+        openButton.setTooltip ("The script in this machine's own editor for its language - edited there,"
+                               " never run; each save comes back here.");
+        openButton.onClick = [this]
+        {
+            commit();
+            if (actions.openInEditor && ! reading.cueId.empty())
+                actions.openInEditor (reading.cueId);
+        };
     }
 
     ScriptEditorComponent::~ScriptEditorComponent()
@@ -184,6 +195,7 @@ namespace wfg::client::ui
         }
 
         editor->setReadOnly (reading.locked || reading.cueId.empty());
+        openButton.setEnabled (! reading.locked && ! reading.cueId.empty());
         problemLine = model::lineOfProblem (reading.said);
         repaint();
     }
@@ -200,6 +212,35 @@ namespace wfg::client::ui
         actions.set ("/godot/cue/" + reading.cueId + "/source", text);
         loaded = text;
         held = text;
+    }
+
+    namespace
+    {
+        //  A cue's id as the list's drag names it: eight of Crockford's letters and digits.
+        bool isCueId (const juce::String& said)
+        {
+            return said.length() == 8 && said.containsOnly ("0123456789ABCDEFGHJKMNPQRSTVWXYZ");
+        }
+    }
+
+    bool ScriptEditorComponent::isInterestedInDragSource (const SourceDetails& details)
+    {
+        return ! reading.locked && ! reading.cueId.empty() && details.description.isString()
+                 && isCueId (details.description.toString());
+    }
+
+    void ScriptEditorComponent::itemDropped (const SourceDetails& details)
+    {
+        if (! isInterestedInDragSource (details) || editor == nullptr)
+            return;
+
+        const auto line = process::scriptLineToFireCue (reading.language, details.description.toString().toStdString());
+        const auto where = editor->getPositionAt (details.localPosition.x - editor->getX(),
+                                                  details.localPosition.y - editor->getY());
+        const juce::CodeDocument::Position start (document, where.getLineNumber(), 0);
+        document.insertText (start, juce::String::fromUTF8 (line.c_str()) + "\n");
+        editor->moveCaretTo (juce::CodeDocument::Position (document, where.getLineNumber() + 1, 0), false);
+        commit();
     }
 
     juce::CodeEditorComponent& ScriptEditorComponent::editorForTest() noexcept
@@ -221,7 +262,8 @@ namespace wfg::client::ui
     {
         g.fillAll (Look::colour (theme, "panel"));
 
-        const auto strip = getLocalBounds().removeFromBottom (statusHeight).reduced (6, 0);
+        auto strip = getLocalBounds().removeFromBottom (statusHeight).reduced (6, 0);
+        strip.removeFromRight (openButton.getWidth() + 6);
         const auto failing = problemLine > 0 || reading.state == "stuck";
         g.setColour (Look::colour (theme, failing ? "failed" : "ink-dim"));
         g.setFont (Look::font (theme, 13.0f));
@@ -249,7 +291,8 @@ namespace wfg::client::ui
     void ScriptEditorComponent::resized()
     {
         auto area = getLocalBounds();
-        area.removeFromBottom (statusHeight);
+        auto strip = area.removeFromBottom (statusHeight);
+        openButton.setBounds (strip.removeFromRight (150).reduced (2));
         if (editor != nullptr)
             editor->setBounds (area);
     }

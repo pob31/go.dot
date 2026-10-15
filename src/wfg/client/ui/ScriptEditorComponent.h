@@ -35,6 +35,11 @@
 
     UNDER THE LOCK it shows the code and changes nothing.
 
+    AND TWO DOORS (AMU, AMV): "Open in your editor" hands the source to this
+    machine's own editor for its language, each save there coming back; and a
+    cue dragged here from the list types the line that fires it, on the line
+    it is let go on.
+
     IT TAKES THE KEYS A CODE EDITOR USES: Space and Return type. Esc is still
     the PANIC, from here as from anywhere.
 */
@@ -51,7 +56,8 @@
 
 namespace wfg::client::ui
 {
-    class ScriptEditorComponent final : public juce::Component
+    class ScriptEditorComponent final : public juce::Component,
+                                        public juce::DragAndDropTarget
     {
     public:
         struct Actions
@@ -61,6 +67,9 @@ namespace wfg::client::ui
 
             /** A sentence for the panel's head. */
             std::function<void (const juce::String&)> say;
+
+            /** The source opened in this machine's own editor (AMU). */
+            std::function<void (const std::string& cueId)> openInEditor;
         };
 
         ScriptEditorComponent (const model::Theme&, Actions);
@@ -74,6 +83,11 @@ namespace wfg::client::ui
         /*  Writes what was typed, if it differs from what the cue holds. */
         void commit();
 
+        /*  A CUE DRAGGED FROM THE LIST (AMV): the list's row drag names its
+            id; let go here, the line that fires it is typed where it landed. */
+        bool isInterestedInDragSource (const SourceDetails& details) override;
+        void itemDropped (const SourceDetails& details) override;
+
         void paint (juce::Graphics&) override;
         void paintOverChildren (juce::Graphics&) override;
         void resized() override;
@@ -85,6 +99,7 @@ namespace wfg::client::ui
         int markedLine() const noexcept { return problemLine; }
         juce::String statusForTest() const;
         bool isReadOnly() const noexcept { return reading.locked; }
+        juce::TextButton& openButtonForTest() noexcept { return openButton; }
 
     private:
         class Editor;
@@ -96,6 +111,7 @@ namespace wfg::client::ui
         juce::CodeDocument document;
         std::unique_ptr<juce::CodeTokeniser> tokeniser;
         std::unique_ptr<Editor> editor;
+        juce::TextButton openButton { "Open in your editor" };
         std::string languageShown;
 
         std::string loaded;                 // the cue's text as last put in the editor

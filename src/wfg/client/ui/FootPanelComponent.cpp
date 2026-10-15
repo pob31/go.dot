@@ -145,6 +145,7 @@ namespace wfg::client::ui
                     its language, one write per finished edit. */
                 ScriptEditorComponent::Actions writing;
                 writing.set = actions.set;
+                writing.openInEditor = actions.editScript;
                 writing.say = [this] (const juce::String& sentence)
                 {
                     note = sentence;

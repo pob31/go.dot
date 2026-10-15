@@ -203,6 +203,8 @@ add_library(wfg_engine STATIC
     wfg/engine/process/JsLanguage.cpp
     wfg/engine/process/ScriptText.h
     wfg/engine/process/ScriptText.cpp
+    wfg/engine/process/ScriptEditing.h
+    wfg/engine/process/ScriptEditing.cpp
     wfg/engine/process/PatchEditor.h
     wfg/engine/process/PatchEditor.cpp
     wfg/engine/pair/Hold.h

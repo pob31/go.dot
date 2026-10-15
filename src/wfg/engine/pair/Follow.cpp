@@ -81,7 +81,7 @@ namespace wfg::pair
             return Gate::ignore;
 
         /*  THIS MACHINE'S CLIENTS (AFT): applied on the main, streamed back. */
-        if (from == origin::window || from == origin::cli || from == "pd"
+        if (from == origin::window || from == origin::cli || from == "pd" || from == "editor"
               || startsWith (from, "ws:") || startsWith (from, "surface:"))
             return Gate::passOn;
 

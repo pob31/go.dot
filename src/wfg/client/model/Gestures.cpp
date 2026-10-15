@@ -695,6 +695,11 @@ namespace wfg::client::gesture
         return { origin::window, "process.help", {} };
     }
 
+    Event editScript (const std::string& cueId)
+    {
+        return { origin::window, "script.edit", { osc::Value::string (cueId) } };
+    }
+
     Event processSend (const std::string& runId, const std::string& name, const process::Atoms& atoms)
     {
         std::vector<osc::Value> args { osc::Value::string (runId), osc::Value::string (name) };
