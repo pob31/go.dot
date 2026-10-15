@@ -172,6 +172,7 @@ add_executable(wfg_tests
     InputCaptureTests.cpp
     TimbreTests.cpp
     OscQueryTests.cpp
+    ProblemsTests.cpp
     ClientTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than

@@ -49,6 +49,7 @@
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/Dual.h>
 #include <wfg/client/model/Picture.h>
+#include <wfg/engine/command/RescanCommands.h>
 #include <wfg/engine/cue/TextFields.h>
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
@@ -686,12 +687,16 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     /*  And the device presets' two (namespace draft §57, AFO), with no table: the names are what is checked. */
     tree::registerPresetCommands (rig.engine.commands(), rig.document, rig.mounts, juce::File {}, nullptr);
 
+    //  And the two looks for this machine's devices (§64).
+    registerRescanCommands (rig.engine.commands(), {}, {});
+
     const std::vector<Event> gestures
     {
         gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneRec ("level", true),
         gesture::laneFree(), gesture::laneRecord (0.0), gesture::laneRecord (12.5), gesture::laneStop(),
 
         gesture::go(), gesture::doh(), gesture::flagLastGo(), gesture::standbyNext(), gesture::standbyPrevious(),
+        gesture::midiRescan(), gesture::serialRescan(),
         gesture::stopAll(), gesture::killAll(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::seek ("R4NID001", 12.5),
@@ -11342,6 +11347,24 @@ TEST_CASE ("client: a mask's outline and a picture's curves are edited as points
     CHECK (model::curveWithPointRemoved (curve, 0).size() == 3);       // an end stays
     CHECK (model::curveWithPointRemoved (curve, 1).size() == 2);
     CHECK (model::curveText ({ { 0.0, 0.0 }, { 1.0, 0.5 } }) == "0 0 1 0.5");
+}
+
+TEST_CASE ("client: the displays offered are the renderer's and this machine's, each once (§64)")
+{
+    /*  The author, 2026-10-15: "Can the screen detection ... happen in the
+        Show Settings panel when clicking on the drop down menu again". The
+        renderer names displays only while it runs; what this machine has is
+        asked of the same lister when a menu opens. The renderer's first, in
+        its order; none twice; an empty name never. */
+    using client::model::mergedDisplays;
+    using Names = std::vector<std::string>;
+
+    CHECK (mergedDisplays ({}, {}).empty());
+    CHECK (mergedDisplays ({ "DELL U2720Q", "Projector" }, {}) == Names { "DELL U2720Q", "Projector" });
+    CHECK (mergedDisplays ({}, { "DELL U2720Q", "Epson" }) == Names { "DELL U2720Q", "Epson" });
+    CHECK (mergedDisplays ({ "Projector", "DELL U2720Q" }, { "DELL U2720Q", "Epson", "" })
+             == Names { "Projector", "DELL U2720Q", "Epson" });
+    CHECK (mergedDisplays ({ "Display 2", "Display 2" }, { "Display 2" }) == Names { "Display 2" });
 }
 
 TEST_CASE ("client: a video cue's place, colour and mask are its picture panel's, and leave the inspector (§47, AAG)")

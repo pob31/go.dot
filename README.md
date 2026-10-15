@@ -141,6 +141,13 @@ has stood in front of the thing.
   that GO started, puts the standby back, and can send each device the command
   that undoes what it was sent. F flags the picked cues to look at after the
   run, and Shift+F the cue the last GO fired, the show locked or not.
+- **What is missing, said where it is used** (namespace draft §64). A cue that
+  needs something this computer lacks tonight - the audio interface, a screen,
+  a MIDI port's device, a plugin, a video input or insert, a network device -
+  or whose file is missing is marked in the cue list with a word; the window's
+  title line has a button per Show settings tab with a problem that opens that
+  tab, and the settings window marks the same tabs. Its device menus look for
+  devices again as they open.
 - **Importing.** Ableton Live sets (`wfg import-als`, several sets making a tour
   with a performance for each venue) and QLab 4 and 5 workspaces
   (`wfg import-qlab`), both also in the window's File menu.

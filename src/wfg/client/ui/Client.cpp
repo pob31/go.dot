@@ -63,6 +63,7 @@
 #include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Readiness.h>
+#include <wfg/client/model/Problems.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/DirectOuts.h>
@@ -168,6 +169,11 @@ namespace wfg::client
 
                 /*  DOH! (PRD §3.32): the command and nothing else (`doh`). */
                 actions.doh             = [this] { doh(); };
+
+                /*  WHAT IS MISSING (namespace draft §64): a warning's page, opened
+                    on Show settings; the missing files', the next such cue. */
+                actions.openSettings    = [this] (const std::string& page) { openShowSettings (page); };
+                actions.revealMissing   = [this] { revealNextMissing(); };
                 actions.undo            = [this] { send (gesture::undo()); };
                 actions.redo            = [this] { send (gesture::redo()); };
                 actions.save            = [this] { save(); };
@@ -1893,8 +1899,10 @@ namespace wfg::client
 
             /*  THE SHOW SETTINGS WINDOW, made once and kept: closing it hides
                 it, and the next open is the same window. From the menu, and
-                once at start when the console was told to. */
-            void openShowSettings()
+                once at start when the console was told to - and on the page a
+                warning names, from the transport's warnings (namespace draft
+                §64); with no page named it opens where it was left. */
+            void openShowSettings (const std::string& page = {})
             {
                 if (! latest)
                     return;
@@ -1902,6 +1910,11 @@ namespace wfg::client
                 if (! audioSettings)
                     audioSettings = std::make_unique<ui::ShowSettingsWindow> (theme, *latest,
                         [this] (Event event) { send (std::move (event)); }, [this] { panic(); });
+
+                audioSettings->showProblems (problemPages);
+
+                if (! page.empty())
+                    audioSettings->showPage (page);
 
                 audioSettings->setVisible (true);
                 audioSettings->toFront (true);
@@ -2116,6 +2129,58 @@ namespace wfg::client
                 cueTileShown = true;
             }
 
+            /*  WHAT IS MISSING (namespace draft §64): the show's objects as last
+                read, what each cue of the list needs, what is missing now, and
+                what that makes of the rows and of the warnings by page. */
+            model::ObjectIndex problemIndex;
+            bool problemsIndexed = false;
+            bool cueNeedsStale = true;
+            bool problemMarksStale = true;
+            model::CueNeeds cueNeeds;
+            std::vector<model::Problem> machineFaults;
+            std::map<std::string, model::Mark> problemMarks;
+            std::vector<model::PageProblems> problemPages;
+
+            /*  The warnings moved: the transport's buttons and the settings
+                window's marks are told, the window only if it has been made. */
+            void problemsMoved()
+            {
+                shell->transport.showProblems (problemPages);
+
+                if (audioSettings)
+                    audioSettings->showProblems (problemPages);
+            }
+
+            /*  THE NEXT CUE WHOSE FILE IS MISSING (namespace draft §64; the
+                author's choice, offered as "Reveal the next cue"): each press
+                of the warning picks the one after the cue picked now, round to
+                the first - revealed, picked and inspected as a failed run's cue
+                is. Under the lock nothing is unfolded or picked: the list is
+                only brought to it. */
+            void revealNextMissing()
+            {
+                std::vector<std::string> cues;
+
+                for (const auto& page : problemPages)
+                    if (page.page.empty())
+                        cues = page.cues;
+
+                if (cues.empty() || ! latest)
+                    return;
+
+                const auto& picked = selection.ids();
+                auto next = picked.empty() ? cues.end() : std::find (cues.begin(), cues.end(), picked.back());
+                next = next == cues.end() || std::next (next) == cues.end() ? cues.begin() : std::next (next);
+
+                if (model::isYes (model::flag (*latest, "/godot/document/locked")))
+                {
+                    shell->cues.revealCue (*next);
+                    return;
+                }
+
+                inspectCueError (*next);
+            }
+
             model::FootReading footReading;
             std::string tileCueAsked;
             double tileSecondsAsked = 0.0;
@@ -2247,7 +2312,42 @@ namespace wfg::client
                     pass and costs two rows a repaint. Both from the same
                     pointer copy, so the list and the strip can never disagree
                     about which tick they are drawing. */
-                show.refresh (*snapshot, reading.listId);
+                const auto rebuilt = show.refresh (*snapshot, reading.listId);
+
+                /*  WHAT IS MISSING (namespace draft §64). What the show declares
+                    is read when the show changes, what each cue of the list
+                    needs when the list is built again, and what each object
+                    says tonight on every pass, by address - and the marks and
+                    warnings are worked out again only when one of those moved. */
+                if (const auto revision = model::text (*snapshot, "/godot/document/revision");
+                      ! problemsIndexed || revision != problemIndex.revision)
+                {
+                    problemIndex = model::indexObjects (*snapshot);
+                    problemsIndexed = true;
+                    cueNeedsStale = true;
+                }
+
+                if (rebuilt || cueNeedsStale)
+                {
+                    cueNeeds = model::needsOf (*snapshot, show.rows(), problemIndex);
+                    cueNeedsStale = false;
+                    problemMarksStale = true;
+                }
+
+                {
+                    auto now = model::machineProblems (*snapshot, problemIndex);
+                    auto files = model::fileProblems (*snapshot, cueNeeds);
+                    now.insert (now.end(), files.begin(), files.end());
+
+                    if (problemMarksStale || now != machineFaults)
+                    {
+                        machineFaults = std::move (now);
+                        problemMarks = model::cueProblems (cueNeeds, machineFaults);
+                        problemMarksStale = false;
+                        problemPages = model::byPage (machineFaults);
+                        problemsMoved();
+                    }
+                }
 
                 //  What the show no longer has cannot stay picked.
                 selection.retain (show.rows());
@@ -2306,8 +2406,10 @@ namespace wfg::client
 
                 shell->cues.show (show, reading.standbyId, selection.ids());
 
-                //  How ready each row's cue is for GO (namespace draft §48, AAM).
-                shell->cues.setReadiness (model::readinessOf (*snapshot, show.rows()));
+                /*  How ready each row's cue is for GO (namespace draft §48, AAM) -
+                    or what it needs and is missing, which takes the same cell
+                    (§64): "ready" is untrue of a cue whose screen is not there. */
+                shell->cues.setReadiness (model::withProblems (model::readinessOf (*snapshot, show.rows()), problemMarks));
 
                 /*  AND WHICH CUES ARE FLAGGED (§63, ALQ), read every pass for the
                     same reason: a flag is a state row, and moves no revision. */

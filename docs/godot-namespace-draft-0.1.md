@@ -8691,7 +8691,7 @@ Three creates, three run gestures, a rescan, and two new addresses for a verb th
 | `strip.release` | `<strip s>` | the hand lifted: a hold clip fades to silence and stops, a play-out clip carries on | a dca strip, `bad-value`; with nothing held, applied and nothing |
 | `run.arm` | `<run s>` | engine origin, submitted by the hook: the retry of a voice claim. The word `voice` leaves the run's `pending` and the member is armed again, now that a track is free | a run not waiting for a voice: applied, nothing |
 | `surface.aim` | `<cue s>` | *(2026-09-25)* the media cue the rotaries edit on the EQ and Send pages, one for every surface; empty lets go. Held in the surface table and published at `/godot/surface/aim`, never stored, and no step of the show's history | a cue that does not exist, `unknown-id`; one that is not media, `bad-value` |
-| `midi.rescan` | — | re-enumerates this machine's MIDI devices and rebinds the declared ports, on an explicit gesture and never on an idle tick, because enumerating blocks for milliseconds on Windows | — |
+| `midi.rescan` | — | re-enumerates this machine's MIDI devices and rebinds the declared ports, on an explicit gesture and never on an idle tick, because enumerating blocks for milliseconds on Windows. *Registered in §64 (2026-10-15): it retries an unbound port and one whose device has gone, never a bound one whose device is there (ALT), and counts at `port/scans`* | — |
 | `node.set` | `<address s> <value>` — two new live addresses | `/godot/run/<id>/trim` and `/godot/dca/<id>/trim`, answered in front of the document (§16.4); the applied record carries the value as an `f:` atom, and no undo transaction is opened | out of range, `bad-value`; not a number, `type-mismatch`. A write to a run that has finished is applied and ignored, as `run.kill` on one is |
 
 **One reason is new**: `needs-strip`, in `needs-go`'s shape — a sampler member fired by name, by
@@ -25636,7 +25636,7 @@ millisecond. The jump fell 6.4 ms with the setting's 6; the Mac's reported outpu
   the machine whose helper wrote it has; a machine row saved in show.xml is still refused under
   the lock, as every `persist=show` row is; a log from before RD.3 that undoes an audio settings
   edit no longer replays (no fixture has one); `midi.rescan`, which `ports/inputs` names, is not
-  a command.
+  a command (it is since §64, machine-local).
 - **RD.4**, 2026-10-11: the pairing settings (AGC, AFV). `pair::PairSettings` - the role
   (`main`, `backup`, `none`), the peers (`host:port`, the port 5010 when left off, an IPv6
   address in brackets, a repeat kept once) and the timeout (one second, a tenth to thirty) -
@@ -29552,3 +29552,127 @@ right of the row (picture: `build/flag-shots/cue-list-flags.png`, with `WFG_SNAP
 `schema.*`, `client.boundary` and `source.comments` pass. By hand, over OSC on a copy of `phase4`:
 refused before any GO, taken under the lock, no unsaved dot, and after a save only state.xml carries
 `flagged="true"`.
+
+## 64. What is missing, said where it is used
+
+Asked by the author on 2026-10-15, after Show settings was put in sections (§39.14): *"1. Can the
+screen detection, MIDI detection, Audio device detection happen in the Show Settings panel when
+clicking on the drop down menu again and not just when the program starts? 2. Then when a cue is
+missing something (screen is not connected for a video output, audio interface for a audio/mic cue,
+missing plugin, video insert etc...) mark the cues in the cue list. 3. Add warnings in the main window
+for each type of error. Clicking on one of these icons opens the show settings to the relevant tab.
+4. In the Show settings, mark sections or tabs with problems."* Built the same day, on the engine and
+the desktop window. Decisions run from ALS.
+
+### 64.1 Rows and commands
+
+| Row | Type | Access | Persist | Default |
+|---|---|---|---|---|
+| `/godot/port/scans` | `i` | r | none | 0 |
+| `/godot/engine/serialScans` | `i` | r | none | 0 |
+| `/godot/cue/<id>/missing` (media, video) | `T` | r | none | false |
+
+`port/scans` counts the looks for MIDI devices - one when the show opens, one per `midi.rescan`;
+`engine/serialScans` the looks for serial ports - every five seconds while serving, and one at once on
+`serial.rescan`. A menu that asked for a look opens once the count moves past what it saw. `missing` is
+true when the cue's file was looked for and is missing or unreadable: the lengths hold nought for such
+a file and nothing for one not read yet (an import a moment ago), which is not called missing. A still
+is not read for a length, so a missing still is said by the read-ahead's mark alone (§48).
+
+| Command | Node | Params | Notes |
+|---|---|---|---|
+| `midi.rescan` | `/godot/cmd/midi/rescan` | — | this machine's MIDI devices listed again; ports retried (ALT) |
+| `serial.rescan` | `/godot/cmd/serial/rescan` | — | this machine's serial ports listed at the next tick |
+
+Both are machine-local (§58, RD.3): never sent to a backup, no step of undo, nothing in the show.
+Every verb that replays a log takes them and does nothing.
+
+### 64.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **ALS** | **A device menu looks again as it opens.** The audio interface's output and input menus are filled again from what the system lists - the path Rescan interfaces takes, which reads the registry for ASIO and opens no device, so the interface that is playing goes on playing; an interface the show names and this machine lacks stays in the menu, "(not on this machine)". The Video page's display menu adds the displays this machine has, asked of the lister the renderer uses, here, so a screen is offered before any output is switched on. The MIDI tab's device menus and the Serial tab's Where menu send `midi.rescan` / `serial.rescan` and open once the engine has looked, or half a second on with what there is. Speeds, and everything that is not a device, open at once. | the author's ask; the shape mine, for review |
+| **ALT** | **A MIDI rescan retries what it could change, and nothing else**: a port that is not bound and names a device (one plugged in since binds now), and a bound port none of whose devices is there any more by identifier or name (let go of, so it says so). **A bound port whose device is there is never closed** - not even when a second device of the same name is plugged in beside it, which would make a name-only match ambiguous. Listing runs on the message thread, where ports have always been bound; the tick takes the lists and the bindings as it takes a rebind's. | mine, for review |
+| **ALU** | **What counts is what is missing or failed** - no audio interface running, a screen an output was given and is not there, a MIDI or serial port not found, a plugin missing or failed, a named input past the interface, a video input or insert with nothing arriving, a network device that says it cannot be used or whose connection is down, a file missing. **Waiting is not a problem**: timecode not arriving, a device not answering a listen, plugins waiting for Load now, a rack over its budget, a renderer starting, a port opening, audio being applied. | the author's (offered as "Missing or failed") |
+| **ALV** | **A missing file has a warning of its own, with no page: pressing it picks the next cue whose file is missing**, after the cue picked now and round to the first - revealed, unfolded and inspected as a failed run's cue is; under the lock only scrolled to. | the author's (offered as "Reveal the next cue") |
+| **ALW** | **The engine keeps the facts; the window joins them to cues**, as it joins the read-ahead's (§48). What the show declares is read when the show changes, what each cue of the list needs when the list is built again, and what each object says tonight on every pass, by address - nothing walks the whole tree on a pass. The page shows none of it (§14.16: the page need not have every view). | mine, for review |
+| **ALX** | **A cue that needs something missing wears a warning triangle in its readiness cell, in the failure colour, and a word after its name** ("no audio", "no screen", "no port", "no input", "no source", "no return", "no device", "plugin missing", "plugin failed", "missing"), every sentence in its tooltip. A problem takes the cell from a readiness mark: "ready" is untrue of a cue whose screen is not there. **A shut group carries what its hidden members need**, as "inside" and how many. A cue switched off needs nothing tonight. | mine, for review |
+| **ALY** | **The main window's warnings are buttons on the title line, before the clock, one per page with a problem**, in the settings window's order: the page's icon - a cue kind's where one fits (the audio interface a speaker, MIDI its socket, the network an OSC message, Video a picture, Inputs a mic), new ones otherwise (a plugin, a rack, a surface, a serial plug) - and how many, in the failure colour; the page's name, what pressing does and the sentences in the tooltip. Pressing opens Show settings on that page, the warp editor put away first. **Redundancy has no button**: its banner says the alarm and offers the answer (§58, RD.11). | mine, for review |
+| **ALZ** | **Show settings marks its pages**: the warning triangle and a count at the end of each page's row, and the sum on its section's heading, the sentences as their tooltips. | mine, for review |
+| **AMA** | **The audio interface is a problem only when something needs it**: a show with a sound or a mic cue, or one whose interface is switched on. A show of pictures with sound switched off says nothing. | mine, for review |
+| **AMB** | **The Timecode page carries no marks of its own**: the port MTC leaves on is the MIDI page's, the output LTC plays on the Outputs page's, the input LTC comes in on the Inputs page's, and each is said there once. A timecode cue and a time group are still marked by what they use. | mine, for review |
+
+### 64.3 What each cue needs
+
+| Cue | Needs |
+|---|---|
+| media | the audio interface; the plugins its FX switch in; its file |
+| mic | the audio interface; its input; its rack channel's plugins; its FX's |
+| video | the renderer; every output (or zone) its canvas is shown on; its video input or insert; its movie's file |
+| midi | its port |
+| process | its MIDI in and out ports |
+| osc | its device, by the longest prefix (`deviceOf`) |
+| timecode | MTC: the port `sync/mtcOut` names; LTC: the audio interface |
+| time group | LTC: the input `sync/ltcIn` names; MTC: the port `sync/mtcIn` names |
+
+| Page | A problem when |
+|---|---|
+| Audio interface | the last apply failed, the interface is disconnected (no clock), or none runs and something needs one (AMA) |
+| Outputs | the show's outputs take more channels than the open interface gives |
+| Output patch | an output is patched past the open interface's last channel |
+| Inputs | an input says why it is not arriving (`input/problem`) |
+| Rack | a plugin on a rack channel is missing or failed |
+| Plugins | a plugin of the set is missing or failed |
+| Video | the renderer failed; while it runs, an enabled output not on its screen, an enabled input with nothing arriving, an insert with nothing coming back |
+| Network | a device says it cannot be used (`mount/problem`), or its connection is down and being retried |
+| MIDI | a port not bound, with why |
+| Surfaces | an enabled surface not connected, with why |
+| Serial | a port being retried, with why |
+| Redundancy | the pair's alarm (a mark here; no button, ALY) |
+
+The words are the implementer's, for the author's review: the cue words above; the sentences "No
+audio interface is running: sound and mic cues play nothing", "The audio interface is disconnected:
+cues are paused, waiting for it and its clock", "The audio interface did not open: ...", "The show's
+outputs take N channels and the interface gives M: the last are not heard", "An output is patched to
+channel N and the interface gives M: it is not heard", "Input / Plugin / Output / Video input / Video
+insert / Device / MIDI port / Surface / Serial port <name>: <the engine's sentence>", "The program that
+draws the pictures failed", "Missing: <file> is not in the show's media, or Go.dot cannot read it - GO
+will play nothing of it", each followed by " - Show settings, <page>."; "A cue inside needs what is
+missing:" / "N cues inside need what is missing:"; the buttons' "<page> - press to open Show settings
+on it:" and "Missing files - press to pick the next cue whose file is missing:"; "(not on this
+machine)" on an interface.
+
+### 64.4 Not done
+
+- **The page shows none of it** (ALW). The facts are all in the tree, so it could join them the same
+  way; nobody has asked.
+- **An FX that plays its cue dry** (`fx/problem`: a width the plugin will not take) is neither missing
+  nor failed (ALU), and is not marked; the FX panel says it.
+- **A direct output past the interface** is said on the Outputs page, not on the cues routed to it.
+- **MIDI devices are not watched**: a device plugged in is found when a menu asks, or by
+  `midi.rescan` from anywhere, not by itself. JUCE's device-list callback could do it unasked.
+- **The five-second serial look runs on the tick thread**, as it did before (with the Pd editor's
+  look beside it); `serial.rescan` only asks for it sooner. It could move to the message thread, as
+  MIDI's has.
+- **Show settings reads every page's rows on every pass, even while hidden**, as it did before.
+
+### 64.5 Tests
+
+`ProblemsTests` (new, C and fr_FR, on snapshots made by hand): what is missing is said on the page
+that puts it right, in the window's order, with the object's own name and the engine's full stop
+dropped; waiting is not a problem and nothing is said of what nobody needs; a cue that needs a missing
+thing is marked, a shut group carries its hidden member's mark and stops when opened, a cue switched
+off needs nothing; a file looked for and missing marks its cue and its warning names the cue; a
+problem wins over ready. `MidiTests`: which ports a rescan retries (`portsToRetry`, no hardware), and
+a rescan through the binder with a device no machine has. `TreeTests`: `missing` false before a read,
+false when there, true when read and missing, nothing on a fade. `MachineScopeTests` and `ClientTests`
+(the gestures against the real registry) know both commands. `ClientTests`: the displays offered,
+each once. `ShowSettingsUiTests`: the interface menus refilled as they open, an absent interface kept
+and Apply sending its bare name; the MIDI and Serial menus sending their rescan and opening when the
+count moves or half a second on; a page asked for from outside; the page marks and their headings,
+gone when put right; the transport's buttons, their counts, their order and what pressing asks.
+`RunPaneUiTests`: the warning in the readiness cell and the word after the name, nothing changed right
+of the cell. `schema.*`, `client.boundary`, `source.comments`. By hand, headless over OSC on a copy of
+`phase4`: `midi.rescan` moved `port/scans` from 1 to 2 with the lists read again, `serial.rescan`
+moved `serialScans`. Pictures in `build/problem-shots` (`cue-list-problems.png`,
+`transport-problems.png`, `show-settings-problems.png`), with `WFG_SNAPSHOT_DIR`.

@@ -20,6 +20,7 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <cstdlib>
 #include <map>
 #include <string_view>
 #include <utility>
@@ -84,6 +85,11 @@ namespace wfg::client::model
             rows.push_back (std::move (row));
 
         return rows;
+    }
+
+    int readSerialScans (const tree::TreeSnapshot& snapshot)
+    {
+        return std::atoi (text (snapshot, "/godot/engine/serialScans").c_str());
     }
 
     std::vector<SystemSerialPort> readSystemSerialPorts (const tree::TreeSnapshot& snapshot)

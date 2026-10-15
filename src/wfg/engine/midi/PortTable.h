@@ -110,6 +110,12 @@ namespace wfg::midi
         const std::vector<Device>& inputs() const noexcept { return inputs_; }
         const std::vector<Device>& outputs() const noexcept { return outputs_; }
 
+        /*  HOW MANY TIMES THE DEVICES WERE LOOKED FOR - at start and on each
+            `midi.rescan` (namespace draft §64), published as `ports/scans`: a
+            window that asked opens its menu once this moves past what it saw. */
+        void countScan() noexcept { ++scans_; }
+        int scans() const noexcept { return scans_; }
+
         /*  The names, one per line. NEWLINE and not space, because a device
             name contains spaces and nothing else would split it back - the
             same argument `document/warnings` makes. */
@@ -187,5 +193,6 @@ namespace wfg::midi
     private:
         std::map<std::string, Binding> bindings;
         std::vector<Device> inputs_, outputs_;
+        int scans_ = 0;
     };
 }

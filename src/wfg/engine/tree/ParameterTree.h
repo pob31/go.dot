@@ -139,6 +139,10 @@ namespace wfg::tree
             path, a tab and a few words a line; looked for by serve. */
         std::string serialPorts;
 
+        /*  And how many times they were looked for - every five seconds and at
+            once on `serial.rescan` (namespace draft §64). */
+        int serialScans = 0;
+
         /** `dummy` in Phase 1, `hosted` or `device` from Phase 2. */
         std::string clock = "dummy";
 

@@ -83,7 +83,13 @@ namespace wfg::client::model
         copy, paste,
 
         //  How ready a row's cue is for GO (namespace draft §48, AAS).
-        loading, ready, partly, missing
+        loading, ready, partly, missing,
+
+        /*  WHAT IS MISSING, AND WHERE IT IS PUT RIGHT (namespace draft §64): a
+            cue that needs something this machine lacks, and the settings pages
+            the main window's warnings name - a plugin, a rack, a surface and a
+            serial port having no cue kind's icon to borrow. */
+        warning, plugin, rack, surface, serial
     };
 
     /*  THE ICON A ROW IS RECOGNISED BY: a group's mode (a sequence, a

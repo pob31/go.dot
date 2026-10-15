@@ -48,6 +48,8 @@ Quelques vérifications depuis un terminal (sous Windows, `wfg.exe` dans le doss
 
 *Show settings* range ses onglets à gauche en cinq sections : Show, Audio, Video, Controllers et Getting started. La dernière, **Getting started**, reprend chaque autre onglet sous sa section, avec une phrase sur son rôle.
 
+**Quand il manque quelque chose.** Une cue qui a besoin de quelque chose que cet ordinateur n'a pas ce soir - l'interface audio, l'écran donné à une sortie, l'appareil d'un port MIDI, un plugin, une entrée ou un insert vidéo, un appareil réseau - ou dont le fichier manque porte un triangle d'avertissement et un mot (*no audio*, *no screen*, *no port*...) après son nom ; survolez-le pour savoir pourquoi. La ligne de titre de la fenêtre principale montre un bouton pour chaque onglet de *Show settings* qui a un problème, avec leur nombre : appuyez dessus pour ouvrir cet onglet. Le bouton des fichiers manquants sélectionne la cue suivante dont le fichier manque. *Show settings* marque les mêmes onglets et leurs sections. Les menus d'appareils (l'interface audio, un écran, un appareil MIDI, un port série) regardent à nouveau quand on les ouvre : un appareil branché à l'instant y figure.
+
 ## Votre premier spectacle en dix minutes
 
 Un spectacle est un dossier avec au moins un fichier `.wfg` et un dossier `media/` où Go.dot copie vos sons. Rangez-le où vous voulez, emportez-le sur une autre machine : seuls les réglages audio sont à revoir.

@@ -62,6 +62,10 @@ namespace wfg::client::model
     /*  What this machine has now, from `/godot/engine/serialPorts`. */
     std::vector<SystemSerialPort> readSystemSerialPorts (const tree::TreeSnapshot& snapshot);
 
+    /*  How many times the engine has looked for them (`/godot/engine/serialScans`,
+        namespace draft §64), as `readMidiScans` counts MIDI's. */
+    int readSerialScans (const tree::TreeSnapshot& snapshot);
+
     /*  The speeds a port opens at, in the order the menu offers them. */
     const std::vector<int>& serialSpeeds();
 }

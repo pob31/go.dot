@@ -101,6 +101,8 @@ namespace wfg::midi
             if (! wish.id.empty())
                 results.push_back (bindOne (wish));
 
+        remember (results);
+
         /*  REMEMBERED WITH THE IDENTIFIERS IT MATCHED, which the caller writes
             into the document before the tick thread runs. Remembered without
             them, the first show edit would read a port whose identifier had
@@ -205,6 +207,8 @@ namespace wfg::midi
         if (results.empty())
             return;
 
+        remember (results);
+
         {
             const std::lock_guard<std::mutex> lock { mailbox };
 
@@ -213,6 +217,99 @@ namespace wfg::midi
         }
 
         anyFinished.store (true, std::memory_order_release);
+    }
+
+    void PortBinder::remember (const std::vector<PortBound>& results)
+    {
+        for (const auto& result : results)
+        {
+            if (result.gone)
+                lastBound.erase (result.id);
+            else
+                lastBound[result.id] = result.binding.bound;
+        }
+    }
+
+    //==========================================================================
+    std::vector<std::string> PortBinder::portsToRetry (const std::vector<PortWish>& applied,
+                                                       const std::map<std::string, bool>& bound,
+                                                       const std::vector<Device>& inputs,
+                                                       const std::vector<Device>& outputs)
+    {
+        const auto there = [] (const std::vector<Device>& devices, const std::string& name, const std::string& id)
+        {
+            return std::any_of (devices.begin(), devices.end(), [&name, &id] (const Device& device)
+            {
+                return (! id.empty() && device.identifier == id) || (! name.empty() && device.name == name);
+            });
+        };
+
+        std::vector<std::string> out;
+
+        for (const auto& wish : applied)
+        {
+            const auto namesInput = ! wish.inputDevice.empty() || ! wish.inputDeviceId.empty();
+            const auto namesOutput = ! wish.outputDevice.empty() || ! wish.outputDeviceId.empty();
+
+            if (wish.id.empty() || (! namesInput && ! namesOutput))
+                continue;
+
+            const auto found = bound.find (wish.id);
+            const auto isBound = found != bound.end() && found->second;
+
+            if (! isBound)
+            {
+                out.push_back (wish.id);
+                continue;
+            }
+
+            const auto inputGone = namesInput && ! there (inputs, wish.inputDevice, wish.inputDeviceId);
+            const auto outputGone = namesOutput && ! there (outputs, wish.outputDevice, wish.outputDeviceId);
+
+            if (inputGone || outputGone)
+                out.push_back (wish.id);
+        }
+
+        return out;
+    }
+
+    void PortBinder::rescan()
+    {
+        DeviceLists found { MidiInputs::availableDevices(), MidiSender::availableDevices() };
+        std::vector<PortBound> results;
+
+        for (const auto& id : portsToRetry (applied, lastBound, found.inputs, found.outputs))
+            for (const auto& wish : applied)
+                if (wish.id == id)
+                {
+                    release (id);
+                    results.push_back (bindOne (wish));
+                }
+
+        remember (results);
+
+        {
+            const std::lock_guard<std::mutex> lock { mailbox };
+
+            for (auto& result : results)
+                finished.push_back (std::move (result));
+
+            scanned = std::move (found);
+        }
+
+        if (! results.empty())
+            anyFinished.store (true, std::memory_order_release);
+
+        anyScanned.store (true, std::memory_order_release);
+    }
+
+    std::optional<PortBinder::DeviceLists> PortBinder::takeDevices()
+    {
+        if (! anyScanned.exchange (false, std::memory_order_acq_rel))
+            return std::nullopt;
+
+        const std::lock_guard<std::mutex> lock { mailbox };
+        return std::exchange (scanned, std::nullopt);
     }
 
     std::vector<PortBound> PortBinder::take()

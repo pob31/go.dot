@@ -50,7 +50,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -112,6 +114,36 @@ namespace wfg::midi
             port table. Empty, with no lock taken, on every tick nothing did. */
         std::vector<PortBound> take();
 
+        /*  MESSAGE THREAD, on `midi.rescan` (namespace draft §64): this
+            machine's devices listed again, and the ports `portsToRetry` names
+            closed and opened again - one with no device finds the device
+            plugged in since, one whose device has gone says so. What came of
+            it reaches the tick thread through `take`, and the lists through
+            `takeDevices`. */
+        void rescan();
+
+        /** What one look found. */
+        struct DeviceLists
+        {
+            std::vector<Device> inputs, outputs;
+        };
+
+        /*  TICK THREAD: the lists the last `rescan` found, once; nothing, with
+            no lock taken, while none has finished. */
+        std::optional<DeviceLists> takeDevices();
+
+        /*  WHICH PORTS A RESCAN TRIES AGAIN - the whole rule, with no device
+            opened, so a test can hand it lists. A port that is not bound and
+            names a device; and a bound one none of whose devices is there any
+            more, by identifier or by name. A bound port whose device is there
+            is never touched, so a rescan in the middle of a show drops no byte
+            on a working cable - not even when a second device of the same name
+            has been plugged in beside it. */
+        static std::vector<std::string> portsToRetry (const std::vector<PortWish>& applied,
+                                                      const std::map<std::string, bool>& bound,
+                                                      const std::vector<Device>& inputs,
+                                                      const std::vector<Device>& outputs);
+
     private:
         PortBound bindOne (const PortWish& wish);
         void release (const std::string& portId);
@@ -124,9 +156,15 @@ namespace wfg::midi
         std::uint64_t wantedSeq = 0;          // under `mailbox`
         std::vector<PortBound> finished;      // under `mailbox`
         std::atomic<bool> anyFinished { false };
+        std::optional<DeviceLists> scanned;   // under `mailbox`
+        std::atomic<bool> anyScanned { false };
 
         std::vector<PortWish> handed;         // the tick thread's own
         std::vector<PortWish> applied;        // the message thread's own
         std::uint64_t appliedSeq = 0;         // the message thread's own
+        std::map<std::string, bool> lastBound; // the message thread's own: what each port came to
+
+        //  The message thread's own: what came of each port, remembered for the next rescan.
+        void remember (const std::vector<PortBound>& results);
     };
 }

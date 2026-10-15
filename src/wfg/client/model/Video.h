@@ -236,6 +236,15 @@ namespace wfg::client::model
     /** The displays this machine has, by the names the system gives them. */
     std::vector<std::string> readDisplays (const tree::TreeSnapshot&);
 
+    /*  THE DISPLAYS A MENU OFFERS (author, 2026-10-15: "Can the screen
+        detection ... happen in the Show Settings panel when clicking on the
+        drop down menu again"): the renderer's, in its order, then the ones
+        this machine has that it has not named - the renderer looks only while
+        it runs, so a screen plugged in before an output is switched on is
+        still offered. Each name once. */
+    std::vector<std::string> mergedDisplays (const std::vector<std::string>& published,
+                                             const std::vector<std::string>& here);
+
     /*  A cue's or an output's canvas as a menu: "(none)" first, which shows
         nothing, then every canvas by name with its size. The key is the
         identifier, so a canvas renamed leaves every cue on it where it was. */

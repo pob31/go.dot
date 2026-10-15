@@ -46,6 +46,8 @@ Useful checks from a terminal (on Windows, `wfg.exe` in the install folder; on m
 
 *Show settings* lists its tabs down the left in five sections: Show, Audio, Video, Controllers and Getting started. The last, **Getting started**, lists every other tab under its section, with one sentence on what each is for.
 
+**When something is missing.** A cue that needs something this computer lacks tonight - the audio interface, the screen an output was given, a MIDI port's device, a plugin, a video input or insert, a network device - or whose file is missing wears a warning triangle and a word (*no audio*, *no screen*, *no port*...) after its name; hover over it for why. The main window's title line shows a button for each *Show settings* tab with a problem, with how many: press it to open that tab. The missing-files button picks the next cue whose file is missing. *Show settings* marks the same tabs and their sections. The device menus (the audio interface, a display, a MIDI device, a serial port) look again when you open them, so a device plugged in a moment ago is in the list.
+
 ## Your first show in ten minutes
 
 A show is a folder that contains one or more `.wfg` files plus a `media/` folder that Go.dot copies your sounds into. Save it anywhere, carry it to another machine, and only the audio settings need a second look.

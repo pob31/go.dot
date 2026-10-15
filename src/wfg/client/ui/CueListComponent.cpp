@@ -837,9 +837,13 @@ namespace wfg::client::ui
         if (ready != nullptr)
         {
             const auto side = juce::jmin (static_cast<float> (unit) * 1.9f, 12.0f * static_cast<float> (theme.type));
-            const auto tone = ready->icon == model::Icon::missing ? Look::colour (theme, "failed")
-                            : ready->icon == model::Icon::partly  ? Look::colour (theme, "waiting")
-                                                                  : faint;
+            /*  MISSING AND WHAT IS MISSING (namespace draft §64) in the failure
+                colour, each its own shape - a ring struck through, a triangle -
+                and its word after the name. */
+            const auto tone = ready->icon == model::Icon::missing || ready->icon == model::Icon::warning
+                                ? Look::colour (theme, "failed")
+                            : ready->icon == model::Icon::partly ? Look::colour (theme, "waiting")
+                                                                 : faint;
 
             icons::draw (g, ready->icon, readyCell.toFloat().withSizeKeepingCentre (side, side), tone);
         }

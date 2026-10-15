@@ -564,6 +564,57 @@ namespace wfg::client::ui
                     ring (l, 12.0f, 12.0f, 7.0f);
                     line (l, 7.0f, 17.0f, 17.0f, 7.0f);
                     break;
+
+                //  WHAT IS MISSING, AND WHERE (namespace draft §64) -------------
+                case model::Icon::warning:
+                    //  A triangle with its mark: something this cue needs is not here tonight.
+                    l.startNewSubPath (12.0f, 3.5f);
+                    l.lineTo (21.0f, 19.5f);
+                    l.lineTo (3.0f, 19.5f);
+                    l.closeSubPath();
+                    line (l, 12.0f, 9.0f, 12.0f, 13.5f);
+                    ring (f, 12.0f, 16.6f, 1.2f);
+                    break;
+
+                case model::Icon::plugin:
+                    //  A box with a lead out of each side: something a signal goes through.
+                    l.addRoundedRectangle (7.0f, 6.0f, 10.0f, 12.0f, 1.5f);
+                    line (l, 2.5f, 12.0f, 7.0f, 12.0f);
+                    line (l, 17.0f, 12.0f, 21.5f, 12.0f);
+                    line (l, 10.0f, 9.5f, 14.0f, 9.5f);
+                    break;
+
+                case model::Icon::rack:
+                    //  Three units in a frame: a rack of channels.
+                    l.addRoundedRectangle (4.0f, 3.5f, 16.0f, 17.0f, 1.5f);
+                    line (l, 4.0f, 9.2f, 20.0f, 9.2f);
+                    line (l, 4.0f, 14.8f, 20.0f, 14.8f);
+                    ring (f, 7.0f, 6.4f, 0.9f);
+                    ring (f, 7.0f, 12.0f, 0.9f);
+                    ring (f, 7.0f, 17.6f, 0.9f);
+                    break;
+
+                case model::Icon::surface:
+                    //  A surface seen from above: two faders and a row of pads.
+                    l.addRoundedRectangle (3.0f, 4.0f, 18.0f, 16.0f, 1.5f);
+                    line (l, 7.5f, 7.5f, 7.5f, 16.5f);
+                    line (l, 12.0f, 7.5f, 12.0f, 16.5f);
+                    f.addRectangle (6.0f, 10.0f, 3.0f, 2.2f);
+                    f.addRectangle (10.5f, 12.5f, 3.0f, 2.2f);
+                    f.addRoundedRectangle (15.5f, 7.5f, 3.0f, 3.0f, 0.6f);
+                    f.addRoundedRectangle (15.5f, 13.0f, 3.0f, 3.0f, 0.6f);
+                    break;
+
+                case model::Icon::serial:
+                    //  A USB plug and its lead: an Arduino's cable.
+                    l.addRoundedRectangle (8.0f, 3.0f, 8.0f, 9.0f, 1.0f);
+                    f.addRectangle (10.0f, 5.0f, 1.6f, 2.4f);
+                    f.addRectangle (12.4f, 5.0f, 1.6f, 2.4f);
+                    line (l, 9.5f, 12.0f, 9.5f, 15.0f);
+                    line (l, 14.5f, 12.0f, 14.5f, 15.0f);
+                    line (l, 9.5f, 15.0f, 14.5f, 15.0f);
+                    line (l, 12.0f, 15.0f, 12.0f, 21.0f);
+                    break;
             }
 
             return s;

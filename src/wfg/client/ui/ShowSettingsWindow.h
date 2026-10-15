@@ -4,9 +4,11 @@
 #include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/command/Event.h>
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <string>
+#include <vector>
 
 namespace wfg::tree { class TreeSnapshot; }
-namespace wfg::client::model { struct Theme; }
+namespace wfg::client::model { struct Theme; struct PageProblems; }
 namespace wfg::client::ui
 {
     /*  KEPT ON TOP OF THE SHOW'S WINDOW (author, 2026-09-30: "selecting the
@@ -24,6 +26,12 @@ namespace wfg::client::ui
                              std::function<void (Event)> send, std::function<void()> panic = {});
         ~ShowSettingsWindow() override;
         void refresh (const tree::TreeSnapshot&);
+
+        /** Shows the page of that name (model/SettingsPages.h); a name it has not is ignored. */
+        void showPage (const std::string& name);
+
+        /** Marks the pages, and their sections, that have a problem (model/Problems.h, namespace draft §64). */
+        void showProblems (const std::vector<model::PageProblems>& pages);
         void closeButtonPressed() override;
         bool keyPressed (const juce::KeyPress&) override;
     private:

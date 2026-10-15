@@ -21,6 +21,7 @@
 #include <wfg/client/ui/Shell.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
 #include <wfg/client/ui/TransportComponent.h>
+#include <wfg/client/model/Problems.h>
 #include <wfg/client/ui/NewCueBarComponent.h>
 #include <wfg/client/ui/NewCueMenu.h>
 #include <wfg/client/ui/Look.h>
@@ -301,6 +302,89 @@ TEST_CASE ("cue list: how ready each cue is, a mark in a cell of its own beside 
         juce::FileOutputStream out { file };
         REQUIRE (out.openedOk());
         CHECK (juce::PNGImageFormat().writeImageToStream (after, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
+TEST_CASE ("cue list: a cue that needs something missing wears the warning in the readiness cell, and its word after the name (§64)")
+{
+    /*  The author, 2026-10-15: "when a cue is missing something ... mark the
+        cues in the cue list". The problem takes the cell a readiness mark
+        would - "ready" is untrue of a cue whose screen is missing - and its
+        word follows the name, as "missing" does. With WFG_SNAPSHOT_DIR set,
+        cue-list-problems.png. */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto sound = document.createCue (list.id, 0, "media", "Thunder").id;
+    const auto picture = document.createCue (list.id, 1, "video", "Logo").id;
+    REQUIRE (document.createCue (list.id, 2, "memo", "Note").ok);
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+
+    wfg::tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, list.id));
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, {});
+    cues.setSize (900, 200);
+    cues.show (show, {}, {});
+
+    const auto paint = [&cues]
+    {
+        juce::Image canvas (juce::Image::ARGB, 900, 200, true, juce::SoftwareImageType());
+        juce::Graphics g (canvas);
+        cues.paintEntireComponent (g, false);
+        return canvas;
+    };
+
+    const std::map<std::string, model::Mark> readiness { { sound, model::readinessMark ("armed", {}, "media") },
+                                                         { picture, model::readinessMark ("armed", {}, "video") } };
+    cues.setReadiness (readiness);
+    const auto ready = paint();
+
+    const std::map<std::string, model::Mark> problems {
+        { sound, { model::Icon::warning, "no audio", "No audio interface is running - Show settings, Audio interface." } },
+        { picture, { model::Icon::warning, "no screen", "Output Front: no such display - Show settings, Video." } } };
+    cues.setReadiness (model::withProblems (readiness, problems));
+    const auto marked = paint();
+
+    const auto unit = juce::roundToInt (theme.type * 7.0);
+    const auto kindLeft = 900 - unit / 2 - (3 * 6 + 8) * unit;
+    const auto cellLeft = kindLeft - 3 * unit;
+
+    int changedInCell = 0, changedRightOfIt = 0, changedLeftOfIt = 0;
+
+    for (int y = 0; y < 200; ++y)
+        for (int x = 0; x < 900; ++x)
+            if (ready.getPixelAt (x, y) != marked.getPixelAt (x, y))
+            {
+                if (x >= kindLeft)          ++changedRightOfIt;
+                else if (x >= cellLeft)     ++changedInCell;
+                else                        ++changedLeftOfIt;
+            }
+
+    CHECK (changedInCell > 0);          // the warning shape where "ready" was
+    CHECK (changedRightOfIt == 0);      // the kind and the times are as they were
+    CHECK (changedLeftOfIt > 0);        // "no audio" and "no screen" after the names
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const juce::File file { juce::File (dir).getChildFile ("cue-list-problems.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+        CHECK (juce::PNGImageFormat().writeImageToStream (marked, out));
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
 }

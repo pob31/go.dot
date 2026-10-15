@@ -46,6 +46,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -1028,6 +1029,80 @@ namespace
         std::string listId, port;
         std::int64_t tick = 0;
     };
+}
+
+TEST_CASE ("midi: a rescan tries a port with no device again and leaves a bound one alone (§64)")
+{
+    /*  The author, 2026-10-15: "Can the screen detection, MIDI detection,
+        Audio device detection happen in the Show Settings panel when clicking
+        on the drop down menu again and not just when the program starts?" A
+        rescan lists the devices again and tries again what that could change:
+        a port with no device, and a bound port whose device has gone. A bound
+        port whose device is there is never closed - not even when a second
+        device of the same name has been plugged in beside it. */
+    using midi::Device;
+    using midi::PortBinder;
+    using midi::PortWish;
+    using Ids = std::vector<std::string>;
+
+    const auto wish = [] (std::string id, std::string in, std::string out, std::string outId = {})
+    {
+        PortWish made;
+        made.id = std::move (id);
+        made.label = made.id;
+        made.inputDevice = std::move (in);
+        made.outputDevice = std::move (out);
+        made.outputDeviceId = std::move (outId);
+        return made;
+    };
+
+    const std::vector<PortWish> show {
+        wish ("PORTNONE", "", ""),                             // names nothing: never tried
+        wish ("PORTWAIT", "", "D700"),                         // unbound, names a device: tried
+        wish ("PORTHERE", "Keys", "Keys"),                     // bound, both there by name: left
+        wish ("PORTIDED", "", "Desk", "usb#7"),                // bound, there by identifier only: left
+        wish ("PORTGONE", "", "Synth"),                        // bound, its device gone: tried
+        wish ("PORTHALF", "Pads", "Pads"),                     // bound, its input gone: tried
+    };
+
+    const std::map<std::string, bool> bound {
+        { "PORTNONE", false }, { "PORTWAIT", false }, { "PORTHERE", true },
+        { "PORTIDED", true }, { "PORTGONE", true }, { "PORTHALF", true },
+    };
+
+    const std::vector<Device> ins { { "Keys", "in#1" } };
+    const std::vector<Device> outs { { "Keys", "out#1" }, { "Keys", "out#2" }, { "Desk renamed", "usb#7" },
+                                     { "Pads", "out#3" } };
+
+    CHECK (PortBinder::portsToRetry (show, bound, ins, outs) == Ids { "PORTWAIT", "PORTGONE", "PORTHALF" });
+
+    //  A port never heard of counts as not bound: tried.
+    CHECK (PortBinder::portsToRetry ({ wish ("PORTNEW1", "", "D700") }, {}, ins, outs) == Ids { "PORTNEW1" });
+
+    /*  AND THE LOOK ITSELF, WITH NO HARDWARE: a port whose device no machine
+        has is tried again and says why again; the lists the look found are
+        handed over once. */
+    midi::MidiInputs inputs;
+    midi::MidiSender outputs;
+    PortBinder binder { inputs, outputs };
+
+    const auto atStart = binder.bindAll ({ wish ("PORT0001", "", "no such desk, surely") });
+    REQUIRE (atStart.size() == 1u);
+    CHECK_FALSE (atStart.front().binding.bound);
+
+    CHECK_FALSE (binder.takeDevices().has_value());     // nothing until the message thread has looked
+
+    binder.rescan();
+
+    const auto tried = binder.take();
+    REQUIRE (tried.size() == 1u);
+    CHECK (tried.front().id == "PORT0001");
+    CHECK_FALSE (tried.front().binding.bound);
+    CHECK (tried.front().binding.problem.find ("no such desk, surely") != std::string::npos);
+
+    CHECK (binder.takeDevices().has_value());
+    CHECK_FALSE (binder.takeDevices().has_value());     // taken once
+    CHECK (binder.take().empty());
 }
 
 TEST_CASE ("go.doh: a MIDI cue to a port that plays sound makes its scene heard; to any other port it does not")

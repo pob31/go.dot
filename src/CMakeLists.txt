@@ -399,6 +399,8 @@ add_library(wfg_engine STATIC
     wfg/engine/command/EventQueue.cpp
     wfg/engine/command/EventQueue.h
     wfg/engine/command/Recovery.h
+    wfg/engine/command/RescanCommands.h
+    wfg/engine/command/RescanCommands.cpp
     wfg/engine/json/JsonValue.cpp
     wfg/engine/json/JsonValue.h
     wfg/engine/import/AlsImport.cpp
@@ -713,6 +715,9 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Picture.cpp
     wfg/client/model/Icons.h
     wfg/client/model/Icons.cpp
+    wfg/client/model/SettingsPages.h
+    wfg/client/model/Problems.h
+    wfg/client/model/Problems.cpp
     wfg/client/model/Readiness.h
     wfg/client/model/Readiness.cpp
     wfg/client/model/Flags.h

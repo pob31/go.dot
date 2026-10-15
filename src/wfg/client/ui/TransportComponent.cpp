@@ -17,6 +17,7 @@
 #include <wfg/client/ui/TransportComponent.h>
 
 #include <wfg/client/ui/Look.h>
+#include <wfg/client/model/SettingsPages.h>
 
 #include <initializer_list>
 #include <optional>
@@ -354,6 +355,68 @@ namespace wfg::client::ui
             repaint (pairArea);
     }
 
+    void TransportComponent::showProblems (const std::vector<model::PageProblems>& pages)
+    {
+        std::vector<model::PageProblems> wanted;
+
+        for (const auto& page : pages)
+            if (page.page != model::settingsPages::redundancy)
+                wanted.push_back (page);
+
+        if (wanted == problemsShown)
+            return;
+
+        problemsShown = std::move (wanted);
+
+        for (auto& button : problemButtons)
+            removeChildComponent (button.get());
+
+        problemButtons.clear();
+
+        for (const auto& page : problemsShown)
+        {
+            /*  HOW MANY, BESIDE THE PAGE'S ICON: the files' warning counts its
+                cues, a page its problems. The page is named in the tooltip,
+                first, with what pressing does - the icon is the page's own, and
+                the count and the words say it beside the colour (§4.8). */
+            const auto count = page.page.empty() ? page.cues.size() : page.sentences.size();
+            auto button = std::make_unique<IconButton> (page.icon, juce::String (static_cast<int> (count)));
+            button->setColours (Look::colour (theme, "ink"), Look::colour (theme, "panel-high"),
+                                Look::colour (theme, "failed"));
+            button->setTextHeight (12.0f * static_cast<float> (theme.type));
+            button->setWantsKeyboardFocus (false);
+            button->setComponentID ("problem:" + juce::String (page.page));
+
+            juce::StringArray said;
+            said.add (page.page.empty()
+                        ? juce::String ("Missing files - press to pick the next cue whose file is missing:")
+                        : juce::String (page.page) + " - press to open Show settings on it:");
+
+            for (std::size_t at = 0; at < page.sentences.size() && at < 8; ++at)
+                said.add (juce::String::fromUTF8 (page.sentences[at].c_str()));
+
+            if (page.sentences.size() > 8)
+                said.add ("and " + juce::String (static_cast<int> (page.sentences.size() - 8)) + " more");
+
+            button->setTooltip (said.joinIntoString ("\n"));
+            button->onClick = [this, which = page.page]
+            {
+                if (which.empty())
+                {
+                    if (actions.revealMissing)
+                        actions.revealMissing();
+                }
+                else if (actions.openSettings)
+                    actions.openSettings (which);
+            };
+
+            addAndMakeVisible (*button);
+            problemButtons.push_back (std::move (button));
+        }
+
+        resized();
+    }
+
     void TransportComponent::setNotice (const juce::String& notice)
     {
         /*  CLIPPED, WHATEVER THE CALLER THINKS IT IS SENDING. This label is one
@@ -556,6 +619,17 @@ namespace wfg::client::ui
         auto top = area.removeFromTop (row);
         rateLabel.setBounds (top.removeFromRight (row * 5));
         clockLabel.setBounds (top.removeFromRight (row * 3));
+
+        /*  WHAT IS MISSING (namespace draft §64): a button per page, before the
+            clock, in the settings window's order from the left - taken from
+            the room the refusal and the notice share, which is cut and not
+            wrapped. */
+        for (auto at = problemButtons.size(); at-- > 0;)
+        {
+            auto& button = *problemButtons[at];
+            button.setBounds (top.removeFromRight (button.idealWidth (row - 6)).reduced (0, 3));
+            top.removeFromRight (pad / 2);
+        }
 
         const auto showWidth = juce::GlyphArrangement::getStringWidthInt (showLabel.getFont(), showLabel.getText())
                                  + pad;

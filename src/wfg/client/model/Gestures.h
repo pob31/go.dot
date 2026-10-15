@@ -72,6 +72,13 @@ namespace wfg::client::gesture
         their `flagged` rows (model/Flags.h). */
     Event flagLastGo();
 
+    /*  THIS MACHINE'S DEVICES LOOKED FOR AGAIN (namespace draft §64), sent
+        as a MIDI or serial menu of Show settings opens: the MIDI devices
+        listed again and ports with none tried again; the serial ports at once
+        rather than at the next five-second look. */
+    Event midiRescan();
+    Event serialRescan();
+
     /*  Where GO would act next, and where it would act before: the cue
         list's arrows. Not a selection - this list has none yet - but the
         pointer itself, which is what the page's arrows move too. */

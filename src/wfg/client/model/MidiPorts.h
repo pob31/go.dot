@@ -103,6 +103,11 @@ namespace wfg::client::model
     std::vector<std::string> readMidiInputs (const tree::TreeSnapshot&);
     std::vector<std::string> readMidiOutputs (const tree::TreeSnapshot&);
 
+    /*  How many times the engine has looked for them (`/godot/port/scans`,
+        namespace draft §64): a menu that asked for a rescan opens once this
+        moves past what it saw when it asked. Nought before the engine says. */
+    int readMidiScans (const tree::TreeSnapshot&);
+
     /*  The menu a MIDI cue's `port` row offers: the identifier it writes,
         paired with the name somebody reads. "(none)" first, because a cue with
         no port is a cue somebody has not finished writing and has to be

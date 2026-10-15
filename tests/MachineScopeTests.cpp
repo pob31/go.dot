@@ -45,6 +45,7 @@
 
 #include "TestSupport.h"
 
+#include <wfg/engine/command/RescanCommands.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/audio/AudioSettings.h>
@@ -134,7 +135,10 @@ namespace
 
         /*  And RD.10's: a follower taking its leader's show - this machine's
             files written over, the other's never touched. */
-        "pair.adoptShow"
+        "pair.adoptShow",
+
+        /*  And §64's: this machine's devices looked for again. */
+        "midi.rescan", "serial.rescan"
     };
 
     const std::string mainList  = "7K2QM9X4";
@@ -193,6 +197,7 @@ namespace
             video::registerVideoCommands (engine.commands(), nullptr);
             video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
             video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
+            registerRescanCommands (engine.commands(), {}, {});
             process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
             doc::registerBundleCommands (engine.commands(), document, session, writer);
             pair::registerPairCommands (engine.commands(), pairing);

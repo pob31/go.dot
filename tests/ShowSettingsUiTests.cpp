@@ -6,6 +6,8 @@
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/TransportComponent.h>
 #include <wfg/client/model/Pair.h>
+#include <wfg/client/model/Problems.h>
+#include <wfg/client/model/SettingsPages.h>
 #include <wfg/client/model/Transport.h>
 #include <wfg/engine/pair/Leadership.h>
 #include <wfg/engine/pair/PeerLink.h>
@@ -20,6 +22,7 @@
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/midi/PortTable.h>
 #include <wfg/engine/cue/Run.h>
 #include <spatcore/ui/patch/PatchMatrixComponent.h>
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -796,6 +799,182 @@ TEST_CASE ("show settings UI: the window is called Show settings, and its pages 
     CHECK_FALSE (list->isEnabled());
 }
 
+TEST_CASE ("show settings UI: the interface menus look again as they open, and keep an interface this machine lacks")
+{
+    /*  The author, 2026-10-15: "Can the screen detection, MIDI detection,
+        Audio device detection happen in the Show Settings panel when clicking
+        on the drop down menu again and not just when the program starts?"
+        Opening either menu fills it again from what the system has - the
+        path Rescan interfaces takes, which opens no device. An interface the
+        show names and this machine lacks stays in its menu, marked, and Apply
+        still sends its own name. */
+    Rig rig;
+    audio::AudioSettings settings;
+    settings.enabled = true;
+    settings.deviceType = "Windows Audio";
+    settings.outputDevice = "Nowhere Interface";
+    REQUIRE (rig.document.configureAudio (settings).ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* output = dynamic_cast<juce::ComboBox*> (withId (panel, "outputInterface"));
+    auto* input = dynamic_cast<juce::ComboBox*> (withId (panel, "inputInterface"));
+    REQUIRE (output != nullptr);
+    REQUIRE (input != nullptr);
+
+    CHECK (output->getText() == "Nowhere Interface  (not on this machine)");
+
+    //  Emptied by hand, its words kept, then opened: the menu is filled again before it shows.
+    const auto words = output->getText();
+    output->clear (juce::dontSendNotification);
+    output->setText (words, juce::dontSendNotification);
+    REQUIRE (output->getNumItems() == 0);
+
+    output->showPopup();
+    output->hidePopup();
+    CHECK (output->getNumItems() >= 2);    // "System default", the interfaces, the one this machine lacks
+
+    input->showPopup();
+    input->hidePopup();
+    CHECK (input->getNumItems() >= 1);
+
+    CHECK (output->getText() == "Nowhere Interface  (not on this machine)");
+    CHECK (input->getSelectedId() == 1);    // "None", as the show says
+
+    //  And Apply names the interface without the mark.
+    auto* apply = button (panel, "Apply while stopped");
+    REQUIRE (apply != nullptr);
+    apply->onClick();
+    REQUIRE_FALSE (rig.sent.empty());
+    CHECK (rig.sent.back().command == "audio.setup");
+    CHECK (rig.sent.back().args[2].getString() == "Nowhere Interface");
+}
+
+TEST_CASE ("show settings UI: a page with a problem is marked, its heading too, and the mark goes with the problem (§64)")
+{
+    /*  The author, 2026-10-15: "In the Show settings, mark sections or tabs
+        with problems." The page's row wears the warning and a count, its
+        section's heading the sum; the sentences are the tooltip. */
+    Rig rig;
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* list = withId (panel, "pageList");
+    REQUIRE (list != nullptr);
+
+    const auto row = [list] (const juce::String& words) -> juce::Button*
+    {
+        return button (*list, words);
+    };
+
+    namespace page = client::model::settingsPages;
+    using client::model::Icon;
+
+    std::vector<client::model::PageProblems> pages {
+        { page::midi, Icon::midi, { "MIDI port Lights: no such device - Show settings, MIDI.",
+                                    "MIDI port Desk: no such device - Show settings, MIDI." }, {} },
+        { page::serial, Icon::serial, { "Serial port Arduino: in use - Show settings, Serial." }, {} },
+        { page::video, Icon::video, { "Output Front: no such display - Show settings, Video." }, {} },
+        { "", Icon::missing, { "Missing: thunder.wav ..." }, { "SND00001" } },
+    };
+
+    const auto picture = [list]
+    {
+        juce::Image canvas (juce::Image::ARGB, list->getWidth(), list->getHeight(), true, juce::SoftwareImageType());
+        juce::Graphics g (canvas);
+        list->paintEntireComponent (g, false);
+        return canvas;
+    };
+
+    const auto before = picture();
+    panel.showProblems (pages);
+    const auto after = picture();
+
+    //  The rows that changed are the pages with problems and their headings - and nothing else.
+    REQUIRE (row ("MIDI") != nullptr);
+    CHECK (row ("MIDI")->getTooltip().contains ("MIDI port Lights"));
+    CHECK (row ("MIDI")->getTooltip().contains ("MIDI port Desk"));
+    CHECK (row ("Serial")->getTooltip().contains ("Arduino"));
+    CHECK (row ("Controllers")->getTooltip().contains ("MIDI port Lights"));
+    CHECK (row ("Controllers")->getTooltip().contains ("Arduino"));
+    CHECK (row ("Video")->getTooltip().contains ("Output Front"));
+    CHECK (row ("Network")->getTooltip().isEmpty());
+    CHECK (row ("Audio")->getTooltip().isEmpty());
+
+    const auto changedIn = [&before, &after] (const juce::Button& entry)
+    {
+        const auto area = entry.getBoundsInParent();
+        auto changed = 0;
+
+        for (int y = area.getY(); y < area.getBottom(); ++y)
+            for (int x = area.getX(); x < area.getRight(); ++x)
+                if (before.getPixelAt (x, y) != after.getPixelAt (x, y))
+                    ++changed;
+
+        return changed;
+    };
+
+    CHECK (changedIn (*row ("MIDI")) > 0);
+    CHECK (changedIn (*row ("Controllers")) > 0);
+    CHECK (changedIn (*row ("Network")) == 0);
+    CHECK (changedIn (*row ("Playback")) == 0);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.setSize (1400, 740);
+        panel.showPage (page::midi);
+
+        const auto shot = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("show-settings-problems.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+        CHECK (juce::PNGImageFormat().writeImageToStream (shot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    //  Put right, the marks go.
+    panel.showProblems ({});
+    CHECK (row ("MIDI")->getTooltip().isEmpty());
+    CHECK (row ("Controllers")->getTooltip().isEmpty());
+}
+
+TEST_CASE ("show settings UI: a page asked for from outside is shown, by the model's own names")
+{
+    /*  Namespace draft §64: a warning in the main window opens Show settings
+        on the page its problem is put right on, so the window turns to a page
+        named from outside - by the names the std-only model knows them by,
+        which are the window's own. */
+    Rig rig;
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    namespace page = client::model::settingsPages;
+
+    for (const auto* name : { page::playback, page::templates, page::redundancy, page::audioInterface, page::outputs,
+                              page::outputPatch, page::inputs, page::inputPatch, page::rack, page::plugins, page::video,
+                              page::network, page::midi, page::surfaces, page::timecode, page::serial,
+                              page::gettingStarted })
+    {
+        CAPTURE (name);
+        REQUIRE (tabs->getTabNames().contains (name));
+
+        panel.showPage (name);
+        CHECK (tabs->getCurrentTabName() == name);
+    }
+
+    //  A name the window has not leaves it where it was.
+    panel.showPage (page::midi);
+    panel.showPage ("Nowhere");
+    CHECK (tabs->getCurrentTabName() == page::midi);
+}
+
 TEST_CASE ("show settings UI: Getting started names every other page under its section, in order, and goes to it")
 {
     /*  Author, 2026-09-30: "Should we add a 'Getting started' tab in the
@@ -1523,6 +1702,14 @@ namespace
     /*  And Bundles, left of Doh! (namespace draft 45): 62 wide. */
     int networkBundlesAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 150 - 54 - 54 - 150 - 80 - 62 / 2; }
     int midiDohAt (const juce::ListBox& list)    { return list.getWidth() - 8 - 24 - 190 - 150 - 80 / 2; }
+
+    /*  The MIDI tab's "Sends on", left of Listens to (210 each) and Rx and Tx
+        (42 each) and Sound; the Serial tab's Where and Speed: the cross 24,
+        the state 240, heard 180, tx and rx 42, reads 60, then speed 90 and
+        where 240 (namespace draft §64's menus). */
+    int midiSendsAt (const juce::ListBox& list)  { return list.getWidth() - 8 - 24 - 190 - 150 - 80 - 56 - 42 - 42 - 210 - 210 / 2; }
+    int serialWhereAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 240 - 180 - 42 - 42 - 60 - 90 - 240 / 2; }
+    int serialSpeedAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 240 - 180 - 42 - 42 - 60 - 90 / 2; }
     int midiSoundAt (const juce::ListBox& list)  { return list.getWidth() - 8 - 24 - 190 - 150 - 80 - 56 / 2; }
 
     /*  The one `node.set` a click sent, as address and value. */
@@ -1866,6 +2053,108 @@ TEST_CASE ("show settings UI: the SpaceMouse's line, and the driver's button onl
     panel.refresh (*rig.publish());
     CHECK_FALSE (closeDriver->isVisible());
     CHECK (rig.sent.empty());
+}
+
+TEST_CASE ("show settings UI: the MIDI and Serial menus look for devices again before they open (§64)")
+{
+    /*  The author, 2026-10-15: "Can the screen detection, MIDI detection,
+        Audio device detection happen in the Show Settings panel when clicking
+        on the drop down menu again and not just when the program starts?" A
+        device menu asks the engine to look again and opens once it has - the
+        count of looks moved past what the menu saw - so a device plugged in a
+        moment ago is in it; or half a second on, with what there is. */
+    Rig rig;
+    midi::PortTable ports;
+    ports.countScan();
+    rig.parameters.setMidiPorts (&ports);
+    rig.state.serialScans = 1;
+
+    REQUIRE (rig.document.createPort ("Lights").ok);
+    REQUIRE (rig.document.createSerial ("Arduino").ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setSize (1400, 740);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    const auto offers = [] (const juce::ComboBox& box, const juce::String& words)
+    {
+        for (auto at = 0; at < box.getNumItems(); ++at)
+            if (box.getItemText (at).contains (words))
+                return true;
+
+        return false;
+    };
+
+    //  MIDI: Sends on asks first, and nothing opens yet.
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("MIDI"));
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+    auto* list = listOn (*page);
+    REQUIRE (list != nullptr);
+    auto* chooser = component<juce::ComboBox> (*page);
+    REQUIRE (chooser != nullptr);
+
+    rig.sent.clear();
+    clickAt (*list, midiSendsAt (*list));
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent.back().command == "midi.rescan");
+    CHECK_FALSE (chooser->isVisible());
+
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (chooser->isVisible());     // the engine has not looked yet
+
+    //  The engine looks: a synth plugged in since, and one look more. The menu opens with it.
+    ports.setDevices ({}, { { "New synth", "usb#9" } });
+    ports.countScan();
+    panel.refresh (*rig.publish());
+    CHECK (chooser->isVisible());
+    CHECK (offers (*chooser, "New synth"));
+    chooser->hidePopup();
+    chooser->setVisible (false);
+
+    //  And a look that never comes: the menu opens half a second on, with what there is.
+    rig.sent.clear();
+    clickAt (*list, midiSendsAt (*list));
+    REQUIRE (rig.sent.size() == 1u);
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (chooser->isVisible());
+    juce::Thread::sleep (600);
+    panel.refresh (*rig.publish());
+    CHECK (chooser->isVisible());
+    chooser->hidePopup();
+
+    //  SERIAL: Where asks first, the same way.
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Serial"));
+    page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+    list = listOn (*page);
+    REQUIRE (list != nullptr);
+    chooser = component<juce::ComboBox> (*page);
+    REQUIRE (chooser != nullptr);
+
+    rig.sent.clear();
+    clickAt (*list, serialWhereAt (*list));
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent.back().command == "serial.rescan");
+    CHECK_FALSE (chooser->isVisible());
+
+    rig.state.serialPorts = "COM7\tUSBSER001";
+    rig.state.serialScans = 2;
+    panel.refresh (*rig.publish());
+    CHECK (chooser->isVisible());
+    CHECK (offers (*chooser, "COM7"));
+    chooser->hidePopup();
+    chooser->setVisible (false);
+
+    //  A speed needs no look: its menu opens at once and nothing is sent.
+    rig.sent.clear();
+    clickAt (*list, serialSpeedAt (*list));
+    CHECK (rig.sent.empty());
+    CHECK (chooser->isVisible());
+    chooser->hidePopup();
 }
 
 TEST_CASE ("show settings UI: the Serial tab declares a port and says what this machine has")
@@ -2610,6 +2899,72 @@ TEST_CASE ("show settings UI: the Redundancy tab sits after Network, and its thr
     REQUIRE (go != nullptr);
     go->onClick();
     CHECK (tabs->getCurrentTabIndex() == names.indexOf ("Redundancy"));
+}
+
+TEST_CASE ("transport UI: a button per page with a problem, and pressing it asks for that page (§64)")
+{
+    /*  The author, 2026-10-15: "Add warnings in the main window for each type
+        of error. Clicking on one of these icons opens the show settings to
+        the relevant tab." The missing files' button, which has no page, asks
+        for the next such cue instead (the author's choice); the pair's alarm
+        is left to its banner. */
+    Rig rig;
+    client::ui::Look look (rig.theme);
+    const DefaultLook guard (look);
+    std::vector<std::string> opened;
+    int revealed = 0;
+
+    client::ui::TransportComponent::Actions actions;
+    actions.openSettings = [&opened] (const std::string& page) { opened.push_back (page); };
+    actions.revealMissing = [&revealed] { ++revealed; };
+
+    client::ui::TransportComponent transport (rig.theme, std::move (actions));
+    transport.setSize (1180, transport.preferredHeight());
+    transport.show (client::model::readTransport (*rig.publish()));
+
+    namespace page = client::model::settingsPages;
+    using client::model::Icon;
+
+    transport.showProblems ({
+        { page::redundancy, Icon::warning, { "Two mains! - Show settings, Redundancy." }, {} },
+        { page::audioInterface, Icon::sound, { "No audio interface is running - Show settings, Audio interface." }, {} },
+        { page::midi, Icon::midi, { "MIDI port Lights: no such device - Show settings, MIDI.",
+                                    "MIDI port Desk: no such device - Show settings, MIDI." }, {} },
+        { "", Icon::missing, { "Missing: thunder.wav", "Missing: rain.wav" }, { "SND00001", "SND00002" } },
+    });
+
+    auto* audio = dynamic_cast<juce::Button*> (withId (transport, "problem:Audio interface"));
+    auto* midi = dynamic_cast<juce::Button*> (withId (transport, "problem:MIDI"));
+    auto* files = dynamic_cast<juce::Button*> (withId (transport, "problem:"));
+    REQUIRE (audio != nullptr);
+    REQUIRE (midi != nullptr);
+    REQUIRE (files != nullptr);
+    CHECK (withId (transport, "problem:Redundancy") == nullptr);
+
+    //  How many, in the button's words; the page and every sentence in its tooltip.
+    CHECK (midi->getButtonText() == "2");
+    CHECK (files->getButtonText() == "2");
+    CHECK (midi->getTooltip().startsWith ("MIDI - press to open Show settings on it"));
+    CHECK (midi->getTooltip().contains ("MIDI port Desk"));
+    CHECK (midi->getWidth() > 0);
+
+    //  In the settings window's order, from the left, before the clock.
+    CHECK (audio->getX() < midi->getX());
+    CHECK (midi->getX() < files->getX());
+
+    midi->onClick();
+    audio->onClick();
+    CHECK (opened == std::vector<std::string> { page::midi, page::audioInterface });
+
+    files->onClick();
+    CHECK (revealed == 1);
+    CHECK (opened.size() == 2u);
+
+    snapshotTo (transport, "transport-problems.png");
+
+    //  Put right, the buttons go.
+    transport.showProblems ({});
+    CHECK (withId (transport, "problem:MIDI") == nullptr);
 }
 
 TEST_CASE ("transport UI: what this computer is beside the show's name, and the banner when the pair needs a hand")

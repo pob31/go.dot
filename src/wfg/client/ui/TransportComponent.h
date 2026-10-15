@@ -43,13 +43,18 @@
     ask, because usually nobody saves a show mid-performance.
 */
 
+#include <wfg/client/model/Problems.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
+#include <wfg/client/ui/Icons.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace wfg::client::ui
 {
@@ -88,6 +93,14 @@ namespace wfg::client::ui
                 "Realign", "Take the main's show" - whichever answers the alarm
                 the banner says. One command each (model/Pair.h, `eventFor`). */
             std::function<void (model::PairAct)> pair;
+
+            /*  WHAT IS MISSING (namespace draft §64; the author, 2026-10-15:
+                "Clicking on one of these icons opens the show settings to the
+                relevant tab"): a warning's page, opened; and the missing files'
+                warning, which has no page, picking the next cue whose file is
+                missing (the author's choice). */
+            std::function<void (const std::string& page)> openSettings;
+            std::function<void()> revealMissing;
         };
 
         TransportComponent (const model::Theme& theme, Actions actions);
@@ -100,6 +113,13 @@ namespace wfg::client::ui
 
         /** A sentence for the foot - a theme file's refusal, mostly. Empty clears it. */
         void setNotice (const juce::String& notice);
+
+        /*  WHAT IS MISSING, PAGE BY PAGE (namespace draft §64): a button on the
+            title line for each page with a problem - its icon and how many, its
+            sentences as its tooltip - which opens Show settings on that page;
+            the missing files' button picks the next such cue. The pair's alarm
+            is left to its banner. Cheap when nothing changed. */
+        void showProblems (const std::vector<model::PageProblems>& pages);
 
         /** Revert's question, asked before the revert; the button and the menu both come here. */
         void askThenRevert();
@@ -137,6 +157,10 @@ namespace wfg::client::ui
             (`pair/alarm`), and one button, greyed with the reason in words
             when it would be refused. */
         bool pairShowing = false;
+
+        //  The warnings shown (§64), and their buttons, on the title line before the clock.
+        std::vector<model::PageProblems> problemsShown;
+        std::vector<std::unique_ptr<IconButton>> problemButtons;
         std::optional<model::PairAct> pairAct;
         juce::Rectangle<int> pairArea;
         juce::Label pairLabel, pairHeading, pairSentence;

@@ -2,6 +2,7 @@
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/Look.h>
+#include <wfg/client/ui/Icons.h>
 #include <wfg/client/ui/WarpEditorPanel.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
@@ -12,7 +13,9 @@
 #include <wfg/client/model/Pair.h>
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/Problems.h>
 #include <wfg/client/model/Rack.h>
+#include <wfg/client/model/SettingsPages.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Timecode.h>
@@ -29,6 +32,7 @@
 #include <functional>
 #include <initializer_list>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -1413,7 +1417,7 @@ namespace wfg::client::ui
             }
 
             void show (std::vector<model::PortRow> ports, std::vector<std::string> inputsNow,
-                       std::vector<std::string> outputsNow, bool editable)
+                       std::vector<std::string> outputsNow, bool editable, int scansNow = 0)
             {
                 const auto sameRows = ports.size() == rows.size()
                                         && std::equal (ports.begin(), ports.end(), rows.begin(),
@@ -1437,8 +1441,30 @@ namespace wfg::client::ui
                 inputs = std::move (inputsNow);
                 outputs = std::move (outputsNow);
                 locked = ! editable;
+                scans = scansNow;
 
                 addPort.setVisible (editable);
+
+                /*  A MENU WAITING FOR THE DEVICES TO BE LOOKED FOR AGAIN (§64)
+                    opens once the engine has looked - the count moved past what
+                    it was when the menu was asked for - or half a second on,
+                    with what there is. Its row is found again by the port's id:
+                    the list may have moved meanwhile. */
+                if (waiting.has_value())
+                {
+                    const auto asked = *waiting;
+                    const auto looked = scans != asked.scans;
+                    const auto late = juce::Time::getMillisecondCounter() - asked.at > 500u;
+
+                    if (looked || late || locked || ! isShowing())
+                    {
+                        waiting.reset();
+
+                        for (std::size_t at = 0; at < rows.size(); ++at)
+                            if (rows[at].id == asked.port && ! locked && isShowing())
+                                openChooser (static_cast<int> (at), asked.width, asked.output);
+                    }
+                }
 
                 /*  WHAT THIS MACHINE HAS, said once under the list rather than
                     per row: a rig with no MIDI at all is the case somebody
@@ -1665,7 +1691,27 @@ namespace wfg::client::ui
                 cellEditor.showEditor();
             }
 
+            /*  THE DEVICES LOOKED FOR AGAIN BEFORE THE MENU OPENS (author,
+                2026-10-15: "Can the screen detection, MIDI detection, Audio
+                device detection happen in the Show Settings panel when
+                clicking on the drop down menu again and not just when the
+                program starts?"): `midi.rescan` first, and the menu when the
+                engine has looked - a device plugged in a moment ago is in it,
+                and a port waiting for that device has been tried again. */
             void chooseAt (int row, int width, bool output)
+            {
+                if (! send)
+                {
+                    openChooser (row, width, output);
+                    return;
+                }
+
+                send (gesture::midiRescan());
+                waiting = Waiting { rows[static_cast<std::size_t> (row)].id, width, output, scans,
+                                    juce::Time::getMillisecondCounter() };
+            }
+
+            void openChooser (int row, int width, bool output)
             {
                 const auto& entry = rows[static_cast<std::size_t> (row)];
 
@@ -1683,7 +1729,11 @@ namespace wfg::client::ui
                 auto at = 1;
                 chooser.addItem ("(none)", at++);
 
-                const auto& devices = output ? outputs : inputs;
+                /*  The devices as they are now, kept with the menu: its answer
+                    is a place in this list, and the list read on every pass may
+                    move under an open menu once devices are looked for again. */
+                offered = output ? outputs : inputs;
+                const auto& devices = offered;
 
                 for (const auto& device : devices)
                     chooser.addItem (juce::String (device), at++);
@@ -1738,7 +1788,7 @@ namespace wfg::client::ui
                 if (id.empty() || ! send)
                     return;
 
-                const auto& devices = choosingOutput ? outputs : inputs;
+                const auto& devices = offered;
                 const auto at = chooser.getSelectedId() - 2;
 
                 std::string chosen;
@@ -1808,6 +1858,23 @@ namespace wfg::client::ui
             std::vector<model::PortRow> rows;
             std::vector<std::string> inputs, outputs;
             bool locked = false;
+
+            //  The devices the open menu offers, as they were when it opened.
+            std::vector<std::string> offered;
+
+            //  How many times the engine has looked for devices (`port/scans`), and a menu waiting for the next look.
+            int scans = 0;
+
+            struct Waiting
+            {
+                std::string port;
+                int width = 0;
+                bool output = true;
+                int scans = 0;
+                juce::uint32 at = 0;
+            };
+
+            std::optional<Waiting> waiting;
         };
 
         //==============================================================================
@@ -1852,7 +1919,8 @@ namespace wfg::client::ui
                 summary.setJustificationType (juce::Justification::centredLeft);
             }
 
-            void show (std::vector<model::SerialRow> ports, std::vector<model::SystemSerialPort> machine, bool editable)
+            void show (std::vector<model::SerialRow> ports, std::vector<model::SystemSerialPort> machine, bool editable,
+                       int scansNow = 0)
             {
                 const auto sameRows = ports == rows;
                 const auto sameLock = locked == ! editable;
@@ -1860,8 +1928,26 @@ namespace wfg::client::ui
                 rows = std::move (ports);
                 found = std::move (machine);
                 locked = ! editable;
+                scans = scansNow;
 
                 addPort.setVisible (editable);
+
+                //  A WHERE MENU WAITING FOR THE PORTS TO BE LOOKED FOR AGAIN (§64), as the MIDI tab's waits.
+                if (waiting.has_value())
+                {
+                    const auto asked = *waiting;
+                    const auto looked = scans != asked.scans;
+                    const auto late = juce::Time::getMillisecondCounter() - asked.at > 500u;
+
+                    if (looked || late || locked || ! isShowing())
+                    {
+                        waiting.reset();
+
+                        for (std::size_t at = 0; at < rows.size(); ++at)
+                            if (rows[at].id == asked.port && ! locked && isShowing())
+                                openChooser (static_cast<int> (at), asked.width, true);
+                    }
+                }
 
                 summary.setText (found.empty()
                                    ? juce::String ("This machine has no serial ports now. Plug the Arduino in;"
@@ -2044,10 +2130,26 @@ namespace wfg::client::ui
                 cellEditor.showEditor();
             }
 
+            /*  WHERE IS LOOKED FOR AGAIN FIRST (author, 2026-10-15; §64):
+                `serial.rescan`, and the menu once the engine has looked - an
+                Arduino plugged in a moment ago is in it. A speed needs no look. */
+            void chooseAt (int row, int width, bool where)
+            {
+                if (! where || ! send)
+                {
+                    openChooser (row, width, where);
+                    return;
+                }
+
+                send (gesture::serialRescan());
+                waiting = Waiting { rows[static_cast<std::size_t> (row)].id, width, scans,
+                                    juce::Time::getMillisecondCounter() };
+            }
+
             /*  WHERE: "(none)", this machine's ports, and a path the show names
                 that this machine lacks, marked rather than dropped (the MIDI
                 tab's rule). SPEED: the speeds a port opens at. */
-            void chooseAt (int row, int width, bool where)
+            void openChooser (int row, int width, bool where)
             {
                 const auto& entry = rows[static_cast<std::size_t> (row)];
 
@@ -2170,6 +2272,19 @@ namespace wfg::client::ui
             std::vector<model::SerialRow> rows;
             std::vector<model::SystemSerialPort> found;
             bool locked = false;
+
+            //  How many times the engine has looked for ports (`engine/serialScans`), and a where menu waiting for the next look.
+            int scans = 0;
+
+            struct Waiting
+            {
+                std::string port;
+                int width = 0;
+                int scans = 0;
+                juce::uint32 at = 0;
+            };
+
+            std::optional<Waiting> waiting;
         };
 
         /*  THE BOXES THIS SHOW TALKS TO.
@@ -5879,7 +5994,11 @@ namespace wfg::client::ui
 
                 canvases = std::move (canvasRows);
                 outputs = std::move (outputRows);
-                displays = std::move (displaysNow);
+
+                /*  WITH THIS MACHINE'S OWN, as last looked for: the menu's
+                    answer is a place in this list, so it is the same list on
+                    every pass until the menu looks again. */
+                displays = model::mergedDisplays (displaysNow, displaysHere);
                 locked = ! editable;
 
                 addCanvas.setVisible (editable);
@@ -6452,6 +6571,17 @@ namespace wfg::client::ui
                 name it goes under and its rate. */
             void chooseWhere (int row, juce::Rectangle<int> cell)
             {
+                /*  THE DISPLAYS LOOKED FOR AGAIN AS THE MENU OPENS (author,
+                    2026-10-15): asked of the lister the renderer uses, here, in
+                    this process - a screen plugged in a moment ago is offered
+                    whether or not the renderer is running to see it. */
+                displaysHere.clear();
+
+                for (const auto& display : video::listDisplays())
+                    displaysHere.push_back (display.name);
+
+                displays = model::mergedDisplays (displays, displaysHere);
+
                 const auto entry = outputs[static_cast<std::size_t> (row)];
                 const auto base = "/godot/videoOutput/" + entry.id + "/";
                 const auto kinds = model::pictureKindsHere();
@@ -6763,6 +6893,9 @@ namespace wfg::client::ui
             std::vector<model::VideoInsertRow> inserts;
             std::vector<model::OfferedSender> offered;
             std::vector<std::string> displays;
+
+            //  This machine's displays when a menu last looked (§64), merged into `displays` on every pass.
+            std::vector<std::string> displaysHere;
             bool locked = false;
 
             /** The show's DCAs as a canvas's menu offers them, "(none)" first. */
@@ -7787,6 +7920,28 @@ namespace wfg::client::ui
             std::array<Act, 5> acts;
         };
 
+        /*  A DEVICE MENU THAT LOOKS AGAIN BEFORE IT OPENS (author, 2026-10-15:
+            "Can the screen detection, MIDI detection, Audio device detection
+            happen in the Show Settings panel when clicking on the drop down
+            menu again and not just when the program starts?"): what was
+            plugged in since the list was last filled is in it the moment it
+            opens, as Rescan interfaces would have put it there. Listing reads
+            what the system says is installed and opens no device - for ASIO,
+            the registry - so the interface that is playing goes on playing. */
+        class DeviceBox final : public juce::ComboBox
+        {
+        public:
+            std::function<void()> beforePopup;
+
+            void showPopup() override
+            {
+                if (beforePopup)
+                    beforePopup();
+
+                juce::ComboBox::showPopup();
+            }
+        };
+
         /*  THE WINDOW'S PAGES, IN SECTIONS AND IN ORDER (author, 2026-10-15:
             "It's a bit crowded in the tabs ... we should have a few sections
             Show, Audio, Video, Network, Controllers, Getting started" - Network
@@ -7806,23 +7961,25 @@ namespace wfg::client::ui
             const char* what;
         };
 
-        constexpr const char* gettingStartedName = "Getting started";
+        namespace pageName = model::settingsPages;
+
+        constexpr const char* gettingStartedName = pageName::gettingStarted;
 
         /*  The page the window opens on: what a show is set up with first
             (author, 2026-09-30, "Audio stays the tab the window opens on"),
             although its section is the second. */
-        constexpr const char* openingPage = "Audio interface";
+        constexpr const char* openingPage = pageName::audioInterface;
 
         constexpr PageWords pageWords[] {
             /*  THE SHOW ITSELF: how GO and Esc behave, what a new cue can be
                 born with, and the other computer playing it - which is this
                 computer's setting rather than the show's, and says so (AGP). */
-            { "Show",        "Playback",        "How GO, Doh! and Esc behave: the least time between two GOs, how"
+            { "Show",        pageName::playback,    "How GO, Doh! and Esc behave: the least time between two GOs, how"
                                                 " long after a GO it can be taken back, and how long the panic fade"
                                                 " takes." },
-            { "Show",        "Templates",       "Cue templates: a cue's settings kept under a name, for new cues to be"
+            { "Show",        pageName::templates,   "Cue templates: a cue's settings kept under a name, for new cues to be"
                                                 " born with from the Add lists." },
-            { "Show",        model::pairWords::tab,
+            { "Show",        pageName::redundancy,
                                                 "Two computers playing one show, a main and a backup that takes over if the"
                                                 " main stops: which one this is, where the other is, and how the two are"
                                                 " doing. This computer's, not the show's. Nothing to do for one computer." },
@@ -7835,36 +7992,36 @@ namespace wfg::client::ui
                 and the plugins they and a cue's FX are made of. */
             { "Audio",       openingPage,       "The interface the show plays through, its sample rate and buffer size."
                                                 " Choose it first: GO turns yellow once the audio is running." },
-            { "Audio",       "Outputs",         "The show's own outputs - mono or stereo, direct or mixes - which cues"
+            { "Audio",       pageName::outputs,     "The show's own outputs - mono or stereo, direct or mixes - which cues"
                                                 " are routed to by name, never by hardware channel." },
-            { "Audio",       "Output patch",    "Where each output lands on the interface's physical outputs: a new venue"
+            { "Audio",       pageName::outputPatch, "Where each output lands on the interface's physical outputs: a new venue"
                                                 " is a new patch, and no cue changes." },
-            { "Audio",       "Inputs",          "Named inputs for mic cues and live sampling - Voix solo, Keys - mono or"
+            { "Audio",       pageName::inputs,      "Named inputs for mic cues and live sampling - Voix solo, Keys - mono or"
                                                 " stereo. Nothing to do for a show that only plays files." },
-            { "Audio",       "Input patch",     "Which physical inputs feed each named input." },
-            { "Audio",       "Rack",            "Rack channels: chains of plugins that mic cues play through, and the"
+            { "Audio",       pageName::inputPatch,  "Which physical inputs feed each named input." },
+            { "Audio",       pageName::rack,        "Rack channels: chains of plugins that mic cues play through, and the"
                                                 " ones that sample." },
-            { "Audio",       "Plugins",         "Scanning this machine for plugins, and the set a cue's FX can switch in." },
+            { "Audio",       pageName::plugins,     "Scanning this machine for plugins, and the set a cue's FX can switch in." },
 
             //  THE PICTURES (Phase 8a, decision VB): one page for the canvases and the outputs.
-            { "Video",       "Video",           "Canvases - the pictures video cues are laid onto - and the outputs that"
+            { "Video",       pageName::video,       "Canvases - the pictures video cues are laid onto - and the outputs that"
                                                 " show them on this machine's displays. Nothing to do for a show with"
                                                 " no picture." },
 
             /*  WHAT THE SHOW TALKS TO AND HEARS FROM: devices over the network,
                 MIDI ports, the surfaces reached through those ports, timecode
                 going out and coming in, and serial ports. */
-            { "Controllers", "Network",         "The devices the show talks to over OSC - a desk, a processor, a video"
+            { "Controllers", pageName::network,     "The devices the show talks to over OSC - a desk, a processor, a video"
                                                 " server - and where their addresses begin." },
-            { "Controllers", "MIDI",            "The MIDI ports cues send to and triggers listen on." },
-            { "Controllers", "Surfaces",        "Control surfaces and what their faders, pads and dials do, and the DCAs"
+            { "Controllers", pageName::midi,        "The MIDI ports cues send to and triggers listen on." },
+            { "Controllers", pageName::surfaces,    "Control surfaces and what their faders, pads and dials do, and the DCAs"
                                                 " that trim groups of cues." },
-            { "Controllers", model::timecodeWords::tab,
+            { "Controllers", pageName::timecode,
                                                 "The timecode the show sends a desk or a server: its frame rate, the MIDI"
                                                 " port MTC leaves on and the output LTC plays on - and the timecode its"
                                                 " time groups follow: where LTC and MTC come in and how their members"
                                                 " keep up. Nothing to do for a show that sends and follows none." },
-            { "Controllers", "Serial",          "Serial ports - an Arduino on USB - whose lines a process cue's patch hears"
+            { "Controllers", pageName::serial,      "Serial ports - an Arduino on USB - whose lines a process cue's patch hears"
                                                 " and sends." },
 
             /*  AND LAST, what to do first (author, 2026-09-30): where somebody
@@ -7925,6 +8082,7 @@ namespace wfg::client::ui
             {
                 const Style style { Look::colour (themeToUse, "ink"), Look::colour (themeToUse, "ink-dim"),
                                     Look::colour (themeToUse, "panel-high"), Look::colour (themeToUse, "picked"),
+                                    Look::colour (themeToUse, "failed"),
                                     Look::font (themeToUse, 15.0f), headingFont (themeToUse) };
                 std::string_view section;
 
@@ -7972,6 +8130,55 @@ namespace wfg::client::ui
                 }
             }
 
+            /*  WHAT IS MISSING, PAGE BY PAGE (author, 2026-10-15: "In the Show
+                settings, mark sections or tabs with problems"; namespace draft
+                §64): a page with a problem wears the warning shape and how many
+                at its row's end, its sentences as its tooltip, and its section's
+                heading wears the sum - so a shut eye on the list finds where to
+                look. The shape and the number say it, the colour a third time
+                (§4.8). */
+            void setProblems (const std::vector<model::PageProblems>& pages)
+            {
+                const auto sectionOf = [] (const std::string& name)
+                {
+                    for (const auto& page : pageWords)
+                        if (name == page.name)
+                            return juce::String (page.section);
+
+                    return juce::String();
+                };
+
+                for (auto& entry : entries)
+                {
+                    auto count = 0;
+                    juce::StringArray said;
+
+                    for (const auto& page : pages)
+                    {
+                        const auto mine = entry->marks.isNotEmpty() ? entry->marks == juce::String (page.page)
+                                                                    : entry->heading && entry->section == sectionOf (page.page);
+
+                        if (! mine || page.page.empty())
+                            continue;
+
+                        count += static_cast<int> (page.sentences.size());
+
+                        for (const auto& sentence : page.sentences)
+                            said.add (juce::String::fromUTF8 (sentence.c_str()));
+                    }
+
+                    if (count != entry->problems)
+                    {
+                        entry->problems = count;
+                        entry->repaint();
+                    }
+
+                    entry->setTooltip (said.size() > 8 ? said.joinIntoString ("\n", 0, 8) + "\nand "
+                                                           + juce::String (said.size() - 8) + " more"
+                                                       : said.joinIntoString ("\n"));
+                }
+            }
+
             void resized() override
             {
                 viewport.setBounds (getLocalBounds());
@@ -7996,7 +8203,7 @@ namespace wfg::client::ui
         private:
             struct Style
             {
-                juce::Colour ink, dim, raised, picked;
+                juce::Colour ink, dim, raised, picked, failed;
                 juce::Font entryType, headingType;
             };
 
@@ -8012,6 +8219,9 @@ namespace wfg::client::ui
                 const bool heading;
                 juce::String section, goesTo, marks;
                 bool lit = false;
+
+                //  How many problems the page has, or its section's pages for a heading (§64).
+                int problems = 0;
 
                 void paintButton (juce::Graphics& g, bool over, bool down) override
                 {
@@ -8031,12 +8241,25 @@ namespace wfg::client::ui
                         g.fillRect (area);
                     }
 
+                    auto words = getLocalBounds().withTrimmedLeft (heading ? 12 : 26).withTrimmedRight (6);
+
+                    //  A PROBLEM HERE (§64): the warning shape and how many, at the row's end.
+                    if (problems > 0)
+                    {
+                        auto mark = words.removeFromRight (38);
+                        const auto count = juce::String (problems);
+                        g.setColour (style.failed.withMultipliedAlpha (alpha));
+                        g.setFont (style.entryType.withHeight (style.entryType.getHeight() * 0.8f));
+                        g.drawText (count, mark.removeFromRight (16), juce::Justification::centredLeft, false);
+                        icons::draw (g, model::Icon::warning, mark.removeFromRight (18).toFloat().reduced (2.0f, 4.0f),
+                                     style.failed.withMultipliedAlpha (alpha));
+                    }
+
                     const auto bright = getToggleState() || lit || ! heading;
                     g.setColour ((bright ? style.ink : style.dim).withMultipliedAlpha (alpha));
                     g.setFont (heading ? style.headingType : style.entryType);
                     g.drawText (heading ? getButtonText().toUpperCase() : getButtonText(),
-                                getLocalBounds().withTrimmedLeft (heading ? 12 : 26).withTrimmedRight (6),
-                                juce::Justification::centredLeft, true);
+                                words, juce::Justification::centredLeft, true);
                 }
 
             private:
@@ -8350,15 +8573,15 @@ namespace wfg::client::ui
                 audio interface's page is "Audio interface" and no longer
                 "Audio", which names its section now (author, 2026-10-15). */
             const std::map<std::string_view, juce::Component*> pageFor {
-                { "Playback", playback.get() }, { "Templates", templates.get() },
-                { model::pairWords::tab, redundancy.get() },
-                { openingPage, &interfacePage }, { "Outputs", outputList.get() }, { "Output patch", outputs.get() },
-                { "Inputs", inputList.get() }, { "Input patch", inputs.get() }, { "Rack", rackPage.get() },
-                { "Plugins", plugins.get() },
-                { "Video", video.get() },
-                { "Network", network.get() }, { "MIDI", midi.get() }, { "Surfaces", surfaces.get() },
-                { model::timecodeWords::tab, timecode.get() }, { "Serial", serialPage.get() },
-                { gettingStartedName, gettingStarted.get() },
+                { pageName::playback, playback.get() }, { pageName::templates, templates.get() },
+                { pageName::redundancy, redundancy.get() },
+                { pageName::audioInterface, &interfacePage }, { pageName::outputs, outputList.get() },
+                { pageName::outputPatch, outputs.get() }, { pageName::inputs, inputList.get() },
+                { pageName::inputPatch, inputs.get() }, { pageName::rack, rackPage.get() }, { pageName::plugins, plugins.get() },
+                { pageName::video, video.get() },
+                { pageName::network, network.get() }, { pageName::midi, midi.get() }, { pageName::surfaces, surfaces.get() },
+                { pageName::timecode, timecode.get() }, { pageName::serial, serialPage.get() },
+                { pageName::gettingStarted, gettingStarted.get() },
             };
 
             const auto background = Look::colour (theme, "panel");
@@ -8389,6 +8612,10 @@ namespace wfg::client::ui
             output.onChange = [this] { capabilities(); };
             input.onChange = [this] { capabilities(); };
             rescan.onClick = [this] { fillTypes (type.getText(), deviceName (output), deviceName (input)); };
+            output.beforePopup = [this] { fillDevices (deviceName (output), deviceName (input)); };
+            input.beforePopup = [this] { fillDevices (deviceName (output), deviceName (input)); };
+            output.setComponentID ("outputInterface");
+            input.setComponentID ("inputInterface");
             fillTypes (juce::String (initial.deviceType), juce::String (initial.outputDevice), juce::String (initial.inputDevice));
             buffer.setText (initial.bufferSize == 0 ? "Device default" : juce::String (initial.bufferSize), juce::dontSendNotification);
             for (auto* component : std::initializer_list<juce::Component*> { &save, &defaults, &status, &apply, &cancel })
@@ -8476,10 +8703,12 @@ namespace wfg::client::ui
             midi->show (ports,
                         model::readMidiInputs (snapshot),
                         model::readMidiOutputs (snapshot),
-                        ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+                        ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
+                        model::readMidiScans (snapshot));
 
             serialPage->show (model::readSerialPorts (snapshot), model::readSystemSerialPorts (snapshot),
-                              ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+                              ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
+                              model::readSerialScans (snapshot));
 
             /*  THE SURFACES, THEIR STRIPS AND THE DCAs are the document's and
                 re-read every pass for the ports' reason; the strips' words are
@@ -8618,6 +8847,25 @@ namespace wfg::client::ui
 
         void stopTest() { outputs->stopTest(); }
 
+        /*  WHAT IS MISSING, BY PAGE (§64), handed in by the client whenever it
+            moves: the list marks the pages and their sections. */
+        void showProblems (const std::vector<model::PageProblems>& pages)
+        {
+            pageList->setProblems (pages);
+        }
+
+        /*  A PAGE ASKED FOR FROM OUTSIDE - a warning in the main window that
+            names the page its problem is put right on (namespace draft §64):
+            the warp editor, which lies over the whole window, is put away
+            first, as its own back button puts it away. */
+        void turnTo (const juce::String& name)
+        {
+            if (warps != nullptr && warps->isVisible())
+                warps->setVisible (false);
+
+            showPage (name);
+        }
+
         /*  What the list down the left takes from the window's width, the
             gap beside it included: the window is that much wider, so a page
             keeps the width it had under a strip of tabs. */
@@ -8676,7 +8924,34 @@ namespace wfg::client::ui
             activeBufferSizes = sizes;
             return changed;
         }
-        static juce::String deviceName (const juce::ComboBox& box) { return box.getSelectedId() == 1 ? juce::String {} : box.getText(); }
+        /*  A DEVICE THE SHOW NAMES AND THIS MACHINE LACKS stays in the menu,
+            marked, as a display and a MIDI device do (§64): the show travelled,
+            or the interface was unplugged since. Its name is the device's,
+            without the mark. */
+        static constexpr int absentId = 9999;
+        static juce::String absentWords() { return "  (not on this machine)"; }
+
+        static juce::String deviceName (const juce::ComboBox& box)
+        {
+            if (box.getSelectedId() == 1)
+                return {};
+
+            const auto text = box.getText();
+            return text.endsWith (absentWords()) ? text.dropLastCharacters (absentWords().length()) : text;
+        }
+
+        static void selectDevice (juce::ComboBox& box, const juce::String& name, const juce::StringArray& names)
+        {
+            if (name.isEmpty())
+                box.setSelectedId (1, juce::dontSendNotification);
+            else if (names.contains (name))
+                box.setText (name, juce::dontSendNotification);
+            else
+            {
+                box.addItem (name + absentWords(), absentId);
+                box.setSelectedId (absentId, juce::dontSendNotification);
+            }
+        }
         juce::AudioIODeviceType* selectedType()
         {
             for (auto* deviceType : devices.getAvailableDeviceTypes())
@@ -8697,16 +8972,17 @@ namespace wfg::client::ui
         {
             output.clear (juce::dontSendNotification); input.clear (juce::dontSendNotification);
             output.addItem ("System default", 1); input.addItem ("None", 1);
+            juce::StringArray outs, ins;
             if (auto* deviceType = selectedType())
             {
                 deviceType->scanForDevices();
-                output.addItemList (deviceType->getDeviceNames (false), 2);
-                input.addItemList (deviceType->getDeviceNames (true), 2);
+                outs = deviceType->getDeviceNames (false);
+                ins = deviceType->getDeviceNames (true);
+                output.addItemList (outs, 2);
+                input.addItemList (ins, 2);
             }
-            if (out.isEmpty()) output.setSelectedId (1, juce::dontSendNotification);
-            else output.setText (out, juce::dontSendNotification);
-            if (in.isEmpty()) input.setSelectedId (1, juce::dontSendNotification);
-            else input.setText (in, juce::dontSendNotification);
+            selectDevice (output, out, outs);
+            selectDevice (input, in, ins);
             capabilities();
         }
         void capabilities()
@@ -8800,7 +9076,8 @@ namespace wfg::client::ui
         /*  The input patch's own regime, the twin of `settled` (Phase 9b). */
         bool inputSettled = false;
         Pages tabs;
-        juce::ComboBox type, output, input, buffer;
+        juce::ComboBox type, buffer;
+        DeviceBox output, input;
         juce::Label typeLabel, outputLabel, inputLabel, bufferLabel, rate, explanation, status;
         juce::ToggleButton enabled { "Enable audio interface" }, save { "Save show for next launch" }, defaults { "Use as defaults for new shows" };
         juce::TextButton rescan { "Rescan interfaces" }, apply { "Apply while stopped" }, cancel { "Close" };
@@ -8861,6 +9138,8 @@ namespace wfg::client::ui
             setAlwaysOnTop (wanted);
     }
     void ShowSettingsWindow::refresh (const tree::TreeSnapshot& snapshot) { panel->refresh (snapshot); }
+    void ShowSettingsWindow::showPage (const std::string& name) { panel->turnTo (juce::String (name)); }
+    void ShowSettingsWindow::showProblems (const std::vector<model::PageProblems>& pages) { panel->showProblems (pages); }
     void ShowSettingsWindow::closeButtonPressed() { panel->stopTest(); setVisible (false); }
     bool ShowSettingsWindow::keyPressed (const juce::KeyPress& key)
     {

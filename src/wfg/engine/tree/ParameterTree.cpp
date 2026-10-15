@@ -1256,7 +1256,7 @@ namespace wfg::tree
             stored, prepare, hash, frameRateOrCodec, kind, parent, autoName, index, role, fx,
             chainChannels, insertLatency, duration, outsBusy, outsMaybe, stripNow, stripsBefore,
             live, overrideWord, sends, sections, messages, curves, eq, dcaMark, headerDerived,
-            order, headerOrder, footerOrder, section
+            order, headerOrder, footerOrder, section, missing
         };
 
         CueRow classifyCueRow (std::string_view name)
@@ -1278,7 +1278,7 @@ namespace wfg::tree
                 { "dcaOffset", CueRow::dcaMark }, { "headerDerived", CueRow::headerDerived },
                 { "order", CueRow::order }, { "headerOrder", CueRow::headerOrder },
                 { "footerOrder", CueRow::footerOrder }, { "header", CueRow::section },
-                { "footer", CueRow::section }
+                { "footer", CueRow::section }, { "missing", CueRow::missing }
             };
 
             for (const auto& [word, which] : names)
@@ -1529,6 +1529,27 @@ namespace wfg::tree
                                                                     walkPlugins().trackChannels).channels)
                                  : storedText (attribute, node);
                         break;
+
+                    /*  A FILE LOOKED FOR AND NOT FOUND (namespace draft §64):
+                        the lengths hold nought for a file that was read and is
+                        missing or unreadable, and nothing at all for one not
+                        read yet - an import a moment ago - which is not said
+                        to be missing. What the cue list marks for any cue,
+                        not only the few the read-ahead reaches. */
+                    case CueRow::missing:
+                    {
+                        auto gone = false;
+
+                        if ((isMedia || isVideo) && durations != nullptr)
+                        {
+                            const auto file = node["file"].toString().toStdString();
+                            const auto found = file.empty() ? durations->end() : durations->find (file);
+                            gone = found != durations->end() && ! (found->second > 0.0);
+                        }
+
+                        text = gone ? "true" : "false";
+                        break;
+                    }
 
                     case CueRow::insertLatency:
                         text = isMedia || isMic
@@ -3747,6 +3768,7 @@ namespace wfg::tree
             else if (name == "patchEditor")    text = state.patchEditor;
             else if (name == "patchEditorInstall") text = state.patchEditorInstall;
             else if (name == "serialPorts")    text = state.serialPorts;
+            else if (name == "serialScans")    text = std::to_string (state.serialScans);
             else if (name == "mediaCacheSweep") text = state.mediaCacheSweep;
             else if (name == "editRender")      text = state.editRender;
             else if (name == "sampleZeroAt")    text = std::to_string (state.sampleZeroAt);
@@ -3978,6 +4000,8 @@ namespace wfg::tree
                 text = midi::PortTable::namesOf (ports->inputs());
             else if (name == "outputs" && ports != nullptr)
                 text = midi::PortTable::namesOf (ports->outputs());
+            else if (name == "scans" && ports != nullptr)
+                text = std::to_string (ports->scans());
             else
                 text = std::string (row->defaultText);
 

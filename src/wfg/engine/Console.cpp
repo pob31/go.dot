@@ -85,6 +85,7 @@
 #include <wfg/engine/midi/MidiSender.h>
 #include <wfg/engine/midi/MtcInbox.h>
 #include <wfg/engine/midi/PortBinder.h>
+#include <wfg/engine/command/RescanCommands.h>
 #include <wfg/engine/timecode/ClockWatch.h>
 #include <wfg/engine/timecode/CodeWatch.h>
 #include <wfg/engine/document/DocumentCommands.h>
@@ -427,6 +428,7 @@ namespace
         wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
         wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
+        wfg::registerRescanCommands (engine.commands(), {}, {});
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -754,6 +756,7 @@ namespace
         wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
         wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
+        wfg::registerRescanCommands (engine.commands(), {}, {});
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -1459,6 +1462,7 @@ namespace
         wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
         wfg::process::editor::registerCommands (engine.commands(), document, nullptr, nullptr);
+        wfg::registerRescanCommands (engine.commands(), {}, {});
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -4783,6 +4787,7 @@ namespace
         wfg::midi::PortTable midiPorts;
         midiPorts.setDevices (wfg::midi::MidiInputs::availableDevices(),
                               wfg::midi::MidiSender::availableDevices());
+        midiPorts.countScan();
         parameters.setMidiPorts (&midiPorts);
 
         /*  AND WHAT PUTS EACH DECLARED PORT ON ITS DEVICES - at start, below,
@@ -5148,6 +5153,21 @@ namespace
         std::uint32_t editRenderSeen = 0;
         bool rendersHeld = false;           // a replaced render a run still plays, asked again each tick
         std::string serialPortsFound;
+
+        /*  THIS MACHINE'S DEVICES LOOKED FOR AGAIN WHEN A MENU ASKS (author,
+            2026-10-15; namespace draft §64). MIDI on the message thread, where
+            ports have always been bound and enumerating may block; what came
+            of it is taken on a later tick, below, as a rebind's is. Serial at
+            the next tick's look rather than the next five-second one - the
+            same look, on the same thread, it has always had. */
+        bool serialLookAgain = false;
+        int serialScans = 0;
+        wfg::registerRescanCommands (engine.commands(),
+                                     [&portBinder]
+                                     {
+                                         juce::MessageManager::callAsync ([&portBinder] { portBinder.rescan(); });
+                                     },
+                                     [&serialLookAgain] { serialLookAgain = true; });
         videoHost.configure (document);
 
         /*  The show's revision the video configuration was last read at: the
@@ -7953,6 +7973,17 @@ namespace
                                     parameters.markStale();
                                 }
 
+                                /*  AND WHAT A `midi.rescan` FOUND (§64): the
+                                    devices the menus offer, and one look more
+                                    counted, which is what a window waiting to
+                                    open its menu watches. Published from the
+                                    runtime half, so nothing is marked stale. */
+                                if (auto looked = portBinder.takeDevices())
+                                {
+                                    midiPorts.setDevices (std::move (looked->inputs), std::move (looked->outputs));
+                                    midiPorts.countScan();
+                                }
+
                                 if (showRevisionNow != showRevisionSeen)
                                 {
                                     showRevisionSeen = showRevisionNow;
@@ -8212,8 +8243,9 @@ namespace
                                 /*  WHAT A PATCH IS EDITED IN, looked for every five
                                     seconds - a Pd installed or downloaded meanwhile is
                                     found - and Pd's download as it goes (§51, ACO). */
-                                if (outcome.tick % 250 == 0 || outcome.tick < 2)
+                                if (outcome.tick % 250 == 0 || outcome.tick < 2 || std::exchange (serialLookAgain, false))
                                 {
+                                    ++serialScans;
                                     const auto found = wfg::process::editor::find();
                                     patchEditorFound = found.has_value() ? found->name : std::string {};
 
@@ -8224,6 +8256,7 @@ namespace
                                         serialPortsFound += (serialPortsFound.empty() ? "" : "\n") + port.path + "\t" + port.about;
                                 }
                                 state.serialPorts = serialPortsFound;
+                                state.serialScans = serialScans;
                                 state.patchEditor = patchEditorFound;
 
                                 /*  THE ANALYSIS CACHE'S LAST SWEEP (§52), looked at

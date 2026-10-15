@@ -1633,6 +1633,48 @@ TEST_CASE ("tree: a fade's and a stop's duration is the one the show says, and o
     CHECK (valueAt ("/godot/cue/B3N8R5TW/duration") == osc::Value::float64 (4.5));    // the media cue's file
 }
 
+TEST_CASE ("tree: a media cue says its file is missing once it has been looked for and is not there (§64)")
+{
+    /*  Namespace draft §64: the cue list marks every cue whose file is
+        missing, not only the few the read-ahead reaches. The lengths hold
+        nought for a file that was read and is missing or unreadable, and
+        nothing for one not read yet - which is not missing, only not read. */
+    doc::ShowDocument document;
+    const juce::File bundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR))
+                                + "/bundles/fade-stop" };
+    REQUIRE (doc::Bundle::open (bundle, document).ok);
+
+    Engine engine;
+    MountTable mounts;
+    cue::RunTable runs;
+    ParameterTree parameters { document, engine.commands(), mounts, runs };
+
+    EngineState state;
+    state.version = "test";
+
+    const auto missingNow = [&] (const std::map<std::string, double>& lengths)
+    {
+        parameters.setMediaDurations (&lengths);
+        parameters.markStale();
+        const auto snapshot = parameters.publish (state.tick++, state);
+        const auto* node = snapshot->find ("/godot/cue/B3N8R5TW/missing");
+        REQUIRE (node != nullptr);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue() == osc::Value::boolean (true);
+    };
+
+    CHECK_FALSE (missingNow ({}));                              // not read yet
+    CHECK_FALSE (missingNow ({ { "thunder.wav", 4.5 } }));      // read, and there
+    CHECK (missingNow ({ { "thunder.wav", 0.0 } }));            // read, and missing or unreadable
+    CHECK_FALSE (missingNow ({ { "another.wav", 0.0 } }));      // somebody else's file
+
+    //  And a fade has no such row: it names no file.
+    const std::map<std::string, double> none;
+    parameters.setMediaDurations (&none);
+    parameters.markStale();
+    CHECK (parameters.publish (state.tick++, state)->find ("/godot/cue/E4GP6QSC/missing") == nullptr);
+}
+
 //==============================================================================
 TEST_CASE ("tree: a run counts down the wait it is in, and says nought when it is in none")
 {

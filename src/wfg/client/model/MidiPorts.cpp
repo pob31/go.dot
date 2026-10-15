@@ -19,6 +19,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <string_view>
@@ -143,6 +144,11 @@ namespace wfg::client::model
     std::vector<std::string> readMidiOutputs (const tree::TreeSnapshot& snapshot)
     {
         return lines (text (snapshot, "/godot/port/outputs"));
+    }
+
+    int readMidiScans (const tree::TreeSnapshot& snapshot)
+    {
+        return std::atoi (text (snapshot, "/godot/port/scans").c_str());
     }
 
     std::vector<std::pair<std::string, std::string>> portChoices (const std::vector<PortRow>& rows)

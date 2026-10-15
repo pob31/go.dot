@@ -417,6 +417,19 @@ namespace wfg::client::model
         return out;
     }
 
+    std::vector<std::string> mergedDisplays (const std::vector<std::string>& published,
+                                             const std::vector<std::string>& here)
+    {
+        std::vector<std::string> out;
+
+        for (const auto* list : { &published, &here })
+            for (const auto& name : *list)
+                if (! name.empty() && std::find (out.begin(), out.end(), name) == out.end())
+                    out.push_back (name);
+
+        return out;
+    }
+
     bool isPictureFile (const std::string& name)
     {
         const auto dot = name.find_last_of ('.');
