@@ -152,6 +152,13 @@ namespace wfg::client::model
         std::string midiPort;
         int midiChannel = 1;
 
+        /*  AND ON AN MQTT BROKER (namespace draft §67, ANA, ANJ): the wire
+            (`mqtt` with the transport), and the topic filters it subscribes
+            to, space-separated, `#` for everything. The broker is `host` and
+            `port`; an empty host is Go.dot's own broker. */
+        std::string wire = "osc";
+        std::string topics = "#";
+
         /*  What to put in a menu or a list: the name, or the prefix when there
             is none. A device is never a blank row - somebody has to be able to
             point at it before they have finished naming it. */
@@ -174,6 +181,23 @@ namespace wfg::client::model
         the only one a port carries. */
     std::vector<std::pair<std::string, std::string>> deviceOnMidiPort (const std::string& deviceId,
                                                                        const std::string& portId);
+
+    /*  AND ON AN MQTT BROKER (namespace draft §67, ANJ): its transport and
+        the mqtt wire, the only one a broker carries; on Go.dot's own broker,
+        the host emptied as well, which is what names it (AND). */
+    std::vector<std::pair<std::string, std::string>> deviceOnMqtt (const std::string& deviceId, bool onGodotsBroker);
+
+    /*  GO.DOT'S OWN BROKER AS THE NETWORK TAB SHOWS IT (namespace draft §67,
+        AND, ANJ): the show's switch and port, and what the broker is doing
+        tonight - the engine's words, filled by whoever reads the snapshot. */
+    struct BrokerRow
+    {
+        bool on = false;
+        int port = 1883;
+        std::string state = "off";      // off, listening, problem
+        std::string problem;
+        int clients = 0;
+    };
 
         /** Every declared device, in identifier order. */
     std::vector<DeviceRow> readDevices (const tree::TreeSnapshot&);

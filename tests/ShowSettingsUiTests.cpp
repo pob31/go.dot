@@ -3117,3 +3117,39 @@ TEST_CASE ("transport UI: what this computer is beside the show's name, and the 
 
     snapshotTo (transport, "transport-show-differs-busy.png");
 }
+
+//==============================================================================
+/*  MQ.6: GO.DOT'S OWN MQTT BROKER ON THE NETWORK TAB (namespace draft §67,
+    AND, ANJ): the switch says which setting is in force in words and sends
+    the one row; the port box shows while it is on. */
+TEST_CASE ("show settings UI: the Network tab's MQTT broker switch sends the row, and says in words what the broker is doing")
+{
+    Rig rig;
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
+
+    auto* off = button (panel, "MQTT broker: Off");
+    REQUIRE (off != nullptr);
+
+    const auto before = rig.sent.size();
+    off->onClick();
+    REQUIRE (rig.sent.size() == before + 1);
+    CHECK (rig.sent.back().command == "node.set");
+    REQUIRE (rig.sent.back().args.size() == 2u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/network/broker");
+    CHECK (rig.sent.back().args[1].getString() == "true");
+
+    //  On: the word changes, and the switch sends it off again.
+    REQUIRE (rig.document.setAttribute ("/godot/network/broker", "true").ok);
+    panel.refresh (*rig.publish());
+    auto* on = button (panel, "MQTT broker: On");
+    REQUIRE (on != nullptr);
+    on->onClick();
+    CHECK (rig.sent.back().args[0].getString() == "/godot/network/broker");
+    CHECK (rig.sent.back().args[1].getString() == "false");
+}

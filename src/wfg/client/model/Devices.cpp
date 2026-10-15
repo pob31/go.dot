@@ -123,6 +123,8 @@ namespace wfg::client::model
             else if (name == "linkProblem") row.linkProblem = text (node);
             else if (name == "midiPort")   row.midiPort = text (node);
             else if (name == "midiChannel") row.midiChannel = number (text (node), 1);
+            else if (name == "wire")       row.wire = text (node).empty() ? std::string ("osc") : text (node);
+            else if (name == "topics")     row.topics = text (node).empty() ? std::string ("#") : text (node);
 
             /*  FAIL-SAFE, as the engine reads it (PRD §3.32): only the exact
                 word takes back; anything else leaves to the operator. */
@@ -197,6 +199,11 @@ namespace wfg::client::model
 
     std::string kindWordOf (const DeviceRow& row, const std::vector<PresetRow>& presets)
     {
+        /*  A broker is its own kind (namespace draft §67, ANJ): no preset
+            makes one, and its addresses are its topics. */
+        if (row.transport == "mqtt")
+            return "MQTT";
+
         if (! row.preset.empty())
         {
             const auto slug = row.preset.substr (0, row.preset.find ('@'));
@@ -326,5 +333,17 @@ namespace wfg::client::model
         return { { "/godot/mount/" + deviceId + "/midiPort", portId },
                  { "/godot/mount/" + deviceId + "/wire", "midi" },
                  { "/godot/mount/" + deviceId + "/transport", "midi" } };
+    }
+
+    std::vector<std::pair<std::string, std::string>> deviceOnMqtt (const std::string& deviceId, bool onGodotsBroker)
+    {
+        std::vector<std::pair<std::string, std::string>> writes {
+            { "/godot/mount/" + deviceId + "/wire", "mqtt" },
+            { "/godot/mount/" + deviceId + "/transport", "mqtt" } };
+
+        if (onGodotsBroker)
+            writes.push_back ({ "/godot/mount/" + deviceId + "/host", "" });
+
+        return writes;
     }
 }

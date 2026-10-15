@@ -14851,3 +14851,51 @@ TEST_CASE ("client: Shift+F's refusals are said in words")
     reading.lastError = "5601 31 window unknown-id go.flag";
     CHECK (reading.errorLine() == "Nothing flagged: the cue the last GO fired has been deleted");
 }
+
+//==============================================================================
+/*  MQ.6: A DEVICE ON AN MQTT BROKER, as a client reads it (namespace draft
+    §67, ANA, ANJ): the gesture that puts it on a broker at an address or on
+    Go.dot's own, its kind word, and its topics read off the row. */
+TEST_CASE ("client: a device on an MQTT broker is put there by one gesture, is its own kind, and reads its topics")
+{
+    CHECK (model::deviceOnMqtt ("MQ000001", false)
+             == std::vector<std::pair<std::string, std::string>> { { "/godot/mount/MQ000001/wire", "mqtt" },
+                                                                   { "/godot/mount/MQ000001/transport", "mqtt" } });
+    CHECK (model::deviceOnMqtt ("MQ000001", true)
+             == std::vector<std::pair<std::string, std::string>> { { "/godot/mount/MQ000001/wire", "mqtt" },
+                                                                   { "/godot/mount/MQ000001/transport", "mqtt" },
+                                                                   { "/godot/mount/MQ000001/host", "" } });
+
+    Rig rig;
+    rig.apply (5, "window", "mount.create", { osc::Value::string ("/house"), osc::Value::string ("") });
+    std::string deviceId;
+    for (const auto& device : model::readDevices (*rig.publish (6)))
+        if (device.prefix == "/house")
+            deviceId = device.id;
+    REQUIRE (! deviceId.empty());
+    const auto base = "/godot/mount/" + deviceId + "/";
+
+    for (const auto& [address, value] : model::deviceOnMqtt (deviceId, false))
+        rig.apply (7, "window", "node.set", { osc::Value::string (address), osc::Value::string (value) });
+    rig.apply (8, "window", "node.set", { osc::Value::string (base + "topics"), osc::Value::string ("house/# +/temp") });
+
+    const auto rowOf = [&rig, &deviceId] (std::int64_t tick)
+    {
+        for (const auto& device : model::readDevices (*rig.publish (tick)))
+            if (device.id == deviceId)
+                return device;
+        return model::DeviceRow {};
+    };
+
+    const auto row = rowOf (9);
+    CHECK (row.transport == "mqtt");
+    CHECK (row.wire == "mqtt");
+    CHECK (row.topics == "house/# +/temp");
+    CHECK (model::kindWordOf (row, {}) == "MQTT");
+    CHECK (row.link == "off");     // a rig with no table: every link reads off
+
+    //  A plain device's topics read `#`, the default, and its kind is not this one.
+    model::DeviceRow plain;
+    CHECK (plain.topics == "#");
+    CHECK (model::kindWordOf (plain, {}) == "OSC");
+}

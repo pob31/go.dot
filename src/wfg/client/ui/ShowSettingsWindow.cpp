@@ -2401,14 +2401,46 @@ namespace wfg::client::ui
                                                 strict ? "false" : "true"));
                 };
 
+                /*  GO.DOT'S OWN MQTT BROKER (namespace draft §67, AND, ANJ;
+                    MQ.6): the switch says which setting is in force, in
+                    words (4.8); the port beside it is typed in place; what
+                    the broker is doing tonight is said after the filter's
+                    sentence. */
+                addAndMakeVisible (brokerButton);
+                brokerButton.setTooltip ("Go.dot's own MQTT broker: a sensor or a controller with nothing but"
+                                         " this machine's address on it publishes here. A device of the show"
+                                         " on it is one whose broker is Go.dot's.");
+                brokerButton.onClick = [this]
+                {
+                    if (send)
+                        send (gesture::setNode ("/godot/network/broker", broker.on ? "false" : "true"));
+                };
+
+                addChildComponent (brokerPortBox);
+                brokerPortBox.setEditable (false, true, false);
+                brokerPortBox.setJustificationType (juce::Justification::centred);
+                brokerPortBox.setColour (juce::Label::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                brokerPortBox.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                brokerPortBox.setTooltip ("The port Go.dot's broker listens on; 1883 is the one every client assumes.");
+                brokerPortBox.onTextChange = [this]
+                {
+                    const auto typed = brokerPortBox.getText().trim().getIntValue();
+                    if (send && typed > 0 && typed <= 65535 && typed != broker.port)
+                        send (gesture::setNode ("/godot/network/brokerPort", std::to_string (typed)));
+                    else
+                        brokerPortBox.setText (juce::String (broker.port), juce::dontSendNotification);
+                };
+
                 addAndMakeVisible (summary);
                 summary.setJustificationType (juce::Justification::centredLeft);
             }
 
             void show (std::vector<model::DeviceRow> devices, bool strictNow,
-                       int refusedNow, bool editable, std::vector<model::PresetRow> presetsNow)
+                       int refusedNow, bool editable, std::vector<model::PresetRow> presetsNow,
+                       model::BrokerRow brokerNow = {})
             {
                 presets = std::move (presetsNow);
+                broker = brokerNow;
                 const auto sameRows = devices.size() == rows.size()
                                         && std::equal (devices.begin(), devices.end(), rows.begin(),
                                                        [] (const model::DeviceRow& a,
@@ -2444,13 +2476,29 @@ namespace wfg::client::ui
                                              : "OSC Filter: Accept All");
                 filter.setEnabled (editable);
 
-                summary.setText (strict
+                brokerButton.setButtonText (broker.on ? "MQTT broker: On" : "MQTT broker: Off");
+                brokerButton.setEnabled (editable);
+                brokerPortBox.setVisible (broker.on);
+                brokerPortBox.setEnabled (editable);
+                if (! brokerPortBox.isBeingEdited())
+                    brokerPortBox.setText (juce::String (broker.port), juce::dontSendNotification);
+
+                const auto brokerWords = ! broker.on ? juce::String()
+                                       : broker.state == "listening"
+                                           ? "  Go.dot's MQTT broker listens on " + juce::String (broker.port) + ": "
+                                               + juce::String (broker.clients) + (broker.clients == 1 ? " client." : " clients.")
+                                       : broker.state == "problem"
+                                           ? "  Go.dot's MQTT broker: " + juce::String (broker.problem)
+                                           : juce::String ("  Go.dot's MQTT broker is starting.");
+
+                summary.setText ((strict
                                    ? juce::String (refusedNow) + " message"
                                        + (refusedNow == 1 ? "" : "s") + " refused since the show"
                                          " opened. Only the devices above with Rx on are heard."
                                    : juce::String ("Every sender is heard. Switch to Registered"
                                                    " Only to take messages from the devices above"
-                                                   " alone."),
+                                                   " alone."))
+                                   + brokerWords,
                                  juce::dontSendNotification);
 
                 if (! sameRows)
@@ -2472,6 +2520,9 @@ namespace wfg::client::ui
 
                 auto foot = area.removeFromBottom (32);
                 filter.setBounds (foot.removeFromLeft (220).reduced (3, 2));
+                foot.removeFromLeft (10);
+                brokerButton.setBounds (foot.removeFromLeft (150).reduced (3, 2));
+                brokerPortBox.setBounds (foot.removeFromLeft (64).reduced (3, 4));
                 foot.removeFromLeft (10);
                 summary.setBounds (foot);
 
@@ -2623,7 +2674,8 @@ namespace wfg::client::ui
             /*  What a click at this x is on, by the same arithmetic. Named
                 rather than an index, because a column moving should break a
                 compile and not a gesture. */
-            enum class Cell { name, prefix, host, port, rx, tx, bundles, doh, rollback, none, problem, kind, cross };
+            enum class Cell { name, prefix, host, port, rx, tx, bundles, doh, rollback, none, problem, kind, cross,
+                              topics };   // topics is no column: edited over the host cell, from its menu (MQ.6)
 
             static Cell cellAt (int x, int width)
             {
@@ -2696,6 +2748,17 @@ namespace wfg::client::ui
                     g.drawText (juce::String::fromUTF8 ("\xe2\x80\x93"), cells[3], juce::Justification::centredLeft);
                     g.setColour (Look::colour (theme, "ink-dim"));
                 }
+                /*  A DEVICE ON AN MQTT BROKER (namespace draft §67, ANJ; MQ.6):
+                    the broker, or Go.dot's own when the host is empty, and
+                    1883 when the port says nothing - the one every client
+                    assumes, so the cell says it rather than nothing. */
+                else if (entry.transport == "mqtt")
+                {
+                    g.drawText (entry.host.empty() ? juce::String ("Go.dot's broker") : juce::String (entry.host),
+                                cells[2], juce::Justification::centredLeft, true);
+                    g.drawText (entry.port > 0 ? juce::String (entry.port) : juce::String ("1883"),
+                                cells[3], juce::Justification::centredLeft);
+                }
                 else
                 {
                     g.drawText (juce::String (entry.host), cells[2], juce::Justification::centredLeft, true);
@@ -2761,9 +2824,9 @@ namespace wfg::client::ui
                     AFJ; DP.6), what the link is doing, in the engine's word:
                     open is quiet and dim; anything else is the failure it is,
                     with its sentence - the word carries it, not the colour. */
-                else if (entry.transport == "tcp")
+                else if (entry.transport == "tcp" || entry.transport == "mqtt")
                 {
-                    g.setColour (Look::colour (theme, entry.link == "open" ? "ink-dim" : "failed"));
+                    g.setColour (Look::colour (theme, entry.link == "open" && entry.linkProblem.empty() ? "ink-dim" : "failed"));
                     g.drawText ("link " + juce::String (entry.link)
                                   + (entry.linkProblem.empty() ? juce::String() : ": " + juce::String (entry.linkProblem)),
                                 cells[11], juce::Justification::centredLeft, true);
@@ -2824,6 +2887,7 @@ namespace wfg::client::ui
                     case Cell::rollback: editAt (row, cellAt (event.x, width), width); return;
 
                     case Cell::problem:
+                    case Cell::topics:
                     case Cell::none:   return;
                 }
             }
@@ -2839,6 +2903,7 @@ namespace wfg::client::ui
                     case Cell::name:     return juce::String (entry.name);
                     case Cell::prefix:   return juce::String (entry.prefix);
                     case Cell::host:     return juce::String (entry.host);
+                    case Cell::topics:   return juce::String (entry.topics);
                     case Cell::rollback: return juce::String (entry.dohRollback);
                     case Cell::port:     return entry.port > 0 ? juce::String (entry.port) : juce::String();
 
@@ -2883,12 +2948,39 @@ namespace wfg::client::ui
                                                                                                         : midiPorts[at].name),
                                   true, entry.transport == "midi" && entry.midiPort == midiPorts[at].id);
 
+                /*  AND A BROKER (namespace draft §67, ANJ; MQ.6), after the
+                    ports: one at an address, or Go.dot's own; and, for a
+                    device already on one, its topics typed in place. */
+                const auto firstMqtt = firstMidi + static_cast<int> (midiPorts.size());
+                const bool onMqtt = entry.transport == "mqtt";
+                menu.addItem (firstMqtt, "On an MQTT broker, at an address...", true, onMqtt && ! entry.host.empty());
+                menu.addItem (firstMqtt + 1, "On Go.dot's MQTT broker", true, onMqtt && entry.host.empty());
+                menu.addItem (firstMqtt + 2, "Topics: " + juce::String (entry.topics) + "...", onMqtt, false);
+
                 const auto id = entry.id;
                 const auto ports = serials;
                 const auto cables = midiPorts;
                 menu.showMenuAsync (juce::PopupMenu::Options(),
-                                    [this, id, ports, cables, row, width, firstMidi] (int chosen)
+                                    [this, id, ports, cables, row, width, firstMidi, firstMqtt] (int chosen)
                                     {
+                                        if (chosen >= firstMqtt && send)
+                                        {
+                                            if (chosen == firstMqtt + 2)
+                                            {
+                                                if (row < static_cast<int> (rows.size()))
+                                                    editAt (row, Cell::topics, width);
+                                                return;
+                                            }
+
+                                            const bool own = chosen == firstMqtt + 1;
+                                            for (const auto& device : rows)
+                                                if (device.id == id && (device.transport != "mqtt" || device.host.empty() != own))
+                                                    send (gesture::setNodes (model::deviceOnMqtt (id, own)));
+                                            if (! own && row < static_cast<int> (rows.size()))
+                                                editAt (row, Cell::host, width);
+                                            return;
+                                        }
+
                                         if (chosen >= firstMidi && send)
                                         {
                                             const auto at = static_cast<std::size_t> (chosen - firstMidi);
@@ -2974,7 +3066,7 @@ namespace wfg::client::ui
 
                 const auto cells = cellsFor (place.withWidth (width).withX (list.getX()));
                 const auto index = cell == Cell::name ? 0 : cell == Cell::prefix ? 1
-                                 : cell == Cell::host ? 2 : cell == Cell::rollback ? 8 : 3;
+                                 : cell == Cell::host || cell == Cell::topics ? 2 : cell == Cell::rollback ? 8 : 3;
 
                 editing = entry.id;
                 editingCell = cell;
@@ -3013,6 +3105,7 @@ namespace wfg::client::ui
                     const auto name = cell == Cell::name     ? "name"
                                     : cell == Cell::prefix   ? "prefix"
                                     : cell == Cell::host     ? "host"
+                                    : cell == Cell::topics   ? "topics"
                                     : cell == Cell::rollback ? "dohRollback" : "port";
 
                     send (gesture::setNode ("/godot/mount/" + id + "/" + name,
@@ -3051,6 +3144,9 @@ namespace wfg::client::ui
             juce::ComboBox presetChooser;
             std::vector<model::PresetRow> presets;
             juce::TextButton filter { "OSC Filter: Accept All" };
+            juce::TextButton brokerButton { "MQTT broker: Off" };
+            juce::Label brokerPortBox;
+            model::BrokerRow broker;
             juce::Label summary;
             juce::Rectangle<int> heading;
 
@@ -8712,11 +8808,22 @@ namespace wfg::client::ui
                 next tick through the engine's own re-read. */
             network->showSerials (model::readSerialPorts (snapshot));
             network->showPorts (model::readPorts (snapshot));
+            model::BrokerRow broker;
+            broker.on = model::isYes (model::flag (snapshot, "/godot/network/broker"));
+            broker.port = juce::String (model::text (snapshot, "/godot/network/brokerPort")).getIntValue();
+            if (broker.port <= 0)
+                broker.port = 1883;
+            broker.state = model::text (snapshot, "/godot/network/brokerState");
+            if (broker.state.empty())
+                broker.state = "off";
+            broker.problem = model::text (snapshot, "/godot/network/brokerProblem");
+            broker.clients = juce::String (model::text (snapshot, "/godot/network/brokerClients")).getIntValue();
+
             network->show (model::readDevices (snapshot),
                            model::isYes (model::flag (snapshot, "/godot/network/strictSenders")),
                            juce::String (model::text (snapshot, "/godot/network/refused")).getIntValue(),
                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
-                           model::readPresets (snapshot));
+                           model::readPresets (snapshot), broker);
 
             /*  THE PAIR (RD.11): the machine's settings and what the pair says
                 now, re-read every pass - every line is live, and each setting
