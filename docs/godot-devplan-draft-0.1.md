@@ -1189,6 +1189,31 @@ The author's decisions are AMM-AMO; AMP-AMX and AMZ are the implementer's, the a
 the foot in JavaScript and again in Lua; a script stuck in a loop is ended and the show runs on; an old
 show saves unchanged; CI is green.
 
+### MQTT: a broker in Go.dot, and a client to any broker · L
+
+*Added on 2026-10-15*, at the author's direction: a sensor, a controller or a hub that speaks MQTT
+heard and answered by process and script cues, and by OSC cues - a broker as a device of the show,
+its topics as addresses under the device's prefix; a client to any broker, and a broker of Go.dot's
+own for a device that has nowhere else to publish (namespace draft §67; PRD §3.21, §3.22, §6.9). The
+author's decisions are ANA-ANC; AND-ANK are the implementer's, the author's to overrule.
+
+| Stage | What | Depends on |
+|---|---|---|
+| MQ.0 | Docs: namespace §67, PRD §3.21, §3.22, §5, §6.9, §6.11, the README, this | - |
+| MQ.1 | The MQTT 3.1.1 codec and topic matching, `MqttTests` | MQ.0 |
+| MQ.2 | The rows and the schema, the load's refusals, `PresetTable::carries` | MQ.0 |
+| MQ.3 | The client hears: the `mqtt` framing on the links table, the session, the tick's take, the hearing rule | MQ.1, MQ.2 |
+| MQ.4 | The client publishes: the destination, the `mqtt` wire, the sink; the backup's hold | MQ.3 |
+| MQ.5 | The broker, its rows, `--mqtt-port`, a device on Go.dot's broker | MQ.1, MQ.2 |
+| MQ.6 | The Network tab: ADD's two entries, Kind, Where, Topics, the broker under the table | MQ.2, MQ.5 |
+| MQ.7 | The help cards, a ready-made script, the guides, the README | MQ.4, MQ.5 |
+| MQ.8 | `blackbox.mqtt`, M72, M73, the whole suite, CI | all |
+
+**Done when:** a sensor publishing to Go.dot's broker, or to a Mosquitto beside it, is heard by a
+patch and a script at an address under its device's prefix and answered on another topic; an OSC cue
+aimed at the device publishes; a backup hears and publishes nothing; a replay plays the sensor back
+with no socket; an old show saves unchanged; CI is green.
+
 ### Editing a sound: sections, crossfades, trim, and a freeze · M
 
 *Added on 2026-10-10*, at the author's direction: a sound cue cut into sections at the playhead, the

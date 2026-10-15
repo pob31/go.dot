@@ -133,6 +133,11 @@ has stood in front of the thing.
   in each language ([`js/`](js/), [`lua/`](lua/)). It reaches the world only
   through Go.dot, so the show's log holds what it did; one caught in an endless
   loop is stopped after a second and the show runs on.
+- **MQTT.** A sensor, a controller or a hub that speaks MQTT is a device of the
+  show: its topics are addresses under the device's prefix, so a patch, a script
+  or an OSC cue hears and publishes as with any device. Go.dot is a client of any
+  broker, and carries a broker of its own for a device that has nowhere else to
+  publish. MQTT 3.1.1, Go.dot's own code, no TLS.
 - **Timecode out.** MTC on a MIDI port, and SMPTE LTC that Go.dot draws itself on
   an audio output, from a cue: it starts at the label it names and runs until it
   is stopped or for a length, on the same sample as the sounds of its group. A
@@ -257,6 +262,7 @@ and says afterwards what was built against what was drawn.
 | OSC cues | Several messages, bundles, recorded curves | §45 |
 | Process cues | Pure Data inside a cue, serial ports; a patch's ways in and out, Pd as its editor | §51, §65 |
 | Script cues | JavaScript and Lua in a cue, on the process cues' host | §66 |
+| MQTT | A broker as a device, a client to any broker, Go.dot's own broker | §67 |
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
 | Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |

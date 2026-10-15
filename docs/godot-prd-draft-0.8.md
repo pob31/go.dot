@@ -2067,6 +2067,14 @@ processor written as text, in JavaScript or Lua: it hears and sends by address a
 the same host, budget and log, and is edited in a code editor at the foot of the window. A stuck script,
 unlike a stuck patch, is interrupted and its run failed (AMQ).
 
+*Added 2026-10-15, at the author's direction:* **MQTT** (namespace draft §67) is one more source and
+sink, and needs no new door: a broker is a device of the show whose transport is `mqtt`, and a topic
+under it is an address under the device's prefix, so `[r /house/room1/temp]` and
+`godot.hear('/house/room1/temp', ...)` hear a sensor as they hear any device, and a send to
+`/house/lights/1` publishes. Go.dot is a client of any broker, and a broker of its own for a device
+that has nowhere else to publish (ANA, AND). A payload is read as a serial line is (ANC). The code is
+Go.dot's own, MQTT 3.1.1 (ANB); TLS is not spoken.
+
 ### 3.22 OSC device templates
 
 A device that speaks OSCQuery **describes itself**; templates are only needed for
@@ -2098,6 +2106,11 @@ cue's messages, so the cue stays an OSC cue and keeps its curves, its waits and
 its Doh! behaviour. Yamaha's RCP document, under NDA, is not requested (AFA).
 The author's decisions are AFA-AFF; AFG-AFP are the implementer's, the author's
 to overrule.
+
+*Added 2026-10-15, at the author's direction (namespace draft §67):* an **MQTT
+broker is a device** too, transport `mqtt`, opaque - its topics are addresses
+under its prefix and need no template; a described MQTT device, a preset whose
+nodes are topics, is left for later (§67.7).
 
 ### 3.23 Choufleur integration (script following and cue prompting)
 
@@ -3549,7 +3562,8 @@ XML document + schema.
 Deck, SpaceMouse), script nodes, engine redundancy, experiment protocol runner,
 latency-alignment test clip.
 
-**Later** — MQTT, deterministic replay tooling on tick-indexed input logging.
+**Later** — deterministic replay tooling on tick-indexed input logging. *(MQTT
+stood here until 2026-10-15; it is built as §3.21's device, namespace draft §67.)*
 
 ---
 
@@ -4206,6 +4220,24 @@ implementer's calls from AKE in §61.2 are the author's to overrule:
 What the work leaves out: a QLab text cue imported; the old OpenGL renderer; font files carried in
 the show's media; a fade of a key, a text's style or its colours; a blur of one picture's own image.
 
+Added 2026-10-15 *(proposed)*, with MQTT (§3.21, namespace draft §67). The implementer's calls from
+AND in §67.2 are the author's to overrule:
+
+- **Go.dot's own broker is this machine's service**, like its OSC port: on by a row of the show
+  (`network/broker`), at a port of the show (1883), `--mqtt-port` overriding it here; a device with an
+  empty host is on it, in-process, and is refused at the load on a machine whose broker is off.
+- **The client rides the links table**: a connection with the table's backoff, state words and hold;
+  one session per device on the tick thread, keepalive counted in ticks; the client id carries the
+  machine's name so a main and a backup on one broker never evict each other.
+- **QoS 0, not retained, on the way out; QoS 0 granted to every subscriber of Go.dot's broker**; a
+  client's QoS 1 and 2 publishes acknowledged as the protocol asks. MQTT 5 refused at CONNECT.
+- **A topic that cannot be an address is dropped and counted** - a space, or any of `# * , ? [ ] { }`.
+- **A backup hears and publishes nothing**; with Go.dot's own broker a sensor aimed at the main does
+  not move at a failover, and the guides say which to choose.
+
+What the work leaves out: TLS and MQTT over WebSocket; MQTT 5; persistent sessions; retained or a QoS
+per cue; a described MQTT device; the broker's `$SYS` topics; a bridge to another broker.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -4397,6 +4429,10 @@ Mackie vs HUI first — first week with the D700.
   0.4 in Lua, none late; an endless loop failed 1.0 s after it began, the threshold, and its instance
   freed a tick later, in either language; a device's report doubled by a script and back at the
   device in 33 to 66 ms, as a patch's.
+- **MQTT** (§3.21, 2026-10-15, namespace draft §67): **M72** - a publish from a client, through
+  Go.dot's broker, heard by a script and answered back to the client, end to end; **M73** - fifty
+  clients publishing twenty a second each to Go.dot's broker with a script hearing them all, the
+  tick's cost and nothing dropped. *(Planned.)*
 
 ---
 

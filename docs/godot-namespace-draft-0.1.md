@@ -29895,3 +29895,103 @@ MQTT (AMH, for patches and scripts alike); a module loader, or one script callin
 one cue's text; JavaScript coloured as JavaScript (JUCE has no tokeniser for it; C++'s stands in); a
 memory cap on JavaScript, which JUCE's engine does not reach (Lua has one); the source edited on the
 browser console's page beyond a text row (AMZ); a script's MIDI heard in the log (as a patch's, §51.8).
+
+## 67. MQTT: a broker in Go.dot, and a client to any broker
+
+Asked by the author on 2026-10-15, the script cues built (§66): *"Can we have a look at the MQTT broker
+and client services for the processor cues?"* §65's AMH had put MQTT off to a design talk of its own -
+the broker, the topics, how a topic becomes an address - and that talk is this section. Decisions run
+from ANA.
+
+### 67.1 What it is, before its names
+
+MQTT is how small things on a network talk: a sensor on an ESP32, a lighting controller, a home
+automation hub publish short messages on **topics** (`room1/temp`, `lights/1`) to a **broker**, and
+whoever subscribed to those topics gets them. Go.dot speaks it both ways. It can be **a client** of a
+broker that is already there - the venue's Mosquitto, a Home Assistant - and it can be **the broker**
+itself, so a sensor with nothing but Go.dot's address on it has somewhere to publish.
+
+To a patch or a script, an MQTT message is a device's report. A broker is added in Show settings >
+Network as a device whose transport is `mqtt`, with a prefix; a topic under it is an address under
+that prefix. With a device whose prefix is `/house`:
+
+| What | A patch | A script | An OSC cue |
+|---|---|---|---|
+| A sensor publishes `23.5` on `room1/temp` | `[r /house/room1/temp]` gets `23.5` | `godot.hear('/house/room1/temp', (t) => ...)` | a trigger on `/house/room1/temp` |
+| Publish `1` on `lights/1` | `[s /house/lights/1]` | `godot.send('/house/lights/1', 1)` | a message to `/house/lights/1 1` |
+
+Nothing is new on the patch's or the script's side: §65's and §66's doors hear and send to a device by
+address, and an MQTT device is a device. What a device heard is in the log, so a replay plays the
+sensor back without a socket.
+
+### 67.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **ANA** | **A broker is a device.** An MQTT connection is a device of the show (§15): `mount/transport` gains `mqtt`, `mount/wire` gains `mqtt`, and each carries only the other. Topic `a/b/c` is the address `<prefix>/a/b/c` under the device's first prefix, and an address under the prefix is the topic without the prefix and its slash. A cue, a trigger, a patch and a script reach it as they reach any device; an OSC cue aimed at it publishes. | the author's (offered as "A broker is a device", recommended; the alternative was a fixed `/godot/mqtt/<id>/<topic>` space as the serial ports have) |
+| **ANB** | **Go.dot's own code, as serial, SLIP and OSC are**: MQTT 3.1.1, fourteen packet types over TCP, one codec (`mqtt::Packet`) for the client and the broker. No library pinned, no TLS - nothing in the tree speaks TLS. | the author's (offered as "Our own, as serial and OSC are", recommended) |
+| **ANC** | **A payload is read as a serial line is** (§51, ACR): split on spaces and commas, numbers as numbers - `23.5` a number, `on` a word; a payload whose first byte is `{` or `[` is one string, for JSON; one that is not text is one blob. Out, the atoms joined by spaces, numbers written in no locale's way, a single string atom sent as it is. | the author's (offered as "As a serial line is", recommended) |
+| **AND** | **Go.dot's own broker** is a service of this machine, like its OSC port: on when `network/broker` is on, at `network/brokerPort` (1883), asking a login when `network/brokerLogin` holds one, `--mqtt-port` overriding the port on this machine as `--osc-port` does. **A device whose host is empty is on Go.dot's broker**, in-process, no socket. A show opened on a machine whose broker is off has that device refused at the load, in words. | mine |
+| **ANE** | **The client rides the links table** (§57, AFJ): a device on `mqtt` is a `serial::Link` on a thread of its own with the table's backoff, state words and hold; a framing `mqtt` cuts the stream by the packet's own length. On the tick thread, one `mqtt::Session` per device: CONNECT (clean session, keepalive thirty seconds, the `login` row as user and password) at each opening the table counts, then SUBSCRIBE to `topics`; PINGREQ by ticks, never the wall clock; a CONNACK that refuses is said on `mount/linkProblem`. The client id is `godot-<device>-<hostname>`: a main and a backup on one broker must not share one, since a broker drops the earlier of two. | mine |
+| **ANF** | **A topic that cannot be an address is dropped**: one with a space or any of `# * , ? [ ] { }`, counted as the link's dropped. Out, every address is a topic. Publishes leave at QoS 0, not retained; a subscription asks QoS 0. | mine |
+| **ANG** | **The broker's scope**: MQTT 3.1.1 and 3.1; level 5 refused (CONNACK `0x01`), which a client of MQTT 5 is told to set down from. Clean sessions only (session present always nought). Subscriptions are granted QoS 0 - the specification allows it, and it is what keeps the broker from tracking acknowledgements it never needs; a client's QoS 1 publish is acknowledged, a QoS 2 one walked through PUBREC, PUBREL, PUBCOMP. Retained messages kept and handed to a new subscriber; a will sent when a client goes without saying; a client silent for one and a half times its keepalive dropped; `+` and `#` in a filter, `$` topics hidden from `#`. One thread listens, one thread a client, each read bounded; nothing on them touches the show. | mine |
+| **ANH** | **Held, and heard** (§58): a backup's MQTT devices stay connected and subscribed - what arrives is the show's input, as a serial port's lines are (AGH) - and publish nothing, answering `sent` (AGG). With a broker elsewhere that is the whole of redundancy. With Go.dot's own broker, a sensor aimed at the main's address does not move at a failover; the guides say so, and say which to choose: a broker elsewhere when the devices must survive the main, or an empty host on both machines when each has its own. The broker itself is this machine's service, not the show's state: the hold does not touch it. | mine |
+| **ANI** | **Heard as a device's report**: every publish taken is written into the namespace on the tick thread under the origin `mqtt:<device>`, as a connection's packets are under `link:<device>` (DP.6), so the hearing rule gives it to the device, the log holds it, and a replay opens no socket. | mine |
+| **ANJ** | **The window**: ADD in the Network tab offers "MQTT device" (a host and a port, 1883) and "MQTT device on Go.dot's broker" (an empty host); the Kind column says **MQTT**, Where says `host:port` or "Go.dot's broker", and an mqtt row has a **Topics** cell for its filters. Under the table, beside the OSC filter: "MQTT broker", off or on, its port, and how many clients tonight. The words "MQTT device", "Go.dot's broker" and "Topics" are mine, for review. | mine |
+| **ANK** | **The help cards say MQTT** where they said "not yet": the Pd card, the JavaScript and Lua cards, each with the device to add and the two lines to copy. No "Copy for a patch" on an MQTT device: its addresses are a device's, typed as any device's are. | mine |
+
+### 67.3 Rows
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `mount/<id>/transport` | `s` | rw | gains `mqtt` |
+| `mount/<id>/wire` | `s` | rw | gains `mqtt`; the only wire an `mqtt` transport carries, the only transport it rides |
+| `mount/<id>/host`, `port` | | rw | the broker; an empty host is Go.dot's broker (AND); a port left at nought is 1883 |
+| `mount/<id>/topics` | `s` | rw | the subscription filters, space-separated; `#` by default |
+| `mount/<id>/login` | `s` | rw | `<user> <password>` for the broker; empty, none |
+| `mount/<id>/link`, `linkProblem` | `s` | r | the table's words (AFJ), and the session's: `refused: bad user name or password`, `refused: identifier`, `refused: protocol`, `refused: unavailable` |
+| `network/broker` | `T` | rw | Go.dot's broker on; false |
+| `network/brokerPort` | `i` | rw | 1883 |
+| `network/brokerLogin` | `s` | rw | `<user> <password>` a client must give; empty, anyone |
+| `network/brokerState` | `s` | r | `off`, `listening`, `problem`; runtime |
+| `network/brokerProblem` | `s` | r | why it is not listening, in words; runtime |
+| `network/brokerClients` | `i` | r | how many are connected now; runtime |
+
+Every new row has a default, so an old show opens and saves unchanged.
+
+### 67.4 Refused
+
+At the load, on `mount/problem`: `the mqtt wire rides the mqtt transport only - set the transport to
+mqtt`; `an mqtt transport carries the mqtt wire only - set the wire to mqtt`; `readback is a described
+device's way; an MQTT device is heard by its topics`; `it is on Go.dot's broker, which this machine has
+off - turn it on in Show settings > Network, or name a broker`. A run to a device whose link is closed
+**fails**, as to a closed connection (AFJ). A publish on a topic the broker refuses is dropped and
+counted; a refused CONNECT is on `linkProblem` and the link waits as a connection does.
+
+### 67.5 Stages
+
+| Stage | What | Built |
+|---|---|---|
+| MQ.0 | This section; PRD §3.21, §3.22, §5, §6.9, §6.11; the devplan; the README | |
+| MQ.1 | The codec and topic matching, `MqttTests` | |
+| MQ.2 | The rows, the schema, the load's refusals, `PresetTable::carries` | |
+| MQ.3 | The client hears: the `mqtt` framing, the session, the tick's take, the hearing rule | |
+| MQ.4 | The client publishes: the destination, the `mqtt` wire, the sink; the hold | |
+| MQ.5 | The broker, its rows, `--mqtt-port`, a device on Go.dot's broker | |
+| MQ.6 | The Network tab: the two ADD entries, Kind, Where, Topics, the broker under the table | |
+| MQ.7 | The help cards, a ready-made script, the guides, the README | |
+| MQ.8 | `blackbox.mqtt`, M72, M73, the whole suite, CI | |
+
+### 67.6 Measurements
+
+- **M72** - a publish from a client, through Go.dot's broker, heard by a script and its answer
+  published back to the client: expected on the tick, as M57 and §66.6's end to end (33 to 66 ms).
+- **M73** - fifty clients publishing twenty a second each to Go.dot's broker, with a script hearing
+  them all: the tick's cost and nothing dropped, Release.
+
+### 67.7 Not built
+
+TLS (port 8883) and MQTT over WebSocket - nothing in the tree speaks TLS; MQTT 5; persistent sessions
+and QoS above nought on the way out; retained, or a QoS, chosen per cue; a described MQTT device - a
+preset whose nodes are topics (§57) - the opaque device being enough for a sensor; the broker's `$SYS`
+topics; a bridge between Go.dot's broker and another.
