@@ -24014,8 +24014,8 @@ Mine, proposed:
 
 ### 51.8 Not built
 
-*(Proposed, PRD §6.9.)* A script object inside Pd - Lua through pd-lua, or JavaScript (ACC's "over
-time"); subpatches entered and arrays edited on the canvas (C4, after PC.8); an edit taking effect
+*(Answered 2026-10-15, §66.)* JavaScript and Lua came as a cue of their own, the script cue, not as an
+object inside Pd (AMM). *(Proposed, PRD §6.9.)* Subpatches entered and arrays edited on the canvas (C4, after PC.8); an edit taking effect
 without opening the patch again; Pd's GUI objects beyond the bang, toggle, number box and sliders on the
 canvas; a patch drawn in the browser console; a MIDI message a patch heard, in the log; anything that
 stops a patch stuck inside Pd short of starting Go.dot again; a helper process for the patches, which
@@ -29746,3 +29746,126 @@ the show; a replay takes it and opens nothing.
 - **PN.3-PN.5**: AMJ - the cue list's and the Serial tab's right-click, words pasted on the canvas as
   boxes (`patchWordsPasted`); AMK - the canvas a drop target for the list's row drag; AML - in the
   Runner's patch path. **PN.6**: the tester guides.
+
+## 66. Script cues: JavaScript, then Lua
+
+Asked by the author on 2026-10-15, the process cue built (§51, §65): *"Now that the pd Processor cues are
+done, I'd like to have one or two scripting language alternatives. I have Javascript and LUA on the
+table. I don't know LUA. I know it's popular for scripting. Once we have JS, how much work would it be to
+have also LUA? Should we develop both at the same time?"* Then, during the build: *"No need to show the
+script content in the inspector."* Decisions run from AMM.
+
+### 66.1 What it is, before its names
+
+A **script cue** does what a process cue does - while it runs, it hears what devices report, what the
+show's rows say, MIDI on a port, a line from an Arduino, and sends on to a device, a port, the Arduino or
+Go.dot itself - but its program is **written as text** in JavaScript, or in Lua, instead of drawn as a
+patch. It runs where a patch runs: on a thread of its own, once a tick, never on the audio thread, the
+tick waiting for it at most the show's budget (`/godot/list/processBudget`), late and stuck as a patch is
+(ACJ). Esc stops it at once; Doh!, a stop cue, its group ending end it as they end a patch. In the
+persistent section it runs all evening and is started again if it stops.
+
+The script is written in an editor at the foot of the window, coloured as code is, with the run's state
+and the last thing the script printed under it. A script reaches the world only through Go.dot's own
+doors, by address, as a patch does:
+
+```js
+// Doubles what the console reports for source 1's x, and fires a cue past 0.8.
+godot.hear('/wfs/source/1/x', (x) => {
+    godot.send('/wfs/source/2/x', x * 2);
+    if (x > 0.8) godot.fire('3.1');
+});
+```
+
+```lua
+-- The same in Lua.
+godot.hear('/wfs/source/1/x', function (x)
+    godot.send('/wfs/source/2/x', x * 2)
+    if x > 0.8 then godot.fire('3.1') end
+end)
+```
+
+Loading a show never runs a script (PRD §3.20); only a run does. A script has no file, no socket, no
+module loader and no clock of its own: what it did is in the log, as a patch's is, and a replay plays it
+from there without running it.
+
+### 66.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **AMM** | **A script cue is a kind of its own**, element `<Script>`, beside the process cue - its rows `language` (`javascript` or `lua`, `javascript` by default), `source` (the code), `midiIn`, `midiOut`. Underneath it is a process cue's run: the same host and threads, budget, late and stuck, the same run rows (`processState`, `processLate`, `processDropped`, `said`, `ports`), `process.send`, the same log and replay. It answers PRD §6.5 again: Lua is taken, and JavaScript, in a cue of their own and not as an object inside Pd (ACC's "over time"). | the author's (offered as "A separate Script cue kind"; I recommended a language chosen on the process cue) |
+| **AMN** | **JavaScript first, Lua as the closing stages of the same work**, one host interface designed for both from the start: the second language is what proves it is not shaped by the first. | the author's (offered as "JS first, Lua as the closing stages of the same plan", recommended) |
+| **AMO** | **The script's text is not in the inspector**: the editor at the foot is where it is read and written; the inspector's "Code" opener opens it. | the author's ("No need to show the script content in the inspector") |
+| **AMP** | **One host, three kinds of instance.** The host (`process::ProcessHost`) drives an interface, `ProcessInstance`, that Pd's instance, JavaScript's and Lua's each are. An instance says whether it shares a lock with the others: only Pd's does (ACK), so only patches wait for a quiet point, and a stuck patch never holds a script back, nor a stuck script a patch. | mine |
+| **AMQ** | **A stuck script is ended, not abandoned.** JavaScript (QuickJS, through JUCE's `juce_javascript`) and Lua can both be interrupted from outside; a script still in its tick when it would be stuck (`processStuckAfter` ticks and a second) is interrupted, its run fails `process-stuck` as a patch's does, and its instance is closed and freed. A patch stuck in Pd still cannot be (ACJ). | mine |
+| **AMR** | **The API is one shape spelt in each language** (66.3), and is a short prelude written in the script's own language: it keeps the script's callbacks and timers, and the host hands it each tick's inputs in one call and takes what it sent in one. Timers count ticks, never the wall clock, so a replay reads the same log. | mine |
+| **AMS** | **The sandbox is PRD §3.20's**: in JavaScript no `std`, `os`, module loader or network; in Lua the base library without `dofile`, `loadfile` and `load` of binary chunks, and `string`, `table`, `math`, `utf8`, `coroutine` - never `io`, `os`, `package` or `debug`. Only Go.dot's doors reach out. | mine |
+| **AMT** | **The editor at the foot** is JUCE's `CodeEditorComponent`, coloured by the language (JUCE has a Lua colouring and none for JavaScript; C++'s is the nearest), read-only under the lock. A finished edit is one write - when the editor loses the keyboard, on Ctrl+S, or when another cue is picked - never a keystroke, since an edit opens the running script again from its beginning (ACM). A problem the script reports - a line it cannot read, an error while it runs - is shown with its line. | mine |
+| **AMU** | **Open in your own editor**: `script.edit` writes the source as `<cue>.js` or `<cue>.lua` beside the patches and opens it in the program the system opens such a file with; a save there comes back as an edit, as a save in Pd does (ACN). Machine-local, as `process.edit` is. | mine |
+| **AMV** | **Copy for a script, and a cue dragged onto the editor** (AMJ, AMK carried over): the line that fires that cue - `godot.fire('B3NK0001');` - and a serial port's two, in the picked cue's language, JavaScript by default. | mine; the author's AMJ, AMK |
+| **AMW** | **A help card in each language** - `js/godot-help.js`, `lua/godot-help.lua`, a script whose comments say every door with a line to copy, opened at the foot by the editor's **?** - and ready-made scripts beside it, installed as `pd/` is. A test holds each card to naming every function the API has. | mine |
+| **AMX** | **Lua 5.4, pinned and built by Go.dot**, its C API used directly (no binding library); its integers leave a script as numbers like any other. | mine |
+
+### 66.3 What a script can call
+
+| What | JavaScript | Lua | As a patch |
+|---|---|---|---|
+| Hear a device's address, a row, a serial port | `godot.hear('/addr', (v, ...) => {})` | `godot.hear('/addr', function (v, ...) end)` | `[r /addr]` |
+| Hear everything it is handed | `godot.hearAll((address, ...values) => {})` | `godot.hearAll(function (address, ...) end)` | `[r in]` |
+| Send to a device | `godot.send('/addr', value, ...)` | the same | `[s /addr]` |
+| Set a row of the show | `godot.set('/godot/cue/<id>/level', -6)` | the same | `[s /godot/cue/<id>/level]` |
+| Run a command | `godot.command('cue/stop', id)` | the same | `[s /godot/cmd/cue/stop]` |
+| Fire a cue by id or number | `godot.fire('3.1')` | the same | `[; /godot/cmd/cue/fire 3.1(` (AML) |
+| Hear MIDI on `midiIn` | `godot.midi.hear((status, a, b) => {})` | the same | `[midiin]` |
+| Send MIDI on `midiOut` | `godot.midi.send(0x90, 60, 100)` | the same | `[midiout]` |
+| A line to a serial port | `godot.send('/godot/serial/<id>/out', 'led', 1)` | the same | `[s /godot/serial/<id>/out]` |
+| Every tick | `godot.tick((n) => {})` | the same | `[metro 20]` |
+| Later, and again | `godot.after(1.5, fn)`, `godot.every(0.25, fn)`, `godot.cancel(t)` | the same | `[delay]`, `[metro]` |
+| This cue's run, in a command | `godot.self` | the same | `self` |
+| Print | `print(...)` | `print(...)` | `[print]` |
+
+A time is in seconds and lands on a tick (20 ms). A value sent is a number, a string, or several of
+them; what a script is handed is the same. `print` goes to the run's `said` and to the editor.
+
+### 66.4 The rows
+
+| Row | Owner | Type | Default | What |
+|---|---|---|---|---|
+| `language` | `script` | `s`, `javascript\|lua` | `javascript` | What the source is written in |
+| `source` | `script` | `s` | a starter script with one comment | The code |
+| `midiIn`, `midiOut` | `script` | `s` | empty | A MIDI port's id, or none - as a process cue's |
+| `run/processState`, `run/processLate`, `run/processDropped`, `run/said`, `run/ports` | run | read | | As a patch's (§51.4); a script's run carries them too |
+
+`cue/kind` and `run/kind` gain `script`.
+
+### 66.5 Commands and records
+
+- `script.edit s cue` - the cue's source opened in this machine's editor for its language (AMU). Refused
+  `locked`. Machine-local.
+- `process.send` hands atoms to a running script as to a patch.
+- What a script made Go.dot do is logged with the origin `script:<run>`; a stuck script is
+  `run.failed <run> process-stuck`.
+
+### 66.6 Measurements
+
+- **M69** - what a tick of a script costs, beside M56's patch: a script doing what M56's fifty-object
+  patch does, JavaScript then Lua.
+- **M70** - ten scripts at once in the budget, beside M58.
+- **M71** - from an endless loop to the run failed and its instance freed.
+
+### 66.7 Stages
+
+| Stage | What |
+|---|---|
+| SC.0 | This section; PRD §3.20, §3.21, §6.5, §6.9, §6.11; §51.8; the devplan |
+| SC.1 | The host's interface; Pd's instance behind it; the quiet point Pd's alone |
+| SC.2 | The kind in the document: rows, schema, the engine's tables |
+| SC.3 | JavaScript's instance: QuickJS linked, the prelude, the sandbox, interrupted when stuck |
+| SC.4 | The Runner: a script cue runs, hears and sends as a patch does |
+| SC.5 | The window's model: the + script, the icon, the inspector, the foot's reading |
+| SC.6 | The editor at the foot |
+| SC.7 | `script.edit`, Copy for a script, a cue dragged onto the editor |
+| SC.8 | The help card and ready-made scripts, an example, the driver, M69-M71, the guides |
+| SC.9 | Lua: pinned, built, its instance, every case again in Lua |
+| SC.10 | Lua in the window and the guides |
+| SC.11 | The close-out |

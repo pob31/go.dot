@@ -2010,6 +2010,9 @@ field, sandboxed, limited API, hard time budget per tick.
 *Added in 0.8, at the author's direction (2026-10-09).* **A script node is a process cue's patch**
 (§3.21; namespace draft §51): Pure Data, run by libpd inside Go.dot, the patch kept as Pd's own text in
 one marked row of the cue (`process/patch`). Loading a show never starts one; only a run does.
+*Added 2026-10-15, at the author's direction:* **or a script cue's source** (§3.21; namespace draft §66),
+JavaScript or Lua in one marked row (`script/source`), sandboxed the same way: no file, no socket, no
+module loader, only Go.dot's own doors; the same budget, and a script stuck past it is ended.
 *(Proposed, ACP.)* The sandbox, in these terms: no compiled externals - only `.pd` patches from Go.dot's
 own folder and the show's; Pd's vanilla objects whole, `[file]` and `[netsend]` included; and the time
 budget of §3.21. Taking `[file]`'s writes or `[netsend]` away is the author's to ask for.
@@ -2058,6 +2061,11 @@ so there is no binding to declare beside it. Serial comes with it: an Arduino's 
 over SLIP as a device (ACR). A patch that never finishes cannot be stopped from outside Pd: it is
 marked stuck after a second, the show never waits on it more than the budget, and nothing new is
 opened in Pd until Go.dot starts again (ACJ, ACK - measured, §6.11).
+
+*Added 2026-10-15, at the author's direction:* **the script cue** (namespace draft §66) is the same
+processor written as text, in JavaScript or Lua: it hears and sends by address as a patch does, runs on
+the same host, budget and log, and is edited in a code editor at the foot of the window. A stuck script,
+unlike a stuck patch, is interrupted and its run failed (AMQ).
 
 ### 3.22 OSC device templates
 
@@ -3796,6 +3804,10 @@ math; Lua for orchestration outside it. Verify EEL2 licence terms.
 by libpd** (BSD-3) - neither EEL2 nor Lua is taken. A script object *inside* Pd - Lua through pd-lua
 (GPL-2 or later), or JavaScript - comes later *(proposed)*: the author's "both over time".
 
+*Answered again 2026-10-15, at the author's direction* (namespace draft §66, AMM, AMN): **JavaScript,
+then Lua, each in a script cue of its own** - not an object inside Pd. JavaScript through JUCE's
+`juce_javascript` (QuickJS), Lua 5.4 (MIT) built by Go.dot. EEL2 is still not taken.
+
 ### 6.6 Restart-vs-second-instance (§3.8); banking policy (§3.9d)
 
 Restart-vs-second-instance is **settled** per kind — §3.8's table, decision N
@@ -4086,7 +4098,7 @@ ACG-ACU in §51.2 are the author's to overrule:
 - **The ready-made patches** `go.avg`, `go.minmax`, `go.smooth`, `go.scale`, `go.deadband`, `go.edge`,
   `go.change`, `go.hold`, `go.ratelimit`.
 
-What the work leaves out: a script object inside Pd; subpatches and arrays on the canvas; an edit taken
+What the work leaves out: subpatches and arrays on the canvas; an edit taken
 without opening the patch again; a patch drawn in the browser console; a MIDI message a patch heard, in
 the log; a way to stop a stuck patch short of starting Go.dot again - a helper process for the patches,
 the option the author did not take, would give it.
@@ -4377,6 +4389,9 @@ Mackie vs HUI first — first week with the D700.
   adds 0.04-0.38 ms a frame at 1080p and 0.14-1.72 ms at 4K, three up to 1.2 and 5.6 ms, the 20 px radius
   the dearest; the monitor's previews 3-9 ms and its tile 12-23 ms on the processor, a tenth of a second
   apart. The Intel Arc the projectors run on, and the whole road from a datagram to light, are the bench's.
+- **Script cues** (§3.21, 2026-10-15, namespace draft §66): **M69** - what a tick of a script costs,
+  JavaScript and Lua, beside M56's patch; **M70** - ten scripts at once in the budget, beside M58;
+  **M71** - from an endless loop to its run failed and its instance freed.
 
 ---
 

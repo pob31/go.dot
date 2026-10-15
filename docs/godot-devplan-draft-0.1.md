@@ -1162,6 +1162,32 @@ author" above, on screen and with an Arduino.
 
 ---
 
+### Script cues: JavaScript, then Lua · L
+
+*Added on 2026-10-15*, at the author's direction: a cue whose program is written as text, in JavaScript
+and then in Lua, hearing and sending by address as a process cue's patch does, on the same host, budget
+and log; edited in a code editor at the foot of the window (namespace draft §66; PRD §3.20, §3.21, §6.5).
+The author's decisions are AMM-AMO; AMP-AMX are the implementer's, the author's to overrule.
+
+| Stage | What | Depends on |
+|---|---|---|
+| SC.0 | Docs: namespace §66, PRD §3.20, §3.21, §6.5, §6.9, §6.11, §51.8, this | - |
+| SC.1 | The process host's instance interface; Pd's behind it; the quiet point Pd's alone | SC.0 |
+| SC.2 | The kind in the document: rows, schema, the engine's tables | SC.0 |
+| SC.3 | JavaScript's instance: QuickJS linked, the prelude, the sandbox, interrupted when stuck | SC.1 |
+| SC.4 | The Runner: a script cue runs, hears and sends | SC.2, SC.3 |
+| SC.5 | The window's model: + script, icon, inspector, the foot's reading | SC.4 |
+| SC.6 | The editor at the foot | SC.5 |
+| SC.7 | `script.edit`, Copy for a script, a cue dragged onto the editor | SC.6 |
+| SC.8 | Help card, ready-made scripts, example, driver, M69-M71, guides | SC.7 |
+| SC.9 | Lua pinned and built, its instance, every case again in Lua | SC.4 |
+| SC.10 | Lua in the window and the guides | SC.9, SC.8 |
+| SC.11 | The close-out | all |
+
+**Done when:** a script averaging what a device reports fires a cue when it crosses a line, written at
+the foot in JavaScript and again in Lua; a script stuck in a loop is ended and the show runs on; an old
+show saves unchanged; CI is green.
+
 ### Editing a sound: sections, crossfades, trim, and a freeze · M
 
 *Added on 2026-10-10*, at the author's direction: a sound cue cut into sections at the playhead, the
