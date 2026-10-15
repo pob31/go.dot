@@ -16,6 +16,9 @@
 
 #include <wfg/engine/tree/MountSender.h>
 
+#include <wfg/engine/mqtt/Packet.h>
+#include <wfg/engine/mqtt/Words.h>
+
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/pair/Hold.h>
@@ -353,6 +356,25 @@ namespace wfg::tree
             const auto line = wire::renderLine (message.address, message.values, templateText) + "\r";
             ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));
         }
+        else if (message.destination.wire == "mqtt")
+        {
+            /*  THE MQTT WIRE (namespace draft §67, ANA, ANC, ANF; MQ.4): a
+                publish on the topic the address spells under the device's
+                prefix, its payload the values joined by spaces, QoS 0, not
+                retained; down the link to the broker, whose session the
+                sink asks first. An address not under the prefix, or a
+                device the table does not hold, sends nothing and fails. */
+            const auto* declaration = mounts != nullptr ? mounts->declarationOf (message.mountId) : nullptr;
+            const auto topic = declaration != nullptr ? mqtt::topicOfAddress (declaration->prefix, message.address)
+                                                      : std::nullopt;
+
+            if (topic.has_value())
+            {
+                std::string problem;
+                if (const auto bytes = mqtt::encode (mqtt::Packet::publishOf (*topic, mqtt::payloadOfValues (message.values)), problem))
+                    ok = deliver (message.destination, *bytes);
+            }
+        }
         else if (const auto bytes = osc::encode (osc::Packet::message (message.address, message.values), error))
         {
             ok = deliver (message.destination, *bytes);
@@ -519,7 +541,7 @@ namespace wfg::tree
         destination.rateCap = declaration.rateCap;
         destination.bundles = declaration.bundles;
         destination.serial = declaration.transport == "serial" ? declaration.serial : std::string {};
-        destination.link = declaration.transport == "tcp" ? declaration.id : std::string {};
+        destination.link = declaration.transport == "tcp" || declaration.transport == "mqtt" ? declaration.id : std::string {};
         destination.wire = declaration.wire.empty() ? std::string ("osc") : declaration.wire;
         destination.midiPort = declaration.transport == "midi" ? declaration.midiPort : std::string {};
         destination.midiChannel = declaration.midiChannel;

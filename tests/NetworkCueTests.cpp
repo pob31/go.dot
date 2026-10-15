@@ -51,6 +51,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/log/Replay.h>
+#include <wfg/engine/mqtt/Packet.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/tree/Mount.h>
@@ -4732,4 +4733,80 @@ TEST_CASE ("hold: a verified cue on a held machine ends done at once, asking not
         CHECK (run->error.empty());
         CHECK (run->warning.empty());
     }
+}
+
+//==============================================================================
+/*  MQ.4: A CUE AIMED AT A DEVICE ON AN MQTT BROKER leaves as a publish on
+    the topic its address spells under the device's prefix, its payload the
+    values joined by spaces, QoS 0, not retained (namespace draft §67, ANA,
+    ANC, ANF); a link that cannot take it fails the run; and a held machine
+    sends nothing and ends the run done (ANH). */
+TEST_CASE ("network cue: a cue aimed at a device on an MQTT broker leaves as a publish under its prefix, and a held machine publishes nothing")
+{
+    NetworkRig rig;
+
+    tree::MountDeclaration house;
+    house.id = "MQ000001";
+    house.prefix = "/house";
+    house.transport = "mqtt";
+    house.wire = "mqtt";
+    house.host = "127.0.0.1";
+    house.port = 1883;
+    REQUIRE (rig.mounts.declare (house).ok);
+    rig.sender.setMounts (&rig.mounts);
+
+    std::vector<std::pair<std::string, mqtt::Packet>> handed;
+    bool takes = true;
+    rig.sender.setLinkSink ([&handed, &takes] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
+    {
+        const auto decoded = mqtt::decode (packet);
+        REQUIRE_MESSAGE (decoded.ok, decoded.problem);
+        handed.emplace_back (mountId, decoded.packet);
+        return takes;
+    });
+
+    const auto cueId = rig.makeOsc ("/house/lights/1", "i:1", "sent");
+    REQUIRE (rig.document.createMessage (cueId, "/house/room1/setpoint", "f:21.5 s:\"eco\"").ok);
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    REQUIRE (rig.runOf (cueId) != nullptr);
+    INFO ("state " << rig.runOf (cueId)->state << ", error " << rig.runOf (cueId)->error << ", warning " << rig.runOf (cueId)->warning);
+    REQUIRE (handed.size() == 2u);
+    CHECK (handed[0].first == "MQ000001");
+    CHECK (handed[0].second.type == mqtt::Type::publish);
+    CHECK (handed[0].second.topic == "lights/1");
+    CHECK (handed[0].second.payload == "1");
+    CHECK (handed[0].second.qos == 0);
+    CHECK_FALSE (handed[0].second.retain);
+    CHECK (handed[1].second.topic == "room1/setpoint");
+    CHECK (handed[1].second.payload == "21.5 eco");
+
+    REQUIRE (rig.runOf (cueId) != nullptr);
+    CHECK (rig.runOf (cueId)->state == cue::runState::done);
+
+    //  The network heard none of it: the link is where the broker is.
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
+
+    //  A link that cannot take it - the session not connected, the broker gone - fails the run.
+    takes = false;
+    const auto refused = rig.makeOsc ("/house/lights/2", "i:0", "sent");
+    rig.fire (refused);
+    rig.tickOnce();
+    REQUIRE (rig.runOf (refused) != nullptr);
+    CHECK (rig.runOf (refused)->state == cue::runState::failed);
+    CHECK (rig.runOf (refused)->error == cue::runError::sendFailed);
+
+    //  HELD (ANH): nothing reaches the link, and the run ends done, sent.
+    pair::Hold hold { true };
+    rig.sender.setHold (&hold);
+    rig.runner.setHold (&hold);
+    handed.clear();
+    const auto held = rig.makeOsc ("/house/lights/3", "i:1", "sent");
+    rig.fire (held);
+    rig.tickOnce();
+    CHECK (handed.empty());
+    REQUIRE (rig.runOf (held) != nullptr);
+    CHECK (rig.runOf (held)->state == cue::runState::done);
+    CHECK (rig.runOf (held)->error.empty());
 }

@@ -4119,14 +4119,24 @@ namespace
                               {
                                   return serialPorts.sendPacket (port, packet);
                               });
-        sender.setLinkSink ([&links] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
+        sender.setLinkSink ([&links, &mqttLinks, &mqttSessions] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
                             {
                                 /*  A packet to a link cut by packets; a line to one
                                     reading lines - the rcp wire (DP.7) - its newline
                                     added by the table. Exactly one of the two takes
                                     it, by the link's framing. */
-                                return links.sendPacket (mountId, packet)
-                                    || links.send (mountId, std::string (packet.begin(), packet.end()));
+                                if (links.sendPacket (mountId, packet)
+                                      || links.send (mountId, std::string (packet.begin(), packet.end())))
+                                    return true;
+
+                                /*  OR A PUBLISH TO A BROKER (namespace draft §67,
+                                    MQ.4): down the mqtt table's link, and only once
+                                    its session is connected - a publish before the
+                                    CONNACK is what gets a client dropped. Not
+                                    connected, the run fails as to a closed link. */
+                                const auto session = mqttSessions.find (mountId);
+                                return session != mqttSessions.end() && session->second.connected()
+                                    && mqttLinks.sendPacket (mountId, packet);
                             });
 
         /*  AND THE THREAD THAT ASKS. A verified cue reads a value back off the

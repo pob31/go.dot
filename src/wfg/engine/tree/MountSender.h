@@ -128,7 +128,8 @@ namespace wfg::tree
             std::string serial {};
 
             /*  THE CONNECTION IT GOES DOWN instead of a datagram, when the
-                device's transport is tcp (namespace draft §57, AFJ; DP.6): the
+                device's transport is tcp (namespace draft §57, AFJ; DP.6) or
+                mqtt (namespace draft §67, ANA; MQ.4): the
                 mount's own identifier, which is what serve's links table is
                 keyed by; the packet's bytes are handed to `linkSink` to be
                 framed as the link's framing says. Empty, as `serial` is, for
