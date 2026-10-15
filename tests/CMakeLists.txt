@@ -103,6 +103,7 @@ add_executable(wfg_tests
     CodeWatchTests.cpp
     ClockWatchTests.cpp
     SerialTests.cpp
+    MqttTests.cpp
     WireTests.cpp
     TrafficTapTests.cpp
     VerifiedCueTests.cpp
