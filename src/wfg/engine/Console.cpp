@@ -62,6 +62,8 @@
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/serial/TcpLink.h>
+#include <wfg/engine/mqtt/Packet.h>
+#include <wfg/engine/mqtt/Session.h>
 #include <wfg/engine/tree/Wires.h>
 #include <wfg/engine/tree/MidiEchoes.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
@@ -2913,6 +2915,58 @@ namespace
         return wanted;
     }
 
+    /*  THE DEVICES ON MQTT BROKERS AS THE SHOW DECLARES THEM (namespace
+        draft §67, ANE; MQ.3): one link per device whose transport is mqtt,
+        at its broker's host and port - 1883 when the port says nothing -
+        cut by the packets' own length, and beside it what its session
+        needs: the prefix its topics land under, the filters, the login, the
+        client id with this machine's name in it so a main and a backup on
+        one broker never evict each other. An empty host is Go.dot's own
+        broker (AND): no path yet, until MQ.5 gives the table a link to it.
+        The session word carries the login and the client id, so a change
+        of either opens the connection again - the only way a CONNECT can
+        carry it. */
+    std::vector<std::pair<wfg::serial::Wanted, wfg::mqtt::SessionWanted>> mqttWantedOf (const wfg::doc::ShowDocument& document,
+                                                                                         const std::string& machine)
+    {
+        std::vector<std::pair<wfg::serial::Wanted, wfg::mqtt::SessionWanted>> wanted;
+
+        for (const auto& mountId : wfg::tree::declaredMountIds (document))
+        {
+            const auto base = "/godot/mount/" + mountId + "/";
+            const auto reads = [&document, &base] (const char* row, const char* otherwise)
+            { return document.getAttribute (base + row).value_or (std::string (otherwise)); };
+
+            if (reads ("transport", "udp") != "mqtt")
+                continue;
+
+            wfg::mqtt::SessionWanted session;
+            session.id = mountId;
+            session.prefix = reads ("prefix", "");
+            session.topics = reads ("topics", "#");
+            session.login = reads ("login", "");
+            session.clientId = "godot-" + mountId + "-" + machine;
+
+            wfg::serial::Wanted link;
+            link.id = mountId;
+            const auto host = reads ("host", "127.0.0.1");
+            auto port = static_cast<int> (wfg::osc::parseDouble (reads ("port", "0")).value_or (0.0));
+            if (port <= 0)
+                port = 1883;
+
+            if (! host.empty() && port <= 65535)
+                link.path = wfg::serial::hostPortOf (host, port);
+
+            link.framing = "mqtt";
+            link.rx = reads ("rx", "false") == "true";
+            link.tx = reads ("tx", "true") != "false";
+            link.session = session.login + "\n" + session.clientId;
+            wanted.emplace_back (std::move (link), std::move (session));
+        }
+
+        return wanted;
+    }
+
     std::vector<wfg::midi::PortWish> portWishesOf (const wfg::doc::ShowDocument& document)
     {
         std::vector<wfg::midi::PortWish> wishes;
@@ -3989,6 +4043,39 @@ namespace
         serialPorts.setHold (&machineHold);
         links.setHold (&machineHold);
 
+        /*  AND THE DEVICES ON MQTT BROKERS (namespace draft §67, ANE, ANH;
+            MQ.3): a third table, its links cut by MQTT's own framing, and a
+            session per device on the tick thread speaking the protocol over
+            it. NO HOLD on this table: a held machine stays connected and
+            subscribed - what arrives is the show's input, as a serial port's
+            lines are (AGH) - and the CONNECT, SUBSCRIBE and PINGREQ that keep
+            it so must go out; what the show publishes is held before it
+            reaches here, by the sender (AGG). */
+        wfg::serial::SerialTable mqttLinks { wfg::serial::openTcpLink };
+        std::map<std::string, wfg::mqtt::Session> mqttSessions;
+        const auto mqttMachine = juce::SystemStats::getComputerName().toStdString();
+        const auto reconcileMqtt = [&mqttLinks, &mqttSessions, &document, &mqttMachine]
+        {
+            std::vector<wfg::serial::Wanted> links;
+            std::vector<std::string> kept;
+
+            for (auto& [link, session] : mqttWantedOf (document, mqttMachine))
+            {
+                kept.push_back (session.id);
+                links.push_back (link);
+
+                if (const auto found = mqttSessions.find (session.id); found != mqttSessions.end())
+                    found->second.want (session);
+                else
+                    mqttSessions.emplace (session.id, wfg::mqtt::Session (session));
+            }
+
+            for (auto at = mqttSessions.begin(); at != mqttSessions.end();)
+                at = std::find (kept.begin(), kept.end(), at->first) == kept.end() ? mqttSessions.erase (at) : std::next (at);
+
+            mqttLinks.reconcile (links);
+        };
+
         /*  WHAT THE CONNECTIONS ARE TOLD TO BE, AND WHETHER THE HOLD WAS ON
             WHEN THEY WERE (RD.1, AGW): a held machine keeps them closed - a
             console that takes one session gives it to the machine that sends,
@@ -4332,6 +4419,7 @@ namespace
         //  The serial ports, opened as the show declares them (declared above).
         serialPorts.reconcile (serialWantedOf (document));
         reconcileLinks();
+        reconcileMqtt();
         runner.setSerialPorts (&serialPorts);
         sender.setMounts (&mounts);
 
@@ -5146,6 +5234,7 @@ namespace
         parameters.setInstaller (&ffmpegInstaller);
         parameters.setSerial (&serialPorts, &runner.heardLines());
         parameters.setLinks (&links);
+        parameters.setMqttLinks (&mqttLinks);
         parameters.setPresets (&presets);
 
         /*  A PROCESS CUE'S PATCH OPENED IN PLUGDATA OR PD (namespace draft §51,
@@ -6632,6 +6721,49 @@ namespace
                                      engine.submit ("mount:" + said.mountId, "mount.heard", std::move (heardArgs));
                                  }
 
+                                 /*  AND WHAT THE BROKERS SENT (namespace draft §67,
+                                     ANE, ANI; MQ.3): each device's packets to its
+                                     session - a publish comes back as what the show
+                                     hears, written into the namespace under the
+                                     origin `mqtt:<id>` as a connection's are under
+                                     `link:<id>`, so the hearing rule gives it to the
+                                     device and the log holds it; then the session's
+                                     own tick, its packets to the link, a broker gone
+                                     silent opened again, its sentence noted. */
+                                 for (auto& [mountId, packets] : mqttLinks.takePackets (64))
+                                 {
+                                     const auto found = mqttSessions.find (mountId);
+                                     if (found == mqttSessions.end())
+                                         continue;
+
+                                     for (const auto& bytes : packets)
+                                     {
+                                         const auto decoded = wfg::mqtt::decode (bytes);
+                                         if (! decoded.ok)
+                                             continue;
+
+                                         if (const auto heard = found->second.feed (decoded.packet, tickIndex))
+                                             nameSpace.write ("mqtt:" + mountId,
+                                                              wfg::osc::Packet::message (heard->address, heard->values));
+                                     }
+                                 }
+
+                                 for (auto& [mountId, mqttSession] : mqttSessions)
+                                 {
+                                     for (const auto& packet : mqttSession.tick (mqttLinks.stateOf (mountId), tickIndex))
+                                     {
+                                         std::string problem;
+                                         if (const auto bytes = wfg::mqtt::encode (packet, problem))
+                                             mqttLinks.sendPacket (mountId, *bytes);
+                                     }
+
+                                     if (mqttSession.takeReopenWish())
+                                         mqttLinks.reopen (mountId);
+
+                                     if (! mqttSession.problem().empty())
+                                         mqttLinks.note (mountId, mqttSession.problem());
+                                 }
+
                                  /*  WHAT THE DEVICES THAT TELL NEED TOLD (DP.10):
                                      every nine seconds, an X32's /xremote, which
                                      it keeps for ten, and a subscription the
@@ -7304,6 +7436,16 @@ namespace
                     continue;
                 }
 
+                /*  AND ONE ON A BROKER (namespace draft §67, ANI) by its
+                    session: what its session heard is the device's. */
+                if (document.getAttribute (base + "transport").value_or (std::string ("udp")) == "mqtt")
+                {
+                    hearing->byHost["mqtt:" + mountId].push_back (
+                        { mountId, document.getAttribute (base + "prefix")
+                                       .value_or (std::string {}) });
+                    continue;
+                }
+
                 /*  AND ONE ON A MIDI PORT (DP.10) by its port: its
                     echoes are its reports, the consumer's to keep. */
                 if (document.getAttribute (base + "transport").value_or (std::string ("udp")) == "midi")
@@ -7761,6 +7903,7 @@ namespace
 
                                 if (machineHold.held() != linksReconciledHeld)
                                     reconcileLinks();
+                                    reconcileMqtt();
 
                                 if (pairing.revision != pairingPublished)
                                 {
@@ -8091,6 +8234,7 @@ namespace
                                         never waits for one. */
                                     serialPorts.reconcile (serialWantedOf (document));
                                     reconcileLinks();
+                                    reconcileMqtt();
 
                                     if (portBinder.want (portWishesOf (document)))
                                         juce::MessageManager::callAsync ([&portBinder]

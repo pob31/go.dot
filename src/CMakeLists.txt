@@ -236,6 +236,7 @@ add_library(wfg_engine STATIC
     wfg/engine/serial/SerialTable.cpp
     wfg/engine/serial/Slip.cpp
     wfg/engine/mqtt/Packet.cpp
+    wfg/engine/mqtt/Session.cpp
     wfg/engine/mqtt/Words.cpp
     wfg/engine/serial/TcpLink.cpp
     wfg/engine/surface/SurfaceProfile.cpp

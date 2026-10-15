@@ -590,3 +590,73 @@ TEST_CASE ("hold: a held table writes to no port and answers true - open, framed
     CHECK (within (2s, [&] { return arduino->sent() == "led 0\n"; }));
     CHECK_FALSE (table.send ("NOSUCHID", "led 0"));
 }
+
+//==============================================================================
+/*  MQ.3: A STREAM CUT BY MQTT'S OWN LENGTH (namespace draft §67, ANE) - a
+    device on a broker is a link on the table, its packets cut by the fixed
+    header the codec reads - and what a session on the tick thread needs of
+    the table: the openings counted, a sentence noted on an open link, and a
+    link asked to open again. */
+TEST_CASE ("serial: a link cut by mqtt packets hands whole packets, counts its openings, and opens again when asked")
+{
+    Bench bench;
+    auto broker = bench.plug ("broker:1883");
+    SerialTable table (bench.opener());
+    auto link = port ("MQ000001", "broker:1883");
+    link.framing = "mqtt";
+    table.reconcile ({ link });
+    REQUIRE (within (2s, [&] { return table.stateOf ("MQ000001").state == "open"; }));
+    CHECK (table.stateOf ("MQ000001").openings == 1u);
+
+    //  Two packets in one read, the second cut in two: a CONNACK and a PINGRESP.
+    const std::string connack { '\x20', '\x02', '\x00', '\x00' };
+    const std::string pingresp { '\xD0', '\x00' };
+    broker->say (connack + pingresp.substr (0, 1));
+    broker->say (pingresp.substr (1));
+
+    std::vector<std::vector<std::uint8_t>> got;
+    within (2s, [&]
+    {
+        for (auto& [id, packets] : table.takePackets (64))
+            for (auto& p : packets)
+                got.push_back (std::move (p));
+        return got.size() >= 2;
+    });
+    REQUIRE (got.size() == 2u);
+    CHECK (got[0] == std::vector<std::uint8_t> { 0x20, 0x02, 0x00, 0x00 });
+    CHECK (got[1] == std::vector<std::uint8_t> { 0xD0, 0x00 });
+
+    //  Sent as they are: no size, no frame.
+    CHECK (table.sendPacket ("MQ000001", { 0xC0, 0x00 }));
+    CHECK (within (2s, [&] { return broker->sent() == std::string ("\xC0\x00", 2); }));
+
+    //  A sentence noted on the open link shows on its problem row.
+    table.note ("MQ000001", "refused: bad user name or password");
+    CHECK (table.stateOf ("MQ000001").problem == "refused: bad user name or password");
+
+    //  Asked to open again: closed, opened, the count moved on.
+    table.reopen ("MQ000001");
+    REQUIRE (within (4s, [&] { return table.stateOf ("MQ000001").openings == 2u; }));
+    CHECK (within (2s, [&] { return table.stateOf ("MQ000001").state == "open"; }));
+    CHECK (table.stateOf ("MQ000001").problem.empty());
+
+    //  A stream out of step - a fifth length byte - is dropped and counted, and read on.
+    broker->say (std::string ("\x30\x80\x80\x80\x80\x01", 6));
+    CHECK (within (2s, [&] { return table.stateOf ("MQ000001").dropped == 1u; }));
+    broker->say (pingresp);
+    got.clear();
+    within (2s, [&]
+    {
+        for (auto& [id, packets] : table.takePackets (64))
+            for (auto& p : packets)
+                got.push_back (std::move (p));
+        return ! got.empty();
+    });
+    CHECK (got.size() == 1u);
+
+    //  A changed session word closes the link and opens it again.
+    link.session = "another login";
+    table.reconcile ({ link });
+    CHECK (within (4s, [&] { return table.stateOf ("MQ000001").openings == 1u
+                                      && table.stateOf ("MQ000001").state == "open"; }));
+}

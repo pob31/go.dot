@@ -435,3 +435,200 @@ TEST_CASE ("mqtt words: a payload is read as a serial line is, JSON whole, bytes
     CHECK (payloadOfValues ({ Value::boolean (true), Value::nil(), Value::string ("x") }) == "true x");
     CHECK (payloadOfValues ({}).empty());
 }
+
+//==============================================================================
+/*  MQ.3: THE SESSION (namespace draft §67, ANE, ANI) - the client side of the
+    protocol on the tick thread, driven here by hand: the link's state as the
+    table would report it, the packets a broker would send, the ticks. */
+#include <wfg/engine/mqtt/Session.h>
+
+namespace
+{
+    wfg::serial::PortState openLink (std::uint64_t openings)
+    {
+        wfg::serial::PortState state;
+        state.state = "open";
+        state.openings = openings;
+        return state;
+    }
+
+    SessionWanted house()
+    {
+        SessionWanted wanted;
+        wanted.id = "MQ000001";
+        wanted.prefix = "/house";
+        wanted.topics = "house/# +/temp";
+        wanted.login = "stage secret";
+        wanted.clientId = "godot-MQ000001-laptop";
+        return wanted;
+    }
+}
+
+TEST_CASE ("mqtt session: CONNECT at each opening, SUBSCRIBE once the broker says yes, and what comes back is heard")
+{
+    Session session (house());
+    wfg::serial::PortState closed;
+
+    //  Nothing while the link is closed.
+    CHECK (session.tick (closed, 1).empty());
+    CHECK_FALSE (session.connected());
+
+    //  The first opening: CONNECT with the login and the client id, clean session.
+    auto out = session.tick (openLink (1), 2);
+    REQUIRE (out.size() == 1u);
+    CHECK (out[0].type == Type::connect);
+    CHECK (out[0].clientId == "godot-MQ000001-laptop");
+    CHECK (out[0].cleanSession);
+    CHECK (out[0].keepAlive == Session::keepAliveSeconds);
+    CHECK (out[0].user == std::string ("stage"));
+    CHECK (out[0].password == std::string ("secret"));
+    CHECK (session.tick (openLink (1), 3).empty());      // and waits
+
+    //  CONNACK accepted: the SUBSCRIBE to every filter follows on the next tick.
+    CHECK_FALSE (session.feed (Packet::connackWith (connack::accepted), 4).has_value());
+    CHECK (session.connected());
+    out = session.tick (openLink (1), 5);
+    REQUIRE (out.size() == 1u);
+    CHECK (out[0].type == Type::subscribe);
+    REQUIRE (out[0].filters.size() == 2u);
+    CHECK (out[0].filters[0].first == "house/#");
+    CHECK (out[0].filters[1].first == "+/temp");
+    CHECK (out[0].filters[0].second == 0);
+    CHECK (out[0].packetId != 0);
+    CHECK_FALSE (session.feed (Packet::subackWith (out[0].packetId, { 0, 0 }), 6).has_value());
+    CHECK (session.problem().empty());
+
+    //  A publish is heard at the address its topic spells, its payload as values.
+    const auto heard = session.feed (Packet::publishOf ("room1/temp", "23.5"), 7);
+    REQUIRE (heard.has_value());
+    CHECK (heard->address == "/house/room1/temp");
+    REQUIRE (heard->values.size() == 1u);
+    CHECK (heard->values[0].asDouble() == doctest::Approx (23.5));
+
+    //  A QoS 1 publish is acknowledged, a QoS 2 one walked through; both heard once.
+    auto qos1 = Packet::publishOf ("lights/1", "on", 1);
+    qos1.packetId = 40;
+    CHECK (session.feed (qos1, 8).has_value());
+    auto qos2 = Packet::publishOf ("lights/2", "off", 2);
+    qos2.packetId = 41;
+    CHECK (session.feed (qos2, 8).has_value());
+    out = session.tick (openLink (1), 9);
+    REQUIRE (out.size() == 2u);
+    CHECK (out[0].type == Type::puback);
+    CHECK (out[0].packetId == 40);
+    CHECK (out[1].type == Type::pubrec);
+    CHECK (out[1].packetId == 41);
+    CHECK_FALSE (session.feed (Packet::acknowledgement (Type::pubrel, 41), 10).has_value());
+    out = session.tick (openLink (1), 11);
+    REQUIRE (out.size() == 1u);
+    CHECK (out[0].type == Type::pubcomp);
+
+    //  A topic that cannot be an address is dropped and counted (ANF).
+    CHECK_FALSE (session.feed (Packet::publishOf ("with space", "1"), 12).has_value());
+    CHECK (session.dropped() == 1u);
+
+    //  A publish from the show: the topic under the prefix, the payload the values.
+    const auto publish = session.publish ("/house/lights/1", { wfg::osc::Value::int32 (1) });
+    REQUIRE (publish.has_value());
+    CHECK (publish->topic == "lights/1");
+    CHECK (publish->payload == "1");
+    CHECK (publish->qos == 0);
+    CHECK_FALSE (publish->retain);
+    CHECK_FALSE (session.publish ("/elsewhere/x", {}).has_value());
+
+    //  A second opening - the table counted it - starts again with CONNECT.
+    out = session.tick (openLink (2), 13);
+    REQUIRE (out.size() == 1u);
+    CHECK (out[0].type == Type::connect);
+    CHECK_FALSE (session.connected());
+
+    //  The link closing in between resets too; opening 2 seen again is not a new one.
+    CHECK (session.tick (closed, 14).empty());
+    CHECK (session.tick (openLink (2), 15).empty());
+}
+
+TEST_CASE ("mqtt session: the keepalive by ticks, a silent broker given up on, a refusal said")
+{
+    Session session (house());
+    session.tick (openLink (1), 0);
+    session.feed (Packet::connackWith (connack::accepted), 1);
+    auto out = session.tick (openLink (1), 2);             // the SUBSCRIBE
+    REQUIRE (out.size() == 1u);
+    session.feed (Packet::subackWith (out[0].packetId, { 0, 0 }), 3);
+
+    //  Half the keepalive with nothing sent: a PINGREQ, and one only until answered.
+    std::int64_t tick = 3;
+    std::vector<Packet> pings;
+    for (; tick < 2 + 15 * Session::ticksPerSecond + 5; ++tick)
+        for (auto& packet : session.tick (openLink (1), tick))
+            if (packet.type == Type::pingreq)
+                pings.push_back (packet);
+    REQUIRE (pings.size() == 1u);
+    session.feed (Packet::plain (Type::pingresp), tick);
+    CHECK (session.connected());
+
+    //  The broker silent for the whole keepalive after that: given up on, the
+    //  link asked to open again, and the sentence says so.
+    for (; tick < 3 + 15 * Session::ticksPerSecond + 30 * Session::ticksPerSecond + 10; ++tick)
+        session.tick (openLink (1), tick);
+    CHECK_FALSE (session.connected());
+    CHECK (session.problem() == "the broker has gone silent");
+    CHECK (session.takeReopenWish());
+    CHECK_FALSE (session.takeReopenWish());
+
+    //  A CONNECT the broker refuses is said in words.
+    Session refused (house());
+    refused.tick (openLink (1), 0);
+    refused.feed (Packet::connackWith (connack::badLogin), 1);
+    CHECK_FALSE (refused.connected());
+    CHECK (refused.problem() == "refused: bad user name or password");
+    CHECK (refused.tick (openLink (1), 2).empty());
+
+    //  And one the broker never answers.
+    Session unanswered (house());
+    unanswered.tick (openLink (1), 0);
+    for (std::int64_t t = 1; t < 11 * Session::ticksPerSecond; ++t)
+        unanswered.tick (openLink (1), t);
+    CHECK (unanswered.problem() == "the broker answered nothing to CONNECT");
+    CHECK (unanswered.takeReopenWish());
+
+    //  A subscription refused is said, the rest held.
+    Session partly (house());
+    partly.tick (openLink (1), 0);
+    partly.feed (Packet::connackWith (connack::accepted), 1);
+    out = partly.tick (openLink (1), 2);
+    REQUIRE (out.size() == 1u);
+    partly.feed (Packet::subackWith (out[0].packetId, { 0, subscribeFailed }), 3);
+    CHECK (partly.problem() == "the broker refused the subscription to +/temp");
+}
+
+TEST_CASE ("mqtt session: a changed filter list is carried to the broker in place")
+{
+    Session session (house());
+    session.tick (openLink (1), 0);
+    session.feed (Packet::connackWith (connack::accepted), 1);
+    auto out = session.tick (openLink (1), 2);
+    REQUIRE (out.size() == 1u);
+
+    auto wanted = house();
+    wanted.topics = "house/# lights/+";
+    session.want (wanted);
+    out = session.tick (openLink (1), 3);
+    REQUIRE (out.size() == 2u);
+    CHECK (out[0].type == Type::unsubscribe);
+    REQUIRE (out[0].filters.size() == 1u);
+    CHECK (out[0].filters[0].first == "+/temp");
+    CHECK (out[1].type == Type::subscribe);
+    REQUIRE (out[1].filters.size() == 2u);
+    CHECK (out[1].filters[1].first == "lights/+");
+
+    //  The same list again is nothing.
+    session.want (wanted);
+    CHECK (session.tick (openLink (1), 4).empty());
+
+    //  A new login is the link's to carry (a new opening): the session is not asked.
+    wanted.login = "other word";
+    session.want (wanted);
+    CHECK (session.tick (openLink (1), 5).empty());
+    CHECK (session.wanted().login == "other word");
+}

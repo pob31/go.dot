@@ -4469,10 +4469,11 @@ namespace wfg::tree
                         off for it would be right; one refused for its
                         framing has a worker reading the stream wrong, and a
                         row that says so is the honest one. */
-                    const auto overLink = links != nullptr
-                                            && document.getAttribute (std::string (godot) + "/mount/" + mountId + "/transport")
-                                                   .value_or (std::string ("udp")) == "tcp";
-                    const auto linkState = overLink ? links->stateOf (mountId) : serial::PortState {};
+                    const auto transport = document.getAttribute (std::string (godot) + "/mount/" + mountId + "/transport")
+                                               .value_or (std::string ("udp"));
+                    const auto* table = transport == "tcp" ? links : transport == "mqtt" ? mqttLinks : nullptr;
+                    const auto overLink = table != nullptr;
+                    const auto linkState = overLink ? table->stateOf (mountId) : serial::PortState {};
                     const auto base = std::string (godot) + "/mount/" + mountId + "/";
 
                     runtime.push_back (makeLeaf (base + "link", *linkRow, overLink ? linkState.state : std::string ("off")));

@@ -463,6 +463,11 @@ namespace wfg::tree
             device's link reads off. */
         void setLinks (const serial::SerialTable* table) noexcept { links = table; }
 
+        /*  AND THE LINKS TO MQTT BROKERS (namespace draft §67, ANE): the
+            table serve opens one on for each device whose transport is
+            mqtt, for the same two rows. */
+        void setMqttLinks (const serial::SerialTable* table) noexcept { mqttLinks = table; }
+
         /*  THE DEVICE PRESETS installed beside the binary (namespace draft
             §57, AFN): what the Network tab's ADD menu offers, published
             under /godot/preset/<slug>. Absent in a replay and a tree dump,
@@ -613,6 +618,7 @@ namespace wfg::tree
         const serial::SerialTable* serialTable = nullptr;
         const serial::HeardLines* serialHeard = nullptr;
         const serial::SerialTable* links = nullptr;
+        const serial::SerialTable* mqttLinks = nullptr;
         const PresetTable* presets = nullptr;
 
         /*  THE PRESET ROWS, MADE ONCE PER TABLE (DP.11): two hundred and forty

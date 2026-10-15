@@ -16,6 +16,8 @@
 
 #include <wfg/engine/serial/SerialTable.h>
 
+#include <wfg/engine/mqtt/Packet.h>
+
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/pair/Hold.h>
 
@@ -35,7 +37,7 @@ namespace wfg::serial
         /*  The framings that carry packets rather than lines (PC.11; DP.6). */
         bool readsPackets (const std::string& framing) noexcept
         {
-            return framing == "slip" || framing == "length" || framing == "raw";
+            return framing == "slip" || framing == "length" || framing == "raw" || framing == "mqtt";
         }
 
         /*  One packet as the port's framing puts it on the wire: SLIP's
@@ -70,6 +72,7 @@ namespace wfg::serial
         std::atomic<bool> tx { true };
         std::atomic<bool> stopping { false };
         std::atomic<bool> finished { false };
+        std::atomic<bool> reopenAsked { false };
 
         mutable std::mutex lock;
         std::condition_variable woken;
@@ -109,6 +112,7 @@ namespace wfg::serial
                         decoder = slip::Decoder {};
                         outgoing.clear();
                         open = true;
+                        ++state.openings;
 
                         /*  THE GREETING FIRST (DP.8), before anything the tick
                             hands over: a console that wants a login before it
@@ -121,6 +125,11 @@ namespace wfg::serial
 
                 const auto got = link->read (readWait);
                 bool failed = ! got.has_value();
+
+                /*  ASKED TO OPEN AGAIN (MQ.3): the far end is there as far as
+                    the socket knows and gone as far as its protocol does. */
+                if (reopenAsked.exchange (false))
+                    failed = true;
 
                 if (got.has_value() && ! got->empty() && rx)
                     heard (*got);
@@ -206,6 +215,34 @@ namespace wfg::serial
             }
         }
 
+        /*  A STREAM CUT BY MQTT'S OWN LENGTH (namespace draft §67, ANE; MQ.3):
+            each packet says how long it is in its fixed header, and the
+            codec reads that; a length that cannot be one means the stream
+            is out of step, which no reading mends - dropped, counted, and
+            the next bytes read as a fresh start, as `length` does. */
+        void heardByMqtt (const std::string& bytes)
+        {
+            partial.append (bytes);
+
+            for (;;)
+            {
+                std::string problem;
+                const auto whole = mqtt::frameLength (reinterpret_cast<const std::uint8_t*> (partial.data()),
+                                                      partial.size(), problem);
+                if (! problem.empty() || whole > slip::largestFrame)
+                {
+                    partial.clear();
+                    ++state.dropped;
+                    return;
+                }
+                if (whole == 0 || partial.size() < whole)
+                    return;
+
+                keep (std::vector<std::uint8_t> (partial.begin(), partial.begin() + static_cast<std::ptrdiff_t> (whole)));
+                partial.erase (0, whole);
+            }
+        }
+
         void heard (const std::string& bytes)
         {
             const std::lock_guard<std::mutex> held (lock);
@@ -226,6 +263,12 @@ namespace wfg::serial
             if (wanted.framing == "raw")
             {
                 keep (std::vector<std::uint8_t> (bytes.begin(), bytes.end()));
+                return;
+            }
+
+            if (wanted.framing == "mqtt")
+            {
+                heardByMqtt (bytes);
                 return;
             }
 
@@ -321,7 +364,7 @@ namespace wfg::serial
             const auto& was = at->second->wanted;
             if (found == wanted.end() || found->path.empty() || found->path != was.path
                   || found->baud != was.baud || found->framing != was.framing
-                  || found->greeting != was.greeting)
+                  || found->greeting != was.greeting || found->session != was.session)
             {
                 retire (at->second);
                 at = workers.erase (at);
@@ -449,6 +492,25 @@ namespace wfg::serial
             return {};
         const std::lock_guard<std::mutex> workerHeld (found->second->lock);
         return found->second->state;
+    }
+
+    void SerialTable::note (const std::string& id, const std::string& problem)
+    {
+        const std::lock_guard<std::mutex> held (lock);
+        const auto found = workers.find (id);
+        if (found == workers.end())
+            return;
+        const std::lock_guard<std::mutex> workerHeld (found->second->lock);
+        if (found->second->state.state == "open")
+            found->second->state.problem = problem;
+    }
+
+    void SerialTable::reopen (const std::string& id)
+    {
+        const std::lock_guard<std::mutex> held (lock);
+        const auto found = workers.find (id);
+        if (found != workers.end())
+            found->second->reopenAsked = true;
     }
 
     //==========================================================================

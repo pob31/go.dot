@@ -69,7 +69,7 @@ namespace wfg::serial
         std::string id;
         std::string path;
         int baud = 115200;
-        std::string framing = "lines";
+        std::string framing = "lines";       // lines, slip, length, raw, mqtt
         bool rx = true;
         bool tx = true;
 
@@ -77,6 +77,13 @@ namespace wfg::serial
             reopening (DP.8): a console's login. Empty sends nothing; one that
             changes closes and opens the port again, so the new line is said. */
         std::string greeting;
+
+        /*  WHAT THE CONNECTION IS FOR, beyond its path (namespace draft §67,
+            ANE): a word the opener never reads but a change of which closes
+            the connection and opens it again - an MQTT device's login and
+            client id, which only a fresh CONNECT can carry. Empty for a
+            port or a plain link. */
+        std::string session;
     };
 
     /*  How one port is, for the tree. */
@@ -85,6 +92,12 @@ namespace wfg::serial
         std::string state = "closed";     // closed, opening, open, retrying
         std::string problem;
         std::uint64_t dropped = 0;
+
+        /*  HOW MANY TIMES IT HAS OPENED (MQ.3): counted by the worker at
+            each opening, so a session on the tick thread that sees the
+            number move knows the far end has forgotten it - even when the
+            closing and the opening both fell between two ticks. */
+        std::uint64_t openings = 0;
     };
 
     class SerialTable
@@ -118,6 +131,17 @@ namespace wfg::serial
         bool sendPacket (const std::string& id, const std::vector<std::uint8_t>& packet);
 
         PortState stateOf (const std::string& id) const;
+
+        /*  A SENTENCE ABOUT AN OPEN PORT from whoever speaks its protocol
+            (MQ.3): a broker that refused the CONNECT leaves the socket open
+            and the table none the wiser, so the session says it here, on
+            the problem row, until the state next changes. */
+        void note (const std::string& id, const std::string& problem);
+
+        /*  CLOSE AND OPEN AGAIN, now: for a far end that has gone silent on
+            an open socket, which no read will ever notice. The worker treats
+            it as the port going away, backoff and all. */
+        void reopen (const std::string& id);
 
         /*  THE MACHINE'S HOLD (namespace draft §58, RD.1; AGG): while it holds,
             `send` and `sendPacket` hand nothing to a port and answer true - at
