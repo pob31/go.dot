@@ -30074,15 +30074,27 @@ Go.dot (this repository):
 
 | Stage | What | Built |
 |---|---|---|
-| RM.0 | This section, the contract document, PRD §3.17, the devplan's Phase 7, the README | fe1894c |
-| RM.1 | `STREAM`/`UNSTREAM`, the bundle a tick, the stalled connection let go, `HOST_INFO`, `blackbox.remote` | d4ee330 |
+| RM.0 | This section, the contract document, PRD §3.17, the devplan's Phase 7, the README | |
+| RM.1 | `STREAM`/`UNSTREAM`, the bundle a tick, the stalled connection let go, `HOST_INFO`, `blackbox.remote` | |
 | RM.2 | `HELLO`, `network/remotes`, `remote.find`, the Network tab's remotes | |
 | RM.3 | Only if M74 asks: a snapshot of values without descriptions | |
 
-The app (`go.dot-remote`): A.0 skeleton, theme and words; A.1 the OSC codec; A.2 the link service and
-the copy of the state; A.3 machines and find; A.4 the transport header; A.5 running cues; A.6 the cue
-list and its inspector; A.7 the surface; A.8 the mapping; A.9 waveforms and show folders; A.10 the
-guides and a release; A.11 the bench on the author's tablet.
+The app (`go.dot-remote`, built 2026-10-15/16, local until the author has looked):
+
+| Stage | What | Built |
+|---|---|---|
+| A.0 | Skeleton, theme (Go.dot's tokens), words in English and French | 7e639f0 |
+| A.1 | The OSC codec | c412f4b |
+| A.2 | The link: a WebSocket a machine, the copy of the state, the writes, the foreground service | fe6ee3b |
+| A.3 | Machines (typed address, main and backup, the pair's words), find-me, the shell's five tabs | 3e74b92 |
+| A.4 | The transport header: current, next, GO, Doh!, PANIC | 38efddc |
+| A.5 | Running: kill, stop, advance, prune, scrub, a sound's trim | 067e399 |
+| A.6 | Cues and the inspector: what the tablet may change (ANO) | ff15c76 |
+| A.7 | Surface: the show's surfaces, "This tablet" with a fader a DCA, EQ and Send pages | d702f70 |
+| A.8 | Mapping: the warps drawn, a point dragged or nudged, the grid split, Identify | 3a86160 |
+| A.9 | Waveforms from the timbre route, kept in a folder a show | ba9fa2e |
+| A.10 | 0.1.0 and the README; the narrow header, the waveform placed | a2a5cbb, 2ac95b2 |
+| A.11 | The bench on the author's tablet, M74 | |
 
 ### 68.6 Measurements
 

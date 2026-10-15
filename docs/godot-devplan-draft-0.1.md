@@ -484,6 +484,12 @@ zone at the wall.
 **Needs from the author:** a review of the app's own words (§68.2, ANW); a show
 of their own for M74.
 
+**Built (2026-10-15/16):** RM.0-RM.2 in Go.dot (the stream, HELLO and `remote.find`,
+the Network tab's Find); the app A.0-A.10 in `go.dot-remote`, 0.1.0, 249 JVM tests, every
+tab drawn and judged in screenshots, installed on the author's tablet and linked to a
+local serve over USB. Owed: the author's look and words, A.11's M74 on the house Wi-Fi,
+a signed release build and the tester guides' section once there is an APK to give.
+
 ---
 
 ## Phase 8 — Video · L

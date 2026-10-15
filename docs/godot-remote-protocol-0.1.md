@@ -163,7 +163,20 @@ what the app shows. The other stays linked, so a takeover costs the tablet nothi
   machine whose button was pressed.
 - The pair's words are the engine's (`/godot/pair/role`, `state`, `alarm`; AGM-AGO).
 
-## 9. What is not here
+## 9. What each tab reads and sends
+
+Every row is in `docs/parameters/godot-parameters.csv`; this is where the app looks, not a second copy.
+
+| Tab | Reads | Sends |
+|---|---|---|
+| Header | `list/focus`, `list/<id>/{standby,history,doh,dohWindow}`, `engine/tick`, `document/locked`, `engine/lastError` | `go`, `go.doh`, `run.stopAll`, `run.killAll`, `standby.previous`, `standby.next` |
+| Running | `run/order`, `run/<id>/{cue,kind,parent,state,phase,position,remaining,level,trim,meter,timbre,round,pruned,seekable,range,strip,held}` | `run.stop` (§6), `run.kill`, `run.advance`, `run.prune`, `run.unprune`, `run.seek`, `run.solo`; `trim` by touch, set, release |
+| Cues | `list/<id>/{name,order}`, `cue/<id>/…` with groups' `order`, `headerOrder`, `footerOrder`, the sound rows, `send/<id>/…`, `bus/<id>/name`, `dca/<id>/…` | `standby.set`, `cue.fire`, `list.focus`; values of the rows the author allowed (§68.2, ANO) |
+| Surface | `surface/<id>/…`, `surface/aim`, strips as `slot/<id>` with `kind` = `strip` (`surface`, `index`, `role`, `dca`, `endpoint`, `target`, `word`, `cue`, `holder`) | the strip's `target` by touch, set, release; `strip.press`, `strip.release`; `surface.aim` (a sound only); the aimed cue's EQ and sends |
+| Mapping | `videoOutput/<id>/…`, `zone/<id>/…`, `canvas/<id>/…` | `mesh` by touch, set, release; `node.setMany` for a new grid; `videoOutput.identify` |
+| Waveforms | `cue/<id>/hash`, `document/name` | `GET /media/<hash>/timbre?INFO` and `?level=N` |
+
+## 10. What is not here
 
 Discovery (the author chose a typed address, AGAINST mDNS - §68.2, ANN). A password: the WebSocket
 takes a GO from anyone on the network (AGB). The canvases' pictures: the projection surface is the
