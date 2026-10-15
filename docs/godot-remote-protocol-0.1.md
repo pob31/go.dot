@@ -128,8 +128,15 @@ Binary frames, OSC, exactly as the page sends them (`clients/console/plumbing/li
 - **A refusal** is only ever `/godot/engine/lastError`: `<tick> <seq> <origin> <reason> [<command>]`.
   The app watches it in the stream, and says in words the ones whose origin is its own.
 - **The show lock** (`/godot/document/locked`) refuses every write to what the show file records.
-  Levels, EQ and sends of a cue ride live and unsaved under it (§17.14, AM); the app shows the rest
-  greyed with the word.
+  A cue's EQ and its sends ride live and unsaved under it (§17.14, AM), as do a DCA mark's curve and
+  offset and a plugin's parameters; its level does NOT - under the lock a level is ridden with the
+  run's `trim` or a DCA's `trim`, which are tonight's and never stored, as are flags. The app shows
+  the rest greyed with the word. (Corrected 2026-10-16: the first draft said levels rode live; the
+  engine refuses `cue/<id>/level` under the lock, found by the app's A.6 against a live serve.)
+- **Stopping a run**: `run.stop <run> [verb]` takes `hard` (the default), `afterMember` and
+  `afterIteration` - the last two for a group, which has a member or a round to wait for; `fade` and
+  `advance` are refused. Advancing a ranged sound is `run.advance <run>`; `run.solo` is a sampler
+  clip's.
 
 The app sends no structure command: no `cue.create`, `object.delete`, `object.move`, nor a write to a
 cue's name or number (§68.2, ANO).
