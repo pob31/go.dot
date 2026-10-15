@@ -25,9 +25,13 @@
 #include <juce_simpleweb/juce_simpleweb.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <exception>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -200,6 +204,37 @@ namespace wfg::oscquery
             starts and read on its thread, as the routes are. */
         std::string doorPrefix;
         PeerDoor* door = nullptr;
+
+        /*  THE STREAMS (namespace draft §68, ANQ, ANR): which connections asked
+            for a bundle a tick, of which subtree, and how many of the frames
+            already handed to each are not yet written to its socket. Touched
+            from two threads, as the subscriptions are - STREAM, UNSTREAM and a
+            close on the server's, the per-tick send on the tick thread - under
+            one lock held for a map operation and never across a send.
+
+            THE COUNT IS SHARED with the send's completion, which runs on the
+            server's thread when the frame has gone to the socket, or when the
+            connection failed and every queued frame is answered at once. A
+            fresh STREAM gets a fresh count: the old frames still in flight
+            then answer one nobody reads, which is harmless. */
+        struct Stream
+        {
+            std::string prefix;
+            std::shared_ptr<std::atomic<int>> unsent = std::make_shared<std::atomic<int>> (0);
+        };
+
+        std::mutex streamsMutex;
+        std::map<ConnectionId, Stream> streams;
+
+        /*  Every frame of the stream carries the tick first, under this address
+            whatever the prefix: it is the heartbeat (ANQ). */
+        static constexpr const char* tickAddress = "/godot/engine/tick";
+
+        /*  ANR's ceiling: two seconds of ticks handed to a connection and not
+            yet written. Not the frames on the wire - the socket's own buffer
+            holds far more than a hundred small ones - so a connection this far
+            behind has had its buffer full for a while. */
+        static constexpr int streamBacklog = 100;
 
         /*  Whether raw OSC bytes are a message under the door's prefix, read
             before decoding: an OSC message begins with its address. And from
@@ -531,6 +566,11 @@ namespace wfg::oscquery
 
             subscriptions.drop (connection);
 
+            {
+                const std::lock_guard<std::mutex> lock (streamsMutex);
+                streams.erase (connection);
+            }
+
             /*  And the touches. A surface that crashed mid-gesture would
                 otherwise leave a node gated against everybody for the rest of
                 the show (PRD 3.16). */
@@ -547,7 +587,8 @@ namespace wfg::oscquery
             connectionClosed (id, 0, {});
         }
 
-        /*  Text frames are OSCQuery's control protocol: LISTEN and IGNORE. */
+        /*  Text frames are OSCQuery's control protocol: LISTEN and IGNORE, and
+            Go.dot's STREAM and UNSTREAM (namespace draft §68). */
         void messageReceived (const juce::String& id, const juce::String& message) override
         {
             const ConnectionId connection = originOf (id);
@@ -575,6 +616,18 @@ namespace wfg::oscquery
                 subscriptions.listen (connection, address);
             else if (command->asString() == "IGNORE")
                 subscriptions.ignore (connection, address);
+            else if (command->asString() == "STREAM")
+            {
+                /*  ONE PREFIX PER CONNECTION: a second STREAM replaces the
+                    first, from the next tick (ANQ). */
+                const std::lock_guard<std::mutex> lock (streamsMutex);
+                streams.insert_or_assign (connection, Stream { address });
+            }
+            else if (command->asString() == "UNSTREAM")
+            {
+                const std::lock_guard<std::mutex> lock (streamsMutex);
+                streams.erase (connection);
+            }
         }
 
         /*  Binary frames are OSC: a node write or a command. */
@@ -836,6 +889,148 @@ namespace wfg::oscquery
                                       std::string_view (connection).substr (3), encoded->data(), encoded->size());
             }
         }
+
+        publishStreams (diff, current);
+    }
+
+    //==========================================================================
+    namespace
+    {
+        /*  Under a stream's prefix: the prefix itself, or anything below it at
+            a slash - `/godot` takes `/godot/cue/...` and not `/godotish`. */
+        bool isUnder (const std::string& address, const std::string& prefix)
+        {
+            if (address.size() < prefix.size() || address.compare (0, prefix.size(), prefix) != 0)
+                return false;
+
+            return address.size() == prefix.size() || prefix == "/" || address[prefix.size()] == '/';
+        }
+
+        /*  One tick's bundle for one prefix: the tick first, then every node
+            under the prefix that appeared or changed, with the value it has
+            now. A node with no value - a container - says nothing.
+
+            A VALUE THE WIRE CANNOT CARRY costs its own message and not the
+            tick: the bundle is encoded whole first, as it nearly always
+            succeeds, and only when it fails is each message tried alone and
+            the ones that fail left out. */
+        std::optional<std::vector<std::uint8_t>> encodeTick (const tree::TreeDiff& diff,
+                                                             const tree::TreeSnapshot& current,
+                                                             const std::string& prefix,
+                                                             const char* tickAddress)
+        {
+            std::vector<osc::Packet> elements;
+            elements.reserve (1 + diff.added.size() + diff.valueChanged.size());
+            elements.push_back (osc::Packet::message (tickAddress, { osc::Value::int64 (current.tick()) }));
+
+            const auto add = [&] (const std::vector<std::string>& addresses)
+            {
+                for (const auto& address : addresses)
+                {
+                    if (address == tickAddress || ! isUnder (address, prefix))
+                        continue;
+
+                    const auto* node = current.find (address);
+
+                    if (node == nullptr || node->values.empty())
+                        continue;
+
+                    elements.push_back (osc::Packet::message (address, node->values));
+                }
+            };
+
+            add (diff.added);
+            add (diff.valueChanged);
+
+            std::string error;
+
+            if (auto whole = osc::encode (osc::Packet::bundle (osc::TimeTag {}, elements), error))
+                return whole;
+
+            std::vector<osc::Packet> carried;
+
+            for (auto& element : elements)
+                if (osc::encode (element, error).has_value())
+                    carried.push_back (std::move (element));
+
+            return osc::encode (osc::Packet::bundle (osc::TimeTag {}, std::move (carried)), error);
+        }
+    }
+
+    void OscQueryServer::publishStreams (const tree::TreeDiff& diff, const tree::TreeSnapshot& current)
+    {
+        std::vector<std::pair<ConnectionId, Impl::Stream>> streaming;
+
+        {
+            const std::lock_guard<std::mutex> lock (impl->streamsMutex);
+
+            if (impl->streams.empty())
+                return;
+
+            streaming.assign (impl->streams.begin(), impl->streams.end());
+        }
+
+        /*  ENCODED ONCE A TICK FOR EVERY CONNECTION ON A PREFIX (ANR), and
+            nearly always there is one prefix: `/godot`. */
+        std::map<std::string, std::shared_ptr<WsServer::OutMessage>> byPrefix;
+
+        for (const auto& [connection, stream] : streaming)
+        {
+            const auto socket = impl->server.connectionMap[juce::String (connection.substr (3))];   // drop "ws:"
+
+            if (socket == nullptr)
+                continue;
+
+            /*  LET GO (ANR): this connection has not taken two seconds of
+                ticks. It is no longer streamed to, and it is told to close -
+                behind what it has not taken, so a tablet that wakes reads its
+                backlog and then the close, and connects again with a snapshot.
+                The tick has not waited for it and never will. */
+            if (stream.unsent->load (std::memory_order_relaxed) >= Impl::streamBacklog)
+            {
+                {
+                    const std::lock_guard<std::mutex> lock (impl->streamsMutex);
+                    impl->streams.erase (connection);
+                }
+
+                socket->send_close (1008, "too far behind the stream - connect again");
+                continue;
+            }
+
+            auto& message = byPrefix[stream.prefix];
+
+            if (message == nullptr)
+            {
+                const auto encoded = encodeTick (diff, current, stream.prefix, Impl::tickAddress);
+
+                if (! encoded.has_value())
+                    continue;
+
+                message = std::make_shared<WsServer::OutMessage>();
+                message->write (reinterpret_cast<const char*> (encoded->data()),
+                                static_cast<std::streamsize> (encoded->size()));
+            }
+
+            /*  ONE OutMessage SHARED by every connection on the prefix: the
+                server writes it from its stream buffer without consuming it, as
+                juce_simpleweb's own broadcast does. NOT SHOWN TO THE MONITOR,
+                as the redundancy link's frames are not: fifty a second would
+                bury the page's traffic it exists to show. */
+            stream.unsent->fetch_add (1, std::memory_order_relaxed);
+            socket->send (message,
+                          [unsent = stream.unsent] (const SimpleWeb::error_code&)
+                          {
+                              unsent->fetch_sub (1, std::memory_order_relaxed);
+                          },
+                          130);   // 130: one binary frame
+            outbound.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+
+    std::size_t OscQueryServer::streamCount() const
+    {
+        const std::lock_guard<std::mutex> lock (impl->streamsMutex);
+        return impl->streams.size();
     }
 
     void OscQueryServer::broadcastText (const std::string& message)

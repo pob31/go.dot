@@ -503,7 +503,12 @@ namespace wfg::tree
             Phase 1 speaks OSC over UDP only. `PATH_RENAMED` is false because
             Go.dot never renames a path - objects are identity-addressed, so a
             rename changes a `name` VALUE and the address is unaffected, which
-            is the whole reason a client's LISTEN survives an edit. */
+            is the whole reason a client's LISTEN survives an edit.
+
+            `PATH_CHANGED` is false because nothing has ever sent one - it said
+            true until namespace draft §68. `STREAM` is Go.dot's own (§68, ANQ):
+            a bundle a tick of everything that changed under a prefix, for a
+            client that holds the whole state - the Android remote. */
         std::string out;
 
         out += "{\n";
@@ -518,10 +523,11 @@ namespace wfg::tree
         out += "    \"DESCRIPTION\": true,\n";
         out += "    \"LISTEN\": true,\n";
         out += "    \"PATH_ADDED\": true,\n";
-        out += "    \"PATH_CHANGED\": true,\n";
+        out += "    \"PATH_CHANGED\": false,\n";
         out += "    \"PATH_REMOVED\": true,\n";
         out += "    \"PATH_RENAMED\": false,\n";
         out += "    \"RANGE\": true,\n";
+        out += "    \"STREAM\": true,\n";
         out += "    \"TAGS\": false,\n";
         out += "    \"TYPE\": true,\n";
         out += "    \"UNIT\": true,\n";

@@ -136,7 +136,8 @@ cue's name or number (§68.2, ANO).
 - **Gone**: no bundle and no answer to a WebSocket ping for three seconds. The app closes the socket
   and connects again (§2) at 0.5, 1, 2 and then every 5 seconds.
 - A link alive with no ticks is Go.dot's clock standing still (an audio interface lost, §6.2), not
-  the network: the app says that instead.
+  the network: the app says that instead. While the clock is held for an interface being changed,
+  bundles keep coming every 20 ms carrying the same tick: the link is alive and time is not moving.
 
 ## 8. Two machines
 

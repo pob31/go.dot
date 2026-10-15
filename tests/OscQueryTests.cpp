@@ -578,6 +578,17 @@ TEST_CASE ("oscquery: HOST_INFO says who this is and where to reach it")
 
     REQUIRE (critical != nullptr);
     CHECK_FALSE (critical->asBool());       // Phase 1 speaks UDP only
+
+    //  The stream is Go.dot's own (namespace draft §68, ANQ), and PATH_CHANGED
+    //  was never sent: a remote reads this to know which way to hold the state.
+    const auto* stream = extensions->find ("STREAM");
+    const auto* pathChanged = extensions->find ("PATH_CHANGED");
+
+    REQUIRE (stream != nullptr);
+    CHECK (stream->asBool());
+
+    REQUIRE (pathChanged != nullptr);
+    CHECK_FALSE (pathChanged->asBool());
 }
 
 //==============================================================================
@@ -953,6 +964,247 @@ TEST_CASE ("oscquery: a structural change is announced before values follow")
     CHECK (client.text[0].contains ("PATH_ADDED"));
     CHECK (client.text[0].contains ("B3N8R5TW"));
     CHECK (client.text[1].contains ("PATH_REMOVED"));
+}
+
+//==============================================================================
+//  THE STREAM (namespace draft §68, ANQ, ANR): a bundle a tick of everything
+//  that changed under a prefix, for a remote that holds the whole state.
+namespace
+{
+    osc::Packet bundleAt (Client& client, std::size_t index)
+    {
+        const std::lock_guard<std::mutex> lock { client.mutex };
+        const auto decoded = osc::decode (client.binary.at (index).data(), client.binary.at (index).size());
+
+        INFO (decoded.error);
+        REQUIRE (decoded.ok);
+        REQUIRE (decoded.packet.isBundle());
+        return decoded.packet;
+    }
+
+    void sendText (Client& client, const char* command, const char* prefix)
+    {
+        client.socket.send (juce::String ("{\"COMMAND\": \"") + command
+                            + "\", \"DATA\": \"" + prefix + "\"}");
+    }
+}
+
+TEST_CASE ("stream: STREAM brings a bundle a tick, the tick first, and only what is under its prefix")
+{
+    Rig rig;
+    REQUIRE (rig.started);
+
+    Client client;
+    client.connect (rig.port());
+    REQUIRE (waitUntil ([&client] { return client.open.load(); }));
+
+    tree::TreeDiff diff;
+    diff.valueChanged = { "/godot/engine/level", "/godot/engine/tick" };
+    diff.added = { "/godot/cmd/standby/next" };       // a node with no value says nothing
+
+    //  Nothing streams to a connection that has not asked.
+    rig.server.publishChanges (diff, *rig.nameSpace.tree, "cli");
+    std::this_thread::sleep_for (std::chrono::milliseconds { 200 });
+    CHECK (client.binaryCount() == 0);
+
+    sendText (client, "STREAM", "/godot");
+    REQUIRE (waitUntil ([&rig] { return rig.server.streamCount() == 1; }));
+
+    //  STREAM is not LISTEN: no subscription is held for it.
+    CHECK (rig.server.connectionCount() == 0);
+
+    rig.server.publishChanges (diff, *rig.nameSpace.tree, "cli");
+    REQUIRE (waitUntil ([&client] { return client.binaryCount() == 1; }));
+
+    {
+        const auto bundle = bundleAt (client, 0);
+
+        //  The tick first, whatever else changed - and once, not again among
+        //  the changes - then what changed, with the value it has now.
+        REQUIRE (bundle.elements.size() == 2);
+        CHECK (bundle.elements[0].address == "/godot/engine/tick");
+        REQUIRE (bundle.elements[0].args.size() == 1);
+        CHECK (bundle.elements[0].args[0] == osc::Value::int64 (7));
+        CHECK (bundle.elements[1].address == "/godot/engine/level");
+        REQUIRE (bundle.elements[1].args.size() == 1);
+        CHECK (bundle.elements[1].args[0] == osc::Value::float32 (0.25f));
+    }
+
+    //  A tick where nothing else changed still sends the tick: the heartbeat.
+    rig.server.publishChanges (tree::TreeDiff {}, *rig.nameSpace.tree, "cli");
+    REQUIRE (waitUntil ([&client] { return client.binaryCount() == 2; }));
+    CHECK (bundleAt (client, 1).elements.size() == 1);
+
+    //  A second STREAM replaces the first: under /godot/cmd, the level is not.
+    sendText (client, "STREAM", "/godot/cmd");
+    std::this_thread::sleep_for (std::chrono::milliseconds { 200 });
+    CHECK (rig.server.streamCount() == 1);
+
+    rig.server.publishChanges (diff, *rig.nameSpace.tree, "cli");
+    REQUIRE (waitUntil ([&client] { return client.binaryCount() == 3; }));
+    {
+        const auto bundle = bundleAt (client, 2);
+        REQUIRE (bundle.elements.size() == 1);
+        CHECK (bundle.elements[0].address == "/godot/engine/tick");
+    }
+
+    //  A prefix is a path: `/godot/engine/lev` does not take `/godot/engine/level`.
+    sendText (client, "STREAM", "/godot/engine/lev");
+    std::this_thread::sleep_for (std::chrono::milliseconds { 200 });
+    rig.server.publishChanges (diff, *rig.nameSpace.tree, "cli");
+    REQUIRE (waitUntil ([&client] { return client.binaryCount() == 4; }));
+    CHECK (bundleAt (client, 3).elements.size() == 1);
+
+    //  UNSTREAM, and it stops.
+    sendText (client, "UNSTREAM", "/godot");
+    REQUIRE (waitUntil ([&rig] { return rig.server.streamCount() == 0; }));
+
+    rig.server.publishChanges (diff, *rig.nameSpace.tree, "cli");
+    std::this_thread::sleep_for (std::chrono::milliseconds { 200 });
+    CHECK (client.binaryCount() == 4);
+}
+
+TEST_CASE ("stream: nothing is withheld from the client that caused a change, or that holds it")
+{
+    /*  A LISTEN push skips the connection whose write made the change and the
+        one touching the node (the case above this block's). The stream does
+        not: a remote's copy of the state is the engine's, and the remote
+        itself ignores what arrives under the operator's finger (ANQ). */
+    Rig rig;
+    REQUIRE (rig.started);
+
+    Client client;
+    client.connect (rig.port());
+    REQUIRE (waitUntil ([&client] { return client.open.load(); }));
+
+    std::string error;
+    const auto encoded = osc::encode (osc::Packet::message ("/godot/cmd/standby/next"), error);
+    REQUIRE (encoded.has_value());
+
+    client.socket.send (reinterpret_cast<const char*> (encoded->data()),
+                        static_cast<int> (encoded->size()));
+    REQUIRE (waitUntil ([&rig] { return rig.nameSpace.writeCount() == 1; }));
+
+    std::string origin;
+    {
+        const std::lock_guard<std::mutex> lock { rig.nameSpace.mutex };
+        origin = rig.nameSpace.writes.front().first;
+    }
+
+    REQUIRE_FALSE (origin.empty());
+
+    sendText (client, "STREAM", "/godot");
+    REQUIRE (waitUntil ([&rig] { return rig.server.streamCount() == 1; }));
+
+    rig.nameSpace.touchedBy = origin;
+    rig.nameSpace.touchedAddress = "/godot/engine/level";
+
+    tree::TreeDiff diff;
+    diff.valueChanged = { "/godot/engine/level" };
+
+    rig.server.publishChanges (diff, *rig.nameSpace.tree, origin);
+    REQUIRE (waitUntil ([&client] { return client.binaryCount() == 1; }));
+
+    const auto bundle = bundleAt (client, 0);
+    REQUIRE (bundle.elements.size() == 2);
+    CHECK (bundle.elements[1].address == "/godot/engine/level");
+}
+
+TEST_CASE ("stream: a connection that stops reading is let go, and the tick never waits for it")
+{
+    /*  A tablet carried out of the Wi-Fi's reach stops reading. Its socket
+        fills, then the frames handed to it pile up in the server; past two
+        seconds of ticks (ANR) it is no longer streamed to and is told to close.
+        Every publish meanwhile returns at once: queuing a frame never waits on
+        the network.
+
+        A raw socket that does the handshake, asks for the stream and then never
+        reads; frames of a quarter of a megabyte each so the socket's buffers
+        fill in a few hundred ticks rather than a few thousand. */
+    Rig rig;
+    REQUIRE (rig.started);
+
+    juce::StreamingSocket stalled;
+    REQUIRE (stalled.connect ("127.0.0.1", rig.port(), 2000));
+
+    const std::string handshake = "GET / HTTP/1.1\r\n"
+                                  "Host: 127.0.0.1:" + std::to_string (rig.port()) + "\r\n"
+                                  "Upgrade: websocket\r\n"
+                                  "Connection: Upgrade\r\n"
+                                  "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                                  "Sec-WebSocket-Version: 13\r\n\r\n";
+    REQUIRE (stalled.write (handshake.data(), static_cast<int> (handshake.size())) == static_cast<int> (handshake.size()));
+
+    std::string reply;
+    REQUIRE (waitUntil ([&stalled, &reply]
+    {
+        char chunk[512];
+
+        if (stalled.waitUntilReady (true, 10) == 1)
+        {
+            const auto got = stalled.read (chunk, sizeof (chunk), false);
+
+            if (got > 0)
+                reply.append (chunk, static_cast<std::size_t> (got));
+        }
+
+        return reply.find ("\r\n\r\n") != std::string::npos;
+    }));
+    REQUIRE (reply.find (" 101 ") != std::string::npos);
+
+    //  STREAM as a masked text frame (a client's frames are masked; a zero key
+    //  leaves the payload as it is).
+    const std::string ask = "{\"COMMAND\": \"STREAM\", \"DATA\": \"/godot\"}";
+    std::string frame;
+    frame += static_cast<char> (0x81);
+    frame += static_cast<char> (0x80 | ask.size());
+    frame += std::string (4, '\0');
+    frame += ask;
+    REQUIRE (stalled.write (frame.data(), static_cast<int> (frame.size())) == static_cast<int> (frame.size()));
+    REQUIRE (waitUntil ([&rig] { return rig.server.streamCount() == 1; }));
+
+    //  A tree with one big value that changes every tick.
+    auto nodes = std::make_shared<std::vector<tree::Node>>();
+    {
+        tree::Node big;
+        big.address = "/godot/engine/big";
+        big.kind = tree::Kind::state;
+        big.access = tree::Access::read;
+        big.typeTags = "s";
+        big.values = { osc::Value::string (std::string (256 * 1024, 'x')) };
+        nodes->push_back (big);
+
+        tree::Node tick;
+        tick.address = "/godot/engine/tick";
+        tick.kind = tree::Kind::state;
+        tick.access = tree::Access::read;
+        tick.typeTags = "h";
+        tick.values = { osc::Value::int64 (1) };
+        nodes->push_back (tick);
+    }
+    const tree::TreeSnapshot heavy (1, nodes, std::make_shared<const std::vector<tree::Node>>(),
+                                    std::vector<tree::Node> {});
+
+    tree::TreeDiff diff;
+    diff.valueChanged = { "/godot/engine/big", "/godot/engine/tick" };
+
+    auto slowest = std::chrono::steady_clock::duration::zero();
+    int ticks = 0;
+
+    for (; ticks < 4000 && rig.server.streamCount() == 1; ++ticks)
+    {
+        const auto before = std::chrono::steady_clock::now();
+        rig.server.publishChanges (diff, heavy, "cli");
+        slowest = std::max (slowest, std::chrono::steady_clock::now() - before);
+    }
+
+    INFO ("ticks published before it was let go: " << ticks);
+    CHECK (rig.server.streamCount() == 0);
+
+    //  Never more than a moment, though the socket has been full for most of them.
+    CHECK (std::chrono::duration_cast<std::chrono::milliseconds> (slowest).count() < 100);
+
+    stalled.close();
 }
 
 //==============================================================================

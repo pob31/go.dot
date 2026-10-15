@@ -1859,6 +1859,21 @@ add_test(NAME blackbox.mqtt.fr_FR
 set_tests_properties(blackbox.mqtt.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# THE REMOTE'S STREAM (namespace draft §68, RM.1): a WebSocket client asks for
+# a bundle a tick, reads the snapshot after it, and holds what the engine holds -
+# every tick once and in order, a datagram's write and its own in the stream, a
+# new cue announced before the bundle that carries it.
+add_test(NAME blackbox.remote.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/remote.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.remote.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.remote.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/remote.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.remote.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # TIMECODE GENERATED END TO END (namespace draft 59, TC.9): serve --hosted
 # --render with --midi-render=TC=<file>, the show fired by GO, and what came out
 # read by a third implementation of the standards in Python - a biphase decoder

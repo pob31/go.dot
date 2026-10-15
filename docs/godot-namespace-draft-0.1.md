@@ -30090,6 +30090,8 @@ guides and a release; A.11 the bench on the author's tablet.
   100 and 500 cues; the stream's bytes a tick idle, during a GO and during a fader drag; the tick's
   lateness with none, one and two tablets streaming and with one that stopped reading (unmoved); the app
   swiped away and back to live (under 0.3 s expected); a reconnect after the Wi-Fi drops.
+  *First reading, 2026-10-15* (`blackbox.remote`, Debug, loopback, the minimal show): an idle bundle is
+  108 bytes, 5.3 KiB a second; every tick streamed once and in order. The rest is owed to the bench (A.11).
 
 ### 68.7 Not built
 

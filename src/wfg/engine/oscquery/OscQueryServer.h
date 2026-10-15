@@ -333,6 +333,18 @@ namespace wfg::oscquery
                              const tree::TreeSnapshot& current,
                              const std::string& causedBy);
 
+        /*  THE STREAM (namespace draft §68, ANQ, ANR), sent from the same call:
+            a connection that sent the text frame
+            `{"COMMAND": "STREAM", "DATA": "<prefix>"}` receives one OSC bundle
+            a tick - `/godot/engine/tick` first, then every node under the
+            prefix that appeared or changed this tick, with its value - until it
+            sends UNSTREAM or goes. Unlike a LISTEN push it withholds nothing
+            from the client that caused a change or holds a touch: a remote's
+            copy of the state is the engine's, whoever moved it. A connection
+            that has not taken two seconds of ticks is let go and told to close;
+            the tick never waits for it. How many connections are streaming: */
+        std::size_t streamCount() const;
+
         //======================================================================
         //  Diagnostics, for tests and for /godot/engine.
         std::size_t connectionCount() const;
@@ -354,6 +366,9 @@ namespace wfg::oscquery
     private:
         /** One text frame to every open connection, for PATH_* notifications. */
         void broadcastText (const std::string& message);
+
+        /** The tick's bundle to every streaming connection (publishChanges' tail). */
+        void publishStreams (const tree::TreeDiff& diff, const tree::TreeSnapshot& current);
 
         /** One binary frame to a connection by its id (`<ip>:<port>`), found and held under the map's lock. */
         bool sendBinary (const std::string& connectionId, const std::uint8_t* data, std::size_t size);
