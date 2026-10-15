@@ -4095,36 +4095,36 @@ namespace
 
         /*  The opener: a word for the broker in this process, else a host
             and a port over TCP. */
-        const auto openMqttLink = [&broker] (const std::string& path, int baud, std::string& problem)
+        const auto openMqttLink = [&broker] (const std::string& where, int baud, std::string& problem)
                                     -> std::unique_ptr<wfg::serial::Link>
         {
-            if (path == "broker")
+            if (where == "broker")
                 return broker.localLink (problem);
-            return wfg::serial::openTcpLink (path, baud, problem);
+            return wfg::serial::openTcpLink (where, baud, problem);
         };
         wfg::serial::SerialTable mqttLinks { openMqttLink };
         std::map<std::string, wfg::mqtt::Session> mqttSessions;
         const auto mqttMachine = juce::SystemStats::getComputerName().toStdString();
         const auto reconcileMqtt = [&mqttLinks, &mqttSessions, &document, &mqttMachine]
         {
-            std::vector<wfg::serial::Wanted> links;
+            std::vector<wfg::serial::Wanted> wantedLinks;
             std::vector<std::string> kept;
 
-            for (auto& [link, session] : mqttWantedOf (document, mqttMachine))
+            for (auto& [wantedLink, wantedSession] : mqttWantedOf (document, mqttMachine))
             {
-                kept.push_back (session.id);
-                links.push_back (link);
+                kept.push_back (wantedSession.id);
+                wantedLinks.push_back (wantedLink);
 
-                if (const auto found = mqttSessions.find (session.id); found != mqttSessions.end())
-                    found->second.want (session);
+                if (const auto found = mqttSessions.find (wantedSession.id); found != mqttSessions.end())
+                    found->second.want (wantedSession);
                 else
-                    mqttSessions.emplace (session.id, wfg::mqtt::Session (session));
+                    mqttSessions.emplace (wantedSession.id, wfg::mqtt::Session (wantedSession));
             }
 
             for (auto at = mqttSessions.begin(); at != mqttSessions.end();)
                 at = std::find (kept.begin(), kept.end(), at->first) == kept.end() ? mqttSessions.erase (at) : std::next (at);
 
-            mqttLinks.reconcile (links);
+            mqttLinks.reconcile (wantedLinks);
         };
 
         /*  WHAT THE CONNECTIONS ARE TOLD TO BE, AND WHETHER THE HOLD WAS ON
@@ -4185,8 +4185,8 @@ namespace
                                     its session is connected - a publish before the
                                     CONNACK is what gets a client dropped. Not
                                     connected, the run fails as to a closed link. */
-                                const auto session = mqttSessions.find (mountId);
-                                return session != mqttSessions.end() && session->second.connected()
+                                const auto found = mqttSessions.find (mountId);
+                                return found != mqttSessions.end() && found->second.connected()
                                     && mqttLinks.sendPacket (mountId, packet);
                             });
 
@@ -7965,8 +7965,6 @@ namespace
 
                                 if (machineHold.held() != linksReconciledHeld)
                                     reconcileLinks();
-                                    reconcileBroker();
-                                    reconcileMqtt();
 
                                 if (pairing.revision != pairingPublished)
                                 {
