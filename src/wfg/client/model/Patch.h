@@ -189,6 +189,19 @@ namespace wfg::client::model
     };
     Pasted patchPasted (const std::string& text, const std::string& piece, int dx, int dy);
 
+    /*  "COPY FOR A PATCH" (namespace draft §65, AMJ): a box's words, as one
+        types them into a box - which Pd pastes into the box being typed and
+        Go.dot's canvas pastes as a box. A cue fired by its id; a serial port
+        heard, and sent a line. */
+    std::string wordsToFireCue (const std::string& cueId);
+    std::string wordsToHearSerial (const std::string& portId);
+    std::string wordsToSendSerial (const std::string& portId);
+
+    /*  WORDS PASTED (AMJ) onto the patch's own canvas at (x, y), a box a line
+        down from the last: a message when they begin with a semicolon, an
+        object otherwise. Empty when there are no words. */
+    Pasted patchWordsPasted (const std::string& text, const std::string& words, int x, int y);
+
     //==========================================================================
     /*  THE PATCH LIVE (PC.8): the run's `ports` readout - "name value..." a
         line - as a map, and what a GUI box is and says. */

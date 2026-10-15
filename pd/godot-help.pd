@@ -11,7 +11,7 @@
 #X text 260 292 writes to the device \, as an OSC cue aimed there would, f 60;
 #X text 20 376 GO.DOT ITSELF, f 96;
 #X msg 20 406 \; /godot/cmd/cue/fire 3.1;
-#X text 300 406 fires cue 3.1 by its number \, as a button on a surface would. Two cues numbered alike \, or none \, and it is refused, f 56;
+#X text 300 406 fires cue 3.1 by its number \, as a button on a surface would - in the list in front first \, then the others. No cue with that number and it is refused, f 56;
 #X msg 20 466 \; /godot/cmd/cue/fire B3NK0001;
 #X text 300 466 fires a cue by its id \, which a renumbering does not break. Right-click the cue in the list \, Copy for a patch - or drag the cue onto Go.dot's canvas, f 56;
 #X msg 20 526 \; /godot/cmd/go;
@@ -40,7 +40,7 @@
 #X obj 645 864 polytouchout;
 #X obj 770 864 midiout;
 #X text 20 922 SERIAL: AN ARDUINO AND THE LIKE, f 96;
-#X text 20 952 Add the port in Show settings > Serial \; Copy for a patch on its row gives these two boxes with its id., f 96;
+#X text 20 952 Add the port in Show settings > Serial. Right-click its row \, Copy for a patch \, for these two boxes with its id., f 96;
 #X obj 20 986 r /godot/serial/K7Q2M9X4/in;
 #X obj 20 1026 unpack f f;
 #X text 300 986 each line it sends \, split on spaces and commas \, numbers as numbers - every line \, not only a changed one, f 56;

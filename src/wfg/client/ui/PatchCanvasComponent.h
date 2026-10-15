@@ -58,7 +58,8 @@
 
 namespace wfg::client::ui
 {
-    class PatchCanvasComponent final : public juce::Component
+    class PatchCanvasComponent final : public juce::Component,
+                                       public juce::DragAndDropTarget
     {
     public:
         struct Actions
@@ -99,6 +100,16 @@ namespace wfg::client::ui
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
         void mouseMagnify (const juce::MouseEvent&, float scaleFactor) override;
         bool keyPressed (const juce::KeyPress&) override;
+
+        /*  A CUE DRAGGED FROM THE LIST (namespace draft §65, AMK): the list's
+            row drag names the cue's id, and let go here it is a message box
+            that fires it, where the hand let go. */
+        bool isInterestedInDragSource (const SourceDetails& details) override;
+        void itemDropped (const SourceDetails& details) override;
+
+        /*  FOR A TEST: words pasted at a point, as Ctrl+V pastes them where the
+            pointer is. */
+        void pasteAt (const juce::String& piece, juce::Point<float> at);
 
         /*  FOR A TEST: the picked boxes and lines, by their index in the
             patch; and a point on the canvas as the component draws it. */

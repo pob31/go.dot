@@ -6146,6 +6146,47 @@ TEST_CASE ("patch canvas: its ? opens Go.dot's help patch, even locked, or offer
     CHECK (helped == 1);
 }
 
+TEST_CASE ("patch canvas: words pasted are boxes where the pointer is, and a cue dropped from the list is a box that fires it (§65)")
+{
+    std::vector<std::string> written;
+    wfg::client::ui::PatchCanvasComponent::Actions actions;
+    actions.set = [&written] (const std::string&, const std::string& text) { written.push_back (text); };
+    actions.say = [] (const juce::String&) {};
+
+    wfg::client::ui::PatchCanvasComponent canvas (wfg::client::model::Theme {}, std::move (actions));
+    canvas.setSize (600, 300);
+
+    wfg::client::model::PatchReading reading;
+    reading.cueId = "PRCS0001";
+    reading.text = "#N canvas 0 50 450 300 12;\n";
+    canvas.show (reading);
+
+    //  "Copy for a patch" on a serial port, pasted at a point on the canvas (AMJ).
+    canvas.pasteAt ("r /godot/serial/K7Q2M9X4/in", canvas.onScreen (100.0, 80.0));
+    REQUIRE (written.size() == 1u);
+    CHECK (written.back().find ("#X obj 100 80 r /godot/serial/K7Q2M9X4/in;") != std::string::npos);
+    reading.text = written.back();
+    canvas.show (reading);
+
+    //  A cue's row dragged from the list and let go (AMK); a dragged preset line or a file is not a cue.
+    juce::Component list;
+    const juce::DragAndDropTarget::SourceDetails cue (juce::var ("B3NK0001"), &list, canvas.onScreen (200.0, 150.0).toInt());
+    const juce::DragAndDropTarget::SourceDetails preset (juce::var ("preset:B3NK0001"), &list, {});
+    CHECK (canvas.isInterestedInDragSource (cue));
+    CHECK_FALSE (canvas.isInterestedInDragSource (preset));
+    canvas.itemDropped (cue);
+    REQUIRE (written.size() == 2u);
+    CHECK (written.back().find ("#X msg 200 150 \\; /godot/cmd/cue/fire B3NK0001;") != std::string::npos);
+
+    //  Locked: nothing taken.
+    reading.text = written.back();
+    reading.locked = true;
+    canvas.show (reading);
+    CHECK_FALSE (canvas.isInterestedInDragSource (cue));
+    canvas.pasteAt ("print", canvas.onScreen (10.0, 10.0));
+    CHECK (written.size() == 2u);
+}
+
 TEST_CASE ("patch canvas: Ctrl+E plays the patch - a toggle and a slider reach their names, nothing is written")
 {
     std::vector<std::string> written;

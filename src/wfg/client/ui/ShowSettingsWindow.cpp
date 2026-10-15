@@ -10,6 +10,7 @@
 #include <wfg/client/model/SerialPorts.h>
 #include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Patch.h>
 #include <wfg/client/model/Pair.h>
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Fx.h>
@@ -2093,6 +2094,22 @@ namespace wfg::client::ui
 
             void listBoxItemClicked (int row, const juce::MouseEvent& event) override
             {
+                /*  A RIGHT-CLICK (namespace draft §65, AMJ): Copy for a patch,
+                    the box that hears this port and the one that sends it a
+                    line, with the id this tab does not show. Locked or not:
+                    it copies, it changes nothing. */
+                if (event.mods.isPopupMenu() && row >= 0 && static_cast<std::size_t> (row) < rows.size())
+                {
+                    const auto& port = rows[static_cast<std::size_t> (row)];
+                    const auto hear = juce::String::fromUTF8 (model::wordsToHearSerial (port.id).c_str());
+                    const auto tell = juce::String::fromUTF8 (model::wordsToSendSerial (port.id).c_str());
+                    juce::PopupMenu menu;
+                    menu.addItem ("Copy for a patch: hear its lines", [hear] { juce::SystemClipboard::copyTextToClipboard (hear); });
+                    menu.addItem ("Copy for a patch: send it a line", [tell] { juce::SystemClipboard::copyTextToClipboard (tell); });
+                    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+                    return;
+                }
+
                 if (locked || row < 0 || static_cast<std::size_t> (row) >= rows.size() || ! send)
                     return;
 

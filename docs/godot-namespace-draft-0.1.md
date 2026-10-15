@@ -29736,11 +29736,13 @@ the show; a replay takes it and opens nothing.
 | **AMI** | **A save from Pd keeps the patch's own window**: the place and size on its first line as Go.dot handed them out, the font and the rest as saved - the window is where this machine's screen put it, and a zoomed window grown to fit would grow the patch at every save. | mine |
 | **AMJ** | **Copy for a patch**: a cue in the list, and a port in Show settings > Serial, put on the clipboard the boxes a patch needs with their ids - a cue's `[; /godot/cmd/cue/fire <id>(`, a port's `[r /godot/serial/<id>/in]` and `[s /godot/serial/<id>/out]` - as Pd's own text, which pastes onto Go.dot's canvas or into Pd. The words "Copy for a patch" are mine, for review. | the author's (offered as "Copy for a patch") |
 | **AMK** | **A cue dragged onto the canvas** drops a message box that fires it, `[; /godot/cmd/cue/fire <id>(`, where it is let go. | the author's (offered as "Drag a cue onto the canvas") |
-| **AML** | **A patch fires a cue by its number too**: `cue/fire 3.1` from a patch finds the cue numbered 3.1 when no cue has that id; two cues numbered alike, or none, and it is refused in words. A number is read as text first, then as a number, so `3.10` and `3.1` are the same cue when only one of them exists. Only a patch: a datagram still names a cue by its id. | the author's (offered as "Fire by number"); the details mine |
+| **AML** | **A patch fires a cue by its number too**: `cue/fire 3.1` from a patch that names no cue's id is `cue.fireNumber 3.1` (§56), by its rule - the focused list first, then the others, the number as written - so a renumbered cue is missed, as it would be by a surface. A number Pd carries as a float is written as Pd writes it, six figures in no locale's way (3.0999999 is `3.1`). No cue with that number: refused `unknown-id`, as `cue.fireNumber` refuses it. Only a patch: a datagram still names a cue by its id. | the author's (offered as "Fire by number"); the details mine |
 
 ### 65.3 Stages
 
 - **PN.0** (43c57e5): AMC. **PN.1** (5e4d47f): AMD, AME, AMF and the window in front (§51 ACN).
 - **PN.2**: AMG, AMH, AMI - the help patch, `process.help`, the canvas's ?, the screen plugin growing a
   zoomed window, a save keeping the patch's window.
-- **PN.3**: AMJ. **PN.4**: AMK. **PN.5**: AML. **PN.6**: the tester guides.
+- **PN.3-PN.5**: AMJ - the cue list's and the Serial tab's right-click, words pasted on the canvas as
+  boxes (`patchWordsPasted`); AMK - the canvas a drop target for the list's row drag; AML - in the
+  Runner's patch path. **PN.6**: the tester guides.

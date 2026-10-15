@@ -171,6 +171,41 @@ namespace wfg::client::ui
                 juce::String::fromUTF8 (model::patchCopied (drawnText, { boxes.begin(), boxes.end() }).c_str()));
     }
 
+    void PatchCanvasComponent::pasteAt (const juce::String& piece, juce::Point<float> at)
+    {
+        pointer = toCanvas (at);
+        paste (piece);
+    }
+
+    namespace
+    {
+        //  A cue's id as the list's drag names it: eight of Crockford's letters and digits.
+        bool isCueId (const juce::String& said)
+        {
+            return said.length() == 8 && said.containsOnly ("0123456789ABCDEFGHJKMNPQRSTVWXYZ");
+        }
+    }
+
+    bool PatchCanvasComponent::isInterestedInDragSource (const SourceDetails& details)
+    {
+        return editable() && details.description.isString() && isCueId (details.description.toString());
+    }
+
+    void PatchCanvasComponent::itemDropped (const SourceDetails& details)
+    {
+        if (! isInterestedInDragSource (details))
+            return;
+
+        const auto at = toCanvas (details.localPosition.toFloat());
+        write (model::patchPlaced (drawnText, model::Placed::message, static_cast<int> (std::round (at.x)),
+                                   static_cast<int> (std::round (at.y)),
+                                   model::wordsToFireCue (details.description.toString().toStdString())));
+        if (! patch.boxes.empty())
+            boxes = { patch.boxes.size() - 1 };
+        lines.clear();
+        repaint();
+    }
+
     void PatchCanvasComponent::paste (const juce::String& piece)
     {
         if (! editable())
@@ -180,6 +215,22 @@ namespace wfg::client::ui
         const auto parsed = process::parsePatch ("#N canvas 0 0 10 10 12;\n" + text);
         if (! parsed.problem.empty() || parsed.boxes.empty())
         {
+            /*  A BOX'S WORDS (§65, AMJ), as "Copy for a patch" leaves them or
+                as typed anywhere: a box each line, where the pointer is. */
+            if (text.find ("#X") == std::string::npos && text.find ("#N") == std::string::npos)
+            {
+                const auto words = model::patchWordsPasted (drawnText, text, static_cast<int> (std::round (pointer.x)),
+                                                            static_cast<int> (std::round (pointer.y)));
+                if (! words.boxes.empty())
+                {
+                    write (words.text);
+                    boxes = { words.boxes.begin(), words.boxes.end() };
+                    lines.clear();
+                    repaint();
+                    return;
+                }
+            }
+
             if (actions.say)
                 actions.say ("Nothing to paste: the clipboard holds no boxes");
             return;

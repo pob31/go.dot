@@ -736,6 +736,41 @@ namespace wfg::client::model
         return out;
     }
 
+    std::string wordsToFireCue (const std::string& cueId)       { return "; /godot/cmd/cue/fire " + cueId; }
+    std::string wordsToHearSerial (const std::string& portId)   { return "r /godot/serial/" + portId + "/in"; }
+    std::string wordsToSendSerial (const std::string& portId)   { return "s /godot/serial/" + portId + "/out"; }
+
+    Pasted patchWordsPasted (const std::string& text, const std::string& words, int x, int y)
+    {
+        Pasted out { text, {} };
+        std::size_t start = 0;
+
+        while (start <= words.size())
+        {
+            auto end = words.find ('\n', start);
+            if (end == std::string::npos)
+                end = words.size();
+
+            auto line = words.substr (start, end - start);
+            while (! line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+                line.pop_back();
+            const auto first = line.find_first_not_of (" \t");
+
+            if (first != std::string::npos)
+            {
+                line = line.substr (first);
+                const auto what = line.front() == ';' ? Placed::message : Placed::object;
+                out.text = patchPlaced (out.text, what, x, y, line);
+                out.boxes.push_back (process::parsePatch (out.text).boxes.size() - 1);
+                y += 40;
+            }
+
+            start = end + 1;
+        }
+
+        return out;
+    }
+
     std::map<std::string, std::string> portValues (const std::string& ports)
     {
         std::map<std::string, std::string> out;

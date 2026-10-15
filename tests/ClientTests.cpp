@@ -12068,6 +12068,34 @@ TEST_CASE ("client: a box placed by Pd's Ctrl+1 to Ctrl+5, a line drawn, a piece
     CHECK (twice.problem.empty());
 }
 
+TEST_CASE ("client: Copy for a patch gives a box's words, and words paste as boxes, a message after a semicolon (§65, AMJ)")
+{
+    CHECK (model::wordsToFireCue ("B3NK0001") == "; /godot/cmd/cue/fire B3NK0001");
+    CHECK (model::wordsToHearSerial ("K7Q2M9X4") == "r /godot/serial/K7Q2M9X4/in");
+    CHECK (model::wordsToSendSerial ("K7Q2M9X4") == "s /godot/serial/K7Q2M9X4/out");
+
+    const std::string text = canvasPatch;
+    const auto before = process::parsePatch (text).boxes.size();
+
+    //  The cue's words: one message box where the pointer is, its semicolon as Pd writes it.
+    const auto fire = model::patchWordsPasted (text, model::wordsToFireCue ("B3NK0001"), 300, 40);
+    CHECK (fire.text.substr (text.size()) == "#X msg 300 40 \\; /godot/cmd/cue/fire B3NK0001;\n");
+    CHECK (fire.boxes == std::vector<std::size_t> { before });
+
+    //  Two lines, two objects, a box apart; blank lines and stray spaces taken out.
+    const auto both = model::patchWordsPasted (text, "  r /godot/serial/K7Q2M9X4/in\r\n\n s /godot/serial/K7Q2M9X4/out \n", 10, 10);
+    const auto parsed = process::parsePatch (both.text);
+    REQUIRE (parsed.problem.empty());
+    REQUIRE (both.boxes.size() == 2u);
+    CHECK (parsed.boxes[both.boxes[0]].kind == process::BoxKind::object);
+    CHECK (parsed.boxes[both.boxes[1]].y == parsed.boxes[both.boxes[0]].y + 40);
+
+    //  No words, nothing placed.
+    const auto none = model::patchWordsPasted (text, " \n ", 0, 0);
+    CHECK (none.boxes.empty());
+    CHECK (none.text == text);
+}
+
 TEST_CASE ("client: a patch opened in plugdata or Pd, and Pd downloaded - two gestures the engine takes")
 {
     Rig rig;

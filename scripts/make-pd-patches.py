@@ -709,8 +709,8 @@ def help_card():
 
     heading('Go.dot itself')
     p.msg('fireNumber', 20, y, '; /godot/cmd/cue/fire 3.1')
-    p.text(300, y, 'fires cue 3.1 by its number, as a button on a surface would. Two cues numbered alike, or none, '
-           'and it is refused', 56)
+    p.text(300, y, 'fires cue 3.1 by its number, as a button on a surface would - in the list in front first, '
+           'then the others. No cue with that number and it is refused', 56)
     y += 60
     p.msg('fireId', 20, y, '; /godot/cmd/cue/fire B3NK0001')
     p.text(300, y, 'fires a cue by its id, which a renumbering does not break. Right-click the cue in the list, '
@@ -742,7 +742,7 @@ def help_card():
     y += 44
 
     heading('Serial: an Arduino and the like')
-    say('Add the port in Show settings > Serial; Copy for a patch on its row gives these two boxes with its id.', 34)
+    say('Add the port in Show settings > Serial. Right-click its row, Copy for a patch, for these two boxes with its id.', 34)
     p.obj('serialIn', 20, y, 'r /godot/serial/K7Q2M9X4/in')
     p.obj('serialUnpack', 20, y + 40, 'unpack f f')
     p.c('serialIn', 0, 'serialUnpack', 0)

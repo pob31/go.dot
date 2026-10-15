@@ -38,6 +38,8 @@
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/process/PatchEditor.h>
+#include <wfg/engine/tree/AuthoringCommands.h>
+#include <wfg/engine/tree/RawSender.h>
 #include <wfg/engine/process/PatchText.h>
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/PatchThread.h>
@@ -752,6 +754,48 @@ TEST_CASE ("process cue: a patch fires a cue by name, under its own origin, and 
     });
     REQUIRE (fired != records.end());
     CHECK (fired->origin == "process:" + processRun);
+}
+
+TEST_CASE ("process cue: a patch fires a cue by its number too, as Pd writes the number (namespace draft §65, AML)")
+{
+    ProcessRig rig ("pc2-number");
+    wfg::tree::RawSender nowhere;
+    wfg::tree::registerAuthoringCommands (rig.engine.commands(), rig.document, nowhere);
+
+    const auto bell = rig.makeMemo ("Bell");
+    const auto gong = rig.makeMemo ("Gong");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + bell + "/number", "3.1").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + gong + "/number", "12").ok);
+
+    //  3.1 travels as Pd's float, 12 as a whole one, Z9 as a word no cue is numbered.
+    const auto cue = rig.makeProcess ("#N canvas 0 0 450 300 12;\n"
+                                      "#X obj 10 10 r /dev/in;\n"
+                                      "#X msg 10 40 \\; /godot/cmd/cue/fire 3.1 \\; /godot/cmd/cue/fire 12"
+                                      " \\; /godot/cmd/cue/fire Z9;\n"
+                                      "#X connect 0 0 1 0;\n");
+    rig.fire (cue);
+    REQUIRE (rig.running (cue));
+    rig.hear ("/dev/in", 1.0f);
+    rig.tickOnce();
+    rig.tickOnce();
+    CHECK (rig.runsOf (bell) == 1u);
+    CHECK (rig.runsOf (gong) == 1u);
+
+    //  Logged as the number it was, under the patch's own origin; the word no cue has is refused.
+    const auto records = rig.records();
+    const auto said = [&records] (const std::string& number)
+    {
+        return std::find_if (records.begin(), records.end(), [&] (const auto& r)
+        {
+            return r.command == "cue.fireNumber" && ! r.args.empty() && r.args.front().isString()
+                     && r.args.front().getString() == number;
+        });
+    };
+    REQUIRE (said ("3.1") != records.end());
+    CHECK (said ("3.1")->origin.rfind ("process:", 0) == 0);
+    REQUIRE (said ("12") != records.end());
+    REQUIRE (said ("Z9") != records.end());
+    CHECK (said ("Z9")->kind == wfg::LogRecord::Kind::rejected);
 }
 
 TEST_CASE ("process cue: a patch ends its own run with self, and that is its completion")

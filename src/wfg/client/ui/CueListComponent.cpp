@@ -22,6 +22,7 @@
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/NewCueMenus.h>
+#include <wfg/client/model/Patch.h>
 #include <wfg/client/model/Timecode.h>
 
 #include <wfg/client/ui/Icons.h>
@@ -1168,6 +1169,21 @@ namespace wfg::client::ui
             return;
 
         const auto& entry = rows[static_cast<std::size_t> (row)];
+
+        /*  A RIGHT-CLICK ON A CUE (namespace draft §65, AMJ): Copy for a patch,
+            the box that fires it by its id, which a patch needs and the list
+            does not show. Nothing is picked or parked by it. */
+        if (event.mods.isPopupMenu())
+        {
+            if (entry.rowKind == model::RowKind::cue && ! entry.id.empty())
+            {
+                const auto words = juce::String::fromUTF8 (model::wordsToFireCue (entry.id).c_str());
+                juce::PopupMenu menu;
+                menu.addItem ("Copy for a patch", [words] { juce::SystemClipboard::copyTextToClipboard (words); });
+                menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+            }
+            return;
+        }
 
         /*  A BAND IS ALL TARGET. The head is small and the twist smaller, and
             a word missed by a pixel should still open the section - which is

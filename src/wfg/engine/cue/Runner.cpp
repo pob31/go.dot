@@ -66,12 +66,14 @@
 #include <string_view>
 #include <bit>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
 #include <limits>
 #include <set>
+#include <system_error>
 #include <utility>
 
 namespace wfg::cue
@@ -13869,6 +13871,21 @@ namespace wfg::cue
                                                 : osc::Value::string (atom.word));
             return values;
         }
+
+        /*  A cue's number as a patch said it: a word as it is, a number as Pd
+            writes one - six figures, so Pd's 3.1 (3.0999999 as it travels) is
+            "3.1" - in no locale's way. Empty for anything else. */
+        std::string cueNumberSaid (const osc::Value& said)
+        {
+            if (said.isString())
+                return said.getString();
+            if (! said.isNumber())
+                return {};
+
+            char text[32] {};
+            const auto written = std::to_chars (text, text + sizeof (text), said.asDouble(), std::chars_format::general, 6);
+            return written.ec == std::errc {} ? std::string (text, written.ptr) : std::string {};
+        }
     }
 
     void Runner::advanceProcesses (Engine& engine, std::int64_t tick)
@@ -14151,6 +14168,20 @@ namespace wfg::cue
                         else if (command->params[i].name == "cue")
                             args[i] = osc::Value::string (cueId);
                     }
+
+                /*  A CUE FIRED BY ITS NUMBER (namespace draft §65, AML):
+                    `cue/fire 3.1` names no cue's id, so it is the cue numbered
+                    3.1, by cue.fireNumber's rule - the focused list first, the
+                    number as written. A patch only; a datagram names the id. */
+                if (name == "cue.fire" && ! args.empty() && engine.commands().find ("cue.fireNumber") != nullptr
+                      && ! (args[0].isString() && document.findById (args[0].getString()).isValid()))
+                {
+                    if (auto number = cueNumberSaid (args[0]); ! number.empty())
+                    {
+                        name = "cue.fireNumber";
+                        args[0] = osc::Value::string (std::move (number));
+                    }
+                }
 
                 engine.submit (from, name, std::move (args));
                 continue;
