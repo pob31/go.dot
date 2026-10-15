@@ -1,0 +1,32 @@
+{
+  "about": "The surface's tables as the Android remote carries them (namespace draft §68, A.7): the EQ page's sixteen controls (src/wfg/engine/surface/SurfacePages.h), how far a detent turns each law (SurfaceProfile.h), and the fader the virtual panel draws (FaderCurve.h, the generic law). SurfacePagesTests holds this file to those headers; go.dot-remote vendors a copy and holds its own tables to it. Change the headers, and this file, and the app's copy, together.",
+  "eqControls": [
+    { "row": "eqHpfFreq", "label": "HP freq",  "short": "HP Frq",  "law": "frequency", "min": 20.0,   "max": 2000.0,  "colour": 0, "switch": "eqHpf",  "press": "toggleSwitch", "shelf": "" },
+    { "row": "eqB1Shape", "label": "B1 shape", "short": "B1 Shp",  "law": "shape",     "min": 0.0,    "max": 0.0,     "colour": 1, "switch": "eqB1On", "press": "toggleShape",  "shelf": "lowShelf" },
+    { "row": "eqB1Freq",  "label": "B1 freq",  "short": "B1 Frq",  "law": "frequency", "min": 20.0,   "max": 20000.0, "colour": 1, "switch": "eqB1On", "press": "none",         "shelf": "" },
+    { "row": "eqB1Gain",  "label": "B1 gain",  "short": "B1 Gain", "law": "gain",      "min": -24.0,  "max": 24.0,    "colour": 1, "switch": "eqB1On", "press": "toggleSwitch", "shelf": "" },
+    { "row": "eqB1Q",     "label": "B1 Q",     "short": "B1 Q",    "law": "width",     "min": 0.1,    "max": 10.0,    "colour": 1, "switch": "eqB1On", "press": "none",         "shelf": "" },
+    { "row": "eqB2Freq",  "label": "B2 freq",  "short": "B2 Frq",  "law": "frequency", "min": 20.0,   "max": 20000.0, "colour": 2, "switch": "eqB2On", "press": "none",         "shelf": "" },
+    { "row": "eqB2Gain",  "label": "B2 gain",  "short": "B2 Gain", "law": "gain",      "min": -24.0,  "max": 24.0,    "colour": 2, "switch": "eqB2On", "press": "toggleSwitch", "shelf": "" },
+    { "row": "eqB2Q",     "label": "B2 Q",     "short": "B2 Q",    "law": "width",     "min": 0.1,    "max": 10.0,    "colour": 2, "switch": "eqB2On", "press": "none",         "shelf": "" },
+    { "row": "eqB3Freq",  "label": "B3 freq",  "short": "B3 Frq",  "law": "frequency", "min": 20.0,   "max": 20000.0, "colour": 3, "switch": "eqB3On", "press": "none",         "shelf": "" },
+    { "row": "eqB3Gain",  "label": "B3 gain",  "short": "B3 Gain", "law": "gain",      "min": -24.0,  "max": 24.0,    "colour": 3, "switch": "eqB3On", "press": "toggleSwitch", "shelf": "" },
+    { "row": "eqB3Q",     "label": "B3 Q",     "short": "B3 Q",    "law": "width",     "min": 0.1,    "max": 10.0,    "colour": 3, "switch": "eqB3On", "press": "none",         "shelf": "" },
+    { "row": "eqB4Shape", "label": "B4 shape", "short": "B4 Shp",  "law": "shape",     "min": 0.0,    "max": 0.0,     "colour": 4, "switch": "eqB4On", "press": "toggleShape",  "shelf": "highShelf" },
+    { "row": "eqB4Freq",  "label": "B4 freq",  "short": "B4 Frq",  "law": "frequency", "min": 20.0,   "max": 20000.0, "colour": 4, "switch": "eqB4On", "press": "none",         "shelf": "" },
+    { "row": "eqB4Gain",  "label": "B4 gain",  "short": "B4 Gain", "law": "gain",      "min": -24.0,  "max": 24.0,    "colour": 4, "switch": "eqB4On", "press": "toggleSwitch", "shelf": "" },
+    { "row": "eqB4Q",     "label": "B4 Q",     "short": "B4 Q",    "law": "width",     "min": 0.1,    "max": 10.0,    "colour": 4, "switch": "eqB4On", "press": "none",         "shelf": "" },
+    { "row": "eqLpfFreq", "label": "LP freq",  "short": "LP Frq",  "law": "frequency", "min": 1000.0, "max": 20000.0, "colour": 5, "switch": "eqLpf",  "press": "toggleSwitch", "shelf": "" }
+  ],
+  "detent": {
+    "octavesPerDetent": 0.0625,
+    "gainStepDb": 0.5,
+    "widthDoublingsPerDetent": 0.125,
+    "levelTravelPerDetent": 0.007874015748031496
+  },
+  "fader": {
+    "silenceDb": -120.0,
+    "loudestDb": 12.0,
+    "points": [ [0.0, -120.0], [0.2, -60.0], [0.85, 0.0], [1.0, 12.0] ]
+  }
+}

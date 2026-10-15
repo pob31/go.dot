@@ -22,6 +22,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/document/Schema.h>
+#include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/surface/SurfacePages.h>
@@ -29,6 +30,8 @@
 
 #include <clocale>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <string_view>
@@ -555,4 +558,92 @@ TEST_CASE ("surface pages: a loop point turns ten milliseconds a detent, fifty w
     CHECK (surface::pageWord (surface::Page::loop) == "loop");
     CHECK (surface::loopControls[0].label.size() <= 12u);
     CHECK (surface::loopControls[1].shortLabel.size() <= 7u);
+}
+
+//==============================================================================
+TEST_CASE ("surface pages: the remote's copy of the tables is these headers' (namespace draft §68, A.7)")
+{
+    /*  The Android remote draws the EQ page and its faders from
+        tests/fixtures/remote/surface-tables.json, a copy it vendors. This holds
+        the file to the headers, so a control, a range, a colour, a detent or
+        the fader's curve changed here and not there fails here. */
+    std::ifstream in (std::string (WFG_TEST_FIXTURES_DIR) + "/remote/surface-tables.json", std::ios::binary);
+    REQUIRE (in.good());
+    const std::string body { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char>() };
+
+    const auto parsed = json::parse (body);
+    INFO (parsed.error);
+    REQUIRE (parsed.value.has_value());
+
+    const auto lawWord = [] (surface::Law law) -> std::string
+    {
+        switch (law)
+        {
+            case surface::Law::frequency: return "frequency";
+            case surface::Law::gain:      return "gain";
+            case surface::Law::width:     return "width";
+            case surface::Law::shape:     return "shape";
+            case surface::Law::level:     return "level";
+        }
+
+        return {};
+    };
+
+    const auto pressWord = [] (surface::Press press) -> std::string
+    {
+        switch (press)
+        {
+            case surface::Press::none:         return "none";
+            case surface::Press::toggleSwitch: return "toggleSwitch";
+            case surface::Press::toggleShape:  return "toggleShape";
+        }
+
+        return {};
+    };
+
+    const auto* controls = parsed.value->find ("eqControls");
+    REQUIRE (controls != nullptr);
+    REQUIRE (controls->asArray().size() == surface::eqControls.size());
+
+    for (std::size_t at = 0; at < surface::eqControls.size(); ++at)
+    {
+        const auto& control = surface::eqControls[at];
+        const auto& copy = controls->asArray()[at];
+        INFO ("control " << at << ": " << control.row);
+
+        const auto word = [&copy] (const char* key) { return copy.find (key) != nullptr ? copy.find (key)->asString() : std::string {}; };
+        const auto number = [&copy] (const char* key) { return copy.find (key) != nullptr ? copy.find (key)->asNumber() : -1.0e9; };
+
+        CHECK (word ("row") == control.row);
+        CHECK (word ("label") == control.label);
+        CHECK (word ("short") == control.shortLabel);
+        CHECK (word ("law") == lawWord (control.law));
+        CHECK (near (number ("min"), control.minimum));
+        CHECK (near (number ("max"), control.maximum));
+        CHECK (static_cast<int> (number ("colour")) == control.colour);
+        CHECK (word ("switch") == control.switchRow);
+        CHECK (word ("press") == pressWord (control.press));
+        CHECK (word ("shelf") == control.shelf);
+    }
+
+    const auto* detent = parsed.value->find ("detent");
+    REQUIRE (detent != nullptr);
+    CHECK (near (detent->find ("octavesPerDetent")->asNumber(), surface::pageOctavesPerDetent));
+    CHECK (near (detent->find ("gainStepDb")->asNumber(), surface::pageGainStepDb));
+    CHECK (near (detent->find ("widthDoublingsPerDetent")->asNumber(), surface::pageWidthDoublingsPerDetent));
+    CHECK (near (detent->find ("levelTravelPerDetent")->asNumber(), surface::pageLevelTravelPerDetent));
+
+    const auto* fader = parsed.value->find ("fader");
+    REQUIRE (fader != nullptr);
+    CHECK (near (fader->find ("silenceDb")->asNumber(), surface::faderSilenceDb));
+    CHECK (near (fader->find ("loudestDb")->asNumber(), surface::faderLoudestDb));
+
+    const auto& points = fader->find ("points")->asArray();
+    REQUIRE (points.size() == surface::faderCurve::points.size());
+
+    for (std::size_t at = 0; at < points.size(); ++at)
+    {
+        CHECK (near (points[at].asArray()[0].asNumber(), surface::faderCurve::points[at].first));
+        CHECK (near (points[at].asArray()[1].asNumber(), surface::faderCurve::points[at].second));
+    }
 }
