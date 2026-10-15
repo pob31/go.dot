@@ -67,6 +67,12 @@ namespace wfg::client::ui
             finds it, and never moved by a long name. */
         constexpr int readyChars = 3;
 
+        /*  A FLAGGED CUE'S FLAG, in a cell of its own directly left of the kind
+            (the author, 2026-10-15: "Can the flag icon be placed to the left of
+            the cue type"; namespace draft §63, ALQ): one column down the list,
+            whatever the name, and the readiness cell one step further left. */
+        constexpr int flagChars = 2;
+
         /*  ONE FILE ONTO ONE MEDIA CUE NAMES ITS FILE, which is asked before
             anything else a dropped file could mean. More than one file could
             not, and a cue of another kind has no file to name. */
@@ -224,6 +230,7 @@ namespace wfg::client::ui
         cells.duration = area.removeFromRight (timeChars * unit);
         cells.preWait = area.removeFromRight (timeChars * unit);
         area.removeFromRight (kindChars * unit);
+        area.removeFromRight (flagChars * unit);
         area.removeFromRight (readyChars * unit);
         cells.number = area.removeFromLeft (numberChars * unit);
         area.removeFromLeft (entry.depth * indent);
@@ -827,6 +834,19 @@ namespace wfg::client::ui
             in its cell - getting ready, ready, partly, missing - in the faint
             ink, and what is wrong in the colours that mean trouble; the word
             itself after the name below, and the whole sentence on hover. */
+        /*  FLAGGED (namespace draft §63, ALQ): the flag in its own cell just
+            left of the kind, in its own colour, at full strength even on a
+            disabled row, since it is about the work and not the playing; its
+            shape and the row's tooltip say it in words too (§4.8). */
+        const auto flagCell = area.removeFromRight (flagChars * unit);
+
+        if (entry.rowKind == model::RowKind::cue && ! entry.derived && flagged.count (entry.id) > 0)
+        {
+            const auto side = juce::jmin (static_cast<float> (unit) * 1.9f, 12.0f * static_cast<float> (theme.type));
+            icons::draw (g, model::Icon::flag, flagCell.toFloat().withSizeKeepingCentre (side, side),
+                         Look::colour (theme, "flag"));
+        }
+
         const auto readyCell = area.removeFromRight (readyChars * unit);
         const auto* ready = [this, &entry]() -> const model::Mark*
         {
@@ -947,21 +967,6 @@ namespace wfg::client::ui
 
             //  And a little air between the picture and the name.
             area.removeFromLeft (pad);
-
-            /*  A FLAGGED CUE'S FLAG, BEFORE ITS NAME (namespace draft §63,
-                ALQ): where an eye running down the names finds it, and never
-                cut off by a long name as the marks after one can be. In its
-                own colour, at full strength even on a disabled row, since it
-                is about the work and not the playing; its shape and the row's
-                tooltip say it in words too (§4.8). */
-            if (! entry.derived && flagged.count (entry.id) > 0)
-            {
-                const auto cell = area.removeFromLeft (juce::roundToInt (side) + pad / 2);
-
-                icons::draw (g, model::Icon::flag, cell.toFloat().withSizeKeepingCentre (side, side),
-                             Look::colour (theme, "flag"));
-                area.removeFromLeft (pad / 2);
-            }
         }
 
         /*  THE CUE'S OWN COLOUR, somebody's decision (`colour`, "a #RRGGBB
@@ -1952,7 +1957,8 @@ namespace wfg::client::ui
         g.drawFittedText ("KIND", row.removeFromRight (kindChars * unit),
                           juce::Justification::centredRight, 1, 0.6f);
 
-        //  The readiness cell has no heading: its marks say what they are when hovered.
+        //  The flag's and the readiness cells have no heading: their marks say what they are when hovered.
+        row.removeFromRight (flagChars * unit);
         row.removeFromRight (readyChars * unit);
 
         g.drawFittedText ("CUE", row.removeFromLeft (numberChars * unit),

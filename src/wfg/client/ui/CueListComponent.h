@@ -182,7 +182,7 @@ namespace wfg::client::ui
 
         /*  THE FLAGGED CUES (namespace draft §63, ALQ), by identifier, read
             every pass: a flag is a state row and moves no revision, so the
-            rows are not built again for one. A flag before the name of each,
+            rows are not built again for one. A flag left of the kind of each,
             and only the rows whose flag came or went are asked to paint. */
         void setFlags (std::set<std::string> flaggedNow);
 

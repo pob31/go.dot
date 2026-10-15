@@ -271,7 +271,7 @@ TEST_CASE ("cue list: how ready each cue is, a mark in a cell of its own beside 
         kind from the right, the readiness cell just left of them. */
     const auto unit = juce::roundToInt (theme.type * 7.0);
     const auto kindLeft = 900 - unit / 2 - (3 * 6 + 8) * unit;
-    const auto cellLeft = kindLeft - 3 * unit;
+    const auto cellLeft = kindLeft - 2 * unit - 3 * unit;     // past the flag's cell (namespace draft 63)
 
     int changedInCell = 0, changedRightOfIt = 0, changedLeftOfIt = 0;
 
@@ -359,7 +359,7 @@ TEST_CASE ("cue list: a cue that needs something missing wears the warning in th
 
     const auto unit = juce::roundToInt (theme.type * 7.0);
     const auto kindLeft = 900 - unit / 2 - (3 * 6 + 8) * unit;
-    const auto cellLeft = kindLeft - 3 * unit;
+    const auto cellLeft = kindLeft - 2 * unit - 3 * unit;     // past the flag's cell (namespace draft 63)
 
     int changedInCell = 0, changedRightOfIt = 0, changedLeftOfIt = 0;
 
@@ -6962,7 +6962,7 @@ TEST_CASE ("run pane: a time group's row says the code it follows, and a chasing
     }
 }
 
-TEST_CASE ("cue list: F and Shift+F, once per key-down, and a flag drawn before a flagged cue's name")
+TEST_CASE ("cue list: F and Shift+F, once per key-down, and a flag drawn left of a flagged cue's kind")
 {
     /*  Namespace draft §63 (the author, 2026-10-15). With WFG_SNAPSHOT_DIR set,
         cue-list-flags.png. */
@@ -7024,28 +7024,29 @@ TEST_CASE ("cue list: F and Shift+F, once per key-down, and a flag drawn before 
     cues.setFlags ({ sound });
     const auto after = paint();
 
-    /*  THE FLAG IS BEFORE THE NAME, so it is drawn in the left part of the
-        row and the times and kind at the right are as they were; and in the
-        flag's own colour, somewhere in what changed. */
+    /*  THE FLAG IS IN ITS CELL JUST LEFT OF THE KIND (the author, 2026-10-15):
+        everything that changed is inside that cell - the name, the kind and
+        the times are as they were - and some of it in the flag's own colour. */
     const auto unit = juce::roundToInt (theme.type * 7.0);
     const auto kindLeft = 900 - unit / 2 - (3 * 6 + 8) * unit;
+    const auto flagLeft = kindLeft - 2 * unit;
     const auto flagColour = model::colourFromHex ("#FF9330");
     REQUIRE (flagColour.has_value());
 
-    int changedLeft = 0, changedRight = 0, inFlagColour = 0;
+    int changedInFlagCell = 0, changedElsewhere = 0, inFlagColour = 0;
 
     for (int y = 0; y < 200; ++y)
         for (int x = 0; x < 900; ++x)
             if (before.getPixelAt (x, y) != after.getPixelAt (x, y))
             {
-                (x >= kindLeft ? changedRight : changedLeft)++;
+                (x >= flagLeft && x < kindLeft ? changedInFlagCell : changedElsewhere)++;
 
                 if (after.getPixelAt (x, y).getARGB() == static_cast<juce::uint32> (*flagColour))
                     ++inFlagColour;
             }
 
-    CHECK (changedLeft > 0);
-    CHECK (changedRight == 0);
+    CHECK (changedInFlagCell > 0);
+    CHECK (changedElsewhere == 0);
     CHECK (inFlagColour > 0);
 
     //  Taken off, the row is as it was.

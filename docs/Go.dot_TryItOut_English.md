@@ -169,7 +169,7 @@ A **process cue** holds a Pure Data patch and runs it while the cue runs, at con
 - **Undo history** for every edit (Ctrl+Shift+U), and continuous autosave.
 - **Lock** the show during performance (Ctrl+L): GO, Esc and Doh! still work, editing does not.
 - **What this computer lacks, shown (new).** A cue that needs something missing tonight - the audio interface, a screen, a MIDI device, a plugin, a file - wears a warning and a word after its name (*no audio*, *no screen*...); hover for why. A button on the title line opens the *Show settings* tab concerned.
-- **Flags (new).** Something to fix? Press F on the picked cue, or Shift+F for the cue the last GO fired, even with the show locked. A flag stands before the cue's name until F takes it off. Flags are kept when the show is saved.
+- **Flags (new).** Something to fix? Press F on the picked cue, or Shift+F for the cue the last GO fired, even with the show locked. A flag stands just left of the cue's type until F takes it off. Flags are kept when the show is saved.
 - **Show and performances.** A show is the piece; each night is a performance, a copy you can change without touching the original. *File > New performance…*. At the end, Go.dot lists what changed, cue by cue, so you can bring the good changes back into the show.
 - **Interface trouble.** If the audio interface disappears, the show pauses and resumes when it returns. If its sample rate changes, Go.dot follows it.
 - **Double-click a `.wfg`** to open the show (Windows installer, Linux .deb, macOS).
