@@ -16,6 +16,8 @@
 
 #include <wfg/engine/tree/TreeCommands.h>
 
+#include <wfg/engine/mqtt/Packet.h>
+
 #include <algorithm>
 #include <functional>
 
@@ -124,6 +126,7 @@ namespace wfg::tree
         declaration.framing = document.getAttribute (base + "framing").value_or (std::string ("length"));
         declaration.wire = document.getAttribute (base + "wire").value_or (std::string ("osc"));
         declaration.login = document.getAttribute (base + "login").value_or (std::string {});
+        declaration.topics = document.getAttribute (base + "topics").value_or (std::string ("#"));
         declaration.midiPort = document.getAttribute (base + "midiPort").value_or (std::string {});
 
         const auto integer = [&document, &base] (const char* row, int otherwise)
@@ -191,8 +194,14 @@ namespace wfg::tree
             rides a MIDI port, a connection or a datagram, never a serial
             line; a word the schema lacks never reaches here. */
         if (declaration->wire != "osc" && declaration->wire != "rcp" && declaration->wire != "line"
-              && declaration->wire != "midi")
-            return refuse ("wire \"" + declaration->wire + "\" is not one Go.dot renders - osc, rcp, line or midi");
+              && declaration->wire != "midi" && declaration->wire != "mqtt")
+            return refuse ("wire \"" + declaration->wire + "\" is not one Go.dot renders - osc, rcp, line, midi or mqtt");
+
+        /*  THE MQTT WIRE AND TRANSPORT ARE ONE THING SEEN TWICE (namespace
+            draft §67, ANA): a publish on a topic is what a broker takes and
+            all it takes, so each is refused without the other. */
+        if (declaration->wire == "mqtt" && declaration->transport != "mqtt")
+            return refuse ("the mqtt wire rides the mqtt transport only - set the transport to mqtt");
 
         if ((declaration->wire == "rcp" || declaration->wire == "line") && declaration->transport != "tcp")
             return refuse ("the " + declaration->wire + " wire is lines of text on a connection - set the transport to tcp");
@@ -261,10 +270,40 @@ namespace wfg::tree
             if (declaration->host.empty())
                 return refuse ("it is reached over a connection and names no host");
         }
+        /*  A DEVICE ON AN MQTT BROKER (namespace draft §67, ANA, AND, ANE):
+            the mqtt wire, filters a broker takes, no readback - it is heard
+            by its topics - and a broker: a host and a port, 1883 when the
+            port is left at nought, or Go.dot's own broker when the host is
+            empty, which the show must have on. */
+        else if (declaration->transport == "mqtt")
+        {
+            if (declaration->wire != "mqtt")
+                return refuse ("an mqtt transport carries the mqtt wire only - set the wire to mqtt");
+
+            if (declaration->readback != "none")
+                return refuse ("readback " + declaration->readback
+                               + " is a described device's way; an MQTT device is heard by its topics - set it to none");
+
+            for (const auto& filter : prefixesOf (declaration->topics))
+                if (! mqtt::validFilter (filter))
+                    return refuse ("topic filter \"" + filter
+                                   + "\" is not one a broker takes - + alone in its level, # alone and last");
+
+            if (prefixesOf (declaration->topics).empty())
+                return refuse ("it subscribes to nothing - name a topic filter, # for everything");
+
+            if (declaration->host.empty()
+                  && document.getAttribute ("/godot/network/broker").value_or (std::string ("false")) != "true")
+                return refuse ("it is on Go.dot's broker, which the show has off"
+                               " - turn it on in Show settings > Network, or name a broker");
+
+            if (declaration->port < 0 || declaration->port > 65535)
+                return refuse ("no usable port. A broker listens on 1883 unless it says otherwise");
+        }
         else if (declaration->transport != "udp" && declaration->transport != "midi")
             return refuse ("transport \"" + declaration->transport
                            + "\" is declared but not implemented -"
-                             " Go.dot speaks udp, tcp, serial and midi to a mount today");
+                             " Go.dot speaks udp, tcp, serial, midi and mqtt to a mount today");
 
         if ((declaration->transport == "udp" || declaration->transport == "tcp")
               && (declaration->port <= 0 || declaration->port > 65535))

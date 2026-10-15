@@ -3438,13 +3438,13 @@
       </optional>
       <optional>
         <attribute name="host">
-          <a:documentation>Where the target is. A literal address rather than a name, because a socket resolves a hostname on every send whose destination differs from the last one, and a blocking lookup on the tick thread is a frame nobody gets back. It defaults to this machine because the ordinary rig is Go.dot and its processors on one box; anything else says so.</a:documentation>
+          <a:documentation>Where the target is. On an mqtt device, the broker; left empty, Go.dot-s own broker on this machine (namespace draft 67, AND). A literal address rather than a name, because a socket resolves a hostname on every send whose destination differs from the last one, and a blocking lookup on the tick thread is a frame nobody gets back. It defaults to this machine because the ordinary rig is Go.dot and its processors on one box; anything else says so.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
       <optional>
         <attribute name="login">
-          <a:documentation>The line sent as soon as the connection opens, and again after every reopening, for a device on the line wire (namespace draft 57, AFJ, DP.8): a grandMA2-s login &lt;user&gt; &lt;password&gt;, which its telnet remote wants before it takes a command. Empty sends nothing. A decision about the rig, so it is stored; a password in a show file is the operator-s to weigh, and a user made for the show with the rights it needs is the usual answer.</a:documentation>
+          <a:documentation>The line sent as soon as the connection opens, and again after every reopening, for a device on the line wire (namespace draft 57, AFJ, DP.8): a grandMA2-s login &lt;user&gt; &lt;password&gt;, which its telnet remote wants before it takes a command; and for a device on an MQTT broker (namespace draft 67, ANE), the user name and password the broker asks, space-separated. Empty sends nothing. A decision about the rig, so it is stored; a password in a show file is the operator-s to weigh, and a user made for the show with the rights it needs is the usual answer.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -3570,14 +3570,21 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="topics">
+          <a:documentation>The topic filters a device on an MQTT broker subscribes to (namespace draft 67, ANA, ANE), space-separated as the prefix row-s roots are - a topic with a space could not be an address anyway: # for everything, house/# for one branch, +/temp for one name at any depth. What arrives on them is heard at the address the topic spells under the prefix. Not read for any other transport.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="transport">
-          <a:documentation>How the device is reached. udp, the ordinary kind, at its host and port. tcp (namespace draft 57, AFJ, DP.6): a connection to its host and port kept open by Go.dot, the stream cut by its framing row. serial: OSC over SLIP on the serial port its serial row names, whose framing is slip - an Arduino running CNMAT-s OSC library on USB (namespace draft 51, ACR, PC.11) - heard, triggered, sent to and recorded from as any device; its host and port are then not read. midi (DP.9): the declared MIDI port its midiPort row names, the midi wire only, a console on a DIN or USB cable. ws is declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring it is refused when the show loads rather than going quiet during it.</a:documentation>
+          <a:documentation>How the device is reached. udp, the ordinary kind, at its host and port. tcp (namespace draft 57, AFJ, DP.6): a connection to its host and port kept open by Go.dot, the stream cut by its framing row. serial: OSC over SLIP on the serial port its serial row names, whose framing is slip - an Arduino running CNMAT-s OSC library on USB (namespace draft 51, ACR, PC.11) - heard, triggered, sent to and recorded from as any device; its host and port are then not read. midi (DP.9): the declared MIDI port its midiPort row names, the midi wire only, a console on a DIN or USB cable. mqtt (namespace draft 67, ANA): a broker at its host and port - or Go.dot-s own broker when the host is empty - its topics addresses under the prefix, heard by the filters its topics row names; the mqtt wire only. ws is declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring it is refused when the show loads rather than going quiet during it.</a:documentation>
           <choice>
             <value>udp</value>
             <value>tcp</value>
             <value>ws</value>
             <value>serial</value>
             <value>midi</value>
+            <value>mqtt</value>
           </choice>
         </attribute>
       </optional>
@@ -3592,12 +3599,13 @@
       </optional>
       <optional>
         <attribute name="wire">
-          <a:documentation>What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to. Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says.</a:documentation>
+          <a:documentation>What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to; mqtt, a publish on the topic the address spells under the prefix, its payload the values joined by spaces (namespace draft 67, ANA, ANC), the mqtt transport only. Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says.</a:documentation>
           <choice>
             <value>osc</value>
             <value>rcp</value>
             <value>line</value>
             <value>midi</value>
+            <value>mqtt</value>
           </choice>
         </attribute>
       </optional>
@@ -3609,6 +3617,30 @@
 
   <define name="Network">
     <element name="Network">
+      <optional>
+        <attribute name="broker">
+          <a:documentation>Whether Go.dot-s own MQTT broker is on (namespace draft 67, AND): a service of this machine, like its OSC port, that a sensor, a controller or a hub with nothing but Go.dot-s address on it can publish to. A device of the show with transport mqtt and an empty host is on it. A decision about the rig, so it is stored; what the broker is doing tonight is on brokerState.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="brokerLogin">
+          <a:documentation>The user name and password, space-separated, a client must give Go.dot-s broker; empty, anyone who can reach the port is taken, as the OSC port takes anyone unless strictSenders says otherwise. A password in a show file is the operator-s to weigh, as mount/login is.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="brokerPort">
+          <a:documentation>The port Go.dot-s broker listens on: 1883, the one every MQTT client assumes. --mqtt-port overrides it on this machine alone, as --osc-port does the OSC port.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">65535</param>
+          </data>
+        </attribute>
+      </optional>
       <optional>
         <attribute name="strictSenders">
           <a:documentation>Whether messages are taken only from the devices this show declares. On, a datagram whose sender is not a declared device with rx set is dropped and written to the log as a refusal naming who sent it; off, which is the default and what Go.dot has always done, anybody who can reach the port is heard. It gates the OSC port alone: a client on the WebSocket is a client rather than a device, and gating those would lock the page and the tablet out of their own engine.</a:documentation>

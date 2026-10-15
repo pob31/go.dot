@@ -2630,3 +2630,77 @@ TEST_CASE ("mount: a description rooted at / with one entry mounts that entry at
     CHECK (mounts.nodeAt ("/holo/track/1/gain") != nullptr);
     CHECK (mounts.nodeAt ("/track/1/gain") == nullptr);
 }
+
+TEST_CASE ("mount: a device on an MQTT broker needs the mqtt wire, filters a broker takes, and a broker")
+{
+    /*  Namespace draft §67 (ANA, AND, ANE; MQ.2): transport mqtt is a broker
+        at a host and port - or Go.dot's own when the host is empty - whose
+        topics are addresses under the prefix. Refused, in words, with any
+        other wire, a readback, a filter a broker would not take, nothing
+        subscribed to, or Go.dot's broker named while the show has it off;
+        declared with no port (1883 is assumed) once those are right. */
+    Rig rig;
+    const auto made = rig.document.createMount ("/house", {}, {});
+    REQUIRE (made.ok);
+    const auto id = made.id;
+    const auto base = "/godot/mount/" + id + "/";
+    REQUIRE (rig.document.setAttribute (base + "transport", "mqtt").ok);
+
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id) == "an mqtt transport carries the mqtt wire only - set the wire to mqtt");
+
+    //  And the wire without the transport is the same mistake from the other side.
+    REQUIRE (rig.document.setAttribute (base + "transport", "udp").ok);
+    REQUIRE (rig.document.setAttribute (base + "wire", "mqtt").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id) == "the mqtt wire rides the mqtt transport only - set the transport to mqtt");
+
+    REQUIRE (rig.document.setAttribute (base + "transport", "mqtt").ok);
+    REQUIRE (rig.document.setAttribute (base + "readback", "oscquery").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id).find ("heard by its topics") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "readback", "none").ok);
+    REQUIRE (rig.document.setAttribute (base + "topics", "house/# a#").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id) == "topic filter \"a#\" is not one a broker takes - + alone in its level, # alone and last");
+
+    REQUIRE (rig.document.setAttribute (base + "topics", "").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.problemOf (id).find ("subscribes to nothing") != std::string::npos);
+
+    //  A broker at a host: loaded, its filters kept, 1883 assumed when the port says nothing.
+    REQUIRE (rig.document.setAttribute (base + "topics", "house/# +/temp").ok);
+    REQUIRE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).empty());
+    REQUIRE (rig.mounts.declarationOf (id) != nullptr);
+    CHECK (rig.mounts.declarationOf (id)->topics == "house/# +/temp");
+    CHECK (rig.mounts.declarationOf (id)->transport == "mqtt");
+    CHECK (rig.mounts.declarationOf (id)->wire == "mqtt");
+    CHECK (rig.mounts.declarationOf (id)->port == 0);
+
+    //  A port said is kept.
+    REQUIRE (rig.document.setAttribute (base + "port", "8883").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.declarationOf (id)->port == 8883);
+
+    //  A changed filter list is carried to the declaration, the nodes kept (it has none).
+    REQUIRE (rig.document.setAttribute (base + "topics", "#").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.declarationOf (id)->topics == "#");
+
+    //  GO.DOT'S OWN BROKER: an empty host, which the show must have on (AND).
+    //  A host alone changing is a retyped destination, not a reload (the
+    //  links table follows it); the refusal is the load's, as a saved
+    //  show meets it.
+    REQUIRE (rig.document.setAttribute (base + "host", "").ok);
+    CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.problemOf (id) == "it is on Go.dot's broker, which the show has off - turn it on in Show settings > Network, or name a broker");
+
+    REQUIRE (rig.document.setAttribute ("/godot/network/broker", "true").ok);
+    REQUIRE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+    CHECK (rig.mounts.problemOf (id).empty());
+    CHECK (rig.mounts.declarationOf (id)->host.empty());
+}

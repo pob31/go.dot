@@ -228,6 +228,13 @@ namespace wfg::tree
             grandMA2's `login <user> <password>`. Empty sends nothing. */
         std::string login;
 
+        /*  THE TOPIC FILTERS a device on an MQTT broker subscribes to
+            (namespace draft §67, ANA, ANE), space-separated as `prefix` is:
+            `#` for everything. Not read for any other transport. The
+            broker is `host` and `port`, or Go.dot's own when the host is
+            empty (AND); `login` is its user name and password. */
+        std::string topics = "#";
+
         /*  THE MIDI SIDE (namespace draft §57, AFJ; DP.9): the declared
             `<Port>` a `midi` transport sends on, the MIDI channel a node's
             shape counts from (a console's base channel, 1 to 16), and the
