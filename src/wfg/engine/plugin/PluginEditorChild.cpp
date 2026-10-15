@@ -424,9 +424,9 @@ namespace wfg::plugin
         //======================================================================
         /*  THE HELPER'S LIFE, a pass every ten milliseconds on the message
             thread: leave if asked or orphaned; hand what the window did to the
-            parent under the subject it was done to; take a new subject; the
-            test's hand; reconcile with values moved elsewhere; the window's
-            visibility and place. */
+            parent under the subject it was done to - the test's hand first,
+            as a real hand moves between passes; take a new subject; reconcile
+            with values moved elsewhere; the window's visibility and place. */
         struct Session final : juce::Timer
         {
             Session (editor::Region& regionToUse, juce::AudioProcessor& processorToUse,
@@ -531,13 +531,19 @@ namespace wfg::plugin
                     return;
                 }
 
+                /*  THE TEST'S HAND FIRST, as on the way out above: a real hand
+                    moves between passes, so the turn is collected before
+                    `reconcile` could put the tree's older value back over it -
+                    poked after `collect`, it went unprotected for its own pass,
+                    and one that reconciled took it straight back (found by CI
+                    on a busy macOS runner, 2026-10-15). */
+                poke();
                 collect();
 
                 if (watcher.stateChanged.exchange (false, std::memory_order_acq_rel))
                     changedByHand();
 
                 takeSubject();
-                poke();
                 reconcile();
                 place();
 

@@ -1182,6 +1182,13 @@ namespace wfg::cue
             sounds with it. */
         std::int64_t launchNotBefore = 0;
 
+        /*  ITS `launchNotBefore` IS A SEAT'S, NOT YET MISSED (RD.8): a sound
+            whose cold arm answers after that sample is moved into its file by
+            the lateness, once (`launchIfDue`), rather than started late from
+            the offset the sample was worked out for. Cleared by the move and
+            by the launch. */
+        bool seatSample = false;
+
         /*  WHERE A CODE PLACED THIS RUN'S START (namespace draft §60, TG.7):
             the Go.dot sample a time group's code says it begins on - a member's
             time and its pre-wait, or a scene member's offset from there - set by

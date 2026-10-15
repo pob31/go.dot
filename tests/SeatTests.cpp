@@ -105,7 +105,20 @@ namespace
     struct QuietPlayer final : cue::Player
     {
         int trackCount() const override                     { return 64; }
-        void requestArm (const cue::ArmRequest& request) override { arms.push_back (request); }
+
+        void requestArm (const cue::ArmRequest& request) override
+        {
+            /*  A COLD DISK (2026-10-15): the first read of a file named in
+                `slowFiles` answers `slowTicks` ticks after it was asked, every
+                later one at once - as a file read once is in the cache. */
+            const auto cold = std::any_of (slowFiles.begin(), slowFiles.end(), [&request] (const std::string& name)
+                                           { return request.mediaFile.find (name) != std::string::npos; })
+                              && warmed.insert (request.mediaFile).second;
+
+            arms.push_back (request);
+            waits.push_back (cold ? slowTicks : 0);
+        }
+
         int slotCount() const override                      { return 2; }
         bool launchAtSample (int track, int, std::int64_t) override { playing.insert (track); return true; }
         bool stop (int track) override                      { playing.erase (track); return true; }
@@ -121,14 +134,29 @@ namespace
 
         void completeArms (Engine& engine)
         {
-            for (const auto& arm : arms)
+            std::vector<cue::ArmRequest> later;
+            std::vector<int> laterWaits;
+
+            for (std::size_t at = 0; at < arms.size(); ++at)
             {
-                engine.submit (origin::engine, "audio.armed", { s (arm.runId), osc::Value::int32 (arm.track) });
-                ready.insert (arm.track);
+                if (waits[at] > 0)
+                {
+                    later.push_back (arms[at]);
+                    laterWaits.push_back (waits[at] - 1);
+                    continue;
+                }
+
+                engine.submit (origin::engine, "audio.armed", { s (arms[at].runId), osc::Value::int32 (arms[at].track) });
+                ready.insert (arms[at].track);
             }
 
-            arms.clear();
+            arms = std::move (later);
+            waits = std::move (laterWaits);
         }
+
+        std::set<std::string> slowFiles, warmed;
+        int slowTicks = 0;
+        std::vector<int> waits;
 
         /*  A LINE FOR LTC (namespace draft §59, TC.7): every code started on
             it, its program, its first sample and its first frame. */
@@ -695,6 +723,23 @@ TEST_CASE ("seat: two engines on one show - a follower that joins late is seated
     const auto mainDue = [] (std::int64_t at) { return t0 + 20ms * at; };
     const auto backupDue = [clockBase] (std::int64_t local) { return t0 + 20ms * (local - clockBase) + 7ms; };
 
+    /*  AND A COLD DISK ON THE BACKUP (blackbox.pair-seat on a loaded runner,
+        2026-10-15): its first read of Rain's file answers five ticks past the
+        seat's lead. The sound is moved into its file by the lateness, once,
+        and plays in step - where it used to start late and stay behind until
+        somebody pressed Realign. Compared from its moved launch on. */
+    auto coldDisk = false;
+    SUBCASE ("a backup whose disk answers at once")                         { coldDisk = false; }
+    SUBCASE ("a backup whose first read of a sound answers past the seat's lead") { coldDisk = true; }
+
+    if (coldDisk)
+    {
+        backup.audio.slowFiles = { "rain.wav" };
+        backup.audio.slowTicks = cue::Runner::seatLeadTicks + 5;
+    }
+
+    const auto coldWait = coldDisk ? backup.audio.slowTicks + cue::Runner::seatLeadTicks + 4 : 0;
+
     //  THE MAIN'S EVENING, BEFORE THE BACKUP IS THERE.
     std::int64_t mainTick = 50;
     playEvening (main, show, mainTick);
@@ -733,7 +778,7 @@ TEST_CASE ("seat: two engines on one show - a follower that joins late is seated
     std::string plantedRun, outOfStep;
     std::int64_t plantedAt = -1, realignedAt = -1, backInStepAt = -1;
 
-    const auto lastMainTick = mainTick + 520;
+    const auto lastMainTick = mainTick + 520 + coldWait;
 
     while (mainTick <= lastMainTick)
     {
@@ -765,7 +810,7 @@ TEST_CASE ("seat: two engines on one show - a follower that joins late is seated
             ++inStepTicks;
 
         //  THE SEAT SETTLED: two hundred ticks of the main's runs, a delay later.
-        const auto settle = backup.runner.seatSettleTicks();
+        const auto settle = backup.runner.seatSettleTicks() + coldWait;
 
         if (seatedAt >= 0 && plantedAt < 0 && localTick > seatedAt + settle && localTick <= seatedAt + settle + 200)
         {
@@ -822,6 +867,10 @@ TEST_CASE ("seat: two engines on one show - a follower that joins late is seated
 
     //  SEATED ONCE ON JOINING, AND THE MAIN'S POSITION SENT FOR IT.
     REQUIRE (seatedAt >= 0);
+
+    //  THE COLD READ: one sound moved into its file by its lateness, and counted.
+    if (coldDisk)
+        CHECK (backup.runner.lateLaunches() >= 1);
     CHECK (stream.positionsSent() >= 1);
     CHECK (following.seatsDropped() == 0);
 

@@ -3570,6 +3570,28 @@ namespace
 
         return count;
     }
+
+    /*  WAITS FOR ONE ADDRESS'S COUNT, as `Listener::waitFor` waits for the
+        total. Two curves leave a datagram each a tick, the first GO's alone a
+        tick ahead, so fifty in all is twenty-six of the one and twenty-four of
+        the other - a total says nothing about either, and a receive thread a
+        moment behind on a shared runner made that one short (2026-10-15). */
+    bool waitForSentTo (NetworkRig& rig, const std::string& address, std::size_t howMany,
+                        int millisecondsAtMost = 4000)
+    {
+        const auto deadline = std::chrono::steady_clock::now()
+                                + std::chrono::milliseconds (millisecondsAtMost);
+
+        while (sentTo (rig, address) < howMany)
+        {
+            if (std::chrono::steady_clock::now() >= deadline)
+                return false;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+        }
+
+        return true;
+    }
 }
 
 TEST_CASE ("network cue: a curve plays on the cue's own clock, sent as it changes, and holds its end")
@@ -3628,8 +3650,9 @@ TEST_CASE ("network cue: a further message's curve moves its integer by whole nu
         rig.tickOnce();
 
     CHECK (rig.runOf (cueId)->state == cue::runState::done);
-    REQUIRE (rig.listener.waitFor (11));
-    std::this_thread::sleep_for (std::chrono::milliseconds (100));
+    REQUIRE (waitForSentTo (rig, "/desk/scene", 11u));
+    REQUIRE (waitForSentTo (rig, "/desk/fader", 1u));
+    std::this_thread::sleep_for (std::chrono::milliseconds (100));     // and then nothing more
 
     //  The fader has no curve: GO's datagram and nothing more. The scene
     //  changes ten times, so ten more beside GO's.
@@ -4263,9 +4286,8 @@ TEST_CASE ("network cue: a curve on a preset's node plays through the described 
     CHECK ((*rig.mounts.valueOf ("/adm/obj/1/xyz"))[1].getFloat32() == doctest::Approx (1.0f));
 
     //  And every move left for the processor: the datagrams carry the preset's addresses.
-    REQUIRE (rig.listener.waitFor (50));
-    CHECK (sentTo (rig, "/adm/obj/1/gain") >= 25u);
-    CHECK (sentTo (rig, "/adm/obj/1/xyz") >= 25u);
+    CHECK (waitForSentTo (rig, "/adm/obj/1/gain", 25u));
+    CHECK (waitForSentTo (rig, "/adm/obj/1/xyz", 25u));
 
     //  A node the preset does not have is refused at GO, as any described device refuses it.
     const auto nowhere = rig.makeOsc ("/adm/obj/999/gain", "f:1", "none");

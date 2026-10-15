@@ -19984,6 +19984,25 @@ namespace wfg::cue
                 time - the second the leader's sound is at then. */
             auto target = run->launchNotBefore > 0 ? std::max (now + lead, run->launchNotBefore) : placed;
 
+            /*  A SEATED SOUND WHOSE COLD ARM ANSWERED AFTER ITS SAMPLE (RD.8):
+                launched now from the offset meant for that sample, it would play
+                behind the leader's by the disk's lateness until somebody pressed
+                Realign (blackbox.pair-seat on a loaded runner, 2026-10-15: five
+                ticks). Moved into its file by the lateness instead, as a mapped
+                follower's late GO is, and counted - once, so a disk slower than
+                the lead every time still starts it, late and said. A slice and a
+                sound played backwards are not moved (`launchIntoFile`). */
+            if (run->seatSample && target > run->launchNotBefore)
+            {
+                run->seatSample = false;
+
+                if (launchIntoFile (engine, tick, *run, run->launchNotBefore, ticksAhead))
+                {
+                    ++lateLaunchCount;
+                    continue;
+                }
+            }
+
             /*  The guarantee the arithmetic exists to provide, checked rather
                 than assumed. A tick thread that overslept would otherwise place
                 a launch too close and buy a hole in the cue.
@@ -20032,6 +20051,7 @@ namespace wfg::cue
                 run->launchRequested = false;
                 run->launchedAtSample = target;
                 run->launchNotBefore = 0;
+                run->seatSample = false;
 
                 /*  ON THE LEADER'S SAMPLES OR NOT (RD.9): a summary laid
                     against the leader's takes this back off its playhead -

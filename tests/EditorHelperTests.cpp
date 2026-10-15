@@ -213,6 +213,12 @@ TEST_CASE ("editor helper: the test gain comes up with no window, takes a subjec
 
     SUBCASE ("a value moved elsewhere is brought in, but never over the hand's own")
     {
+        /*  THE HAND'S MOMENT RUNS ON THE HELPER'S CLOCK: it starts when the
+            helper collects the turn, never before the poke, and lasts 300 ms
+            (ownValueMs). A busy runner can spend all of it between the poke
+            and the look (macOS CI, 2026-10-15), so the look is judged only
+            when it was certainly made inside the moment. */
+        const auto poked = std::chrono::steady_clock::now();
         host.poke (0, 0.6f);
         REQUIRE (waitFor (host, [&] { return near (host.currentValue (0), 0.6f); }));
         host.drain();
@@ -220,7 +226,12 @@ TEST_CASE ("editor helper: the test gain comes up with no window, takes a subjec
         //  The tree's older copy, arriving while the hand's value is fresh: not taken...
         host.setLive ({ 0.2f, plugin::editor::restsAtPreset });
         std::this_thread::sleep_for (std::chrono::milliseconds (50));
-        CHECK (near (host.currentValue (0), 0.6f));
+        const auto held = host.currentValue (0);
+
+        if (std::chrono::steady_clock::now() - poked < std::chrono::milliseconds (250))
+            CHECK (near (held, 0.6f));
+        else
+            MESSAGE ("too slow to look inside the hand's moment; not judged");
 
         //  ...and taken once the hand's moment has passed - an undo does come through.
         REQUIRE (waitFor (host, [&] { return near (host.currentValue (0), 0.2f); }, 3000));

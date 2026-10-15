@@ -4342,9 +4342,15 @@ TEST_CASE ("mtc in: --midi-play plays a render file into a port's input, in orde
 {
     /*  Real threads on the real clock: the order is the claim, the spacing a
         sanity check with loose bounds, looser on CI, whose runners share
-        their cores. */
+        their cores. LATE IS COUNTED FROM THE FIRST LINE'S ARRIVAL, early from
+        before start(): the play takes its own start when its thread first
+        runs, and a loaded runner can keep a new thread off a core for a fifth
+        of a second (195 ms on Windows CI, 2026-10-15) - a wait that moves
+        every line alike and says nothing of the spacing. The start has a bound
+        of its own, generous: the first line is played at once, not at a gap. */
     const auto onCi = juce::SystemStats::getEnvironmentVariable ("GITHUB_ACTIONS", {}) == "true";
     const std::int64_t slack = onCi ? 150'000'000 : 15'000'000;
+    const std::int64_t startSlack = onCi ? 1'000'000'000 : 100'000'000;
 
     const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory)
                           .getChildFile ("godot-midi-play-" + juce::String (juce::Random::getSystemRandom().nextInt64()) + ".txt");
@@ -4387,17 +4393,17 @@ TEST_CASE ("mtc in: --midi-play plays a render file into a port's input, in orde
         std::vector<midi::MtcEntry> taken;
         inputs.mtcInbox().takeAll (taken);
         REQUIRE (taken.size() == 6u);
+        CHECK (taken.front().arrivalNanos - began <= startSlack);    // the first line at once
 
         for (std::size_t n = 0; n < taken.size(); ++n)
         {
             INFO ("line " << n);
             CHECK (taken[n].bytes[1] == static_cast<std::uint8_t> (n << 4));
 
-            //  Never before its moment - the play began after `began` - and not long after it.
-            const auto offset = taken[n].arrivalNanos - began;
+            //  Never before its moment - the play began after `began` - and not long after the first line's.
             const auto wanted = static_cast<std::int64_t> (n) * 20'000'000;
-            CHECK (offset >= wanted);
-            CHECK (offset <= wanted + slack);
+            CHECK (taken[n].arrivalNanos - began >= wanted);
+            CHECK (taken[n].arrivalNanos - taken.front().arrivalNanos <= wanted + slack);
         }
     }
 
@@ -4415,6 +4421,7 @@ TEST_CASE ("mtc in: --midi-play plays a render file into a port's input, in orde
         std::vector<midi::MtcEntry> taken;
         inputs.mtcInbox().takeAll (taken);
         REQUIRE (taken.size() >= 15u);
+        CHECK (taken.front().arrivalNanos - began <= startSlack);
 
         /*  The file again and again, in order, each pass 120 ms after the
             one before - its last line at 100 ms, and one spacing after it. */
@@ -4425,7 +4432,7 @@ TEST_CASE ("mtc in: --midi-play plays a render file into a port's input, in orde
 
             const auto wanted = static_cast<std::int64_t> (n / 6) * 120'000'000 + static_cast<std::int64_t> (n % 6) * 20'000'000;
             CHECK (taken[n].arrivalNanos - began >= wanted);
-            CHECK (taken[n].arrivalNanos - began <= wanted + slack);
+            CHECK (taken[n].arrivalNanos - taken.front().arrivalNanos <= wanted + slack);
         }
     }
 

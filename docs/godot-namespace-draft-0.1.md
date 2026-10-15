@@ -26171,7 +26171,13 @@ millisecond. The jump fell 6.4 ms with the setting's 6; the Mac's reported outpu
   main started again follows it, is seated, in step, its bed within two
   ticks of the backup's. Found and left: a sound seated cold that takes
   longer than `seatLeadTicks` to arm starts that much late, and says so in the
-  summary; a fade-and-stop seated before its stop lands carries the stop but
+  summary (*mended 2026-10-15, after blackbox.pair-seat read Rain 100 ms behind
+  on a loaded Windows runner: a plain sound whose cold arm answers after its
+  seat's sample is moved into its file by the lateness, once, as a mapped
+  follower's late GO is - `Run::seatSample`; a slice, or a sound played
+  backwards, still starts late; SeatTests' two-engine case gains a backup whose
+  first read of Rain answers five ticks past the lead, red without the mend*);
+  a fade-and-stop seated before its stop lands carries the stop but
   not the sound's fade-out level path; a movie is sought at the launch
   latency's horizon, not the picture's own; a Doh! within its window after a
   seat is refused here; a pass recording lanes is not carried; an OSC cue

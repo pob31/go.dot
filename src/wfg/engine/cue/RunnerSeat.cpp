@@ -748,6 +748,7 @@ namespace wfg::cue
                         sound->launchRequestedAtTick = tick + seatLeadTicks;
                         sound->recordLag = recordLagSeconds (tick);
                         sound->recordLagFixed = true;
+                        sound->seatSample = sound->kind == "media";
 
                         /*  A CODE (TC.7) on that same sample, and with the sounds
                             of its group seated beside it - waited for when one
@@ -920,6 +921,7 @@ namespace wfg::cue
                     run->launchRequestedAtTick = tick + seatLeadTicks;
                     run->recordLag = recordLagSeconds (tick);
                     run->recordLagFixed = true;
+                    run->seatSample = true;
                 }
             }
 

@@ -1948,7 +1948,9 @@ namespace wfg::cue
             in ticks: a fifth of a second for its cold arm to answer - a disk, a
             graph - so that it starts on the sample its offset was worked out
             for and not whenever it is ready (`Run::launchNotBefore`). One that
-            takes longer starts late, and the summary says by how much. */
+            takes longer is moved into its file by its lateness, once
+            (`Run::seatSample`); a slice, or one played backwards, starts late,
+            and the summary says by how much. */
         static constexpr int seatLeadTicks = 10;
 
         /*  The ticks after a seat before the leader's summaries are compared:

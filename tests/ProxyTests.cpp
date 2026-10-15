@@ -922,15 +922,23 @@ TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may la
         return lane.stateSettled();
     };
 
-    //  What a block of 0.8 comes back as, a few blocks in so any warm-up is past.
+    /*  What a block of 0.8 comes back as, once three in a row have come back
+        in time, so the rise after silence is past. Fed until then, as the
+        first child test's warm-up is (7dfeb6c), because the box a test runs
+        on is shared: two late blocks in a row leave the last one silent, and
+        a macOS runner read nought for the Pad that way at 1ac7ef2, with the
+        state held and nothing wrong. A lane that is not called never answers,
+        and gives back the silence it gave. */
     const auto play = [] (plugin::ProxyLane& lane)
     {
         Block block (2, 64, 0.8f);
 
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0, inTime = 0; i < 64 && inTime < 3; ++i)
         {
+            const auto before = lane.answered();
             std::fill (block.storage.begin(), block.storage.end(), 0.8f);
             lane.process (block.data(), 2, 64);
+            inTime = lane.answered() > before ? inTime + 1 : 0;
         }
 
         return block.storage.front();
