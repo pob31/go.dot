@@ -366,6 +366,51 @@ TEST_CASE ("script: a script's sends past the cap are counted, not kept")
     CHECK (outbox.dropped == 7);
 }
 
+TEST_CASE ("script: many JavaScript scripts made, run and freed at once on their own threads, and again")
+{
+    /*  JUCE's engine keeps every engine's native objects in one set shared by
+        the process: made and freed on many threads at once, unguarded, it
+        corrupted the heap (M70 on the Linux runner, 2026-10-15). Sixteen
+        scripts at a time, made, ticked and closed or let go, eight times over. */
+    for (int round = 0; round < 8; ++round)
+    {
+        std::vector<std::unique_ptr<ScriptInstance>> scripts;
+        for (int i = 0; i < 16; ++i)
+        {
+            scripts.push_back (javascript());
+            REQUIRE (scripts.back()->make());
+        }
+        for (auto& js : scripts)
+            REQUIRE (js->finished (5s));
+        for (auto& js : scripts)
+            REQUIRE (js->open ("godot.hear('/a', (x) => godot.send('/b', [x, x * 2]));\n"));
+        for (auto& js : scripts)
+        {
+            REQUIRE (js->finished (5s));
+            REQUIRE (js->opened());
+        }
+        for (auto& js : scripts)
+            REQUIRE (js->tick ({ { "/a", { Atom::of (1.0) } } }));
+
+        //  Half closed and waited for, half let go mid-tick to free themselves.
+        for (std::size_t i = 0; i < scripts.size(); ++i)
+        {
+            if (i % 2 == 0)
+            {
+                REQUIRE (scripts[i]->finished (5s));
+                CHECK (scripts[i]->takeOutbox().sent.size() == 1u);
+                REQUIRE (scripts[i]->close());
+            }
+            else
+            {
+                scripts[i]->leaveUnfreed();
+            }
+        }
+        scripts.clear();
+    }
+    CHECK (true);
+}
+
 TEST_CASE ("script: a job asked for while the last is running is refused, and none before make")
 {
     auto js = javascript();

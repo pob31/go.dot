@@ -19,6 +19,7 @@
 #include <juce_javascript/juce_javascript.h>
 
 #include <cctype>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -235,21 +236,50 @@ namespace wfg::process
             }
         };
 
+        /*  ONE LOCK FOR EVERY SCRIPT'S ENGINE BEING MADE OR FREED. JUCE's
+            juce_javascript keeps every native object of every engine in one
+            set, process-wide and unguarded (DynamicObjectWrapper::
+            getDynamicObjects): registering one inserts into it, freeing an
+            engine erases from it. Ten scripts opened in one tick, or freed
+            while others open, did both at once on ten threads - and corrupted
+            the heap (a SIGSEGV on the Linux runner, M70, 2026-10-15). A tick
+            touches no part of it, so the lock is taken only as a script opens
+            and closes, never on the tick's road. */
+        std::mutex& engineMaking()
+        {
+            static std::mutex lock;
+            return lock;
+        }
+
         class JsLanguage final : public ScriptLanguage
         {
         public:
             explicit JsLanguage (ScriptOutput& outputToUse)
                 : output (outputToUse)
             {
-                /*  A backstop only: the host interrupts a script stuck for a
-                    second (AMQ) long before this. */
-                engine.maximumExecutionTime = juce::RelativeTime::seconds (60.0);
-                engine.registerNativeObject ("__host", new Door (output, hearing));
+                {
+                    const std::lock_guard<std::mutex> making (engineMaking());
+                    engine = std::make_unique<juce::JavascriptEngine>();
 
-                const auto result = engine.execute (prelude);
+                    /*  A backstop only: the host interrupts a script stuck for
+                        a second (AMQ) long before this. */
+                    engine->maximumExecutionTime = juce::RelativeTime::seconds (60.0);
+                    engine->registerNativeObject ("__host", new Door (output, hearing));
+                }
+
+                const auto result = engine->execute (prelude);
                 if (result.failed())
                     preludeProblem = "Go.dot's JavaScript prelude failed: " + result.getErrorMessage().toStdString();
             }
+
+            ~JsLanguage() override
+            {
+                const std::lock_guard<std::mutex> making (engineMaking());
+                engine.reset();
+            }
+
+            JsLanguage (const JsLanguage&) = delete;
+            JsLanguage& operator= (const JsLanguage&) = delete;
 
             bool load (const std::string& source, std::string& problem) override
             {
@@ -259,7 +289,7 @@ namespace wfg::process
                     return false;
                 }
 
-                const auto result = engine.execute (juce::String::fromUTF8 (source.data(), static_cast<int> (source.size())));
+                const auto result = engine->execute (juce::String::fromUTF8 (source.data(), static_cast<int> (source.size())));
                 if (result.failed())
                 {
                     problem = javascriptProblem (result.getErrorMessage().toStdString());
@@ -286,7 +316,7 @@ namespace wfg::process
                 const juce::var arguments[] { juce::var (list) };
                 const juce::var::NativeFunctionArgs args (juce::var(), arguments, 1);
                 auto result = juce::Result::ok();
-                engine.callFunction ("__godot_tick", args, &result);
+                engine->callFunction ("__godot_tick", args, &result);
 
                 if (result.failed())
                     output.print (javascriptProblem (result.getErrorMessage().toStdString()));
@@ -299,14 +329,14 @@ namespace wfg::process
 
             void interrupt() noexcept override
             {
-                engine.stop();
+                engine->stop();
             }
 
         private:
             ScriptOutput& output;
             std::vector<std::string> hearing;
             std::string preludeProblem;
-            juce::JavascriptEngine engine;
+            std::unique_ptr<juce::JavascriptEngine> engine;
         };
     }
 
