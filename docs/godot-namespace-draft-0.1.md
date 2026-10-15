@@ -29803,9 +29803,10 @@ from there without running it.
 | **AMS** | **The sandbox is PRD §3.20's**: in JavaScript no `std`, `os`, module loader or network; in Lua the base library without `dofile`, `loadfile` and `load` of binary chunks, and `string`, `table`, `math`, `utf8`, `coroutine` - never `io`, `os`, `package` or `debug`. Only Go.dot's doors reach out. | mine |
 | **AMT** | **The editor at the foot** is JUCE's `CodeEditorComponent`, coloured by the language (JUCE has a Lua colouring and none for JavaScript; C++'s is the nearest), read-only under the lock. A finished edit is one write - when the editor loses the keyboard, on Ctrl+S, or when another cue is picked - never a keystroke, since an edit opens the running script again from its beginning (ACM). A problem the script reports - a line it cannot read, an error while it runs - is shown with its line. | mine |
 | **AMU** | **Open in your own editor**: `script.edit` writes the source as `<cue>.js` or `<cue>.lua` beside the patches and opens it in the program this machine EDITS such a file with - never the one it opens it with, since a .js file's "open" on Windows is Windows Script Host, which would run it: Windows' "edit" verb (Notepad for a .js unless somebody chose otherwise), "open" only for a type with no "edit"; the Mac's default text editor (`open -t`); `xdg-open` on Linux. A save there comes back as an edit from `editor`, as a save in Pd does from `pd` (ACN), and a backup passes it on as it does Pd's. Machine-local, as `process.edit` is; refused `locked`, and `editor-missing` where nothing edits such a file. | mine |
-| **AMV** | **Copy for a script, and a cue dragged onto the editor** (AMJ, AMK carried over): the line that fires that cue - `godot.fire('B3NK0001');` - and a serial port's two, in the picked cue's language, JavaScript by default. | mine; the author's AMJ, AMK |
+| **AMV** | **Copy for a script, and a cue dragged onto the editor** (AMJ, AMK carried over): the line that fires that cue - `godot.fire('B3NK0001');` - and a serial port's two. The cue list and the Serial tab offer both languages, "Copy for a script" (JavaScript) and "Copy for a Lua script"; a cue dragged onto the editor is typed in that script's own language, on the line it is let go on. | mine; the author's AMJ, AMK |
 | **AMW** | **A help card in each language** - `js/godot-help.js`, `lua/godot-help.lua`, a script whose comments say every door with a line to copy, opened at the foot by the editor's **?** - and ready-made scripts beside it, installed as `pd/` is. A test holds each card to naming every function the API has. | mine |
-| **AMX** | **Lua 5.4, pinned and built by Go.dot**, its C API used directly (no binding library); its integers leave a script as numbers like any other. | mine |
+| **AMX** | **Lua 5.4, pinned and built by Go.dot** (5.4.9, `wfg_lua`), its C API used directly (no binding library); its io, os, package and debug libraries are not even linked. A whole number is handed to a script as Lua's integer (a MIDI note prints 60, not 60.0), any other as a float; all leave as numbers. A script's memory is capped at 64 MB - past it an allocation fails as Lua's "not enough memory" and the script runs on. The interrupt is a count hook every thousand instructions whose error `pcall`, `xpcall` and `coroutine.resume` pass on, so no script can keep running past it. | mine |
+| **AMZ** | **The browser console keeps a script's source**, as a row after its language and ports: the page has no editor at its foot, and AMO's reason - the editor is where code is read - does not reach it. | mine |
 
 ### 66.3 What a script can call
 
@@ -29853,14 +29854,16 @@ them; what a script is handed is the same. `print` goes to the run's `said` and 
   patch does, JavaScript then Lua. *Measured 2026-10-15* (SC.8, MSVC, Debug, Windows, the author's
   laptop): a value in, forty-eight additions, a value out, in JavaScript - 111 to 129 µs a tick, the
   hand-off to its thread and back included, against a patch's 42 µs (M56). QuickJS interprets; Pd's
-  objects are compiled C.
+  objects are compiled C. *And in Lua* (SC.9): 32 to 38 µs - less than a patch's.
 - **M70** - ten scripts at once in the budget, beside M58. *Measured 2026-10-15*: ten such scripts
   at once, 1.14 ms a tick on average and 1.79 ms at worst, none late in 2 500, every value answered -
-  against ten patches' 0.33 and 0.81 ms (M58). Inside the 2 ms budget on a Debug build.
+  against ten patches' 0.33 and 0.81 ms (M58). Inside the 2 ms budget on a Debug build. *And in Lua*:
+  0.41 ms on average, 3.7 ms once at worst, none late.
 - **M71** - from an endless loop to the run failed and its instance freed. *Measured 2026-10-15*:
   failed `process-stuck` 1.02 s after the loop began - the threshold, fifty ticks and a second - and
   its instance freed 21 ms after that, the next tick; the interrupt itself ends the loop in 0.3 ms.
-  A patch stuck so is never freed (ACJ).
+  A patch stuck so is never freed (ACJ). *And in Lua*: failed 1.01 s after it began, freed 21 ms later -
+  inside `pcall` or a coroutine alike.
 - And end to end (`blackbox.script`, SC.8): a device's report doubled by a script and back at the
   device in 33 to 66 ms, as a patch's (M57, 33 to 67 ms) - the tick, not the language.
 
@@ -29868,15 +29871,27 @@ them; what a script is handed is the same. `print` goes to the run's `said` and 
 
 | Stage | What |
 |---|---|
-| SC.0 | This section; PRD §3.20, §3.21, §6.5, §6.9, §6.11; §51.8; the devplan |
-| SC.1 | The host's interface; Pd's instance behind it; the quiet point Pd's alone |
-| SC.2 | The kind in the document: rows, schema, the engine's tables |
-| SC.3 | JavaScript's instance: QuickJS linked, the prelude, the sandbox, interrupted when stuck |
-| SC.4 | The Runner: a script cue runs, hears and sends as a patch does |
-| SC.5 | The window's model: the + script, the icon, the inspector, the foot's reading |
-| SC.6 | The editor at the foot |
-| SC.7 | `script.edit`, Copy for a script, a cue dragged onto the editor |
-| SC.8 | The help card and ready-made scripts, an example, the driver, M69-M71, the guides |
-| SC.9 | Lua: pinned, built, its instance, every case again in Lua |
-| SC.10 | Lua in the window and the guides |
-| SC.11 | The close-out |
+| Stage | What | Built |
+|---|---|---|
+| SC.0 | This section; PRD §3.20, §3.21, §6.5, §6.9, §6.11; §51.8; the devplan | 7345c6f |
+| SC.1 | The host's interface; Pd's instance behind it; the quiet point Pd's alone | b6d641a |
+| SC.2 | The kind in the document: rows, schema, the engine's tables | 2e498df |
+| SC.3 | JavaScript's instance: QuickJS linked, the prelude, the sandbox, interrupted when stuck | 8891c9e |
+| SC.4 | The Runner: a script cue runs, hears and sends as a patch does | cbd38fa |
+| SC.5-SC.6 | The window's model and the editor at the foot | c8317bd |
+| SC.7 | `script.edit`, Copy for a script, a cue dragged onto the editor | dc0fc50 |
+| SC.8 | The help card and ready-made scripts, an example, the driver, M69-M71 | 430d64c |
+| SC.9 | Lua: pinned, built, its instance, every case again in Lua | 3976469 |
+| SC.10 | Lua in the window; the guides, the README, the PRD, the devplan | 4bf44ee and the docs after it |
+| SC.11 | The close-out: the whole suite, CI | |
+
+FOUND ON THE WAY AND MENDED (SC.5): a process cue's canvas read its run off `/godot/runs/order`,
+which is nothing - the runs are published at `/godot/run/order` - so since PC.8 the canvas never found
+its running patch: no live values on its lines, no state, and its live boxes had no run to send to.
+
+### 66.8 Not built
+
+MQTT (AMH, for patches and scripts alike); a module loader, or one script calling another - each is
+one cue's text; JavaScript coloured as JavaScript (JUCE has no tokeniser for it; C++'s stands in); a
+memory cap on JavaScript, which JUCE's engine does not reach (Lua has one); the source edited on the
+browser console's page beyond a text row (AMZ); a script's MIDI heard in the log (as a patch's, §51.8).

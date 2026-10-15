@@ -52,7 +52,7 @@ has stood in front of the thing.
 ### What it does today
 
 - **The cue list and GO.** Cues that play a sound or a picture, fade something,
-  send OSC or MIDI, open a microphone, run a Pure Data patch, or enable, disable
+  send OSC or MIDI, open a microphone, run a Pure Data patch or a script, or enable, disable
   or jump to another cue. Waits at both ends; groups that play as a timeline or
   a sequence, automatic or manual, with headers and footers that always run;
   shuffled rounds with a seed, so a random scene can be rehearsed; parallel
@@ -127,6 +127,12 @@ has stood in front of the thing.
   patch on how a patch hears and sends (the canvas's ?), and an example show; a
   cue or a serial port gives its box by *Copy for a patch*. Serial ports carry an
   Arduino's lines, or OSC over SLIP.
+- **Script cues.** The same, written as text: a JavaScript or Lua script that
+  hears and sends by address as a patch does, edited at the foot of the window
+  (or in the computer's own text editor), with a help card and ready-made scripts
+  in each language ([`js/`](js/), [`lua/`](lua/)). It reaches the world only
+  through Go.dot, so the show's log holds what it did; one caught in an endless
+  loop is stopped after a second and the show runs on.
 - **Timecode out.** MTC on a MIDI port, and SMPTE LTC that Go.dot draws itself on
   an audio output, from a cue: it starts at the label it names and runs until it
   is stopped or for a length, on the same sample as the sounds of its group. A
@@ -250,6 +256,7 @@ and says afterwards what was built against what was drawn.
 | Phase 8 | Video: stills, movies, the native renderer, NDI/Spout/Syphon, read-ahead, pictures in sampler groups, the DCA knob; keys, text cues and blur | §35–§37, §40, §44, §47–§50, §61 |
 | OSC cues | Several messages, bundles, recorded curves | §45 |
 | Process cues | Pure Data inside a cue, serial ports; a patch's ways in and out, Pd as its editor | §51, §65 |
+| Script cues | JavaScript and Lua in a cue, on the process cues' host | §66 |
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
 | Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |
@@ -623,6 +630,7 @@ test step runs, four, three and four entries at once — each runner's cores.
 | `wfg::client_model` | STATIC | The desktop client's half with no JUCE type: what a label shows, the theme's tokens, the command each gesture submits — so the tests can assert them with no window |
 | `wfg::client_ui` | STATIC | The desktop window itself. Not linked by the engine: `main()` hands it over as a factory, and `client.boundary` holds the split |
 | `wfg_pd` | STATIC | Pure Data and libpd, one Pd instance per patch on a thread of its own |
+| `wfg_lua` | STATIC | Lua 5.4 for a script cue: its core and six libraries, never io, os, package or debug |
 | `wfg_hidapi` | STATIC | hidapi's one platform file, for the SpaceMouse |
 | `wfg_syphon` | STATIC | macOS only: Syphon's Metal half and Go.dot's own server on it |
 | `wfg` | executable | The product binary (PRD §7's binary name) |
@@ -635,7 +643,8 @@ test step runs, four, three and four entries at once — each runner's cores.
 
 `.github/workflows/release.yml` makes one download per platform for people to
 try. Windows and Linux get a folder: the `wfg` binary, `console/` (the web
-client), `pd/` (Go.dot's ready-made Pure Data patches), an empty show in
+client), `pd/` (Go.dot's ready-made Pure Data patches), `js/` and `lua/` (a
+script cue's help card and ready-made scripts), an empty show in
 `Untitled/`, example shows in `Examples/`, a launcher (`Go.dot.exe` or
 `go.dot.sh`) and a `README.txt` for the tester. macOS gets the same inside `Go.dot.app`, in a
 DMG that is **signed with the author's Developer ID, notarized and stapled** by
@@ -692,6 +701,7 @@ live in `packaging/`.
 | NDI's headers (vendored in `ThirdParty/ndi`; the runtime is the user's install) | 6.3, from DistroAV | `d34b4cc4c590426464bff4d59f88f68829010b4b` |
 | Pure Data (`ThirdParty/pure-data`; a process cue's patches) | 0.56-5 | `f009fd8d7b537e209e09898d487fdf1bf547da2b` |
 | libpd (`ThirdParty/libpd`; its nested `pure-data` stays empty) | 0.16.1 | `ba0dc63262901d658af8bbda5e619a60fa975e78` |
+| Lua (`ThirdParty/lua`; a script cue's Lua) | 5.4.9 | `312b9efaa1061c2c4cad08554dbc1351c3270eef` |
 
 The load-bearing fact: **Tracktion Engine develop (3.5.0)'s own `modules/juce` gitlink is
 byte-for-byte our JUCE pin.** We are not guessing at a compatible JUCE — we are
@@ -807,6 +817,8 @@ packaging/           what a test build carries beside the binary: the
                      Info.plist, entitlements) and windows/ (the installer)
 pd/                  Go.dot's ready-made Pure Data patches, each with a help
                      patch, written by scripts/make-pd-patches.py
+js/, lua/            a script cue's help card and ready-made scripts, in
+                     JavaScript and in Lua
 clients/console/     the web client the engine serves at /ui; reads by polling,
                      writes binary OSC, no build step, no dependency
 clients/desktop/     theme.json, the window's palette, re-read on F5

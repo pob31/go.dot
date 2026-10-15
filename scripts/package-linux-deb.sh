@@ -58,7 +58,7 @@ stage="$(cd "$1" && pwd)"
 version="$2"
 out="$3"
 
-for needed in wfg go.dot.sh console/index.html pd/go.avg.pd Untitled; do
+for needed in wfg go.dot.sh console/index.html pd/go.avg.pd js/godot-help.js lua/godot-help.lua Untitled; do
     if [ ! -e "$stage/$needed" ]; then
         echo "package-linux-deb: $stage has no $needed; is it a cmake --install of the wfg component?" >&2
         exit 1

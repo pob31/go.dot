@@ -4391,7 +4391,12 @@ Mackie vs HUI first — first week with the D700.
   apart. The Intel Arc the projectors run on, and the whole road from a datagram to light, are the bench's.
 - **Script cues** (§3.21, 2026-10-15, namespace draft §66): **M69** - what a tick of a script costs,
   JavaScript and Lua, beside M56's patch; **M70** - ten scripts at once in the budget, beside M58;
-  **M71** - from an endless loop to its run failed and its instance freed.
+  **M71** - from an endless loop to its run failed and its instance freed. *Measured 2026-10-15*
+  (§66.6), Debug, Windows: a script doing a fifty-object patch's work 104 to 129 µs a tick in
+  JavaScript and 32 to 38 in Lua, against a patch's 42; ten at once 1.1 ms a tick in JavaScript and
+  0.4 in Lua, none late; an endless loop failed 1.0 s after it began, the threshold, and its instance
+  freed a tick later, in either language; a device's report doubled by a script and back at the
+  device in 33 to 66 ms, as a patch's.
 
 ---
 

@@ -55,7 +55,7 @@ Un spectacle est un dossier avec au moins un fichier `.wfg` et un dossier `media
 1. **Choisir l'interface audio.** *Show > Show settings… > Audio interface*. Le bouton GO passe au jaune quand l'audio tourne.
 2. **Créer et nommer les sorties** (canaux de mixage ou sorties directes, mono ou stéréo). Dans *Outputs*, créez les sorties du spectacle (« Face G/D », « Sub », « Retours »). Dans *Output patch*, indiquez sur quel canal physique chacune arrive. Les cues visent des noms : changer de salle, c'est changer de patch, sans toucher aux cues.
 3. **Ajouter des sons.** Glissez des fichiers WAV, AIFF, FLAC ou Ogg sur la liste. Chacun devient une cue média au nom du fichier. Déposez-en un sur une cue existante pour remplacer son fichier.
-4. **Ajouter d'autres cues** depuis la rangée *Add* au-dessus de la liste : `memo`, `media`, `mic`, `video`, `fade`, `transport`, `osc`, `midi`, `process`, `group`. Ceux qui portent un ▾ ouvrent un petit menu de variantes.
+4. **Ajouter d'autres cues** depuis la rangée *Add* au-dessus de la liste : `memo`, `media`, `mic`, `video`, `fade`, `transport`, `osc`, `midi`, `process`, `script`, `group`. Ceux qui portent un ▾ ouvrent un petit menu de variantes.
 5. **Régler chaque cue** dans l'inspecteur à droite : nom, pre-wait, post-wait, enchaînement, niveau. Les boutons en haut de l'inspecteur ouvrent les panneaux en pied de fenêtre : *Waveform*, *EQ*, *FX*, *Sends*, *Curve*, *Timeline*.
 6. **Jouer.** Cliquez à l'extrême gauche d'une cue pour y déplacer le pointeur de lecture. La cue en attente (standby) est signalée par une marque jaune. **Espace** fait GO.
 7. **Enregistrer** avec Ctrl+S (⌘S sur Mac). La sauvegarde automatique tourne de toute façon.
@@ -134,7 +134,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Moniteur réseau | Voir chaque message entrant et sortant | *Show > Network monitor…* |
 | Surfaces de contrôle | Faders, pads, potentiomètres et DCA, sur une surface Mackie Control ou un panneau virtuel à l'écran. Prise en charge complète de l'Asparion D700 : faders, pages EQ et plugins sur les rotatifs, molette maître, attente sur les flèches | *Show > Surfaces…* |
 | Console web | Le même spectacle dans un navigateur, sur n'importe quelle machine du réseau | `http://<cette machine>:5010/ui` |
-| Ports série | Recevoir les lignes d'un Arduino dans une cue process, et lui en renvoyer | Show settings > Serial |
+| Ports série | Recevoir les lignes d'un Arduino dans une cue process ou une cue script, et lui en renvoyer | Show settings > Serial |
 
 ### Vidéo (nouveau)
 
@@ -175,6 +175,34 @@ Le **?** dans le coin du canevas ouvre un patch d'aide qui montre, avec des boî
 | La SpaceMouse | `[r /godot/puck]` |
 
 Un clic droit sur une cue de la liste, ou sur un port de l'onglet Serial, puis *Copy for a patch* donne sa boîte avec son identifiant ; collez-la sur le canevas, ou dans une boîte de Pd. Une cue glissée de la liste sur le canevas devient une boîte qui la déclenche. Tous les patchs ouverts dans Pure Data partagent un seul Pd, sa fenêtre passe au premier plan, et sur un écran haute résolution les menus et les patchs de Pd sont dessinés à une taille lisible. MQTT n'est pas encore disponible.
+
+### Cues script : JavaScript et Lua (nouveau)
+
+Une **cue script** fait ce que fait une cue process, écrite en texte au lieu d'être dessinée : quelques lignes de JavaScript ou de Lua qui tournent tant que la cue tourne, au rythme du contrôle, jamais dans le chemin audio. Un script entend ce qui arrive (retours des appareils, OSC, MIDI, lignes série, lignes du spectacle) et envoie aux appareils, en MIDI et aux commandes de Go.dot. On choisit le langage dans l'inspecteur ; on écrit le script dans l'éditeur en pied de fenêtre, où une erreur est marquée sur sa ligne et où ce que le script affiche apparaît sous le code. *Open in your editor* le confie à l'éditeur de texte de votre ordinateur, et chaque sauvegarde revient. *Add > script*.
+
+```js
+// Double ce que la console renvoie pour le x de la source 1, et déclenche la cue 3.1 au-delà de 0.8.
+godot.hear('/wfs/source/1/x', (x) => {
+    godot.send('/wfs/source/2/x', x * 2);
+    if (x > 0.8) godot.fire('3.1');
+});
+```
+
+Le **?** à côté de l'éditeur ouvre une fiche d'aide dans le langage du script, avec une ligne à copier pour chaque entrée et chaque sortie, et des scripts tout faits pour démarrer (une moyenne, un minimum et un maximum, un lissage, un seuil franchi) :
+
+| Pour... | En JavaScript | En Lua |
+|---|---|---|
+| Entendre l'OSC d'un appareil (Show settings > Network, Rx activé) | `godot.hear('/son/adresse', (x) => ...)` | `godot.hear('/son/adresse', function (x) ... end)` |
+| Envoyer à un appareil | `godot.send('/son/adresse', 0.5)` | pareil |
+| Déclencher une cue, par son numéro ou son identifiant | `godot.fire('3.1')` | pareil |
+| Lancer une commande de Go.dot | `godot.command('go')`, `standby/set`, `run/stopAll`... | pareil |
+| Entendre ou régler une ligne du spectacle | `godot.hear('/godot/...', ...)`, `godot.set('cue/<id>/name', 'Pluie')` | pareil |
+| Le MIDI (MIDI in et MIDI out de la cue) | `godot.midi.hear(...)`, `godot.midi.send(0x90, 60, 100)` | pareil |
+| Un Arduino (Show settings > Serial) | `godot.hear('/godot/serial/<id>/in', ...)`, `godot.send('/godot/serial/<id>/out', ...)` | pareil |
+| La SpaceMouse | `godot.hear('/godot/puck', ...)` | pareil |
+| Plus tard, de temps en temps, à chaque tick | `godot.after(1.5, ...)`, `godot.every(0.25, ...)`, `godot.tick(...)` | pareil |
+
+Un clic droit sur une cue de la liste, ou sur un port de l'onglet Serial, puis *Copy for a script* ou *Copy for a Lua script* donne sa ligne avec son identifiant ; une cue glissée de la liste sur l'éditeur y tape la ligne qui la déclenche. Un script n'a ni fichiers, ni réseau, ni modules à lui : il passe par Go.dot pour atteindre le monde, si bien que le journal du spectacle garde ce qu'il a fait. Un script pris dans une boucle sans fin est arrêté au bout d'une seconde, et le spectacle continue. Le spectacle d'exemple *Process examples* contient le même capteur de lumière qu'en patch, en JavaScript et en Lua. MQTT n'est pas encore disponible.
 
 ### Importer des spectacles QLab et Ableton Live (nouveau)
 

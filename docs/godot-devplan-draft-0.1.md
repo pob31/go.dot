@@ -1167,7 +1167,8 @@ author" above, on screen and with an Arduino.
 *Added on 2026-10-15*, at the author's direction: a cue whose program is written as text, in JavaScript
 and then in Lua, hearing and sending by address as a process cue's patch does, on the same host, budget
 and log; edited in a code editor at the foot of the window (namespace draft §66; PRD §3.20, §3.21, §6.5).
-The author's decisions are AMM-AMO; AMP-AMX are the implementer's, the author's to overrule.
+The author's decisions are AMM-AMO; AMP-AMX and AMZ are the implementer's, the author's to overrule.
+*Built 2026-10-15*, SC.0-SC.10 (§66.7); the close-out, SC.11, runs the whole suite.
 
 | Stage | What | Depends on |
 |---|---|---|

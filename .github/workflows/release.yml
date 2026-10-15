@@ -146,6 +146,8 @@ jobs:
           test -x go.dot.sh
           test -f console/index.html
           test -f pd/go.avg.pd
+          test -f js/godot-help.js
+          test -f lua/godot-help.lua
           # The two Try it out guides, by pattern: the French one's name has a c-cedilla.
           test "$(ls Go.dot_TryItOut_*.md | wc -l)" -eq 2
 
@@ -264,6 +266,8 @@ jobs:
           test -f Go.dot.app/Contents/Resources/launch.sh
           test -f Go.dot.app/Contents/Resources/console/index.html
           test -f Go.dot.app/Contents/Resources/pd/go.avg.pd
+          test -f Go.dot.app/Contents/Resources/js/godot-help.js
+          test -f Go.dot.app/Contents/Resources/lua/godot-help.lua
           # Beside the app, as LICENSE is: the two Try it out guides, by pattern.
           test "$(ls Go.dot_TryItOut_*.md | wc -l)" -eq 2
 
@@ -379,6 +383,8 @@ jobs:
           if (-not (Test-Path 'Go.dot.exe')) { throw 'Go.dot.exe is missing' }
           if (-not (Test-Path 'console/index.html')) { throw 'console/ is missing' }
           if (-not (Test-Path 'pd/go.avg.pd')) { throw 'pd/ is missing' }
+          if (-not (Test-Path 'js/godot-help.js')) { throw 'js/ is missing' }
+          if (-not (Test-Path 'lua/godot-help.lua')) { throw 'lua/ is missing' }
           # The two Try it out guides, by pattern: the French one's name has a c-cedilla.
           if (@(Get-ChildItem 'Go.dot_TryItOut_*.md').Count -ne 2) { throw 'a Try it out guide is missing' }
           foreach ($run in @(@('--version'), @('selftest'), @('validate', 'Untitled'), @('validate', 'Examples/Process examples'))) {

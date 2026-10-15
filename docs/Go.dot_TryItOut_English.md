@@ -53,7 +53,7 @@ A show is a folder that contains one or more `.wfg` files plus a `media/` folder
 1. **Pick the audio interface.** *Show > Show settings… > Audio interface*. The GO button turns yellow once audio is running.
 2. **Create and name your outputs** (mix channels or direct outs, mono or stereo). On *Outputs*, create the show's outputs ("Main L/R", "Sub", "Foldback"). On *Output patch*, say which physical channel each one lands on. Cues are routed by name, so a new venue is a new patch and no cue changes.
 3. **Add sounds.** Drag WAV, AIFF, FLAC or Ogg files onto the cue list. Each becomes a media cue named after its file. Drop one on an existing cue to replace its file.
-4. **Add other cues** from the *Add* row above the list: `memo`, `media`, `mic`, `video`, `fade`, `transport`, `osc`, `midi`, `process`, `group`. The ones with a ▾ open a short menu of kinds.
+4. **Add other cues** from the *Add* row above the list: `memo`, `media`, `mic`, `video`, `fade`, `transport`, `osc`, `midi`, `process`, `script`, `group`. The ones with a ▾ open a short menu of kinds.
 5. **Shape each cue** in the inspector on the right: name, pre-wait, post-wait, follow, level. The buttons at the top of the inspector open the panels at the foot of the window: *Waveform*, *EQ*, *FX*, *Sends*, *Curve*, *Timeline*.
 6. **Run it.** Click the far left of any cue to move the playback pointer. The standby cue is highlighted with a yellow mark. Press **Space** for GO.
 7. **Save** with Ctrl+S (⌘S on a Mac). Autosave runs anyway.
@@ -132,7 +132,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Network monitor | See every message in and out | *Show > Network monitor…* |
 | Control surfaces | Faders, pads, dials and DCAs, on a Mackie Control surface or a virtual panel on screen. Full support for the Asparion D700: faders, EQ and plugin pages on the rotaries, a master dial, standby on the arrows | *Show > Surfaces…* |
 | Web console | The same show in a browser, on any machine on the network | `http://<this machine>:5010/ui` |
-| Serial ports | Hear an Arduino's lines in a process cue and send lines back | Show settings > Serial |
+| Serial ports | Hear an Arduino's lines in a process cue or a script cue and send lines back | Show settings > Serial |
 
 ### Video (new)
 
@@ -173,6 +173,34 @@ The **?** at the canvas's corner opens a help patch that shows, with boxes to co
 | The SpaceMouse | `[r /godot/puck]` |
 
 Right-click a cue in the list, or a port in the Serial tab, and choose *Copy for a patch* to get its box with its id; paste it on the canvas, or into a box in Pd. A cue dragged from the list onto the canvas becomes a box that fires it. Every patch opened in Pure Data shares one Pd, its window comes to the front, and on a high-resolution screen Pd's menus and patches are drawn at a readable size. MQTT is not available yet.
+
+### Script cues: JavaScript and Lua (new)
+
+A **script cue** does what a process cue does, written as text instead of drawn: a few lines of JavaScript or Lua that run while the cue runs, at control rate, never in the audio path. A script hears what arrives (device reports, OSC, MIDI, serial lines, rows of the show) and sends to devices, to MIDI and to Go.dot's own commands. Pick the language in the inspector; write the script in the editor at the foot of the window, where a mistake is marked on its line and what the script prints shows under the code. *Open in your editor* hands it to your computer's own text editor, and each save comes back. *Add > script*.
+
+```js
+// Doubles what the console reports for source 1's x, and fires cue 3.1 past 0.8.
+godot.hear('/wfs/source/1/x', (x) => {
+    godot.send('/wfs/source/2/x', x * 2);
+    if (x > 0.8) godot.fire('3.1');
+});
+```
+
+The **?** beside the editor opens a help card in the script's language, with a line to copy for each way in and out, and ready-made scripts to start from (an average, a minimum and maximum, smoothing, a line crossed):
+
+| To... | In JavaScript | In Lua |
+|---|---|---|
+| Hear a device's OSC (Show settings > Network, Rx on) | `godot.hear('/its/address', (x) => ...)` | `godot.hear('/its/address', function (x) ... end)` |
+| Send to a device | `godot.send('/its/address', 0.5)` | the same |
+| Fire a cue, by its number or its id | `godot.fire('3.1')` | the same |
+| Run any of Go.dot's commands | `godot.command('go')`, `standby/set`, `run/stopAll`... | the same |
+| Hear or set a row of the show | `godot.hear('/godot/...', ...)`, `godot.set('cue/<id>/name', 'Rain')` | the same |
+| MIDI (the cue's MIDI in and MIDI out) | `godot.midi.hear(...)`, `godot.midi.send(0x90, 60, 100)` | the same |
+| An Arduino (Show settings > Serial) | `godot.hear('/godot/serial/<id>/in', ...)`, `godot.send('/godot/serial/<id>/out', ...)` | the same |
+| The SpaceMouse | `godot.hear('/godot/puck', ...)` | the same |
+| Later, every so often, every tick | `godot.after(1.5, ...)`, `godot.every(0.25, ...)`, `godot.tick(...)` | the same |
+
+Right-click a cue in the list, or a port in the Serial tab, and choose *Copy for a script* or *Copy for a Lua script* to get its line with its id; a cue dragged from the list onto the editor types the line that fires it. A script has no files, network or modules of its own: it reaches the world through Go.dot, so the show's log holds what it did. A script caught in a loop that never ends is stopped after a second, and the show runs on. The example show *Process examples* has the same light sensor as a patch, in JavaScript and in Lua. MQTT is not available yet.
 
 ### Importing QLab and Ableton Live shows (new)
 
