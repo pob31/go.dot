@@ -119,7 +119,7 @@ has stood in front of the thing.
   their own addresses as menus (§56,
   [`docs/godot-authoring-protocol-0.1.md`](docs/godot-authoring-protocol-0.1.md)).
 - **Process cues.** A Pure Data patch inside a cue, running while the cue runs at
-  control rate and never in the audio path. It hears device reports, OSC, MIDI
+  control rate and never in the audio path. It hears device reports, OSC, MQTT, MIDI
   and serial lines, and sends to devices, to MIDI and to Go.dot's own commands.
   It is drawn and played on a canvas at the foot of the window, or opened in Pure
   Data or plugdata - one Pd for every patch, fitted to a high-resolution screen.

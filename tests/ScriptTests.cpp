@@ -856,3 +856,51 @@ TEST_CASE ("script: a Lua script's starter opens and does nothing, and its copie
                     + wfg::process::scriptLineToSendSerial ("javascript", "SRL00001") + "\n");
     CHECK (js->receives() == std::vector<std::string> { "/godot/serial/SRL00001/in" });
 }
+
+//==============================================================================
+/*  MQ.7: THE RELAY (namespace draft §67, ANK) - a sensor on an MQTT broker
+    heard at its address under the device's prefix, a cue fired past a line
+    and another under it, a light's state published: the ready-made script
+    in each language does what its comment says. Nothing MQTT in the test:
+    an MQTT device's report is a device's report, which is the point. */
+TEST_CASE ("script: the relay hears a sensor on a broker, fires a cue past a line and publishes the light, in both languages")
+{
+    const auto temperature = [] (double t) { return std::vector<Input> { { "/house/room1/temp", { Atom::of (t) } } }; };
+    const auto fired = [] (const Outbox& outbox)
+    {
+        std::vector<std::string> cues;
+        for (const auto& sent : outbox.sent)
+            if (sent.to == "/godot/cmd/cue/fire")
+                cues.push_back (sent.atoms.front().word);
+        return cues;
+    };
+    const auto luaText = [] (const std::string& name)
+    {
+        std::ifstream in (std::string (WFG_REPO_ROOT) + "/lua/" + name, std::ios::binary);
+        return std::string { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char>() };
+    };
+
+    const auto drive = [&] (ScriptInstance& script)
+    {
+        CHECK (fired (tickOnce (script, temperature (20.0))).empty());
+        auto out = tickOnce (script, temperature (26.0));
+        CHECK (fired (out) == std::vector<std::string> { "3.1" });
+        CHECK (numbersSentTo (out, "/house/lights/1") == std::vector<double> { 1.0 });
+        CHECK (fired (tickOnce (script, temperature (24.0))).empty());      // in the band: nothing twice
+        CHECK (fired (tickOnce (script, temperature (27.0))).empty());
+        out = tickOnce (script, temperature (22.0));
+        CHECK (fired (out) == std::vector<std::string> { "3.2" });
+        CHECK (numbersSentTo (out, "/house/lights/1") == std::vector<double> { 0.0 });
+    };
+
+    {
+        auto js = javascript();
+        makeAndOpen (*js, readyMadeText ("relay.js"));
+        drive (*js);
+    }
+    {
+        auto script = lua();
+        makeAndOpen (*script, luaText ("relay.lua"));
+        drive (*script);
+    }
+}

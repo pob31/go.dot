@@ -755,6 +755,21 @@ def help_card():
     p.text(300, y, 'a line to the port, its words joined by spaces', 56)
     y += 70
 
+    heading('MQTT: a sensor, a controller or a hub on a broker')
+    say('Add the device in Show settings > Network: its address cell offers "On an MQTT broker, at an address..." '
+        'or "On Go.dot\'s MQTT broker" (the switch under the table), and its topics from the same menu - # for '
+        'everything. Give it a prefix, /house say: a topic is then an address under it, room1/temp is '
+        '/house/room1/temp.', 72)
+    p.obj('mqttIn', 20, y, 'r /house/room1/temp')
+    p.text(300, y, 'what was published on the topic, its payload read as a serial line is: numbers as numbers, '
+           'words as words', 56)
+    y += 50
+    p.msg('mqttLine', 20, y, '1')
+    p.obj('mqttOut', 20, y + 30, 's /house/lights/1')
+    p.c('mqttLine', 0, 'mqttOut', 0)
+    p.text(300, y, 'publishes 1 on lights/1 through the device\'s broker', 56)
+    y += 70
+
     heading('The SpaceMouse')
     p.obj('puck', 20, y, 'r /godot/puck')
     p.obj('puckAxes', 20, y + 40, 'unpack f f f f f f')
@@ -783,9 +798,6 @@ def help_card():
     say('[netreceive], [netsend] and [oscparse] on a port of the patch\'s own: Go.dot already listens, the port may '
         'be Go.dot\'s, and what comes in that way is not in the show\'s log, so a replay cannot play it back. '
         'Add the device instead.', 54)
-    heading('Not yet')
-    say('MQTT: to come. A device that speaks MQTT cannot reach a patch yet.', 30)
-
     heading('Ready-made')
     say('go.avg, go.minmax, go.smooth, go.scale, go.deadband, go.change, go.edge, go.hold, go.ratelimit - '
         'right-click one in a patch and choose Help.', 40)

@@ -81,6 +81,23 @@
 --       a line to the port, its words joined by spaces
 --
 --
+-- MQTT: A SENSOR, A CONTROLLER OR A HUB ON A BROKER
+-- -------------------------------------------------
+-- Add the device in Show settings > Network. Click its address cell and
+-- choose "On an MQTT broker, at an address..." - the venue's Mosquitto, a
+-- Home Assistant - or "On Go.dot's MQTT broker", which Go.dot runs itself
+-- (the switch under the table). Give it a prefix, /house say, and from the
+-- same menu the topics it listens to (# for everything). A topic is then an
+-- address under the prefix: room1/temp is /house/room1/temp.
+--
+--   godot.hear('/house/room1/temp', function (t) print('temperature', t) end)
+--       what was published on the topic, its payload read as a serial line
+--       is: numbers as numbers, words as words, JSON as one string
+--
+--   godot.send('/house/lights/1', 1)
+--       publishes 1 on lights/1 through the device's broker
+--
+--
 -- THE SPACEMOUSE
 -- --------------
 --   godot.hear('/godot/puck', function (tx, ty, tz, rx, ry, rz) print(tz) end)
@@ -122,15 +139,10 @@
 -- show's log, so a replay could not play it back. Add the device instead.
 --
 --
--- NOT YET
--- -------
--- MQTT: to come. A device that speaks MQTT cannot reach a script yet.
---
---
 -- READY-MADE
 -- ----------
--- average.lua, minmax.lua, smooth.lua and edge.lua, beside this card: open the
--- ? in the editor and pick one, then copy what you need.
+-- average.lua, minmax.lua, smooth.lua, edge.lua and relay.lua, beside this
+-- card: open the ? in the editor and pick one, then copy what you need.
 --
 --
 -- Part of Go.dot - https://github.com/pob31/go.dot - GPL-3.0-or-later,
