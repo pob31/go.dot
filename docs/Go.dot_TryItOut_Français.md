@@ -161,6 +161,21 @@ Les images sont dessinées par un processus à part que Go.dot surveille : un fi
 
 Une **cue process** contient un patch Pure Data et le fait tourner tant que la cue tourne, au rythme du contrôle, jamais dans le chemin audio. Elle entend ce qui arrive (retours des appareils, OSC, MIDI, lignes série) et envoie aux appareils, en MIDI et aux commandes de Go.dot. On édite le patch sur le canevas de Go.dot en pied de fenêtre, où les valeurs bougent en direct et où toggles, bangs, sliders et boîtes de nombre se jouent, ou on l'ouvre dans plugdata ou Pure Data : chaque sauvegarde revient. Des abstractions toutes faites couvrent les besognes courantes : `go.avg`, `go.minmax`, `go.smooth`, `go.scale`, `go.deadband`, `go.change`, `go.edge`, `go.hold` et `go.ratelimit`, chacune avec son patch d'aide, plus un spectacle d'exemple. *Add > process*.
 
+Le **?** dans le coin du canevas ouvre un patch d'aide qui montre, avec des boîtes à copier, comment un patch entend et envoie :
+
+| Pour... | Dans le patch |
+|---|---|
+| Entendre l'OSC d'un appareil (Show settings > Network, Rx activé) | `[r /son/adresse]` |
+| Envoyer à un appareil, ici ou sur un autre ordinateur | `[s /son/adresse]` |
+| Déclencher une cue | `[; /godot/cmd/cue/fire 3.1(` par son numéro, ou par son identifiant |
+| Lancer une commande de Go.dot | `[s /godot/cmd/go]`, `standby/set`, `run/stopAll`... |
+| Entendre ou régler une ligne du spectacle | `[r /godot/...]`, `[s /godot/...]` |
+| Le MIDI (MIDI in et MIDI out de la cue) | `[notein]`, `[ctlin]`, `[midiin]`... et `[noteout]`, `[ctlout]`... |
+| Un Arduino (Show settings > Serial) | `[r /godot/serial/<id>/in]`, `[s /godot/serial/<id>/out]` |
+| La SpaceMouse | `[r /godot/puck]` |
+
+Un clic droit sur une cue de la liste, ou sur un port de l'onglet Serial, puis *Copy for a patch* donne sa boîte avec son identifiant ; collez-la sur le canevas, ou dans une boîte de Pd. Une cue glissée de la liste sur le canevas devient une boîte qui la déclenche. Tous les patchs ouverts dans Pure Data partagent un seul Pd, sa fenêtre passe au premier plan, et sur un écran haute résolution les menus et les patchs de Pd sont dessinés à une taille lisible. MQTT n'est pas encore disponible.
+
 ### Importer des spectacles QLab et Ableton Live (nouveau)
 
 - **QLab** : File > Import QLab workspace… lit directement le fichier d'un espace de travail QLab 4 ou 5, sans QLab. Cochez les listes de cues voulues ; Go.dot écrit un nouveau spectacle (cues, groupes, niveaux, fondus, routage et cibles) et un rapport de ce qu'il n'a pas pu reprendre.

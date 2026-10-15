@@ -122,9 +122,11 @@ has stood in front of the thing.
   control rate and never in the audio path. It hears device reports, OSC, MIDI
   and serial lines, and sends to devices, to MIDI and to Go.dot's own commands.
   It is drawn and played on a canvas at the foot of the window, or opened in Pure
-  Data or plugdata. Go.dot ships ready-made patches for the usual chores
-  ([`pd/`](pd/)) and an example show. Serial ports carry an Arduino's lines, or
-  OSC over SLIP.
+  Data or plugdata - one Pd for every patch, fitted to a high-resolution screen.
+  Go.dot ships ready-made patches for the usual chores ([`pd/`](pd/)), a help
+  patch on how a patch hears and sends (the canvas's ?), and an example show; a
+  cue or a serial port gives its box by *Copy for a patch*. Serial ports carry an
+  Arduino's lines, or OSC over SLIP.
 - **Timecode out.** MTC on a MIDI port, and SMPTE LTC that Go.dot draws itself on
   an audio output, from a cue: it starts at the label it names and runs until it
   is stopped or for a length, on the same sample as the sounds of its group. A
@@ -247,7 +249,7 @@ and says afterwards what was built against what was drawn.
 | Imports | Ableton Live and QLab | §29, §46 |
 | Phase 8 | Video: stills, movies, the native renderer, NDI/Spout/Syphon, read-ahead, pictures in sampler groups, the DCA knob; keys, text cues and blur | §35–§37, §40, §44, §47–§50, §61 |
 | OSC cues | Several messages, bundles, recorded curves | §45 |
-| Process cues | Pure Data inside a cue, serial ports | §51 |
+| Process cues | Pure Data inside a cue, serial ports; a patch's ways in and out, Pd as its editor | §51, §65 |
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
 | Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |

@@ -159,6 +159,21 @@ Pictures are drawn by a separate process that Go.dot watches, so a slow movie ca
 
 A **process cue** holds a Pure Data patch and runs it while the cue runs, at control rate, never in the audio path. It hears what arrives (device reports, OSC, MIDI, serial lines) and sends to devices, to MIDI and to Go.dot's own commands. Edit the patch on Go.dot's canvas at the foot of the window, where values move live and toggles, bangs, sliders and number boxes play, or open it in plugdata or Pure Data and each save comes back. Ready-made abstractions cover the usual chores: `go.avg`, `go.minmax`, `go.smooth`, `go.scale`, `go.deadband`, `go.change`, `go.edge`, `go.hold` and `go.ratelimit`, each with a help patch, plus an example show. *Add > process*.
 
+The **?** at the canvas's corner opens a help patch that shows, with boxes to copy, how a patch hears and sends:
+
+| To... | In the patch |
+|---|---|
+| Hear a device's OSC (Show settings > Network, Rx on) | `[r /its/address]` |
+| Send to a device, here or on another computer | `[s /its/address]` |
+| Fire a cue | `[; /godot/cmd/cue/fire 3.1(` by its number, or by its id |
+| Run any of Go.dot's commands | `[s /godot/cmd/go]`, `standby/set`, `run/stopAll`... |
+| Hear or set a row of the show | `[r /godot/...]`, `[s /godot/...]` |
+| MIDI (the cue's MIDI in and MIDI out) | `[notein]`, `[ctlin]`, `[midiin]`... and `[noteout]`, `[ctlout]`... |
+| An Arduino (Show settings > Serial) | `[r /godot/serial/<id>/in]`, `[s /godot/serial/<id>/out]` |
+| The SpaceMouse | `[r /godot/puck]` |
+
+Right-click a cue in the list, or a port in the Serial tab, and choose *Copy for a patch* to get its box with its id; paste it on the canvas, or into a box in Pd. A cue dragged from the list onto the canvas becomes a box that fires it. Every patch opened in Pure Data shares one Pd, its window comes to the front, and on a high-resolution screen Pd's menus and patches are drawn at a readable size. MQTT is not available yet.
+
 ### Importing QLab and Ableton Live shows (new)
 
 - **QLab**: File > Import QLab workspace… reads a QLab 4 or 5 workspace file directly, with no QLab needed. Tick the cue lists you want; Go.dot writes a new show (cues, groups, levels, fades, routing and targets) and a report of what it could not carry over.
