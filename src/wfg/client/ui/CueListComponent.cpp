@@ -17,6 +17,7 @@
 #include <wfg/client/ui/CueListComponent.h>
 
 #include <wfg/client/model/Video.h>
+#include <wfg/client/model/Flags.h>
 #include <wfg/client/model/Icons.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/LoadToTime.h>
@@ -31,6 +32,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 
 namespace wfg::client::ui
@@ -941,6 +943,21 @@ namespace wfg::client::ui
 
             //  And a little air between the picture and the name.
             area.removeFromLeft (pad);
+
+            /*  A FLAGGED CUE'S FLAG, BEFORE ITS NAME (namespace draft §63,
+                ALQ): where an eye running down the names finds it, and never
+                cut off by a long name as the marks after one can be. In its
+                own colour, at full strength even on a disabled row, since it
+                is about the work and not the playing; its shape and the row's
+                tooltip say it in words too (§4.8). */
+            if (! entry.derived && flagged.count (entry.id) > 0)
+            {
+                const auto cell = area.removeFromLeft (juce::roundToInt (side) + pad / 2);
+
+                icons::draw (g, model::Icon::flag, cell.toFloat().withSizeKeepingCentre (side, side),
+                             Look::colour (theme, "flag"));
+                area.removeFromLeft (pad / 2);
+            }
         }
 
         /*  THE CUE'S OWN COLOUR, somebody's decision (`colour`, "a #RRGGBB
@@ -1996,6 +2013,26 @@ namespace wfg::client::ui
         }
     }
 
+    void CueListComponent::setFlags (std::set<std::string> flaggedNow)
+    {
+        if (flaggedNow == flagged)
+            return;
+
+        std::vector<std::string> moved;
+        std::set_symmetric_difference (flagged.begin(), flagged.end(), flaggedNow.begin(), flaggedNow.end(),
+                                       std::back_inserter (moved));
+
+        flagged = std::move (flaggedNow);
+
+        for (int at = 0; at < static_cast<int> (rows.size()); ++at)
+        {
+            const auto& entry = rows[static_cast<std::size_t> (at)];
+
+            if (entry.rowKind == model::RowKind::cue && std::find (moved.begin(), moved.end(), entry.id) != moved.end())
+                list.repaintRow (at);
+        }
+    }
+
     juce::String CueListComponent::getTooltipForRow (int row)
     {
         /*  WHAT THE READINESS MARK MEANS, in a sentence (§48, AAS) - the only
@@ -2008,8 +2045,18 @@ namespace wfg::client::ui
         if (entry.rowKind != model::RowKind::cue)
             return {};
 
-        const auto found = readiness.find (entry.id);
-        return found != readiness.end() ? juce::String::fromUTF8 (found->second.meaning.c_str()) : juce::String {};
+        /*  AND THE FLAG'S, when it wears one (namespace draft §63, ALQ):
+            first, since it is the one somebody put there on purpose. */
+        juce::String said;
+
+        if (! entry.derived && flagged.count (entry.id) > 0)
+            said = juce::String::fromUTF8 (model::flagMark().meaning.c_str());
+
+        if (const auto found = readiness.find (entry.id); found != readiness.end())
+            said += (said.isEmpty() ? juce::String() : juce::String ("; "))
+                      + juce::String::fromUTF8 (found->second.meaning.c_str());
+
+        return said;
     }
 
     void CueListComponent::paintStep (const model::Row& entry, juce::Graphics& g,
@@ -2143,6 +2190,46 @@ namespace wfg::client::ui
 
             return true;
         }
+
+        /*  F FLAGS THE PICKED CUES AND SHIFT+F THE CUE THE LAST GO FIRED (the
+            author, 2026-10-15: "Use 'f' on the keyboard to mark the cue and
+            [shift]+F to mark the last cue that was triggers (Go command)";
+            namespace draft §63, ALM). With no other modifier, so Ctrl/⌘-F stays
+            free for a find; once per key-down (`flagKeyDown`); and under the
+            lock too, since a flag is a state row a locked show takes. A field
+            being typed into keeps its F: it holds the focus, and a text box
+            answers a letter before this list is asked. */
+        const auto plainF = key == juce::KeyPress ('f', 0, 0);
+        const auto shiftF = key == juce::KeyPress ('f', juce::ModifierKeys::shiftModifier, 0);
+
+        if (plainF || shiftF)
+        {
+            if (! flagKeyDown)
+            {
+                flagKeyDown = true;
+
+                if (shiftF)
+                {
+                    if (actions.flagLastGo) actions.flagLastGo();
+                }
+                else if (actions.flagChosen)
+                {
+                    actions.flagChosen();
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    bool CueListComponent::keyStateChanged (bool)
+    {
+        /*  F IS UP, so the next press flags again. Asked of the keyboard rather
+            than read off this call, which says only that SOME key moved. */
+        if (flagKeyDown && ! juce::KeyPress::isKeyCurrentlyDown ('f'))
+            flagKeyDown = false;
 
         return false;
     }

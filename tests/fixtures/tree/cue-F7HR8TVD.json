@@ -27,6 +27,14 @@
       "VALUE": [true],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     },
+    "flagged": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/flagged",
+      "DESCRIPTION": "Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.",
+      "TYPE": "T",
+      "ACCESS": 3,
+      "VALUE": [false],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
     "index": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/index",
       "DESCRIPTION": "Position among siblings, zero-based.",

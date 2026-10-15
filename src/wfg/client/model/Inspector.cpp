@@ -50,7 +50,9 @@ namespace wfg::client::model
             not code: reordering a kind is a line here rather than a change to
             anything, which is what made it cheap to argue about with the page
             open - and the same has to be true with the window open. */
-        const std::vector<std::string> saidFirst { "number", "name", "shortName", "colour", "notes" };
+        /*  `flagged` AFTER THE NOTES (namespace draft §63, ALQ): the two
+            things somebody leaves on a cue for afterwards, side by side. */
+        const std::vector<std::string> saidFirst { "number", "name", "shortName", "colour", "notes", "flagged" };
         const std::vector<std::string> when      { "preWait", "duration", "postWait" };
         const std::vector<std::string> saidLast  { "enabled", "preset" };
 

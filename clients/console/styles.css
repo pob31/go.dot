@@ -73,6 +73,11 @@
   --waiting:    #86a3db;
   --picked:     #9a95e4;
 
+  /*  A FLAGGED CUE'S FLAG (namespace draft 63): the desktop's `flag` token, a
+      signal orange brighter than the standby's amber. The flag's shape and its
+      title say it too. */
+  --flag:       #ff9330;
+
   /*  The row grows with the type, or a taller line would sit in a box drawn
       for a shorter one. */
   --row: calc(26px * var(--type));
@@ -640,6 +645,7 @@ button:disabled { color: var(--ink-off); cursor: default; }
 
 .name { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .name .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name .flagged { flex: none; color: var(--flag); cursor: help; }
 
 .twist { width: calc(12px * var(--type)); color: var(--ink-faint); cursor: pointer; user-select: none;
          font-size: var(--t-9); flex: none; }

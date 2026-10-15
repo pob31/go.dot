@@ -55,6 +55,7 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/EphemeralState.h>
 #include <wfg/engine/document/FadePoints.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/CanonicalXml.h>
@@ -21801,4 +21802,192 @@ TEST_CASE ("run names: a shuffled group draws the same rounds under one salt, ot
     REQUIRE_FALSE (one.runs.all().empty());
     REQUIRE_FALSE (two.runs.all().empty());
     CHECK (one.runs.all().front().id == two.runs.all().front().id);
+}
+
+//==============================================================================
+/*  SHIFT+F - THE CUE THE LAST GO FIRED, FLAGGED (namespace draft §63; the
+    author, 2026-10-15: "flag a line so the operator can fix something
+    afterwards ... [shift]+F to mark the last cue that was triggered").
+
+    `go.flag` writes `cue/flagged`, a state row: through the lock, with no
+    unsaved dot and no step of Undo, into state.xml and never show.xml. Every
+    case here failed on the code before it, where `go.flag` was an unknown
+    command and `flagged` an address that named nothing. */
+namespace
+{
+    std::string flaggedOf (const Rig& rig, const std::string& cueId)
+    {
+        return rig.document.getAttribute ("/godot/cue/" + cueId + "/flagged").value_or ("");
+    }
+
+    Engine::TickResult flagLastGo (Rig& rig)
+    {
+        return rig.submitAndTick ("go.flag");
+    }
+}
+
+TEST_CASE ("go.flag: flags the cue the last GO fired, and sets rather than toggles")
+{
+    Rig rig;
+
+    //  Before any GO there is no cue to flag, and it says so.
+    CHECK (flagLastGo (rig).rejected == 1);
+    CHECK (refusedFor (rig, "nothing-to-flag"));
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.standby() == rig.memoId);
+
+    CHECK (flaggedOf (rig, rig.mediaId) == "false");
+    CHECK (flagLastGo (rig).rejected == 0);
+    CHECK (flaggedOf (rig, rig.mediaId) == "true");
+    CHECK (flaggedOf (rig, rig.memoId) == "false");
+
+    //  Pressed again it is still flagged: Shift+F never takes a flag off.
+    CHECK (flagLastGo (rig).rejected == 0);
+    CHECK (flaggedOf (rig, rig.mediaId) == "true");
+
+    //  The next GO is the one it flags next.
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    CHECK (flagLastGo (rig).rejected == 0);
+    CHECK (flaggedOf (rig, rig.memoId) == "true");
+
+    //  And F's way off is an ordinary write of the row.
+    CHECK (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/" + rig.mediaId + "/flagged"),
+                                            osc::Value::string ("false") }).rejected == 0);
+    CHECK (flaggedOf (rig, rig.mediaId) == "false");
+}
+
+TEST_CASE ("go.flag: a locked show takes it, and it is no edit of the show")
+{
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    REQUIRE (rig.document.isLocked());
+
+    const auto showBefore = rig.document.showRevision();
+    const auto couldUndo = rig.document.history (doc::UndoDomain::document).canUndo();
+
+    CHECK (flagLastGo (rig).rejected == 0);
+    CHECK (flaggedOf (rig, rig.mediaId) == "true");
+
+    //  F's write, on another cue, under the same lock.
+    CHECK (rig.submitAndTick ("node.setMany", { osc::Value::string ("/godot/cue/" + rig.memoId + "/flagged"),
+                                                osc::Value::string ("true") }).rejected == 0);
+    CHECK (flaggedOf (rig, rig.memoId) == "true");
+
+    //  No unsaved dot - the show half has not moved - and nothing to undo.
+    CHECK (rig.document.showRevision() == showBefore);
+    CHECK (rig.document.history (doc::UndoDomain::document).canUndo() == couldUndo);
+
+    //  The lock still holds for what the show plays.
+    CHECK (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/" + rig.mediaId + "/notes"),
+                                            osc::Value::string ("fix the level") }).rejected == 1);
+    CHECK (refusedFor (rig, "locked"));
+}
+
+TEST_CASE ("go.flag: it lands in state.xml and never in show.xml, and comes back from it")
+{
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (flagLastGo (rig).rejected == 0);
+
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto state = doc::EphemeralState::write (rig.document);
+
+    CHECK (show.find ("flagged") == std::string::npos);
+    CHECK (state.find ("id=\"" + rig.mediaId + "\" flagged=\"true\"") != std::string::npos);
+
+    //  An unflagged cue says nothing: the file stays a list of what differs.
+    CHECK (state.find ("id=\"" + rig.memoId + "\"") == std::string::npos);
+
+    Rig again;
+    REQUIRE (doc::CanonicalXml::read (show, again.document).ok);
+    REQUIRE (doc::EphemeralState::read (state, again.document).ok);
+    CHECK (flaggedOf (again, rig.mediaId) == "true");
+    CHECK (flaggedOf (again, rig.memoId) == "false");
+}
+
+TEST_CASE ("go.flag: a Doh!, an empty GO and a refused GO leave the cue it flags")
+{
+    SUBCASE ("a Doh! takes the GO back and the cue it fired is still the one to look at")
+    {
+        Rig rig;
+        rig.setStandby (rig.mediaId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (doh (rig).rejected == 0);
+        REQUIRE (rig.standby() == rig.mediaId);
+
+        CHECK (flagLastGo (rig).rejected == 0);
+        CHECK (flaggedOf (rig, rig.mediaId) == "true");
+    }
+
+    SUBCASE ("a GO on an empty standby fires nothing, so the last cue stays the last")
+    {
+        Rig rig;
+        rig.setStandby (rig.memoId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.standby().empty());
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        CHECK (flagLastGo (rig).rejected == 0);
+        CHECK (flaggedOf (rig, rig.memoId) == "true");
+    }
+
+    SUBCASE ("a bounced GO is not a GO")
+    {
+        Rig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0.5").ok);
+        rig.setStandby (rig.mediaId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.submitAndTick ("go").rejected == 1);       // too soon
+
+        CHECK (flagLastGo (rig).rejected == 0);
+        CHECK (flaggedOf (rig, rig.mediaId) == "true");
+        CHECK (flaggedOf (rig, rig.memoId) == "false");
+    }
+}
+
+TEST_CASE ("go.flag: a cue deleted since its GO is refused, and nothing else is flagged")
+{
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.submitAndTick ("object.delete", { osc::Value::string (rig.mediaId) }).rejected == 0);
+
+    CHECK (flagLastGo (rig).rejected == 1);
+    INFO (rig.engine.lastError());
+    CHECK (refusedFor (rig, "unknown-id"));
+    CHECK (flaggedOf (rig, rig.memoId) == "false");
+}
+
+TEST_CASE ("go.flag: replayed from its log, it flags the same cue")
+{
+    HistoryRig rig;
+    rig.park (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (flagLastGo (rig).rejected == 0);
+    REQUIRE (flaggedOf (rig, rig.memoId) == "true");
+
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    Rig fresh;
+    fresh.runner.setPlayer (nullptr);
+    REQUIRE (doc::CanonicalXml::read (show, fresh.document).ok);
+    REQUIRE (flaggedOf (fresh, rig.memoId) == "false");     // show.xml does not carry it
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+    CHECK (flaggedOf (fresh, rig.memoId) == "true");
+    CHECK (flaggedOf (fresh, rig.mediaId) == "false");
 }

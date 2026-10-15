@@ -4682,7 +4682,18 @@
           <ref name="State.Show"/>
           <ref name="State.Lists"/>
           <ref name="State.List"/>
+          <ref name="State.Cue"/>
           <ref name="State.Group"/>
+          <ref name="State.Media"/>
+          <ref name="State.Mic"/>
+          <ref name="State.Video"/>
+          <ref name="State.Fade"/>
+          <ref name="State.Transport"/>
+          <ref name="State.Start"/>
+          <ref name="State.Process"/>
+          <ref name="State.Timecode"/>
+          <ref name="State.Osc"/>
+          <ref name="State.Midi"/>
           <ref name="State.Port"/>
           <ref name="State.Audio"/>
           <ref name="State.VideoOutput"/>
@@ -4748,11 +4759,37 @@
     </element>
   </define>
 
+  <define name="State.Cue">
+    <element name="Cue">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
   <define name="State.Group">
     <element name="Group">
       <attribute name="id">
         <ref name="identifier"/>
       </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
       <optional>
         <attribute name="folded">
           <a:documentation>Whether the group is drawn shut, its members hidden under its row. State, not show: how a group is read is not a decision about what it plays, so it lands in state.xml and does not mark the show unsaved.</a:documentation>
@@ -4774,6 +4811,176 @@
       <optional>
         <attribute name="headerFolded">
           <a:documentation>Whether the group&apos;s header band is drawn shut. State, as `folded` is.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Media">
+    <element name="Media">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Mic">
+    <element name="Mic">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Video">
+    <element name="Video">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Fade">
+    <element name="Fade">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Transport">
+    <element name="Transport">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Start">
+    <element name="Start">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Process">
+    <element name="Process">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Timecode">
+    <element name="Timecode">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Osc">
+    <element name="Osc">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Midi">
+    <element name="Midi">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="flagged">
+          <a:documentation>Whether somebody has marked this cue to be looked at afterwards (namespace draft 63; the keys are the author-s, 2026-10-15): F in the window flags or unflags the picked cues, and Shift+F - the command go.flag - flags the cue the last GO fired. A note for the people working on the show and nothing the show plays: a flagged cue fires exactly as it would unflagged. State, not show, so that it can be taken in the middle of a locked performance: it lands in state.xml beside the standby, is let through the lock, never marks the show unsaved and is not undone by Undo - and so it reaches the disk with the next save, as the standby does.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>

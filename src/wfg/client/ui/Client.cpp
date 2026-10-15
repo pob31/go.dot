@@ -52,6 +52,7 @@
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/DeviceTree.h>
 #include <wfg/client/model/Dual.h>
+#include <wfg/client/model/Flags.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/LoadToTime.h>
@@ -134,6 +135,10 @@ namespace wfg::client
             /*  THE PAIR'S FIVE (namespace draft §58.4, RD.11), under Show >
                 Redundancy: the operator's commands, offered under the lock too. */
             menuTakeOver, menuHandOver, menuKeepShow, menuRealign, menuAdoptShow,
+
+            /*  F AND SHIFT+F (namespace draft §63, ALM): the picked cues
+                flagged or unflagged, and the cue the last GO fired flagged. */
+            menuFlagPicked, menuFlagLastGo,
 
             /*  THE TEMPLATES APPLY TEMPLATE OFFERS, numbered from here in the
                 order the show keeps them (namespace draft §38). */
@@ -278,6 +283,12 @@ namespace wfg::client
                 listActions.editingBegan    = [this] { inspectorHeld = shell->panel() != ui::Shell::Panel::inspector; };
                 listActions.pickAll         = [this] { selection.all (show.rows()); inspectNow(); };
                 listActions.removeChosen    = [this] { removeChosen(); };
+
+                /*  F AND SHIFT+F (the author, 2026-10-15; namespace draft §63):
+                    the picked cues' flags written as one gesture, and the
+                    engine's `go.flag` for the cue the last GO fired. */
+                listActions.flagChosen      = [this] { flagChosen(); };
+                listActions.flagLastGo      = [this] { send (gesture::flagLastGo()); };
 
                 listActions.importMedia     = [this] (const std::string& parent, int index,
                                                       const juce::StringArray& files)
@@ -858,6 +869,12 @@ namespace wfg::client
                         the transport, which Shell::keyPressed asks first: it
                         holds the latch that makes a held F9 one Doh!. */
                     case menuGoDoh:      return { juce::KeyPress::F9Key, 0, 0 };
+
+                    /*  F AND SHIFT+F (namespace draft §63, ALM), printed here and
+                        answered by the cue list, which Shell::keyPressed asks
+                        first: it holds the latch that makes a held F one flag. */
+                    case menuFlagPicked: return { 'f', 0, 0 };
+                    case menuFlagLastGo: return { 'f', shift, 0 };
                     /*  No accelerator: these are reached through the menu only.
                         The surfaces window takes the number keys for its pads
                         once it is open, and needs no key of its own to open. */
@@ -952,6 +969,13 @@ namespace wfg::client
                         show, not editing it - and whether there is a GO it can
                         take back is the engine's to say, in its own sentence. */
                     case menuGoDoh:      return true;
+
+                    /*  FLAGS UNDER THE LOCK TOO (§63, ALN): a flag is a note for
+                        afterwards, kept with the standby, and never an edit of
+                        what the show plays. Whether a GO has fired a cue to flag
+                        is the engine's to say, in its own sentence. */
+                    case menuFlagPicked: return ! selection.empty();
+                    case menuFlagLastGo: return true;
 
                     /*  OFFERED UNDER THE LOCK TOO: riding a fader and pressing a
                         pad are playing the show, not editing it. */
@@ -1119,6 +1143,12 @@ namespace wfg::client
                         reaches for during a show rather than before it. */
                     addMenuItem (menu, menuGoDoh, "Doh! - take back the last GO");
 
+                    /*  AND THE FLAGS (namespace draft §63, ALM): what an operator
+                        marks during a run to look at once it is over. The first
+                        says which way F would go for the cues picked now. */
+                    addMenuItem (menu, menuFlagPicked, flagPickedWords());
+                    addMenuItem (menu, menuFlagLastGo, "Flag the cue the last GO fired");
+
                     /*  AND THE PAIR'S FIVE BESIDE THEM (RD.11), on a computer with a
                         role: what an operator reaches for when the other machine
                         misbehaves - under the lock too, which greys the Redundancy
@@ -1229,6 +1259,8 @@ namespace wfg::client
                     case menuDeleteCue: removeChosen(); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     case menuGoDoh:     doh(); break;
+                    case menuFlagPicked: flagChosen(); break;
+                    case menuFlagLastGo: send (gesture::flagLastGo()); break;
                     case menuLoadToTime: toggleLoadToTime(); break;
                     case menuUndoHistory: toggleUndoHistory(); break;
                     case menuWaveform:  toggleWaveform(); break;
@@ -1778,6 +1810,49 @@ namespace wfg::client
                 selection.clear();
             }
 
+            /*  F: THE PICKED CUES FLAGGED, OR UNFLAGGED WHEN EVERY ONE ALREADY
+                IS (namespace draft §63, ALP) - one `node.setMany` of their
+                `flagged` rows, so one record, and under the lock as much as not
+                (a state row: no unsaved dot, no step of Undo). Read against the
+                last pass's snapshot, as every gesture between passes is; the
+                foot says what it did, or that nothing was picked. */
+            void flagChosen()
+            {
+                if (latest == nullptr || shell == nullptr)
+                    return;
+
+                if (selection.empty())
+                {
+                    shell->transport.setNotice (juce::String (model::nothingPickedToFlag()));
+                    return;
+                }
+
+                const auto toggle = model::flagToggle (model::flaggedOf (*latest, show.rows()),
+                                                       selection.ids(), show.rows());
+
+                if (! toggle.writes.empty())
+                    send (gesture::setNodes (toggle.writes));
+
+                shell->transport.setNotice (juce::String::fromUTF8 (toggle.said.c_str()));
+            }
+
+            /*  THE MENU ITEM'S WORDS, which say the way F would go now. */
+            juce::String flagPickedWords() const
+            {
+                if (selection.empty() || latest == nullptr)
+                    return "Flag the picked cues";
+
+                const auto toggle = model::flagToggle (model::flaggedOf (*latest, show.rows()),
+                                                       selection.ids(), show.rows());
+                const auto many = selection.size() > 1;
+
+                return toggle.flagging ? (many ? "Flag the " + juce::String (static_cast<int> (selection.size()))
+                                                   + " picked cues"
+                                               : juce::String ("Flag the picked cue"))
+                                       : (many ? juce::String ("Take the flags off the picked cues")
+                                               : juce::String ("Take the flag off the picked cue"));
+            }
+
             /** For the factory, when a theme file was refused at start: shown where the author is looking. */
             void notice (const std::string& sentence)
             {
@@ -2233,6 +2308,10 @@ namespace wfg::client
 
                 //  How ready each row's cue is for GO (namespace draft §48, AAM).
                 shell->cues.setReadiness (model::readinessOf (*snapshot, show.rows()));
+
+                /*  AND WHICH CUES ARE FLAGGED (§63, ALQ), read every pass for the
+                    same reason: a flag is a state row, and moves no revision. */
+                shell->cues.setFlags (model::flaggedOf (*snapshot, show.rows()));
 
                 if (! revealedErrorCue.empty()) shell->cues.revealCue (revealedErrorCue);
 

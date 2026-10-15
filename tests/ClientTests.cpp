@@ -71,6 +71,7 @@
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Readiness.h>
+#include <wfg/client/model/Flags.h>
 #include <wfg/client/model/Sections.h>
 #include <wfg/client/model/View.h>
 #include <wfg/client/model/Reorder.h>
@@ -690,7 +691,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneRec ("level", true),
         gesture::laneFree(), gesture::laneRecord (0.0), gesture::laneRecord (12.5), gesture::laneStop(),
 
-        gesture::go(), gesture::doh(), gesture::standbyNext(), gesture::standbyPrevious(),
+        gesture::go(), gesture::doh(), gesture::flagLastGo(), gesture::standbyNext(), gesture::standbyPrevious(),
         gesture::stopAll(), gesture::killAll(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::seek ("R4NID001", 12.5),
@@ -14563,4 +14564,76 @@ TEST_CASE ("client: the pair's five and three settings are real commands, greyed
             REQUIRE (rig.apply (tick++, origin::window, "pair.adoptShow").applied == 0);
             CHECK (model::words (rig.engine.lastError())[3] == offered.reason);
         }
+}
+
+//==============================================================================
+/*  A CUE FLAGGED TO LOOK AT AFTERWARDS (namespace draft §63; the author,
+    2026-10-15: "Use 'f' on the keyboard to mark the cue and [shift]+F to mark
+    the last cue that was triggers"). F is the window's own `node.setMany` over
+    the picked cues' `flagged` rows; the flags are read every pass, since a
+    state row moves no revision. */
+TEST_CASE ("client: F flags the picked cues one way for all, and the list reads the flags every pass")
+{
+    Rig rig;
+    const std::string listId = "7K2QM9X4";
+    const std::string house = "B3N8R5TW", walkIn = "E4GP6QSC", announce = "F7HR8TVD";
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*rig.publish (1), listId));
+    const auto& rows = show.rows();
+
+    CHECK (model::flaggedOf (*rig.publish (2), rows).empty());
+
+    //  A state row: written, published, read - and the show's revision has not moved.
+    const auto revision = rig.document.showRevision();
+    REQUIRE (rig.apply (3, "window", "node.set", { osc::Value::string ("/godot/cue/" + walkIn + "/flagged"),
+                                                   osc::Value::string ("true") }).rejected == 0);
+    CHECK (rig.document.showRevision() == revision);
+    CHECK_FALSE (show.refresh (*rig.publish (4), listId));          // no rebuild for a flag
+    CHECK (model::flaggedOf (*rig.publish (4), rows) == std::set<std::string> { walkIn });
+
+    //  One picked and flagged: F takes it off, and the foot names it as the list does.
+    {
+        const auto toggle = model::flagToggle ({ walkIn }, { walkIn }, rows);
+        CHECK_FALSE (toggle.flagging);
+        CHECK (toggle.writes == std::vector<std::pair<std::string, std::string>>
+                                  { { "/godot/cue/" + walkIn + "/flagged", "false" } });
+        CHECK (toggle.said == "Flag taken off 2.1 Walk-in");
+    }
+
+    //  Some flagged and some not: all of them end flagged, and only the others are written.
+    {
+        const auto toggle = model::flagToggle ({ walkIn }, { house, walkIn, announce }, rows);
+        CHECK (toggle.flagging);
+        CHECK (toggle.writes == std::vector<std::pair<std::string, std::string>>
+                                  { { "/godot/cue/" + house + "/flagged", "true" },
+                                    { "/godot/cue/" + announce + "/flagged", "true" } });
+        CHECK (toggle.said == "Flagged 3 cues to look at afterwards");
+
+        //  As the window sends it: one gesture, and the engine takes it.
+        REQUIRE (rig.apply (5, "window", "node.setMany",
+                            { osc::Value::string (toggle.writes[0].first), osc::Value::string (toggle.writes[0].second),
+                              osc::Value::string (toggle.writes[1].first), osc::Value::string (toggle.writes[1].second) })
+                   .rejected == 0);
+        CHECK (model::flaggedOf (*rig.publish (6), rows) == std::set<std::string> { house, walkIn, announce });
+    }
+
+    //  Nothing picked writes nothing, and the foot says what F wants.
+    CHECK (model::flagToggle ({ walkIn }, {}, rows).writes.empty());
+    CHECK (model::nothingPickedToFlag().find ("Shift+F") != std::string::npos);
+
+    //  The mark: a drawn flag, and in words how it comes off (§4.8).
+    CHECK (model::flagMark().icon == model::Icon::flag);
+    CHECK (model::flagMark().meaning.find ("F on it takes the flag off") != std::string::npos);
+}
+
+TEST_CASE ("client: Shift+F's refusals are said in words")
+{
+    model::TransportReading reading;
+
+    reading.lastError = "5600 30 window nothing-to-flag go.flag";
+    CHECK (reading.errorLine() == "Nothing flagged: no GO has fired a cue yet");
+
+    reading.lastError = "5601 31 window unknown-id go.flag";
+    CHECK (reading.errorLine() == "Nothing flagged: the cue the last GO fired has been deleted");
 }

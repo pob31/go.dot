@@ -238,6 +238,17 @@ namespace wfg::client::model
                 return "Doh! ignored: pressed again too soon (Show settings > Playback)";
         }
 
+        /*  SHIFT+F'S REFUSALS IN WORDS (namespace draft §63, ALO): nothing to
+            flag yet, or the cue the last GO fired gone since. */
+        if (fields[4] == "go.flag")
+        {
+            if (fields[3] == "nothing-to-flag")
+                return "Nothing flagged: no GO has fired a cue yet";
+
+            if (fields[3] == "unknown-id")
+                return "Nothing flagged: the cue the last GO fired has been deleted";
+        }
+
         /*  THE LEVEL LANE'S REFUSALS IN WORDS (namespace draft §30.4): a pass
             that does not start writes nothing, and that is said rather than
             left to a code - under the recorder's own name, the button's (QY),

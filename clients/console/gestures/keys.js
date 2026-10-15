@@ -265,6 +265,38 @@ document.addEventListener("keydown", (event) => {
 
   if (event.altKey) return;
 
+  /*  F FLAGS WHAT IS PICKED, SHIFT+F THE CUE THE LAST GO FIRED (namespace
+      draft 63; the author, 2026-10-15), as the desktop binds them - a note on
+      a cue to look at once the run is over. ON `key`, as the accelerators are,
+      so the letter is the one typed whatever the layout; a held key's repeats
+      are dropped, since F turns flags one way and back. Shift+F is the
+      engine's `go.flag`, which knows which cue the last GO fired. F writes the
+      picked cues' `flagged` rows as one `node.setMany`: every picked cue
+      already flagged, and they come off; otherwise the rest go on. A state
+      row, so a locked show takes either. */
+  if (String(event.key || "").toLowerCase() === "f") {
+    event.preventDefault();
+
+    if (event.repeat) return;
+
+    if (event.shiftKey) { press("Shift+F"); return; }
+
+    const picked = selection.chosen.slice();
+
+    if (!picked.length) return;
+
+    const isFlagged = (id) => tree.cue(id, "flagged", false) === true;
+    const flagging = !picked.every(isFlagged);
+    const writes = [];
+
+    for (const id of picked) {
+      if (isFlagged(id) !== flagging) writes.push("/godot/cue/" + id + "/flagged", flagging ? "true" : "false");
+    }
+
+    if (writes.length) gesture("flag", writes);
+    return;
+  }
+
   if (event.code === "Space") { event.preventDefault(); press("Space"); }
   else if (event.code === "ArrowDown") { event.preventDefault(); press("ArrowDown"); }
   else if (event.code === "ArrowUp") { event.preventDefault(); press("ArrowUp"); }

@@ -261,14 +261,17 @@ namespace wfg::client::ui
     bool Shell::keyStateChanged (bool isKeyDown)
     {
         /*  THE FOCUS RESTS HERE, so a key's release arrives here and not at
-            the transport, which holds the latch a held F9 is filtered by. */
+            the transport, which holds the latch a held F9 is filtered by - nor
+            at the list, which holds F's (namespace draft §63). */
+        cues.keyStateChanged (isKeyDown);
         return transport.keyStateChanged (isKeyDown);
     }
 
     /*  A RELEASE NOBODY HERE SAW: the transport asks the keyboard whether F9
-        is still down, and opens its latch when it is not. */
+        is still down, and opens its latch when it is not; the list, F. */
     void Shell::focusGained (FocusChangeType)
     {
+        cues.keyStateChanged (false);
         transport.keyStateChanged (false);
     }
 

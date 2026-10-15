@@ -251,6 +251,11 @@ function cueRow(id, depth, section, rail, standby, out) {
   const open = isGroup && !folded.has(id);
 
   const enabled = tree.cue(id, "enabled", true) !== false;
+
+  /*  FLAGGED TO LOOK AT AFTERWARDS (namespace draft 63): a flag before the
+      name, where an eye running down the names finds it, and its meaning in
+      the title - the shape and the words, never the colour alone (§4.8). */
+  const flagged = tree.cue(id, "flagged", false) === true;
   const number = esc(tree.cue(id, "number", ""));
   const name = esc(shownName(id) || "—");
 
@@ -387,6 +392,10 @@ function cueRow(id, depth, section, rail, standby, out) {
       '<div class="name" style="padding-left:' + (depth * 16) + 'px">' +
         twist +
         '<span class="kind">' + esc(kind) + "</span>" +
+        (flagged
+           ? '<span class="flagged" data-flagged="' + id + '"' +
+             ' title="flagged: somebody marked it to look at afterwards - F on it takes the flag off">\u2691</span>'
+           : "") +
         '<span class="text">' + name + "</span>" +
       "</div>" +
       '<div class="tail">' +

@@ -235,6 +235,12 @@ namespace wfg
             version's. */
         inline constexpr const char* triggerAfterGo   = "trigger-after-go";
 
+        /*  SHIFT+F WITH NO GO TO FLAG (namespace draft §63, ALO): no GO has
+            fired anything since the show opened, so there is no cue the last
+            GO fired. A GO on an empty standby, or one refused too soon, fired
+            nothing and is not that GO. */
+        inline constexpr const char* nothingToFlag    = "nothing-to-flag";
+
         /*  A PRESS ON A TAKE WITH NOTHING TO PRESS IT THROUGH (Phase 9c,
             namespace draft §19.6): Rec, Loop or a layer asked of a sampling
             channel no sounding mic cue holds - its cue not fired yet, ended,

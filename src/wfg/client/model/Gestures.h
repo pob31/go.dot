@@ -66,6 +66,12 @@ namespace wfg::client::gesture
         and its own key; one named command, as §4.11 asks, and never Undo. */
     Event doh();
 
+    /*  SHIFT+F (namespace draft §63, ALM, ALO): the cue the last GO fired,
+        flagged to look at afterwards - one named command, since which cue that
+        was is the engine's to know. F on the picked cues is a `setNodes` of
+        their `flagged` rows (model/Flags.h). */
+    Event flagLastGo();
+
     /*  Where GO would act next, and where it would act before: the cue
         list's arrows. Not a selection - this list has none yet - but the
         pointer itself, which is what the page's arrows move too. */

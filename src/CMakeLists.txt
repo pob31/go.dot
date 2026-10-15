@@ -715,6 +715,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Icons.cpp
     wfg/client/model/Readiness.h
     wfg/client/model/Readiness.cpp
+    wfg/client/model/Flags.h
+    wfg/client/model/Flags.cpp
     wfg/client/model/Inspector.h
     wfg/client/model/Inspector.cpp
     wfg/client/model/LoadToTime.h

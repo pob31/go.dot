@@ -51,6 +51,7 @@
 
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -106,6 +107,12 @@ namespace wfg::client::ui
 
             /** Picks every cue the list draws: ctrl/⌘-A. */
             std::function<void()> pickAll;
+
+            /*  F FLAGS OR UNFLAGS THE PICKED CUES, SHIFT+F FLAGS THE CUE THE
+                LAST GO FIRED (the author, 2026-10-15; namespace draft §63,
+                ALM). Under the lock too: a flag is a state row. */
+            std::function<void()> flagChosen;
+            std::function<void()> flagLastGo;
 
             /*  THE PRESET: a cue marked as prepared by an ancestor group's
                 header. Alt-drop on the group says which, and so does a plain
@@ -173,9 +180,19 @@ namespace wfg::client::ui
             so only the rows whose mark moved are asked to paint. */
         void setReadiness (std::map<std::string, model::Mark> marks);
 
+        /*  THE FLAGGED CUES (namespace draft §63, ALQ), by identifier, read
+            every pass: a flag is a state row and moves no revision, so the
+            rows are not built again for one. A flag before the name of each,
+            and only the rows whose flag came or went are asked to paint. */
+        void setFlags (std::set<std::string> flaggedNow);
+
         void paint (juce::Graphics& g) override;
         void resized() override;
         bool keyPressed (const juce::KeyPress& key) override;
+
+        /*  OPENS F'S LATCH once F is up: the Shell hands every key's release
+            here, as it does the transport's for F9. */
+        bool keyStateChanged (bool isKeyDown) override;
 
     private:
         int getNumRows() override;
@@ -304,6 +321,12 @@ namespace wfg::client::ui
         std::vector<std::string> changedIds;
         std::vector<std::string> addedIds;
         std::map<std::string, model::Mark> readiness;
+        std::set<std::string> flagged;
+
+        /*  ONE FLAG PER KEY-DOWN: JUCE repeats a held key's `keyPressed`, and
+            a held F would flag and unflag the picked cues as fast as it
+            repeated. Shut by the first press, opened by `keyStateChanged`. */
+        bool flagKeyDown = false;
         std::string standby;
         int standbyRow = -1;
         std::vector<std::string> chosen;     ///< the picked cues, as the selection holds them

@@ -139,7 +139,8 @@ has stood in front of the thing.
   next GO resumes it. A double Esc stops everything Go.dot started, at once,
   footers skipped. **Doh!** takes back a GO pressed too early: it stops what
   that GO started, puts the standby back, and can send each device the command
-  that undoes what it was sent.
+  that undoes what it was sent. F flags the picked cues to look at after the
+  run, and Shift+F the cue the last GO fired, the show locked or not.
 - **Importing.** Ableton Live sets (`wfg import-als`, several sets making a tour
   with a performance for each venue) and QLab 4 and 5 workspaces
   (`wfg import-qlab`), both also in the window's File menu.

@@ -31,6 +31,7 @@
 
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Readiness.h>
+#include <wfg/client/model/Flags.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Surfaces.h>
@@ -6874,5 +6875,116 @@ TEST_CASE ("run pane: a time group's row says the code it follows, and a chasing
         juce::PNGImageFormat png;
         CHECK (png.writeImageToStream (picture, out));
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
+TEST_CASE ("cue list: F and Shift+F, once per key-down, and a flag drawn before a flagged cue's name")
+{
+    /*  Namespace draft §63 (the author, 2026-10-15). With WFG_SNAPSHOT_DIR set,
+        cue-list-flags.png. */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto sound = document.createCue (list.id, 0, "media", "Thunder").id;
+    REQUIRE (document.createCue (list.id, 1, "memo", "Note").ok);
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+
+    wfg::tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, list.id));
+
+    int chosen = 0, lastGo = 0;
+
+    ui::CueListComponent::Actions actions;
+    actions.flagChosen = [&] { ++chosen; };
+    actions.flagLastGo = [&] { ++lastGo; };
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, actions);
+    cues.setSize (900, 200);
+    cues.show (show, {}, {});
+
+    //  F is the picked cues', Shift+F the last GO's; a held key repeats and is one press.
+    CHECK (cues.keyPressed (juce::KeyPress ('f', 0, 0)));
+    CHECK (cues.keyPressed (juce::KeyPress ('f', 0, 0)));
+    CHECK (chosen == 1);
+
+    cues.keyStateChanged (false);       // no key is down in a test
+    CHECK (cues.keyPressed (juce::KeyPress ('f', juce::ModifierKeys::shiftModifier, 0)));
+    CHECK (lastGo == 1);
+    CHECK (chosen == 1);
+
+    //  Ctrl/⌘-F is not a flag: it is left for a find.
+    cues.keyStateChanged (false);
+    CHECK_FALSE (cues.keyPressed (juce::KeyPress ('f', juce::ModifierKeys::commandModifier, 0)));
+    CHECK (chosen == 1);
+    CHECK (lastGo == 1);
+
+    const auto paint = [&cues]
+    {
+        juce::Image canvas (juce::Image::ARGB, 900, 200, true, juce::SoftwareImageType());
+        juce::Graphics g (canvas);
+        cues.paintEntireComponent (g, false);
+        return canvas;
+    };
+
+    const auto before = paint();
+    cues.setFlags ({ sound });
+    const auto after = paint();
+
+    /*  THE FLAG IS BEFORE THE NAME, so it is drawn in the left part of the
+        row and the times and kind at the right are as they were; and in the
+        flag's own colour, somewhere in what changed. */
+    const auto unit = juce::roundToInt (theme.type * 7.0);
+    const auto kindLeft = 900 - unit / 2 - (3 * 6 + 8) * unit;
+    const auto flagColour = model::colourFromHex ("#FF9330");
+    REQUIRE (flagColour.has_value());
+
+    int changedLeft = 0, changedRight = 0, inFlagColour = 0;
+
+    for (int y = 0; y < 200; ++y)
+        for (int x = 0; x < 900; ++x)
+            if (before.getPixelAt (x, y) != after.getPixelAt (x, y))
+            {
+                (x >= kindLeft ? changedRight : changedLeft)++;
+
+                if (after.getPixelAt (x, y).getARGB() == static_cast<juce::uint32> (*flagColour))
+                    ++inFlagColour;
+            }
+
+    CHECK (changedLeft > 0);
+    CHECK (changedRight == 0);
+    CHECK (inFlagColour > 0);
+
+    //  Taken off, the row is as it was.
+    cues.setFlags ({});
+    const auto again = paint();
+    int stillChanged = 0;
+
+    for (int y = 0; y < 200; ++y)
+        for (int x = 0; x < 900; ++x)
+            if (before.getPixelAt (x, y) != again.getPixelAt (x, y))
+                ++stillChanged;
+
+    CHECK (stillChanged == 0);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        cues.setFlags ({ sound });
+        const juce::File file { juce::File (dir).getChildFile ("cue-list-flags.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        juce::PNGImageFormat png;
+        png.writeImageToStream (paint(), out);
     }
 }

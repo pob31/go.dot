@@ -69,6 +69,8 @@ Un spectacle est un dossier avec au moins un fichier `.wfg` et un dossier `media
 | Échap | Tout arrêter proprement : fondu sur la durée de panique (1 s par défaut), fins de groupes jouées |
 | Échap deux fois (en moins de 0,75 s) | Tout couper d'un coup, sans les fins |
 | F9 | **Doh!** — reprendre le dernier GO |
+| F | Marquer d'un drapeau les cues sélectionnées, pour y revenir après le filage (F à nouveau retire le drapeau) |
+| Maj+F | Marquer d'un drapeau la cue lancée par le dernier GO |
 | Ctrl+Z / Ctrl+Maj+Z | Annuler / rétablir une modification (⌘ sur Mac) |
 | Ctrl+L | Verrouiller le spectacle pour éviter toute modification accidentelle |
 | Ctrl+T | Charger à un instant : repartir du milieu d'une scène |
@@ -168,6 +170,7 @@ Une **cue process** contient un patch Pure Data et le fait tourner tant que la c
 
 - **Historique d'annulation** de chaque modification (Ctrl+Maj+U), et sauvegarde automatique continue.
 - **Verrouiller** le spectacle pendant la représentation (Ctrl+L) : GO, Échap et Doh! fonctionnent, l'édition non.
+- **Drapeaux (nouveau).** Quelque chose à corriger ? F sur la cue sélectionnée, ou Maj+F pour la cue lancée par le dernier GO, même spectacle verrouillé. Un drapeau se place devant le nom de la cue jusqu'à ce que F le retire. Les drapeaux sont gardés avec l'attente : ils sont écrits sur le disque au prochain enregistrement du spectacle, donc enregistrez avant de fermer pour les garder.
 - **Spectacle et représentations.** Le spectacle est l'œuvre ; chaque soir est une représentation, une copie que l'on modifie sans toucher l'original. *File > New performance…*. À la fin, Go.dot liste ce qui a changé, cue par cue, pour reporter les bonnes modifications dans le spectacle.
 - **Problèmes d'interface.** Si l'interface audio disparaît, le spectacle se met en pause et reprend à son retour. Si sa fréquence d'échantillonnage change, Go.dot suit.
 - **Double-clic sur un `.wfg`** pour ouvrir le spectacle (installateur Windows, .deb Linux, macOS).

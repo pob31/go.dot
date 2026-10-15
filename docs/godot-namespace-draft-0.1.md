@@ -315,6 +315,7 @@ to the node invokes the command; the same names are what the CLI and the event l
 | `standby.previous` | `/godot/cmd/standby/previous` | — | |
 | `mount.load` | `/godot/cmd/mount/load` | `s` mount id | (re)reads the namespace file |
 | `go.doh` | `/godot/cmd/go/doh` | `[s run…]` | *(2026-10-01, D1)* Doh!: takes back the last GO, inside `list/dohWindow` of it; refused `too-soon`, `nothing-to-take-back`, `trigger-after-go` or `too-late` - §24.4 |
+| `go.flag` | `/godot/cmd/go/flag` | — | *(2026-10-15, §63)* Shift+F: flags the cue the last GO fired (`cue/flagged` set true); refused `nothing-to-flag` before any GO has fired a cue, `unknown-id` when that cue has been deleted since |
 | `go.dohRelaunch` | `/godot/cmd/go/dohRelaunch` | `s` run `[s made…]` | *(specified 2026-10-01 for D3; built 2026-10-03)* a scene the GO stopped, relaunched once it has ended - §24.4, §24.13 |
 | `list.dohReport` | `/godot/cmd/list/dohReport` | `s` list `s` text | *(specified 2026-10-01 for D3; built 2026-10-03)* the Doh's report, from a hook - §24.4, §24.13 |
 
@@ -29475,3 +29476,79 @@ tiles cost the renderer's message thread with a blur in them.
 - **VFX.12**, 2026-10-13: the tester guides, in English and French - keys, text cues with their fields,
   blur cues - and the README's status; a summary for the author beside the build. The full suite ran once,
   at the plan's end.
+
+## 63. Flags: a cue marked to look at afterwards
+
+Asked by the author on 2026-10-15: *"Is it possible to flag a line so the operator can fix something
+afterwards? Use "f" on the keyboard to mark the cue and [shift]+F to mark the last cue that was
+triggers (Go command)"*. Built the same day, on the engine, the desktop window and the page. Numbered
+63 because §62 is the fonts and QLab text work on its own branch, not yet on `main`; its decisions
+run to ALK, so these start at ALM.
+
+### 63.1 The row and the command
+
+| Row | Type | Access | Persist | Default |
+|---|---|---|---|---|
+| `/godot/cue/<id>/flagged` | `T` | rw | **state** | false |
+
+Every kind of cue has it, since it is a `cue` row. A flagged cue plays exactly as it would unflagged:
+the flag is a note for the people working on the show and nothing the show plays.
+
+| Command | Node | Params | Notes |
+|---|---|---|---|
+| `go.flag` | `/godot/cmd/go/flag` | — | flags the cue the last GO fired; sets, never clears |
+
+| Reason | When | The desktop's line |
+|---|---|---|
+| `nothing-to-flag` | no GO has fired a cue since the show opened (a GO on an empty standby, or one refused too soon, fired nothing) | "Nothing flagged: no GO has fired a cue yet" |
+| `unknown-id` | the cue the last GO fired has been deleted since | "Nothing flagged: the cue the last GO fired has been deleted" |
+
+F needs no command of its own: it is a `node.setMany` of the picked cues' `flagged` rows, which is
+one record and one gesture, as any edit over several cues is (§30.11).
+
+### 63.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **ALM** | **F flags the picked cues; Shift+F flags the cue the last GO fired** | the author's |
+| **ALN** | **The flag is a state row** (state.xml, beside the standby and the folds), so that it can be taken during a locked performance: the lock is on the show half only (§14.11), and a flag changes nothing a GO does. It lights no unsaved dot and Undo does not take it back - F again takes it off. **It reaches the disk with the next save, as the standby does: a show closed without a save loses the flags set since.** The alternative, a show row with an exception to the lock, would ride the autosave and ask to be saved at close, at the cost of the lock's one rule. Put to the author. | mine, for review |
+| **ALO** | **Shift+F is an engine command, `go.flag`**, because which cue the last GO fired is the engine's to know: a client reading it off the tree is a pass behind a GO pressed a moment ago, and a surface button or a stage manager's OSC has no tree to read. The cue is the standby that GO found - a member, when the pointer stood inside a group - and it is **kept through a Doh!**, a jump and a trigger: the cue a GO fired too early is the one to look at. It **sets the flag and never clears it**, so a second press is harmless. | mine, for review |
+| **ALP** | **F goes one way for all the picked cues**: every one already flagged, and the flags come off; otherwise the rest are flagged, so a pick of three where one was flagged ends with three flagged. Only the rows that change are written. **One flag per key-down** (a held key repeats). F with nothing picked writes nothing and says so. Only F and Shift+F: **Ctrl/⌘-F is left free** for a find. Under the lock as much as not. | mine, for review |
+| **ALQ** | **The mark: a drawn flag before the cue's name**, in its own colour (theme token `flag`, a signal orange #FF9330, brighter than the standby's amber), so it is never cut off by a long name as the marks after one can be; its tooltip says what it means and how it comes off (§4.8). The inspector's `flagged` tick sits after the notes on both clients. The Show menu offers both beside Doh!, the first worded for the way F would go. | mine, for review |
+| **ALR** | **The page binds the same two keys** (Shift+F in `commands.json` as a key, F's write as the gesture `flag`) and draws ⚑ before a flagged cue's name, with the same title. | mine, for review |
+
+The words the window says are the implementer's, for the author's review: "Flagged 12 Rain to look at
+afterwards", "Flagged 3 cues to look at afterwards", "Flag taken off 12 Rain", "Nothing picked to flag:
+pick a cue and press F, or Shift+F flags the cue the last GO fired", the two refusals above, the
+tooltip "flagged: somebody marked it to look at afterwards - F on it takes the flag off", and the menu's
+"Flag the picked cue", "Flag the 3 picked cues", "Take the flag off the picked cue", "Flag the cue the
+last GO fired".
+
+### 63.3 Not done
+
+- **No list of flagged cues** and no step from one to the next. A long show would want one - a "next
+  flagged" key or a filter on the list - once the author has used the flags in a run.
+- **QLab's own `flagged`** (§46) is not imported onto the row, and neither are the cues the importer
+  marks for review in its report. Both would be one write each; the importer is being changed on the
+  fonts branch (§62), so this waits for it.
+- **The backup machine** (§58) learns which cue the last GO fired by running the GOs it is sent; a
+  backup realigned from the main's position (RD.8) knows none until the next GO, so Shift+F on it says
+  `nothing-to-flag` until then. The position's wire format was left alone.
+- **An audio outage** (§6.2) refuses `go.flag` and F's write as it refuses every edit, with the
+  outage's own word.
+
+### 63.4 Tests
+
+`GoTests` (under C and fr_FR): `go.flag` flags the cue the last GO fired and sets rather than toggles;
+a locked show takes it and F's `node.setMany`, the show's revision and the Undo history do not move,
+and the lock still refuses a show row; the flag is in state.xml and never show.xml, and comes back
+from it; a Doh!, an empty GO and a refused GO leave the cue it flags; a cue deleted since is
+`unknown-id`; a log replayed onto the saved show flags the same cue. `TreeTests`' golden carries the
+new row. `ClientTests`: the gesture against the real registry, F's one way for all and the words, the
+flags read every pass with no rebuild, the refusals' sentences. `RunPaneUiTests`: F once per key-down,
+Shift+F, Ctrl+F left alone, and a flag drawn before the name in its colour and nothing changed at the
+right of the row (picture: `build/flag-shots/cue-list-flags.png`, with `WFG_SNAPSHOT_DIR`).
+`blackbox.client` checks the two new table entries against `wfg commands`; `console.unit`,
+`schema.*`, `client.boundary` and `source.comments` pass. By hand, over OSC on a copy of `phase4`:
+refused before any GO, taken under the lock, no unsaved dot, and after a save only state.xml carries
+`flagged="true"`.

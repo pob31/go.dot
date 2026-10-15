@@ -172,6 +172,13 @@ namespace wfg::client::model
                     (§4.8). */
                 { "doh",           0xFFFF6EB4 },
 
+                /*  A FLAGGED CUE'S FLAG (namespace draft §63, ALQ): a signal
+                    orange, brighter than the standby's amber and the stopping
+                    orange beside it, because a flag is there to be found down
+                    a long list afterwards. The flag's shape before the name
+                    says it, and its tooltip in words: never the colour alone. */
+                { "flag",          0xFFFF9330 },
+
                 /*  AN EQ HANDLE EACH (author, 2026-09-25: "Having different
                     colours on each handle like on the EQ of the spatcore
                     library really helps"): spatcore's own first six, red to

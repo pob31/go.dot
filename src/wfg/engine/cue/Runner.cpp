@@ -8727,6 +8727,7 @@ namespace wfg::cue
             from the GO before this one. */
         record.lastGoTickBefore = lastGoTick;
         lastGoTick = tick;
+        lastGoneCue = standby;
 
         if (const auto found = marks.find (listId); found != marks.end())
             record.markBefore = found->second;
@@ -23442,6 +23443,56 @@ namespace wfg::cue
                                 applied.push_back (osc::Value::string (id));
 
                             return Outcome::ok (applied);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  SHIFT+F: THE CUE THE LAST GO FIRED, FLAGGED (namespace draft §63;
+            the author, 2026-10-15: "flag a line so the operator can fix
+            something afterwards ... [shift]+F to mark the last cue that was
+            triggered"). A note for afterwards, and nothing the show plays.
+
+            AN ENGINE COMMAND AND NOT A CLIENT'S `node.set`, because which cue
+            the last GO fired is the engine's to know: a client reading it off
+            the tree would be a pass behind a GO pressed a moment ago, and a
+            surface button or a stage manager's OSC has no tree to read. One
+            named command, as §4.11 asks, whoever presses it.
+
+            A WRITE TO A STATE ROW, `cue/flagged`, through the document's one
+            door - so it is let through the lock, lights no unsaved dot, takes
+            no step of Undo and lands in state.xml at the next save, as the
+            standby does. It SETS the flag and never clears it: a second press
+            of Shift+F is still "look at this one", and F on the row is how a
+            flag comes off.
+
+            Which cue: `Runner::cueLastGone`, the standby the last GO found,
+            kept through a Doh! (ALO). No arguments, and the record carries
+            none: a replay runs the GOs before it and reaches the same cue. */
+        registry.add ({ "go.flag",
+                        "Flags the cue the last GO fired - /godot/cue/<id>/flagged set true - for somebody"
+                        " to look at afterwards. A state row: accepted under the lock, no unsaved dot, no"
+                        " step of Undo. Refused nothing-to-flag before any GO has fired a cue.",
+                        {},
+                        true,
+                        [&runner, &document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto& cueId = runner.cueLastGone();
+
+                            if (cueId.empty())
+                                return Outcome::rejected (reason::nothingToFlag);
+
+                            /*  A CUE DELETED SINCE ITS GO is `unknown-id`, asked
+                                here: the door would answer `bad-address` for an
+                                address that names nothing, which sends somebody to
+                                look at a datagram nobody typed. */
+                            if (! document.findById (cueId).isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto edit = document.setAttribute ("/godot/cue/" + cueId + "/flagged", "true");
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok (args);
                         } });
 
         //----------------------------------------------------------------------

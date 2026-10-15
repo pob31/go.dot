@@ -67,6 +67,9 @@ namespace wfg::client::model
         //  What a row says about itself beside its name.
         forever, shuffle, follow, subset, preset, disabled, speed, stretch, dca, lane,
 
+        //  Somebody marked it to look at afterwards (namespace draft §63), before its name.
+        flag,
+
         /*  The panels at the foot - all but the EQ and the FX, which are
             their own two letters (author, 2026-09-30: "EQ toggle can show EQ
             rather than the Gaussian bump. Same for FX"): a word as short as a

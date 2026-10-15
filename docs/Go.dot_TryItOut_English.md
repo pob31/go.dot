@@ -67,6 +67,8 @@ A show is a folder that contains one or more `.wfg` files plus a `media/` folder
 | Esc | Stop everything gracefully: fade out over the panic time (1 s by default), run the groups' endings |
 | Esc twice (within 0.75 s) | Drop everything at once, no endings |
 | F9 | **Doh!** — take back the last GO |
+| F | Flag the picked cues to look at after the run (F again takes the flag off) |
+| Shift+F | Flag the cue the last GO fired |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo an edit (⌘ on a Mac) |
 | Ctrl+L | Lock the show so nothing can be edited by accident |
 | Ctrl+T | Load to time: start the show from the middle of a scene |
@@ -166,6 +168,7 @@ A **process cue** holds a Pure Data patch and runs it while the cue runs, at con
 
 - **Undo history** for every edit (Ctrl+Shift+U), and continuous autosave.
 - **Lock** the show during performance (Ctrl+L): GO, Esc and Doh! still work, editing does not.
+- **Flags (new).** Something to fix? Press F on the picked cue, or Shift+F for the cue the last GO fired, even with the show locked. A flag stands before the cue's name until F takes it off. Flags are kept with the standby, so they reach the disk when the show is next saved: save before closing to keep them.
 - **Show and performances.** A show is the piece; each night is a performance, a copy you can change without touching the original. *File > New performance…*. At the end, Go.dot lists what changed, cue by cue, so you can bring the good changes back into the show.
 - **Interface trouble.** If the audio interface disappears, the show pauses and resumes when it returns. If its sample rate changes, Go.dot follows it.
 - **Double-click a `.wfg`** to open the show (Windows installer, Linux .deb, macOS).

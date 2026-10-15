@@ -409,6 +409,16 @@ namespace wfg::client::ui
                     f.addRoundedRectangle (6.5f, 9.5f, 11.0f, 5.0f, 1.3f);
                     break;
 
+                case model::Icon::flag:
+                    /*  A FLAG ON ITS POLE, the pennant solid: the mark a reader
+                        looks for down a long list (namespace draft §63). */
+                    line (l, 6.0f, 3.0f, 6.0f, 21.5f);
+                    f.startNewSubPath (6.0f, 3.5f);
+                    f.lineTo (19.5f, 7.5f);
+                    f.lineTo (6.0f, 12.5f);
+                    f.closeSubPath();
+                    break;
+
                 case model::Icon::lane:
                     l.startNewSubPath (3.0f, 17.0f);
                     l.lineTo (9.0f, 8.0f);

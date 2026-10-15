@@ -1642,6 +1642,14 @@ namespace wfg::cue
                     const std::string& carriedOn = {});
         std::uint64_t goInHand() const noexcept { return currentGo; }
 
+        /*  THE CUE THE LAST GO FIRED, for Shift+F's flag (namespace draft
+            §63, ALO): the standby that GO found - a member, when the pointer
+            stood inside a group - or empty before any GO. Unlike Doh!'s record
+            it is kept through a Doh!, a jump and a trigger: the cue a GO fired
+            too early is the very one somebody wants to look at afterwards.
+            Handler state, set by `beginGo`, so a replay flags the same cue. */
+        const std::string& cueLastGone() const noexcept { return lastGoneCue; }
+
         /*  `supplied` and `drawn` (D3): the identifiers its put-back makes - a
             cue the GO stopped, made again where it would be now; a scene, a
             bank fired again - drawn in that order, and carried on the applied
@@ -3095,6 +3103,9 @@ namespace wfg::cue
 
         /*  The tick of the last GO that fired something, or none yet. */
         std::int64_t lastGoTick = -1;
+
+        /*  And the cue it fired, which nothing takes back (`cueLastGone`). */
+        std::string lastGoneCue;
 
         std::vector<OscJob> sending;
 

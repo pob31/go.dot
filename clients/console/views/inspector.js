@@ -98,7 +98,7 @@ function fieldsFor(id, kind) {
     parameter table shows up in a predictable place instead of vanishing. */
 const WHEN = ["preWait", "duration", "postWait"];
 
-const SAID_FIRST = ["number", "name", "shortName", "colour", "notes"];
+const SAID_FIRST = ["number", "name", "shortName", "colour", "notes", "flagged"];
 const SAID_LAST = ["enabled", "preset"];
 
 /*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS (Phase 6): the DCA
