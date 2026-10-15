@@ -76,6 +76,7 @@ namespace wfg::client::model
         if (kind == "osc")     return Icon::osc;
         if (kind == "midi")    return Icon::midi;
         if (kind == "process") return Icon::process;
+        if (kind == "script")  return Icon::script;
         if (kind == "timecode") return Icon::timecode;
         if (kind == "range")   return Icon::range;
         if (kind == "trigger") return Icon::trigger;
@@ -96,7 +97,7 @@ namespace wfg::client::model
             is one of the cues that act on a cue, and shares the transport's. */
         if (kind == "memo" || kind == "media" || kind == "mic" || kind == "video" || kind == "fade"
               || kind == "transport" || kind == "osc" || kind == "midi" || kind == "group"
-              || kind == "process" || kind == "timecode")
+              || kind == "process" || kind == "timecode" || kind == "script")
             return "kind-" + kind;
 
         if (kind == "start")
@@ -122,6 +123,9 @@ namespace wfg::client::model
 
         //  A process cue's patch wears the process cue's own (namespace draft §51).
         if (subject == "patch")    return Icon::process;
+
+        //  And a script cue's code its own (namespace draft §66).
+        if (subject == "code")     return Icon::script;
 
         return Icon::none;
     }

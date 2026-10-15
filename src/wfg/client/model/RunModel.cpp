@@ -169,15 +169,17 @@ namespace wfg::client::model
         {
             const auto base = "/godot/run/" + row.id + "/";
 
+            //  A script stuck is ended (§66, AMQ); a patch holds Pd.
             if (row.error == "process-stuck")
-                return "stuck - Pure Data is held until Go.dot starts again";
+                return row.kind == "script" ? "stuck - ended, and the rest run on"
+                                            : "stuck - Pure Data is held until Go.dot starts again";
             if (row.error == "pd-held")
                 return "not opened - another patch is stuck";
 
             const auto state = text (snapshot, base + "processState");
 
             if (state == "starting")
-                return "opening its patch";
+                return row.kind == "script" ? "starting its script" : "opening its patch";
             if (state == "stuck")
                 return "stuck";
             if (state == "late")
@@ -505,7 +507,7 @@ namespace wfg::client::model
             if (row.kind == "mic")
                 row.liveWords = micWords (snapshot, row);
 
-            if (row.kind == "process")
+            if (row.kind == "process" || row.kind == "script")
                 row.liveWords = processWords (snapshot, row);
 
             if (row.kind == "timecode")

@@ -178,6 +178,29 @@ namespace wfg::client::ui
                     line (l, 4.75f, 10.0f, 11.75f, 14.0f);
                     break;
 
+                case model::Icon::script:
+                    /*  A script (namespace draft §66): code between braces, three
+                        lines of it, the middle one indented - text, where a
+                        patch is boxes. */
+                    l.startNewSubPath (7.0f, 3.5f);
+                    l.quadraticTo (4.5f, 3.5f, 4.5f, 6.5f);
+                    l.lineTo (4.5f, 10.0f);
+                    l.quadraticTo (4.5f, 12.0f, 2.5f, 12.0f);
+                    l.quadraticTo (4.5f, 12.0f, 4.5f, 14.0f);
+                    l.lineTo (4.5f, 17.5f);
+                    l.quadraticTo (4.5f, 20.5f, 7.0f, 20.5f);
+                    l.startNewSubPath (17.0f, 3.5f);
+                    l.quadraticTo (19.5f, 3.5f, 19.5f, 6.5f);
+                    l.lineTo (19.5f, 10.0f);
+                    l.quadraticTo (19.5f, 12.0f, 21.5f, 12.0f);
+                    l.quadraticTo (19.5f, 12.0f, 19.5f, 14.0f);
+                    l.lineTo (19.5f, 17.5f);
+                    l.quadraticTo (19.5f, 20.5f, 17.0f, 20.5f);
+                    line (l, 8.0f, 8.0f, 14.0f, 8.0f);
+                    line (l, 10.0f, 12.0f, 16.0f, 12.0f);
+                    line (l, 8.0f, 16.0f, 13.0f, 16.0f);
+                    break;
+
                 case model::Icon::timecode:
                     /*  A code (namespace draft §59): the square wave LTC is drawn
                         as, its bits short and long, over the frames it counts -

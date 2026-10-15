@@ -35,6 +35,7 @@
 #include <wfg/client/ui/CurveLaneComponent.h>
 #include <wfg/client/ui/OscMessagesComponent.h>
 #include <wfg/client/ui/PatchCanvasComponent.h>
+#include <wfg/client/ui/ScriptEditorComponent.h>
 #include <wfg/client/ui/PicturePanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/Icons.h>
@@ -263,6 +264,7 @@ namespace wfg::client::ui
         std::unique_ptr<TakePanelComponent> takePanel;
         std::unique_ptr<PicturePanelComponent> picture;
         std::unique_ptr<PatchCanvasComponent> patchCanvas;
+        std::unique_ptr<ScriptEditorComponent> scriptEditor;
         std::map<std::string, std::string> editorWords;
         juce::TextButton shut { "x" };
 

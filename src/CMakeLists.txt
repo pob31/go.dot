@@ -201,6 +201,8 @@ add_library(wfg_engine STATIC
     wfg/engine/process/ScriptInstance.cpp
     wfg/engine/process/JsLanguage.h
     wfg/engine/process/JsLanguage.cpp
+    wfg/engine/process/ScriptText.h
+    wfg/engine/process/ScriptText.cpp
     wfg/engine/process/PatchEditor.h
     wfg/engine/process/PatchEditor.cpp
     wfg/engine/pair/Hold.h
@@ -686,6 +688,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/OscMessages.cpp
     wfg/client/model/Patch.h
     wfg/client/model/Patch.cpp
+    wfg/client/model/Code.h
+    wfg/client/model/Code.cpp
     wfg/client/model/OscCurves.h
     wfg/client/model/OscCurves.cpp
     wfg/client/model/Sends.h
@@ -806,6 +810,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/OscMessagesComponent.cpp
     wfg/client/ui/PatchCanvasComponent.h
     wfg/client/ui/PatchCanvasComponent.cpp
+    wfg/client/ui/ScriptEditorComponent.h
+    wfg/client/ui/ScriptEditorComponent.cpp
     wfg/client/ui/CurveLaneComponent.h
     wfg/client/ui/CurveLaneComponent.cpp
     wfg/client/ui/RunPaneComponent.h

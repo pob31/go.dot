@@ -123,6 +123,11 @@ namespace wfg::client::model
                 { "start",   { "target" } },
                 //  A process cue (namespace draft §51): its patch, then its MIDI.
                 { "process", { "patch", "midiIn", "midiOut" } },
+                /*  A SCRIPT CUE (namespace draft §66): its language, then its
+                    MIDI - its source is the editor's at the foot, not the
+                    inspector's (AMO, the author: "No need to show the script
+                    content in the inspector"). */
+                { "script",  { "language", "midiIn", "midiOut" } },
 
                 /*  A TIMECODE CUE (namespace draft §59): which code, where it
                     starts, how long it runs - the rate and where it goes are
@@ -1482,6 +1487,12 @@ namespace wfg::client::model
                 opens it, as a fade's mixer opens - offered so it can be shut. */
             offer ("Patch, the boxes and lines this cue runs", "patch");
         }
+        else if (kind == "script")
+        {
+            /*  A SCRIPT CUE'S CODE (namespace draft §66, AMO): picking one opens
+                it, as a patch opens - offered so it can be shut. */
+            offer ("Code, the script this cue runs", "code");
+        }
 
         return out;
     }
@@ -1816,6 +1827,13 @@ namespace wfg::client::model
         if (out.kind == "fade")
             std::erase_if (decided, [] (const Field& field)
                                     { return field.name == "sends" || field.name == "eq" || field.name == "fx"; });
+
+        /*  AND A SCRIPT'S SOURCE IS ITS EDITOR'S (namespace draft §66, AMO; the
+            author, 2026-10-15: "No need to show the script content in the
+            inspector"): code is read and written at the foot, where it has
+            room, its colours and its lines. The Code opener is the door. */
+        if (out.kind == "script")
+            std::erase_if (decided, [] (const Field& field) { return field.name == "source"; });
 
         //  The four blocks, in the order somebody fills them in.
         auto kindRows = [&out]

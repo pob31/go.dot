@@ -213,6 +213,7 @@ namespace wfg::client::model
                 { "kind-osc",       0xFFD8C26A },
                 { "kind-midi",      0xFFB59CF0 },
                 { "kind-process",   0xFF7FD1AE },   // namespace draft §51: a seafoam no other kind wears
+                { "kind-script",    0xFF8E9CF2 },   // namespace draft §66: a periwinkle, between audio's blue and MIDI's violet
                 { "kind-timecode",  0xFFBCD65E },   // namespace draft §59: a lime, between OSC's yellow and video's green, never red
                 { "kind-group",     0xFFC6C1B9 },
 

@@ -66,6 +66,8 @@ namespace wfg::client::ui
 
         if (patchCanvas != nullptr)
             patchCanvas->applyTheme (theme);
+        if (scriptEditor != nullptr)
+            scriptEditor->applyTheme (theme);
 
         if (messages != nullptr)
             messages->applyTheme (theme);
@@ -133,9 +135,27 @@ namespace wfg::client::ui
         takePanel.reset();
         picture.reset();
         patchCanvas.reset();
+        scriptEditor.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::code:
+            {
+                /*  A SCRIPT CUE'S CODE (namespace draft §66, AMT): written in
+                    its language, one write per finished edit. */
+                ScriptEditorComponent::Actions writing;
+                writing.set = actions.set;
+                writing.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                scriptEditor = std::make_unique<ScriptEditorComponent> (theme, std::move (writing));
+                addAndMakeVisible (*scriptEditor);
+                break;
+            }
+
             case model::Subject::Kind::patch:
             {
                 /*  A PROCESS CUE'S PATCH (namespace draft §51, PC.5): drawn
@@ -511,6 +531,10 @@ namespace wfg::client::ui
                 wanted = "Patch";
                 break;
 
+            case model::Subject::Kind::code:
+                wanted = "Code";
+                break;
+
             case model::Subject::Kind::none:
                 break;
         }
@@ -573,6 +597,9 @@ namespace wfg::client::ui
 
         if (patchCanvas != nullptr)
             patchCanvas->show (reading.patch);
+
+        if (scriptEditor != nullptr)
+            scriptEditor->show (reading.code);
     }
 
     std::optional<double> FootPanelComponent::heldEdge() const
@@ -730,6 +757,9 @@ namespace wfg::client::ui
 
         if (patchCanvas != nullptr)
             patchCanvas->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (scriptEditor != nullptr)
+            scriptEditor->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
 
         /*  THE TABLE ON THE LEFT AND THE CURVES ON THE RIGHT, the table as
             wide as the inspector and the cue list's own column would allow it

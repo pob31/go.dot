@@ -548,7 +548,8 @@ namespace wfg::client
                         different one opens it. */
                     if (shell->footSubject().kind == model::Subject::Kind::curve
                           || shell->footSubject().kind == model::Subject::Kind::fade
-                          || shell->footSubject().kind == model::Subject::Kind::patch)
+                          || shell->footSubject().kind == model::Subject::Kind::patch
+                          || shell->footSubject().kind == model::Subject::Kind::code)
                         shutCurveFor = shell->footSubject().objectId;
 
                     shell->setFoot ({});
@@ -2491,6 +2492,18 @@ namespace wfg::client
                               && shell->footSubject().objectId == selection.anchor()))
                 {
                     shell->setFoot ({ model::Subject::Kind::patch, selection.anchor() });
+                    menuItemsChanged();
+                }
+
+                /*  AND A SCRIPT CUE ITS CODE (namespace draft §66, AMO): the one
+                    place its script is shown, the inspector having none of it. */
+                if (! selection.anchor().empty()
+                      && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "script"
+                      && shutCurveFor != selection.anchor()
+                      && ! (shell->footSubject().kind == model::Subject::Kind::code
+                              && shell->footSubject().objectId == selection.anchor()))
+                {
+                    shell->setFoot ({ model::Subject::Kind::code, selection.anchor() });
                     menuItemsChanged();
                 }
 

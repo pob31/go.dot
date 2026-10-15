@@ -231,8 +231,11 @@ namespace wfg::client::model
         out.editor = text (snapshot, "/godot/engine/patchEditor");
         out.editorInstall = text (snapshot, "/godot/engine/patchEditorInstall");
 
-        //  Its live run, the newest: a process cue has one at a time.
-        for (const auto& run : words (text (snapshot, "/godot/runs/order")))
+        /*  Its live run, the newest: a process cue has one at a time. Read
+            off /godot/run/order, where the runs are published - until
+            2026-10-15 this read /godot/runs/order, which is nothing, so the
+            canvas never found its running patch (found writing §66's editor). */
+        for (const auto& run : words (text (snapshot, "/godot/run/order")))
         {
             const auto at = "/godot/run/" + run + "/";
             const auto state = text (snapshot, at + "state");

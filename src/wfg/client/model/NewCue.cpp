@@ -18,6 +18,7 @@
 
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/process/PatchText.h>
+#include <wfg/engine/process/ScriptText.h>
 
 namespace wfg::client::model
 {
@@ -27,7 +28,7 @@ namespace wfg::client::model
             "+ transport" list, among the other cues that act on a cue. The
             kind is unchanged; only its button went. */
         static const std::vector<std::string> kinds {
-            "memo", "media", "mic", "video", "fade", "transport", "osc", "midi", "process", "group"
+            "memo", "media", "mic", "video", "fade", "transport", "osc", "midi", "process", "script", "group"
         };
 
         return kinds;
@@ -39,6 +40,11 @@ namespace wfg::client::model
             a patch reaches the world, rather than on an empty canvas. */
         if (kind == "process")
             return { { "patch", process::starterPatch() } };
+
+        /*  AND A SCRIPT CUE ON A FEW LINES OF COMMENT (namespace draft §66), in
+            JavaScript, the language a new one is written in. */
+        if (kind == "script")
+            return { { "language", "javascript" }, { "source", process::starterScript ("javascript") } };
 
         return {};
     }

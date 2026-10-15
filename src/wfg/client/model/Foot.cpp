@@ -46,6 +46,7 @@ namespace wfg::client::model
             case Subject::Kind::messages:  return "messages";
             case Subject::Kind::picture:   return "picture";
             case Subject::Kind::patch:     return "patch";
+            case Subject::Kind::code:      return "code";
             case Subject::Kind::none:      break;
         }
 
@@ -57,7 +58,7 @@ namespace wfg::client::model
         for (const auto kind : { Subject::Kind::waveform, Subject::Kind::sends, Subject::Kind::timeline,
                                  Subject::Kind::curve, Subject::Kind::eq, Subject::Kind::fx,
                                  Subject::Kind::take, Subject::Kind::fade, Subject::Kind::messages,
-                                 Subject::Kind::picture, Subject::Kind::patch })
+                                 Subject::Kind::picture, Subject::Kind::patch, Subject::Kind::code })
             if (wordFor (kind) == word)
                 return kind;
 
@@ -125,6 +126,9 @@ namespace wfg::client::model
             /*  AND A PROCESS CUE'S PATCH (namespace draft §51): what this cue
                 runs is a question about the cue in hand. */
             case Subject::Kind::patch:     return true;
+
+            //  AND A SCRIPT CUE'S CODE (namespace draft §66), as a patch.
+            case Subject::Kind::code:      return true;
             case Subject::Kind::none:      break;
         }
 
@@ -183,6 +187,7 @@ namespace wfg::client::model
             case Subject::Kind::fade:
             case Subject::Kind::messages:
             case Subject::Kind::patch:
+            case Subject::Kind::code:
             case Subject::Kind::none:      break;
         }
 
@@ -339,6 +344,7 @@ namespace wfg::client::model
             case Subject::Kind::fade:
             case Subject::Kind::messages:
             case Subject::Kind::patch:
+            case Subject::Kind::code:
                 break;
         }
 
@@ -511,6 +517,16 @@ namespace wfg::client::model
 
             if (out.patch.cueId.empty())
                 out.notice = "Only a process cue has a patch";
+        }
+
+        /*  A SCRIPT CUE'S CODE (namespace draft §66, AMT), the lock with it. */
+        if (subject.kind == Subject::Kind::code)
+        {
+            out.code = readCodeFoot (snapshot, out.subject.objectId);
+            out.locked = out.code.locked;
+
+            if (out.code.cueId.empty())
+                out.notice = "Only a script cue has code";
         }
 
         if (subject.kind == Subject::Kind::fade)

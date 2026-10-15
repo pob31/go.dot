@@ -142,7 +142,7 @@ namespace wfg::client::model
             {
                 named ("port", "port:");
             }
-            else if (kind == "process")
+            else if (kind == "process" || kind == "script")
             {
                 named ("midiIn", "port:");
                 named ("midiOut", "port:");

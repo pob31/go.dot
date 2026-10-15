@@ -5924,6 +5924,122 @@ TEST_CASE ("warps: the editor over Show settings goes from output to output on i
 }
 
 //==============================================================================
+/*  THE SCRIPT EDITOR (namespace draft §66, AMT): typing writes nothing until
+    the edit is finished, then one write of the whole source; a change made
+    elsewhere is shown when nothing typed waits; the lock writes nothing; a
+    problem's line is marked. */
+#include <wfg/client/ui/ScriptEditorComponent.h>
+
+TEST_CASE ("script editor: typing is one write when finished, an edit elsewhere is shown, the lock writes nothing")
+{
+    std::vector<std::pair<std::string, std::string>> written;
+    wfg::client::ui::ScriptEditorComponent::Actions actions;
+    actions.set = [&written] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.say = [] (const juce::String&) {};
+
+    auto editor = std::make_unique<wfg::client::ui::ScriptEditorComponent> (wfg::client::model::Theme {}, std::move (actions));
+    editor->setSize (600, 300);
+
+    wfg::client::model::CodeReading reading;
+    reading.cueId = "SCRP0001";
+    reading.language = "javascript";
+    reading.text = "print(1);\n";
+    editor->show (reading);
+    CHECK (editor->documentForTest().getAllContent() == "print(1);\n");
+    CHECK (written.empty());
+
+    //  TYPED: nothing written until the edit is finished.
+    auto& document = editor->documentForTest();
+    document.insertText (document.getNumCharacters(), "print(2);\n");
+    document.insertText (document.getNumCharacters(), "print(3);\n");
+    CHECK (written.empty());
+
+    //  The tree still holds the old text: what was typed stays.
+    editor->show (reading);
+    CHECK (document.getAllContent() == "print(1);\nprint(2);\nprint(3);\n");
+
+    editor->commit();
+    REQUIRE (written.size() == 1u);
+    CHECK (written[0].first == "/godot/cue/SCRP0001/source");
+    CHECK (written[0].second == "print(1);\nprint(2);\nprint(3);\n");
+
+    //  Committed again with nothing new: nothing written.
+    editor->commit();
+    CHECK (written.size() == 1u);
+
+    //  The tree catches up, then a change made elsewhere is shown.
+    reading.text = written[0].second;
+    editor->show (reading);
+    reading.text = "print('elsewhere');\n";
+    editor->show (reading);
+    CHECK (document.getAllContent() == "print('elsewhere');\n");
+
+    //  A PROBLEM ON A LINE is marked there and said under the code.
+    reading.state = "running";
+    reading.runId = "SCRRUN01";
+    reading.said = "'x' is not defined (line 1)";
+    editor->show (reading);
+    CHECK (editor->markedLine() == 1);
+    CHECK (editor->statusForTest().contains ("JavaScript - running"));
+    CHECK (editor->statusForTest().contains ("(line 1)"));
+
+    //  UNDER THE LOCK: read-only, and nothing written.
+    reading.locked = true;
+    editor->show (reading);
+    CHECK (editor->editorForTest().isReadOnly());
+    document.insertText (0, "x");
+    editor->commit();
+    CHECK (written.size() == 1u);
+
+    //  ANOTHER CUE PICKED writes what was typed for the last one, first.
+    reading.locked = false;
+    editor->show (reading);
+    document.replaceAllContent ("godot.tick(() => {});\n");
+    wfg::client::model::CodeReading other;
+    other.cueId = "SCRP0002";
+    other.language = "lua";
+    other.text = "print(1)\n";
+    editor->show (other);
+    REQUIRE (written.size() == 2u);
+    CHECK (written[1].first == "/godot/cue/SCRP0001/source");
+    CHECK (written[1].second == "godot.tick(() => {});\n");
+    CHECK (document.getAllContent() == "print(1)\n");
+    CHECK (editor->statusForTest().startsWith ("Lua"));
+
+    //  AND THE PANEL SHUT writes what waits.
+    document.replaceAllContent ("print(2)\n");
+    editor.reset();
+    REQUIRE (written.size() == 3u);
+    CHECK (written[2].first == "/godot/cue/SCRP0002/source");
+}
+
+TEST_CASE ("script editor: Esc goes on to the PANIC, and Ctrl+S writes and goes on to save the show")
+{
+    std::vector<std::pair<std::string, std::string>> written;
+    wfg::client::ui::ScriptEditorComponent::Actions actions;
+    actions.set = [&written] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+
+    wfg::client::ui::ScriptEditorComponent editor (wfg::client::model::Theme {}, std::move (actions));
+    editor.setSize (600, 300);
+    wfg::client::model::CodeReading reading;
+    reading.cueId = "SCRP0001";
+    reading.language = "javascript";
+    reading.text = "print(1);\n";
+    editor.show (reading);
+
+    auto& code = editor.editorForTest();
+    CHECK_FALSE (code.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+
+    editor.documentForTest().insertText (0, "// a\n");
+    CHECK_FALSE (code.keyPressed (juce::KeyPress ('s', juce::ModifierKeys::commandModifier, 0)));
+    REQUIRE (written.size() == 1u);
+    CHECK (written[0].second == "// a\nprint(1);\n");
+
+    //  Space and Return type, as in any editor.
+    CHECK (code.keyPressed (juce::KeyPress (juce::KeyPress::returnKey)));
+}
+
+//==============================================================================
 /*  THE PATCH CANVAS (namespace draft §51, PC.5): a drag is one write of the
     whole patch when the hand lets go, Delete takes the picked boxes and their
     lines, a band picks what it touches, and the lock writes nothing. */

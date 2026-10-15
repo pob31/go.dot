@@ -60,6 +60,7 @@
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Picture.h>
+#include <wfg/client/model/Code.h>
 #include <wfg/client/model/Take.h>
 #include <wfg/client/model/Timeline.h>
 
@@ -71,7 +72,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take, fade, messages, picture, patch };
+        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take, fade, messages, picture, patch, code };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -273,6 +274,9 @@ namespace wfg::client::model
 
         /*  A PROCESS CUE'S PATCH (namespace draft §51, PC.5), for the canvas. */
         PatchReading patch;
+
+        /*  A SCRIPT CUE'S CODE (namespace draft §66, AMT), for the editor. */
+        CodeReading code;
 
         /*  AND ITS CURVES, beside the table (namespace draft 45, O.7): each on
             the cue's own time, against an axis of its own. */

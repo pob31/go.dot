@@ -12008,6 +12008,176 @@ TEST_CASE ("client: the canvas at the foot reads a process cue's patch, and its 
     CHECK (model::iconForPanel ("patch") == model::Icon::process);
 }
 
+//==============================================================================
+/*  SCRIPT CUES IN THE WINDOW (namespace draft §66, SC.5). */
+#include <wfg/engine/process/ScriptText.h>
+
+TEST_CASE ("client: a script cue has its own icon and accent, and its button makes one in JavaScript with the starter")
+{
+    CHECK (model::iconFor ("script") == model::Icon::script);
+    CHECK (model::accentFor ("script") == "kind-script");
+    CHECK (model::iconForPanel ("code") == model::Icon::script);
+
+    const auto& kinds = model::cueKinds();
+    const auto process = std::find (kinds.begin(), kinds.end(), "process");
+    const auto script = std::find (kinds.begin(), kinds.end(), "script");
+    REQUIRE (script != kinds.end());
+    CHECK (script == process + 1);
+
+    const auto born = model::bornWith ("script");
+    REQUIRE (born.size() == 2u);
+    CHECK (born[0] == std::pair<std::string, std::string> { "language", "javascript" });
+    CHECK (born[1].first == "source");
+    CHECK (born[1].second == wfg::process::starterScript ("javascript"));
+    CHECK (born[1].second.find ("godot.hear(") != std::string::npos);
+}
+
+TEST_CASE ("client: a script cue is inspected by its language and two MIDI ports, never its source, and offers its code")
+{
+    Rig rig;
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("script"), osc::Value::string ("Mapper"),
+                                            osc::Value::string ("SCRP0001"),
+                                            osc::Value::string ("source"), osc::Value::string ("print(1);") });
+    const auto snapshot = rig.publish (2);
+
+    const auto panel = model::inspect (*snapshot, "SCRP0001");
+    REQUIRE_FALSE (panel.empty());
+    CHECK (panel.kind == "script");
+
+    std::vector<std::string> order;
+    const model::Field* language = nullptr;
+    for (const auto& block : panel.blocks)
+        for (const auto& field : block.fields)
+        {
+            CHECK (field.name != "source");
+            if (field.name == "language" || field.name == "midiIn" || field.name == "midiOut")
+                order.push_back (field.name);
+            if (field.name == "language")
+                language = &field;
+        }
+
+    CHECK (order == std::vector<std::string> { "language", "midiIn", "midiOut" });
+    REQUIRE (language != nullptr);
+    CHECK (language->control == model::Control::choice);
+    CHECK (language->value == "javascript");
+
+    const auto openers = model::openersFor ("script", "SCRP0001");
+    REQUIRE (openers.size() == 1u);
+    CHECK (openers[0].value == "code");
+    CHECK (openers[0].control == model::Control::opener);
+}
+
+TEST_CASE ("client: a script run says what its script is doing, beside its name")
+{
+    Rig rig;
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("script"), osc::Value::string ("Mapper"),
+                                            osc::Value::string ("SCRP0001") });
+    rig.runs.create ("SCRRUN01", "SCRP0001", "script");
+    auto* run = rig.runs.find ("SCRRUN01");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::playing;
+
+    std::int64_t tick = 2;
+    const auto words = [&]
+    {
+        rig.parameters.markStale();
+        for (const auto& row : model::readRuns (*rig.publish (tick++)))
+            if (row.id == "SCRRUN01")
+                return row.liveWords;
+        return std::string ("(no row)");
+    };
+
+    run->processState = "starting";
+    CHECK (words() == "starting its script");
+    run->processState = "running";
+    run->processSaid = "level: 0.25";
+    CHECK (words() == "level: 0.25");
+
+    run->state = cue::runState::failed;
+    run->error = "process-stuck";
+    CHECK (words() == "stuck - ended, and the rest run on");
+}
+
+TEST_CASE ("client: the editor at the foot reads a script cue's code, its language, its lock and its run")
+{
+    Rig rig;
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("script"), osc::Value::string ("Mapper"),
+                                            osc::Value::string ("SCRP0001"),
+                                            osc::Value::string ("language"), osc::Value::string ("lua"),
+                                            osc::Value::string ("source"), osc::Value::string ("print(1)") });
+    //  A run made ahead and over, so the tree has it from the first publish.
+    rig.runs.create ("SCRRUN01", "SCRP0001", "script");
+    auto* run = rig.runs.find ("SCRRUN01");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::done;
+
+    auto reading = model::readCodeFoot (*rig.publish (2), "SCRP0001");
+    CHECK (reading.cueId == "SCRP0001");
+    CHECK (reading.language == "lua");
+    CHECK (reading.text == "print(1)");
+    CHECK_FALSE (reading.locked);
+    CHECK (reading.runId.empty());
+    CHECK (model::codeStatusWords (reading) == "Lua - runs when its cue runs");
+
+    CHECK (model::readCodeFoot (*rig.publish (3), "B3N8R5TW").cueId.empty());   // not a script cue
+
+    run->state = cue::runState::playing;
+    run->processState = "running";
+    run->processSaid = "'x' is not defined (line 7)";
+    rig.parameters.markStale();
+    reading = model::readCodeFoot (*rig.publish (4), "SCRP0001");
+    CHECK (reading.runId == "SCRRUN01");
+    CHECK (reading.state == "running");
+    CHECK (model::lineOfProblem (reading.said) == 7);
+    CHECK (model::lineOfProblem ("level: 0.25") == 0);
+    CHECK (model::codeStatusWords (reading) == "Lua - running");
+
+    const auto foot = model::readFoot (*rig.publish (5), { model::Subject::Kind::code, "SCRP0001" }, {});
+    CHECK (foot.code.cueId == "SCRP0001");
+    CHECK (foot.notice.empty());
+    CHECK (model::followsPick (model::Subject::Kind::code));
+    CHECK (model::wordFor (model::Subject::Kind::code) == "code");
+    CHECK (model::subjectKindFor ("code") == model::Subject::Kind::code);
+
+    const auto onMemo = model::readFoot (*rig.publish (6), { model::Subject::Kind::code, "B3N8R5TW" }, {});
+    CHECK (onMemo.notice == "Only a script cue has code");
+}
+
+TEST_CASE ("client: the lines a script copies fire a cue and hear and send a serial port, in its language")
+{
+    CHECK (wfg::process::scriptLineToFireCue ("javascript", "B3NK0001") == "godot.fire('B3NK0001');");
+    CHECK (wfg::process::scriptLineToFireCue ("lua", "B3NK0001") == "godot.fire('B3NK0001')");
+    CHECK (wfg::process::scriptLineToSendSerial ("javascript", "SRL00001") == "godot.send('/godot/serial/SRL00001/out', 'led', 1);");
+    CHECK (wfg::process::scriptLinesToHearSerial ("lua", "SRL00001").find ("godot.hear('/godot/serial/SRL00001/in', function (...)")
+           == 0u);
+    CHECK (wfg::process::starterScript ("lua").rfind ("--", 0) == 0u);
+}
+
+TEST_CASE ("client: the canvas at the foot finds its process cue's running patch, its state, said line and ports")
+{
+    Rig rig;
+    rig.apply (1, "window", "cue.create", { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                                            osc::Value::string ("process"), osc::Value::string ("Mapper"),
+                                            osc::Value::string ("PRCS0001"),
+                                            osc::Value::string ("patch"), osc::Value::string (canvasPatch) });
+    rig.runs.create ("PRCRUN01", "PRCS0001", "process");
+    auto* run = rig.runs.find ("PRCRUN01");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::playing;
+    run->processState = "running";
+    run->processSaid = "level: 0.25";
+    run->processPorts = "/dev/out 0.5\n";
+
+    const auto reading = model::readPatchFoot (*rig.publish (2), "PRCS0001");
+    CHECK (reading.runId == "PRCRUN01");
+    CHECK (reading.state == "running");
+    CHECK (reading.said == "level: 0.25");
+    CHECK (reading.ports == "/dev/out 0.5\n");
+}
+
 TEST_CASE ("client: a box typed is written as Pd writes it, and an object typed empty goes")
 {
     const std::string text = canvasPatch;
