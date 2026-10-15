@@ -44,6 +44,8 @@
 #include <wfg/engine/process/PdInstance.h>
 #include <wfg/engine/process/PatchThread.h>
 #include <wfg/engine/process/ProcessHost.h>
+#include <wfg/engine/process/JsLanguage.h>
+#include <wfg/engine/process/ScriptInstance.h>
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountSender.h>
@@ -2028,7 +2030,7 @@ TEST_CASE ("ready-made: every help patch opens with nothing printed against it")
     CHECK (opened == 10);       // the nine ready-made patches' and godot-help.pd, the canvas's ?
 }
 
-TEST_CASE ("ready-made: the example show opens, and its two patches play with the ready-made ones found")
+TEST_CASE ("ready-made: the example show opens, its two patches play with the ready-made ones found, and its script")
 {
     const auto bundle = juce::File (juce::String (std::string (WFG_REPO_ROOT))).getChildFile ("packaging/Examples/Process examples");
     wfg::doc::ShowDocument document;
@@ -2075,6 +2077,35 @@ TEST_CASE ("ready-made: the example show opens, and its two patches play with th
     const auto desk = numbersSentTo (tickOnce (slider, { { "/slider", { Atom::of (64.0) } } }), "/desk/fader/1");
     REQUIRE (desk.size() == 1u);
     CHECK (std::abs (desk[0] - 64.0 / 127.0) < 1e-5);
+
+    //  SENSOR TO CUES, IN A SCRIPT (namespace draft §66): the same two cues, once each.
+    const auto source = document.getAttribute ("/godot/cue/PXSCRPT1/source");
+    REQUIRE (source.has_value());
+    CHECK (document.getAttribute ("/godot/cue/PXSCRPT1/language") == std::optional<std::string> ("javascript"));
+    wfg::process::ScriptInstance script (wfg::process::makeJavascript, {});
+    REQUIRE (script.make());
+    REQUIRE (script.finished (5s));
+    REQUIRE (script.open (*source));
+    REQUIRE (script.finished (5s));
+    INFO (script.problem());
+    REQUIRE (script.opened());
+
+    std::vector<std::string> scripted;
+    const auto lightToScript = [&] (double value)
+    {
+        REQUIRE (script.tick ({ { "/sensor/light", { Atom::of (value) } } }));
+        REQUIRE (script.finished (5s));
+        for (const auto& sent : script.takeOutbox().sent)
+            if (sent.to == "/godot/cmd/cue/fire")
+                scripted.push_back (sent.atoms.front().word);
+    };
+    lightToScript (0.0);
+    for (int tick = 0; tick < 20; ++tick)
+        lightToScript (1000.0);
+    CHECK (scripted == std::vector<std::string> { "PXSHN001" });
+    for (int tick = 0; tick < 20; ++tick)
+        lightToScript (0.0);
+    CHECK (scripted == std::vector<std::string> { "PXSHN001", "PXDARK01" });
 }
 
 //==============================================================================
@@ -2406,6 +2437,157 @@ TEST_CASE ("process host: a stuck script is interrupted and freed, and patches o
         std::this_thread::sleep_for (std::chrono::milliseconds (20));
     }
     CHECK (opened);
+}
+
+//==============================================================================
+/*  M69-M71: WHAT A SCRIPT COSTS (namespace draft §66.6), beside M56 and M58's
+    patches: the same work - a value in, forty-eight additions, a value out -
+    written in JavaScript; ten at once against the budget; and an endless loop
+    from its first late tick to its instance freed. */
+namespace
+{
+    std::string fortyEightAdditions()
+    {
+        return "godot.hear('/in', (x) => {\n"
+               "    let v = x;\n"
+               "    for (let i = 0; i < 48; ++i)\n"
+               "        v = v + 1;\n"
+               "    godot.send('/out', v);\n"
+               "});\n";
+    }
+}
+
+TEST_CASE ("M69: a tick of a JavaScript script doing a fifty-object patch's work, a value in and out")
+{
+    wfg::process::ScriptInstance js (wfg::process::makeJavascript, {});
+    REQUIRE (js.make());
+    REQUIRE (js.finished (5s));
+    REQUIRE (js.open (fortyEightAdditions()));
+    REQUIRE (js.finished (5s));
+    REQUIRE (js.opened());
+
+    constexpr int ticks = 500;
+    double last = 0.0;
+    const auto start = std::chrono::steady_clock::now();
+    for (int tick = 0; tick < ticks; ++tick)
+    {
+        REQUIRE (js.tick ({ { "/in", { Atom::of (static_cast<double> (tick)) } } }));
+        REQUIRE (js.finished (5s));
+        const auto out = numbersSentTo (js.takeOutbox(), "/out");
+        REQUIRE (out.size() == 1u);
+        last = out[0];
+    }
+    const auto micros = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - start).count() / ticks;
+    CHECK (sameNumber (last, 499.0 + 48.0));
+    MESSAGE ("M69: a tick of a JavaScript script doing a fifty-object patch's work, a value in and out, " << micros
+             << " us on average, the hand-off to its thread and back included");
+    CHECK (micros < 20000.0);
+}
+
+TEST_CASE ("M70: ten JavaScript scripts at once, each on its own thread, against the budget")
+{
+    wfg::process::ProcessHost host (hostSettings ("m70"));
+    std::vector<wfg::process::WantedProcess> wanted;
+    for (int i = 0; i < 10; ++i)
+        wanted.push_back ({ "RUN" + std::to_string (i), "CUE" + std::to_string (i), fortyEightAdditions(), "javascript" });
+
+    double value = 0.0;
+    const auto inputs = [&value] (const std::string&, const std::vector<std::string>&)
+    {
+        wfg::process::TickInputs in;
+        in.heard.push_back ({ "/in", { Atom::of (value) } });
+        return in;
+    };
+    constexpr auto budget = std::chrono::microseconds (20000);
+
+    int opened = 0;
+    const auto giveUp = std::chrono::steady_clock::now() + std::chrono::seconds (30);
+    while (opened < 10 && std::chrono::steady_clock::now() < giveUp)
+    {
+        const auto tickStart = std::chrono::steady_clock::now();
+        opened = 0;
+        for (const auto& result : host.tick (wanted, inputs, budget, 50))
+            opened += result.state == "running" || result.state == "late" ? 1 : 0;
+        std::this_thread::sleep_until (tickStart + std::chrono::milliseconds (20));
+    }
+    REQUIRE (opened == 10);
+
+    constexpr int ticks = 250;
+    double worst = 0.0, total = 0.0;
+    int answered = 0, late = 0;
+    for (int tick = 0; tick < ticks; ++tick)
+    {
+        value = tick;
+        const auto start = std::chrono::steady_clock::now();
+        const auto results = host.tick (wanted, inputs, budget, 50);
+        const auto ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - start).count();
+        worst = std::max (worst, ms);
+        total += ms;
+        for (const auto& result : results)
+        {
+            late += result.state == "late" ? 1 : 0;
+            for (const auto& sent : result.sent)
+                answered += sent.to == "/out" ? 1 : 0;
+        }
+    }
+
+    MESSAGE ("M70: ten JavaScript scripts at once, a tick in " << total / ticks << " ms on average, "
+             << worst << " ms at worst, " << late << " late of " << ticks * 10 << ", " << answered << " answers");
+    CHECK (answered >= ticks * 10 / 2);
+    CHECK_FALSE (host.anyStuck());
+}
+
+TEST_CASE ("M71: a JavaScript script in an endless loop, from its first late tick to its instance freed")
+{
+    wfg::process::ProcessHost host (hostSettings ("m71"));
+    std::vector<wfg::process::WantedProcess> wanted { { "RUNS", "CUES", "godot.hear('/loop', () => { for (;;) {} });\n", "javascript" } };
+
+    bool loop = false;
+    const auto inputs = [&loop] (const std::string&, const std::vector<std::string>&)
+    {
+        wfg::process::TickInputs in;
+        if (loop)
+            in.heard.push_back ({ "/loop", {} });
+        return in;
+    };
+    constexpr auto budget = std::chrono::microseconds (2000);
+
+    const auto giveUp = std::chrono::steady_clock::now() + std::chrono::seconds (30);
+    bool running = false;
+    while (! running && std::chrono::steady_clock::now() < giveUp)
+    {
+        for (const auto& result : host.tick (wanted, inputs, budget, 50))
+            running = result.state == "running";
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+    REQUIRE (running);
+
+    //  At the show's own rate, a tick each 20 ms, as the show's threshold - fifty ticks and a second - says.
+    loop = true;
+    const auto looped = std::chrono::steady_clock::now();
+    std::optional<std::chrono::steady_clock::time_point> failed, freed;
+    while (! freed.has_value() && std::chrono::steady_clock::now() < giveUp)
+    {
+        const auto tickStart = std::chrono::steady_clock::now();
+        for (const auto& result : host.tick (wanted, inputs, budget, 50))
+            if (result.failure == "process-stuck" && ! failed.has_value())
+            {
+                failed = std::chrono::steady_clock::now();
+                wanted.clear();     // the Runner ends a failed run
+                loop = false;
+            }
+        if (failed.has_value() && host.instances() == 0u)
+            freed = std::chrono::steady_clock::now();
+        std::this_thread::sleep_until (tickStart + std::chrono::milliseconds (20));
+    }
+    REQUIRE (failed.has_value());
+    REQUIRE (freed.has_value());
+
+    const auto ms = [] (auto a, auto b) { return std::chrono::duration<double, std::milli> (b - a).count(); };
+    MESSAGE ("M71: an endless loop failed process-stuck " << ms (looped, *failed) << " ms after it began, and its"
+             " instance was freed " << ms (*failed, *freed) << " ms after that");
+    CHECK_FALSE (host.anyStuck());
+    CHECK (ms (*failed, *freed) < 1000.0);
 }
 
 //==============================================================================

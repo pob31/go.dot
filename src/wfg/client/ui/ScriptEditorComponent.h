@@ -53,6 +53,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace wfg::client::ui
 {
@@ -101,6 +102,19 @@ namespace wfg::client::ui
         bool isReadOnly() const noexcept { return reading.locked; }
         juce::TextButton& openButtonForTest() noexcept { return openButton; }
 
+        /*  THE ? (AMW): the help card for the script's language, read-only in
+            place of the code, and the ready-made scripts beside it to pick
+            from; again, back to the script. */
+        void showHelp (bool shown);
+        bool showingHelp() const noexcept { return helping; }
+        juce::TextButton& helpButtonForTest() noexcept { return helpButton; }
+        juce::ComboBox& cardsForTest() noexcept { return cards; }
+        juce::String helpTextForTest() const { return helpDocument.getAllContent(); }
+
+        /*  FOR A TEST: where the ready-made scripts are, in place of Go.dot's
+            own folder. */
+        void setReadyMadeFolder (std::string folder) { readyMadeOverride = std::move (folder); }
+
     private:
         class Editor;
 
@@ -112,6 +126,17 @@ namespace wfg::client::ui
         std::unique_ptr<juce::CodeTokeniser> tokeniser;
         std::unique_ptr<Editor> editor;
         juce::TextButton openButton { "Open in your editor" };
+
+        juce::TextButton helpButton { "?" };
+        juce::ComboBox cards;
+        juce::CodeDocument helpDocument;
+        std::unique_ptr<juce::CodeEditorComponent> helpView;
+        bool helping = false;
+        std::string readyMadeOverride;
+        std::vector<std::string> cardNames;
+
+        std::string readyMade() const;
+        void showCard (int index);
         std::string languageShown;
 
         std::string loaded;                 // the cue's text as last put in the editor

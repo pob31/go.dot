@@ -27,6 +27,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace wfg::process
 {
@@ -43,4 +44,16 @@ namespace wfg::process
 
     /*  Whether a language word is Lua's; anything else is JavaScript. */
     bool isLua (std::string_view language) noexcept;
+
+    /*  GO.DOT'S READY-MADE SCRIPTS FOR A LANGUAGE (AMW): its `js` or `lua`
+        folder, beside the binary or in the bundle's Resources on macOS, as the
+        `pd` folder is found; empty where there is none. */
+    std::string readyMadeFolder (std::string_view language);
+
+    /*  What is in such a folder, the help card first and the rest by name:
+        file names, with the language's own ending. */
+    std::vector<std::string> readyMadeFiles (const std::string& folder, std::string_view language);
+
+    /*  The help card's file name: godot-help.js or godot-help.lua. */
+    std::string helpCardName (std::string_view language);
 }

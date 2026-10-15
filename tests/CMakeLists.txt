@@ -1827,6 +1827,21 @@ add_test(NAME blackbox.process.fr_FR
 set_tests_properties(blackbox.process.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# A SCRIPT CUE END TO END (namespace draft 66, SC.8): process.py's twin for a
+# script cue's JavaScript - a device's report doubled and sent back to
+# mock_target.py, Bell fired by godot.fire under the script's own origin, Esc
+# ending it, and the session replayed. No hosted audio.
+add_test(NAME blackbox.script.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/script.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.script.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.script.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/script.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.script.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # TIMECODE GENERATED END TO END (namespace draft 59, TC.9): serve --hosted
 # --render with --midi-render=TC=<file>, the show fired by GO, and what came out
 # read by a third implementation of the standards in Python - a biphase decoder

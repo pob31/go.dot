@@ -29849,9 +29849,19 @@ them; what a script is handed is the same. `print` goes to the run's `said` and 
 ### 66.6 Measurements
 
 - **M69** - what a tick of a script costs, beside M56's patch: a script doing what M56's fifty-object
-  patch does, JavaScript then Lua.
-- **M70** - ten scripts at once in the budget, beside M58.
-- **M71** - from an endless loop to the run failed and its instance freed.
+  patch does, JavaScript then Lua. *Measured 2026-10-15* (SC.8, MSVC, Debug, Windows, the author's
+  laptop): a value in, forty-eight additions, a value out, in JavaScript - 111 to 129 µs a tick, the
+  hand-off to its thread and back included, against a patch's 42 µs (M56). QuickJS interprets; Pd's
+  objects are compiled C.
+- **M70** - ten scripts at once in the budget, beside M58. *Measured 2026-10-15*: ten such scripts
+  at once, 1.14 ms a tick on average and 1.79 ms at worst, none late in 2 500, every value answered -
+  against ten patches' 0.33 and 0.81 ms (M58). Inside the 2 ms budget on a Debug build.
+- **M71** - from an endless loop to the run failed and its instance freed. *Measured 2026-10-15*:
+  failed `process-stuck` 1.02 s after the loop began - the threshold, fifty ticks and a second - and
+  its instance freed 21 ms after that, the next tick; the interrupt itself ends the loop in 0.3 ms.
+  A patch stuck so is never freed (ACJ).
+- And end to end (`blackbox.script`, SC.8): a device's report doubled by a script and back at the
+  device in 33 to 66 ms, as a patch's (M57, 33 to 67 ms) - the tick, not the language.
 
 ### 66.7 Stages
 

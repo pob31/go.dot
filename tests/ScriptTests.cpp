@@ -425,3 +425,109 @@ TEST_CASE ("script: an instance let go while stuck is not waited for - its threa
     js.reset();
     CHECK (std::chrono::steady_clock::now() - start < 1s);
 }
+
+//==============================================================================
+/*  SC.8: THE HELP CARD AND THE READY-MADE SCRIPTS (AMW). Read from the repo's
+    own `js` folder, as Go.dot reads its copy beside the binary. */
+#include <wfg/engine/process/ScriptText.h>
+
+#include <fstream>
+#include <iterator>
+
+namespace
+{
+    std::string readyMadeText (const std::string& name)
+    {
+        std::ifstream in (std::string (WFG_REPO_ROOT) + "/js/" + name, std::ios::binary);
+        return { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char>() };
+    }
+
+    /*  Every function a script can call, as §66.3 lists them. */
+    const std::vector<std::string> jsApi {
+        "godot.hear(", "godot.hearAll(", "godot.send(", "godot.set(", "godot.command(", "godot.fire(",
+        "godot.midi.hear(", "godot.midi.send(", "godot.tick(", "godot.after(", "godot.every(", "godot.cancel(",
+        "godot.self", "print(", "console.log("
+    };
+}
+
+TEST_CASE ("script: the help card names every function a script can call, and the prelude has each")
+{
+    const auto card = readyMadeText ("godot-help.js");
+    REQUIRE_FALSE (card.empty());
+    const auto prelude = std::string (wfg::process::javascriptPrelude());
+
+    for (const auto& call : jsApi)
+    {
+        INFO (call);
+        CHECK (card.find (call) != std::string::npos);
+
+        //  In the prelude, as a member of `godot` or a name it leaves.
+        auto name = call.substr (call.rfind ('.') == std::string::npos ? 0 : call.rfind ('.') + 1);
+        if (! name.empty() && name.back() == '(')
+            name.pop_back();
+        CHECK ((prelude.find (name + " (") != std::string::npos || prelude.find (name + ":") != std::string::npos
+                || prelude.find ("'" + name + "'") != std::string::npos));
+    }
+}
+
+TEST_CASE ("script: the help card opens as a script and nothing in it runs; the ready-made scripts each open")
+{
+    const auto names = wfg::process::readyMadeFiles (std::string (WFG_REPO_ROOT) + "/js", "javascript");
+    REQUIRE (names.size() >= 5u);
+    CHECK (names.front() == "godot-help.js");
+
+    for (const auto& name : names)
+    {
+        INFO (name);
+        auto js = javascript();
+        const auto atOpen = makeAndOpen (*js, readyMadeText (name));
+        CHECK (atOpen.sent.empty());
+        CHECK (atOpen.printed.empty());
+        CHECK (js->problem().empty());
+    }
+}
+
+TEST_CASE ("script: the ready-made scripts do what their comment says")
+{
+    const auto heard = [] (double x) { return std::vector<Input> { { "/wfs/source/1/x", { Atom::of (x) } } }; };
+
+    {
+        auto js = javascript();
+        makeAndOpen (*js, readyMadeText ("average.js"));
+        CHECK (numbersSentTo (tickOnce (*js, heard (1.0)), "/wfs/source/1/xAverage") == std::vector<double> { 1.0 });
+        CHECK (numbersSentTo (tickOnce (*js, heard (2.0)), "/wfs/source/1/xAverage") == std::vector<double> { 1.5 });
+        CHECK (numbersSentTo (tickOnce (*js, heard (6.0)), "/wfs/source/1/xAverage") == std::vector<double> { 3.0 });
+    }
+    {
+        auto js = javascript();
+        makeAndOpen (*js, readyMadeText ("minmax.js"));
+        CHECK (numbersSentTo (tickOnce (*js, heard (5.0)), "/wfs/source/1/xRange") == std::vector<double> { 5.0, 5.0 });
+        CHECK (numbersSentTo (tickOnce (*js, heard (1.0)), "/wfs/source/1/xRange") == std::vector<double> { 1.0, 5.0 });
+        for (int tick = 0; tick < 100; ++tick)
+            tickOnce (*js);
+        CHECK (numbersSentTo (tickOnce (*js, heard (3.0)), "/wfs/source/1/xRange") == std::vector<double> { 3.0, 3.0 });
+    }
+    {
+        auto js = javascript();
+        makeAndOpen (*js, readyMadeText ("smooth.js"));
+        CHECK (numbersSentTo (tickOnce (*js, heard (0.0)), "/wfs/source/1/xSmooth") == std::vector<double> { 0.0 });
+        CHECK (numbersSentTo (tickOnce (*js, heard (4.0)), "/wfs/source/1/xSmooth") == std::vector<double> { 1.0 });
+    }
+    {
+        auto js = javascript();
+        makeAndOpen (*js, readyMadeText ("edge.js"));
+        const auto fired = [] (const Outbox& outbox)
+        {
+            std::vector<std::string> cues;
+            for (const auto& sent : outbox.sent)
+                if (sent.to == "/godot/cmd/cue/fire")
+                    cues.push_back (sent.atoms.front().word);
+            return cues;
+        };
+        CHECK (fired (tickOnce (*js, heard (0.5))).empty());
+        CHECK (fired (tickOnce (*js, heard (0.9))) == std::vector<std::string> { "3.1" });
+        CHECK (fired (tickOnce (*js, heard (0.82))).empty());      // in the band: nothing twice
+        CHECK (fired (tickOnce (*js, heard (0.95))).empty());
+        CHECK (fired (tickOnce (*js, heard (0.7))) == std::vector<std::string> { "3.2" });
+    }
+}

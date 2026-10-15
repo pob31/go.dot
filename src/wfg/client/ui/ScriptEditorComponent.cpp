@@ -18,6 +18,7 @@
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/process/ScriptText.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace wfg::client::ui
@@ -76,6 +77,62 @@ namespace wfg::client::ui
             if (actions.openInEditor && ! reading.cueId.empty())
                 actions.openInEditor (reading.cueId);
         };
+
+        addAndMakeVisible (helpButton);
+        helpButton.setTooltip ("How a script hears and sends - OSC, MIDI, serial, the SpaceMouse and Go.dot itself -"
+                               " and the ready-made scripts.");
+        helpButton.onClick = [this] { showHelp (! helping); };
+
+        addChildComponent (cards);
+        cards.setTooltip ("The help card, or a ready-made script to copy from");
+        cards.onChange = [this] { showCard (cards.getSelectedItemIndex()); };
+    }
+
+    std::string ScriptEditorComponent::readyMade() const
+    {
+        return ! readyMadeOverride.empty() ? readyMadeOverride : process::readyMadeFolder (languageShown);
+    }
+
+    void ScriptEditorComponent::showCard (int index)
+    {
+        if (index < 0 || static_cast<std::size_t> (index) >= cardNames.size())
+            return;
+
+        const auto file = juce::File (juce::String::fromUTF8 (readyMade().c_str()))
+                              .getChildFile (juce::String::fromUTF8 (cardNames[static_cast<std::size_t> (index)].c_str()));
+        helpDocument.replaceAllContent (file.loadFileAsString());
+        helpDocument.clearUndoHistory();
+        if (helpView != nullptr)
+            helpView->scrollToLine (0);
+    }
+
+    void ScriptEditorComponent::showHelp (bool shown)
+    {
+        commit();
+        helping = shown;
+        helpButton.setButtonText (shown ? "Back to the script" : "?");
+
+        if (shown)
+        {
+            cardNames = process::readyMadeFiles (readyMade(), languageShown);
+            cards.clear (juce::dontSendNotification);
+            for (std::size_t i = 0; i < cardNames.size(); ++i)
+                cards.addItem (juce::String::fromUTF8 (cardNames[i].c_str()), static_cast<int> (i) + 1);
+
+            if (cardNames.empty())
+                helpDocument.replaceAllContent (languageShown == "lua" ? "-- Go.dot's ready-made Lua folder is not beside it."
+                                                                         : "// Go.dot's ready-made JavaScript folder is not beside it.");
+            else
+                cards.setSelectedItemIndex (0, juce::sendNotificationSync);
+        }
+
+        if (editor != nullptr)
+            editor->setVisible (! shown);
+        if (helpView != nullptr)
+            helpView->setVisible (shown);
+        cards.setVisible (shown && ! cardNames.empty());
+        resized();
+        repaint();
     }
 
     ScriptEditorComponent::~ScriptEditorComponent()
@@ -99,6 +156,10 @@ namespace wfg::client::ui
         if (editor != nullptr)
             removeChildComponent (editor.get());
         editor.reset();
+        helpView.reset();
+        helping = false;
+        helpButton.setButtonText ("?");
+        cards.setVisible (false);
 
         if (lua)
             tokeniser = std::make_unique<juce::LuaTokeniser>();
@@ -110,6 +171,12 @@ namespace wfg::client::ui
         editor->setLineNumbersShown (true);
         editor->setScrollbarThickness (10);
         addAndMakeVisible (*editor);
+
+        helpView = std::make_unique<juce::CodeEditorComponent> (helpDocument, tokeniser.get());
+        helpView->setReadOnly (true);
+        helpView->setLineNumbersShown (false);
+        helpView->setScrollbarThickness (10);
+        addChildComponent (*helpView);
         colour();
         resized();
     }
@@ -119,8 +186,8 @@ namespace wfg::client::ui
         if (editor == nullptr)
             return;
 
-        editor->setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 14.0f,
-                                                        juce::Font::plain)));
+        const juce::Font face (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 14.0f, juce::Font::plain));
+        editor->setFont (face);
 
         const auto ink = [this] (const char* name) { return Look::colour (theme, name); };
 
@@ -146,6 +213,16 @@ namespace wfg::client::ui
             else                                                type.colour = ink ("ink-dim");
         }
         editor->setColourScheme (scheme);
+
+        if (helpView != nullptr)
+        {
+            helpView->setFont (face);
+            for (const auto id : { juce::CodeEditorComponent::backgroundColourId, juce::CodeEditorComponent::defaultTextColourId,
+                                   juce::CodeEditorComponent::highlightColourId, juce::CodeEditorComponent::lineNumberBackgroundId,
+                                   juce::CodeEditorComponent::lineNumberTextId })
+                helpView->setColour (id, editor->findColour (id));
+            helpView->setColourScheme (scheme);
+        }
     }
 
     void ScriptEditorComponent::applyTheme (const model::Theme& themeToUse)
@@ -263,7 +340,7 @@ namespace wfg::client::ui
         g.fillAll (Look::colour (theme, "panel"));
 
         auto strip = getLocalBounds().removeFromBottom (statusHeight).reduced (6, 0);
-        strip.removeFromRight (openButton.getWidth() + 6);
+        strip.setRight (std::min (openButton.getX(), cards.isVisible() ? cards.getX() : openButton.getX()) - 6);
         const auto failing = problemLine > 0 || reading.state == "stuck";
         g.setColour (Look::colour (theme, failing ? "failed" : "ink-dim"));
         g.setFont (Look::font (theme, 13.0f));
@@ -273,7 +350,7 @@ namespace wfg::client::ui
     void ScriptEditorComponent::paintOverChildren (juce::Graphics& g)
     {
         //  THE LINE A PROBLEM NAMES, marked in the margin and underlined.
-        if (problemLine <= 0 || editor == nullptr || problemLine > document.getNumLines())
+        if (helping || problemLine <= 0 || editor == nullptr || problemLine > document.getNumLines())
             return;
 
         const juce::CodeDocument::Position at (document, problemLine - 1, 0);
@@ -292,7 +369,12 @@ namespace wfg::client::ui
     {
         auto area = getLocalBounds();
         auto strip = area.removeFromBottom (statusHeight);
+        helpButton.setBounds (strip.removeFromRight (helping ? 140 : 30).reduced (2));
         openButton.setBounds (strip.removeFromRight (150).reduced (2));
+        if (helping)
+            cards.setBounds (strip.removeFromRight (180).reduced (2));
+        if (helpView != nullptr)
+            helpView->setBounds (area);
         if (editor != nullptr)
             editor->setBounds (area);
     }

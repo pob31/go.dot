@@ -16,11 +16,50 @@
 
 #include <wfg/engine/process/ScriptText.h>
 
+#include <juce_core/juce_core.h>
+
+#include <algorithm>
+
 namespace wfg::process
 {
     bool isLua (std::string_view language) noexcept
     {
         return language == "lua";
+    }
+
+    std::string helpCardName (std::string_view language)
+    {
+        return isLua (language) ? "godot-help.lua" : "godot-help.js";
+    }
+
+    std::string readyMadeFolder (std::string_view language)
+    {
+        const auto name = juce::String (isLua (language) ? "lua" : "js");
+        const auto program = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+        for (const auto& folder : { program.getChildFile (name), program.getSiblingFile ("Resources").getChildFile (name) })
+            if (folder.isDirectory())
+                return folder.getFullPathName().toStdString();
+        return {};
+    }
+
+    std::vector<std::string> readyMadeFiles (const std::string& folder, std::string_view language)
+    {
+        std::vector<std::string> names;
+        if (folder.empty())
+            return names;
+
+        const auto ending = juce::String (isLua (language) ? "*.lua" : "*.js");
+        for (const auto& file : juce::File (juce::String::fromUTF8 (folder.c_str())).findChildFiles (juce::File::findFiles, false, ending))
+            names.push_back (file.getFileName().toStdString());
+
+        const auto help = helpCardName (language);
+        std::sort (names.begin(), names.end(), [&help] (const std::string& a, const std::string& b)
+        {
+            if ((a == help) != (b == help))
+                return a == help;
+            return a < b;
+        });
+        return names;
     }
 
     std::string starterScript (std::string_view language)

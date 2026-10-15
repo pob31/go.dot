@@ -1,0 +1,17 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="7K2QM9X4" name="Main">
+      <Script id="SCRP0001" name="Doubler" number="1" source="// Doubles what the device reports at /dev/in and sends it back to /dev/out;&#10;// a report rising past a half fires Bell, once until it falls below again.&#10;let above = false;&#10;godot.hear('/dev/in', (x) =&gt; {&#10;    godot.send('/dev/out', x * 2);&#10;    if (! above &amp;&amp; x &gt; 0.5) {&#10;        above = true;&#10;        godot.fire('B3NK0001');&#10;    } else if (above &amp;&amp; x &lt; 0.5) {&#10;        above = false;&#10;    }&#10;});&#10;"/>
+      <Cue id="B3NK0001" name="Bell" number="2"/>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="DEVMNT01" name="Device" port="9000" prefix="/dev" rx="true"/>
+  </Mounts>
+  <Audio tracks="0"/>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+  <Sync/>
+</Show>

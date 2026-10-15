@@ -6053,6 +6053,45 @@ TEST_CASE ("script editor: Open in your editor writes first and asks for this cu
     CHECK_FALSE (editor.openButtonForTest().isEnabled());
 }
 
+TEST_CASE ("script editor: the ? shows the help card read-only and the ready-made scripts, and goes back to the script")
+{
+    std::vector<std::pair<std::string, std::string>> written;
+    wfg::client::ui::ScriptEditorComponent::Actions actions;
+    actions.set = [&written] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+
+    wfg::client::ui::ScriptEditorComponent editor (wfg::client::model::Theme {}, std::move (actions));
+    editor.setSize (700, 300);
+    editor.setReadyMadeFolder (std::string (WFG_REPO_ROOT) + "/js");
+
+    wfg::client::model::CodeReading reading;
+    reading.cueId = "SCRP0001";
+    reading.language = "javascript";
+    reading.text = "print(1);\n";
+    editor.show (reading);
+    editor.documentForTest().insertText (0, "// typed\n");
+
+    editor.helpButtonForTest().onClick();
+    CHECK (editor.showingHelp());
+    REQUIRE (written.size() == 1u);       // what was typed is written first
+    CHECK (editor.helpTextForTest().contains ("How a script hears and sends"));
+    CHECK (editor.cardsForTest().getNumItems() >= 5);
+    CHECK (editor.cardsForTest().getItemText (0) == "godot-help.js");
+    CHECK_FALSE (editor.editorForTest().isVisible());
+
+    //  A ready-made script, picked.
+    for (int i = 0; i < editor.cardsForTest().getNumItems(); ++i)
+        if (editor.cardsForTest().getItemText (i) == "average.js")
+            editor.cardsForTest().setSelectedItemIndex (i, juce::sendNotificationSync);
+    CHECK (editor.helpTextForTest().contains ("xAverage"));
+
+    //  Back to the script, as it was.
+    editor.helpButtonForTest().onClick();
+    CHECK_FALSE (editor.showingHelp());
+    CHECK (editor.editorForTest().isVisible());
+    CHECK (editor.documentForTest().getAllContent() == "// typed\nprint(1);\n");
+    CHECK (written.size() == 1u);
+}
+
 TEST_CASE ("script editor: Esc goes on to the PANIC, and Ctrl+S writes and goes on to save the show")
 {
     std::vector<std::pair<std::string, std::string>> written;

@@ -81,6 +81,8 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/clients/console/" DESTINATION "${_wfg_r
 # help patch - where serve looks for them: beside the binary, or in the
 # bundle's Resources on macOS (namespace draft §51, ACU).
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/pd/" DESTINATION "${_wfg_res_prefix}pd" COMPONENT wfg)
+# The ready-made scripts and their help card (namespace draft §66, AMW), the same way.
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/js/" DESTINATION "${_wfg_res_prefix}js" COMPONENT wfg)
 # The device presets (namespace draft §57, AFN), beside the binary as the patches are.
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/presets/" DESTINATION "${_wfg_res_prefix}presets" COMPONENT wfg)
 
