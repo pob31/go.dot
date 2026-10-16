@@ -37,6 +37,8 @@
     <string>Go.dot plays live inputs as cues and records takes from them.</string>
     <key>NSCameraUsageDescription</key>
     <string>Go.dot shows a camera's picture as a video input, on a projector or a video card.</string>
+    <key>NSCameraUseContinuityCameraDeviceType</key>
+    <true/>
 
     <!--
         A .wfg IS A GO.DOT SHOW: the manifest in a show's folder, which a

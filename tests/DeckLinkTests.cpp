@@ -98,7 +98,8 @@ TEST_CASE ("decklink: the SDK's headers are 16.0's and reach the library's entry
     CHECK (IID_IDeckLinkOutput.Data1 != 0u);
    #else
     IDeckLinkIterator* (* volatile create)() = CreateDeckLinkIteratorInstance;
-    CHECK (create != nullptr);
+    const auto linked = create != nullptr;
+    CHECK (linked);
    #endif
 }
 

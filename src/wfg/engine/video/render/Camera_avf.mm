@@ -216,7 +216,8 @@ namespace wfg::video::camera
     private:
         bool running() const
         {
-            return session != nil && session.isRunning && ! session.isInterrupted;
+            //  isInterrupted is iOS's: a Mac's session that loses its camera stops running.
+            return session != nil && session.isRunning;
         }
 
         const std::string word;
