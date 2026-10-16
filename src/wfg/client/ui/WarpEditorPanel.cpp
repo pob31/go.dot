@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <optional>
 #include <vector>
@@ -106,8 +107,8 @@ namespace wfg::client::ui
             opacityLabel.setText ("Opacity %", juce::dontSendNotification);
             pointLabel.setText ("Point x, y", juce::dontSendNotification);
             hint.setJustificationType (juce::Justification::topLeft);
-            hint.setText ("Drag a point, or click one and move it with the arrow keys (Shift: ten times as far)."
-                          " The projector follows.", juce::dontSendNotification);
+            hint.setText ("Click a point to pick it, then drag it, or move it with the arrow keys (Shift: ten times"
+                          " as far). The projector follows.", juce::dontSendNotification);
 
             addZone.setTooltip ("A further canvas on this output, through a warp of its own, over what it shows");
             removeZone.setTooltip ("Take the picked zone away");
@@ -357,25 +358,42 @@ namespace wfg::client::ui
             if (pickedLayer >= layers.size() || ! pictureArea().contains (event.getPosition()))
                 return;
 
+            /*  A FIRST CLICK PICKS, A SECOND ONE MOVES (the author, 2026-10-16:
+                "to avoid unvoluntary moves, the first click selects the handle
+                but doesn't move it"): only a press on the point already picked
+                drags it, so a point is never moved by the click that found it.
+                The picked one wins over a nearer neighbour inside its reach. */
+            if (pickedPoint.has_value() && distanceTo (*pickedPoint, event.position) < catchRadius)
+            {
+                dragging = ! locked;
+                grabOffset = pointAt (*pickedPoint) - event.position;
+                return;
+            }
+
             pickedPoint = nearestPoint (event.position);
-            dragging = pickedPoint.has_value() && ! locked;
+            dragging = false;
             fillControls();
             repaint();
         }
 
         void mouseDrag (const juce::MouseEvent& event) override
         {
-            if (! dragging || ! pickedPoint.has_value() || pickedLayer >= layers.size())
+            /*  NOT UNTIL THE HAND HAS MOVED (JUCE's few pixels), and the point
+                keeps where it was held from: a press that wobbles moves nothing,
+                and a point caught off its centre does not jump under the mouse. */
+            if (! dragging || ! pickedPoint.has_value() || pickedLayer >= layers.size()
+                  || ! event.mouseWasDraggedSinceMouseDown())
                 return;
 
             const auto picture = pictureArea().toFloat();
             auto warp = layers[pickedLayer].warp;
             const auto at = *pickedPoint;
+            const auto to = event.position + grabOffset;
 
             /*  A LITTLE PAST THE EDGES IS ALLOWED: a warp that takes only part
                 of a canvas onto the display puts its points outside it. */
-            warp.x[at] = std::clamp ((event.position.x - picture.getX()) / picture.getWidth(), -0.5f, 1.5f);
-            warp.y[at] = std::clamp ((event.position.y - picture.getY()) / picture.getHeight(), -0.5f, 1.5f);
+            warp.x[at] = std::clamp ((to.x - picture.getX()) / picture.getWidth(), -0.5f, 1.5f);
+            warp.y[at] = std::clamp ((to.y - picture.getY()) / picture.getHeight(), -0.5f, 1.5f);
             writeWarp (warp, false);
         }
 
@@ -452,24 +470,32 @@ namespace wfg::client::ui
             return pickedLayer < layers.size() ? &layers[pickedLayer] : nullptr;
         }
 
-        std::optional<std::size_t> nearestPoint (juce::Point<float> at) const
+        //  Where the picked warp's point `n` is drawn, in the editor's pixels.
+        juce::Point<float> pointAt (std::size_t n) const
         {
             const auto& warp = layers[pickedLayer].warp;
             const auto picture = pictureArea().toFloat();
+            return { picture.getX() + static_cast<float> (warp.x[n]) * picture.getWidth(),
+                     picture.getY() + static_cast<float> (warp.y[n]) * picture.getHeight() };
+        }
+
+        float distanceTo (std::size_t n, juce::Point<float> at) const
+        {
+            return n < layers[pickedLayer].warp.x.size() ? pointAt (n).getDistanceFrom (at)
+                                                          : std::numeric_limits<float>::max();
+        }
+
+        std::optional<std::size_t> nearestPoint (juce::Point<float> at) const
+        {
             std::optional<std::size_t> best;
-            auto bestDistance = 12.0f;
+            auto bestDistance = catchRadius;
 
-            for (std::size_t n = 0; n < warp.x.size(); ++n)
-            {
-                const juce::Point<float> point { picture.getX() + static_cast<float> (warp.x[n]) * picture.getWidth(),
-                                                 picture.getY() + static_cast<float> (warp.y[n]) * picture.getHeight() };
-
-                if (const auto distance = point.getDistanceFrom (at); distance < bestDistance)
+            for (std::size_t n = 0; n < layers[pickedLayer].warp.x.size(); ++n)
+                if (const auto distance = distanceTo (n, at); distance < bestDistance)
                 {
                     bestDistance = distance;
                     best = n;
                 }
-            }
 
             return best;
         }
@@ -533,12 +559,12 @@ namespace wfg::client::ui
                 const juce::Point<float> point { area.getX() + static_cast<float> (warp.x[n]) * area.getWidth(),
                                                  area.getY() + static_cast<float> (warp.y[n]) * area.getHeight() };
                 g.setColour (Look::colour (theme, "ink"));
-                g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (point));
+                g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre (point));
 
                 if (pickedPoint.has_value() && *pickedPoint == n)
                 {
                     g.setColour (Look::colour (theme, "picked"));
-                    g.drawEllipse (juce::Rectangle<float> (16.0f, 16.0f).withCentre (point), 2.0f);
+                    g.drawEllipse (juce::Rectangle<float> (22.0f, 22.0f).withCentre (point), 2.0f);
                 }
             }
         }
@@ -713,6 +739,12 @@ namespace wfg::client::ui
         std::optional<std::size_t> pickedPoint;
         bool dragging = false;
         bool locked = false;
+
+        /*  HOW NEAR A PRESS CATCHES A POINT, in pixels: 18 (it was 12, the
+            author's "difficult to catch", 2026-10-16), and the dot drawn larger
+            with it. */
+        static constexpr float catchRadius = 18.0f;
+        juce::Point<float> grabOffset;
 
         juce::Rectangle<int> listBounds, pictureBounds;
 

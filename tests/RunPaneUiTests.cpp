@@ -5923,6 +5923,90 @@ TEST_CASE ("warps: the editor over Show settings goes from output to output on i
     CHECK (sent.empty());       // looking and moving between outputs edits nothing
 }
 
+TEST_CASE ("warps: a click picks a point and moves nothing, a press on the picked point drags it from where it was held")
+{
+    /*  The author, 2026-10-16: "the handles are difficult to catch", and "the
+        first click selects the handles but doesn't move it. The next click on
+        the selected handle allows the change in geometry". */
+    wfg::Engine engine;
+    wfg::doc::ShowDocument document;
+    wfg::tree::MountTable mounts;
+    wfg::cue::RunTable runs;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    wfg::tree::EngineState state;
+
+    const auto canvas = document.createCanvas ("Stage");
+    REQUIRE (canvas.ok);
+    const auto front = document.createVideoOutput ("Front", canvas.id);
+    REQUIRE (front.ok);
+
+    const auto snapshot = parameters.publish (1, state);
+
+    std::vector<wfg::Event> sent;
+    ui::WarpEditorPanel panel (model::Theme {}, [&sent] (wfg::Event event) { sent.push_back (std::move (event)); }, [] {});
+    panel.setSize (1100, 700);
+    panel.open (front.id, *snapshot);
+
+    //  The editor is the panel's one child that is not a word, a menu or a button.
+    juce::Component* editor = nullptr;
+
+    for (auto* child : panel.getChildren())
+        if (dynamic_cast<juce::Label*> (child) == nullptr && dynamic_cast<juce::ComboBox*> (child) == nullptr
+              && dynamic_cast<juce::Button*> (child) == nullptr)
+            editor = child;
+
+    REQUIRE (editor != nullptr);
+
+    std::vector<juce::Label*> typed;     // opacity, then the point's x and y
+
+    for (auto* child : editor->getChildren())
+        if (auto* label = dynamic_cast<juce::Label*> (child); label != nullptr && label->isEditableOnSingleClick())
+            typed.push_back (label);
+
+    REQUIRE (typed.size() == 3);
+
+    //  The picture as the editor lays it: beside a 300-pixel side, 40 in, 16 by 9.
+    auto area = editor->getLocalBounds().reduced (10);
+    area.removeFromLeft (310);
+    area = area.reduced (40);
+    const auto picture = (area.getWidth() > area.getHeight() * 16 / 9
+                              ? area.withSizeKeepingCentre (area.getHeight() * 16 / 9, area.getHeight())
+                              : area.withSizeKeepingCentre (area.getWidth(), area.getWidth() * 9 / 16)).toFloat();
+
+    ScrubHand hand { *editor };
+
+    //  Fifteen pixels off the top-left corner: out of the old reach of twelve, in the new one.
+    const auto x0 = picture.getX() + 12.0f, y0 = picture.getY() + 9.0f;
+    hand.press (x0, y0);
+    hand.drag (x0 + 40.0f, y0 + 30.0f);
+    hand.release (x0 + 40.0f, y0 + 30.0f);
+    CHECK (sent.empty());
+    CHECK (typed[1]->getText().getDoubleValue() == doctest::Approx (0.0));
+    CHECK (typed[2]->getText().getDoubleValue() == doctest::Approx (0.0));
+
+    //  Pressed again without moving the hand: still nothing.
+    hand.press (x0, y0);
+    hand.surface.mouseDrag (hand.at (x0 + 1.0f, y0 + 1.0f, true, false));
+    hand.release (x0 + 1.0f, y0 + 1.0f);
+    CHECK (sent.empty());
+
+    //  Pressed and dragged: the point goes as far as the hand did, not to under it.
+    hand.press (x0, y0);
+    hand.drag (x0 + 40.0f, y0 + 30.0f);
+    hand.release (x0 + 40.0f, y0 + 30.0f);
+    CHECK (sent.size() == 1);
+    CHECK (typed[1]->getText().getDoubleValue() == doctest::Approx (40.0 / picture.getWidth()).epsilon (0.001));
+    CHECK (typed[2]->getText().getDoubleValue() == doctest::Approx (30.0 / picture.getHeight()).epsilon (0.001));
+
+    //  Another point is only picked by its first click.
+    hand.press (picture.getRight() - 5.0f, picture.getY() + 5.0f);
+    hand.drag (picture.getRight() - 60.0f, picture.getY() + 60.0f);
+    hand.release (picture.getRight() - 60.0f, picture.getY() + 60.0f);
+    CHECK (sent.size() == 1);
+    CHECK (typed[1]->getText().getDoubleValue() == doctest::Approx (1.0));
+    CHECK (typed[2]->getText().getDoubleValue() == doctest::Approx (0.0));
+}
+
 //==============================================================================
 /*  THE SCRIPT EDITOR (namespace draft §66, AMT): typing writes nothing until
     the edit is finished, then one write of the whole source; a change made

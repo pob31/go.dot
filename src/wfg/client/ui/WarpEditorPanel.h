@@ -34,8 +34,10 @@
     THE PICTURE is the output, the shape of its display; over it, each warp the
     output draws: its own canvas first, then each zone, bottom first. The one
     picked is drawn bright with its control points; the others are outlines. A
-    point is dragged with the mouse, or picked and moved by the arrow keys (a
-    thousandth of the display, a hundredth with Shift), or typed. The splits
+    point is picked by a click and only then dragged, by a second press on it
+    (the author, 2026-10-16: no point moved by the click that finds it), or
+    moved by the arrow keys (a thousandth of the display, a hundredth with
+    Shift), or typed. The splits
     are added and taken away by column and by row, and the warp keeps its shape
     as they are (`model::regridded`). "Whole output" puts a warp back, and
     "Copy to..." puts the picked warp's shape - its points and its splits - on

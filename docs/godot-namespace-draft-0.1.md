@@ -21906,7 +21906,10 @@ The author's (each the option I recommended; the words of each option were mine)
 - **WY** each placed canvas has **its own warp**, rather than taking cells of one grid the output
   shares; apart or overlapping, stacked, a blend and an opacity each.
 - The warps are edited in a **drawn editor, live** - the projector follows a drag - with typed
-  numbers too.
+  numbers too. *Amended 2026-10-16 at the author's direction ("the handles are difficult to catch";
+  "the first click selects the handle but doesn't move it"):* a point is caught within 18 px (it was
+  12) and drawn larger; a click **picks** a point and never moves it, and only a press on the point
+  already picked drags it, from where it was held and not before the hand has moved.
 - The monitor shows **every canvas, about ten times a second**, drawn small on the CPU while it is
   open.
 
