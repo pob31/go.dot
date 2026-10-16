@@ -668,6 +668,11 @@ target_link_libraries(wfg_engine
     PUBLIC  wfg::thirdparty
     PRIVATE wfg::warnings)
 
+# AJA's library (namespace draft §72, AQC; cmake/WfgThirdParty.cmake), for
+# render/Card_aja.cpp: PRIVATE, so its headers and definitions reach the
+# engine's own files and nothing that links the engine.
+target_link_libraries(wfg_engine PRIVATE ajantv2)
+
 # -----------------------------------------------------------------------------
 # The compiled client, in two halves (namespace draft §14.16).
 #

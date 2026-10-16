@@ -28,3 +28,6 @@
 [submodule "ThirdParty/lua"]
 	path = ThirdParty/lua
 	url = https://github.com/lua/lua.git
+[submodule "ThirdParty/libajantv2"]
+	path = ThirdParty/libajantv2
+	url = https://github.com/aja-video/libajantv2.git

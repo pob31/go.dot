@@ -504,6 +504,22 @@ Design Pty. Ltd.
 
 ---
 
+## libajantv2 (AJA's NTV2 SDK)
+
+- **Website**: https://github.com/aja-video/libajantv2
+- **Version**: tag `ntv2_18_0_0` (NTV2 SDK 18.0.0), commit `4add45239a03960aa36de6fef326ee1b753e8ec9`
+- **Licence**: MIT
+- **Copyright**: (c) 2023 AJA Video Systems
+
+What reaches an AJA card (namespace draft §72, AQB, AQC). A pinned submodule at
+`ThirdParty/libajantv2`, built by its own CMake as a static library with its demos, tools, tests and
+Linux driver off and third-party plugin loading off, so no mbedtls is fetched or linked
+(`cmake/WfgThirdParty.cmake`). Nothing of it is modified. **AJA's driver is not shipped**: it is the
+user's, from AJA's installer or kernel module. Full text: `ThirdParty/libajantv2/LICENSE`. AJA® is a
+trademark of AJA Video Systems, Inc.
+
+---
+
 ## The LV2 SDK: lilv, serd, sord, sratom, zix and the LV2 headers
 
 Compiled in since 2026-09-26, when LV2 hosting was switched on

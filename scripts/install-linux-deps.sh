@@ -145,7 +145,8 @@ $SUDO apt-get install -y --no-install-recommends \
 #   libegl-mesa0         Mesa's EGL and its software rasteriser (llvmpipe), on
 #   libgl1-mesa-dri      which the GPU tests draw on a machine with no GPU
 #   libudev-dev          hidapi's hidraw backend, for the SpaceMouse the engine
-#                        reads (namespace draft 45, O.11)
+#                        reads (namespace draft 45, O.11); and AJA's library,
+#                        libajantv2, which finds its cards through it (§72)
 #
 # cmake itself is NOT in the list: the runner images and most desktops ship one,
 # and the version we need (3.22+) is older than every supported distro's. If

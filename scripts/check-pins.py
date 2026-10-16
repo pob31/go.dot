@@ -83,6 +83,7 @@ SPATCORE = "ThirdParty/spatcore"
 HIDAPI = "ThirdParty/hidapi"
 LIBPD = "ThirdParty/libpd"
 PUREDATA = "ThirdParty/pure-data"
+LIBAJANTV2 = "ThirdParty/libajantv2"
 TE_VENDORED_JUCE = "ThirdParty/tracktion_engine/modules/juce"
 SIMPLEWEB_ASIO = "ThirdParty/juce_simpleweb/asio"
 # The submodules Go.dot patches, and what check (g) calls each one.
@@ -99,6 +100,7 @@ FIX_HINT = {
     HIDAPI: "git submodule update --init " + HIDAPI,
     LIBPD: "git submodule update --init " + LIBPD,
     PUREDATA: "git submodule update --init " + PUREDATA,
+    LIBAJANTV2: "git submodule update --init " + LIBAJANTV2,
     SIMPLEWEB: "git submodule update --init --recursive " + SIMPLEWEB
                + "   (the --recursive is SCOPED to this path, and required: asio)",
 }
@@ -150,7 +152,7 @@ def checked_out_head(path: str):
 
 def check_a(failures):
     """Every submodule is checked out at the SHA its gitlink names."""
-    for path in (JUCE, TE, SIMPLEWEB, SPATCORE, HIDAPI, LIBPD, PUREDATA):
+    for path in (JUCE, TE, SIMPLEWEB, SPATCORE, HIDAPI, LIBPD, PUREDATA, LIBAJANTV2):
         recorded, err = recorded_gitlink(path)
         if err:
             failures.append(err)

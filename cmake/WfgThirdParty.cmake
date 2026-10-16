@@ -903,6 +903,69 @@ target_link_libraries(wfg_deps INTERFACE wfg_lua)
 unset(_file)
 unset(_lua)
 
+# AJA'S LIBRARY, libajantv2 (MIT; aja-video/libajantv2 at tag ntv2_18_0_0;
+# namespace draft §72, AQB, AQC): what reaches an AJA card, compiled in - its
+# driver is the user's, AJA's installer or kernel module. Built by its own CMake,
+# the supported route for a library this size, statically, with its demos,
+# tools, tests and Linux driver off, installing nothing, and with plugin loading
+# off (NTV2_PREVENT_PLUGIN_LOAD), which would otherwise fetch and build mbedtls
+# at configure time. FENCED, because its CMake reaches past itself:
+#  * a function scope holds its options; its macOS settings FORCE-write the
+#    deployment target from the environment's MACOSX_DEPLOYMENT_TARGET, so that
+#    is unset around it (the root's 13.3 stands);
+#  * its target hands its users, PUBLIC, its warning and optimisation flags, and
+#    NDEBUG on every configuration (it reads CMAKE_BUILD_TYPE, empty under a
+#    multi-config generator), _CONSOLE, _WINDOWS, WIN32_LEAN_AND_MEAN and the CRT
+#    warnings switched off: those
+#    are taken off what it hands on, and its own warnings silenced;
+#  * its headers reach us as SYSTEM, so its warnings never meet -Werror;
+#  * it is compiled as C++17, MSVC permissive: its Windows code jumps over
+#    initialisations with goto, which C++20's conformance mode refuses (C2362);
+#  * it writes ntv2version.h into its own includes folder, which its .gitignore
+#    names: the submodule stays clean.
+# Linux links libudev, which scripts/install-linux-deps.sh installs.
+function(_wfg_add_ajantv2 aja)
+    if(NOT EXISTS "${aja}/CMakeLists.txt")
+        message(FATAL_ERROR "Go.dot: ThirdParty/libajantv2 is not checked out. From the repo root:\n"
+                            "    git submodule update --init ThirdParty/libajantv2")
+    endif()
+    set(BUILD_SHARED_LIBS OFF)
+    set(AJANTV2_BUILD_SHARED OFF)
+    set(AJANTV2_DISABLE_DEMOS ON)
+    set(AJANTV2_DISABLE_TOOLS ON)
+    set(AJANTV2_DISABLE_TESTS ON)
+    set(AJANTV2_DISABLE_DRIVER ON)
+    set(AJANTV2_DISABLE_PLUGIN_LOAD ON)
+    set(AJANTV2_DISABLE_RDMA ON)
+    set(AJA_INSTALL_SOURCES OFF)
+    set(AJA_INSTALL_HEADERS OFF)
+    set(AJA_INSTALL_LIBS OFF)
+    set(AJA_INSTALL_CMAKE OFF)
+    set(AJA_INSTALL_MISC OFF)
+    set(AJA_DISABLE_QT ON)
+    set(AJA_QT_DEPLOY OFF)
+    set(_environment "$ENV{MACOSX_DEPLOYMENT_TARGET}")
+    unset(ENV{MACOSX_DEPLOYMENT_TARGET})
+    add_subdirectory("${aja}" libajantv2 EXCLUDE_FROM_ALL)
+    if(NOT _environment STREQUAL "")
+        set(ENV{MACOSX_DEPLOYMENT_TARGET} "${_environment}")
+    endif()
+endfunction()
+_wfg_add_ajantv2("${CMAKE_SOURCE_DIR}/ThirdParty/libajantv2")
+
+get_target_property(_defs ajantv2 INTERFACE_COMPILE_DEFINITIONS)
+list(REMOVE_ITEM _defs NDEBUG _DEBUG AJA_DEBUG _CONSOLE _WINDOWS WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS _SCL_SECURE_NO_WARNINGS)
+get_target_property(_includes ajantv2 INTERFACE_INCLUDE_DIRECTORIES)
+set_target_properties(ajantv2 PROPERTIES
+    INTERFACE_COMPILE_OPTIONS ""
+    INTERFACE_COMPILE_DEFINITIONS "${_defs}"
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_includes}"
+    COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w;/permissive,-w>"
+    CXX_STANDARD 17
+    POSITION_INDEPENDENT_CODE ON)
+unset(_defs)
+unset(_includes)
+
 add_library(wfg::thirdparty ALIAS wfg_thirdparty)
 
 # The engine will eventually be linked into things that are themselves shared objects

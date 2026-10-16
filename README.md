@@ -727,6 +727,7 @@ live in `packaging/`.
 | Syphon (`ThirdParty/Syphon`, macOS) | main, 2026-09-21 | `f4761677a45b8034a3c2069ec0f3d2553da81fba` |
 | NDI's headers (vendored in `ThirdParty/ndi`; the runtime is the user's install) | 6.3, from DistroAV | `d34b4cc4c590426464bff4d59f88f68829010b4b` |
 | The DeckLink SDK's headers (vendored in `ThirdParty/decklink` by `scripts/vendor-decklink.py`; the library is the user's Desktop Video) | Desktop Video SDK 16.0 | `ThirdParty/decklink/MANIFEST.txt` |
+| libajantv2 (`ThirdParty/libajantv2`; AJA's cards, its driver the user's) | NTV2 SDK 18.0.0 (`ntv2_18_0_0`) | `4add45239a03960aa36de6fef326ee1b753e8ec9` |
 | Pure Data (`ThirdParty/pure-data`; a process cue's patches) | 0.56-5 | `f009fd8d7b537e209e09898d487fdf1bf547da2b` |
 | libpd (`ThirdParty/libpd`; its nested `pure-data` stays empty) | 0.16.1 | `ba0dc63262901d658af8bbda5e619a60fa975e78` |
 | Lua (`ThirdParty/lua`; a script cue's Lua) | 5.4.9 | `312b9efaa1061c2c4cad08554dbc1351c3270eef` |
