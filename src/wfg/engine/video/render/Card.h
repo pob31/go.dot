@@ -96,6 +96,7 @@ namespace wfg::video::card
     {
         std::vector<Card> cards;
         std::string version;    ///< Desktop Video's, as it says it
+        std::string ajaDriver;  ///< AJA's driver, as its first card says it (§72)
         std::string problem;
     };
 

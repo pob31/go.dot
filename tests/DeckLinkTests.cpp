@@ -994,6 +994,23 @@ TEST_CASE ("aja: every maker's cards as one - the test card beside AJA's none, a
     CHECK (nothing.problem == "Desktop Video is not installed");
 }
 
+TEST_CASE ("aja: the probe lists every maker's cards and says AJA's driver (§72, VC.8)")
+{
+    std::vector<video::card::Maker> makers;
+    makers.push_back ({ {}, video::card::makeFakeSystem() });
+    makers.push_back ({ "AJA", video::card::makeAjaSystem() });
+    auto every = video::card::makeEverySystem (std::move (makers));
+
+    std::ostringstream out;
+    CHECK (video::runVideoProbe (*every, {}, out) == 0);
+
+    const auto said = out.str();
+    MESSAGE (said);
+    CHECK (said.find ("AJA driver: no AJA card answered") != std::string::npos);
+    CHECK (said.find ("1 card") != std::string::npos);
+    CHECK (said.find ("Go.dot test card  (fake-1)") != std::string::npos);
+}
+
 TEST_CASE ("camera: the test camera listed by name, its formats known once opened, automatic its largest at 25 a second or more, one input at a time (VC.1)")
 {
     auto cameras = video::camera::oneInputEach (video::camera::makeFakeCameras());

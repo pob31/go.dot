@@ -81,6 +81,9 @@ namespace wfg::video::card
                         firstProblem = found.problem;
                     }
 
+                    if (! found.ajaDriver.empty())
+                        all.ajaDriver = found.ajaDriver;
+
                     for (auto& one : found.cards)
                         all.cards.push_back (std::move (one));
                 }

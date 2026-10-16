@@ -16,6 +16,7 @@
 
 #include <wfg/engine/video/VideoProbe.h>
 
+#include <wfg/engine/video/DeviceNames.h>
 #include <wfg/engine/video/render/Camera.h>
 
 #include <wfg/engine/osc/OscValue.h>
@@ -151,7 +152,8 @@ namespace wfg::video
             const auto wanted = option (args, "card", {});
 
             for (const auto& card : found.cards)
-                if (card.output && (wanted.empty() || card.id == wanted || card.name == wanted) && chosen == nullptr)
+                if (card.output && (wanted.empty() || card.id == wanted || card.name == wanted || nameWithMaker (card.id, card.name) == wanted)
+                      && chosen == nullptr)
                     chosen = &card;
 
             if (chosen == nullptr)
@@ -171,7 +173,7 @@ namespace wfg::video
             std::string why;
             auto output = cards.openOutput (chosen->id, settings, why);
 
-            out << "\nRunning " << chosen->name << " at " << settings.mode << (settings.key != card::Keying::off ? ", keyed" : "")
+            out << "\nRunning " << nameWithMaker (chosen->id, chosen->name) << " at " << settings.mode << (settings.key != card::Keying::off ? ", keyed" : "")
                 << (settings.audioChannels > 0 ? ", with sound" : "") << ", for " << seconds << " s\n";
 
             if (output == nullptr)
@@ -316,6 +318,7 @@ namespace wfg::video
 
         out << "Go.dot video probe\n";
         out << "Desktop Video: " << (found.version.empty() ? "not found" : found.version) << "\n";
+        out << "AJA driver: " << (found.ajaDriver.empty() ? "no AJA card answered" : found.ajaDriver) << "\n";
 
         if (! found.problem.empty())
         {
@@ -328,7 +331,7 @@ namespace wfg::video
 
             for (const auto& card : found.cards)
             {
-                out << "\n" << card.name << "  (" << card.id << ")\n";
+                out << "\n" << nameWithMaker (card.id, card.name) << "  (" << card.id << ")\n";
                 out << "  sends pictures: " << yesNo (card.output) << "   takes pictures in: " << yesNo (card.input) << "\n";
                 out << "  keyers: " << keyers (card) << "   10-bit: " << yesNo (card.tenBit)
                     << "   sound channels: " << card.audioChannels << "\n";

@@ -1121,6 +1121,9 @@ namespace wfg::video::card
                     if (! CNTV2DeviceScanner::GetDeviceAtIndex (index, device))
                         break;
 
+                    if (found.ajaDriver.empty())
+                        found.ajaDriver = device.GetDriverVersionString();
+
                     auto& can = device.features();
                     Card one;
                     one.id = idOf (device, index);
