@@ -1872,8 +1872,14 @@ namespace wfg::cue
                 }
                 else
                 {
+                    /*  Less a delay it was held back by (namespace draft §70):
+                        `run.started` is when its launch was placed, not heard. */
+                    const auto heldBack = samplesPerTick > 0
+                                            ? static_cast<double> (run.soundDelay)
+                                                / static_cast<double> (static_cast<std::int64_t> (samplesPerTick) * TickClock::rateHz)
+                                            : 0.0;
                     const auto elapsed = heard ? static_cast<double> (tick - run.startedAtTick)
-                                                   / static_cast<double> (TickClock::rateHz)
+                                                   / static_cast<double> (TickClock::rateHz) - heldBack
                                                : 0.0;
 
                     bed.at.from = run.armedOrigin + std::max (elapsed, 0.0) * documentSpeedOf (cue);
@@ -19827,7 +19833,24 @@ namespace wfg::cue
         const auto* self = runs.find (job.self);
         const auto factor = self != nullptr && std::isfinite (self->chaseFactor) && self->chaseFactor > 0.0
                               ? self->chaseFactor : 1.0;
-        const auto speed = job.rate * factor;
+        auto speed = job.rate * factor;
+
+        /*  A PICTURE HELD BACK TAKES ITS SPEED A DELAY LATER (namespace draft
+            §70, AOT): each speed asked is kept with the sample it was asked
+            for, and a stretch is laid at the one in force a delay before it -
+            so a fade or a chase moves the picture when it reaches the moment
+            its sounds did, and the lag stays the same in seconds. */
+        if (self != nullptr && self->pictureDelay > 0)
+        {
+            if (job.speedsAsked.empty()
+                  || std::bit_cast<std::uint64_t> (job.speedsAsked.back().second) != std::bit_cast<std::uint64_t> (speed))
+                job.speedsAsked.emplace_back (at, speed);
+
+            while (job.speedsAsked.size() > 1 && job.speedsAsked[1].first <= at - self->pictureDelay)
+                job.speedsAsked.erase (job.speedsAsked.begin());
+
+            speed = job.speedsAsked.front().second;
+        }
 
         /*  THE WAY IT GOES (namespace draft §41): the speed's sign, turned
             again while a ping-pong range plays back from its out-point. */
@@ -22123,8 +22146,12 @@ namespace wfg::cue
                 ramps join the same way. */
             if (std::bit_cast<std::uint64_t> (speed) != std::bit_cast<std::uint64_t> (run->ratePlaced))
             {
+                /*  HELD BACK, ITS CHANGE IS TOO (namespace draft §70, AOT): a
+                    delay later, so a speed change keeps the lag the same in
+                    seconds - the sound reaches the change when it reaches the
+                    moment the picture did. */
                 const auto last = run->rateClock.size() > 0 ? run->rateClock.back().at : 0.0;
-                const auto from = std::max (static_cast<double> (now + lead), last);
+                const auto from = std::max (static_cast<double> (now + lead + run->soundDelay), last);
                 const auto to = from + static_cast<double> (samplesPerTick);
                 const auto before = std::abs (run->ratePlaced);
                 const auto after = std::abs (speed);

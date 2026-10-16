@@ -2491,6 +2491,49 @@ TEST_CASE ("video: a movie whose sound is held back ends with its sound, the tai
     CHECK (held.movie >= plain.movie + 24);
 }
 
+TEST_CASE ("video: a picture held back takes a speed fade a delay later (namespace draft 70, AOT)")
+{
+    //  Where the movie holds once a fade has stood it still: the file's second.
+    const auto heldAt = [] (const char* delay)
+    {
+        const std::map<std::string, double> lengths { { "clip.mov", 20.0 } };
+        VideoRig rig;
+        rig.runner.setMediaDurations (&lengths);
+
+        REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                    osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                    osc::Value::string ("VD000060"),
+                                                    osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                    osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                    osc::Value::string ("file"), osc::Value::string ("clip.mov") }).applied >= 1);
+        REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (1),
+                                                    osc::Value::string ("fade"), osc::Value::string ("Hold"),
+                                                    osc::Value::string ("VD000050"),
+                                                    osc::Value::string ("target"), osc::Value::string ("VD000060"),
+                                                    osc::Value::string ("duration"), osc::Value::string ("0"),
+                                                    osc::Value::string ("video"), osc::Value::string ("rate:0") }).applied >= 1);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/delay", delay).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/delayBy", "200").ok);
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+        rig.ticks (50);
+        rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000050") });
+        rig.ticks (40);
+
+        const auto movie = rig.runOf ("VD000060")->id;
+        const auto& times = rig.sink.geometry[movie][video::Property::time];
+        REQUIRE_FALSE (times.empty());
+        return times.back().value;
+    };
+
+    /*  ON THE SAME FRAME: it came up two tenths of a second late and stands
+        still two tenths late, so it holds where the film would have - where a
+        change placed when asked would hold it two tenths short. */
+    const auto plain = heldAt ("none");
+    REQUIRE (plain > 0.5);
+    CHECK (heldAt ("picture") == doctest::Approx (plain));
+}
+
 TEST_CASE ("video: a movie sought keeps its sound or its picture held back by the same delay (namespace draft 70, AOT)")
 {
     //  How far the sound's relaunch lands after the picture's step to the sought second.

@@ -3432,6 +3432,10 @@ namespace wfg::cue
                 with its later stream and their tails are not cut. */
             bool endOwed = false;
 
+            /*  A PICTURE HELD BACK: each speed asked, with the sample it was
+                asked for, until a delay has passed it (namespace draft §70). */
+            std::vector<std::pair<std::int64_t, double>> speedsAsked;
+
             /*  ITS RANGES (namespace draft 37.5, WL), as a sound's: the cue's,
                 read again every tick so an edit is seen at once (TZ); the one
                 playing, by identifier, and which pass of it. No range: the

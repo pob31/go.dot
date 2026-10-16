@@ -1678,6 +1678,51 @@ TEST_CASE ("time group chasing: a jump chaser 30 ms behind its code jumps once, 
     CHECK (run->position == doctest::Approx (static_cast<double> (1099 * perTick - start + shift) / 48000.0).epsilon (toTheSample));
 }
 
+TEST_CASE ("time group chasing: a chaser held back starts its delay after its code's sample and is in step there - the lag is not an error, and a jump keeps it (namespace draft 70)")
+{
+    CodeRig rig;
+    const auto rain = chaser (rig, 0, "Rain", "01:00:10:00", "rain.wav", "jump");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rain + "/delay", "sound").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rain + "/delayBy", "100").ok);
+    rig.goOn (rig.group);
+
+    const auto f0 = frameNamed ("01:00:00:00", timecode::Rate::fps25);
+    const std::int64_t anchor = 100 * perTick;
+    rig.ticksUntil (100);
+    rig.heard ("jumped", "25", f0, anchor);
+
+    //  HEARD A TENTH OF A SECOND AFTER THE CODE REACHES ITS TIME, and in step there.
+    const auto start = anchor + 480'000;
+    const std::int64_t held = 4800;
+    rig.ticksUntil (start / perTick + 50);
+    REQUIRE (rig.countOf (rain) == 1);
+    const auto runId = rig.runsOf (rain).front()->id;
+    REQUIRE (rig.runs.find (runId)->launchedAtSample == start + held);
+    CHECK (rig.audio.loops.empty());
+    CHECK (rig.runs.find (runId)->chaseState == "inStep");
+    CHECK (std::abs (rig.runs.find (runId)->chaseError) < 0.001);
+
+    //  THE CODE 30 ms SOONER: one jump, to where the code was a delay ago.
+    const std::int64_t shift = 1440;
+    rig.ticksUntil (1000);
+    rig.heard ("running", "25", f0 + 500, anchor + 960'000 - shift);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.audio.loops.size() == 1u);
+    const auto loop = rig.audio.loops.front();
+    const auto at = 1001 * perTick + horizonSamples;
+
+    CHECK (loop.move.from == doctest::Approx (static_cast<double> (at - start - held) / 48000.0).epsilon (toTheSample));
+    CHECK (loop.move.fileAt == doctest::Approx (static_cast<double> (at - held - start + shift) / 48000.0).epsilon (toTheSample));
+    CHECK (rig.runs.find (runId)->chaseError == doctest::Approx (-30.0).epsilon (1e-6));
+
+    //  And in step after it, never moved again.
+    rig.ticksUntil (1100);
+    CHECK (rig.audio.loops.size() == 1u);
+    CHECK (rig.runs.find (runId)->chaseState == "inStep");
+}
+
 TEST_CASE ("time group chasing: a locate seats a chaser at its offset and hands its run back on the record, jumps one still in range, ends one whose time is ahead, and leaves a free runner playing")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));

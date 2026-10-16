@@ -652,6 +652,43 @@ TEST_CASE ("go: a sound held back is placed its delay later, on the sample, afte
     CHECK (lead ("sound", "7.3", "0.1") == waited + 350);
 }
 
+/*  A SOUND HELD BACK TAKES ITS SPEED CHANGES A DELAY LATER (namespace draft
+    70, AOT): it reaches the change when it reaches the moment the picture did,
+    so the lag stays the same in seconds. */
+TEST_CASE ("go: a speed changed under a sound held back is placed its delay later")
+{
+    const auto changeAfterEdit = [] (const char* delay)
+    {
+        Rig rig;
+        rig.clockRuns = true;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/delay", delay).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/delayBy", "100").ok);
+        rig.setStandby (rig.mediaId);
+
+        rig.submitAndTick ("go");
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.launches.empty(); }));
+        rig.tickOnce();
+        rig.tickOnce();
+
+        const auto editedAt = rig.audio.samples;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/rate", "0.5").ok);
+        rig.tickOnce();
+        rig.tickOnce();
+
+        std::int64_t reached = -1;
+
+        for (const auto& point : rig.audio.ratePoints)
+            if (point.speed == doctest::Approx (0.5))
+                reached = point.sample;
+
+        REQUIRE (reached >= 0);
+        return reached - editedAt;
+    };
+
+    CHECK (changeAfterEdit ("sound") == changeAfterEdit ("none") + 4800);
+}
+
 TEST_CASE ("go: every voice busy fails the run rather than stealing one")
 {
     /*  A playing track is never stolen. The GO is APPLIED - it was a legal

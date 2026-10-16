@@ -1431,7 +1431,9 @@ namespace wfg::cue
                 return false;
             }
 
-            const auto target = chaseTargetOf (targetCue, member, plan, map, at, start, lengths);
+            /*  HELD BACK, it is where the code was a delay ago (namespace
+                draft §70, AOT): the lag is not an error to correct. */
+            const auto target = chaseTargetOf (targetCue, member, plan, map, at - run.pictureDelay, start, lengths);
 
             if (! target.has_value())
             {
@@ -1513,7 +1515,8 @@ namespace wfg::cue
             return false;
         }
 
-        const auto target = chaseTargetOf (targetCue, member, plan, map, at, start, lengths);
+        //  Held back, where the code was a delay ago (namespace draft §70, AOT).
+        const auto target = chaseTargetOf (targetCue, member, plan, map, at - run.soundDelay, start, lengths);
 
         if (! target.has_value())
         {
@@ -1558,7 +1561,7 @@ namespace wfg::cue
             if (run.stretch)
             {
                 land = at + static_cast<std::int64_t> (std::ceil (audio->stretchLeadSamples (run.ratePlaced)));
-                const auto there = chaseTargetOf (targetCue, member, plan, map, land, start, lengths);
+                const auto there = chaseTargetOf (targetCue, member, plan, map, land - run.soundDelay, start, lengths);
 
                 if (! there.has_value() || ! there->sounding() || there->range != run.range)
                     return false;
@@ -2146,6 +2149,12 @@ namespace wfg::cue
                 wants.offset = target->file;
                 wants.range = target->range;
                 wants.pass = target->pass;
+
+                /*  HELD BACK, heard its whole delay after the code reaches that
+                    second (namespace draft §70): the code's place, not a
+                    playhead's, so the delay is still to come. */
+                if (textOf (cue, "delay") == "sound")
+                    wants.heldFor = std::max (numberOf (cue, "delayBy"), 0.0) / 1000.0;
 
                 const auto from = used.size();
                 seatPlan (engine, tick, { wants }, runFor, nextId);
