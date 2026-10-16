@@ -748,19 +748,24 @@ TEST_CASE ("video gpu: a card output carrying a bus sends its sound behind the c
                             return output != nullptr && output->bound && output->framesPresented > 10;
                         }, 15000));
 
+    /*  Sound written while the renderer was still starting is the ring's to
+        drop - nothing could send it yet, and how long a start takes is the
+        machine's (Debug, a software rasteriser). From here, sending, none is. */
+    const auto droppedStarting = cs::droppedFrames (*file.region());
     tickUntil (host, ticks, [&] { pump(); return false; }, 2000);
 
     const auto said = host.readouts();
     const auto* output = said.output ("VD000021");
     REQUIRE (output != nullptr);
     MESSAGE ("latency " << output->latencyMs << " ms, sound late or refused " << output->soundLate
-             << ", frames late " << output->framesLate << ", ring dropped " << cs::droppedFrames (*file.region()));
+             << ", frames late " << output->framesLate << ", ring dropped " << cs::droppedFrames (*file.region()) - droppedStarting
+             << " sending, " << droppedStarting << " starting");
 
     //  The picture and the sound 60 ms behind the count, with the frames waiting.
     CHECK (output->latencyMs >= 60.0);
     CHECK (output->latencyMs <= 100.5);
     CHECK (output->soundLate == 0u);
-    CHECK (cs::droppedFrames (*file.region()) == 0);
+    CHECK (cs::droppedFrames (*file.region()) == droppedStarting);
 
     //  And the sound flows: some 48 000 frames a second, counted four times a second.
     const auto sentBefore = output->soundSent;
