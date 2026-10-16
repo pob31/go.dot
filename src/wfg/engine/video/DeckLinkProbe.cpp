@@ -16,12 +16,15 @@
 
 #include <wfg/engine/video/DeckLinkProbe.h>
 
+#include <wfg/engine/osc/OscValue.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <locale>
 #include <sstream>
 #include <thread>
 
@@ -160,7 +163,8 @@ namespace wfg::video
             settings.key = flag (args, "key") ? card::Keying::external : card::Keying::off;
             settings.audioChannels = flag (args, "sound") ? 2 : 0;
             settings.tenBit = flag (args, "ten-bit");
-            const auto seconds = std::max (0.5, std::atof (option (args, "seconds", "60").c_str()));
+            //  Read in no locale: "1.2" is 1.2 under fr_FR too (PRD §3.20).
+            const auto seconds = std::max (0.5, osc::parseDouble (option (args, "seconds", "60")).value_or (60.0));
 
             std::string why;
             auto output = cards.openOutput (chosen->id, settings, why);
@@ -302,6 +306,9 @@ namespace wfg::video
     {
         const card::ThreadScope apartment;
         std::ostringstream out;
+
+        //  No locale writes the report's numbers (PRD §3.20): 1.2 s, never 1,2 s.
+        out.imbue (std::locale::classic());
         const auto found = cards.find();
         auto code = 0;
 
