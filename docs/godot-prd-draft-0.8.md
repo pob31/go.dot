@@ -230,6 +230,15 @@ event triggers *is* a background dataflow process — which is how the deferred
 state-machine phase arrives without new machinery, and how the experiment
 protocol runner works (one list stepping trials, another watching for responses).
 
+*Added in 0.8, at the author's direction (2026-10-16).* **Such a list has a name:
+a cart.** A list is a show list or a cart. GO never meets a cart: it has no
+standby, and the GO focus never rests on one. It holds cues of any kind, each
+fired out of order - by its trigger, a pad on the tablet's Cart tab, or a strip
+when a sampler group in the cart is armed - and a group in a cart is what a
+macro is (§3.10). The author's words: *"a macro cart that can hold almost any
+type of app and that's totally out of the ordered cuelist."* A client shows a
+cart as a tab beside the show list. Namespace draft §74.
+
 #### Three kinds of pointer
 
 | Pointer | Scope | Notes |
@@ -571,6 +580,12 @@ group** (§3.14): its members start when the code or the clock reaches their tim
 trigger on a single cue remains; it fires once a calendar day, and a step of the clock - the night
 summer time ends, a time-sync step - fires nothing, where before a step back fired every clock
 trigger in the show.
+
+*Added in 0.8, at the author's direction (2026-10-16).* **A key is a trigger.** A cue may be fired
+by a key of the computer the window or the page runs on, held as a pad is held: a `hold` member stops
+when the key is let go. The keys the show itself uses - Space, Esc, F9 and the clients' shared
+shortcuts - cannot be taken. A key fires a cue and nothing else: a key that runs a command is a later
+round's. Namespace draft §74.
 
 ### 3.8 Stop cues
 
@@ -993,7 +1008,8 @@ needs it (namespace draft §28). It is `send/levelLane`: the level lane's text,
 judge and file clock, an offset on that send's level, so a sound can travel
 between the mixes while it plays and come back the same way on every pass of a
 loop. Media cues only, one lane drawn at a time in the waveform editor.
-Recording one from a fader is not built.
+Recording one from a fader is not built. *(Built the next day: the flip below
+records the sends with the level.)*
 
 *Added in 0.8, at the author's direction (2026-10-06).* **The faders flip to
 one cue, and its level and its sends are recorded in one pass.** The waveform's
@@ -1016,6 +1032,21 @@ port), or a SpaceMouse for a value the device cannot report, which Go.dot then
 sends as it moves (§3.16). One pass is one step of undo. The curves are drawn
 one at a time in the foot panel, on the cue's own time; a top view of a
 position is proposed (§6.9). Namespace draft §45.
+
+*Added in 0.8, at the author's direction (2026-10-16).* **The one-shot lifetime
+is a cart, and a binding moves a value.** A macro is not a list of commands: it
+is a group in a cart (§3.5), whose cues - a start, a stop, a jump that branches
+the show, an OSC message, a script - fire together or in sequence when the
+group is fired out of order. The author: *"The binding could very well be a
+branching into a non-linear system, it could be a plain macro, something the
+sampler covers for media already only that an OSC or MIDI cue would need to be
+triggered."* The two other lifetimes belong to **bindings**: a MIDI control or
+an OSC address wired to a node and scaled into its range, live all evening when
+the show's settings hold it, or for each run of a cue that holds it. A binding
+writes where a hand would - the show when it is unlocked, the live layer under
+the lock - picks up a motorless control's value before moving it, and may send
+the value back to the control. A key or a note that runs a command, touch and
+write, update-cue and the curve work below are later rounds. Namespace draft §74.
 
 **Curve editor:** breakpoint lists with numeric entry, not only draggable
 pixels.
@@ -2886,6 +2917,11 @@ keeps its strip through a takeover, until MUTE (ABJ). *Built 2026-10-09* (namesp
 a pad brings a picture up on the sample it would start a sound; a movie waits for its sound's voice
 and both leave together, a tick later (§6.11, M55).
 
+*Amended 2026-10-16, at the author's direction* (namespace draft §74): **in a cart, a sampler group
+holds any cue kind** - an OSC message, a MIDI program change, a script, a group - and a pad fires it;
+in a show list it keeps to sounds and pictures. A cart's sampler groups are armed for the whole show,
+as a persistent cue is asserted (§3.29) *(proposed)*.
+
 **Strips.** §3.16's word for a fader or a pad. Each strip's role is the
 layout's (§3.9a): a **DCA strip** is pinned; a **sampler strip** is filled by
 whichever sampler group is armed, in member order, left to right. A member may
@@ -4453,6 +4489,22 @@ from APV in §72.2 are the author's to overrule:
 
 What the work leaves out: a camera's sound; a camera's controls; a virtual camera; two inputs on a
 camera.
+
+Added 2026-10-16 *(proposed)*, with the cart, key triggers and bindings (§3.5, §3.7, §3.10, namespace
+draft §74). The implementer's calls from AQR in §74.2 are the author's to overrule:
+
+- **`list/kind`**, show or cart; GO focus and the standby refuse a cart.
+- **A client shows a list apart from the GO focus**; a cart's tab moves nothing.
+- **A cart's sampler groups armed all show**, as persistent cues are asserted; its other cues never.
+- **`cue.press` and `cue.release`** for every hand that is not a strip; a key's let-go is
+  `trigger.release`.
+- **A pad on a cue that is not a sound or a picture** fires it; `hold` stops what it started.
+- **A key spelled as the page spells one**, and the clients' shared shortcuts refused.
+- **A binding's shape**: endpoint, target and scaling; pickup on by default; under the lock it rides
+  live; a double Esc stops what a binding is doing and never the binding; feedback off by default.
+
+What the work leaves out: a key or a note running a command; touch and write; update-cue; MIDI curves
+and clips; 2D paths; the Stream Deck.
 
 ### 6.10 Protocol implementation order (§3.16)
 

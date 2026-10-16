@@ -400,7 +400,9 @@ lever.
 **Still owed:** the unit on the bench for the four hardware clauses, M27 and
 M28; M26 retaken on a Release build of a quiet machine; rebinding a port after
 start and `midi.rescan` (M-B's debt, not paid here); and the rulings §16.12
-lists.
+lists. *(2026-10-16: the port rebinding was paid on 2026-09-25 - a port changed
+while the show runs is put on its device then, `midi/PortBinder` - and
+`midi.rescan` on 2026-10-15, namespace draft §64.)*
 
 **Designed next, not built (2026-09-23): surface pages.** The author wants the
 D700's Pan, EQ, Send and FX buttons repurposed as Go.dot's own pages - the
@@ -1535,6 +1537,39 @@ at 20 frames a second of its own (not a show camera). Owed: M78, a flash on Go.d
 return through capture - best with a USB HDMI dongle looped back from this machine's output; a real
 AJA card, by the testers (M79); the author's word on APV-AQD and the screen words.
 
+### The cart, key triggers, and bindings that move a value · L
+
+*Added on 2026-10-16*, at the author's direction: the first of the core gaps parked after the
+2026-09-28 audit to be built, PRD §3.10's bindings. The one-shot lifetime is a **cart** - a cue list
+GO never meets, holding any cue kind, each fired out of order by a key, a MIDI note, an OSC message,
+a pad on the tablet or a strip; a macro is a group in it. Then **bindings**: a MIDI control or an OSC
+address wired to a node and scaled into its range, for the evening or for a cue's run (namespace
+draft §74; PRD §3.5, §3.7, §3.10, §3.27 and §6.9 amended). The author's decisions are AQJ-AQQ; AQR-ARD
+are the implementer's, the author's to overrule. On the branch `bindings`, in the worktree
+`go.dot-bindings`. The Stream Deck comes after, as a transport whose keys are a cart's triggers.
+
+| Stage | What | Depends on |
+|---|---|---|
+| BD.0 | Docs: namespace §74, the PRD, this | - |
+| BD.1 | The wheel over a number | BD.0 |
+| BD.2 | The cart: `list/kind`, no standby, no GO focus, `list.create`'s pairs, its banks asserted | BD.0 |
+| BD.3 | Any kind under a pad in a cart; `cue.press`, `cue.release`, `trigger.release` | BD.2 |
+| BD.4 | Key triggers, in the window and on the page | BD.3 |
+| BD.5 | Tabs for lists, a cart among them, apart from the GO focus | BD.2 |
+| BD.6 | The tablet's Cart tab, in `go.dot-remote` | BD.3 |
+| BD.7 | The binding's rows, schema and commands | BD.0 |
+| BD.8 | Its matching and scaling, pure | BD.7 |
+| BD.9 | MIDI and OSC wired; pickup; the cue-scoped arm and release; the stops | BD.8 |
+| BD.10 | Feedback; Learn | BD.9 |
+| BD.11 | The window: the Bindings section, a cue's bindings, Learn | BD.10 |
+| BD.12 | M80, the README, the guides, the whole suite | all |
+
+**Done when:** a cart's OSC cue fires from a key, a MIDI note and a pad on the tablet, and GO never
+meets it; a timeline group in a cart fires its cues together; a cart's sampler bank is armed from the
+moment the show opens and a pad on a script cue holds it while pressed; the wheel turns an inspector
+number; a MIDI CC rides a cue's level with pickup, live under the lock and kept by Keep; a cue-scoped
+binding lives exactly as long as its run; an old show saves unchanged; CI is green.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M
@@ -1900,7 +1935,9 @@ Left: the show half rebuilt on every tick that applies a command (§31.5).
 - **Stream Deck** profile (bitmap renderable, triggering role); **SpaceMouse**
   as a rate endpoint; further surface profiles. *(2026-10-08: the SpaceMouse
   arrives first as what records an OSC cue's curves - the item before Phase 10,
-  namespace draft §45.)*
+  namespace draft §45.) (2026-10-16: the Stream Deck's keys will be a cart's
+  triggers and its dials bindings, namespace draft §74, so it waits for that
+  round.)*
 - **OSC and MIDI processing cues as persistent processes** (PRD §3.29): the
   state-machine phase §3.5 deferred, arriving as rows in the persistent section;
   a stateful process restarts at its resting state, and no fixed pool is needed

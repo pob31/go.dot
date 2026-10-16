@@ -30550,3 +30550,114 @@ A command that puts a device's parameters at rest (AQH); a Panic column on the N
 device's policy is stored in the show and, as before, shown nowhere; what `snap` would put a
 parameter at. The parameter table's sentence for `mount/panic` ("Default resting state for the
 mounted nodes") stays as it is: changing it regenerates the schema for no change in behaviour.
+
+## 74. The cart, key triggers, and bindings that move a value
+
+PRD §3.10 asks for bindings - a control in the room wired to the show - in three lifetimes:
+persistent, cue-scoped, and one-shot, "a macro is a pulse through the same graph". The 2026-09-28
+audit parked the generic binding object until video was done; the author took it up on 2026-10-16:
+*"Can you detail the binding in PRD §3.10 that would be still to be built? We will at some point see
+how to integrate Streamdecks in the workflow."* Asked what a macro is, the author answered with the
+shape of the whole thing: *"They mix ordered actions to out of order events. The binding could very
+well be a branching into a non-linear system, it could be a plain macro, something the sampler covers
+for media already only that an OSC or MIDI cue would need to be triggered. It could for instance
+switching to a back up tracking ID for a spatial sound object. Then this is a macro cart that can hold
+almost any type of app and that's totally out of the ordered cuelist."* And, reading the plan: *"I
+would add another tab on the tablet app for direct triggering of the cart by touch."* Decisions run
+from AQJ.
+
+### 74.1 What it is, before its names
+
+A show list is ordered: GO walks it. Some things a show needs are not in order - the tracker that
+fails and wants its backup identity sent now, the door slam a director asks for again, a branch to
+the other ending. Today such a cue sits in the list with a trigger on it, and GO meets it on the way
+past.
+
+A **cart** is a cue list that GO never meets. It has no standby; nothing in it is fired by GO. It
+holds cues of any kind - a sound, an OSC message, a MIDI program change, a script, a jump that
+branches the show list, a group that does several of these at once, which is what a macro is - and
+each is fired out of order: by its trigger (a key, a MIDI note, an OSC message), by a pad on the
+tablet's Cart tab, or by a strip when a sampler group in the cart is armed onto a surface. PRD §3.5
+already said that a list with no standby pointer and only event triggers is a background process,
+and §3.27 that a show-long soundboard is a parallel list; the cart is both, named.
+
+A **binding** is the other half of §3.10: a knob, a fader or an OSC address wired to a value - a
+cue's level, a send, an EQ gain, a device's parameter - scaled into that value's range, for the whole
+evening or for as long as one cue runs.
+
+### 74.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **AQJ** | **This round builds the one-shot lifetime as the cart, key triggers, and bindings that move a value**, persistent and cue-scoped. Touch and write automation, an explicit update-cue, MIDI curves and MIDI clips, fades on a device's nodes and 2D paths are later rounds. | the author's (offered as "Binding object + macros", recommended) |
+| **AQK** | **A computer key may fire a cue, except the keys the show itself uses**: Space (GO), Esc and Esc Esc, F9 (Doh!), and the clients' shared shortcuts (AQW). | the author's (offered as "Yes, not GO/Esc/Doh!", recommended) |
+| **AQL** | **A macro is a group in a cart**, not a list of command steps: a timeline group fires everything in it at once, an automatic sequence one after another with its waits, and each step is a cue - a start, a stop, a fade, a jump, an OSC or MIDI message, a script. The cart is a parallel list GO never meets, holding any cue kind. | the author's (asked *"Could we use groups for this instead?"*, then the words in the heading; I had recommended a named list of commands) |
+| **AQM** | **A cart is a list, shown as a tab beside the show list**, its cues rows as any list's, edited as any cue. | the author's (offered as "A list tab, rows as any list", recommended) |
+| **AQN** | **Any cue kind under a pad, in a cart only.** A sampler group in a cart may hold any kind; a sampler group in a show list keeps to sounds and pictures (§49). | the author's (offered beside "Everywhere", which I recommended) |
+| **AQO** | **Keys fire cues only, for now.** A trigger fires its cue; a binding moves a value; a key or a note that runs a command - Undo, Save, a page - is not built. | the author's (offered beside a gate binding running any named command, which I recommended) |
+| **AQP** | **The mouse wheel turns the number under the pointer** - any number the master dial could take (§17.18) - one step a notch by the dial's own law, Shift for a fine step, with no click first. | the author's (raised by the author, *"Mouse wheel can also be used for hover-dial adjustments"*; the stage, recommended) |
+| **AQQ** | **The tablet gains a Cart tab**: every cart's cues as pads, fired by touch, held while the finger is down. | the author's |
+| **AQR** | **`list/kind`: `show` or `cart`.** A cart has no standby: a write to it, `standby.set` and the arrows are refused (`not-a-stop`); GO focus never rests on a cart - `list.focus` refuses one (`not-a-stop`), and the focus that falls back to the first list falls back to the first show list. A list made a cart has its standby cleared. | mine |
+| **AQS** | **A client shows a list apart from the GO focus.** The window and the page draw the list whose tab is picked; picking a show list's tab still moves the GO focus there, as it does today, and picking a cart's tab moves nothing. The transport keeps saying which list GO acts on. | mine |
+| **AQT** | **A cart's sampler groups are armed all show**: each enabled sampler group at a cart's top level is asserted as a persistent cue is (§3.29) - armed when the show opens and at every step, left alone while armed. Esc stops a bank and the next step arms it again; so does a double Esc, as §3.29 already has it for beds. A cart's other cues are never fired by the pass. | mine |
+| **AQU** | **One press for every hand that is not a strip**: `cue.press <cue> [velocity]` and `cue.release <cue>`. A member of an armed sampler group presses its strip, exactly as `strip.press` would, velocity and all; any other cue is fired as `cue.fire` fires it, and its release does nothing. A key trigger's key-down is `trigger.fire` and its key-up `trigger.release <trigger>`, which releases the trigger's cue the same way. Standby never moves. | mine |
+| **AQV** | **A pad on a cue that is not a sound or a picture** (a cart's bank, AQN) fires it under its bank's run when pressed. Released, a `hold` member's run is stopped, where it has one still going - a group, an OSC cue sending its curves, a script - and nothing happens otherwise; `playOut` lets it run. A second press follows the kind's own rule (PRD §3.8). Its fader rides nothing and starts nothing; its strip shows the cue's name. | mine |
+| **AQW** | **A key trigger is matched where the key arrives**, in the window and on the page, from the published triggers; never while a text box has the keys. Its key is spelled as the page's key table spells one: `Mod`, `Alt`, `Shift`, then the key (`F6`, `Mod+K`, `Shift+1`, `ArrowLeft`). The engine refuses the show's own keys (AQK) and the shortcuts both clients share: Space, Escape, F9, F5, F, Shift+F, ArrowUp, ArrowDown, Mod+Z, Mod+Shift+Z, Mod+S, Mod+C, Mod+V, Delete, Backspace. | mine |
+| **AQX** | **A binding is an endpoint, a target and a scaling.** The endpoint is a MIDI control on a declared port (a CC, a pair of CCs for 14 bits, a note's velocity, pitch bend, channel pressure) or an OSC address on Go.dot's UDP port and one of its arguments; it says its class - absolute, relative or rate (PRD §3.16). The target is a node's address, ridden through the one write verb (§16.4) with origin `binding:<id>`. The scaling maps the input's range onto the node's own, by the law of its unit - decibels along the fader's travel as a fader does - with invert, a step a notch for a relative control, and for a rate one the speed at a full push and a dead zone. | mine |
+| **AQY** | **Two lifetimes for a binding**: one in the show's settings is live while the show is open (persistent); one on a cue is live for each run of that cue, armed as it starts and let go as it ends - Esc's graceful ending included (cue-scoped). A cue-scoped binding may name its own cue's rows without its identifier, so it copies from cue to cue. | mine |
+| **AQZ** | **An absolute control without a motor picks the value up** before it moves it: the first message that crosses the value, or lands within a step of it, takes it over; before that, nothing is written. A binding may switch pickup off. | mine |
+| **ARA** | **A bound value writes where a hand would.** Unlocked, it edits the show, joined into one undo step as a fader's move is; under the lock, it rides live, kept or dropped by `live.keep` and `live.drop` (§17.14, AM). | mine |
+| **ARB** | **A double Esc stops what a binding is doing, never the binding**: a rate control held over at the press writes nothing more until it is let go and pushed again, and a control moved after the press is a hand moving a control (§23.11). | mine |
+| **ARC** | **Feedback is the binding's choice, off by default**: the value sent back to the control - a motor fader, an LED ring on a generic MIDI box - paced as the D700 is paced, never echoing a value the control itself just sent. | mine |
+| **ARD** | **Learn** on a binding, or on any number the master dial could take, takes the next control that moves as the endpoint: its port, channel, kind and number, or its address and argument. | mine |
+
+### 74.3 Rows
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `list/<id>/kind` | `s` | rw | `show`, `cart`; `show` (AQR) |
+| `trigger/<id>/kind` | `s` | rw | gains `key` |
+| `trigger/<id>/key` | `s` | rw | **key**: the chord (AQW); refused when it is one the show keeps |
+| `binding/<id>/…` | | | the rows of AQX-ARD, written in this table when BD.7 builds them |
+
+Every new row has a default, so an old show opens and saves unchanged.
+
+### 74.4 Commands
+
+| Command | Arguments | What |
+|---|---|---|
+| `list.create` | `name [id] [attribute value]…` | gains attribute pairs after the identifier, as `cue.create` has them: `kind cart` makes a cart |
+| `cue.press` | `cue [velocity]` | AQU |
+| `cue.release` | `cue` | AQU |
+| `trigger.release` | `trigger` | a key let go (AQU) |
+
+### 74.5 Stages
+
+| Stage | What | Built |
+|---|---|---|
+| BD.0 | This section; PRD §3.5, §3.7, §3.10, §3.27 and §6.9; the devplan | |
+| BD.1 | The wheel over a number (AQP) | |
+| BD.2 | The cart: `list/kind`, no standby, no GO focus, `list.create`'s pairs, its banks asserted (AQR, AQT) | |
+| BD.3 | Any kind under a pad in a cart; `cue.press`, `cue.release`, `trigger.release` (AQN, AQU, AQV) | |
+| BD.4 | Key triggers, in the window and on the page (AQK, AQW) | |
+| BD.5 | Tabs for lists, a cart among them, apart from the GO focus (AQM, AQS) | |
+| BD.6 | The tablet's Cart tab (AQQ) | |
+| BD.7 | The binding's rows, schema and commands | |
+| BD.8 | Its matching and scaling, pure | |
+| BD.9 | MIDI and OSC wired; pickup; the cue-scoped arm and release; the stops | |
+| BD.10 | Feedback; Learn | |
+| BD.11 | The window: the Bindings section of the show settings, a cue's bindings, Learn | |
+| BD.12 | M80, the README, the guides, the whole suite | |
+
+### 74.6 Measurements
+
+- **M80** - Release, quiet machine: a MIDI note bound as a key trigger to a cart's OSC cue, from the
+  note's arrival to the message on the wire; a CC bound to a cue's level, from the CC to the level
+  heard. Owed.
+
+### 74.7 Not built
+
+A key or a note running a named command (AQO); touch and write automation and read as a mode;
+update-cue; CC and pitch-bend curves on a MIDI cue, and MIDI clips; fades aimed at a device's nodes;
+2D paths and their top view; the SpaceMouse as a live binding; the Stream Deck, which arrives as a
+transport whose keys are cart triggers with pictures and whose dials are relative bindings.
