@@ -239,6 +239,7 @@ namespace wfg::cue
             nothing at all, so every cue needs its range whether or not it
             uses it. */
         std::vector<std::pair<std::string, SlotUse>> spans;
+        std::map<std::string, juce::ValueTree> nodeOf;
 
         for (const auto& cue : walk.placed)
         {
@@ -271,6 +272,7 @@ namespace wfg::cue
                               ? span.lastRow : span.firstRow;
 
             spans.push_back ({ cue.id, span });
+            nodeOf[cue.id] = cue.node;
 
             for (const auto& child : cue.node)
             {
@@ -327,6 +329,15 @@ namespace wfg::cue
             going to be a pair, and comparing them to find that out is the work
             an index removes.
         */
+        const auto sameJoin = [&read] (const juce::ValueTree& a, const juce::ValueTree& b)
+        {
+            const auto parent = a.getParent();
+
+            return parent.isValid() && parent == b.getParent() && parent.hasType ("Group")
+                     && isSequence (read.groupMode (parent))
+                     && read.text (parent, "group", "join") != "letPlay";
+        };
+
         std::map<std::string, std::vector<std::size_t>> bySlot;
 
         for (std::size_t index = 0; index < liveRanges.size(); ++index)
@@ -346,6 +357,13 @@ namespace wfg::cue
                     const auto& second = liveRanges[indices[b]];
 
                     if (first.cue == second.cue || first.shared || second.shared)
+                        continue;
+
+                    /*  TWO MEMBERS OF ONE GAPLESS OR CROSSFADE SEQUENCE (namespace
+                        draft §69): held together across the join by design - the
+                        Runner grants the second the slot beside the first - so
+                        their crossing is meant, and nothing to warn about. */
+                    if (sameJoin (nodeOf[first.cue], nodeOf[second.cue]))
                         continue;
 
                     const auto how = relate (first, second);

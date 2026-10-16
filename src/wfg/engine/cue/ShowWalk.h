@@ -448,11 +448,15 @@ namespace wfg::cue
             bool chainAlive = memberTiming.known;
             const auto timeline = isTimeline (reader.groupMode (node));
 
-            for (const auto& child : node)
-            {
-                if (! isCueElement (child.getType().toString()))
-                    continue;
+            std::vector<juce::ValueTree> members;
 
+            for (const auto& child : node)
+                if (isCueElement (child.getType().toString()))
+                    members.push_back (child);
+
+            for (std::size_t index = 0; index < members.size(); ++index)
+            {
+                const auto& child = members[index];
                 Timing here;
 
                 if (chainAlive)
@@ -480,8 +484,12 @@ namespace wfg::cue
                         continue;
                     }
 
+                    /*  LESS A CROSSFADE INTO THE NEXT (namespace draft §69,
+                        GJ.7): the next member starts that much before this one
+                        ends, its waits after - as the Runner places it. */
                     running = here.at + *memberLength
-                                + reader.number (child, "cue", "postWait");
+                                + reader.number (child, "cue", "postWait")
+                                - joinOverlap (node, child, nextEnabled (members, index), memberLength);
                 }
             }
 
@@ -558,6 +566,60 @@ namespace wfg::cue
             return {};
         }
 
+        static bool hasRanges (const juce::ValueTree& cue)
+        {
+            for (const auto& child : cue)
+                if (child.getType().toString() == "Range")
+                    return true;
+
+            return false;
+        }
+
+        //  The member after `index` that plays: a disabled one is skipped, and takes no boundary.
+        juce::ValueTree nextEnabled (const std::vector<juce::ValueTree>& members, std::size_t index) const
+        {
+            for (auto next = index + 1; next < members.size(); ++next)
+                if (reader.flag (members[next], "cue", "enabled"))
+                    return members[next];
+
+            return {};
+        }
+
+        /*  HOW MUCH OF A MEMBER THE NEXT ONE CROSSES (namespace draft §69,
+            GJ.7): an automatic sequence's Crossfade, between two members the
+            Runner places - a sound or a movie with no ranges going out,
+            anything but a scene coming in, never the same cue - no longer than
+            either of them. Nought for every other boundary: Gapless and Let
+            play overlap nothing, and the walk counts the gap Let play leaves as
+            nought, as it always has. The rule `Runner::joinTick` places by. */
+        double joinOverlap (const juce::ValueTree& group, const juce::ValueTree& outgoing,
+                            const juce::ValueTree& incoming, std::optional<double> outLength) const
+        {
+            if (! incoming.isValid() || ! isAutoSequence (reader.groupMode (group))
+                  || reader.text (group, "group", "join") != "crossfade")
+                return 0.0;
+
+            const auto out = outgoing.getType().toString();
+            const auto in = incoming.getType().toString();
+            const auto sounding = (out == "Media" || (out == "Video" && reader.text (outgoing, "video", "source") == "movie"))
+                                    && ! hasRanges (outgoing);
+
+            if (! sounding || in == "Group" || ! reader.flag (outgoing, "cue", "enabled")
+                  || incoming[juce::Identifier ("id")] == outgoing[juce::Identifier ("id")])
+                return 0.0;
+
+            auto overlap = std::max (0.1, reader.number (group, "group", "joinLength"));
+
+            if (outLength.has_value())
+                overlap = std::min (overlap, *outLength);
+
+            if (in == "Media" || in == "Video")
+                if (const auto inLength = lengthOf (incoming); inLength.has_value())
+                    overlap = std::min (overlap, *inLength);
+
+            return std::max (0.0, overlap);
+        }
+
         static bool hasCuesIn (const juce::ValueTree& group, const char* role)
         {
             const auto section = group.getChildWithName (juce::Identifier (role));
@@ -593,6 +655,25 @@ namespace wfg::cue
 
             if (element == "Media")
                 return mediaLength (node);
+
+            /*  A MOVIE AS LONG AS IT PLAYS (namespace draft §69, GJ.7), as a
+                sound: the file from its start offset, at its speed. A still, a
+                fill, a capture or a text holds until something stops it, and
+                a movie's ranges are left unsized. */
+            if (element == "Video")
+            {
+                if (reader.text (node, "video", "source") != "movie" || hasRanges (node))
+                    return std::nullopt;
+
+                const auto length = playedLengthOf (node, durations);
+                const auto speed = std::abs (reader.number (node, "video", "rate"));
+
+                if (! length.has_value() || ! (speed > 0.0))
+                    return std::nullopt;
+
+                const auto span = *length - reader.number (node, "video", "startOffset");
+                return span > 0.0 ? std::optional<double> (span / speed) : std::nullopt;
+            }
 
             if (element == "Group")
                 return groupLength (node);
@@ -690,11 +771,15 @@ namespace wfg::cue
             double running = 0.0;
             double furthest = 0.0;
 
-            for (const auto& child : node)
-            {
-                if (! isCueElement (child.getType().toString()))
-                    continue;
+            std::vector<juce::ValueTree> members;
 
+            for (const auto& child : node)
+                if (isCueElement (child.getType().toString()))
+                    members.push_back (child);
+
+            for (std::size_t index = 0; index < members.size(); ++index)
+            {
+                const auto& child = members[index];
                 const auto length = lengthOf (child);
 
                 if (! length.has_value())
@@ -706,7 +791,8 @@ namespace wfg::cue
                 furthest = std::max (furthest, begins + *length);
 
                 if (! timeline)
-                    running = begins + *length + reader.number (child, "cue", "postWait");
+                    running = begins + *length + reader.number (child, "cue", "postWait")
+                                - joinOverlap (node, child, nextEnabled (members, index), length);
             }
 
             /*  THE GROUP'S OWN PRE-WAIT IS NOT PART OF ITS LENGTH, corrected

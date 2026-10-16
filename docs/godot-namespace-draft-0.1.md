@@ -30204,5 +30204,5 @@ Every new row has a default, so an old show opens and saves unchanged.
 ### 69.6 Not built
 
 A nested group as a member of a placed join, and a ranged sound, a fade, a memo or a network cue as the outgoing member of one (AOE); a crossfade's length or curve per member; a range
-crossfade's curve; the clash warning where an outgoing footer and an incoming header touch one target
+crossfade's curve; a seek, or a backup seated, landing inside a crossfade - both members are placed where they are, by the solver and the timeline alike, but the crossing's fades are not carried into the seat, so the two sound whole until the outgoing one ends; the clash warning where an outgoing footer and an incoming header touch one target
 (PRD §3.6, *proposed* since 2026-09-18).

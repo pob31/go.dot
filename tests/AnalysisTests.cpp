@@ -839,3 +839,28 @@ TEST_CASE ("M18: the analysis is a cache asked and not told, counted rather than
                      << " times; " << moves << " object.move each followed by a publish "
                      << moveCost << " ms, " << (moveCost / moves) << " ms each");
 }
+
+TEST_CASE ("analysis: two members of one Crossfade sequence on one input cross by design, and are not a clash (§69)")
+{
+    AnalysisRig rig;
+
+    const auto chain = rig.group (rig.listId, 0, "Chain", "sequence", "auto");
+    rig.document.findById (chain).setProperty (juce::Identifier ("join"), "crossfade", nullptr);
+    rig.document.findById (chain).setProperty (juce::Identifier ("joinLength"), 1.0, nullptr);
+
+    const auto first = rig.media (chain, 0, "First");
+    const auto second = rig.media (chain, 1, "Second");
+    rig.feed (first, rig.slotA);
+    rig.feed (second, rig.slotA);
+
+    //  They do overlap - a second of crossing - and the Runner holds the input for both.
+    CHECK_FALSE (rig.clash (rig.slotA, first, second));
+
+    //  Two members of a timeline on one input, together from its start, still are one.
+    const auto scene = rig.group (rig.listId, 1, "Scene", "timeline", "manual");
+    const auto rain = rig.media (scene, 0, "Rain");
+    const auto wind = rig.media (scene, 1, "Wind");
+    rig.feed (rain, rig.slotB);
+    rig.feed (wind, rig.slotB);
+    CHECK (rig.clash (rig.slotB, rain, wind));
+}

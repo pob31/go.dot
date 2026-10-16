@@ -64,6 +64,37 @@ namespace wfg::client::model
         bool lengthOf (const tree::TreeSnapshot&, const std::string&, const std::string&,
                        double&, int);
 
+        /*  HOW MUCH OF A MEMBER THE NEXT ONE CROSSES (namespace draft §69,
+            GJ.7), as the engine's walk and its Runner have it: an automatic
+            sequence's Crossfade from a sound or a movie into anything but a
+            scene, never the same cue, no longer than either. Nought otherwise. */
+        double crossfadeInto (const tree::TreeSnapshot& snapshot, const std::string& groupId,
+                              const std::string& outgoing, double outLength, const std::string& incoming,
+                              int depth)
+        {
+            const auto base = "/godot/cue/" + groupId + "/";
+            const cue::GroupMode mode { text (snapshot, base + "mode"), text (snapshot, base + "advance") };
+
+            if (incoming.empty() || incoming == outgoing || ! cue::isAutoSequence (mode)
+                  || text (snapshot, base + "join") != "crossfade")
+                return 0.0;
+
+            const auto outKind = text (snapshot, "/godot/cue/" + outgoing + "/kind");
+            const auto inKind = text (snapshot, "/godot/cue/" + incoming + "/kind");
+
+            if ((outKind != "media" && outKind != "video") || inKind == "group")
+                return 0.0;
+
+            auto overlap = std::max (0.1, osc::parseDouble (text (snapshot, base + "joinLength")).value_or (2.0));
+            overlap = std::min (overlap, outLength);
+
+            if (inKind == "media" || inKind == "video")
+                if (double inLength = 0.0; lengthOf (snapshot, incoming, inKind, inLength, depth))
+                    overlap = std::min (overlap, inLength);
+
+            return std::max (0.0, overlap);
+        }
+
         bool groupSpan (const tree::TreeSnapshot& snapshot, const std::string& id,
                         double& span, int depth)
         {
@@ -106,8 +137,11 @@ namespace wfg::client::model
             auto running = 0.0;
             auto furthest = 0.0;
 
-            for (const auto& child : words (text (snapshot, base + "order")))
+            const auto members = words (text (snapshot, base + "order"));
+
+            for (std::size_t index = 0; index < members.size(); ++index)
             {
+                const auto& child = members[index];
                 const auto member = "/godot/cue/" + child + "/";
 
                 double length = 0.0;
@@ -122,7 +156,10 @@ namespace wfg::client::model
                 furthest = std::max (furthest, begins + length);
 
                 if (! timeline)
-                    running = begins + length + secondsAt (snapshot, member + "postWait");
+                    running = begins + length + secondsAt (snapshot, member + "postWait")
+                                - crossfadeInto (snapshot, id, child, length,
+                                                 index + 1 < members.size() ? members[index + 1] : std::string {},
+                                                 depth + 1);
             }
 
             span = furthest * static_cast<double> (rounds);
@@ -141,6 +178,19 @@ namespace wfg::client::model
 
             if (kind == "group")
                 return groupSpan (snapshot, id, length, depth);
+
+            /*  A MOVIE AS LONG AS IT PLAYS, at its speed (§69, GJ.7); a still,
+                a fill, a capture or a text holds until something stops it. */
+            if (kind == "video")
+            {
+                if (text (snapshot, "/godot/cue/" + id + "/source") != "movie")
+                    return false;
+
+                const auto speed = std::abs (osc::parseDouble (text (snapshot, "/godot/cue/" + id + "/rate"))
+                                               .value_or (1.0));
+                length = speed > 0.0 ? secondsAt (snapshot, "/godot/cue/" + id + "/duration") / speed : 0.0;
+                return length > 0.0;
+            }
 
             if (kind == "media" || kind == "fade" || kind == "transport")
             {
@@ -208,8 +258,9 @@ namespace wfg::client::model
 
         auto running = 0.0;
 
-        for (const auto& id : order)
+        for (std::size_t index = 0; index < order.size(); ++index)
         {
+            const auto& id = order[index];
             const auto member = "/godot/cue/" + id + "/";
 
             Bar bar;
@@ -236,7 +287,9 @@ namespace wfg::client::model
                 bar.at = running + bar.preWait;
 
                 if (bar.lengthKnown)
-                    running = bar.at + bar.length + bar.postWait;
+                    running = bar.at + bar.length + bar.postWait
+                                - crossfadeInto (snapshot, groupId, id, bar.length,
+                                                 index + 1 < order.size() ? order[index + 1] : std::string {}, 0);
             }
 
             out.span = std::max (out.span, bar.ends());

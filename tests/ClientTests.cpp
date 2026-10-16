@@ -5496,6 +5496,42 @@ TEST_CASE ("client: a timeline group's members are bars, and a sequence's are a 
     }
 }
 
+TEST_CASE ("client: an automatic Crossfade's members overlap on the timeline as the engine places them (§69)")
+{
+    Rig rig;
+    const std::map<std::string, double> lengths { { "tone.wav", 4.0 } };
+    rig.parameters.setMediaDurations (&lengths);
+
+    const std::string list = "7K2QM9X4";
+    const auto chain = rig.document.createCue (list, 0, "group", "Chain", {}, { { "advance", "auto" } });
+    REQUIRE (chain.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.id + "/join", "crossfade").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.id + "/joinLength", "1").ok);
+
+    for (int index = 0; index < 3; ++index)
+    {
+        const auto member = rig.document.createCue (chain.id, index, "media", "Tone");
+        REQUIRE (member.ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + member.id + "/file", "tone.wav").ok);
+    }
+
+    rig.parameters.markStale();
+    auto reading = model::readTimeline (*rig.publish (1), chain.id);
+    REQUIRE (reading.bars.size() == 3u);
+
+    //  Four seconds each, the next a second before the end of the one before.
+    CHECK (reading.bars[0].at == doctest::Approx (0.0));
+    CHECK (reading.bars[1].at == doctest::Approx (3.0));
+    CHECK (reading.bars[2].at == doctest::Approx (6.0));
+    CHECK (reading.span == doctest::Approx (10.0));
+
+    //  Gapless and Let play overlap nothing.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.id + "/join", "gapless").ok);
+    rig.parameters.markStale();
+    reading = model::readTimeline (*rig.publish (2), chain.id);
+    REQUIRE (reading.bars.size() == 3u);
+    CHECK (reading.bars[2].at == doctest::Approx (8.0));
+}
 TEST_CASE ("client: a nested group's bar is as long as what is inside it")
 {
     /*  The author, 2026-09-22: "can you resolve nested groups?" No group's

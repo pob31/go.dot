@@ -1143,3 +1143,48 @@ TEST_CASE ("solve: a time group is never a timed chain, never landed in, never o
     CHECK (std::none_of (stopped.runs.begin(), stopped.runs.end(),
                          [&kept] (const cue::PlannedRun& run) { return run.cue == kept; }));
 }
+
+TEST_CASE ("solve: inside an automatic Crossfade both members are sounding, each where it is (namespace draft 69)")
+{
+    SolverRig rig;
+
+    const auto made = rig.document.createCue (rig.listId, 0, "group", "Chain", {}, { { "advance", "auto" } });
+    REQUIRE (made.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + made.id + "/join", "crossfade").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + made.id + "/joinLength", "1").ok);
+
+    const auto first = rig.media (made.id, 0, "First");
+    const auto second = rig.media (made.id, 1, "Second");
+    const auto third = rig.media (made.id, 2, "Third");
+
+    //  Four seconds each, crossing for one: the second starts at three, the third at six.
+    const auto plan = rig.solve (made.id, 3.5);
+    REQUIRE (plan.ok);
+
+    const auto plannedOf = [&plan] (const std::string& cueId) -> const cue::PlannedRun*
+    {
+        for (const auto& run : plan.runs)
+            if (run.cue == cueId)
+                return &run;
+
+        return nullptr;
+    };
+
+    REQUIRE (plannedOf (first) != nullptr);
+    REQUIRE (plannedOf (second) != nullptr);
+    CHECK (plannedOf (first)->offset == doctest::Approx (3.5));
+    CHECK (plannedOf (second)->offset == doctest::Approx (0.5));
+
+    //  And the third began at six: at nine and a half it is three and a half in, alone.
+    const auto later = rig.solve (made.id, 9.5);
+    REQUIRE (later.ok);
+
+    const cue::PlannedRun* thirdRun = nullptr;
+
+    for (const auto& run : later.runs)
+        if (run.cue == third)
+            thirdRun = &run;
+
+    REQUIRE (thirdRun != nullptr);
+    CHECK (thirdRun->offset == doctest::Approx (3.5));
+}
