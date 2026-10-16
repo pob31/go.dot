@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 21;
+    constexpr std::uint32_t version = 22;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -92,6 +92,12 @@ namespace wfg::video::region
 
     /** Room for what other programs offer, one line each (`videoInputs/available`). */
     constexpr int availableChars = 8192;
+
+    /*  A DECKLINK CARD (namespace draft §71): room for the cards found, one
+        line each with their formats (`videoOutput/cards`), and the most
+        channels of sound a card output embeds. */
+    constexpr int cardsChars = 16384;
+    constexpr int maxCardChannels = 32;
 
     /*  THE MONITOR'S PICTURE OF A CANVAS (namespace draft 40, the author's
         "video monitor window for the canvases"), at most this many pixels
@@ -141,16 +147,36 @@ namespace wfg::video::region
 
     /*  WHAT AN OUTPUT DOES WITH ITS CANVAS (namespace draft §44, YA): shows it
         on a display, or sends it to other programs - over the network (NDI),
-        or on this machine (Spout on Windows, Syphon on macOS). An unknown word
-        is a display, as every output was before. */
-    enum class OutputKind : std::uint32_t { display = 0, ndi = 1, spout = 2, syphon = 3 };
+        or on this machine (Spout on Windows, Syphon on macOS) - or down a
+        cable from a DeckLink card (§71). An unknown word is a display, as
+        every output was before. */
+    enum class OutputKind : std::uint32_t { display = 0, ndi = 1, spout = 2, syphon = 3, decklink = 4 };
+
+    /** The highest kind: what a reader holds a stored number to. */
+    constexpr std::uint32_t lastOutputKind = static_cast<std::uint32_t> (OutputKind::decklink);
 
     inline OutputKind outputKindFrom (std::string_view word) noexcept
     {
-        if (word == "ndi")     return OutputKind::ndi;
-        if (word == "spout")   return OutputKind::spout;
-        if (word == "syphon")  return OutputKind::syphon;
+        if (word == "ndi")       return OutputKind::ndi;
+        if (word == "spout")     return OutputKind::spout;
+        if (word == "syphon")    return OutputKind::syphon;
+        if (word == "decklink")  return OutputKind::decklink;
         return OutputKind::display;
+    }
+
+    inline OutputKind storedKind (std::uint32_t stored) noexcept
+    {
+        return static_cast<OutputKind> (std::min (stored, lastOutputKind));
+    }
+
+    /*  WHETHER A CARD OUTPUT KEYS (§71, APG), and how. */
+    enum class CardKey : std::uint32_t { off = 0, external = 1, internal = 2 };
+
+    inline CardKey cardKeyFrom (std::string_view word) noexcept
+    {
+        if (word == "external")  return CardKey::external;
+        if (word == "internal")  return CardKey::internal;
+        return CardKey::off;
     }
 
     inline Fit fitFrom (std::string_view word) noexcept
@@ -230,6 +256,15 @@ namespace wfg::video::region
         std::atomic<std::uint32_t> kind;
         char sendName[nameChars];
         std::atomic<double> frameRate;
+
+        /*  A CARD OUTPUT (§71): which card, at which format, whether it
+            keys, and the sound it embeds - the show's logical output channel
+            for each of the cable's channels in turn, -1 for silence. */
+        char card[nameChars];
+        char videoMode[idChars];
+        std::atomic<std::uint32_t> key;
+        std::atomic<std::uint32_t> soundCount;
+        std::atomic<std::int32_t> sound[maxCardChannels];
     };
 
     /*  A VIDEO INPUT (namespace draft §44, YB): which, how it arrives - the
@@ -241,6 +276,9 @@ namespace wfg::video::region
         std::atomic<std::uint32_t> kind;
         char sender[nameChars];
         std::atomic<std::uint32_t> enabled;
+
+        /** A card input's format: `auto`, or a format's word (§71, APM). */
+        char videoMode[idChars];
     };
 
     /*  A VIDEO INSERT (§44, YE): how the picture goes and comes back, the
@@ -428,6 +466,14 @@ namespace wfg::video::region
         std::atomic<std::uint64_t> framesPresented;
         std::atomic<std::uint64_t> framesLate;
         std::atomic<float> jitterMs;
+
+        /*  A CARD OUTPUT'S (§71): how long the card holds a frame, how much
+            faster its clock runs than the sound's, its reference (0 none, 1
+            locked, 2 unlocked) and its sound dropped or late. */
+        std::atomic<float> latencyMs;
+        std::atomic<float> skewPpm;
+        std::atomic<std::uint32_t> reference;
+        std::atomic<std::uint64_t> soundLate;
     };
 
     /*  WHAT A VIDEO INPUT IS DOING TONIGHT (§44, YB), the renderer's side:
@@ -441,6 +487,9 @@ namespace wfg::video::region
         std::atomic<std::int32_t> height;
         std::atomic<float> frameRate;
         char problem[textChars];
+
+        /** A card input's: the format arriving, as its word (§71). */
+        char format[idChars];
     };
 
     /*  WHAT A VIDEO INSERT IS DOING TONIGHT (§44, YE, YH): whether what comes
@@ -554,6 +603,11 @@ namespace wfg::video::region
         InputState inputs[maxInputs];
         std::atomic<std::uint32_t> availableSeq;
         char available[availableChars];
+
+        /*  Renderer to engine (§71): the DeckLink cards found, under
+            `cardsSeq`, a line each as `videoOutput/cards` says them. */
+        std::atomic<std::uint32_t> cardsSeq;
+        char cards[cardsChars];
 
         /** Renderer to engine (§44, YE): each video insert, in the configuration's order. */
         InsertState inserts[maxInserts];
@@ -992,7 +1046,17 @@ namespace wfg::video::region
             readings built in order above stay as they were. */
         bool grid = false;
 
-        bool sends() const noexcept  { return kind != OutputKind::display; }
+        /*  A CARD OUTPUT'S (§71), after the grid for the same reason: the
+            card, its format, its key, and the logical output channel each of
+            the cable's channels carries, -1 for silence. */
+        std::string card {};
+        std::string videoMode = "1080p50";
+        CardKey key = CardKey::off;
+        std::vector<int> sound {};
+
+        /*  Sent to other programs; and sent down a card's cable. */
+        bool sends() const noexcept  { return kind != OutputKind::display && kind != OutputKind::decklink; }
+        bool toCard() const noexcept { return kind == OutputKind::decklink; }
     };
 
     struct InputReading
@@ -1001,6 +1065,7 @@ namespace wfg::video::region
         OutputKind kind = OutputKind::ndi;
         std::string sender;
         bool enabled = true;
+        std::string videoMode = "auto";
     };
 
     struct InsertReading
@@ -1155,9 +1220,17 @@ namespace wfg::video::region
                 entry.mesh.x.assign (o.meshX, o.meshX + points);
                 entry.mesh.y.assign (o.meshY, o.meshY + points);
                 entry.cdl = Cdl::from (std::vector<double> (o.cdl, o.cdl + 10));
-                entry.kind = static_cast<OutputKind> (std::min<std::uint32_t> (o.kind.load (std::memory_order_relaxed), 3u));
+                entry.kind = storedKind (o.kind.load (std::memory_order_relaxed));
                 entry.sendName = readText (o.sendName);
                 entry.frameRate = std::clamp (o.frameRate.load (std::memory_order_relaxed), 1.0, 240.0);
+                entry.card = readText (o.card);
+                entry.videoMode = readText (o.videoMode);
+                entry.key = static_cast<CardKey> (std::min<std::uint32_t> (o.key.load (std::memory_order_relaxed), 2u));
+
+                const auto channels = std::min<std::uint32_t> (o.soundCount.load (std::memory_order_relaxed), maxCardChannels);
+
+                for (std::uint32_t c = 0; c < channels; ++c)
+                    entry.sound.push_back (o.sound[c].load (std::memory_order_relaxed));
 
                 const auto zones = std::min<std::uint32_t> (o.zoneCount.load (std::memory_order_relaxed), maxZones);
 
@@ -1187,9 +1260,10 @@ namespace wfg::video::region
                 const auto& in = r.config.inputs[n];
                 InputReading entry;
                 entry.id = readText (in.id);
-                entry.kind = static_cast<OutputKind> (std::min<std::uint32_t> (in.kind.load (std::memory_order_relaxed), 3u));
+                entry.kind = storedKind (in.kind.load (std::memory_order_relaxed));
                 entry.sender = readText (in.sender);
                 entry.enabled = in.enabled.load (std::memory_order_relaxed) != 0;
+                entry.videoMode = readText (in.videoMode);
                 out.inputs.push_back (std::move (entry));
             }
 
@@ -1201,7 +1275,7 @@ namespace wfg::video::region
                 const auto& in = r.config.inserts[n];
                 InsertReading entry;
                 entry.id = readText (in.id);
-                entry.kind = static_cast<OutputKind> (std::min<std::uint32_t> (in.kind.load (std::memory_order_relaxed), 3u));
+                entry.kind = storedKind (in.kind.load (std::memory_order_relaxed));
                 entry.sendName = readText (in.sendName);
                 entry.returnSender = readText (in.returnSender);
                 out.inserts.push_back (std::move (entry));
@@ -1246,6 +1320,16 @@ namespace wfg::video::region
             o.kind.store (static_cast<std::uint32_t> (outputs[n].kind), std::memory_order_relaxed);
             writeText (o.sendName, outputs[n].sendName);
             o.frameRate.store (std::clamp (outputs[n].frameRate, 1.0, 240.0), std::memory_order_relaxed);
+            writeText (o.card, outputs[n].card);
+            writeText (o.videoMode, outputs[n].videoMode);
+            o.key.store (static_cast<std::uint32_t> (outputs[n].key), std::memory_order_relaxed);
+
+            const auto channels = std::min<std::size_t> (outputs[n].sound.size(), maxCardChannels);
+
+            for (std::size_t c = 0; c < channels; ++c)
+                o.sound[c].store (outputs[n].sound[c], std::memory_order_relaxed);
+
+            o.soundCount.store (static_cast<std::uint32_t> (channels), std::memory_order_relaxed);
 
             /*  THE MESH, the identity when the show's is not a full grid. */
             const auto mesh = outputs[n].mesh.isValid() ? outputs[n].mesh : Mesh::identity();
@@ -1296,6 +1380,7 @@ namespace wfg::video::region
             in.kind.store (static_cast<std::uint32_t> (inputs[n].kind), std::memory_order_relaxed);
             writeText (in.sender, inputs[n].sender);
             in.enabled.store (inputs[n].enabled ? 1u : 0u, std::memory_order_relaxed);
+            writeText (in.videoMode, inputs[n].videoMode);
         }
 
         r.config.inputCount.store (static_cast<std::uint32_t> (inputCount), std::memory_order_relaxed);
@@ -1335,7 +1420,8 @@ namespace wfg::video::region
     /*  THE RENDERER'S SIDE OF AN INPUT (§44, YB): slot `n` names `id`, and
         whether pictures arrive, their size and rate, and why not. */
     inline void writeInputState (Region& r, std::size_t n, std::string_view id, bool connected,
-                                 int width, int height, double frameRate, std::string_view problem) noexcept
+                                 int width, int height, double frameRate, std::string_view problem,
+                                 std::string_view format = {}) noexcept
     {
         if (n >= static_cast<std::size_t> (maxInputs))
             return;
@@ -1348,6 +1434,7 @@ namespace wfg::video::region
         state.height.store (height, std::memory_order_relaxed);
         state.frameRate.store (static_cast<float> (frameRate), std::memory_order_relaxed);
         writeText (state.problem, problem);
+        writeText (state.format, format);
         endWrite (state.seq);
     }
 
@@ -1365,5 +1452,37 @@ namespace wfg::video::region
         std::string out;
         readConsistent (r.availableSeq, [&] { out = readText (r.available); });
         return out;
+    }
+
+    /*  THE DECKLINK CARDS FOUND (§71), as `videoOutput/cards` says them. */
+    inline void writeCards (Region& r, std::string_view lines) noexcept
+    {
+        beginWrite (r.cardsSeq);
+        writeText (r.cards, lines);
+        endWrite (r.cardsSeq);
+    }
+
+    inline std::string readCards (const Region& r)
+    {
+        std::string out;
+        readConsistent (r.cardsSeq, [&] { out = readText (r.cards); });
+        return out;
+    }
+
+    /*  A CARD OUTPUT'S STATE (§71), the renderer's side, slot `n`: written
+        under the slot's own `seq` beside its frames. */
+    inline void writeCardState (Region& r, std::size_t n, double latencyMs, double skewPpm, std::uint32_t reference,
+                                std::uint64_t soundLate) noexcept
+    {
+        if (n >= static_cast<std::size_t> (maxOutputs))
+            return;
+
+        auto& state = r.outputs[n];
+        beginWrite (state.seq);
+        state.latencyMs.store (static_cast<float> (latencyMs), std::memory_order_relaxed);
+        state.skewPpm.store (static_cast<float> (skewPpm), std::memory_order_relaxed);
+        state.reference.store (std::min (reference, 2u), std::memory_order_relaxed);
+        state.soundLate.store (soundLate, std::memory_order_relaxed);
+        endWrite (state.seq);
     }
 }

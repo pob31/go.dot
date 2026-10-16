@@ -4862,6 +4862,8 @@ namespace wfg::tree
                                 text += (text.empty() ? "" : "\n") + status.sourceName + "\t" + status.state + "\t"
                                       + std::to_string (static_cast<int> (status.progress * 100.0)) + "\t" + status.problem;
                     }
+                    else if (name == "cards")
+                        text = found.cards;
                     else
                         continue;
 
@@ -4897,6 +4899,14 @@ namespace wfg::tree
                         text = std::to_string (entry != nullptr ? entry->framesLate : 0);
                     else if (name == "presentJitter")
                         text = osc::formatDouble (entry != nullptr ? entry->jitterMs : 0.0);
+                    else if (name == "latency")
+                        text = osc::formatDouble (entry != nullptr ? entry->latencyMs : 0.0);
+                    else if (name == "skew")
+                        text = osc::formatDouble (entry != nullptr ? entry->skewPpm : 0.0);
+                    else if (name == "reference")
+                        text = entry != nullptr ? entry->reference : std::string ("none");
+                    else if (name == "soundLate")
+                        text = std::to_string (entry != nullptr ? entry->soundLate : 0);
                     else
                         continue;
 
@@ -4932,6 +4942,8 @@ namespace wfg::tree
                         text = std::to_string (entry != nullptr ? entry->height : 0);
                     else if (name == "frameRate")
                         text = osc::formatDouble (entry != nullptr ? entry->frameRate : 0.0);
+                    else if (name == "format")
+                        text = entry != nullptr ? entry->format : std::string {};
                     else if (name == "problem")
                         text = entry != nullptr ? entry->problem
                                                 : (found.renderer == "running" ? std::string ("the renderer has not reached it yet")

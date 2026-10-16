@@ -31,6 +31,9 @@ namespace wfg::video::render
             case region::OutputKind::spout:   return makeSpoutReceiver (sender, why);
             case region::OutputKind::syphon:  return makeSyphonReceiver (sender, why);
             case region::OutputKind::ndi:     return makeNdiReceiver (sender, why);
+            case region::OutputKind::decklink:
+                why = "taking a card's picture in is not built yet";
+                return nullptr;
             case region::OutputKind::display: break;
         }
 

@@ -4438,6 +4438,18 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="card">
+          <a:documentation>The DeckLink card a card output sends through, by the identifier Desktop Video keeps for it across restarts, as videoOutputs/cards lists it (namespace draft 71). Read by nothing on another kind; empty sends nothing.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="cardName">
+          <a:documentation>The card&apos;s name when it was picked - DeckLink 8K Pro (1) - shown while the card is not on this machine, so the row still says what somebody chose.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="cdl">
           <a:documentation>The output&apos;s calibration, ASC CDL (VP): slope red green blue, offset red green blue, power red green blue, saturation - ten numbers, in the order a .cdl file lists them. Empty changes nothing. What matches a second projector, or a grey wall, to the first.</a:documentation>
           <list>
@@ -4472,13 +4484,24 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="key">
+          <a:documentation>Whether a card output sends its canvas&apos;s transparency as a key (namespace draft 71, APG): off sends the picture alone; external sends the fill on one connector and the key on its pair, for a vision mixer to lay the picture over another; internal lays the picture over the card&apos;s own input on the card. The fill is premultiplied. Only on a card with that keyer.</a:documentation>
+          <choice>
+            <value>off</value>
+            <value>external</value>
+            <value>internal</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="kind">
-          <a:documentation>What the output does with its canvas (namespace draft 44, YA): display shows it on a display of this machine, as every output did; ndi sends it over the network, spout to another program on this Windows machine, syphon to another on this Mac - warped and calibrated as an output is, its display rows read by nothing. A kind this system has not got sends nothing and says so.</a:documentation>
+          <a:documentation>What the output does with its canvas (namespace draft 44, YA): display shows it on a display of this machine, as every output did; ndi sends it over the network, spout to another program on this Windows machine, syphon to another on this Mac; decklink sends it down a cable from a Blackmagic DeckLink card, at the card&apos;s format and on the card&apos;s clock (namespace draft 71) - warped and calibrated as an output is, its display rows read by nothing. A kind this system has not got sends nothing and says so.</a:documentation>
           <choice>
             <value>display</value>
             <value>ndi</value>
             <value>spout</value>
             <value>syphon</value>
+            <value>decklink</value>
           </choice>
         </attribute>
       </optional>
@@ -4519,6 +4542,18 @@
       <optional>
         <attribute name="sendName">
           <a:documentation>The name another program finds a sending output by, and empty for Go.dot and the output&apos;s name - Go.dot - Face. Read by nothing on a display.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="sound">
+          <a:documentation>The buses a card output embeds in its cable beside the picture, by identifier, space-separated, laid in order onto the cable&apos;s channels - a stereo bus two of them (namespace draft 71, APH). The same samples the interface plays, after their trim and DCA; empty sends no sound.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="videoMode">
+          <a:documentation>The format a card output sends, as a word made from it (namespace draft 71.3): the height for the usual widescreen sizes, dci and the height for cinema&apos;s wider ones, else width x height; then p or i; then pictures a second, or fields a second when interlaced, whole or to two places - 1080p50, 1080p59.94, 1080i50, 2160p25, dci1080p24. A new output starts at 1080p50 (AOY). The card must offer it; read by nothing on another kind.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -4629,11 +4664,12 @@
       </optional>
       <optional>
         <attribute name="kind">
-          <a:documentation>How the picture arrives: ndi over the network, spout from another program on this Windows machine, syphon from one on this Mac.</a:documentation>
+          <a:documentation>How the picture arrives: ndi over the network, spout from another program on this Windows machine, syphon from one on this Mac, decklink in a cable to a Blackmagic DeckLink card (namespace draft 71, APM) - its sender the card&apos;s identifier.</a:documentation>
           <choice>
             <value>ndi</value>
             <value>spout</value>
             <value>syphon</value>
+            <value>decklink</value>
           </choice>
         </attribute>
       </optional>
@@ -4646,6 +4682,12 @@
       <optional>
         <attribute name="sender">
           <a:documentation>The name the other program sends under, as videoInputs/available lists it - for NDI the machine&apos;s name and the source&apos;s, MACHINE (Source). Empty takes nothing.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="videoMode">
+          <a:documentation>The format a card input takes in: auto, found by the card, or a format&apos;s word as a card output&apos;s videoMode is written (namespace draft 71, APM). Read by nothing on another kind.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

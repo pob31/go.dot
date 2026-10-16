@@ -809,7 +809,8 @@ namespace wfg::doc
             last, as an output's. */
         registry.add ({ "videoInput.create",
                         "Declares a video input: a picture another program sends over NDI, Spout or"
-                        " Syphon, which a capture cue shows. The sender may be empty and picked after.",
+                        " Syphon, or one a DeckLink card takes in, which a capture cue shows. The sender"
+                        " may be empty and picked after.",
                         { { "name", 's', true }, { "kind", 's', true }, { "sender", 's', true }, { "id", 's', true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)

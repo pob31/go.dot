@@ -257,4 +257,10 @@ namespace wfg::video::card
     /*  Bytes a row of `width` pixels takes in `format`: v210's rows are padded
         to 128 bytes, as cards ask. */
     int rowBytesFor (PixelFormat format, int width) noexcept;
+
+    /*  WHAT `videoOutput/cards` SAYS (namespace draft §71.3): a line a card -
+        its identifier, its name, what it can do (output, input, internal,
+        external, 10bit, soundN), the formats it sends and those it takes in,
+        tab between, words within by spaces - or one line, problem and why. */
+    std::string describe (const Found& found);
 }

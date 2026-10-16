@@ -28,6 +28,7 @@
 #include <wfg/engine/video/TextRaster.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoRegion.h>
+#include <wfg/engine/video/render/Card.h>
 #include <wfg/engine/video/render/Gpu.h>
 #include <wfg/engine/video/render/Painter.h>
 #include <wfg/engine/video/render/Projector.h>
@@ -2480,6 +2481,9 @@ namespace wfg::video
 
             void run() override
             {
+                //  A card is opened and fed from this thread (§71): COM's apartment for it, on Windows.
+                const card::ThreadScope apartment;
+
                 std::vector<ProjectorSpec> specs;
                 std::vector<std::unique_ptr<render::Surface>> surfaces;
                 std::vector<Frames> frames;
@@ -2626,6 +2630,9 @@ namespace wfg::video
                     {
                         nextDiscovery = now + 1'000'000'000;
                         region::writeAvailable (r, render::discoverSenders());
+
+                        //  And the DeckLink cards (§71): a moment's work, as the senders are.
+                        region::writeCards (r, card::describe (card::system().find()));
                     }
 
                     /*  THE INSERTS (§44, YE): a sender for the cue's picture and a
@@ -3230,7 +3237,9 @@ namespace wfg::video
                     for (const auto& output : config.outputs)
                         key += output.id + "|" + (output.enabled ? "1" : "0") + (output.hidden ? "h" : "") + "|"
                              + output.display + "|" + output.displayId + "|" + std::to_string (static_cast<int> (output.kind))
-                             + "|" + output.sendName + "|" + osc::formatDouble (output.frameRate) + ";";
+                             + "|" + output.sendName + "|" + osc::formatDouble (output.frameRate)
+                             + "|" + output.card + "|" + output.videoMode + "|" + std::to_string (static_cast<int> (output.key))
+                             + "|" + std::to_string (output.sound.size()) + ";";
 
                     if (displaysMoved || key != boundKey)
                     {
@@ -3674,6 +3683,8 @@ namespace wfg::video
 
                     if (output.sends())
                         why = output.enabled ? "the renderer was asked for OpenGL, which sends nothing" : "switched off";
+                    else if (output.toCard())
+                        why = output.enabled ? "sending to a card is not built yet" : "switched off";
                     else if (! output.enabled)
                         why = "switched off";
                     else if (output.hidden)

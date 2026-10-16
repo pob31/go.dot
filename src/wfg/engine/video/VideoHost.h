@@ -86,6 +86,14 @@ namespace wfg::video
             std::uint64_t framesPresented = 0;
             std::uint64_t framesLate = 0;
             double jitterMs = 0.0;
+
+            /*  A card output's (namespace draft §71): how long the card
+                holds a frame, its clock against the sound's, its reference
+                - none, locked, unlocked - and its sound dropped or late. */
+            double latencyMs = 0.0;
+            double skewPpm = 0.0;
+            std::string reference = "none";
+            std::uint64_t soundLate = 0;
         };
 
         std::vector<OutputEntry> outputs;
@@ -100,10 +108,15 @@ namespace wfg::video
             int height = 0;
             double frameRate = 0.0;
             std::string problem;
+            std::string format {};   ///< a card input's, as its word (§71)
         };
 
         std::vector<InputEntry> inputs;
         std::string available;
+
+        /*  THE DECKLINK CARDS THIS MACHINE HAS (§71), as `videoOutput/cards`
+            says them. */
+        std::string cards;
 
         /*  AND EACH VIDEO INSERT (§44, YE, YH). */
         struct InsertEntry

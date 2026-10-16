@@ -24,12 +24,14 @@
 
 #include <wfg/engine/video/DeckLinkProbe.h>
 #include <wfg/engine/video/VideoModes.h>
+#include <wfg/engine/video/VideoRegion.h>
 #include <wfg/engine/video/render/Card.h>
 #include <wfg/engine/video/render/DeckLinkApi.h>
 
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <new>
 #include <sstream>
 #include <thread>
 
@@ -285,4 +287,70 @@ TEST_CASE ("decklink: the test card's clock runs as fast as it was told to drift
     //  The stream's nanoseconds against the machine's.
     const double ppm = (static_cast<double> (time1 - time0) / static_cast<double> (nanos1 - nanos0) - 1.0) * 1.0e6;
     CHECK (std::abs (ppm - 1000.0) < 20.0);
+}
+
+TEST_CASE ("decklink: a card output's and input's settings cross to the renderer whole, and its kind is not read as another (DL.2)")
+{
+    std::vector<char> bytes (video::region::regionBytes(), 0);
+    auto* r = new (bytes.data()) video::region::Region {};
+    video::region::stamp (*r);
+
+    video::region::OutputReading output;
+    output.id = "MC000070";
+    output.kind = video::region::OutputKind::decklink;
+    output.card = "dl-1a2b3c4d";
+    output.videoMode = "2160p59.94";
+    output.key = video::region::CardKey::internal;
+    output.sound = { 0, 1, -1, 5 };
+
+    video::region::InputReading input;
+    input.id = "MC000071";
+    input.kind = video::region::OutputKind::decklink;
+    input.sender = "dl-1a2b3c4d";
+    input.videoMode = "1080i50";
+
+    video::region::writeConfig (*r, {}, { output }, { input });
+
+    video::region::ConfigReading read;
+    REQUIRE (video::region::readConfig (*r, read));
+    REQUIRE (read.outputs.size() == 1);
+    CHECK (read.outputs[0].kind == video::region::OutputKind::decklink);
+    CHECK (read.outputs[0].toCard());
+    CHECK_FALSE (read.outputs[0].sends());
+    CHECK (read.outputs[0].card == "dl-1a2b3c4d");
+    CHECK (read.outputs[0].videoMode == "2160p59.94");
+    CHECK (read.outputs[0].key == video::region::CardKey::internal);
+    CHECK (read.outputs[0].sound == std::vector<int> { 0, 1, -1, 5 });
+
+    REQUIRE (read.inputs.size() == 1);
+    CHECK (read.inputs[0].kind == video::region::OutputKind::decklink);
+    CHECK (read.inputs[0].videoMode == "1080i50");
+
+    //  The cards found, and a card output's state, the renderer's side.
+    video::region::writeCards (*r, "fake-1\tGo.dot test card\toutput input\t1080p50\t1080p50");
+    CHECK (video::region::readCards (*r) == "fake-1\tGo.dot test card\toutput input\t1080p50\t1080p50");
+    video::region::writeCardState (*r, 0, 40.0, -12.5, 1, 3);
+    CHECK (r->outputs[0].latencyMs.load() == doctest::Approx (40.0));
+    CHECK (r->outputs[0].skewPpm.load() == doctest::Approx (-12.5));
+    CHECK (r->outputs[0].reference.load() == 1u);
+    CHECK (r->outputs[0].soundLate.load() == 3u);
+
+    //  A kind written past the last read back as the last, never as a smaller one.
+    CHECK (video::region::storedKind (99u) == video::region::OutputKind::decklink);
+    CHECK (video::region::outputKindFrom ("decklink") == video::region::OutputKind::decklink);
+}
+
+TEST_CASE ("decklink: what videoOutput/cards says of the test card, and of Desktop Video missing (DL.2)")
+{
+    auto cards = video::card::makeFakeSystem();
+    const auto said = video::card::describe (cards->find());
+    CHECK (said.rfind ("fake-1\tGo.dot test card\toutput input internal external 10bit sound16\t1080p50 1080p25", 0) == 0);
+    CHECK (said.find ('\n') == std::string::npos);
+
+    Missing missing;
+    CHECK (video::card::describe (missing.find()).rfind ("problem\tDesktop Video is not installed", 0) == 0);
+
+    video::card::FakeOptions absent;
+    absent.present = false;
+    CHECK (video::card::describe (video::card::makeFakeSystem (absent)->find()).empty());
 }

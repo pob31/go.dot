@@ -33,6 +33,7 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/video/Blanks.h>
 #include <wfg/engine/video/TextLook.h>
+#include <wfg/engine/video/VideoModes.h>
 
 #include <map>
 #include <functional>
@@ -1648,6 +1649,18 @@ namespace wfg::doc
                 for (const auto& member : target.node)
                     if (! timeGroupTakes (member.getType().toString().toStdString(), groupModeOf (member)))
                         return EditResult::failed (reason::badValue);
+        }
+
+        /*  A CARD'S FORMAT IS A WORD MADE FROM IT (namespace draft §71.3): a
+            string as far as the table can say, so the word is judged here - a
+            format's own word, or `auto` on an input, the card finding it. */
+        if ((target.attribute->element == "VideoOutput" || target.attribute->element == "VideoInput")
+            && target.attribute->name() == "videoMode")
+        {
+            const bool automatic = target.attribute->element == "VideoInput" && text == video::modes::automatic;
+
+            if (! automatic && ! video::modes::parse (std::string (text)).has_value())
+                return EditResult::failed (reason::badValue);
         }
 
         if (target.attribute->element == "Audio"
@@ -4641,8 +4654,9 @@ namespace wfg::doc
         if (auto refusal = refuseIfLocked())
             return *refusal;
 
-        //  The three kinds, and nothing else: a word nobody can send under is no input.
-        if (! kind.empty() && kind != "ndi" && kind != "spout" && kind != "syphon")
+        //  The kinds, and nothing else: a word nobody can send under is no
+        //  input. A DeckLink card's input is one too (§71, APM).
+        if (! kind.empty() && kind != "ndi" && kind != "spout" && kind != "syphon" && kind != "decklink")
             return EditResult::failed (reason::badValue);
 
         std::vector<std::pair<std::string_view, std::string>> attributes;

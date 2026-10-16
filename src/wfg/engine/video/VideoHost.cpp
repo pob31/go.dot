@@ -22,6 +22,7 @@
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/video/RegionSink.h>
 #include <wfg/engine/video/SendNames.h>
+#include <wfg/engine/video/VideoModes.h>
 
 #include <juce_core/juce_core.h>
 
@@ -65,7 +66,8 @@ namespace wfg::video
             return std::equal (a.begin(), a.end(), b.begin(), b.end(),
                                [] (const region::InputReading& x, const region::InputReading& y)
                                {
-                                   return x.id == y.id && x.kind == y.kind && x.sender == y.sender && x.enabled == y.enabled;
+                                   return x.id == y.id && x.kind == y.kind && x.sender == y.sender && x.enabled == y.enabled
+                                       && x.videoMode == y.videoMode;
                                });
         }
 
@@ -99,6 +101,7 @@ namespace wfg::video
                                        && x.enabled == y.enabled && x.testPattern == y.testPattern && x.grid == y.grid && x.hidden == y.hidden
                                        && x.kind == y.kind && x.sendName == y.sendName
                                        && std::abs (x.frameRate - y.frameRate) < 1e-9
+                                       && x.card == y.card && x.videoMode == y.videoMode && x.key == y.key && x.sound == y.sound
                                        && x.mesh.columns == y.mesh.columns && x.mesh.rows == y.mesh.rows
                                        && x.mesh.x == y.mesh.x && x.mesh.y == y.mesh.y && sameCdl (x.cdl, y.cdl)
                                        && sameZones;
@@ -369,6 +372,16 @@ namespace wfg::video
                 entry.framesPresented = state.framesPresented.load (std::memory_order_relaxed);
                 entry.framesLate = state.framesLate.load (std::memory_order_relaxed);
                 entry.jitterMs = static_cast<double> (state.jitterMs.load (std::memory_order_relaxed));
+
+                region::readConsistent (state.seq, [&]
+                {
+                    static constexpr const char* references[] { "none", "locked", "unlocked" };
+                    entry.latencyMs = static_cast<double> (state.latencyMs.load (std::memory_order_relaxed));
+                    entry.skewPpm = static_cast<double> (state.skewPpm.load (std::memory_order_relaxed));
+                    entry.reference = references[std::min<std::uint32_t> (state.reference.load (std::memory_order_relaxed), 2u)];
+                    entry.soundLate = state.soundLate.load (std::memory_order_relaxed);
+                });
+
                 foundOutputs.push_back (std::move (entry));
             }
 
@@ -386,6 +399,7 @@ namespace wfg::video
                     entry.height = state.height.load (std::memory_order_relaxed);
                     entry.frameRate = static_cast<double> (state.frameRate.load (std::memory_order_relaxed));
                     entry.problem = region::readText (state.problem);
+                    entry.format = region::readText (state.format);
                 });
 
                 if (! entry.id.empty())
@@ -393,6 +407,7 @@ namespace wfg::video
             }
 
             auto offered = region::readAvailable (*r);
+            auto cardsFound = region::readCards (*r);
 
             /*  WHAT IS HELD OF THE READ-AHEAD (§48), and whether it answers the
                 list written last. */
@@ -433,6 +448,7 @@ namespace wfg::video
                 latest.outputs = std::move (foundOutputs);
                 latest.inputs = std::move (foundInputs);
                 latest.available = std::move (offered);
+                latest.cards = std::move (cardsFound);
                 latest.inserts = std::move (foundInserts);
                 latest.layerTints = region::readTints (r->layerTints);
                 latest.canvasTints = region::readTints (r->canvasTints);
@@ -448,6 +464,7 @@ namespace wfg::video
                 latest.outputs.clear();
                 latest.inputs.clear();
                 latest.available.clear();
+                latest.cards.clear();
                 latest.inserts.clear();
                 latest.layerTints.clear();
                 latest.canvasTints.clear();
@@ -596,6 +613,27 @@ namespace wfg::video
             if (const auto rate = osc::parseDouble (text (base + "frameRate")); rate.has_value() && *rate > 0.0)
                 entry.frameRate = std::clamp (*rate, 1.0, 240.0);
 
+            /*  A CARD OUTPUT (§71): its card, format and key, and its sound -
+                each bus named laid onto the cable's channels in turn, as many
+                as the bus is wide, from the logical channel it starts at. */
+            entry.card = text (base + "card");
+            entry.videoMode = text (base + "videoMode");
+
+            if (entry.videoMode.empty())
+                entry.videoMode = modes::defaultWord;
+
+            entry.key = region::cardKeyFrom (text (base + "key"));
+
+            for (const auto& bus : juce::StringArray::fromTokens (juce::String (text (base + "sound")), " ", ""))
+            {
+                const auto at = "/godot/bus/" + bus.toStdString() + "/";
+                const auto first = whole (at + "firstChannel", -1);
+                const auto width = whole (at + "width", 0);
+
+                for (int c = 0; first >= 0 && c < width && entry.sound.size() < static_cast<std::size_t> (region::maxCardChannels); ++c)
+                    entry.sound.push_back (first + c);
+            }
+
             /*  ITS MAPPING: the mesh as the show says it - a grid the wrong
                 size for its columns and rows is the identity - and the CDL. */
             const auto numbers = [&text] (const std::string& address)
@@ -683,6 +721,11 @@ namespace wfg::video
 
             entry.sender = text (base + "sender");
             entry.enabled = text (base + "enabled") != "false";
+            entry.videoMode = text (base + "videoMode");
+
+            if (entry.videoMode.empty())
+                entry.videoMode = modes::automatic;
+
             anyEnabled = anyEnabled || entry.enabled;
             inputs.push_back (std::move (entry));
         }

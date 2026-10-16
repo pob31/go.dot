@@ -369,6 +369,57 @@ TEST_CASE ("video: a video insert is declared by its command after the inputs, i
     CHECK_FALSE (rig.applied ("videoInsert.create", { text ("Wrong"), text ("hdmi"), text (""), text (""), text ("MC000062") }));
 }
 
+TEST_CASE ("video: a card output's rows and a card input's, a format judged as a word made from it (namespace draft §71, DL.2)")
+{
+    Rig rig { noPictureBundle() };
+
+    REQUIRE (rig.applied ("videoOutput.create", { text ("Mixer"), text (""), text ("MC000070") }));
+    const std::string out = "/godot/videoOutput/MC000070/";
+
+    //  A new card output starts at 1080p50 (AOY), keying nothing, sending no sound.
+    REQUIRE (rig.applied ("node.set", { text (out + "kind"), text ("decklink") }));
+    CHECK (rig.at (out + "kind") == "decklink");
+    CHECK (rig.at (out + "videoMode") == "1080p50");
+    CHECK (rig.at (out + "key") == "off");
+    CHECK (rig.at (out + "sound").empty());
+
+    //  A format's own word, and nothing else: no input's `auto` on an output.
+    REQUIRE (rig.applied ("node.set", { text (out + "videoMode"), text ("1080p59.94") }));
+    CHECK (rig.at (out + "videoMode") == "1080p59.94");
+    CHECK_FALSE (rig.applied ("node.set", { text (out + "videoMode"), text ("1080p59.9") }));
+    CHECK_FALSE (rig.applied ("node.set", { text (out + "videoMode"), text ("auto") }));
+    CHECK_FALSE (rig.applied ("node.set", { text (out + "videoMode"), text ("1080p050") }));
+    CHECK (rig.at (out + "videoMode") == "1080p59.94");
+
+    REQUIRE (rig.applied ("node.set", { text (out + "key"), text ("external") }));
+    CHECK_FALSE (rig.applied ("node.set", { text (out + "key"), text ("both") }));
+    REQUIRE (rig.applied ("node.set", { text (out + "card"), text ("dl-1a2b3c4d") }));
+    REQUIRE (rig.applied ("node.set", { text (out + "cardName"), text ("DeckLink Duo 2 (1)") }));
+    REQUIRE (rig.applied ("node.set", { text (out + "sound"), text ("BS000001 BS000002") }));
+    CHECK (rig.at (out + "sound") == "BS000001 BS000002");
+
+    /*  WHAT THE CARD SAYS TONIGHT is published and never stored: nothing,
+        with no renderer to say otherwise. */
+    CHECK (rig.at (out + "latency") == "0");
+    CHECK (rig.at (out + "skew") == "0");
+    CHECK (rig.at (out + "reference") == "none");
+    CHECK (rig.at (out + "soundLate") == "0");
+    CHECK (rig.exists ("/godot/videoOutput/cards"));
+
+    //  A card's input: found by the card unless a format is said.
+    REQUIRE (rig.applied ("videoInput.create", { text ("Camera 1"), text ("decklink"), text ("dl-1a2b3c4d"), text ("MC000071") }));
+    const std::string in = "/godot/videoInput/MC000071/";
+    CHECK (rig.at (in + "kind") == "decklink");
+    CHECK (rig.at (in + "videoMode") == "auto");
+    REQUIRE (rig.applied ("node.set", { text (in + "videoMode"), text ("1080i50") }));
+    REQUIRE (rig.applied ("node.set", { text (in + "videoMode"), text ("auto") }));
+    CHECK_FALSE (rig.applied ("node.set", { text (in + "videoMode"), text ("1080x") }));
+    CHECK (rig.at (in + "format").empty());
+
+    //  An insert is never a card's: its round trip is another program's.
+    CHECK_FALSE (rig.applied ("videoInsert.create", { text ("Wrong"), text ("decklink"), text (""), text (""), text ("MC000072") }));
+}
+
 TEST_CASE ("video: wfg validate says a video cue on no canvas shows nothing, and a canvas row naming a cue")
 {
     Rig rig;
