@@ -3076,3 +3076,77 @@ TEST_CASE ("video: a movie being edited is read ahead and shown from its render,
     rig.ticks (2);
     REQUIRE (namesOf (rig.sink.preloads) == std::vector<std::string> { "clip-second.mov" });
 }
+
+//==============================================================================
+/*  A SEQUENCE'S JOIN ON PICTURES (namespace draft §69, AOA, GJ.6): the next
+    picture dissolves in over the one before, held whole under it until it goes;
+    an automatic sequence of movies placed on each one's end. */
+namespace
+{
+    //  The DCA factor's points a picture was given, the dissolve's.
+    std::vector<video::Point> dissolveOf (VideoRig& rig, const std::string& runId)
+    {
+        return rig.sink.geometry[runId][video::Property::dca];
+    }
+}
+
+TEST_CASE ("video: a manual act's Crossfade dissolves the next picture in over the one before, which goes once it is covered")
+{
+    VideoRig rig;
+    const auto act = groupIn (rig, 0, "sequence");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + act + "/join", "crossfade").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + act + "/joinLength", "1").ok);
+
+    const auto first = videoCueIn (rig, act, 0, "picture", "wash.png", "Wash");
+    const auto second = videoCueIn (rig, act, 1, "picture", "wash.png", "Moon");
+
+    standbyOn (rig, first);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    rig.ticks (5);
+    const auto firstRun = rig.runOf (first)->id;
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    rig.ticks (5);
+    const auto* incoming = rig.runOf (second);
+    REQUIRE (incoming != nullptr);
+    const auto shown = incoming->shownAtSample;
+    REQUIRE (shown > 0);
+
+    //  From nothing where it came up, whole a second later.
+    rig.ticks (60);
+    const auto rise = dissolveOf (rig, incoming->id);
+    REQUIRE (rise.size() >= 2u);
+    CHECK (rise.front().sample == shown);
+    CHECK (rise.front().value == doctest::Approx (0.0));
+    CHECK (rise.back().value == doctest::Approx (1.0));
+    CHECK (rise.back().sample >= shown + 48000);
+
+    //  The one before held whole under it - no dissolve of its own - and gone once covered.
+    for (const auto& point : dissolveOf (rig, firstRun))
+        CHECK (point.value == doctest::Approx (1.0));
+
+    CHECK (rig.runs.find (firstRun)->isFinished());
+    CHECK_FALSE (rig.runs.find (incoming->id)->isFinished());
+}
+
+TEST_CASE ("video: an automatic Gapless sequence of movies places each on the end of the one before")
+{
+    VideoRig rig;
+    const std::map<std::string, double> lengths { { "clip.mov", 2.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    const auto chain = groupIn (rig, 0, "sequence");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain + "/advance", "auto").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain + "/join", "gapless").ok);
+
+    const auto first = videoCueIn (rig, chain, 0, "movie", "clip.mov", "Clip");
+    const auto second = videoCueIn (rig, chain, 1, "movie", "clip.mov", "Next");
+
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (chain) }).rejected == 0);
+
+    for (int n = 0; n < 400 && (rig.runOf (second) == nullptr || rig.runOf (second)->shownAtSample == 0); ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.runOf (second) != nullptr);
+    CHECK (rig.runOf (second)->shownAtSample == rig.runOf (first)->shownAtSample + 2 * 48000);
+}

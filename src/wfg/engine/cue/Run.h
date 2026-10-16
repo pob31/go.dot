@@ -532,6 +532,11 @@ namespace wfg::cue
             silence by, when it is stopped; `joinStopSent` once it has been. */
         bool joinTriggered = false;
         std::string joinOutBy;
+
+        /*  THE SAMPLE A PICTURE CAME UP ON (§69, GJ.6), as `launchedAtSample` is
+            a sound's: where its fade-in starts and where a manual act's next
+            picture takes the place of the ones before it. Nought until shown. */
+        std::int64_t shownAtSample = 0;
         std::int64_t joinStopAt = 0;
         bool joinStopSent = false;
 

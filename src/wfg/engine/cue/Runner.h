@@ -2173,6 +2173,13 @@ namespace wfg::cue
             holds is granted to the other beside it (§69). */
         bool sharesAJoin (const Run& holder, const Run& run) const;
 
+        /*  WHAT A JOIN LEAVES OF A PICTURE'S OPACITY at `sample` (§69, AOA): its
+            fade-in, in a picture's straight line; and its fade-out only where
+            the picture taking its place lies under it - one coming up on top
+            dissolves over it, held whole underneath until it goes, which is a
+            dissolve rather than two pictures each half there. */
+        double videoJoinFactorAt (const Run& run, std::int64_t sample) const;
+
         //  Let play's next member armed a load lead before the outgoing one's end (§69, AOF).
         void letPlayAhead (Engine& engine, GroupJob& job, std::int64_t now);
 
@@ -3433,6 +3440,9 @@ namespace wfg::cue
         };
 
         std::vector<VideoJob> showing;
+
+        //  The picture a run shows, if it is up (§69, GJ.6).
+        const VideoJob* showingJobOf (const std::string& runId) const;
 
         /*  A FADE CUE MOVING A PICTURE (§36, VS): the values it moves and
             where to, from where they were when it began, over its ticks and

@@ -248,7 +248,10 @@ namespace wfg::cue
             if (run.kind == "media" || run.kind == "mic")
                 return run.launchedAtSample > 0;
 
-            if (run.kind != "video" && run.kind != "group")
+            if (run.kind == "video")
+                return run.shownAtSample > 0;
+
+            if (run.kind != "group")
                 return false;
 
             return run.state != runState::armed && run.state != runState::waiting
@@ -18923,6 +18926,10 @@ namespace wfg::cue
 
         if (audio == nullptr)
         {
+            /*  A SHOW OF PICTURES ALONE still has its acts (§69, GJ.6): its
+                pictures are placed above, and what they take the place of
+                follows here. */
+            joinManual (engine);
             runs.settle (tick);
             return;
         }
@@ -19378,9 +19385,15 @@ namespace wfg::cue
                         videoSink->opacity (job.self, point);
                 }
 
+                /*  WHERE IT CAME UP (§69, GJ.6): a join's fade-in starts there,
+                    and a manual act's picture takes its place from there. */
+                if (auto* shown = runs.find (job.self); shown != nullptr && shown->shownAtSample == 0)
+                    shown->shownAtSample = std::max<std::int64_t> (1, at);
+
                 /*  AND WHAT THE DCAS LEAVE OF IT, from the sample it comes up
-                    on (namespace draft 37.5, WE). */
-                job.dcaFactor = videoDcaFactorOf (*run);
+                    on (namespace draft 37.5, WE) - and a join's fade-in, from
+                    nothing there. */
+                job.dcaFactor = videoDcaFactorOf (*run) * videoJoinFactorAt (*run, at);
 
                 if (job.dcaFactor < 1.0)
                     placeVideoPoint (job, video::Property::dca, { at, job.dcaFactor });
@@ -19544,12 +19557,13 @@ namespace wfg::cue
 
     void Runner::followVideoDcas (VideoJob& job, const Run& run)
     {
-        const auto factor = videoDcaFactorOf (run);
+        /*  AND A JOIN'S DISSOLVE, the same factor (§69, AOA): placed a point a
+            tick at the horizon, as a DCA ridden is. */
+        const auto at = videoSampleAhead();
+        const auto factor = videoDcaFactorOf (run) * videoJoinFactorAt (run, at);
 
         if (std::abs (factor - job.dcaFactor) < 1e-6)
             return;
-
-        const auto at = videoSampleAhead();
         const auto& placed = job.moved[static_cast<std::size_t> (video::Property::dca)];
 
         if (at >= 0)
@@ -21140,7 +21154,9 @@ namespace wfg::cue
                 the sample it was placed on, and rises from there. */
             if (run->joinIn)
             {
-                const auto from = run->joinInFrom > 0 ? run->joinInFrom : run->launchedAtSample;
+                const auto from = run->joinInFrom > 0       ? run->joinInFrom
+                                : run->launchedAtSample > 0 ? run->launchedAtSample
+                                                            : run->shownAtSample;
 
                 gain *= from > 0 ? join::gainIn (at, from, run->joinSamples, run->joinCurve, false) : 0.0;
             }
@@ -21253,13 +21269,20 @@ namespace wfg::cue
 
                 at = run->launchedAtSample;
             }
+            else if (run->kind == "video")
+            {
+                if (run->shownAtSample <= 0)
+                    continue;
+
+                at = run->shownAtSample;
+            }
             else
             {
                 if (run->state == runState::armed || run->state == runState::waiting
                       || run->state == runState::preparing)
                     continue;
 
-                at = run->kind == "video" ? videoSampleAhead() : now;
+                at = now;
                 run->joinInFrom = at;
             }
 
@@ -21309,6 +21332,41 @@ namespace wfg::cue
 
     std::optional<std::int64_t> Runner::knownEndOf (const Run& run) const
     {
+        /*  A MOVIE'S (§69, GJ.6): where its playhead, read from the stretch it
+            is on, reaches the file's end at its speed - a movie with no ranges,
+            playing forwards, of a known length. A still, a fill, a capture or
+            a text has no end of its own. */
+        if (run.kind == "video")
+        {
+            const auto* job = showingJobOf (run.id);
+
+            if (job == nullptr || ! job->movie || ! job->placed || job->movieEnded || job->movieAt < 0
+                  || ! job->rangeId.empty() || job->bounce != 1)
+                return std::nullopt;
+
+            if (! rangesOf (document.findById (run.cue)).empty())
+                return std::nullopt;
+
+            auto duration = 0.0;
+
+            if (const auto* known = handlerDurations())
+                if (const auto found = known->find (job->movieFile); found != known->end())
+                    duration = found->second;
+
+            if (! (duration > 0.0))
+                duration = job->movieLength;
+
+            const auto factor = std::isfinite (run.chaseFactor) && run.chaseFactor > 0.0 ? run.chaseFactor : 1.0;
+            const auto speed = job->rate * factor;
+            const auto rate = videoSampleRate();
+
+            if (! (duration > job->moviePosition) || ! (speed > 0.0) || rate <= 0)
+                return std::nullopt;
+
+            return job->movieAt + static_cast<std::int64_t> (std::llround ((duration - job->moviePosition) / speed
+                                                                            * static_cast<double> (rate)));
+        }
+
         if (run.kind != "media" || run.launchedAtSample <= 0 || run.turned || run.bent || run.direction < 0
               || run.range >= 0 || ! (run.pieceEnd > run.positionOrigin))
             return std::nullopt;
@@ -21392,6 +21450,47 @@ namespace wfg::cue
 
         job.aheadCue = nextCue;
         engine.submit (origin::engine, "run.spawn", { osc::Value::string (job.run), osc::Value::string (nextCue) });
+    }
+
+    const Runner::VideoJob* Runner::showingJobOf (const std::string& runId) const
+    {
+        for (const auto& job : showing)
+            if (job.self == runId)
+                return &job;
+
+        return nullptr;
+    }
+
+    double Runner::videoJoinFactorAt (const Run& run, std::int64_t sample) const
+    {
+        if (! (run.joinIn || run.joinOut) || sample < 0)
+            return 1.0;
+
+        auto factor = 1.0;
+
+        if (run.joinIn)
+        {
+            const auto from = run.joinInFrom > 0 ? run.joinInFrom : run.shownAtSample;
+
+            factor *= from > 0 ? join::gainIn (sample, from, run.joinSamples, run.joinCurve, true) : 0.0;
+        }
+
+        if (run.joinOut)
+        {
+            /*  HELD UNDER A PICTURE COMING UP ON TOP of it: a higher layer, or
+                the same one later, which is how the canvas stacks them. Faded
+                under anything else - a sound, or a picture beneath it. */
+            auto heldUnder = false;
+
+            if (const auto* self = showingJobOf (run.id); self != nullptr && ! run.joinOutBy.empty())
+                if (const auto* incoming = showingJobOf (run.joinOutBy))
+                    heldUnder = incoming->spec.canvas == self->spec.canvas && incoming->spec.layer >= self->spec.layer;
+
+            if (! heldUnder)
+                factor *= join::gainOut (sample, run.joinOutFrom, run.joinSamples, run.joinCurve, true);
+        }
+
+        return std::clamp (factor, 0.0, 1.0);
     }
 
     bool Runner::sharesAJoin (const Run& holder, const Run& run) const
@@ -21491,7 +21590,8 @@ namespace wfg::cue
             (AOG). Anything else is Let play at this boundary. */
         const auto incomingKind = incomingNode.isValid() ? kindOfCue (incomingNode) : std::string {};
         const auto placeable = outgoingNode.isValid() && incomingNode.isValid()
-                                 && outgoing->kind == "media" && incomingKind != "group" && ! incomingKind.empty()
+                                 && (outgoing->kind == "media" || outgoing->kind == "video")
+                                 && incomingKind != "group" && ! incomingKind.empty()
                                  && nextCue != outgoing->cue;
 
         const auto outgoingGone = outgoing->isFinished() || outgoing->state == runState::stopping
@@ -21519,10 +21619,13 @@ namespace wfg::cue
         {
             overlap = setting.seconds;
 
-            if (outgoing->ownRate > 0.0)
+            if (outgoing->kind == "media" && outgoing->ownRate > 0.0)
                 overlap = std::min (overlap, (outgoing->pieceEnd - outgoing->positionOrigin) / outgoing->ownRate);
 
-            if (incomingKind == "media")
+            if (outgoing->kind == "video" && end.has_value() && outgoing->shownAtSample > 0)
+                overlap = std::min (overlap, static_cast<double> (*end - outgoing->shownAtSample) / rate);
+
+            if (incomingKind == "media" || incomingKind == "video")
                 if (const auto length = playedLengthOf (incomingNode, durations); length.has_value())
                     overlap = std::min (overlap, *length / std::max (1.0e-3, numberOf (incomingNode, "rate")));
 
@@ -21617,6 +21720,7 @@ namespace wfg::cue
             outgoing->joinOutFrom = *end - overlapSamples;
             outgoing->joinSamples = overlapSamples;
             outgoing->joinCurve = setting.curve;
+            outgoing->joinOutBy = job.aheadRun;
         }
 
         const auto placed = job.aheadRun;
