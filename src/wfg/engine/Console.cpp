@@ -45,6 +45,7 @@
 #include <wfg/engine/cue/UndoStep.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/TriggerIndex.h>
+#include <wfg/engine/binding/BindingBridge.h>
 #include <wfg/engine/pair/Follow.h>
 #include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/pair/Leadership.h>
@@ -4894,8 +4895,17 @@ namespace
         wfg::osc::UdpEndpoint udp;
         udp.setTap (&traffic);
 
+        /*  THE BINDINGS (namespace draft §74, BD.9): what a control in the
+            room moves, heard on the MIDI and OSC threads and written by the
+            tick. Made before the namespace and the MIDI inputs, which hand it
+            what they hear, so it outlives both - and a double Esc lets go of
+            what it holds (ARB), which only this process has to hear. */
+        wfg::binding::BindingBridge bindingBridge;
+        wfg::binding::letGoOnDoubleEsc (engine.commands(), bindingBridge);
+
         wfg::oscquery::EngineNamespace nameSpace { engine, parameters, touches, udp };
         nameSpace.hearFrom (heardBox);
+        nameSpace.bindTo (bindingBridge);
 
         /*  The triggers, rebuilt on the tick thread whenever the document moves
             and held here so the clock read below has one too. */
@@ -4926,6 +4936,7 @@ namespace
         triggerIndex = wfg::cue::TriggerIndex::build (document);
         nameSpace.publishTriggers (triggerIndex);
         midiIn.publishTriggers (triggerIndex);
+        bindingBridge.publish (wfg::binding::BindingIndex::build (document));
 
         for (const auto& name : midiInputNames)
             midiIn.open (name);
@@ -5465,11 +5476,18 @@ namespace
             And what the surfaces decline is kept for the process cues whose patch
             listens on that port (namespace draft §51, PC.3) - a copy, so the
             triggers still hear it. */
-        midiIn.setConsumer ([bridge = surfaceBridge, &processMidi, &echoes, &echoPorts, &echoPortsGuard, &heardBox]
+        midiIn.setConsumer ([bridge = surfaceBridge, &processMidi, &echoes, &echoPorts, &echoPortsGuard, &heardBox,
+                             &bindingBridge]
                             (const std::string& portId, const wfg::midi::Bytes& message)
                             {
                                 if (bridge->arrived (portId, message))
                                     return true;
+
+                                /*  A BINDING HEARS IT (namespace draft §74,
+                                    BD.9) and takes nothing from anybody: a
+                                    trigger on the same controller fires as it
+                                    always did. */
+                                bindingBridge.midiArrived (portId, message);
 
                                 /*  A CONSOLE ON THIS PORT WITH RX ON (DP.10) is
                                     heard: its echoes, by its shapes, kept as
@@ -6779,6 +6797,14 @@ namespace
                                                                 },
                                                                 tickIndex))
                                      parameters.markStale();
+
+                                 /*  AND WHAT THE BINDINGS HEARD (namespace draft
+                                     §74, BD.9), one write a binding, beside the
+                                     surfaces' and for the same reason. */
+                                 bindingBridge.beforeTick ([&engine] (wfg::Event event)
+                                                           {
+                                                               return engine.submit (std::move (event));
+                                                           });
 
                                  /*  WHAT THE DEVICES SAID since the last tick
                                      (namespace draft 45, O.8): the newest value
@@ -8455,6 +8481,7 @@ namespace
                                         wfg::cue::TriggerIndex::build (document);
                                     nameSpace.publishTriggers (triggerIndex);
                                     midiIn.publishTriggers (triggerIndex);
+                                    bindingBridge.publish (wfg::binding::BindingIndex::build (document));
                                 }
 
                                 state.refusedDatagrams =
@@ -8593,6 +8620,10 @@ namespace
                                     rings and colour, the differences only. */
                                 if (current != nullptr)
                                     surfaceBridge->afterTick (current, touches, outcome.tick);
+
+                                //  And which runs the bindings of a cue are live for (AQY).
+                                if (current != nullptr)
+                                    bindingBridge.afterTick (current);
 
                                 /*  And the rows of the show a process cue's patch
                                     hears, read off it next tick (namespace draft §51). */

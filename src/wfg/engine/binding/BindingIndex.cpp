@@ -17,6 +17,7 @@
 #include <wfg/engine/binding/BindingIndex.h>
 
 #include <wfg/engine/document/ShowDocument.h>
+#include <juce_data_structures/juce_data_structures.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -27,25 +28,31 @@ namespace wfg::binding
     {
         const juce::Identifier idProperty { "id" };
 
-        std::string rowOf (const doc::ShowDocument& document, const std::string& id, const char* row)
+        /*  A ROW READ OFF THE ELEMENT, not through `getAttribute`: the index is
+            built again after every tick that changed the show, and a bound
+            fader under no lock changes it every tick it moves. What the
+            document holds is the canonical text; what it leaves out is the
+            table's default, which the callers below restate. */
+        std::string rowOf (const juce::ValueTree& node, const char* row)
         {
-            return document.getAttribute ("/godot/binding/" + id + "/" + row).value_or (std::string {});
+            return node.getProperty (juce::Identifier (row)).toString().toStdString();
         }
 
-        int integerOf (const doc::ShowDocument& document, const std::string& id, const char* row, int otherwise)
+        int integerOf (const juce::ValueTree& node, const char* row, int otherwise)
         {
-            const auto number = osc::parseDouble (rowOf (document, id, row));
+            const auto number = osc::parseDouble (rowOf (node, row));
             return number.has_value() ? static_cast<int> (*number) : otherwise;
         }
 
-        double numberOf (const doc::ShowDocument& document, const std::string& id, const char* row, double otherwise)
+        double numberOf (const juce::ValueTree& node, const char* row, double otherwise)
         {
-            return osc::parseDouble (rowOf (document, id, row)).value_or (otherwise);
+            return osc::parseDouble (rowOf (node, row)).value_or (otherwise);
         }
 
-        bool flagOf (const doc::ShowDocument& document, const std::string& id, const char* row)
+        bool flagOf (const juce::ValueTree& node, const char* row, bool otherwise)
         {
-            return rowOf (document, id, row) == "true";
+            const auto text = rowOf (node, row);
+            return text.empty() ? otherwise : text == "true";
         }
 
         MidiType typeOf (const std::string& word) noexcept
@@ -97,29 +104,29 @@ namespace wfg::binding
             if (binding.id.empty())
                 continue;
 
-            const auto& id = binding.id;
-            binding.name = rowOf (document, id, "name");
-            binding.cue = rowOf (document, id, "cue");
-            binding.enabled = rowOf (document, id, "enabled") != "false";
-            binding.source = rowOf (document, id, "source") == "osc" ? Source::osc : Source::midi;
-            binding.port = rowOf (document, id, "port");
-            binding.channel = integerOf (document, id, "channel", 0);
-            binding.type = typeOf (rowOf (document, id, "type"));
-            binding.number = integerOf (document, id, "number", 0);
-            binding.address = rowOf (document, id, "address");
-            binding.argument = integerOf (document, id, "argument", 0);
-            binding.control = controlOf (rowOf (document, id, "control"));
-            binding.target = rowOf (document, id, "target");
-            binding.scale.inLow = numberOf (document, id, "inLow", 0.0);
-            binding.scale.inHigh = numberOf (document, id, "inHigh", 1.0);
-            binding.scale.ownRange = flagOf (document, id, "ownRange");
-            binding.scale.outLow = numberOf (document, id, "outLow", 0.0);
-            binding.scale.outHigh = numberOf (document, id, "outHigh", 1.0);
-            binding.scale.invert = flagOf (document, id, "invert");
-            binding.scale.speed = numberOf (document, id, "speed", 0.5);
-            binding.scale.deadZone = numberOf (document, id, "deadZone", 0.1);
-            binding.pickup = flagOf (document, id, "pickup");
-            binding.feedback = flagOf (document, id, "feedback");
+            //  The defaults are the table's (docs/parameters/godot-parameters.csv, `binding`).
+            binding.name = rowOf (node, "name");
+            binding.cue = rowOf (node, "cue");
+            binding.enabled = flagOf (node, "enabled", true);
+            binding.source = rowOf (node, "source") == "osc" ? Source::osc : Source::midi;
+            binding.port = rowOf (node, "port");
+            binding.channel = integerOf (node, "channel", 0);
+            binding.type = typeOf (rowOf (node, "type"));
+            binding.number = integerOf (node, "number", 0);
+            binding.address = rowOf (node, "address");
+            binding.argument = integerOf (node, "argument", 0);
+            binding.control = controlOf (rowOf (node, "control"));
+            binding.target = rowOf (node, "target");
+            binding.scale.inLow = numberOf (node, "inLow", 0.0);
+            binding.scale.inHigh = numberOf (node, "inHigh", 1.0);
+            binding.scale.ownRange = flagOf (node, "ownRange", true);
+            binding.scale.outLow = numberOf (node, "outLow", 0.0);
+            binding.scale.outHigh = numberOf (node, "outHigh", 1.0);
+            binding.scale.invert = flagOf (node, "invert", false);
+            binding.scale.speed = numberOf (node, "speed", 0.5);
+            binding.scale.deadZone = numberOf (node, "deadZone", 0.1);
+            binding.pickup = flagOf (node, "pickup", true);
+            binding.feedback = flagOf (node, "feedback", false);
 
             index->bindings.push_back (std::move (binding));
         }

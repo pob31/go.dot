@@ -139,6 +139,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/TriggerIndex.cpp
     wfg/engine/cue/KeyChord.h
     wfg/engine/cue/KeyChord.cpp
+    wfg/engine/binding/BindingBridge.h
+    wfg/engine/binding/BindingBridge.cpp
     wfg/engine/binding/BindingIndex.h
     wfg/engine/binding/BindingIndex.cpp
     wfg/engine/binding/Scaling.h

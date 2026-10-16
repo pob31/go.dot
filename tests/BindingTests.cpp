@@ -23,12 +23,19 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/binding/BindingBridge.h>
 #include <wfg/engine/binding/BindingIndex.h>
 #include <wfg/engine/binding/Scaling.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/osc/OscCodec.h>
+#include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/osc/UdpEndpoint.h>
+#include <wfg/engine/oscquery/EngineNamespace.h>
+#include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -359,4 +366,253 @@ TEST_CASE ("binding index: read from the show, and matched by port, channel, kin
     //  OSC by its address.
     CHECK (ids (binding::matchOsc (*index, "/desk/fader/1")) == std::vector<std::string> { "BNDCQ001" });
     CHECK (binding::matchOsc (*index, "/desk/fader/2").empty());
+}
+
+//==============================================================================
+/*  BD.9: THE BRIDGE. Bytes and datagrams in, `node.set` out, in the order serve
+    ticks it: the bridge's writes before the tick, the index and the tree after. */
+namespace
+{
+    struct BridgeRig : Rig
+    {
+        BridgeRig()
+        {
+            cue::registerRunCommands (engine.commands(), runs);
+            binding::letGoOnDoubleEsc (engine.commands(), bridge);
+            settle();
+        }
+
+        void settle()
+        {
+            parameters.markStale();
+            tree::EngineState state;
+            state.documentRevision = document.showRevision();
+            snapshot = parameters.publish (tick, state);
+            bridge.publish (binding::BindingIndex::build (document));
+            bridge.afterTick (snapshot);
+        }
+
+        //  One tick: what the bridge writes, applied; then the index and the tree again.
+        std::vector<Event> step()
+        {
+            std::vector<Event> sent;
+            bridge.beforeTick ([this, &sent] (Event event)
+                               {
+                                   sent.push_back (event);
+                                   return engine.submit (std::move (event));
+                               });
+            engine.processTick (tick++);
+            settle();
+            return sent;
+        }
+
+        bool cc (int controller, int value)
+        {
+            return bridge.midiArrived ("PORT0001", { std::uint8_t { 0xB0 }, static_cast<std::uint8_t> (controller),
+                                                     static_cast<std::uint8_t> (value) });
+        }
+
+        double number (const std::string& address)
+        {
+            return osc::parseDouble (published (address)).value_or (-999.0);
+        }
+
+        binding::BindingBridge bridge;
+    };
+}
+
+TEST_CASE ("binding bridge: a controller moves a number by its law, one write a tick, as the binding")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    BridgeRig rig;
+    const auto level = "/godot/cue/" + rig.cueId + "/level";
+
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BND00001"), s ("number"), s ("7"), s ("target"), s (level),
+                                            s ("pickup"), s ("false") }).rejected == 0);
+    rig.settle();
+
+    //  The top of the travel is the top of the level's range, written by the binding.
+    CHECK (rig.cc (7, 127));
+    auto sent = rig.step();
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent.front().origin == "binding:BND00001");
+    CHECK (sent.front().command == "node.set");
+    CHECK (std::abs (rig.number (level) - 12.0) < 1.0e-9);
+
+    //  Three places in one tick: one write, the last, along the fader's law.
+    rig.cc (7, 0);
+    rig.cc (7, 40);
+    rig.cc (7, 108);
+    CHECK (rig.step().size() == 1u);
+    CHECK (std::abs (rig.number (level) - surface::dbForFraction (108.0 / 127.0)) < 1.0e-3);
+
+    //  Another controller moves nothing; nothing heard, nothing written.
+    CHECK_FALSE (rig.cc (8, 20));
+    CHECK (rig.step().empty());
+    CHECK (rig.step().empty());
+
+    //  Switched off, it hears nothing.
+    REQUIRE (rig.document.setAttribute ("/godot/binding/BND00001/enabled", "false").ok);
+    rig.settle();
+    CHECK_FALSE (rig.cc (7, 0));
+    CHECK (rig.step().empty());
+}
+
+TEST_CASE ("binding bridge: a knob with no motor picks the value up, and again once something else has moved it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    BridgeRig rig;
+    const auto level = "/godot/cue/" + rig.cueId + "/level";
+
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BND00002"), s ("number"), s ("7"), s ("target"), s (level) }).rejected == 0);
+    rig.settle();
+
+    //  The level is at nought, most of the way up: the knob near the bottom moves nothing.
+    rig.cc (7, 0);
+    CHECK (rig.step().empty());
+    rig.cc (7, 30);
+    CHECK (rig.step().empty());
+    CHECK (std::abs (rig.number (level)) < 1.0e-9);
+
+    //  Swept past it: caught, and from there it moves the level either way.
+    rig.cc (7, 120);
+    CHECK (rig.step().size() == 1u);
+    CHECK (rig.number (level) > 0.0);
+    rig.cc (7, 100);
+    CHECK (rig.step().size() == 1u);
+    CHECK (rig.number (level) < 0.0);
+
+    //  Moved from the window, the level is the knob's no more until it crosses it again.
+    REQUIRE (rig.send ("node.set", { s (level), osc::Value::float64 (-30.0) }).rejected == 0);
+    rig.settle();
+    rig.cc (7, 101);
+    CHECK (rig.step().empty());
+    CHECK (std::abs (rig.number (level) + 30.0) < 1.0e-9);
+    rig.cc (7, 50);
+    CHECK (rig.step().size() == 1u);
+    CHECK (std::abs (rig.number (level) - surface::dbForFraction (50.0 / 127.0)) < 1.0e-3);
+}
+
+TEST_CASE ("binding bridge: an encoder turns as the master dial does, a pedal moves by its push, and a double Esc lets go of the push")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    BridgeRig rig;
+    const auto preWait = "/godot/cue/" + rig.cueId + "/preWait";
+    const auto postWait = "/godot/cue/" + rig.cueId + "/postWait";
+
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BNDREV01"), s ("number"), s ("8"), s ("control"), s ("relative"),
+                                            s ("target"), s (preWait) }).rejected == 0);
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BNDRATE1"), s ("number"), s ("9"), s ("control"), s ("rate"),
+                                            s ("target"), s (postWait), s ("outHigh"), s ("50"), s ("speed"), s ("1") }).rejected == 0);
+    rig.settle();
+
+    //  Three detents and three more in one tick: one write, six tenths of a second; one back.
+    rig.cc (8, 3);
+    rig.cc (8, 3);
+    CHECK (rig.step().size() == 1u);
+    CHECK (std::abs (rig.number (preWait) - 0.6) < 1.0e-9);
+    rig.cc (8, 65);
+    rig.step();
+    CHECK (std::abs (rig.number (preWait) - 0.5) < 1.0e-9);
+
+    //  Pushed all the way: fifty seconds' span a second, a second a tick, every tick it is held.
+    rig.cc (9, 127);
+    CHECK (rig.step().size() == 1u);
+    CHECK (std::abs (rig.number (postWait) - 1.0) < 1.0e-9);
+    CHECK (rig.step().size() == 1u);
+    CHECK (std::abs (rig.number (postWait) - 2.0) < 1.0e-9);
+
+    //  A double Esc: held over, it writes nothing more, however hard it is pushed.
+    REQUIRE (rig.send ("run.killAll", {}).rejected == 0);
+    rig.settle();
+    CHECK (rig.step().empty());
+    rig.cc (9, 127);
+    CHECK (rig.step().empty());
+    CHECK (std::abs (rig.number (postWait) - 2.0) < 1.0e-9);
+
+    //  Back to rest and pushed again: a hand moving a control.
+    rig.cc (9, 64);
+    CHECK (rig.step().empty());
+    rig.cc (9, 127);
+    CHECK (rig.step().size() == 1u);
+    CHECK (std::abs (rig.number (postWait) - 3.0) < 1.0e-9);
+
+    //  And the encoder was never let go of.
+    rig.cc (8, 1);
+    rig.step();
+    CHECK (std::abs (rig.number (preWait) - 0.6) < 1.0e-9);
+}
+
+TEST_CASE ("binding bridge: a binding of a cue is live while a run of that cue is going, and only then")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    BridgeRig rig;
+    const auto level = "/godot/cue/" + rig.cueId + "/level";
+
+    REQUIRE (rig.send ("binding.create", { s (rig.cueId), s ("BNDCQE02"), s ("number"), s ("7"), s ("target"), s ("level"),
+                                            s ("pickup"), s ("false") }).rejected == 0);
+    rig.settle();
+
+    //  No run: what it hears is dropped.
+    CHECK (rig.cc (7, 127));
+    CHECK (rig.step().empty());
+
+    //  A run made ready ahead of a GO is not one going.
+    rig.runs.create ("RUNBND01", rig.cueId, "media");
+    auto* run = rig.runs.find ("RUNBND01");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::armed;
+    rig.settle();
+    rig.cc (7, 127);
+    CHECK (rig.step().empty());
+
+    //  Playing: its own cue's level, by the row's name.
+    run->state = cue::runState::playing;
+    rig.settle();
+    rig.cc (7, 127);
+    const auto sent = rig.step();
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent.front().args.front().getString() == level);
+    CHECK (std::abs (rig.number (level) - 12.0) < 1.0e-9);
+
+    //  Ended: let go.
+    run->state = cue::runState::done;
+    rig.settle();
+    rig.cc (7, 0);
+    CHECK (rig.step().empty());
+    CHECK (std::abs (rig.number (level) - 12.0) < 1.0e-9);
+}
+
+TEST_CASE ("binding bridge: an OSC address moves a number by its argument, and is written to no node")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    BridgeRig rig;
+    const auto level = "/godot/cue/" + rig.cueId + "/level";
+
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BNDSC001"), s ("source"), s ("osc"), s ("address"), s ("/desk/fader/1"),
+                                            s ("argument"), s ("1"), s ("target"), s (level), s ("pickup"), s ("false") }).rejected == 0);
+    rig.settle();
+
+    CHECK (rig.bridge.oscArrived ("/desk/fader/1", { s ("strip"), osc::Value::float32 (1.0f) }));
+    CHECK (rig.step().size() == 1u);
+    CHECK (std::abs (rig.number (level) - 12.0) < 1.0e-9);
+
+    //  Another address is not the binding's; its own with no such argument is, and moves nothing.
+    CHECK_FALSE (rig.bridge.oscArrived ("/desk/fader/2", { s ("strip"), osc::Value::float32 (0.0f) }));
+    CHECK (rig.bridge.oscArrived ("/desk/fader/1", {}));
+    CHECK (rig.step().empty());
+
+    //  Down the namespace's road: a datagram is the binding's and no write of its own ...
+    osc::UdpEndpoint udp;
+    oscquery::EngineNamespace nameSpace { rig.engine, rig.parameters, rig.touches, udp };
+    nameSpace.bindTo (rig.bridge);
+    nameSpace.write ("udp:10.0.0.5:9000", osc::Packet::message ("/desk/fader/1", { s ("strip"), osc::Value::float32 (0.0f) }));
+    CHECK (rig.engine.processTick (rig.tick++).total() == 0u);
+    CHECK (rig.step().size() == 1u);
+    CHECK (rig.number (level) <= -119.0);
+
+    //  ... and a WebSocket client's message to it is a client's write, which finds no node.
+    nameSpace.write ("ws:1", osc::Packet::message ("/desk/fader/1", { s ("strip"), osc::Value::float32 (1.0f) }));
+    CHECK (rig.engine.processTick (rig.tick++).rejected == 1u);
+    CHECK (rig.step().empty());
 }

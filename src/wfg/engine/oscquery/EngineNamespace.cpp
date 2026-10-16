@@ -16,6 +16,8 @@
 
 #include <wfg/engine/oscquery/EngineNamespace.h>
 
+#include <wfg/engine/binding/BindingBridge.h>
+
 #include <algorithm>
 
 namespace wfg::oscquery
@@ -83,6 +85,15 @@ namespace wfg::oscquery
             engine.submit (Event { origin, command, packet.args });
             return;
         }
+
+        /*  A BINDING'S, OVER UDP AS A TRIGGER IS (namespace draft §74, BD.9):
+            kept for the tick, which writes what it moves - asked first, so a
+            trigger on the same address fires as well. A device's report
+            under the same address is still the device's below; anything else
+            the binding took is written to no node, so an address only a
+            binding listens for is never an error at `lastError`. */
+        const auto bound = bindings != nullptr && origin.rfind ("udp:", 0) == 0
+                             && bindings->oscArrived (packet.address, packet.args);
 
         /*  A TRIGGER, and it is asked about BEFORE the argument-less return
             below - because a foot switch that sends a bare address and nothing
@@ -152,6 +163,9 @@ namespace wfg::oscquery
         if (heard != nullptr
               && (origin.rfind ("serial:", 0) == 0 || origin.rfind ("link:", 0) == 0 || origin.rfind ("mqtt:", 0) == 0)
               && heard->take (origin, packet.address, packet.args))
+            return;
+
+        if (bound)
             return;
 
         /*  An argument-less message to a state node is not a write of nothing.

@@ -57,6 +57,8 @@
 #include <mutex>
 #include <string>
 
+namespace wfg::binding { class BindingBridge; }
+
 namespace wfg::oscquery
 {
     class EngineNamespace final : public Namespace
@@ -116,6 +118,15 @@ namespace wfg::oscquery
             starts; the box outlives the namespace. */
         void hearFrom (tree::HeardBox& box) noexcept { heard = &box; }
 
+        /*  AND WHAT MOVES A NUMBER FROM OUTSIDE (namespace draft §74, BD.9,
+            AQX): a datagram whose address a binding listens for is the
+            binding's, kept for the tick and written to no node - as a
+            trigger's address is written to none. A device's report under
+            the same address is still the device's as well. Absent, nothing
+            is bound. Set before the socket starts; the bridge outlives the
+            namespace. */
+        void bindTo (binding::BindingBridge& bridge) noexcept { bindings = &bridge; }
+
     private:
         Engine& engine;
         tree::ParameterTree& parameters;
@@ -126,5 +137,6 @@ namespace wfg::oscquery
         std::shared_ptr<const cue::TriggerIndex> triggers;
 
         tree::HeardBox* heard = nullptr;
+        binding::BindingBridge* bindings = nullptr;
     };
 }
