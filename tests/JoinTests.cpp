@@ -95,6 +95,22 @@ namespace
 
         void setRouting (int, const std::vector<cue::Coefficient>&) override {}
 
+        //  A faded jump the slot's reader is told to make (a range's crossfaded wrap).
+        struct Move
+        {
+            int track = -1;
+            int slot = -1;
+            LoopMove move;
+        };
+
+        std::uint64_t placeLoop (int track, int slot, const LoopMove& move) override
+        {
+            moves.push_back ({ track, slot, move });
+            return moves.size();
+        }
+
+        std::vector<Move> moves;
+
         /*  A VOICE SOUNDS from its launch sample until a stop placed on it, or
             its file's length, is reached. */
         bool isPlaying (int track) const override
@@ -874,4 +890,91 @@ TEST_CASE ("join: an automatic Let play arms the next member while the one befor
     const auto group = rig.runOf (chain.group);
     REQUIRE (rig.tickUntil ([group] { return group->isFinished(); }, 600));
     CHECK (rig.runOf (chain.third)->launchedAtSample > 0);
+}
+//==============================================================================
+namespace
+{
+    /*  A SOUND WITH ONE RANGE of two seconds from the file's start, looping
+        `loops` times (nought: for ever), its wraps as asked. */
+    std::string loopedSound (Rig& rig, int loops, const std::string& joinWord, double seconds)
+    {
+        rig.disksAnswer = true;
+        const auto sound = rig.media (rig.listId, 0, "loop");
+        const auto range = rig.document.createRange (sound, 0.0, 2.0);
+        REQUIRE (range.ok);
+        REQUIRE (rig.document.setAttribute ("/godot/range/" + range.id + "/loops", std::to_string (loops)).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + sound + "/rangeJoin", joinWord).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + sound + "/rangeJoinLength", osc::formatDouble (seconds)).ok);
+        return sound;
+    }
+}
+
+TEST_CASE ("join: a range's crossfaded wrap - a faded jump to the in-point a crossfade before each wrap, the last pass to the out-point (§69, AOJ)")
+{
+    Rig rig;
+    const auto sound = loopedSound (rig, 3, "crossfade", 0.5);
+
+    rig.apply ("cue.fire", { osc::Value::string (sound) });
+    const auto run = rig.runOf (sound);
+    REQUIRE (rig.tickUntil ([run] { return run->launchedAtSample > 0; }, 40));
+    const auto start = run->launchedAtSample;
+
+    //  A pass a crossfade shorter: one and a half seconds.
+    CHECK (run->rangeFade == samplesOf (0.5));
+    CHECK (run->passSamples == samplesOf (1.5));
+
+    REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.stopsAt.empty(); }, 600));
+
+    //  Two wraps for three passes, each back to the in-point over half a second, at a second and a half apart.
+    REQUIRE (rig.audio.moves.size() == 2u);
+
+    for (std::size_t n = 0; n < 2; ++n)
+    {
+        INFO ("wrap " << n);
+        const auto& move = rig.audio.moves[n].move;
+        CHECK (rig.audio.moves[n].slot == 0);
+        CHECK (move.from == doctest::Approx (1.5 * static_cast<double> (n + 1)));
+        CHECK (move.fileAt == doctest::Approx (0.0));
+        CHECK (move.loopIn == doctest::Approx (0.0));
+        CHECK (move.loopOut == doctest::Approx (2.0));
+        CHECK (move.crossfade == doctest::Approx (0.5));
+    }
+
+    //  And the last pass to its out-point: three passes of a second and a half, and half a second more.
+    CHECK (rig.audio.stopsAt.back().second == start + samplesOf (5.0));
+}
+
+TEST_CASE ("join: a gapless range wraps on its own, and a range looping for ever crosses every wrap")
+{
+    SUBCASE ("gapless: no jump placed, three full passes")
+    {
+        Rig rig;
+        const auto sound = loopedSound (rig, 3, "gapless", 0.5);
+        rig.apply ("cue.fire", { osc::Value::string (sound) });
+        const auto run = rig.runOf (sound);
+        REQUIRE (rig.tickUntil ([run] { return run->launchedAtSample > 0; }, 40));
+        const auto start = run->launchedAtSample;
+
+        REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.stopsAt.empty(); }, 600));
+        CHECK (rig.audio.moves.empty());
+        CHECK (rig.audio.stopsAt.back().second == start + samplesOf (6.0));
+    }
+
+    SUBCASE ("for ever: one wrap a pass")
+    {
+        Rig rig;
+        const auto sound = loopedSound (rig, 0, "crossfade", 0.25);
+        rig.apply ("cue.fire", { osc::Value::string (sound) });
+        const auto run = rig.runOf (sound);
+        REQUIRE (rig.tickUntil ([run] { return run->launchedAtSample > 0; }, 40));
+        const auto start = run->launchedAtSample;
+
+        playTo (rig, start + samplesOf (7.0));
+
+        //  Passes of 1.75 s: wraps at 1.75, 3.5, 5.25 and 7, the last placed a horizon ahead.
+        REQUIRE (rig.audio.moves.size() >= 3u);
+        CHECK (rig.audio.moves[2].move.from == doctest::Approx (5.25));
+        CHECK (rig.audio.stopsAt.empty());
+        CHECK (run->rangeIteration >= 4);
+    }
 }

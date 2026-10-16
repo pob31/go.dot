@@ -43,6 +43,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
     inline constexpr std::string_view enum_media_rateMode[] = { "varispeed", "timestretch" };
+    inline constexpr std::string_view enum_media_rangeJoin[] = { "gapless", "crossfade" };
     inline constexpr std::string_view enum_member_release[] = { "hold", "playOut" };
     inline constexpr std::string_view enum_member_secondPress[] = { "restart", "noop", "stop" };
     inline constexpr std::string_view enum_timed_chase[] = { "free", "jump", "varispeed", "timestretch" };
@@ -1122,6 +1123,22 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "A volume curve over the file, as (seconds, level) pairs: seconds of the FILE from its start, not of the cue from its GO, and a level in dB within the -120..12 the cue level may take. An OFFSET on the cue level - one more term beside a fade, a hand on a strip and a DCA - so nought is the cue as written. Straight in dB between two points; before the first it holds the first, after the last the last. It follows the file wherever it plays: the start offset, a jump, a scrub, and every pass of a looping range, which hears the same stretch of it again. Empty, the default, is no lane (namespace draft 20)." },
+        { "media", "rangeJoin",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "gapless",
+          false, 0.0, false, 0.0,
+          enum_media_rangeJoin, 2,
+          "", 50.0, false, "park",
+          "",
+          "How a sound's ranges loop (PRD 3.24; namespace draft 69, AOJ): gapless wraps each pass on its sample, as the clip's own loop always has; crossfade crosses every wrap of a looping range over rangeJoinLength - the end of the pass read on under the start of the next, equal power - so a loop cut anywhere does not click. A pass is then shorter by the crossfade, and the last plays to the out point. Read at each range's start; a sound at a speed other than one, backwards, bouncing, or with its points moved while it plays, wraps gapless." },
+        { "media", "rangeJoinLength",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "0.1",
+          true, 0.01, false, 0.0,
+          nullptr, 0,
+          "s", 50.0, false, "park",
+          "",
+          "How long a range's crossfaded wrap lasts (namespace draft 69, AOJ), no longer than half the range. Read when rangeJoin is crossfade." },
         { "media", "lockedTo",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",

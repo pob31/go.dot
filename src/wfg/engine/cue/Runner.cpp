@@ -20344,6 +20344,14 @@ namespace wfg::cue
                     run->passesWanted = slice.loops;
                     run->passSamples = samplesForRange (slice, audio->sampleRate());
                     run->boundaryPlacedAt = -1;
+                    run->readerAtSliceStart = at < run->armedSlices.size() ? run->armedSlices[at].in : slice.in;
+
+                    /*  A CROSSFADED WRAP (§69, AOJ) from the in-point only: a run
+                        carried on inside its slice wraps gapless. */
+                    run->rangeFade = std::abs (run->readerAtSliceStart - slice.in) < 1.0e-9
+                                       ? rangeFadeFor (*run, slice, audio->sampleRate()) : 0;
+                    run->passSamples -= run->rangeFade;
+                    run->wrapPlacedAt = 0;
                     run->rangesFinished = false;
                     run->firstPassSamples = 0;
                     run->passesBefore = 0;
@@ -20615,6 +20623,12 @@ namespace wfg::cue
                     const auto passesGone = (heardTo - run->rangeStartedAtSample) / run->passSamples;
 
                     endsAt = run->rangeStartedAtSample + (passesGone + 1) * run->passSamples;
+
+                    /*  A CROSSFADED WRAP'S PASS ENDS AT ITS OUT-POINT, a crossfade
+                        after the next pass began - and that next pass is the one
+                        playing once its wrap is placed (§69, AOJ). */
+                    if (run->rangeFade > 0)
+                        endsAt += run->rangeFade + (run->wrapPlacedAt == endsAt ? run->passSamples : 0);
                 }
             }
             else if (wanted > 0)
@@ -20640,14 +20654,20 @@ namespace wfg::cue
                 }
                 else
                 {
+                    //  The last pass plays to the out-point, a crossfade after its wrap would have been.
                     endsAt = run->rangeStartedAtSample
-                               + static_cast<std::int64_t> (wanted) * run->passSamples;
+                               + static_cast<std::int64_t> (wanted) * run->passSamples + run->rangeFade;
                 }
             }
             else
             {
+                placeWrap (*run, heardTo, now, lead, wanted, moved, atSpeed);
                 continue;                       // loops for ever, and nobody has asked it not to
             }
+
+            //  The wraps before the end, each crossfaded, until the last pass.
+            if (! run->advanceRequested)
+                placeWrap (*run, heardTo, now, lead, wanted, moved, atSpeed);
 
             /*  NOT YET. The boundary is placed when it comes inside the
                 placement horizon and not before, so that an edit made while the
@@ -20792,6 +20812,9 @@ namespace wfg::cue
             run->positionOrigin = incoming.in;
             run->passesWanted = incoming.loops;
             run->passSamples = samplesForRange (incoming, rate);
+            run->rangeFade = rangeFadeFor (*run, incoming, rate);
+            run->passSamples -= run->rangeFade;
+            run->wrapPlacedAt = 0;
             run->firstPassSamples = 0;
             run->passesBefore = 0;
             run->loopMove = 0;
@@ -20800,6 +20823,51 @@ namespace wfg::cue
                            { osc::Value::string (run->id),
                              osc::Value::int32 (static_cast<std::int32_t> (next)) });
         }
+    }
+
+    std::int64_t Runner::rangeFadeFor (const Run& run, const RangeSpec& slice, std::int64_t rate) const
+    {
+        /*  ONLY WHERE THE PASS ARITHMETIC STAYS A COUNT (§69, AOJ): forwards,
+            not bouncing, at a speed of one. Anything else wraps gapless. */
+        const auto cue = document.findById (run.cue);
+
+        if (rate <= 0 || ! cue.isValid() || textOf (cue, "rangeJoin") != "crossfade"
+              || run.direction < 0 || slice.pingPong || ! juce::approximatelyEqual (run.ownRate, 1.0))
+            return 0;
+
+        const auto length = samplesForRange (slice, rate);
+        const auto fade = static_cast<std::int64_t> (std::llround (numberOf (cue, "rangeJoinLength") * static_cast<double> (rate)));
+
+        return std::clamp<std::int64_t> (fade, 0, length / 2);
+    }
+
+    void Runner::placeWrap (Run& run, std::int64_t heardTo, std::int64_t now, std::int64_t lead, int wanted,
+                            bool moved, bool atSpeed)
+    {
+        /*  A CROSSFADED WRAP (namespace draft §69, AOJ): a crossfade before the
+            pass would reach its out-point, the slot's reader jumps back to the
+            in-point, reading the pass's end on under the new pass's start over
+            the crossfade - the faded jump a chase or a moved loop already makes
+            (§33). Placed a horizon ahead, once each. A pass the count says is
+            the last has no wrap: it plays to the out-point. A slice moved under
+            itself, or a speed, and the wraps are the clip's own again. */
+        if (run.rangeFade <= 0 || moved || atSpeed || run.stopIssued || run.passSamples <= 0
+              || static_cast<std::size_t> (run.range) >= run.playingSlices.size())
+            return;
+
+        const auto passesGone = std::max<std::int64_t> (0, heardTo - run.rangeStartedAtSample) / run.passSamples;
+        const auto wrap = run.rangeStartedAtSample + (passesGone + 1) * run.passSamples;
+
+        if ((wanted > 0 && passesGone + 1 >= wanted) || wrap <= run.wrapPlacedAt || wrap - now > lead)
+            return;
+
+        const auto rate = static_cast<double> (audio->sampleRate());
+        const auto& playing = run.playingSlices[static_cast<std::size_t> (run.range)];
+        const auto from = run.readerAtSliceStart + static_cast<double> (wrap - run.rangeStartedAtSample) / rate;
+
+        audio->placeLoop (run.track, run.range, { from, playing.in, playing.in, playing.out,
+                                                  static_cast<double> (run.rangeFade) / rate, 1, false });
+        run.wrapPlacedAt = wrap;
     }
 
     void Runner::updatePositions (std::int64_t tick)

@@ -109,7 +109,7 @@ const KIND_ORDER = {
   // The speed and its mode after where the file starts (namespace draft §22.7).
   // What its DCA mark carries straight after the DCA (namespace draft §50).
   media:   ["file", "lockedTo", "level", "startOffset", "rate", "rateMode", "levelLane", "dca", "dcaCurve", "dcaOffset", "initialLevel", "release", "secondPress",
-            "velocity", "velocityFloor", "pressure", "releaseFade",
+            "velocity", "velocityFloor", "pressure", "releaseFade", "rangeJoin", "rangeJoinLength",
             // The EQ (Phase 9a): the switch, the two filters, then four bands - each its
             // own switch (2026-09-25), then frequency, gain and width, the outer two with a
             // shape. The desktop draws these as a curve at the foot; here they are rows, in
@@ -343,6 +343,7 @@ function detailsMarkup(ids, fields, kind) {
     written is still the stored word; a row not here shows its own words. */
 const OPTION_WORDS = {
   join: { letPlay: "Let play", gapless: "Gapless", crossfade: "Crossfade" },
+  rangeJoin: { gapless: "Gapless", crossfade: "Crossfade" },
 };
 
 export function wordFor(name, value) {

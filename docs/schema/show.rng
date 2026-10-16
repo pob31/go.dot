@@ -913,6 +913,23 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="rangeJoin">
+          <a:documentation>How a sound&apos;s ranges loop (PRD 3.24; namespace draft 69, AOJ): gapless wraps each pass on its sample, as the clip&apos;s own loop always has; crossfade crosses every wrap of a looping range over rangeJoinLength - the end of the pass read on under the start of the next, equal power - so a loop cut anywhere does not click. A pass is then shorter by the crossfade, and the last plays to the out point. Read at each range&apos;s start; a sound at a speed other than one, backwards, bouncing, or with its points moved while it plays, wraps gapless.</a:documentation>
+          <choice>
+            <value>gapless</value>
+            <value>crossfade</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="rangeJoinLength">
+          <a:documentation>How long a range&apos;s crossfaded wrap lasts (namespace draft 69, AOJ), no longer than half the range. Read when rangeJoin is crossfade.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.01</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="rate">
           <a:documentation>The speed the cue plays at, as decided (namespace draft §22): one is the file&apos;s own, a half takes twice as long, two takes half; up to twenty. Nought holds the file where it is - silent in varispeed, a stopped tape, and a held sound in timestretch (decision DR). Heard while the cue sounds: an edit reaches a playing run on the next tick, placed a launch horizon ahead as a launch is, unless a speed fade holds that run. What rateMode says a speed other than one does to the pitch. Rests at one (PRD 4.6). Below nought the file plays BACKWARDS at that speed&apos;s size (namespace draft 41, WX, the author&apos;s pick): a fade from one to minus one stops the sound and plays it back, turning round where it crossed nought; a cue launched at a negative speed plays its piece - its ranges, or its start offset to its end - from the end back to the start.</a:documentation>
           <data type="double">

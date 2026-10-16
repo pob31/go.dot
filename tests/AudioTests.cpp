@@ -7830,6 +7830,57 @@ TEST_CASE ("slice move: an out pulled in behind the playhead jumps to the in-poi
     }
 }
 
+TEST_CASE ("range join: a loop's wraps crossfaded - faded jumps back to the in-point, the path again after each fade (§69, AOJ)")
+{
+    /*  WHAT `Runner::placeWrap` PLACES, heard: a two-second loop of the ramp
+        with a half-second crossfade, so each pass is a second and a half and
+        the reader jumps back to nought a crossfade before the out-point - the
+        pass's end read on under the next pass's start. Two wraps in a row, the
+        second crossing out of the first's map. */
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 4);
+    REQUIRE (ramp.existsAsFile());
+    REQUIRE (voice.open (ramp, false, { { 0.0, 2.0, 0 } }));
+    REQUIRE (voice.go (1.0));
+
+    voice.runTo (voice.at (1.0));
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, 1.5, 0.0, 0.0, 2.0, 0.5 }) != 0);
+    voice.runTo (voice.at (2.5));
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, 3.0, 0.0, 0.0, 2.0, 0.5 }) != 0);
+
+    const auto heard = voice.record (2.1, 2.6);
+    const auto nothing = std::numeric_limits<double>::quiet_NaN();
+
+    //  After the first fade, a second and a half behind; inside the second, blended; after it, three behind.
+    const auto path = [nothing] (double t)
+    {
+        return t < 3.0 ? t - 1.5 : t < 3.5 ? nothing : t < 5.0 ? t - 3.0 : t - 5.0;      // at five, its own wrap: no third jump here
+    };
+
+    CHECK (offPath (heard, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0) == 0);
+
+    /*  Inside the second fade, the two streams blended: never outside them -
+        the outgoing one the end of the pass, the incoming one its start. */
+    const auto* x = heard.getReadPointer (0);
+
+    for (int n = 0; n < heard.getNumSamples(); ++n)
+    {
+        const auto t = static_cast<double> (voice.startedAt + n - voice.launch) / voice.rate;
+
+        if (t < 3.01 || t > 3.49)
+            continue;
+
+        const auto got = rampSecond (x[n], 4);
+        const auto gone = t - 1.5;
+        const auto come = t - 3.0;
+
+        CHECK (got <= std::sqrt (2.0) * std::max (gone, come) + 1.0e-3);
+        CHECK (got >= std::min (gone, come) * 0.9);
+    }
+
+    //  Nothing rebuilt, nothing late.
+    CHECK_FALSE (voice.rig.host.trackLoopAdoption (0, 0).has_value());
+}
 TEST_CASE ("slice move: an in pushed past the playhead plays on into it, and loops from there")
 {
     SpeedRig voice;

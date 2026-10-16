@@ -2138,6 +2138,14 @@ namespace wfg::cue
             fades and before the lanes; frozen on a run on its way out. */
         void applyJoins();
 
+        /*  A RANGE'S CROSSFADED WRAP (§69, AOJ, GJ.10): the crossfade a range
+            entered now gets, in samples - nought for a gapless one, or one
+            Go.dot cannot count the passes of - and the faded jump back to its
+            in-point placed before each wrap but the last. */
+        std::int64_t rangeFadeFor (const Run& run, const RangeSpec& slice, std::int64_t rate) const;
+        void placeWrap (Run& run, std::int64_t heardTo, std::int64_t now, std::int64_t lead, int wanted,
+                        bool moved, bool atSpeed);
+
         /*  A GROUP'S JOIN, read from its rows (namespace draft §69): Let play for
             anything that is not a sequence, whatever the row says - a timeline,
             a sampler and a time group have no boundaries of this kind. */

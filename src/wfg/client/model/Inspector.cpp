@@ -25,6 +25,7 @@
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Picture.h>
 #include <wfg/client/model/Rack.h>
+#include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Timecode.h>
@@ -87,7 +88,7 @@ namespace wfg::client::model
                                "level", "startOffset", "rate", "rateMode", "dca", "dcaCurve", "dcaOffset", "strip",
                                "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
-                               "releaseFade" } },
+                               "releaseFade", "rangeJoin", "rangeJoinLength" } },
 
                 /*  A MIC CUE (Phase 9b): what it takes and through what, how it
                     comes in, then where it goes - a media cue's sound rows with
@@ -239,6 +240,9 @@ namespace wfg::client::model
                     for the author. */
                 { "joinLength", "crossfade length" },
                 { "joinCurve", "crossfade curve" },
+                //  A SOUND'S RANGES, HOW THEY WRAP (§69, AOJ): the implementer's words, for the author.
+                { "rangeJoin", "range wraps" },
+                { "rangeJoinLength", "wrap crossfade" },
             };
 
             return table;
@@ -1236,6 +1240,38 @@ namespace wfg::client::model
             and the curve are a crossfade's, greyed under the other two - and
             left live on a selection whose joins differ, where one of them may
             be a crossfade. Greyed, never hidden. */
+        /*  HOW A SOUND'S RANGES WRAP (namespace draft §69, AOJ), in the words
+            its group's join uses, and asked of a sound that has ranges only -
+            the length greyed unless the wraps cross. */
+        void wordTheRangeJoin (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                               const std::string& kind, std::vector<Field>& decided)
+        {
+            if (kind != "media")
+                return;
+
+            const auto ranged = ! readRanges (snapshot, cueId).empty();
+            auto crossfade = true;
+
+            for (const auto& field : decided)
+                if (field.name == "rangeJoin" && ! field.mixed)
+                    crossfade = field.value == "crossfade";
+
+            for (auto& field : decided)
+            {
+                if (field.name == "rangeJoin")
+                {
+                    if (field.writable)
+                        field.choices = { { "gapless", "Gapless" }, { "crossfade", "Crossfade" } };
+
+                    field.applies = field.applies && ranged;
+                }
+                else if (field.name == "rangeJoinLength")
+                {
+                    field.applies = field.applies && ranged && crossfade;
+                }
+            }
+        }
+
         void wordTheJoin (const std::string& kind, std::vector<Field>& decided)
         {
             if (kind != "group")
@@ -1842,6 +1878,7 @@ namespace wfg::client::model
         greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
         greyWhatOnlyACodeAsks (out.kind, asks, decided);
         wordTheJoin (out.kind, decided);
+        wordTheRangeJoin (snapshot, cueId, out.kind, decided);
         greyTheMapping (out.kind, decided);
 
         /*  THE EQ'S NINETEEN ROWS HAVE AN EDITOR OF THEIR OWN (Phase 9a), the

@@ -8954,6 +8954,37 @@ TEST_CASE ("client: a sequence's join - after how it advances, in the author's w
     CHECK (appliesIn (both, "joinLength"));
 }
 
+TEST_CASE ("client: a sound's range wraps - asked of a sound with ranges, its length a crossfade's (§69, AOJ)")
+{
+    Rig rig;
+
+    const std::string list = "7K2QM9X4";
+    const auto plain = rig.document.createCue (list, 0, "media", "Plain");
+    const auto looped = rig.document.createCue (list, 1, "media", "Looped");
+    REQUIRE (plain.ok);
+    REQUIRE (looped.ok);
+    REQUIRE (rig.document.createRange (looped.id, 0.0, 2.0).ok);
+
+    rig.parameters.markStale();
+    auto snapshot = rig.publish (1);
+
+    const auto inspected = model::inspect (*snapshot, looped.id);
+    const auto* wraps = rowIn (inspected, "rangeJoin");
+    REQUIRE (wraps != nullptr);
+    CHECK (wraps->label == "range wraps");
+    CHECK (wraps->value == "gapless");
+    REQUIRE (wraps->choices.size() == 2u);
+    CHECK (wraps->choices[1] == std::pair<std::string, std::string> { "crossfade", "Crossfade" });
+
+    CHECK (appliesIn (model::inspect (*snapshot, looped.id), "rangeJoin"));
+    CHECK_FALSE (appliesIn (model::inspect (*snapshot, looped.id), "rangeJoinLength"));
+    CHECK_FALSE (appliesIn (model::inspect (*snapshot, plain.id), "rangeJoin"));
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + looped.id + "/rangeJoin", "crossfade").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+    CHECK (appliesIn (model::inspect (*snapshot, looped.id), "rangeJoinLength"));
+}
 TEST_CASE ("client: a time group asks the engine's questions - no icon of a sequence, no follow mark, no length, no words at a scrub (§60)")
 {
     /*  The predicates the engine asks (cue/GroupMode.h) are the client's too.

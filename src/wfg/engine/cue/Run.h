@@ -537,6 +537,15 @@ namespace wfg::cue
             a sound's: where its fade-in starts and where a manual act's next
             picture takes the place of the ones before it. Nought until shown. */
         std::int64_t shownAtSample = 0;
+
+        /*  A RANGE'S CROSSFADED WRAP (namespace draft §69, AOJ, GJ.10): the
+            crossfade, in samples, of the range sounding now - nought where its
+            wraps are gapless - and the sample of the last wrap placed. With a
+            crossfade a pass is shorter by it (`passSamples`), each wrap is a
+            faded jump back to the in-point placed on the slot a horizon ahead,
+            and the last pass plays to the out-point. */
+        std::int64_t rangeFade = 0;
+        std::int64_t wrapPlacedAt = 0;
         std::int64_t joinStopAt = 0;
         bool joinStopSent = false;
 

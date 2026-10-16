@@ -732,6 +732,16 @@ namespace wfg::cue
                     return std::nullopt;
 
                 total += span * static_cast<double> (passes);
+
+                /*  LESS EACH CROSSFADED WRAP (namespace draft §69, AOJ): a pass
+                    then ends a crossfade early, and the last plays to its out
+                    point - the rule `Runner::rangeFadeFor` follows, at a speed
+                    of one, forwards, not bouncing. */
+                if (reader.text (node, "media", "rangeJoin") == "crossfade" && passes > 1
+                      && juce::approximatelyEqual (reader.number (node, "media", "rate"), 1.0)
+                      && ! reader.flag (child, "range", "pingPong"))
+                    total -= std::min (reader.number (node, "media", "rangeJoinLength"), span / 2.0)
+                               * static_cast<double> (passes - 1);
             }
 
             if (anyRange)
