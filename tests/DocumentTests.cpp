@@ -3325,6 +3325,61 @@ TEST_CASE ("time group: the rows - mode gains time, timeSource on a group, timed
     CHECK (read.validate().empty());
 }
 
+TEST_CASE ("schema: a group's join - let play, gapless or crossfade, with a length and a curve (namespace draft 69)")
+{
+    const auto& schema = Schema::instance();
+
+    const auto* join = schema.attribute ("Group", "join");
+    REQUIRE (join != nullptr);
+    CHECK (join->defaultText() == "letPlay");
+
+    for (const auto* word : { "letPlay", "gapless", "crossfade" })
+        CHECK (join->isEnumValue (word));
+
+    //  The word it had until the author renamed it is not one.
+    CHECK_FALSE (join->isEnumValue ("gap"));
+
+    REQUIRE (schema.attribute ("Group", "joinLength") != nullptr);
+    REQUIRE (schema.attribute ("Group", "joinCurve") != nullptr);
+    CHECK (schema.attribute ("Group", "joinLength")->defaultText() == "2");
+    CHECK (schema.attribute ("Group", "joinCurve")->defaultText() == "0");
+
+    //  A group's, and no other cue's.
+    for (const auto* element : { "Media", "Video", "Cue", "Fade", "Osc" })
+    {
+        INFO ("element " << element);
+        CHECK (schema.attribute (element, "join") == nullptr);
+    }
+
+    ShowDocument document;
+    const auto list = document.createList ("Main").id;
+    const auto group = document.createCue (list, 0, "group", "Playlist").id;
+    const auto base = "/godot/cue/" + group + "/";
+
+    CHECK (document.getAttribute (base + "join") == std::optional<std::string> ("letPlay"));
+    CHECK (document.getAttribute (base + "joinLength") == std::optional<std::string> ("2"));
+    CHECK (document.getAttribute (base + "joinCurve") == std::optional<std::string> ("0"));
+
+    //  At their defaults they are not written, so an old show saves as it was.
+    CHECK (CanonicalXml::write (document).find ("join") == std::string::npos);
+
+    CHECK_FALSE (document.setAttribute (base + "join", "gap").ok);
+    CHECK_FALSE (document.setAttribute (base + "joinLength", "0.05").ok);
+    CHECK_FALSE (document.setAttribute (base + "joinCurve", "1.5").ok);
+
+    REQUIRE (document.setAttribute (base + "join", "crossfade").ok);
+    REQUIRE (document.setAttribute (base + "joinLength", "3.5").ok);
+    REQUIRE (document.setAttribute (base + "joinCurve", "-0.25").ok);
+
+    //  Read back in any locale: the length is not "3,5" in fr_FR.
+    ShowDocument read;
+    REQUIRE (CanonicalXml::read (CanonicalXml::write (document), read).ok);
+    CHECK (read.getAttribute (base + "join") == std::optional<std::string> ("crossfade"));
+    CHECK (read.getAttribute (base + "joinLength") == std::optional<std::string> ("3.5"));
+    CHECK (read.getAttribute (base + "joinCurve") == std::optional<std::string> ("-0.25"));
+    CHECK (read.validate().empty());
+}
+
 TEST_CASE ("time group: holds sounds, pictures, timelines and automatic sequences - refused anything else at create, move, paste and wrap")
 {
     ShowDocument document;

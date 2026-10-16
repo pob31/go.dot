@@ -301,6 +301,33 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="join">
+          <a:documentation>What happens between two members of a sequence, set once for every boundary the group owns, automatic or manual, the round&apos;s wrap included (PRD 3.6; namespace draft 69, ANY). letPlay leaves the previous member alone: an automatic sequence starts the next when it is seen to end, a manual one&apos;s GO starts the next while it plays on. gapless places the next on the sample the previous ends on, or has a manual GO cut every earlier member still sounding. crossfade starts the next joinLength before the previous ends and crosses the two, or has a manual GO fade what still sounds out as the next fades in. A member&apos;s post-wait and the next one&apos;s pre-wait push the next later; an automatic boundary whose end cannot be known ahead is letPlay, and its row says so. Asked of a sequence only.</a:documentation>
+          <choice>
+            <value>letPlay</value>
+            <value>gapless</value>
+            <value>crossfade</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="joinCurve">
+          <a:documentation>The shape of a crossfade between two members (namespace draft 69, AOC), the rule a sound edit&apos;s section fades follow: nought is equal power for a sound and a straight line for a picture; towards +1 the sound is held up longer, towards -1 let go sooner, and at -1 the two gains add to one, for material that is alike. Read when join is crossfade.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-1</param>
+            <param name="maxInclusive">1</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="joinLength">
+          <a:documentation>How long a crossfade between two members lasts (namespace draft 69, AOC): the outgoing member&apos;s fade-out ends at its own end, the incoming member&apos;s fade-in starts at its launch, and this is the length of each. Read when join is crossfade.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="loops">
           <a:documentation>How many ROUNDS this group plays before it is done. Rounds, not playbacks: with play set, a round is a subset of the members, and three loops of two-of-five is six cues rather than three. Zero means for ever, which is what an ambience bed is, and is left by a stop verb, an advance or run.stop rather than by counting.</a:documentation>
           <data type="integer">

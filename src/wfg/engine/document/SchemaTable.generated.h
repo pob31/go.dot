@@ -73,6 +73,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_run_chaseState[] = { "free", "inStep", "catching", "jumped" };
     inline constexpr std::string_view enum_group_mode[] = { "timeline", "sequence", "sampler", "time" };
     inline constexpr std::string_view enum_group_advance[] = { "auto", "manual" };
+    inline constexpr std::string_view enum_group_join[] = { "letPlay", "gapless", "crossfade" };
     inline constexpr std::string_view enum_group_selection[] = { "sequential", "shuffle" };
     inline constexpr std::string_view enum_group_takeover[] = { "group", "strip" };
     inline constexpr std::string_view enum_group_timeSource[] = { "ltc", "mtc", "clock" };
@@ -3025,6 +3026,30 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Whether a member starts when the previous completes or on GO." },
+        { "group", "join",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "letPlay",
+          false, 0.0, false, 0.0,
+          enum_group_join, 3,
+          "", 50.0, false, "park",
+          "",
+          "What happens between two members of a sequence, set once for every boundary the group owns, automatic or manual, the round's wrap included (PRD 3.6; namespace draft 69, ANY). letPlay leaves the previous member alone: an automatic sequence starts the next when it is seen to end, a manual one's GO starts the next while it plays on. gapless places the next on the sample the previous ends on, or has a manual GO cut every earlier member still sounding. crossfade starts the next joinLength before the previous ends and crosses the two, or has a manual GO fade what still sounds out as the next fades in. A member's post-wait and the next one's pre-wait push the next later; an automatic boundary whose end cannot be known ahead is letPlay, and its row says so. Asked of a sequence only." },
+        { "group", "joinLength",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "2",
+          true, 0.1, false, 0.0,
+          nullptr, 0,
+          "s", 50.0, false, "park",
+          "",
+          "How long a crossfade between two members lasts (namespace draft 69, AOC): the outgoing member's fade-out ends at its own end, the incoming member's fade-in starts at its launch, and this is the length of each. Read when join is crossfade." },
+        { "group", "joinCurve",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "0",
+          true, -1.0, true, 1.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "The shape of a crossfade between two members (namespace draft 69, AOC), the rule a sound edit's section fades follow: nought is equal power for a sound and a straight line for a picture; towards +1 the sound is held up longer, towards -1 let go sooner, and at -1 the two gains add to one, for material that is alike. Read when join is crossfade." },
         { "group", "selection",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "sequential",
