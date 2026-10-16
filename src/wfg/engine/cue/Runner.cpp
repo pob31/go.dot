@@ -14848,7 +14848,9 @@ namespace wfg::cue
                         break;
                     }
 
-                    target = std::max (target, sibling->launchedAtSample);
+                    /*  ON THE SAMPLE IT WAS DUE, not the one a sound held back
+                        is heard on (namespace draft §70). */
+                    target = std::max (target, sibling->launchedAtSample - sibling->soundDelay);
                 }
 
             /*  And the guarantee the media loop checks, for the same reason: a
@@ -16271,6 +16273,36 @@ namespace wfg::cue
 
         const auto movie = cue[juce::Identifier ("lockedTo")].toString().toStdString();
         return ! movie.empty() && document.findById (movie).hasType ("Video");
+    }
+
+    void Runner::readDelay (Run& run) const
+    {
+        if (run.delayRead || audio == nullptr || audio->sampleRate() <= 0)
+            return;
+
+        run.delayRead = true;
+
+        auto cue = document.findById (run.cue);
+
+        /*  A LOCKED SOUND HAS NO SAY (AOR): its movie's rows decide. */
+        if (followsAMovie (cue))
+            cue = document.findById (cue[juce::Identifier ("lockedTo")].toString().toStdString());
+
+        const auto which = textOf (cue, "delay");
+
+        if (which != "sound" && which != "picture")
+            return;
+
+        const auto samples = static_cast<std::int64_t> (std::llround (std::max (numberOf (cue, "delayBy"), 0.0)
+                                                                      * static_cast<double> (audio->sampleRate())
+                                                                      / 1000.0));
+
+        /*  A SOUND IS HELD BACK ON A SOUND'S RUN, A PICTURE ON A PICTURE'S: a
+            movie that holds back its sounds places its own picture when due. */
+        if (which == "sound" && run.kind == "media")
+            run.soundDelay = samples;
+        else if (which == "picture" && run.kind == "video")
+            run.pictureDelay = samples;
     }
 
     void Runner::fireLockedSounds (Engine& engine, std::int64_t tick, const std::string& movieCue,
@@ -20205,6 +20237,17 @@ namespace wfg::cue
                 anywhere in the playlist (§3.24), and which slot it launches is
                 which range that is. */
             const auto slot = run->startRange;
+
+            /*  A SOUND HELD BACK (namespace draft §70, AOT): placed its delay
+                after the sample it is due on - every reckoning above, the lead,
+                a seat, a code's sample, the guarantee, done on the one it was
+                due on, and nothing after it but the voice's own. A positive
+                delay only moves it further from the block in hand. */
+            if (run->kind == "media")
+            {
+                readDelay (*run);
+                target += run->soundDelay;
+            }
 
             /*  A MIC CUE'S LAUNCH IS ITS GATE (Phase 9b): opened at the same
                 instant a media cue's clip would start, over its fade-in. */

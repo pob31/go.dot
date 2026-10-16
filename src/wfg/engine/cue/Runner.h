@@ -2981,6 +2981,11 @@ namespace wfg::cue
         std::vector<std::string> soundsLockedTo (const std::string& movieCue) const;
         bool followsAMovie (const juce::ValueTree& cue) const;
 
+        /*  A RUN'S STREAM HELD BACK (namespace draft §70): fills `soundDelay`
+            or `pictureDelay` from its cue's rows - a locked sound's from its
+            movie's - once, at the session's rate. */
+        void readDelay (Run& run) const;
+
         /*  ONE WALK OF THE SHOW PER EDIT, not one per movie per tick: every
             movie's locked sounds, made again when the document's revision moves
             - an override switching a sound on or off moves it too - since a

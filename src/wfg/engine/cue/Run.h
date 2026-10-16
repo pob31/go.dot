@@ -1224,6 +1224,16 @@ namespace wfg::cue
         /** The sample the launch was placed at. Zero before it is placed. */
         std::int64_t launchedAtSample = 0;
 
+        /*  THE STREAM HELD BACK (namespace draft §70): how many samples after
+            it is due this run's sound, or its picture, is placed - the cue's
+            `delay` and `delayBy`, a locked sound's its movie's (AOR). Read
+            once, the first time either is placed, and kept for the run's life,
+            so a seek, a speed change, a chase and a resume keep the same lag
+            (AOT). At most one of the two is ever more than nought. */
+        bool delayRead = false;
+        std::int64_t soundDelay = 0;
+        std::int64_t pictureDelay = 0;
+
         /*  HOW FAR AHEAD OF THE RECORD CLOCK ITS LAUNCH WAS PLACED, seconds
             (namespace draft §58, RD.9): a follower's sound placed on its
             leader's sample sounds this much before its own tick grid would

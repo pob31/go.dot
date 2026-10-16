@@ -612,6 +612,46 @@ TEST_CASE ("go: a cue armed in advance launches on the tick GO arrives")
     CHECK (rig.audio.launches.size() == 1u);
 }
 
+/*  A SOUND HELD BACK (namespace draft 70): placed `delayBy` after the sample
+    it is due on, on the sample - not rounded to a tick as a pre-wait is - and
+    after the pre-wait, never instead of it. */
+TEST_CASE ("go: a sound held back is placed its delay later, on the sample, after its pre-wait")
+{
+    const auto lead = [] (const char* delay, const char* delayBy, const char* preWait)
+    {
+        Rig rig;
+        rig.clockRuns = true;
+
+        //  Before standby, which makes the run and copies its waits.
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/delay", delay).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/delayBy", delayBy).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/preWait", preWait).ok);
+        rig.setStandby (rig.mediaId);
+
+        const auto goAt = rig.audio.samples;
+        rig.submitAndTick ("go");
+        rig.audio.completeArms (rig.engine);
+
+        REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.launches.empty(); }));
+        return rig.audio.launches[0].second - goAt;
+    };
+
+    const auto plain = lead ("none", "7.3", "0");
+
+    //  7.3 ms at 48 kHz is 350.4 samples: 350, and not a tick's 960.
+    CHECK (lead ("sound", "7.3", "0") == plain + 350);
+
+    //  Nought held back is today's launch.
+    CHECK (lead ("sound", "0", "0") == plain);
+
+    /*  A pre-wait first, and the delay on top of it. (The wait is a few ticks
+        more than none, less the tick a cold arm waits for its disk, which the
+        wait has already covered: the pre-wait's own tests count it.) */
+    const auto waited = lead ("none", "0", "0.1");
+    CHECK (waited > plain);
+    CHECK (lead ("sound", "7.3", "0.1") == waited + 350);
+}
+
 TEST_CASE ("go: every voice busy fails the run rather than stealing one")
 {
     /*  A playing track is never stolen. The GO is APPLIED - it was a legal
