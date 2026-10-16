@@ -20826,6 +20826,7 @@ The implementer's, open to overruling:
 | `bound` | `T` | r | none | a display is behind it tonight |
 | `problem` | `s` | r | none | why not, in a sentence |
 | `testPattern` | `T` | r | none | a white frame and a cross over whatever is up; `videoOutput.identify` switches it (§35.9) |
+| `grid` | `T` | r | none | the alignment grid, in the canvas's space and bent by the mesh, over whatever is up; `videoOutput.grid` switches it (§68.2, ANX) |
 | `framesPresented`, `framesLate` | `h` | r | none | the child's own count, so pacing is measured, not judged by eye |
 | `presentJitter` | `d` ms | r | none | how far presentation strays from its due time |
 | `meshColumns`, `meshRows`, `mesh` | `i`, `i`, `d*` | rw | show | V.5: the bezier mesh in canvas coordinates 0..1 |
@@ -21963,6 +21964,13 @@ which the document folds into one undo step; a split is one `node.setMany`.
 Owed to the bench: the editor shows the output as 16 by 9 whatever the display's shape; the picture
 of the canvas is not drawn under the grid; nothing is drawn on the projector itself while editing.
 
+*Since 2026-10-16* (§68.2, ANX): **Grid: On / Grid: Off** in the editor's bar puts a white grid on the
+projector itself, in the canvas's own space and bent through each warp as its picture is - the tablet
+has the same switch. The native renderer draws each canvas's grid once a size offscreen and lays it
+through the pass's mesh after every picture, added (its black is nothing, its lines white); the old GL
+renderer (`--renderer=gl`) clears the grid's bars into the canvas's offscreen picture before the warp,
+so there the output's CDL grades the lines with the picture. The region is version 21.
+
 ### 40.6 The video monitor
 
 **Show > Video monitor...** opens a window with a tile per canvas, in the canvas's shape, its name and
@@ -21974,7 +21982,7 @@ anybody. The pictures come through the region (`Preview`, by canvas) and `VideoH
 ### 40.7 Not in this work
 
 - Edge blending between overlapping projectors (the calibration masks, §35.2's VA, after V.5).
-- The canvas drawn under the warp in the editor, and the grid drawn on the projector while editing.
+- The canvas drawn under the warp in the editor. (The grid on the projector came with §68, ANX.)
 - The display's own shape in the editor.
 - The monitor at full rate or full size.
 
@@ -30048,12 +30056,14 @@ the mapping at the wall.
 | **ANU** | **Staleness** in the app: stale after half a second with no bundle, said and greyed; gone after three seconds with no bundle and no answer to a ping, then connected again at 0.5, 1, 2 and every 5 seconds. A link that answers with no ticks is Go.dot's clock standing still, said as such. | mine |
 | **ANV** | **Two machines**: the app may hold a main and its backup at once, each its own connection and copy; one is on screen. Commands go to the machine on screen; a pair command to the machine whose button was pressed. | mine |
 | **ANW** | **What is always on screen**: the current cue (the last the focused list fired), the next (its standby), GO, Doh! and Panic - Doh! left of Panic with air between, Panic's second press within 750 ms the double Esc, as the desktop's. The app's own words (Machines, on screen, stale, Find) are mine, for review; GO, PANIC and Doh! are the desktop's in both languages. | the author's (what is shown); the words mine |
+| **ANX** | **A grid on the wall to set the geometry by.** The author, 2026-10-16: *"In the mapping window and on the remote add a grid toggle to help set the geometry."* `videoOutput.grid <output> <on>` puts an output's alignment grid over what it shows, or takes it away: tonight's, machine-local, never saved, taken under the lock - as Identify is. The grid is drawn in the output's **canvas's own space** and bent through **the same mesh as the picture**, so the projected lines show exactly what the warp does; an output with zones bends each zone's canvas grid through that zone's mesh, and its own canvas's through its own. White, lines about a four-hundredth of the canvas's shorter side and never under a pixel, 16 columns and as many rows as keep the cells square-ish (`round(16 x height / width)`), the two centre lines twice as thick, an outline round the canvas's edge (`video::gridBars`, Mapping.h); over the picture, never instead of it. Identify's frame and cross stay as they are, in display space. The desktop's toggle is **Grid: On / Grid: Off** in the mapping window's bar, for the output being edited, and a **Grid** cell beside Identify on the Video tab. | the author's (the toggle, in both places); the drawing and the words mine |
 
 ### 68.3 Rows
 
 | Address | Type | Access | Notes |
 |---|---|---|---|
 | `network/remotes` | `s` | r | runtime, one a line: `<origin>\t<id>\t<name>` for each connection that said HELLO; empty when none |
+| `videoOutput/<id>/grid` | `T` | r | runtime, tonight's, false by default: the output shows its alignment grid (ANX); as `testPattern` is for Identify |
 
 ### 68.4 Commands and frames
 
@@ -30064,6 +30074,7 @@ the mapping at the wall.
 | `{"COMMAND": "HELLO", "DATA": "<id>\t<name>"}` | text frame: who this connection is (ANT) |
 | `{"COMMAND": "FIND", "DATA": "<seconds>"}` | text frame from the server to a remote |
 | `remote.find <id> [seconds]` | machine-local: FIND to every connection of that remote |
+| `videoOutput.grid <output:s> <on:T>` | machine-local, under the lock, never saved: the output's alignment grid on or off (ANX); beside `videoOutput.identify` |
 
 `HOST_INFO` says `STREAM: true` and now `PATH_CHANGED: false` - it had said true, and nothing has ever
 sent one.
@@ -30078,6 +30089,7 @@ Go.dot (this repository):
 | RM.1 | `STREAM`/`UNSTREAM`, the bundle a tick, the stalled connection let go, `HOST_INFO`, `blackbox.remote` | |
 | RM.2 | `HELLO`, `network/remotes`, `remote.find`, the Network tab's remotes | |
 | RM.3 | Only if M74 asks: a snapshot of values without descriptions | |
+| RM.4 | The mapping's grid (ANX): `videoOutput.grid`, the row, both renderers, the mapping window's Grid and the Video tab's | |
 
 The app (`go.dot-remote`, built 2026-10-15/16, local until the author has looked):
 

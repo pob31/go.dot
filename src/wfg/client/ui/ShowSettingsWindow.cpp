@@ -6167,7 +6167,7 @@ namespace wfg::client::ui
                                                           { return a.id == b.id && a.name == b.name && a.canvas == b.canvas
                                                                      && a.display == b.display && a.enabled == b.enabled
                                                                      && a.bound == b.bound && a.problem == b.problem
-                                                                     && a.testPattern == b.testPattern && a.zones == b.zones
+                                                                     && a.testPattern == b.testPattern && a.grid == b.grid && a.zones == b.zones
                                                                      && a.kind == b.kind && a.sendName == b.sendName
                                                                      && std::abs (a.frameRate - b.frameRate) < 1e-9; });
 
@@ -6266,6 +6266,7 @@ namespace wfg::client::ui
                     g.drawText (outputNames[at], outputCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
 
                 g.drawText ("Warp, zones", outputCells[7], juce::Justification::centredLeft);
+                g.drawText ("Grid", outputCells[8], juce::Justification::centredLeft);
 
                 const auto inputCells = inputCellsFor (inputHeading.withWidth (inputList.getWidth()));
                 const char* inputNames[] { "Input", "Kind", "Takes in from", "On", "Alpha", "State" };
@@ -6293,17 +6294,20 @@ namespace wfg::client::ui
                 return { area, width, height, level, dca, cross };
             }
 
-            static std::array<juce::Rectangle<int>, 8> outputCellsFor (juce::Rectangle<int> row)
+            /*  GRID (§68, ANX) beside Identify, the eighth so the cells before
+                it keep their numbers. */
+            static std::array<juce::Rectangle<int>, 9> outputCellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
                 const auto cross = area.removeFromRight (24);
                 const auto warp = area.removeFromRight (110);
                 const auto state = area.removeFromRight (220);
+                const auto grid = area.removeFromRight (56);
                 const auto identify = area.removeFromRight (72);
                 const auto on = area.removeFromRight (48);
                 const auto display = area.removeFromRight (240);
                 const auto shows = area.removeFromRight (180);
-                return { area, shows, display, on, identify, state, cross, warp };
+                return { area, shows, display, on, identify, state, cross, warp, grid };
             }
 
             /*  ALPHA (namespace draft 61, AKF): whether the program sends a
@@ -6464,6 +6468,10 @@ namespace wfg::client::ui
                     g.setColour (Look::colour (page.theme, entry.testPattern ? "ink" : "ink-off"));
                     g.drawText (entry.testPattern ? "ON" : "OFF", cells[4], juce::Justification::centredLeft);
 
+                    //  GRID (§68, ANX): the alignment grid on that wall, in words, as Identify is.
+                    g.setColour (Look::colour (page.theme, entry.grid ? "ink" : "ink-off"));
+                    g.drawText (entry.grid ? "ON" : "OFF", cells[8], juce::Justification::centredLeft);
+
                     /*  THE STATE IN WORDS, never a colour alone (§4.8): showing,
                         or why not. */
                     const auto showing = entry.bound && entry.problem.empty();
@@ -6497,7 +6505,7 @@ namespace wfg::client::ui
                     const auto cells = outputCellsFor ({ 0, 0, width, page.outputList.getRowHeight() });
                     const auto& entry = page.outputs[static_cast<std::size_t> (row)];
                     const auto base = "/godot/videoOutput/" + entry.id + "/";
-                    const auto cell = cellIndexAt (cells.data(), 8, event.x);
+                    const auto cell = cellIndexAt (cells.data(), 9, event.x);
 
                     if (cell == 7)
                     {
@@ -6510,6 +6518,13 @@ namespace wfg::client::ui
                     if (cell == 4)
                     {
                         page.send (gesture::identifyVideoOutput (entry.id, ! entry.testPattern));
+                        return;
+                    }
+
+                    //  And the grid that sets the geometry, the same way (§68, ANX).
+                    if (cell == 8)
+                    {
+                        page.send (gesture::gridVideoOutput (entry.id, ! entry.grid));
                         return;
                     }
 

@@ -654,6 +654,11 @@ namespace wfg::client::gesture
         return { origin::window, "videoOutput.identify", { osc::Value::string (outputId), osc::Value::boolean (on) } };
     }
 
+    Event gridVideoOutput (const std::string& outputId, bool on)
+    {
+        return { origin::window, "videoOutput.grid", { osc::Value::string (outputId), osc::Value::boolean (on) } };
+    }
+
     Event findRemote (const std::string& remoteId)
     {
         return { origin::window, "remote.find", { osc::Value::string (remoteId) } };

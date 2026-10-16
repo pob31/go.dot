@@ -198,6 +198,13 @@ namespace wfg::video
         void identify (const std::string& outputId, bool on);
         bool identifying (const std::string& outputId) const;
 
+        /*  AN OUTPUT'S ALIGNMENT GRID, on or off (`videoOutput.grid`, namespace
+            draft §68, ANX): white lines in its canvas's own space, bent through
+            the same mesh as the picture and drawn over it - to set the geometry
+            by. Tonight's, held here and never in the show. Tick thread. */
+        void grid (const std::string& outputId, bool on);
+        bool gridding (const std::string& outputId) const;
+
         /*  THE PROJECTORS' WINDOWS PUT AWAY, so their displays show the desktop
             again (`video.hideProjectors`, §39, the author's request of
             2026-10-08): only while the show is unlocked - locked, the show is

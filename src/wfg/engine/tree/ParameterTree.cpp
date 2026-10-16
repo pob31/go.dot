@@ -4803,6 +4803,8 @@ namespace wfg::tree
                                                                                : std::string ("the renderer is not running"));
                     else if (name == "testPattern")
                         text = videoHost != nullptr && videoHost->identifying (outputId) ? "true" : "false";
+                    else if (name == "grid")
+                        text = videoHost != nullptr && videoHost->gridding (outputId) ? "true" : "false";
                     else if (name == "framesPresented")
                         text = std::to_string (entry != nullptr ? entry->framesPresented : 0);
                     else if (name == "framesLate")

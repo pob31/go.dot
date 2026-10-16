@@ -44,6 +44,20 @@ namespace wfg::video
                             return Outcome::ok (args);
                         } }));
 
+        registry.add (machineLocal ({ "videoOutput.grid",
+                        "Puts a video output's alignment grid - white lines in its canvas's own space, bent"
+                        " through the same mesh as the picture - over what it shows, or takes it away: to set"
+                        " its geometry by. Tonight's, never saved.",
+                        { { "output", 's', false }, { "on", 'T', false } },
+                        false,
+                        [host] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (host != nullptr)
+                                host->grid (args[0].getString(), args[1].isBool() && args[1].getBool());
+
+                            return Outcome::ok (args);
+                        } }));
+
         registry.add (machineLocal ({ "video.hideProjectors",
                         "Puts every projector's window away, so its display shows the desktop again, or brings"
                         " them back - only while the show is unlocked: a locked show shows every projector"

@@ -728,7 +728,7 @@ namespace wfg::client::ui
     WarpEditorPanel::WarpEditorPanel (const model::Theme& themeToUse, std::function<void (Event)> send,
                                       std::function<void()> backToUse)
         : theme (themeToUse), back (std::move (backToUse)),
-          editor (std::make_unique<Editor> (themeToUse, std::move (send)))
+          editor (std::make_unique<Editor> (themeToUse, send)), sendGrid (send)
     {
         addAndMakeVisible (*editor);
 
@@ -756,6 +756,19 @@ namespace wfg::client::ui
         backButton.setTooltip ("Back to the Video tab");
         backButton.onClick = [this] { if (back) back(); };
         addAndMakeVisible (backButton);
+
+        /*  THE GRID ON THE WALL (§68, ANX): the output being edited, at once and
+            under the lock too - tonight's, never the show's. */
+        gridButton.setWantsKeyboardFocus (false);
+        gridButton.setClickingTogglesState (false);
+        gridButton.setTooltip ("Show a white grid on this output, in its canvas's own space and bent through the same"
+                               " warps as the picture - to set the geometry by. Tonight's, never saved");
+        gridButton.onClick = [this]
+        {
+            if (sendGrid && ! editor->output().empty())
+                sendGrid (gesture::gridVideoOutput (editor->output(), ! gridOn));
+        };
+        addAndMakeVisible (gridButton);
     }
 
     WarpEditorPanel::~WarpEditorPanel() = default;
@@ -804,6 +817,13 @@ namespace wfg::client::ui
         for (std::size_t n = 0; n < outputKeys.size(); ++n)
             if (outputKeys[n] == editor->output() && outputBox.getSelectedItemIndex() != static_cast<int> (n))
                 outputBox.setSelectedItemIndex (static_cast<int> (n), juce::dontSendNotification);
+
+        //  The word says which way it is, and the button is lit with it - never the light alone (§4.8).
+        gridOn = ! editor->output().empty()
+                   && model::isYes (model::flag (snapshot, "/godot/videoOutput/" + editor->output() + "/grid"));
+        gridButton.setButtonText (gridOn ? "Grid: On" : "Grid: Off");
+        gridButton.setToggleState (gridOn, juce::dontSendNotification);
+        gridButton.setEnabled (! editor->output().empty());
     }
 
     void WarpEditorPanel::paint (juce::Graphics& g)
@@ -823,6 +843,8 @@ namespace wfg::client::ui
         title.setBounds (bar.removeFromLeft (150));
         bar.removeFromLeft (8);
         outputBox.setBounds (bar.removeFromLeft (std::min (320, bar.getWidth())));
+        bar.removeFromLeft (12);
+        gridButton.setBounds (bar.removeFromLeft (std::min (100, bar.getWidth())));
 
         editor->setBounds (area);
     }

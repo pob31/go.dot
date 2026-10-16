@@ -48,6 +48,14 @@
     EVERY CHANGE IS A COMMAND (§3.2): a drag is a run of `node.set` on one
     address, which the document folds into one undo step; a split and a copy
     are one `node.setMany` of the grid and its points.
+
+    GRID, in the bar (namespace draft §68, ANX, the author's ask of
+    2026-10-16: "In the mapping window and on the remote add a grid toggle to
+    help set the geometry"): the output being edited shows a white grid in its
+    canvas's own space, bent through the same warps as the picture, so the
+    wall shows exactly what a dragged point does. `videoOutput.grid`, tonight's
+    and machine-local as Identify is, so it works under the lock; the word on
+    the button says which way it is, "Grid: On" or "Grid: Off".
 */
 
 #include <wfg/client/model/Theme.h>
@@ -92,6 +100,9 @@ namespace wfg::client::ui
         juce::Label title;
         juce::ComboBox outputBox;
         juce::TextButton backButton;
+        juce::TextButton gridButton { "Grid: Off" };
+        std::function<void (Event)> sendGrid;
+        bool gridOn = false;
         std::vector<std::string> outputKeys;
         std::vector<std::string> outputLabels;
         std::string pendingOutput;

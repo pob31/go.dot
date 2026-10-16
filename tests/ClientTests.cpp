@@ -138,6 +138,7 @@
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/video/VideoCommands.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/tree/PresetCommands.h>
@@ -694,8 +695,13 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     //  And the Network tab's Find for a remote (§68, ANT), with no server.
     oscquery::registerRemoteCommands (rig.engine.commands(), nullptr);
 
+    //  And the pictures' own, with no host: Identify, and the mapping window's Grid (§68, ANX).
+    video::registerVideoCommands (rig.engine.commands(), nullptr);
+
     const std::vector<Event> gestures
     {
+        gesture::identifyVideoOutput ("VD000021", true), gesture::gridVideoOutput ("VD000021", true),
+        gesture::gridVideoOutput ("VD000021", false), gesture::hideProjectors (true),
         gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneRec ("level", true),
         gesture::laneFree(), gesture::laneRecord (0.0), gesture::laneRecord (12.5), gesture::laneStop(),
 

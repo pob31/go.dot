@@ -123,7 +123,7 @@ namespace
         "plugin.scan", "plugin.scanRetry", "plugin.scanned", "plugin.failed", "plugin.restart",
         "document.saveAs", "document.autosave", "document.recover", "document.discardRecovery",
         "media.cleanCache", "ffmpeg.install", "pd.install", "process.edit", "process.help", "script.edit",
-        "videoOutput.identify", "video.hideProjectors", "spacemouse.closeDriver",
+        "videoOutput.identify", "videoOutput.grid", "video.hideProjectors", "spacemouse.closeDriver",
         "pair.setRole", "pair.setPeers", "pair.setTimeout", "pair.saved",
 
         /*  And RD.7's: what the machine now is in its pair, and the operator's

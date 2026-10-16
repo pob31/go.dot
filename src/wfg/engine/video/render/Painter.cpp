@@ -1350,6 +1350,63 @@ namespace wfg::video::render
             bar (width / 2 - line / 2, 0, line, height);
         }
 
+        /*  A CANVAS'S ALIGNMENT GRID (`videoOutput.grid`, namespace draft
+            §68, ANX): white lines on black at the canvas's own size, made once
+            for each size asked for and kept while an output draws it - then
+            bent through each pass's mesh after its picture, so the projected
+            lines show exactly what the warp does. Invalid for a canvas the
+            configuration does not hold. Outside any pass. */
+        sg_view grid (const std::string& canvasId)
+        {
+            const region::CanvasReading* reading = nullptr;
+
+            for (const auto& canvasReading : config.canvases)
+                if (canvasReading.id == canvasId)
+                    reading = &canvasReading;
+
+            if (reading == nullptr)
+                return {};
+
+            const auto width = std::max (1, reading->width);
+            const auto height = std::max (1, reading->height);
+            const auto key = "grid:" + std::to_string (width) + "x" + std::to_string (height);
+            const auto known = targets.find (key);
+            const std::uint32_t before = known != targets.end() ? known->second.image.id : std::uint32_t { SG_INVALID_ID };
+            auto& held = offscreen (key, width, height, canvasFormat);
+            usedTargets.insert (key);
+
+            if (held.image.id == SG_INVALID_ID)
+                return {};
+
+            //  Drawn when it is made, and never again while it is kept.
+            if (held.image.id != before)
+            {
+                sg_pass pass {};
+                pass.attachments.colors[0] = held.colour;
+                pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+                pass.action.colors[0].clear_value = { 0.0f, 0.0f, 0.0f, 0.0f };
+                sg_begin_pass (pass);
+                sg_apply_pipeline (pipeline (Program::fill, Lay::none, canvasFormat));
+
+                video_fill_t fill {};
+                fill.colour[0] = fill.colour[1] = fill.colour[2] = fill.colour[3] = 1.0f;
+
+                const auto ndcX = [width] (int px) { return 2.0 * px / width - 1.0; };
+                const auto ndcY = [height] (int py) { return 2.0 * py / height - 1.0; };
+
+                for (const auto& bar : gridBars (width, height))
+                {
+                    apply (UB_video_corners, rectangle (ndcX (bar.x), ndcY (bar.y), ndcX (bar.x + bar.w), ndcY (bar.y + bar.h)));
+                    apply (UB_video_fill, fill);
+                    sg_draw (0, 4, 1);
+                }
+
+                sg_end_pass();
+            }
+
+            return held.texture;
+        }
+
         //==============================================================================
         sg_view canvas (const std::string& id, std::int64_t sample)
         {
@@ -1387,17 +1444,37 @@ namespace wfg::video::render
                 Lay lay;
                 double opacity;
                 const Mesh* mesh;
+                sg_view grid {};    ///< its canvas's alignment grid, when the output shows it (ANX)
             };
 
             std::vector<Pass> passes;
 
+            //  The grid of a pass's canvas, made before any pass of this output begins.
+            const auto gridOf = [this, &output] (const std::string& canvasId)
+            {
+                return output.grid ? grid (canvasId) : sg_view {};
+            };
+
             if (const auto own = canvas (output.canvas, sample); own.id != SG_INVALID_ID)
-                passes.push_back ({ own, Lay::normal, 1.0, &output.mesh });
+                passes.push_back ({ own, Lay::normal, 1.0, &output.mesh, gridOf (output.canvas) });
 
             for (const auto& zone : output.zones)
                 if (zone.opacity > 0.0)
                     if (const auto texture = canvas (zone.canvas, sample); texture.id != SG_INVALID_ID)
-                        passes.push_back ({ texture, layOf (zone.blend), zone.opacity, &zone.mesh });
+                        passes.push_back ({ texture, layOf (zone.blend), zone.opacity, &zone.mesh, gridOf (zone.canvas) });
+
+            /*  THE ALIGNMENT GRIDS (§68, ANX), each bent through its pass's
+                mesh, white over the picture - added, so its black is nothing
+                and its lines are white whatever lies under them. A zoned
+                output lays them after every picture, so no zone hides another
+                one's lines. */
+            const auto drawGrids = [&] (sg_pixel_format format, bool zonedKeys)
+            {
+                for (std::size_t n = 0; n < passes.size(); ++n)
+                    if (passes[n].grid.id != SG_INVALID_ID)
+                        warp (output.id + (zonedKeys ? "#" + std::to_string (n) : std::string ("#out")), *passes[n].mesh,
+                              passes[n].grid, format, Lay::add, nullptr, 1.0);
+            };
 
             sg_view calibrated {};
             const Mesh* calibratedMesh = &output.mesh;
@@ -1414,6 +1491,7 @@ namespace wfg::video::render
                     warp (output.id + "#" + std::to_string (n), *passes[n].mesh, passes[n].texture, canvasFormat,
                           passes[n].lay, nullptr, passes[n].opacity);
 
+                drawGrids (canvasFormat, true);
                 sg_end_pass();
                 calibrated = whole.texture;
                 calibratedMesh = &identityMesh;
@@ -1428,6 +1506,10 @@ namespace wfg::video::render
 
             if (calibrated.id != SG_INVALID_ID)
                 warp (output.id + "#out", *calibratedMesh, calibrated, into.format, Lay::none, &output.cdl, 1.0);
+
+            //  Unzoned, the grid through the output's own mesh after the calibrated picture.
+            if (output.zones.empty() && calibrated.id != SG_INVALID_ID)
+                drawGrids (into.format, false);
 
             if (output.testPattern)
                 testPattern (width, height, into.format);

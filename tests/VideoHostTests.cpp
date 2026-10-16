@@ -236,6 +236,14 @@ TEST_CASE ("video region: the configuration written whole and read back, and tex
     CHECK (read.outputs[0].display == "EPSON PJ");
     CHECK (read.outputs[0].canvas == "CANVAS01");
     CHECK (read.outputs[0].enabled);
+    CHECK_FALSE (read.outputs[0].grid);
+
+    //  The alignment grid (§68, ANX), read back as written.
+    outputs[0].grid = true;
+    video::region::writeConfig (r, canvases, outputs);
+    REQUIRE (video::region::readConfig (r, read));
+    CHECK (read.outputs[0].grid);
+    CHECK_FALSE (read.outputs[0].testPattern);
 
     /*  A NAME LONGER THAN ITS FIELD is cut, never run over. */
     char field[8];
@@ -528,6 +536,30 @@ TEST_CASE ("video host: a renderer with no window draws the scene the region hol
             host.identify ("VD000021", false);
             REQUIRE (video::region::readConfig (r, config));
             CHECK_FALSE (config.outputs.front().testPattern);
+        }
+
+        /*  THE GRID (§68, ANX) the same way: at once, through an edit of the
+            show, apart from Identify, and gone when switched off. */
+        {
+            host.grid ("VD000021", true);
+            video::region::ConfigReading config;
+            REQUIRE (video::region::readConfig (r, config));
+            REQUIRE (config.outputs.size() == 1);
+            CHECK (config.outputs.front().grid);
+            CHECK_FALSE (config.outputs.front().testPattern);
+            CHECK (host.gridding ("VD000021"));
+            CHECK_FALSE (host.gridding ("VD000099"));
+
+            REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/name", "Face right").ok);
+            host.configure (document);
+            REQUIRE (video::region::readConfig (r, config));
+            CHECK (config.outputs.front().name == "Face right");
+            CHECK (config.outputs.front().grid);
+
+            host.grid ("VD000021", false);
+            REQUIRE (video::region::readConfig (r, config));
+            CHECK_FALSE (config.outputs.front().grid);
+            CHECK_FALSE (host.gridding ("VD000021"));
         }
 
         /*  THE PROJECTORS PUT AWAY (§39, the author's request of 2026-10-08):
@@ -2700,6 +2732,56 @@ TEST_CASE ("video mapping: an output's ASC CDL, and the identity when it is not 
     video::applyCdl (grey, r, g, b);
     CHECK (r == doctest::Approx (0.2126));
     CHECK (g == doctest::Approx (0.2126));
+}
+
+TEST_CASE ("video mapping: the alignment grid - sixteen columns, square-ish rows, thin lines, thicker centre lines, an outline (§68, ANX)")
+{
+    CHECK (video::gridRows (1920, 1080) == 9);
+    CHECK (video::gridRows (1920, 1200) == 10);
+    CHECK (video::gridRows (1080, 1920) == 28);
+    CHECK (video::gridRows (4000, 10) == 1);
+
+    CHECK (video::gridLine (1920, 1080) == 3);
+    CHECK (video::gridLine (3840, 2160) == 5);
+    CHECK (video::gridLine (64, 36) == 1);
+    CHECK (video::gridLine (0, 0) == 1);
+
+    const auto bars = video::gridBars (1920, 1080);
+
+    //  Fifteen inner columns, eight inner rows, the two centre lines and the four edges.
+    CHECK (bars.size() == 15u + 8u + 2u + 4u);
+
+    const auto covered = [&bars] (int x, int y)
+    {
+        return std::any_of (bars.begin(), bars.end(), [x, y] (const video::GridBar& bar)
+                            { return x >= bar.x && x < bar.x + bar.w && y >= bar.y && y < bar.y + bar.h; });
+    };
+
+    //  On a line, on the outline, at the centre; and a cell's middle left clear.
+    CHECK (covered (120, 500));         // the first inner column, 1920 / 16
+    CHECK (covered (700, 120));         // the first inner row, 1080 / 9
+    CHECK (covered (0, 500));
+    CHECK (covered (1919, 500));
+    CHECK (covered (700, 0));
+    CHECK (covered (700, 1079));
+    CHECK (covered (962, 300));         // the centre line, twice as thick
+    CHECK_FALSE (covered (60, 60));
+    CHECK_FALSE (covered (1000, 650));
+
+    //  Every bar inside the picture, and the centre ones twice a line's thickness.
+    for (const auto& bar : bars)
+    {
+        CHECK (bar.x >= 0);
+        CHECK (bar.y >= 0);
+        CHECK (bar.x + bar.w <= 1920);
+        CHECK (bar.y + bar.h <= 1080);
+    }
+
+    CHECK (std::count_if (bars.begin(), bars.end(), [] (const video::GridBar& bar) { return bar.w == 6 || bar.h == 6; }) == 2);
+
+    //  A tiny canvas still gets lines a pixel wide.
+    for (const auto& bar : video::gridBars (16, 9))
+        CHECK ((bar.w >= 1 && bar.h >= 1));
 }
 
 TEST_CASE ("video host: an output's mesh and CDL reach the region with its configuration")

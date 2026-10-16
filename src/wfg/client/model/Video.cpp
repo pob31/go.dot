@@ -380,6 +380,7 @@ namespace wfg::client::model
             else if (name == "bound")           row.bound = truthOf (node, false);
             else if (name == "problem")         row.problem = text (node);
             else if (name == "testPattern")     row.testPattern = truthOf (node, false);
+            else if (name == "grid")            row.grid = truthOf (node, false);
             else if (name == "framesPresented") row.framesPresented = integerOf (node, 0);
             else if (name == "framesLate")      row.framesLate = integerOf (node, 0);
             else if (name == "zones")           row.zones = static_cast<int> (words (text (node)).size());

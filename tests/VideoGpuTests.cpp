@@ -1043,6 +1043,112 @@ TEST_CASE ("video gpu: an output warps and calibrates the canvas once composited
     CHECK (near (at (laid, width - 10, height / 2), 0xC04020u));
 }
 
+TEST_CASE ("video gpu: an output's alignment grid drawn white over its picture in the canvas's space, bent by its mesh and by each zone's (§68, ANX)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    Pictures pictures;
+
+    auto dim = layerOf ("L1", region::Source::fill, 1.0, 1);
+    dim.paint = 0x402010u;
+
+    region::ConfigReading config;
+    config.canvases.push_back ({ "C1", 64, 36 });
+    config.canvases.push_back ({ "C2", 64, 36 });
+
+    /*  A 64 BY 36 CANVAS: lines a pixel wide, sixteen columns four pixels
+        apart and nine rows - the first column at x 4, a cell's middle at 2. */
+    region::OutputReading plain;
+    plain.id = "O1";
+    plain.canvas = "C1";
+    plain.mesh = video::Mesh::identity();
+
+    auto gridded = plain;
+    gridded.id = "O2";
+    gridded.grid = true;
+
+    //  Squeezed into the middle half of a display twice as wide: the canvas at 32..96, a pixel to a pixel.
+    auto squeezed = gridded;
+    squeezed.id = "O3";
+    squeezed.mesh.x = { 0.25f, 0.75f, 0.25f, 0.75f };
+
+    //  A zone over the left half of a display twice as wide, its canvas a pixel to a pixel there.
+    auto zoned = gridded;
+    zoned.id = "O4";
+    region::ZoneReading zone;
+    zone.canvas = "C2";
+    zone.mesh = video::Mesh::identity();
+    zone.mesh.x = { 0.0f, 0.5f, 0.0f, 0.5f };
+    zoned.zones.push_back (zone);
+
+    std::vector<float> none, lined, bent, laid;
+    int w = 0, h = 0, wideW = 0, wideH = 0;
+
+    {
+        video::render::Painter painter (pictures);
+        std::string why;
+        REQUIRE_MESSAGE (painter.make (why), why);
+
+        painter.beginFrame (config, { dim }, {});
+        painter.drawOutput (plain, 100, painter.offscreenTarget ("O1", 64, 36, SG_PIXELFORMAT_RGBA8));
+        painter.drawOutput (gridded, 100, painter.offscreenTarget ("O2", 64, 36, SG_PIXELFORMAT_RGBA8));
+        painter.drawOutput (squeezed, 100, painter.offscreenTarget ("O3", 128, 36, SG_PIXELFORMAT_RGBA8));
+        painter.drawOutput (zoned, 100, painter.offscreenTarget ("O4", 128, 36, SG_PIXELFORMAT_RGBA8));
+        sg_commit();
+
+        REQUIRE (video::gpu::readBack (painter.offscreenImage ("O1"), none, w, h));
+        REQUIRE (video::gpu::readBack (painter.offscreenImage ("O2"), lined, w, h));
+        REQUIRE (video::gpu::readBack (painter.offscreenImage ("O3"), bent, wideW, wideH));
+        REQUIRE (video::gpu::readBack (painter.offscreenImage ("O4"), laid, wideW, wideH));
+        painter.endFrame();
+    }
+
+    REQUIRE (w == 64);
+    REQUIRE (h == 36);
+    REQUIRE (wideW == 128);
+    REQUIRE (wideH == 36);
+
+    const auto at = [] (const std::vector<float>& rgba, int stride, int column, int row)
+    {
+        return rgbOf (rgba.data() + 4 * (static_cast<std::size_t> (row) * static_cast<std::size_t> (stride)
+                                         + static_cast<std::size_t> (column)));
+    };
+
+    const auto near = [] (std::uint32_t got, std::uint32_t want)
+    {
+        for (int shift : { 16, 8, 0 })
+            if (std::abs (static_cast<int> ((got >> shift) & 0xffu) - static_cast<int> ((want >> shift) & 0xffu)) > 4)
+                return false;
+
+        return true;
+    };
+
+    //  Off, the picture alone; on, a white line where the grid falls and the picture between.
+    INFO ("off reads " << at (none, 64, 4, 6) << ", on " << at (lined, 64, 4, 6) << " and " << at (lined, 64, 2, 6));
+    CHECK (near (at (none, 64, 4, 6), 0x402010u));
+    CHECK (near (at (lined, 64, 4, 6), 0xFFFFFFu));
+    CHECK (near (at (lined, 64, 0, 6), 0xFFFFFFu));
+    CHECK (near (at (lined, 64, 2, 6), 0x402010u));
+
+    //  Bent by the mesh: the outline and the first column moved with the canvas; nothing outside it.
+    INFO ("squeezed reads " << at (bent, 128, 32, 6) << ", " << at (bent, 128, 36, 6) << ", " << at (bent, 128, 4, 6));
+    CHECK (near (at (bent, 128, 32, 6), 0xFFFFFFu));
+    CHECK (near (at (bent, 128, 36, 6), 0xFFFFFFu));
+    CHECK (near (at (bent, 128, 34, 6), 0x402010u));
+    CHECK (near (at (bent, 128, 4, 6), 0u));
+
+    /*  ZONED: the zone's canvas grid through the zone's mesh - its first
+        column at x 4 of the left half, where the output's own grid, stretched
+        twice as wide, has none - and the own grid on the right. */
+    INFO ("zoned reads " << at (laid, 128, 4, 6) << ", " << at (laid, 128, 6, 6) << ", " << at (laid, 128, 127, 6));
+    CHECK (near (at (laid, 128, 4, 6), 0xFFFFFFu));
+    CHECK (near (at (laid, 128, 6, 6), 0u));
+    CHECK (near (at (laid, 128, 127, 6), 0xFFFFFFu));
+}
+
 TEST_CASE ("video gpu: a HAP frame is drawn still compressed, one upload for every output (R.1)")
 {
     Device device;

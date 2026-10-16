@@ -447,6 +447,12 @@ namespace wfg::client::gesture
     /** An output's test pattern on or off, to find which projector is which: tonight's. */
     Event identifyVideoOutput (const std::string& outputId, bool on);
 
+    /*  An output's alignment grid on or off (`videoOutput.grid`, namespace
+        draft §68, ANX): white lines in its canvas's own space, bent through the
+        same mesh as the picture - to set the geometry by. Tonight's; the
+        mapping window's Grid and the Video tab's. */
+    Event gridVideoOutput (const std::string& outputId, bool on);
+
     /*  `remote.find <id>` (namespace draft §68, ANT): a tablet connected to
         this machine asked to show itself - its screen flashing, an alarm - the
         Network tab's Find beside each remote. */

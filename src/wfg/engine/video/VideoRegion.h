@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 20;
+    constexpr std::uint32_t version = 21;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -204,6 +204,10 @@ namespace wfg::video::region
         char displayId[nameChars];
         std::atomic<std::uint32_t> enabled;
         std::atomic<std::uint32_t> testPattern;
+
+        /*  ITS ALIGNMENT GRID over the picture, bent through the same meshes
+            (`videoOutput.grid`, namespace draft §68, ANX). */
+        std::atomic<std::uint32_t> grid;
 
         /*  KEPT OFF ITS DISPLAY while the show is unlocked and the operator
             asked for the screen back (`video.hideProjectors`, §39). */
@@ -983,6 +987,11 @@ namespace wfg::video::region
         std::string sendName {};
         double frameRate = 60.0;
 
+        /*  ITS ALIGNMENT GRID drawn over the picture (`videoOutput.grid`,
+            §68, ANX): tonight's, as the test pattern is. Last, so the
+            readings built in order above stay as they were. */
+        bool grid = false;
+
         bool sends() const noexcept  { return kind != OutputKind::display; }
     };
 
@@ -1139,6 +1148,7 @@ namespace wfg::video::region
                                       o.testPattern.load (std::memory_order_relaxed) != 0, {}, {}, {},
                                       o.hidden.load (std::memory_order_relaxed) != 0 };
 
+                entry.grid = o.grid.load (std::memory_order_relaxed) != 0;
                 entry.mesh.columns = std::clamp (static_cast<int> (o.meshColumns.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
                 entry.mesh.rows = std::clamp (static_cast<int> (o.meshRows.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
                 const auto points = static_cast<std::size_t> (entry.mesh.columns * entry.mesh.rows);
@@ -1231,6 +1241,7 @@ namespace wfg::video::region
             writeText (o.displayId, outputs[n].displayId);
             o.enabled.store (outputs[n].enabled ? 1u : 0u, std::memory_order_relaxed);
             o.testPattern.store (outputs[n].testPattern ? 1u : 0u, std::memory_order_relaxed);
+            o.grid.store (outputs[n].grid ? 1u : 0u, std::memory_order_relaxed);
             o.hidden.store (outputs[n].hidden ? 1u : 0u, std::memory_order_relaxed);
             o.kind.store (static_cast<std::uint32_t> (outputs[n].kind), std::memory_order_relaxed);
             writeText (o.sendName, outputs[n].sendName);

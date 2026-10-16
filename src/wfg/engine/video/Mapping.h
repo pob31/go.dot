@@ -244,4 +244,71 @@ namespace wfg::video
         green = c[1];
         blue = c[2];
     }
+
+    /*  THE ALIGNMENT GRID (`videoOutput.grid`, namespace draft §68, ANX): the
+        bars to fill white in a picture `width` by `height` - a canvas's own
+        size - for the grid that sets an output's geometry. Sixteen columns,
+        as many rows as keep the cells square-ish; lines about a four-hundredth
+        of the shorter side and never under a pixel, the two centre lines
+        twice that, and an outline round the edge. Each bar is x, y, w, h in
+        pixels from the bottom-left; the grid is symmetric but for a rounded
+        pixel, so a renderer whose rows run from the top draws it as well. Both renderers draw these, so they agree. */
+    struct GridBar
+    {
+        int x = 0, y = 0, w = 0, h = 0;
+    };
+
+    inline constexpr int gridColumns = 16;
+
+    inline int gridRows (int width, int height) noexcept
+    {
+        const auto across = std::max (1, width);
+        const auto down = std::max (1, height);
+        return std::max (1, static_cast<int> (std::lround (static_cast<double> (gridColumns) * down / across)));
+    }
+
+    inline int gridLine (int width, int height) noexcept
+    {
+        return std::max (1, static_cast<int> (std::lround (std::min (std::max (1, width), std::max (1, height)) / 400.0)));
+    }
+
+    inline std::vector<GridBar> gridBars (int width, int height)
+    {
+        width = std::max (1, width);
+        height = std::max (1, height);
+
+        const auto line = gridLine (width, height);
+        const auto centre = 2 * line;
+        const auto rows = gridRows (width, height);
+        std::vector<GridBar> bars;
+
+        //  Centred on a position, kept inside the picture.
+        const auto across = [&] (double at, int thick)
+        {
+            const auto x = std::clamp (static_cast<int> (std::lround (at - thick / 2.0)), 0, std::max (0, width - thick));
+            bars.push_back ({ x, 0, std::min (thick, width), height });
+        };
+
+        const auto down = [&] (double at, int thick)
+        {
+            const auto y = std::clamp (static_cast<int> (std::lround (at - thick / 2.0)), 0, std::max (0, height - thick));
+            bars.push_back ({ 0, y, width, std::min (thick, height) });
+        };
+
+        for (int n = 1; n < gridColumns; ++n)
+            across (static_cast<double> (n) * width / gridColumns, line);
+
+        for (int n = 1; n < rows; ++n)
+            down (static_cast<double> (n) * height / rows, line);
+
+        across (width / 2.0, centre);
+        down (height / 2.0, centre);
+
+        //  The outline: the canvas's edge.
+        bars.push_back ({ 0, 0, width, std::min (line, height) });
+        bars.push_back ({ 0, std::max (0, height - line), width, std::min (line, height) });
+        bars.push_back ({ 0, 0, std::min (line, width), height });
+        bars.push_back ({ std::max (0, width - line), 0, std::min (line, width), height });
+        return bars;
+    }
 }

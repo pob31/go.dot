@@ -26,6 +26,11 @@
     the show lock; a named command all the same (§4.11), logged, so a replay
     reads it - and, with no renderer, does nothing with it.
 
+    `videoOutput.grid <output> <on>` is its sibling for the mapping (namespace
+    draft §68, ANX): a white grid in the output's canvas's own space, bent
+    through the same mesh as the picture, over what it shows - to set the
+    geometry by. Tonight's, machine-local and under the lock, as identify is.
+
     Registered wherever the other commands are - `serve` with its host, and
     every verb that replays or lists a log with none.
 */

@@ -96,7 +96,7 @@ namespace wfg::video
 
                                    return x.id == y.id && x.canvas == y.canvas && x.name == y.name
                                        && x.display == y.display && x.displayId == y.displayId
-                                       && x.enabled == y.enabled && x.testPattern == y.testPattern && x.hidden == y.hidden
+                                       && x.enabled == y.enabled && x.testPattern == y.testPattern && x.grid == y.grid && x.hidden == y.hidden
                                        && x.kind == y.kind && x.sendName == y.sendName
                                        && std::abs (x.frameRate - y.frameRate) < 1e-9
                                        && x.mesh.columns == y.mesh.columns && x.mesh.rows == y.mesh.rows
@@ -471,6 +471,7 @@ namespace wfg::video
         std::vector<region::InsertReading> inserts;
         bool configured = false;
         std::set<std::string> identified;
+        std::set<std::string> gridded;     // outputs showing their alignment grid (§68, ANX)
         bool hideProjectors = false;
         bool locked = false;    // the show's lock, as `configure` last read it
 
@@ -582,6 +583,7 @@ namespace wfg::video
             entry.displayId = text (base + "displayId");
             entry.enabled = text (base + "enabled") != "false";
             entry.testPattern = impl->identified.count (id) > 0;
+            entry.grid = impl->gridded.count (id) > 0;
             entry.hidden = impl->hideProjectors && ! impl->locked;
 
             /*  A SENDER (§44, YA): what it sends under - Go.dot and the
@@ -845,6 +847,28 @@ namespace wfg::video
     bool VideoHost::identifying (const std::string& outputId) const
     {
         return impl->identified.count (outputId) > 0;
+    }
+
+    void VideoHost::grid (const std::string& outputId, bool on)
+    {
+        if (on)
+            impl->gridded.insert (outputId);
+        else
+            impl->gridded.erase (outputId);
+
+        if (impl->r == nullptr || ! impl->configured)
+            return;
+
+        //  At once, as the test pattern is: the wall shows it on the next frame.
+        for (auto& output : impl->outputs)
+            output.grid = impl->gridded.count (output.id) > 0;
+
+        region::writeConfig (*impl->r, impl->canvases, impl->outputs, impl->inputs, impl->inserts);
+    }
+
+    bool VideoHost::gridding (const std::string& outputId) const
+    {
+        return impl->gridded.count (outputId) > 0;
     }
 
     void VideoHost::hideProjectors (bool on)

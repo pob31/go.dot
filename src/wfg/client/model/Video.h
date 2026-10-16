@@ -64,6 +64,7 @@ namespace wfg::client::model
         bool bound = false;
         std::string problem;
         bool testPattern = false;
+        bool grid = false;          ///< its alignment grid shown, tonight's (§68, ANX)
         std::int64_t framesPresented = 0;
         std::int64_t framesLate = 0;
         int zones = 0;              ///< how many zones lie over its own canvas (namespace draft 40)

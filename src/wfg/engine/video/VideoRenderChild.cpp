@@ -1433,6 +1433,18 @@ namespace wfg::video
                 if (! zoned && canvas != nullptr)
                     compositeCanvas (canvasId, *canvas, layers, sample);
 
+                /*  THE ALIGNMENT GRID (§68, ANX): into the canvas's offscreen
+                    picture before it is bent, so the mesh bends it as it bends
+                    the picture; straight onto the display for an output nobody
+                    mapped, where canvas and display are one. */
+                if (! zoned && canvas != nullptr && mine != nullptr && mine->grid)
+                {
+                    if (mapped)
+                        drawGrid (0, 0, std::max (1, canvas->width), std::max (1, canvas->height));
+                    else
+                        drawGrid (overhang.left, overhang.bottom, width, height);
+                }
+
                 if (mapped)
                     warpOnto (width, height, *mine);
 
@@ -1640,6 +1652,10 @@ namespace wfg::video
                         continue;
 
                     compositeCanvas (pass.canvas, *canvas, layers, sample);
+
+                    //  Its canvas's grid in the canvas's picture, bent with it (ANX).
+                    if (output.grid)
+                        drawGrid (0, 0, std::max (1, canvas->width), std::max (1, canvas->height));
 
                     glBindFramebuffer (GL_FRAMEBUFFER, outputTarget.frame);
                     glViewport (0, 0, width, height);
@@ -2109,6 +2125,28 @@ namespace wfg::video
                 bar (0, height / 2 - line / 2, width, line);
                 bar (width / 2 - line / 2, 0, line, height);
                 glDisable (GL_SCISSOR_TEST);
+            }
+
+            /*  AN ALIGNMENT GRID (§68, ANX, Mapping.h's bars) into whatever is
+                bound, `width` by `height` from (left, bottom), by clearing thin
+                rectangles white as the test pattern is. In this renderer it
+                goes into the canvas's picture before the warp, so a mapped
+                output's CDL grades it with the picture. */
+            static void drawGrid (int left, int bottom, int width, int height)
+            {
+                using namespace juce::gl;
+
+                glEnable (GL_SCISSOR_TEST);
+                glClearColor (1.0f, 1.0f, 1.0f, 1.0f);
+
+                for (const auto& bar : gridBars (width, height))
+                {
+                    glScissor (left + bar.x, bottom + bar.y, bar.w, bar.h);
+                    glClear (GL_COLOR_BUFFER_BIT);
+                }
+
+                glDisable (GL_SCISSOR_TEST);
+                glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
             }
 
             /*  THE DISPLAY'S PIXELS AS THE VIEWPORT, in the window's own - whose
