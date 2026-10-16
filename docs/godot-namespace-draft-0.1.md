@@ -30455,7 +30455,10 @@ and an output may go to any card, DeckLink's or AJA's.
 
 Shown as *Video capture* (an input's kind), *Sent to a video card* (an output's section), *Automatic*
 (a format found by the card, or chosen for a camera), a camera named *Name - camera* - mine, for the
-author.
+author. *As built (VC.5):* also mine - *Automatic* replacing §71's *Found by the card*, *nothing brings a
+picture in here*, *its formats are listed once it has been opened*, *a camera not on this machine*, and
+the camera's *no signal* while it sends nothing (AQD). Why a card is missing - Desktop Video not
+installed - is said under the devices in the menu, cameras or none.
 
 ### 72.4 Stages
 

@@ -824,14 +824,98 @@ namespace wfg::client::model
         return cardsFrom (text (snapshot, "/godot/videoOutput/cards"));
     }
 
-    std::vector<std::string> inputKindsHere (const CardsFound& cards)
+    std::string CaptureRow::shown() const
+    {
+        return video::nameWithMaker (id, name);
+    }
+
+    const CaptureRow* CapturesFound::device (const std::string& id) const
+    {
+        for (const auto& one : devices)
+            if (one.id == id)
+                return &one;
+
+        return nullptr;
+    }
+
+    CapturesFound capturesFrom (const std::string& all)
+    {
+        //  A line a device: identifier, name, maker, formats, between tabs.
+        CapturesFound found;
+        std::size_t at = 0;
+
+        while (at < all.size())
+        {
+            const auto end = all.find ('\n', at);
+            const auto line = all.substr (at, end == std::string::npos ? std::string::npos : end - at);
+            std::vector<std::string> fields;
+            std::size_t from = 0;
+
+            while (true)
+            {
+                const auto tab = line.find ('\t', from);
+                fields.push_back (line.substr (from, tab == std::string::npos ? std::string::npos : tab - from));
+
+                if (tab == std::string::npos)
+                    break;
+
+                from = tab + 1;
+            }
+
+            if (fields.size() >= 2 && ! fields[0].empty())
+            {
+                CaptureRow row;
+                row.id = fields[0];
+                row.name = fields[1];
+
+                if (fields.size() > 2)
+                    row.maker = fields[2];
+
+                if (fields.size() > 3)
+                    row.formats = words (fields[3]);
+
+                found.devices.push_back (std::move (row));
+            }
+
+            if (end == std::string::npos)
+                break;
+
+            at = end + 1;
+        }
+
+        return found;
+    }
+
+    CapturesFound readCaptures (const tree::TreeSnapshot& snapshot)
+    {
+        return capturesFrom (text (snapshot, "/godot/videoInput/devices"));
+    }
+
+    std::vector<std::string> inputKindsHere (const CapturesFound& captures)
     {
         auto kinds = pictureKindsHere();
 
-        if (std::any_of (cards.cards.begin(), cards.cards.end(), [] (const CardRow& card) { return card.input; }))
+        if (! captures.devices.empty())
             kinds.push_back ("device");
 
         return kinds;
+    }
+
+    std::string captureSummary (const VideoInputRow& input, const CapturesFound& captures)
+    {
+        std::string out;
+
+        if (const auto* device = captures.device (input.sender); device != nullptr)
+            out = device->shown();
+        else if (video::makerOf (input.sender) == "camera")
+            out = "a camera not on this machine";
+        else
+            out = input.sender + " (not on this machine)";
+
+        if (! input.videoMode.empty() && input.videoMode != "auto")
+            out += "  \xc2\xb7  " + input.videoMode;
+
+        return out;
     }
 
     std::string cardSummary (const VideoOutputRow& output, const CardsFound& cards, const std::vector<OutputRow>& buses)

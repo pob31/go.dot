@@ -6138,7 +6138,7 @@ namespace wfg::client::ui
                        bool editable, std::vector<std::pair<std::string, std::string>> dcaChoicesToShow,
                        std::vector<model::VideoInputRow> inputRows, std::vector<model::VideoInsertRow> insertRows,
                        std::vector<model::OfferedSender> offeredNow, model::CardsFound cardsNow = {},
-                       std::vector<model::OutputRow> busesNow = {})
+                       std::vector<model::OutputRow> busesNow = {}, model::CapturesFound capturesNow = {})
             {
                 /*  THE INPUTS AND INSERTS (namespace draft §44), drawn again each
                     pass: their states move while nothing about the show does. */
@@ -6147,6 +6147,7 @@ namespace wfg::client::ui
                 offered = std::move (offeredNow);
                 cards = std::move (cardsNow);
                 buses = std::move (busesNow);
+                captures = std::move (capturesNow);
                 addInput.setVisible (editable);
                 addInsert.setVisible (editable);
                 inputList.updateContent();
@@ -6597,17 +6598,11 @@ namespace wfg::client::ui
                     g.setColour (Look::colour (page.theme, "ink-dim"));
                     g.drawText (juce::String (model::pictureKindWord (entry.kind)), cells[1], juce::Justification::centredLeft);
 
-                    //  A card input names its card, and its format unless the card finds it (§71, APM).
+                    //  A capture input names its device with its maker, and its format unless Automatic (§72, APR).
                     auto sender = juce::String (entry.sender);
 
                     if (entry.kind == "device" && ! entry.sender.empty())
-                    {
-                        const auto* card = page.cards.card (entry.sender);
-                        sender = juce::String::fromUTF8 ((card != nullptr ? card->name : entry.sender + " (not on this machine)").c_str());
-
-                        if (entry.videoMode != "auto")
-                            sender += juce::String::fromUTF8 ("  \xc2\xb7  ") + juce::String (entry.videoMode);
-                    }
+                        sender = juce::String::fromUTF8 (model::captureSummary (entry, page.captures).c_str());
 
                     g.setColour (Look::colour (page.theme, entry.sender.empty() ? "ink-off" : "ink-dim"));
                     g.drawText (entry.sender.empty() ? dash : sender, cells[2], juce::Justification::centredLeft, true);
@@ -6648,10 +6643,10 @@ namespace wfg::client::ui
                     switch (cellIndexAt (cells.data(), 7, event.x))
                     {
                         case 0: page.editCell (page.inputList, row, cells[0], base + "name", entry.name); return;
-                        case 1: page.chooseKind (base + "kind", entry.kind, model::inputKindsHere (page.cards)); return;
+                        case 1: page.chooseKind (base + "kind", entry.kind, model::inputKindsHere (page.captures)); return;
                         case 2:
                             if (entry.kind == "device")
-                                page.chooseCardInput (base, entry);
+                                page.chooseCapture (base, entry);
                             else
                                 page.chooseSender (page.inputList, row, cells[2], base + "sender", entry.kind, entry.sender);
 
@@ -6803,22 +6798,24 @@ namespace wfg::client::ui
                                     });
             }
 
-            /*  A CARD'S INPUT (namespace draft §71, APM): the card, from those
-                that take pictures in, and the format - found by the card, or one
-                it offers. */
-            void chooseCardInput (const std::string& base, const model::VideoInputRow& entry)
+            /*  WHAT A VIDEO CAPTURE INPUT TAKES IN (namespace draft §71 APM, §72
+                APR): a card's input or a camera, each named with its maker, and
+                the format - Automatic (found by a card, chosen for a camera) or
+                one it takes in. A camera's formats are known once it has been
+                opened; why a card is missing - Desktop Video not installed - is
+                said under them. */
+            void chooseCapture (const std::string& base, const model::VideoInputRow& entry)
             {
                 std::vector<std::pair<std::string, std::string>> taking;
 
-                for (const auto& card : cards.cards)
-                    if (card.input)
-                        taking.push_back ({ card.id, card.name });
+                for (const auto& device : captures.devices)
+                    taking.push_back ({ device.id, device.shown() });
 
-                const auto* chosenCard = cards.card (entry.sender);
+                const auto* chosen = captures.device (entry.sender);
                 std::vector<std::string> formats { "auto" };
 
-                if (chosenCard != nullptr)
-                    formats.insert (formats.end(), chosenCard->takes.begin(), chosenCard->takes.end());
+                if (chosen != nullptr)
+                    formats.insert (formats.end(), chosen->formats.begin(), chosen->formats.end());
 
                 juce::PopupMenu menu;
                 menu.addItem (1, "(none)", true, entry.sender.empty());
@@ -6828,14 +6825,19 @@ namespace wfg::client::ui
                                   taking[at].first == entry.sender);
 
                 if (taking.empty())
-                    menu.addItem (2, juce::String::fromUTF8 ((cards.problem.empty() ? std::string ("no card takes pictures in here")
-                                                                                     : cards.problem).c_str()), false);
+                    menu.addItem (2, "nothing brings a picture in here", false);
+
+                if (! cards.problem.empty())
+                    menu.addItem (3, juce::String::fromUTF8 (cards.problem.c_str()), false);
 
                 juce::PopupMenu format;
 
                 for (std::size_t at = 0; at < formats.size(); ++at)
-                    format.addItem (static_cast<int> (at) + 300, at == 0 ? juce::String ("Found by the card") : juce::String (formats[at]),
+                    format.addItem (static_cast<int> (at) + 300, at == 0 ? juce::String ("Automatic") : juce::String (formats[at]),
                                     true, formats[at] == entry.videoMode);
+
+                if (chosen != nullptr && chosen->maker == "camera" && chosen->formats.empty())
+                    format.addItem (4, "its formats are listed once it has been opened", false);
 
                 menu.addSeparator();
                 menu.addSubMenu ("Format", format);
@@ -7297,9 +7299,11 @@ namespace wfg::client::ui
             std::vector<model::VideoInsertRow> inserts;
             std::vector<model::OfferedSender> offered;
 
-            //  The DeckLink cards found, and the show's buses a card's sound picks from (§71).
+            //  The video cards found, and the show's buses a card's sound picks from (§71);
+            //  what brings a picture in, cards' inputs and cameras (§72).
             model::CardsFound cards;
             std::vector<model::OutputRow> buses;
+            model::CapturesFound captures;
             std::vector<std::string> displays;
 
             //  This machine's displays when a menu last looked (§64), merged into `displays` on every pass.
@@ -9192,7 +9196,8 @@ namespace wfg::client::ui
                          ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
                          model::dcaChoices (model::readDcas (snapshot)),
                          model::readVideoInputs (snapshot), model::readVideoInserts (snapshot),
-                         model::readOfferedSenders (snapshot), model::readCards (snapshot), model::readOutputs (snapshot));
+                         model::readOfferedSenders (snapshot), model::readCards (snapshot), model::readOutputs (snapshot),
+                         model::readCaptures (snapshot));
 
             templates->show (model::readCueTemplates (snapshot),
                              ! model::isYes (model::flag (snapshot, "/godot/document/locked")));

@@ -108,7 +108,7 @@ namespace wfg::client::model
         std::string sender;
         bool enabled = true;
         bool alpha = false;             ///< the program sends a meaningful alpha (61, AKF)
-        std::string videoMode = "auto"; ///< a card input's format, or found by the card (§71, APM)
+        std::string videoMode = "auto"; ///< a capture input's format, or Automatic (§71 APM, §72)
         std::string format;             ///< the format arriving at a card input, tonight's
         bool connected = false;
         int width = 0;
@@ -181,9 +181,41 @@ namespace wfg::client::model
     CardsFound cardsFrom (const std::string& text);
     CardsFound readCards (const tree::TreeSnapshot&);
 
-    /*  THE KINDS AN INPUT CAN BE HERE (APN): this system's, and DeckLink where a
-        card that takes pictures in is found. An insert's stay this system's. */
-    std::vector<std::string> inputKindsHere (const CardsFound& cards);
+    /*  WHAT BRINGS A PICTURE IN ON THIS MACHINE (namespace draft §72, APR), as
+        `/godot/videoInput/devices` says it: each card's input and each camera -
+        its identifier, name, maker and the formats it takes in, a camera's once
+        it has been opened. What a Video capture input picks from. */
+    struct CaptureRow
+    {
+        std::string id;
+        std::string name;
+        std::string maker;
+        std::vector<std::string> formats;
+
+        /*  Its name with its maker where the name does not say it:
+            "DeckLink Duo 2 (1)", "Logitech C920 - camera". */
+        std::string shown() const;
+    };
+
+    struct CapturesFound
+    {
+        std::vector<CaptureRow> devices;
+
+        const CaptureRow* device (const std::string& id) const;
+    };
+
+    CapturesFound capturesFrom (const std::string& text);
+    CapturesFound readCaptures (const tree::TreeSnapshot&);
+
+    /*  THE KINDS AN INPUT CAN BE HERE (APN, APR): this system's, and Video
+        capture where something brings a picture in - a card's input or a
+        camera. An insert's stay this system's. */
+    std::vector<std::string> inputKindsHere (const CapturesFound& captures);
+
+    /*  WHAT A VIDEO CAPTURE INPUT TAKES IN, in a row's words: the device by
+        name and maker - or that it is not on this machine - and its format
+        unless Automatic. */
+    std::string captureSummary (const VideoInputRow& input, const CapturesFound& captures);
 
     /*  WHAT A CARD OUTPUT SENDS, in a row's words: the card, its format, its
         key, the buses its sound carries - named as `buses` names them. */

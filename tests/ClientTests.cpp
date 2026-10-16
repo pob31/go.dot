@@ -11105,7 +11105,7 @@ TEST_CASE ("client: an output's zones are read bottom first, a warp the wrong si
     CHECK (model::regridded (model::WarpPoints::whole(), 4, 3).isWhole());
 }
 
-TEST_CASE ("client: the DeckLink cards read as the renderer says them, offered as an input kind only where one takes pictures in (§71, DL.9)")
+TEST_CASE ("client: the DeckLink cards read as the renderer says them (§71, DL.9)")
 {
     const auto found = model::cardsFrom ("fake-1\tGo.dot test card\toutput input internal external 10bit sound16\t1080p50 1080p59.94\t1080p50\n"
                                          "dl-2\tDeckLink Mini Monitor\toutput sound2\t1080i50\t");
@@ -11138,19 +11138,52 @@ TEST_CASE ("client: the DeckLink cards read as the renderer says them, offered a
     CHECK (none.cards.empty());
     CHECK (none.problem.rfind ("Desktop Video is not installed", 0) == 0);
 
-    //  DeckLink is an input's kind only where a card takes pictures in (APN).
-    const auto here = model::pictureKindsHere();
-    CHECK (model::inputKindsHere (none) == here);
-
-    model::CardsFound outputOnly;
-    outputOnly.cards.push_back (monitor);
-    CHECK (model::inputKindsHere (outputOnly) == here);
-
-    auto withInput = model::inputKindsHere (found);
-    REQUIRE (withInput.size() == here.size() + 1);
-    CHECK (withInput.back() == "device");
     CHECK (model::pictureKindWord ("device") == "Video capture");
     CHECK (model::pictureKindWord ("card") == "Video card");
+}
+
+TEST_CASE ("client: what brings a picture in read as the renderer says it, offered as Video capture only where something does, said in a row's words (§72, VC.5)")
+{
+    const auto found = model::capturesFrom ("fake-1\tGo.dot test card\t\t1080p50\n"
+                                            "dl-2\tDuo 2 (1)\tDeckLink\t1080p50 1080i50\n"
+                                            "cam:fake-1\tGo.dot test camera\tcamera\t720p30 1080p30 640x480p30\n"
+                                            "cam:usb-9\tLogitech C920\tcamera\t");
+    REQUIRE (found.devices.size() == 4);
+
+    CHECK (found.devices[0].shown() == "Go.dot test card");
+    CHECK (found.devices[1].shown() == "DeckLink Duo 2 (1)");
+    CHECK (found.devices[1].formats == std::vector<std::string> { "1080p50", "1080i50" });
+    CHECK (found.devices[2].maker == "camera");
+    CHECK (found.devices[2].formats.size() == 3);
+    CHECK (found.devices[3].shown() == "Logitech C920 - camera");
+    CHECK (found.devices[3].formats.empty());
+    CHECK (found.device ("cam:usb-9") == &found.devices[3]);
+    CHECK (found.device ("cam:usb-8") == nullptr);
+
+    //  Video capture is an input's kind only where something brings a picture in.
+    const auto here = model::pictureKindsHere();
+    CHECK (model::inputKindsHere (model::capturesFrom ({})) == here);
+
+    auto withDevices = model::inputKindsHere (found);
+    REQUIRE (withDevices.size() == here.size() + 1);
+    CHECK (withDevices.back() == "device");
+
+    //  A row's words: the device with its maker, its format unless Automatic,
+    //  or that it is not here.
+    const std::string dot = "  \xc2\xb7  ";
+    model::VideoInputRow input;
+    input.kind = "device";
+    input.sender = "cam:usb-9";
+    input.videoMode = "auto";
+    CHECK (model::captureSummary (input, found) == "Logitech C920 - camera");
+    input.sender = "dl-2";
+    input.videoMode = "1080i50";
+    CHECK (model::captureSummary (input, found) == "DeckLink Duo 2 (1)" + dot + "1080i50");
+    input.sender = "cam:usb-7";
+    input.videoMode = "auto";
+    CHECK (model::captureSummary (input, found) == "a camera not on this machine");
+    input.sender = "dl-7";
+    CHECK (model::captureSummary (input, found) == "dl-7 (not on this machine)");
 }
 
 TEST_CASE ("client: a card output's rows read, neither a display nor a sender, said in a row's words (§71, DL.9)")
