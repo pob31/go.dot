@@ -653,8 +653,21 @@ namespace wfg::cue
             if (element == "Fade")
                 return reader.number (node, "fade", "duration");
 
+            /*  A STREAM HELD BACK ENDS ITS DELAY LATER (namespace draft §70,
+                AOP): the cue lasts until the later of its two. */
+            const auto delayed = [this, &node, &element] (std::optional<double> length) -> std::optional<double>
+            {
+                const auto owner = element == "Media" ? "media" : "video";
+                const auto delay = reader.text (node, owner, "delay");
+
+                if (! length.has_value() || (delay != "sound" && delay != "picture"))
+                    return length;
+
+                return *length + std::max (reader.number (node, owner, "delayBy"), 0.0) / 1000.0;
+            };
+
             if (element == "Media")
-                return mediaLength (node);
+                return delayed (mediaLength (node));
 
             /*  A MOVIE AS LONG AS IT PLAYS (namespace draft §69, GJ.7), as a
                 sound: the file from its start offset, at its speed. A still, a
@@ -672,7 +685,7 @@ namespace wfg::cue
                     return std::nullopt;
 
                 const auto span = *length - reader.number (node, "video", "startOffset");
-                return span > 0.0 ? std::optional<double> (span / speed) : std::nullopt;
+                return delayed (span > 0.0 ? std::optional<double> (span / speed) : std::nullopt);
             }
 
             if (element == "Group")

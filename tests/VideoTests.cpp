@@ -2271,13 +2271,18 @@ namespace
         bool launchAtSample (int track, int, std::int64_t sample) override
         {
             launches.push_back ({ track, sample });
+            endsAt[track] = sample + soundLength;
             return true;
         }
-        bool stop (int track) override                                    { stops.push_back (track); return true; }
-        bool stopAtSample (int track, int, std::int64_t) override        { stops.push_back (track); return true; }
+        bool stop (int track) override                                    { stops.push_back (track); endsAt.erase (track); return true; }
+        bool stopAtSample (int track, int, std::int64_t) override        { stops.push_back (track); endsAt.erase (track); return true; }
         void setLevelDb (int, double) override                           {}
         void setRouting (int, const std::vector<cue::Coefficient>&) override {}
-        bool isPlaying (int) const override                              { return false; }
+        bool isPlaying (int track) const override
+        {
+            const auto end = endsAt.find (track);
+            return end != endsAt.end() && now < end->second;
+        }
         bool isArmReady (int track) const override                       { return ready.count (track) > 0; }
         std::int64_t samplesElapsed() const override                     { return now; }
         int blockSize() const override                                   { return 128; }
@@ -2301,6 +2306,10 @@ namespace
         std::vector<std::pair<int, std::int64_t>> launches;
         std::vector<int> stops;
         std::int64_t now = 0;
+
+        //  How long every sound plays from its launch: for ever unless a case says.
+        std::int64_t soundLength = std::numeric_limits<std::int64_t>::max() / 2;
+        std::map<int, std::int64_t> endsAt;
     };
 
     void makeLockedMovie (VideoRig& rig, const char* delay, const char* delayBy)
@@ -2423,6 +2432,63 @@ TEST_CASE ("video: Esc inside a delay - the stream held back never starts (names
         CHECK (std::find (audio.stops.begin(), audio.stops.end(), track) != audio.stops.end());
         CHECK (rig.runs.find (soundId)->isFinished());
     }
+}
+
+TEST_CASE ("video: a movie whose sound is held back ends with its sound, the tail not cut (namespace draft 70, AOP)")
+{
+    //  The tick each run ended on, and whether the Runner stopped the sound itself.
+    struct Ends { std::int64_t movie = -1; std::int64_t sound = -1; bool soundStopped = false; };
+
+    const auto play = [] (const char* delay)
+    {
+        const std::map<std::string, double> lengths { { "clip.mov", 1.0 }, { "clip (sound).wav", 1.0 } };
+        LaunchingPlayer audio;
+        audio.soundLength = 48000;
+        VideoRig rig;
+        rig.runner.setPlayer (&audio);
+        rig.runner.setMediaDurations (&lengths);
+        makeLockedMovie (rig, delay, "500");
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+        audio.completeArms (rig.engine);
+
+        const auto movieId = rig.runOf ("VD000060")->id;
+        const auto soundId = rig.runOf ("VD000061")->id;
+        Ends ends;
+        int track = -1;
+
+        for (int n = 0; n < 300 && (ends.movie < 0 || ends.sound < 0); ++n)
+        {
+            audio.now = rig.tick * 960;
+            rig.tickOnce();
+
+            if (const auto* sound = rig.runs.find (soundId); sound != nullptr && track < 0)
+                track = sound->track;
+
+            if (ends.movie < 0 && rig.runs.find (movieId)->isFinished())
+                ends.movie = rig.tick;
+
+            if (ends.sound < 0 && rig.runs.find (soundId)->isFinished())
+                ends.sound = rig.tick;
+        }
+
+        REQUIRE (ends.movie >= 0);
+        REQUIRE (ends.sound >= 0);
+        ends.soundStopped = std::find (audio.stops.begin(), audio.stops.end(), track) != audio.stops.end();
+        return ends;
+    };
+
+    const auto plain = play ("none");
+    const auto held = play ("sound");
+
+    //  Its sound plays out its own second, half a second after the picture's.
+    CHECK_FALSE (held.soundStopped);
+    CHECK (held.sound >= plain.sound + 24);
+    CHECK (held.sound <= plain.sound + 26);
+
+    //  And the movie's run ends with it, not on its last frame.
+    CHECK (held.movie >= held.sound);
+    CHECK (held.movie >= plain.movie + 24);
 }
 
 TEST_CASE ("video: a movie sought keeps its sound or its picture held back by the same delay (namespace draft 70, AOT)")

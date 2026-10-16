@@ -2921,6 +2921,23 @@ namespace wfg::cue
             run->startOffset = wants.offset;
             run->startRange = std::max (wants.range, 0);
 
+            /*  WHAT IS LEFT OF A SOUND'S DELAY (namespace draft §70, AOV): what
+                the plan reckoned, or, read off a playhead part way into its file,
+                nothing - its delay is behind it. One at its top keeps its own. */
+            if (cue.hasType ("Media"))
+            {
+                if (wants.heldFor >= 0.0)
+                {
+                    run->delayRead = true;
+                    run->soundDelay = videoSamplesFor (wants.heldFor);
+                }
+                else if (wants.offset > numberOf (cue, "startOffset") || wants.range >= 0)
+                {
+                    run->delayRead = true;
+                    run->soundDelay = 0;
+                }
+            }
+
             /*  A CUE WITH RANGES AT ITS PHASE (2026-10-05, namespace draft
                 §30.6, S8). The solver says which range, which pass and where in
                 it (`placeInRanges`), and the plan's offset is that second of the
@@ -16294,6 +16311,16 @@ namespace wfg::cue
         return ! movie.empty() && document.findById (movie).hasType ("Video");
     }
 
+    bool Runner::heldSoundsPlaying (const std::string& movieRun) const
+    {
+        for (const auto* child : runs.childrenOf (movieRun))
+            if (child != nullptr && ! child->isFinished() && child->kind == "media" && child->soundDelay > 0
+                  && followsAMovie (document.findById (child->cue)))
+                return true;
+
+        return false;
+    }
+
     void Runner::readDelay (Run& run) const
     {
         if (run.delayRead || samplesPerTick <= 0)
@@ -19475,6 +19502,13 @@ namespace wfg::cue
             if (job.movie && job.placed && ! job.movieEnded)
                 advanceMovie (engine, job);
 
+            /*  AND ENDS ONCE ITS SOUNDS HELD BACK HAVE (namespace draft §70). */
+            if (job.movie && job.endOwed && ! heldSoundsPlaying (job.self))
+            {
+                job.endOwed = false;
+                engine.submit (origin::engine, "run.ended", one (job.self));
+            }
+
             //  And its run reads where it is in the file (§47, AAC).
             if (job.movie && job.placed)
                 if (auto* movieRun = runs.find (job.self); movieRun != nullptr && ! movieRun->isFinished())
@@ -19917,6 +19951,14 @@ namespace wfg::cue
                     videoSink->remove (job.self, reaches + samplesPerTick);
 
                 job.removed = true;
+            }
+
+            /*  ITS SOUNDS HELD BACK PLAY ON PAST ITS LAST FRAME (namespace
+                draft §70, AOP): the end is owed until they have ended. */
+            if (heldSoundsPlaying (job.self))
+            {
+                job.endOwed = true;
+                return;
             }
 
             engine.submit (origin::engine, "run.ended", one (job.self));

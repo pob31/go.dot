@@ -121,6 +121,17 @@ namespace wfg::cue
             return out;
         }
 
+        /*  How long a sound cue holds its sound back, in seconds on the clock
+            (namespace draft §70): its delay, when it says sound. A locked
+            sound's is its movie's, and no plan seats one on its own. */
+        double heldBackOf (const Reader& read, const juce::ValueTree& cue)
+        {
+            if (read.text (cue, "media", "delay") != "sound")
+                return 0.0;
+
+            return std::max (read.number (cue, "media", "delayBy"), 0.0) / 1000.0;
+        }
+
         double speedOf (const Reader& read, const juce::ValueTree& cue)
         {
             //  Its size (namespace draft §41): backwards takes as long as forwards.
@@ -166,8 +177,11 @@ namespace wfg::cue
                 total += span * static_cast<double> (passes);
             }
 
+            //  Held back, it ends its delay later too (namespace draft §70, AOP).
+            const auto held = heldBackOf (read, cue);
+
             if (anyRange)
-                return onTheClock (total, speedOf (read, cue));
+                return onTheClock (total, speedOf (read, cue)) + held;
 
             /*  As long as the cue plays (namespace draft §55): its edit's
                 sections put together while the edit is open, else its file. */
@@ -177,7 +191,7 @@ namespace wfg::cue
                 return std::nullopt;
 
             const auto span = *length - read.number (cue, "media", "startOffset");
-            return span > 0.0 ? std::optional<double> (onTheClock (span, speedOf (read, cue))) : std::nullopt;
+            return span > 0.0 ? std::optional<double> (onTheClock (span, speedOf (read, cue)) + held) : std::nullopt;
         }
 
         /*  Which range a media cue is in `offset` seconds after it started, and
@@ -187,9 +201,16 @@ namespace wfg::cue
             arithmetic over the passes in order rather than a lookup. A range
             that plays for ever swallows everything after it, which is right:
             nothing gets past a bed. */
-        void placeInRanges (const Reader& read, const juce::ValueTree& cue, double offset,
+        void placeInRanges (const Reader& read, const juce::ValueTree& cue, double sinceStart,
                             PlannedRun& out, std::vector<Confusion>& confused)
         {
+            /*  ITS DELAY FIRST (namespace draft §70, AOV): a sound held back is
+                at `sinceStart` less its delay, and one the instant finds still
+                inside it starts the rest of the delay later, from its top. */
+            const auto held = heldBackOf (read, cue);
+            out.heldFor = std::max (held - sinceStart, 0.0);
+            const auto offset = std::max (sinceStart - held, 0.0);
+
             /*  `offset` IS THE CLOCK'S, seconds since the cue started, and the
                 file has moved its own speed times as far (§22.5). */
             const auto progress = offset * speedOf (read, cue);

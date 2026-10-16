@@ -134,6 +134,12 @@ namespace wfg::cue
         /** Seconds into the cue's own material. */
         double offset = 0.0;
 
+        /*  A SOUND HELD BACK (namespace draft §70, AOV): seconds of its delay
+            still to come at the instant - its file at `offset` from then - or
+            nought once the delay is behind it. -1 where the plan did not reckon
+            it (a run read off its playhead), which leaves the run its own. */
+        double heldFor = -1.0;
+
         /*  Which of the cue's ranges, counting from nought, and which pass of
             it. -1 and 1 for a cue with no ranges, which plays its file once. */
         int range = -1;

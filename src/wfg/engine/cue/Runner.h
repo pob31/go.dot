@@ -2986,6 +2986,10 @@ namespace wfg::cue
             movie's - once, at the session's rate. */
         void readDelay (Run& run) const;
 
+        /*  Whether a movie run has a locked sound held back still to end - its
+            tail playing on past the movie's last frame (namespace draft §70). */
+        bool heldSoundsPlaying (const std::string& movieRun) const;
+
         /*  ONE WALK OF THE SHOW PER EDIT, not one per movie per tick: every
             movie's locked sounds, made again when the document's revision moves
             - an override switching a sound on or off moves it too - since a
@@ -3422,6 +3426,11 @@ namespace wfg::cue
             std::int64_t movieAt = -1;
             double rate = 1.0;
             bool movieEnded = false;
+
+            /*  AT ITS END, ITS SOUNDS HELD BACK STILL PLAYING (namespace draft
+                §70, AOP): the run's `run.ended` waits for them, so the cue ends
+                with its later stream and their tails are not cut. */
+            bool endOwed = false;
 
             /*  ITS RANGES (namespace draft 37.5, WL), as a sound's: the cue's,
                 read again every tick so an edit is seen at once (TZ); the one

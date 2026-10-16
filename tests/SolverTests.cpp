@@ -1144,6 +1144,56 @@ TEST_CASE ("solve: a time group is never a timed chain, never landed in, never o
                          [&kept] (const cue::PlannedRun& run) { return run.cue == kept; }));
 }
 
+TEST_CASE ("solve: a sound held back is its delay behind, or still inside it, and the next member follows its later end (namespace draft 70)")
+{
+    SolverRig rig;
+
+    const auto made = rig.document.createCue (rig.listId, 0, "group", "Chain", {}, { { "advance", "auto" } });
+    REQUIRE (made.ok);
+
+    const auto first = rig.media (made.id, 0, "First");
+    const auto second = rig.media (made.id, 1, "Second");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + first + "/delay", "sound").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + first + "/delayBy", "500").ok);
+
+    const auto plannedOf = [] (const cue::Plan& plan, const std::string& cueId) -> cue::PlannedRun
+    {
+        for (const auto& run : plan.runs)
+            if (run.cue == cueId)
+                return run;
+
+        FAIL ("not planned: " << cueId);
+        return {};
+    };
+
+    //  A second and a half after it was fired: a second into its file.
+    const auto sounding = rig.solve (made.id, 1.5);
+    REQUIRE (sounding.ok);
+    CHECK (plannedOf (sounding, first).offset == doctest::Approx (1.0));
+    CHECK (plannedOf (sounding, first).heldFor == doctest::Approx (0.0));
+
+    //  A fifth of a second after: still held back, three tenths to go, from its top.
+    const auto inside = rig.solve (made.id, 0.2);
+    REQUIRE (inside.ok);
+    CHECK (plannedOf (inside, first).offset == doctest::Approx (0.0));
+    CHECK (plannedOf (inside, first).heldFor == doctest::Approx (0.3));
+
+    /*  FOUR SECONDS OF FILE AND HALF A SECOND HELD BACK: the first ends at four
+        and a half (AOP), so at four and a quarter it is still playing and the
+        second is a quarter of a second away. */
+    const auto late = rig.solve (made.id, 4.25);
+    REQUIRE (late.ok);
+    CHECK (plannedOf (late, first).offset == doctest::Approx (3.75));
+    CHECK (plannedOf (late, second).when == cue::planned::due);
+    CHECK (plannedOf (late, second).startsIn == doctest::Approx (0.25));
+
+    //  The second is not held back: past its start, it is where it is.
+    const auto after = rig.solve (made.id, 5.5);
+    REQUIRE (after.ok);
+    CHECK (plannedOf (after, second).offset == doctest::Approx (1.0));
+    CHECK (plannedOf (after, second).heldFor == doctest::Approx (0.0));
+}
+
 TEST_CASE ("solve: inside an automatic Crossfade both members are sounding, each where it is (namespace draft 69)")
 {
     SolverRig rig;
