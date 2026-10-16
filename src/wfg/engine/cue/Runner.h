@@ -2154,6 +2154,28 @@ namespace wfg::cue
         //  Whether a member of this kind takes the place of the ones before it, and gives its place.
         static bool joinsByKind (const std::string& kind) noexcept;
 
+        /*  AN AUTOMATIC SEQUENCE'S GAPLESS AND CROSSFADE (§69, GJ.5), asked by
+            `advanceGroups` before its own boundary: true while a placed join
+            holds this group's next boundary - its next member armed ahead and
+            its launch placed on the outgoing member's end, less the crossfade,
+            plus the two waits between them. False leaves the boundary to the
+            scheduler's own path, which is Let play: no join, the first member,
+            the round's end, an end Go.dot cannot read ahead (AOE). */
+        bool joinTick (Engine& engine, GroupJob& job, const juce::ValueTree& group);
+
+        /*  The sample a sounding member's file runs out on, read off its speed
+            clock, when Go.dot can know it ahead: a sound with no ranges, playing
+            forwards, of a known length. Nothing otherwise (AOE). */
+        std::optional<std::int64_t> knownEndOf (const Run& run) const;
+
+        /*  Whether two runs are members of one sequence run whose join is
+            Gapless or Crossfade, the earlier still unfinished: a claim the one
+            holds is granted to the other beside it (§69). */
+        bool sharesAJoin (const Run& holder, const Run& run) const;
+
+        //  Let play's next member armed a load lead before the outgoing one's end (§69, AOF).
+        void letPlayAhead (Engine& engine, GroupJob& job, std::int64_t now);
+
         /*  EVERY SOUNDING MEDIA CUE'S SPEED (namespace draft §22.4): the cue's
             `rate` re-read when the show's revision moves - unless a speed fade
             holds the run - and any change placed on the voice a launch horizon
@@ -2993,6 +3015,9 @@ namespace wfg::cue
             completes the group rather than spinning. */
         std::vector<std::string> drawRound (Engine& engine, const juce::ValueTree& group,
                                             const std::string& runId);
+
+        //  The round drawRound would draw now, drawn and not submitted: its seed and its members (§69, GJ.5).
+        std::pair<std::int32_t, std::vector<std::string>> roundFor (const juce::ValueTree& group, const std::string& runId);
 
         void enforceStops();
 

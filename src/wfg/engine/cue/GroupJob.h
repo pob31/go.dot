@@ -255,6 +255,19 @@ namespace wfg::cue
             within a launch horizon while its code still wants it. Until then
             its sample is its parent's to move (a code re-anchored), nothing of
             it has been heard, and a stop gives it back with no footer. */
+        /*  THE NEXT MEMBER OF A PLACED JOIN (namespace draft §69, GJ.5): an
+            automatic sequence's Gapless or Crossfade arms the member after the
+            one it awaits a load lead before its launch, and places that launch
+            on a sample worked out from the outgoing member's end. `aheadCue`
+            once its spawn is asked for, `aheadRun` once the run is there;
+            `aheadStart` the sample last worked out for it, kept for when the
+            outgoing member's end can no longer be read (it has ended). Cleared
+            when the launch is placed, which is when the incoming member becomes
+            the one awaited. */
+        std::string aheadCue;
+        std::string aheadRun;
+        std::int64_t aheadStart = 0;
+
         std::int64_t codeSample = 0;
         int codeRate = 0;                   // the samples a second `codeSample` counts
         bool codeCommitted = false;

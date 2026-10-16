@@ -125,12 +125,19 @@ namespace
                                { osc::Value::string (arm.runId), osc::Value::int32 (arm.track) });
                 ready.insert (arm.track);
                 armed.push_back (arm);
+
+                //  The file's own length, where the case gave one: the voice stops there by itself.
+                for (const auto& [name, seconds] : *durations)
+                    if (arm.mediaFile.size() >= name.size()
+                          && arm.mediaFile.compare (arm.mediaFile.size() - name.size(), name.size(), name) == 0)
+                        lengthOf[arm.track] = static_cast<std::int64_t> (std::llround (seconds * ::sampleRate));
             }
 
             arms.clear();
         }
 
         std::int64_t samples = 0;
+        const std::map<std::string, double>* durations = nullptr;
         std::vector<cue::ArmRequest> arms;
         std::vector<cue::ArmRequest> armed;
         std::set<int> ready;
@@ -172,6 +179,8 @@ namespace
 
             runner.setPlayer (&audio);
             runner.setSamplesPerTick (samplesPerTick);
+            runner.setMediaDurations (&durations);
+            audio.durations = &durations;
 
             listId = document.createList ("Sound").id;
             document.setAttribute ("/godot/list/goDebounce", "0");
@@ -180,6 +189,9 @@ namespace
         //  One tick, the sample clock where the tick is, the Runner observing first.
         Engine::TickResult tickOnce()
         {
+            if (disksAnswer)
+                audio.completeArms (engine);
+
             audio.samples = tick * samplesPerTick;
             runner.beforeTick (engine, tick);
             return engine.processTick (tick++);
@@ -223,6 +235,10 @@ namespace
 
             return newest;
         }
+
+        //  The files' lengths, by name, and whether every arm is answered on the next tick.
+        std::map<std::string, double> durations;
+        bool disksAnswer = false;
 
         JoinPlayer audio;
         Engine engine;
@@ -582,4 +598,280 @@ TEST_CASE ("join: Esc across a manual crossfade stops both, each from where it w
         CHECK_FALSE (song->isFinished());
         CHECK_FALSE (song->joinStopSent);
     }
+}
+
+//==============================================================================
+namespace
+{
+    /*  AN AUTOMATIC SEQUENCE OF THREE SOUNDS of three, two and two seconds,
+        asked for a join, the disk answering every arm on the next tick. */
+    struct Chain
+    {
+        std::string group, first, second, third;
+    };
+
+    Chain automaticChain (Rig& rig, const std::string& joinWord, double seconds = 1.0)
+    {
+        rig.durations = { { "first.wav", 3.0 }, { "second.wav", 2.0 }, { "third.wav", 2.0 } };
+        rig.disksAnswer = true;
+
+        Chain chain;
+        const auto made = rig.document.createCue (rig.listId, 0, "group", "Chain", {}, { { "advance", "auto" } });
+        REQUIRE (made.ok);
+        chain.group = made.id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.group + "/join", joinWord).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.group + "/joinLength", osc::formatDouble (seconds)).ok);
+
+        chain.first = rig.media (chain.group, 0, "first");
+        chain.second = rig.media (chain.group, 1, "second");
+        chain.third = rig.media (chain.group, 2, "third");
+        return chain;
+    }
+
+    //  Fired, and played until the third member has been placed.
+    void playChain (Rig& rig, const Chain& chain)
+    {
+        rig.apply ("cue.fire", { osc::Value::string (chain.group) });
+        REQUIRE (rig.tickUntil ([&rig, &chain] { const auto third = rig.runOf (chain.third);
+                                                return third != nullptr && third->launchedAtSample > 0; }, 1000));
+    }
+}
+
+TEST_CASE ("join: an automatic Gapless places each member on the sample the one before it ends on, armed while it played")
+{
+    Rig rig;
+    const auto chain = automaticChain (rig, "gapless");
+    playChain (rig, chain);
+
+    const auto first = rig.runOf (chain.first);
+    const auto second = rig.runOf (chain.second);
+    const auto third = rig.runOf (chain.third);
+
+    CHECK (second->launchedAtSample == first->launchedAtSample + samplesOf (3.0));
+    CHECK (third->launchedAtSample == second->launchedAtSample + samplesOf (2.0));
+
+    //  Nothing faded: a cut on the sample.
+    CHECK_FALSE (first->joinOut);
+    CHECK_FALSE (second->joinIn);
+
+    //  And the whole chain ends, the group with it.
+    const auto group = rig.runOf (chain.group);
+    REQUIRE (rig.tickUntil ([group] { return group->isFinished(); }, 400));
+}
+
+TEST_CASE ("join: an automatic Crossfade starts the next member its length before the end, the two crossing")
+{
+    Rig rig;
+    const auto chain = automaticChain (rig, "crossfade", 1.0);
+    playChain (rig, chain);
+
+    const auto first = rig.runOf (chain.first);
+    const auto second = rig.runOf (chain.second);
+    const auto end = first->launchedAtSample + samplesOf (3.0);
+
+    CHECK (second->launchedAtSample == end - samplesOf (1.0));
+    CHECK (first->joinOut);
+    CHECK (first->joinOutFrom == end - samplesOf (1.0));
+    CHECK (first->joinSamples == samplesOf (1.0));
+    CHECK (second->joinIn);
+    CHECK (second->joinSamples == samplesOf (1.0));
+
+    //  The first member is not faded in: it has nothing to come in over.
+    CHECK_FALSE (first->joinIn);
+}
+
+TEST_CASE ("join: an automatic Crossfade crosses at equal power and leaves each member whole")
+{
+    /*  HALF A SECOND, so the second member - two seconds long - is whole for a
+        while between its fade-in and its own fade-out into the third. */
+    Rig rig;
+    const auto chain = automaticChain (rig, "crossfade", 0.5);
+    rig.apply ("cue.fire", { osc::Value::string (chain.group) });
+
+    REQUIRE (rig.tickUntil ([&rig, &chain] { const auto second = rig.runOf (chain.second);
+                                            return second != nullptr && second->launchedAtSample > 0; }, 400));
+    const auto first = rig.runOf (chain.first);
+    const auto second = rig.runOf (chain.second);
+
+    /*  ACROSS THE CROSSING, THE TWO ADD TO ONE IN POWER - the level of two
+        unlike sounds does not dip - read where the tick lands, near halfway. */
+    playTo (rig, second->launchedAtSample + samplesOf (0.25) - samplesPerTick);
+    const auto power = std::pow (10.0, first->joinDb / 10.0) + std::pow (10.0, second->joinDb / 10.0);
+    CHECK (power == doctest::Approx (1.0).epsilon (0.01));
+    CHECK (first->joinDb < -1.0);
+    CHECK (second->joinDb < -1.0);
+
+    playTo (rig, second->launchedAtSample + samplesOf (0.5));
+    CHECK (second->joinDb == doctest::Approx (0.0));
+    CHECK (first->joinDb == doctest::Approx (-120.0));
+}
+
+TEST_CASE ("join: the waits push the next member later, and the fades stay on their members")
+{
+    Rig rig;
+    const auto chain = automaticChain (rig, "crossfade", 1.0);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.first + "/postWait", "0.25").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.second + "/preWait", "0.25").ok);
+    playChain (rig, chain);
+
+    const auto first = rig.runOf (chain.first);
+    const auto second = rig.runOf (chain.second);
+    const auto end = first->launchedAtSample + samplesOf (3.0);
+
+    //  Half a second of waits: the second member half a second later, its crossfade half as long.
+    CHECK (second->launchedAtSample == end - samplesOf (1.0) + samplesOf (0.5));
+    CHECK (first->joinOutFrom == end - samplesOf (1.0));
+    CHECK (first->joinSamples == samplesOf (1.0));
+    CHECK (second->joinSamples == samplesOf (1.0));
+}
+
+TEST_CASE ("join: a crossfade no longer than either member, and a group stopped after its member gives back the one armed ahead")
+{
+    SUBCASE ("a crossfade longer than the next member")
+    {
+        Rig rig;
+        const auto chain = automaticChain (rig, "crossfade", 2.5);
+        playChain (rig, chain);
+
+        //  The second is two seconds long: the crossfade into it is two.
+        const auto first = rig.runOf (chain.first);
+        const auto second = rig.runOf (chain.second);
+        CHECK (second->launchedAtSample == first->launchedAtSample + samplesOf (3.0) - samplesOf (2.0));
+        CHECK (second->joinSamples == samplesOf (2.0));
+    }
+
+    SUBCASE ("stopped after the member playing")
+    {
+        Rig rig;
+        const auto chain = automaticChain (rig, "gapless");
+        rig.apply ("cue.fire", { osc::Value::string (chain.group) });
+
+        //  The second armed ahead while the first plays.
+        REQUIRE (rig.tickUntil ([&rig, &chain] { return rig.runOf (chain.second) != nullptr; }, 400));
+        const auto group = rig.runOf (chain.group);
+        rig.apply ("run.stop", { osc::Value::string (group.id), osc::Value::string ("afterMember") });
+
+        REQUIRE (rig.tickUntil ([group] { return group->isFinished(); }, 400));
+        CHECK (rig.runOf (chain.second)->isFinished());
+        CHECK (rig.runOf (chain.second)->launchedAtSample == 0);
+        CHECK (rig.runOf (chain.third) == nullptr);
+    }
+}
+TEST_CASE ("join: across the round's end - a looping Gapless pair and a shuffled Crossfade place every boundary")
+{
+    Rig rig;
+    rig.durations = { { "a.wav", 1.0 }, { "b.wav", 1.0 }, { "c.wav", 1.0 } };
+    rig.disksAnswer = true;
+
+    const auto made = rig.document.createCue (rig.listId, 0, "group", "Bed", {}, { { "advance", "auto" } });
+    REQUIRE (made.ok);
+    const auto base = "/godot/cue/" + made.id + "/";
+    rig.media (made.id, 0, "a");
+    rig.media (made.id, 1, "b");
+
+    auto spacing = samplesOf (1.0);
+    auto expected = std::size_t { 6 };
+
+    SUBCASE ("Gapless, three rounds of two")
+    {
+        REQUIRE (rig.document.setAttribute (base + "join", "gapless").ok);
+        REQUIRE (rig.document.setAttribute (base + "loops", "3").ok);
+    }
+
+    SUBCASE ("Crossfade, shuffled, two rounds of three")
+    {
+        rig.media (made.id, 2, "c");
+        REQUIRE (rig.document.setAttribute (base + "join", "crossfade").ok);
+        REQUIRE (rig.document.setAttribute (base + "joinLength", "0.25").ok);
+        REQUIRE (rig.document.setAttribute (base + "selection", "shuffle").ok);
+        REQUIRE (rig.document.setAttribute (base + "loops", "2").ok);
+        spacing = samplesOf (0.75);
+    }
+
+    rig.apply ("cue.fire", { osc::Value::string (made.id) });
+    const auto group = rig.runOf (made.id);
+    REQUIRE (rig.tickUntil ([group] { return group->isFinished(); }, 1200));
+
+    //  Every launch on its sample, one after another, the round's end no different.
+    REQUIRE (rig.audio.launches.size() == expected);
+
+    for (std::size_t n = 1; n < rig.audio.launches.size(); ++n)
+    {
+        INFO ("launch " << n);
+        CHECK (rig.audio.launches[n].second == rig.audio.launches[n - 1].second + spacing);
+    }
+
+    //  And the round counter says how many rounds were played.
+    CHECK (group->iteration == (expected == 6 && spacing == samplesOf (1.0) ? 3 : 2));
+}
+TEST_CASE ("join: two members feeding one processor input hold it together across the join, rather than one waiting for the other")
+{
+    Rig rig;
+    const auto chain = automaticChain (rig, "gapless");
+
+    const auto mount = rig.document.createMount ("/wfs", "namespaces/wfs.json");
+    REQUIRE (mount.ok);
+    const auto slot = rig.document.createSlot (mount.id, "/wfs/input/1");
+    REQUIRE (slot.ok);
+
+    //  The processor's inputs arrive on a bus of the interface's outputs.
+    juce::ValueTree bus { "Bus" };
+    const auto busId = rig.runIds.generate();
+    bus.setProperty (juce::Identifier ("id"), juce::String (busId), nullptr);
+    bus.setProperty (juce::Identifier ("name"), "WFS send", nullptr);
+    bus.setProperty (juce::Identifier ("firstChannel"), 0, nullptr);
+    bus.setProperty (juce::Identifier ("width"), 8, nullptr);
+    rig.document.root().getChildWithName ("Audio").appendChild (bus, nullptr);
+    rig.document.findById (slot.id).setProperty (juce::Identifier ("bus"), juce::String (busId), nullptr);
+
+    const auto feedInto = [&rig, &slot] (const std::string& member)
+    {
+        const auto feed = rig.document.createFeed (member, slot.id);
+        REQUIRE (feed.ok);
+        rig.document.findById (feed.id).setProperty (juce::Identifier ("gains"), "1", nullptr);
+    };
+
+    for (const auto& member : { chain.first, chain.second, chain.third })
+        feedInto (member);
+
+    playChain (rig, chain);
+
+    const auto first = rig.runOf (chain.first);
+    const auto second = rig.runOf (chain.second);
+
+    CHECK (second->pending.empty());
+    CHECK (second->launchedAtSample == first->launchedAtSample + samplesOf (3.0));
+
+    //  Outside a join the input is still one cue's at a time.
+    const auto loose = rig.media (rig.listId, 1, "loose");
+    feedInto (loose);
+    rig.apply ("cue.fire", { osc::Value::string (loose) });
+    CHECK_FALSE (rig.runOf (loose)->pending.empty());
+}
+
+TEST_CASE ("join: an automatic Let play arms the next member while the one before it plays, and starts it once that one has ended")
+{
+    Rig rig;
+    const auto chain = automaticChain (rig, "letPlay");
+    rig.apply ("cue.fire", { osc::Value::string (chain.group) });
+
+    REQUIRE (rig.tickUntil ([&rig, &chain] { return rig.runOf (chain.first) != nullptr
+                                                && rig.runOf (chain.first)->launchedAtSample > 0; }, 100));
+    const auto first = rig.runOf (chain.first);
+    const auto end = first->launchedAtSample + samplesOf (3.0);
+
+    //  Armed a load lead before the end - while the first member still sounds.
+    REQUIRE (rig.tickUntil ([&rig, &chain] { return rig.runOf (chain.second) != nullptr; }, 400));
+    CHECK (rig.audio.samples < end);
+    CHECK_FALSE (first->isFinished());
+    CHECK (rig.runOf (chain.second)->launchedAtSample == 0);
+
+    //  And started after the first has ended, as it always was.
+    REQUIRE (rig.tickUntil ([&rig, &chain] { return rig.runOf (chain.second)->launchedAtSample > 0; }, 400));
+    CHECK (rig.runOf (chain.second)->launchedAtSample > end);
+    CHECK_FALSE (rig.runOf (chain.second)->joinIn);
+
+    const auto group = rig.runOf (chain.group);
+    REQUIRE (rig.tickUntil ([group] { return group->isFinished(); }, 600));
+    CHECK (rig.runOf (chain.third)->launchedAtSample > 0);
 }

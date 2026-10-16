@@ -229,6 +229,11 @@ namespace wfg::cue
             return out;
         }
 
+        /*  HOW FAR AHEAD OF ITS LAUNCH A PLACED JOIN ARMS ITS NEXT MEMBER
+            (namespace draft §69, AOF): the two seconds a code-placed member is
+            loaded ahead (§60), so a sound read cold from the disk is ready. */
+        constexpr double joinPreloadSeconds = 2.0;
+
         /*  A MEMBER OF AN ACT THAT IS SOUNDING OR SHOWING NOW (namespace draft
             §69, GJ.4), which a manual join's next member takes the place of: a
             sound or a live input placed on its sample, a picture or a scene
@@ -5335,6 +5340,23 @@ namespace wfg::cue
                 continue;
 
             const auto* holder = runs.holderOf (slotId);
+
+            /*  HELD ALONGSIDE A MEMBER IT JOINS (namespace draft §69): two
+                members of one Gapless or Crossfade sequence sound together for
+                the length of the crossing, and every file of a sequence feeding
+                one source is the ordinary case. Queued behind the outgoing
+                member, the incoming one would wait for it to end - a placed
+                join a gap again, and a manual crossfade that never begins,
+                since the outgoing member only fades once the incoming one is
+                placed. Granted beside it instead: a document decision, so a
+                replay makes it too. */
+            if (holder != nullptr && holder != run && sharesAJoin (*holder, *run))
+            {
+                if (std::find (run->claims.begin(), run->claims.end(), slotId) == run->claims.end())
+                    run->claims.push_back (slotId);
+
+                continue;
+            }
 
             /*  A SLOT THIS RUN ALREADY HOLDS, OR ALREADY WAITS FOR, IS NOT
                 ASKED FOR AGAIN. With no audio side a run is armed twice - a
@@ -16726,6 +16748,29 @@ namespace wfg::cue
     std::vector<std::string> Runner::drawRound (Engine& engine, const juce::ValueTree& group,
                                                 const std::string& runId)
     {
+        auto [seed, members] = roundFor (group, runId);
+
+        if (members.empty())
+            return {};
+
+        std::vector<osc::Value> args { osc::Value::string (runId),
+                                       osc::Value::int32 (seed) };
+
+        for (const auto& cueId : members)
+            args.push_back (osc::Value::string (cueId));
+
+        engine.submit (origin::engine, "run.round", std::move (args));
+        return members;
+    }
+
+    std::pair<std::int32_t, std::vector<std::string>> Runner::roundFor (const juce::ValueTree& group,
+                                                                        const std::string& runId)
+    {
+        /*  THE ROUND THE NEXT DRAW WILL MAKE, and nothing submitted: a pure
+            function of the run's seed, its round count, what it has pruned and
+            the last member of the round before - so a placed join can arm the
+            next round's first member while this round's last still plays
+            (namespace draft §69, GJ.5), and the draw then makes the same round. */
         auto* run = runs.find (runId);
 
         if (run == nullptr)
@@ -16838,14 +16883,7 @@ namespace wfg::cue
         if (play > 0 && play < members.size())
             members.resize (play);
 
-        std::vector<osc::Value> args { osc::Value::string (runId),
-                                       osc::Value::int32 (seed) };
-
-        for (const auto& cueId : members)
-            args.push_back (osc::Value::string (cueId));
-
-        engine.submit (origin::engine, "run.round", std::move (args));
-        return members;
+        return { static_cast<std::int32_t> (seed), members };
     }
 
     void Runner::advanceGroups (Engine& engine)
@@ -17292,9 +17330,19 @@ namespace wfg::cue
 
                 `prepare` is the mark, because it already means the thing being
                 asked: this is ready for a GO that has not happened. */
+            /*  NOR A MEMBER A PLACED JOIN ARMED AHEAD (namespace draft §69,
+                GJ.5), until its launch is placed: it is the next boundary's, and
+                at a round's end the next round's - taken by that round when it
+                is drawn, not by this one. */
+            const auto armedAhead = [&job] (const Run& child)
+            {
+                return ! job.aheadCue.empty() && child.cue == job.aheadCue && child.state == runState::armed
+                         && child.launchRequestedAtTick == 0 && ! child.launchRequested;
+            };
+
             for (const auto* child : runs.childrenOf (job.run))
                 if (inPhase (child->cue) && ! job.hasTaken (child->id)
-                     && child->prepare.empty())
+                     && child->prepare.empty() && ! armedAhead (*child))
                 {
                     job.taken.push_back (child->id);
                     job.phaseRuns.push_back (child->id);
@@ -17413,6 +17461,12 @@ namespace wfg::cue
 
                 continue;
             }
+
+            /*  A PLACED JOIN HOLDS THE BOUNDARY (namespace draft §69, GJ.5):
+                the next member armed ahead and its launch placed on a sample.
+                Where it does not, the boundary is the one below. */
+            if (joinTick (engine, job, group))
+                continue;
 
             /*  A sequence, which a header and a footer always are: launch what
                 was spawned, wait for it, then spawn the next. */
@@ -21251,6 +21305,335 @@ namespace wfg::cue
                 run->joinInFrom = 0;
             }
         }
+    }
+
+    std::optional<std::int64_t> Runner::knownEndOf (const Run& run) const
+    {
+        if (run.kind != "media" || run.launchedAtSample <= 0 || run.turned || run.bent || run.direction < 0
+              || run.range >= 0 || ! (run.pieceEnd > run.positionOrigin))
+            return std::nullopt;
+
+        if (! rangesOf (document.findById (run.cue)).empty())
+            return std::nullopt;
+
+        const auto rate = audio != nullptr ? audio->sampleRate() : videoSampleRate();
+
+        if (rate <= 0)
+            return std::nullopt;
+
+        /*  WHERE THE FILE RUNS OUT, on the clock the voice plays by: the
+            launch's count plus the piece in samples, met at whatever speeds
+            the clock holds - so a speed fade moves the end, and the boundary
+            is worked out again every tick until it is placed. */
+        const auto source = run.launchSource + (run.pieceEnd - run.positionOrigin) * static_cast<double> (rate);
+        const auto when = run.rateClock.whenSourceReaches (source);
+
+        if (! when.has_value())
+            return std::nullopt;
+
+        return static_cast<std::int64_t> (std::llround (*when));
+    }
+
+    void Runner::letPlayAhead (Engine& engine, GroupJob& job, std::int64_t now)
+    {
+        /*  LET PLAY ARMS AHEAD TOO (namespace draft §69, AOF). §12.5 and the
+            scheduler's own comments said an automatic sequence spawns its next
+            member while the current one plays, so the disk is paid before the
+            boundary; it spawned it only once the current one had finished, and
+            a sound read cold added its loading to the gap. Now it is armed a
+            load lead before the outgoing member's end, where that end can be
+            read, and kept out of the phase until the boundary - where the
+            scheduler's own path adopts it, unclaimed, and launches it as before.
+            The boundary itself is unchanged: observed, `sequenceGapTicks`. */
+        const auto* outgoing = job.awaiting.empty() ? nullptr : runs.find (job.awaiting);
+
+        if (! job.aheadCue.empty())
+        {
+            //  The boundary has come: from here the member is the scheduler's.
+            if (outgoing == nullptr || outgoing->isFinished() || outgoing->state == runState::stopping
+                  || outgoing->stopAsked)
+            {
+                job.aheadCue.clear();
+                job.aheadRun.clear();
+                job.aheadStart = 0;
+            }
+
+            return;
+        }
+
+        if (now < 0 || outgoing == nullptr || outgoing->isFinished() || job.nextMember >= job.phaseCues.size())
+            return;
+
+        const auto* groupRun = runs.find (job.run);
+
+        if (groupRun == nullptr || ! groupRun->stopAfter.empty() || groupRun->stopAsked
+              || groupRun->state == runState::stopping)
+            return;
+
+        const auto& nextCue = job.phaseCues[job.nextMember];
+        const auto incoming = document.findById (nextCue);
+
+        if (! incoming.isValid() || kindOfCue (incoming) == "group" || nextCue == outgoing->cue)
+            return;
+
+        const auto end = knownEndOf (*outgoing);
+        const auto rate = static_cast<double> (audio != nullptr ? audio->sampleRate() : videoSampleRate());
+
+        if (! end.has_value() || *end - now > static_cast<std::int64_t> (std::llround (joinPreloadSeconds * rate)))
+            return;
+
+        /*  NOTHING ALREADY THERE for it - armed by the horizon, or already run
+            by it, a preset network cue whose preparation was the whole of it:
+            the scheduler walks past that one, and a second run spawned here
+            would be one it never launches and the scene would never end. */
+        for (const auto* child : runs.childrenOf (job.run))
+            if (child->cue == nextCue && ! job.hasTaken (child->id))
+                return;
+
+        job.aheadCue = nextCue;
+        engine.submit (origin::engine, "run.spawn", { osc::Value::string (job.run), osc::Value::string (nextCue) });
+    }
+
+    bool Runner::sharesAJoin (const Run& holder, const Run& run) const
+    {
+        if (holder.isFinished() || holder.parent.empty() || holder.parent != run.parent)
+            return false;
+
+        const auto* parent = runs.find (run.parent);
+
+        if (parent == nullptr)
+            return false;
+
+        const auto group = document.findById (parent->cue);
+
+        return group.isValid() && joinSettingOf (group).kind != join::Kind::letPlay;
+    }
+
+    bool Runner::joinTick (Engine& engine, GroupJob& job, const juce::ValueTree& group)
+    {
+        const auto mode = groupMode (group);
+
+        if (job.phase != groupPhase::members || ! isAutoSequence (mode) || job.codeSample != 0)
+            return false;
+
+        const auto setting = joinSettingOf (group);
+        const auto now = videoClockNow();
+
+        if (setting.kind == join::Kind::letPlay)
+        {
+            letPlayAhead (engine, job, now);
+            return false;
+        }
+
+        //  THE FIRST MEMBER is the scheduler's own; a join is between two.
+        if (now < 0 || job.awaiting.empty())
+            return false;
+
+        const auto* groupRun = runs.find (job.run);
+        auto* outgoing = runs.find (job.awaiting);
+
+        if (groupRun == nullptr || outgoing == nullptr)
+            return false;
+
+        /*  A PLAN THE GROUP NO LONGER WANTS: asked to stop after the member
+            playing, or stopping. The member armed ahead is given back, and the
+            boundary is the scheduler's - which then finds nothing to start. */
+        const auto abandon = [this, &engine, &job]
+        {
+            if (! job.aheadRun.empty())
+                if (const auto* ahead = runs.find (job.aheadRun); ahead != nullptr && ! ahead->isFinished())
+                    engine.submit (origin::engine, "run.stop", one (ahead->id));
+
+            job.aheadCue.clear();
+            job.aheadRun.clear();
+            job.aheadStart = 0;
+            return false;
+        };
+
+        if (groupRun->stopAfter == "member" || groupRun->state == runState::stopping || groupRun->stopAsked)
+            return abandon();
+
+        /*  AT THE ROUND'S END, THE NEXT ROUND'S FIRST MEMBER - the round wrap
+            is a boundary like any other (PRD §3.6). Read from the round the
+            next draw will make, which is a pure function of the run; drawn for
+            real when that member is placed. A round that will not come - the
+            last, or one a stop verb ended - has no boundary to join. */
+        const auto wraps = job.nextMember >= job.phaseCues.size();
+        std::string nextCue = job.aheadCue;
+
+        if (wraps)
+        {
+            const auto again = groupRun->stopAfter.empty()
+                                 && (groupRun->iterations == 0 || groupRun->iteration < groupRun->iterations);
+
+            if (! again)
+                return job.aheadCue.empty() ? false : abandon();
+
+            if (nextCue.empty())
+            {
+                const auto round = roundFor (group, job.run).second;
+
+                if (round.empty())
+                    return false;
+
+                nextCue = round.front();
+            }
+        }
+        else if (nextCue.empty())
+        {
+            nextCue = job.phaseCues[job.nextMember];
+        }
+        const auto incomingNode = document.findById (nextCue);
+        const auto outgoingNode = document.findById (outgoing->cue);
+
+        /*  WHAT CAN BE PLACED (AOE): a sound going out - its end read off its
+            clock - and anything but a scene coming in, never the same cue
+            (AOG). Anything else is Let play at this boundary. */
+        const auto incomingKind = incomingNode.isValid() ? kindOfCue (incomingNode) : std::string {};
+        const auto placeable = outgoingNode.isValid() && incomingNode.isValid()
+                                 && outgoing->kind == "media" && incomingKind != "group" && ! incomingKind.empty()
+                                 && nextCue != outgoing->cue;
+
+        const auto outgoingGone = outgoing->isFinished() || outgoing->state == runState::stopping
+                                    || outgoing->stopAsked;
+
+        //  Nothing armed ahead, and nothing to place: the scheduler's boundary.
+        if (job.aheadCue.empty() && (! placeable || outgoingGone))
+            return false;
+
+        const auto rate = static_cast<double> (audio != nullptr ? audio->sampleRate() : videoSampleRate());
+        const auto end = placeable && ! outgoingGone ? knownEndOf (*outgoing) : std::optional<std::int64_t> {};
+
+        if (job.aheadCue.empty() && ! end.has_value())
+        {
+            //  Not sounding yet, or an end it cannot read: wait for the launch, or leave it be.
+            return outgoing->launchedAtSample <= 0 && ! outgoing->isFinished() && placeable;
+        }
+
+        /*  THE CROSSFADE THIS BOUNDARY CAN HAVE: the length asked, no longer
+            than either member - a short one would otherwise be wholly inside
+            the other's fade. */
+        auto overlap = 0.0;
+
+        if (setting.kind == join::Kind::crossfade)
+        {
+            overlap = setting.seconds;
+
+            if (outgoing->ownRate > 0.0)
+                overlap = std::min (overlap, (outgoing->pieceEnd - outgoing->positionOrigin) / outgoing->ownRate);
+
+            if (incomingKind == "media")
+                if (const auto length = playedLengthOf (incomingNode, durations); length.has_value())
+                    overlap = std::min (overlap, *length / std::max (1.0e-3, numberOf (incomingNode, "rate")));
+
+            overlap = std::max (0.0, overlap);
+        }
+
+        const auto overlapSamples = static_cast<std::int64_t> (std::llround (overlap * rate));
+
+        /*  WHERE THE NEXT ONE BEGINS (ANZ): the outgoing member's end, less the
+            crossfade, plus its post-wait and the incoming member's pre-wait -
+            the fades stay on their members and the waits move the second one.
+            Once the outgoing member has gone, the next begins now. */
+        if (end.has_value())
+            job.aheadStart = *end - overlapSamples
+                               + static_cast<std::int64_t> (std::llround (numberOf (outgoingNode, "postWait") * rate))
+                               + static_cast<std::int64_t> (std::llround (numberOf (incomingNode, "preWait") * rate));
+        else if (outgoingGone)
+            job.aheadStart = std::min (job.aheadStart > 0 ? job.aheadStart : now, now);
+
+        const auto start = job.aheadStart;
+        const auto preload = static_cast<std::int64_t> (std::llround (joinPreloadSeconds * rate));
+
+        //  ARMED A LOAD LEAD AHEAD (AOF): the disk is paid while the outgoing member plays.
+        if (job.aheadCue.empty())
+        {
+            if (start - now > preload)
+                return false;
+
+            /*  ALREADY THERE: run by the horizon - its preparation the whole of
+                it - which the scheduler walks past, so the boundary is its; or
+                armed by the horizon, adopted rather than spawned beside. */
+            for (const auto* child : runs.childrenOf (job.run))
+                if (child->cue == nextCue && ! job.hasTaken (child->id))
+                {
+                    if (child->isFinished() || child->state != runState::armed || child->launchRequested
+                          || child->launchRequestedAtTick != 0)
+                        return false;
+
+                    job.aheadCue = nextCue;
+                    return true;
+                }
+
+            job.aheadCue = nextCue;
+            engine.submit (origin::engine, "run.spawn",
+                           { osc::Value::string (job.run), osc::Value::string (nextCue) });
+            return true;
+        }
+
+        //  The spawn lands in its tick's drain; the run is found on a tick after.
+        if (job.aheadRun.empty())
+        {
+            for (const auto* child : runs.childrenOf (job.run))
+                if (child->cue == job.aheadCue && ! child->isFinished() && child->state == runState::armed
+                      && child->launchRequestedAtTick == 0 && ! child->launchRequested)
+                    job.aheadRun = child->id;
+
+            if (job.aheadRun.empty())
+                return true;
+
+            /*  A CROSSFADE'S INCOMING MEMBER IS SILENT FROM ITS ARM, and rises
+                from its own launch (AOL). */
+            if (auto* incoming = runs.find (job.aheadRun); incoming != nullptr && overlapSamples > 0)
+            {
+                incoming->joinIn = true;
+                incoming->joinSamples = overlapSamples;
+                incoming->joinCurve = setting.curve;
+            }
+        }
+
+        auto* incoming = runs.find (job.aheadRun);
+
+        if (incoming == nullptr || incoming->isFinished())
+            return abandon();
+
+        /*  PLACED: asked a launch horizon ahead, on its sample - the code's
+            primitive (§60), which folds the pre-wait into the sample and gives
+            the launch its lateness to report. From here the incoming member is
+            the one awaited, and the outgoing member fades out to its own end. */
+        /*  THE NEXT ROUND AS IT WILL BE DRAWN: a member pruned since the peek,
+            or the show edited, may have changed it - and then the member armed
+            ahead is not its first, and the boundary is Let play. */
+        if (wraps)
+            if (const auto round = roundFor (group, job.run).second; round.empty() || round.front() != incoming->cue)
+                return abandon();
+
+        if (! askOnCode (engine, *incoming, start, now, true, false))
+            return true;
+
+        if (overlapSamples > 0 && end.has_value())
+        {
+            outgoing->joinOut = true;
+            outgoing->joinOutFrom = *end - overlapSamples;
+            outgoing->joinSamples = overlapSamples;
+            outgoing->joinCurve = setting.curve;
+        }
+
+        const auto placed = job.aheadRun;
+
+        /*  THE NEXT ROUND BEGINS WITH ITS FIRST MEMBER PLACED: drawn now - the
+            round the peek made - and adopting that member, unclaimed, as a
+            round adopts what the horizon armed. */
+        if (wraps)
+            beginPhase (engine, job, group, groupPhase::members);
+        else
+            ++job.nextMember;
+
+        job.awaiting = placed;
+        job.aheadCue.clear();
+        job.aheadRun.clear();
+        job.aheadStart = 0;
+        return true;
     }
 
     void Runner::applyLanes()
