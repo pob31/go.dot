@@ -2141,6 +2141,23 @@ tracking-lost-with-cue-near.
 Go.dot's rule that no external source moves standby (§3.5). The two agree without
 negotiation.
 
+*Amended in 0.8, at the author's direction (2026-10-16): "This is the Choufleur
+integration done ... We won't include it in the desktop app. It sits very well on
+the app or any browser."* **The integration lives in the Android remote**
+(`go.dot-remote`, namespace draft §68). Its **Script** tab shows Choufleur's own
+operator page, the page an operator would open in any browser, under the remote's
+GO / Doh! / PANIC header. The address is typed or scanned from Choufleur's code on
+the Connections tab, and the page stays loaded while the operator works in the
+other tabs. The remote keeps the screen awake itself. **The wrist buzzer is paired
+by the remote**, natively over Bluetooth, on its Connections tab. The page still
+computes the warnings and hands its one-byte opcodes to the remote's link through
+a bridge in the page (`window.GoDotRemoteBuzzer`; Choufleur's `live.html`, commit
+00d861d). Elsewhere Web Bluetooth works as before. **The desktop gets no Choufleur
+pane and no Bluetooth sidecar.** The sections below on the pane and on Go.dot
+relaying the buzz are kept as the record of the design they replace. The data
+flow, the cue list populated from Go.dot and jump-to-cue, stays written as the
+design and is not scheduled.
+
 #### Ownership
 
 **Choufleur owns the script and where the show is in it. Go.dot owns the cue and
@@ -3847,8 +3864,9 @@ re-claims strips lost to eviction and cannot conjure strips the layout lacks.
 
 - Mapping between Choufleur's cue notation / line identity
   (`docs/choufleur-notation_1.md`) and Go.dot stable cue IDs.
-- Embedded webview vs docked external window — lean embedded; settled once the
-  pane exists. Go.dot relays the buzz either way.
+- ~~Embedded webview vs docked external window~~ — settled 2026-10-16 by the author:
+  no desktop pane. Choufleur is shown by the Android remote's Script tab or any
+  browser, and the remote pairs the buzzer (§3.23's amendment).
 - Read `docs/choufleur-prd_1.md` and `docs/choufleur-notation_1.md` before
   designing the exposed cue-list namespace; the show file format is already
   specified there and should not be duplicated.

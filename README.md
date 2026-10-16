@@ -191,14 +191,15 @@ has stood in front of the thing.
   touch, latch and write modes (PRD §3.10). Today a surface reaches parameters
   through Go.dot's own pages.
 - **The tablet** (Phase 7) — the console runs in a tablet's browser, but as a
-  mouse-and-keyboard page, without the touch gestures PRD §3.17 describes. A
-  native Android remote that stays live in the background is being built in its
-  own repository, [go.dot-remote](https://github.com/pob31/go.dot-remote)
-  (namespace draft §68).
+  mouse-and-keyboard page, without the touch gestures PRD §3.17 describes. The
+  native Android remote, which stays live in the background, is its own
+  repository, [go.dot-remote](https://github.com/pob31/go.dot-remote)
+  (namespace draft §68): it runs on the author's tablet; a signed release and its
+  page in the tester guides are still to come.
 - **Group joins** — gap, gapless or crossfade between a sequence's members,
   decided (PRD §3.6) and waiting for the client's layout to settle.
 - **Video latency offsets and DeckLink output** (Phase 8b).
-- **Integrations** — Choufleur, OSCQuery devices found on the network by
+- **Integrations** — OSCQuery devices found on the network by
   themselves, and commanding WFS-DIY's and XOA's sources with claims per cue
   (Phase 11). The device presets (twenty-four shipped) wait for a console to
   answer them.
@@ -266,6 +267,7 @@ and says afterwards what was built against what was drawn.
 | Process cues | Pure Data inside a cue, serial ports; a patch's ways in and out, Pd as its editor | §51, §65 |
 | Script cues | JavaScript and Lua in a cue, on the process cues' host | §66 |
 | MQTT | A broker as a device, a client to any broker, Go.dot's own broker | §67 |
+| The remote | An Android app live in the background: GO, Doh! and PANIC, cues, running cues, a surface, the mapping and its grid, find-my-tablet; Choufleur's script page and its wrist buzzer | §68 |
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
 | Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |
@@ -859,11 +861,11 @@ Two directories that do **not** exist here, and will not:
   keeps its Gradle toolchain in a repository of its own,
   [go.dot-remote](https://github.com/pob31/go.dot-remote); what it says to the
   engine is `docs/godot-remote-protocol-0.1.md`.
-- The Phase 11 Rust BLE sidecar lives in the permissively licensed
-  [Choufleur](https://github.com/pob31/choufleur_prompt) repo (MIT OR Apache-2.0)
-  and is pulled in as a `ThirdParty/` submodule if it is needed at all. There is
-  no `src/sidecar/` and no `rust/` under this GPL-3 tree, ever — PRD §3.23's
-  licence direction is one-way, and code that starts here cannot go back.
+- A Rust Bluetooth sidecar for Choufleur's wrist buzzer. The Android remote pairs
+  the buzzer itself and shows Choufleur's page in its Script tab, so the desktop
+  carries neither (PRD §3.23, 2026-10-16). There is no `src/sidecar/` and no
+  `rust/` under this GPL-3 tree, ever — PRD §3.23's licence direction is one-way,
+  and code that starts here cannot go back.
 
 ---
 

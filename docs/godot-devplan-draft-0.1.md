@@ -1715,6 +1715,12 @@ Left: the show half rebuilt on every tick that applies a command (§31.5).
 - **Choufleur** (PRD §3.23): exposed cue-list namespace with number/name/ID/
   tags; pane contract; BLE sidecar in Rust with `btleplug`, speaking Choufleur's
   opcode table; Go.dot relays the buzz. Embedded vs docked decided here.
+  **Done 2026-10-16 in the Android remote instead, at the author's direction**
+  ("This is the Choufleur integration done ... We won't include it in the desktop
+  app"): the remote's Script tab shows Choufleur's page, and the remote pairs the
+  wrist buzzer, which the page drives through a bridge (go.dot-remote 0.1.2-0.1.3;
+  Choufleur's `live.html`, 00d861d). No desktop pane and no sidecar. The cue list
+  populated from Go.dot is not scheduled.
 - **OSC device templates** as OSCQuery namespace descriptions; ADM-OSC built in.
   *(2026-10-10: being built as the device presets - one file per device family and
   protocol, consoles, lighting desks and spatial processors - the item before Phase 10,
@@ -1750,7 +1756,9 @@ Left: the show half rebuilt on every tick that applies a command (§31.5).
   namespace draft §51.)*
 
 **Done when:** the sound operator's Choufleur column is populated from Go.dot
-and a Go.dot warning taps the wrist.
+and a Go.dot warning taps the wrist. *(2026-10-16: the Choufleur half is closed as
+done in the Android remote - page and buzzer there; this criterion is kept as the
+record and is not scheduled.)*
 
 **Needs from the author:** the cue-notation ↔ ID mapping (PRD §6.8).
 
