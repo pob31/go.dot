@@ -118,10 +118,10 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_video_alignV[] = { "top", "middle", "bottom" };
     inline constexpr std::string_view enum_cueTemplate_kind[] = { "media", "movie", "picture", "fill", "mask", "capture", "text" };
     inline constexpr std::string_view enum_videoOutputs_renderer[] = { "stopped", "starting", "running", "failed" };
-    inline constexpr std::string_view enum_videoOutput_kind[] = { "display", "ndi", "spout", "syphon", "decklink" };
+    inline constexpr std::string_view enum_videoOutput_kind[] = { "display", "ndi", "spout", "syphon", "card" };
     inline constexpr std::string_view enum_videoOutput_key[] = { "off", "external", "internal" };
     inline constexpr std::string_view enum_videoOutput_reference[] = { "none", "locked", "unlocked" };
-    inline constexpr std::string_view enum_videoInput_kind[] = { "ndi", "spout", "syphon", "decklink" };
+    inline constexpr std::string_view enum_videoInput_kind[] = { "ndi", "spout", "syphon", "device" };
     inline constexpr std::string_view enum_videoInsert_kind[] = { "ndi", "spout", "syphon" };
     inline constexpr std::string_view enum_zone_blend[] = { "normal", "add", "screen", "multiply" };
 
@@ -5646,7 +5646,7 @@ namespace wfg::doc::generated
           enum_videoOutput_kind, 5,
           "", 50.0, false, "park",
           "",
-          "What the output does with its canvas (namespace draft 44, YA): display shows it on a display of this machine, as every output did; ndi sends it over the network, spout to another program on this Windows machine, syphon to another on this Mac; decklink sends it down a cable from a Blackmagic DeckLink card, at the card's format and on the card's clock (namespace draft 71) - warped and calibrated as an output is, its display rows read by nothing. A kind this system has not got sends nothing and says so." },
+          "What the output does with its canvas (namespace draft 44, YA): display shows it on a display of this machine, as every output did; ndi sends it over the network, spout to another program on this Windows machine, syphon to another on this Mac; card sends it down a video card's cable - a Blackmagic DeckLink's or an AJA's - at the card's format and on the card's clock (namespace draft 71, 72) - warped and calibrated as an output is, its display rows read by nothing. A kind this system has not got sends nothing and says so." },
         { "videoOutput", "sendName",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -5878,7 +5878,7 @@ namespace wfg::doc::generated
           enum_videoInput_kind, 4,
           "", 50.0, false, "park",
           "",
-          "How the picture arrives: ndi over the network, spout from another program on this Windows machine, syphon from one on this Mac, decklink in a cable to a Blackmagic DeckLink card (namespace draft 71, APM) - its sender the card's identifier." },
+          "How the picture arrives: ndi over the network, spout from another program on this Windows machine, syphon from one on this Mac, device from a device on this machine - a video card's input or a camera (namespace draft 71 APM, 72 APR) - its sender the device's identifier." },
         { "videoInput", "sender",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -5894,7 +5894,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "The format a card input takes in: auto, found by the card, or a format's word as a card output's videoMode is written (namespace draft 71, APM). Read by nothing on another kind." },
+          "The format a device input takes in: auto - found by a card, a camera's largest picture at 25 frames a second or more - or a format's word as a card output's videoMode is written (namespace draft 71 APM, 72 APX). Read by nothing on another kind." },
         { "videoInput", "enabled",
           ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "true",

@@ -1492,6 +1492,35 @@ green. Then M77 on a real card, by the testers.
 
 ---
 
+### Video capture: cameras, then AJA cards · L
+
+*Added on 2026-10-16*, at the author's direction, with the DeckLink round built and not yet landed: a
+**camera** - webcam, USB dongle, a mixer in webcam mode - as a video input through Media Foundation,
+AVFoundation or Video4Linux, and **AJA** cards beside DeckLink's, their open-source library compiled
+in (namespace draft §72; PRD §3.19, §6.9 and §6.11 amended). Inputs read *Video capture*, outputs
+*Sent to a video card*. The author's decisions are APR-APU; APV-AQC are the implementer's. Cameras
+first, against a test camera, this machine's own camera only with the author's leave; AJA after,
+against the test card and the testers' probe. Same branch, `decklink`, landed with it.
+
+| Stage | What | Depends on |
+|---|---|---|
+| VC.0 | Docs: namespace §72, the PRD, this; the stored words renamed | - |
+| VC.1 | The camera interface and the test camera; one receiver for every device; the devices published | VC.0 |
+| VC.2 | Media Foundation | VC.1 |
+| VC.3 | AVFoundation, its permission, Info.plist and the entitlement | VC.1 |
+| VC.4 | Video4Linux | VC.1 |
+| VC.5 | The Video tab: Video capture, the device menu, formats | VC.1 |
+| VC.6 | libajantv2 carried and built | VC.0 |
+| VC.7 | AJA's cards in the card interface | VC.6 |
+| VC.8 | The probe for both makers; the testers' instructions | VC.7 |
+| VC.9 | M78, M79; the README, the guides; the whole suite, the farm | all |
+
+**Done when:** the test camera and this machine's camera reach a projector through a capture cue,
+one that stops coming back by itself; an AJA card listed beside a DeckLink one on the test card's
+terms; macOS and Linux cameras built and seen on the farm; an old show saves unchanged; CI is green.
+
+---
+
 ## Phase 10 — Timecode, panic, hardening · M
 
 **Goal:** the stop levels and the sync sources that a touring show requires.

@@ -92,8 +92,8 @@ namespace wfg::client::model
 
         /*  Sent to other programs - NDI, Spout, Syphon - and sent down a card's
             cable: neither is a display, and only the first has a send name. */
-        bool sends() const { return ! kind.empty() && kind != "display" && kind != "decklink"; }
-        bool toCard() const { return kind == "decklink"; }
+        bool sends() const { return ! kind.empty() && kind != "display" && kind != "card"; }
+        bool toCard() const { return kind == "card"; }
         std::string label() const;
     };
 

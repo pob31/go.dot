@@ -1147,7 +1147,7 @@ TEST_CASE ("video gpu: a keyed card output keeps its canvas's alpha, premultipli
 
     auto keyed = display;
     keyed.id = "O2";
-    keyed.kind = region::OutputKind::decklink;
+    keyed.kind = region::OutputKind::card;
     keyed.key = region::CardKey::external;
 
     std::vector<float> shown, sent, dimmed;

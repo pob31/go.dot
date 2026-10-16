@@ -23,7 +23,7 @@
     nothing here names the SDK: Card_decklink.cpp is the real card, through the
     Desktop Video the user installed; Card_fake.cpp is a TEST CARD that keeps
     time on the machine's clock, which every test uses and which
-    WFG_DECKLINK_FAKE=1 puts in the real one's place, so the screens can be
+    WFG_CARD_FAKE=1 puts in the real one's place, so the screens can be
     looked at with no card.
 
     AN OUTPUT is paced by the card (APB). The renderer fills a frame the card
@@ -197,7 +197,7 @@ namespace wfg::video::card
         virtual std::unique_ptr<Input> openInput (const std::string& id, const std::string& modeWord, std::string& why) = 0;
     };
 
-    /*  The cards this process reaches: the test card when WFG_DECKLINK_FAKE is
+    /*  The cards this process reaches: the test card when WFG_CARD_FAKE is
         set to 1, the user's Desktop Video otherwise - made the first time,
         kept for the process. */
     System& system();
@@ -208,9 +208,9 @@ namespace wfg::video::card
     /*  THE TEST CARD (APO), for tests and for looking at the screens with no
         card: one card, "Go.dot test card", with an output, an input that shows
         what its output last sent, both keyers, 10-bit and 16 channels. Put in
-        the real one's place by WFG_DECKLINK_FAKE=1, its clock drifted by
-        WFG_DECKLINK_FAKE_DRIFT parts per million and every Nth frame late by
-        WFG_DECKLINK_FAKE_DROP. */
+        the real one's place by WFG_CARD_FAKE=1, its clock drifted by
+        WFG_CARD_FAKE_DRIFT parts per million and every Nth frame late by
+        WFG_CARD_FAKE_DROP. */
     struct FakeOptions
     {
         double driftPpm = 0.0;     ///< its clock against the machine's

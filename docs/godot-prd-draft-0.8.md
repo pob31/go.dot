@@ -1873,6 +1873,16 @@ DeckLink in the renderer; the picture drawn for the sound's sample at the moment
 frames waiting; 10-bit YUV unless keyed; a premultiplied fill; a capture's lost signal drawing black;
 a test card standing in for a real one (AOZ-APP).
 
+*Amended 2026-10-16, at the author's direction* (namespace draft §72, APR-APU): **video capture.** A
+video input may be **any device on this machine that brings a picture in** - a video card's input or
+a **camera**: a webcam, a USB capture dongle, an ATEM Mini or a Web Presenter in webcam mode, read
+through each system's own framework (Media Foundation, AVFoundation, Video4Linux). Inputs read *Video
+capture*; outputs to a card read *Sent to a video card*, and a card may be Blackmagic's DeckLink or
+**AJA**'s, whose open-source library Go.dot compiles in, its driver the user's. Cameras first, AJA
+after; pictures only. Proposed (§6.9): a camera listed without lighting it, `auto` its largest picture
+at 25 frames a second or more, a stopped camera opened again, permission said in words, AJA in the same
+card interface (APV-AQC).
+
 #### 3.19a Surfaces and mapping
 
 *Amended 2026-10-06, at the author's direction:* **one canvas may feed several outputs**, each with
@@ -4422,6 +4432,21 @@ calls from AOZ in §71.2 are the author's to overrule:
 What the work leaves out: sound coming in on a card; field-by-field interlace; the SDI link choices;
 HDR; timecode on the cable; deck control; a card's profile.
 
+Added 2026-10-16 *(proposed)*, with video capture (§3.19, namespace draft §72). The implementer's calls
+from APV in §72.2 are the author's to overrule:
+
+- **The stored words renamed before shipping**: an output's kind `card`, an input's `device`, a device's
+  identifier carrying its source (`dl-`, `aja-`, `cam:`).
+- **A camera listed by name without lighting it**; its formats known once opened.
+- **A camera's `auto`**: its largest picture at 25 frames a second or more, else its largest.
+- **Colour turned off the render thread**, by the system's own conversion where it has one.
+- **A camera that stops is opened again**; one input per camera; no signal draws black.
+- **Permission in words**: macOS's question, Windows's privacy switch, Linux's video group.
+- **AJA in the card interface**, its library compiled in with plugin loading off.
+
+What the work leaves out: a camera's sound; a camera's controls; a virtual camera; two inputs on a
+camera.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -4624,6 +4649,9 @@ Mackie vs HUI first — first week with the D700.
   against its embedded beep off a card's cable, frames late over ten minutes, the card's latency and
   skew as its report says them; and in Go.dot a bus on a card against the same bus on the interface.
   Owed to the testers, there being no card on the bench.
+- **Video capture** (§3.19, 2026-10-16, namespace draft §72): **M78** - a camera through a capture cue
+  to a projector, from a flash before the lens to the flash on the wall, Release; **M79** - an AJA
+  card by the testers, as M77.
 
 ---
 

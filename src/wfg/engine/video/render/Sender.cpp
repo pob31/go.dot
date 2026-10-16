@@ -25,8 +25,11 @@ namespace wfg::video::render
             case region::OutputKind::spout:   return makeSpoutSender (name, why);
             case region::OutputKind::syphon:  return makeSyphonSender (name, why);
             case region::OutputKind::ndi:     return makeNdiSender (name, frameRate, why);
-            case region::OutputKind::decklink:
+            case region::OutputKind::card:
                 why = "a card is paced by the card, never sent on the renderer's time";
+                return nullptr;
+            case region::OutputKind::device:
+                why = "a device on this machine brings pictures in, never sends them";
                 return nullptr;
             case region::OutputKind::display: break;
         }

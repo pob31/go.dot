@@ -11148,8 +11148,9 @@ TEST_CASE ("client: the DeckLink cards read as the renderer says them, offered a
 
     auto withInput = model::inputKindsHere (found);
     REQUIRE (withInput.size() == here.size() + 1);
-    CHECK (withInput.back() == "decklink");
-    CHECK (model::pictureKindWord ("decklink") == "DeckLink");
+    CHECK (withInput.back() == "device");
+    CHECK (model::pictureKindWord ("device") == "Video capture");
+    CHECK (model::pictureKindWord ("card") == "Video card");
 }
 
 TEST_CASE ("client: a card output's rows read, neither a display nor a sender, said in a row's words (§71, DL.9)")
@@ -11162,7 +11163,7 @@ TEST_CASE ("client: a card output's rows read, neither a display nor a sender, s
     REQUIRE (output.ok);
 
     const auto base = "/godot/videoOutput/" + output.id + "/";
-    REQUIRE (rig.document.setAttribute (base + "kind", "decklink").ok);
+    REQUIRE (rig.document.setAttribute (base + "kind", "card").ok);
     REQUIRE (rig.document.setAttribute (base + "card", "fake-1").ok);
     REQUIRE (rig.document.setAttribute (base + "cardName", "Go.dot test card").ok);
     REQUIRE (rig.document.setAttribute (base + "key", "external").ok);
@@ -11192,7 +11193,12 @@ TEST_CASE ("client: a card output's rows read, neither a display nor a sender, s
     const auto found = model::cardsFrom ("fake-1\tGo.dot test card\toutput\t1080p50\t");
     const auto dot = std::string ("  \xc2\xb7  ");
     CHECK (model::cardSummary (row, found, { main })
-           == "DeckLink" + dot + "Go.dot test card" + dot + "1080p50" + dot + "key external" + dot + "sound Main L/R, BS000002");
+           == "Go.dot test card" + dot + "1080p50" + dot + "key external" + dot + "sound Main L/R, BS000002");
+
+    //  A maker the card's name does not say is put in front of it (APR).
+    auto aja = row;
+    aja.card = "aja-1Z00001";
+    CHECK (model::cardSummary (aja, model::cardsFrom ("aja-1Z00001\tKona 5\toutput\t1080p50\t"), {}).rfind ("AJA Kona 5" + dot, 0) == 0);
 
     //  The card gone from this machine: its name as picked, said so.
     CHECK (model::cardSummary (row, {}, { main }).find ("Go.dot test card (not on this machine)") != std::string::npos);

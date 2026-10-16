@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/Video.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/engine/video/DeviceNames.h>
 
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/video/SendNames.h>
@@ -741,7 +742,8 @@ namespace wfg::client::model
         if (kind == "ndi")       return "NDI";
         if (kind == "spout")     return "Spout";
         if (kind == "syphon")    return "Syphon";
-        if (kind == "decklink")  return "DeckLink";
+        if (kind == "card")      return "Video card";
+        if (kind == "device")    return "Video capture";
         return "a display";
     }
 
@@ -827,7 +829,7 @@ namespace wfg::client::model
         auto kinds = pictureKindsHere();
 
         if (std::any_of (cards.cards.begin(), cards.cards.end(), [] (const CardRow& card) { return card.input; }))
-            kinds.push_back ("decklink");
+            kinds.push_back ("device");
 
         return kinds;
     }
@@ -835,16 +837,16 @@ namespace wfg::client::model
     std::string cardSummary (const VideoOutputRow& output, const CardsFound& cards, const std::vector<OutputRow>& buses)
     {
         const auto* card = cards.card (output.card);
-        std::string out = "DeckLink";
+        std::string out;
 
         if (card != nullptr)
-            out += "  \xc2\xb7  " + card->name;
+            out = video::nameWithMaker (card->id, card->name);
         else if (! output.cardName.empty())
-            out += "  \xc2\xb7  " + output.cardName + " (not on this machine)";
+            out = video::nameWithMaker (output.card, output.cardName) + " (not on this machine)";
         else if (! output.card.empty())
-            out += "  \xc2\xb7  " + output.card + " (not on this machine)";
+            out = output.card + " (not on this machine)";
         else
-            out += "  \xc2\xb7  no card chosen";
+            out = "no card chosen";
 
         out += "  \xc2\xb7  " + output.videoMode;
 

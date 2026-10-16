@@ -4655,8 +4655,9 @@ namespace wfg::doc
             return *refusal;
 
         //  The kinds, and nothing else: a word nobody can send under is no
-        //  input. A DeckLink card's input is one too (§71, APM).
-        if (! kind.empty() && kind != "ndi" && kind != "spout" && kind != "syphon" && kind != "decklink")
+        //  input. A device on this machine - a card's input, a camera - is one
+        //  too (§71 APM, §72 APR).
+        if (! kind.empty() && kind != "ndi" && kind != "spout" && kind != "syphon" && kind != "device")
             return EditResult::failed (reason::badValue);
 
         std::vector<std::pair<std::string_view, std::string>> attributes;

@@ -374,7 +374,7 @@ namespace wfg::client::model
                 if (const auto why = text (snapshot, "/godot/videoOutput/" + output.id + "/problem");
                       output.enabled && ! why.empty())
                     add (out, pageName::video, "videoOutput:" + output.id,
-                         text (snapshot, "/godot/videoOutput/" + output.id + "/kind") == "decklink" ? "no card" : "no screen",
+                         text (snapshot, "/godot/videoOutput/" + output.id + "/kind") == "card" ? "no card" : "no screen",
                          "Output " + output.name + ": " + why);
 
             for (const auto& input : index.videoInputs)

@@ -284,7 +284,7 @@ and says afterwards what was built against what was drawn.
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |
 | Group joins | Let play, Gapless or Crossfade between a sequence's members, automatic and manual, pictures dissolving; a looping range's wraps crossfaded | §69 |
 | Sound or picture delay | A cue holds back its sound or its picture by a number of milliseconds, to line up with a projector or a long audio chain | §70 |
-| DeckLink cards | Pictures out at a card's format and on its clock, the show's buses embedded, fill and key, a card's input; `wfg decklink-probe` for testers | §71 |
+| DeckLink cards | Pictures out at a card's format and on its clock, the show's buses embedded, fill and key, a card's input; `wfg video-probe` for testers | §71 |
 | Authoring | WFS-DIY and S21_HiJack write cues into Go.dot | §56, [authoring protocol](docs/godot-authoring-protocol-0.1.md) |
 | Device presets | Consoles, lighting desks and spatial processors, each protocol a preset | §57 |
 | Redundancy | A main and a backup playing one show, measured over Dante | §58 |

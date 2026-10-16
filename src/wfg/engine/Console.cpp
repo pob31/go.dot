@@ -78,7 +78,7 @@
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/ScanJob.h>
 #include <wfg/engine/video/Conversion.h>
-#include <wfg/engine/video/DeckLinkProbe.h>
+#include <wfg/engine/video/VideoProbe.h>
 #include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/TextRaster.h>
 #include <wfg/engine/video/VideoCommands.h>
@@ -9680,9 +9680,9 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       {},
                       [] (const juce::ArgumentList&) { listMidi(); } });
 
-    app.addCommand ({ wfg::video::deckLinkProbeVerb,
-                      "decklink-probe [--run] [--card=<id>] [--mode=1080p50] [--seconds=60] [--key] [--sound] [--ten-bit] [--report=<file>]",
-                      "Lists the DeckLink cards Desktop Video finds; with --run, plays bars, a flash and a beep to one and says what happened",
+    app.addCommand ({ wfg::video::videoProbeVerb,
+                      "video-probe [--run] [--card=<id>] [--mode=1080p50] [--seconds=60] [--key] [--sound] [--ten-bit] [--report=<file>]",
+                      "Lists the video cards and cameras this machine has; with --run, plays bars, a flash and a beep to a card and says what happened",
                       {},
                       [] (const juce::ArgumentList& args)
                       {
@@ -9691,7 +9691,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                           for (int i = 1; i < args.size(); ++i)
                               words.push_back (args[i].text.toStdString());
 
-                          if (const auto code = wfg::video::runDeckLinkProbe (wfg::video::card::system(), words, std::cout); code != 0)
+                          if (const auto code = wfg::video::runVideoProbe (wfg::video::card::system(), words, std::cout); code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 

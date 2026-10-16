@@ -17,15 +17,15 @@
 #pragma once
 
 /*
-    `wfg decklink-probe` - THE TESTERS' PROBE (namespace draft §71, APP).
+    `wfg video-probe` - THE TESTERS' PROBE (namespace draft §71 APP, §72 APV).
 
     Nobody who builds Go.dot has a DeckLink card; the people who test it do.
     The probe is what they run and send back: every card Desktop Video finds,
     what it can do, and the formats it sends and takes in, written so that a
     reader who has never seen Go.dot can check it against the card's box.
 
-        wfg decklink-probe          lists the cards
-        wfg decklink-probe --run [--card=<id or name>] [--mode=1080p50]
+        wfg video-probe             lists the cards and the cameras
+        wfg video-probe --run [--card=<id or name>] [--mode=1080p50]
                          [--seconds=60] [--key] [--sound] [--ten-bit]
                          [--report=<file>]
                                     and plays to the first card that sends
@@ -37,7 +37,7 @@
                                     says what came of the frames, how much
                                     the card held, its clock against the
                                     computer's and its reference
-        WFG_DECKLINK_FAKE=1 wfg decklink-probe ...
+        WFG_CARD_FAKE=1 wfg video-probe ...
                                     the same, of the test card
 
     It opens no sound interface and no show: a card on its own. --report
@@ -58,7 +58,7 @@ namespace wfg::video
 {
     /*  The probe over `cards`, written to `out`. `args` are the words after
         the verb. */
-    int runDeckLinkProbe (card::System& cards, const std::vector<std::string>& args, std::ostream& out);
+    int runVideoProbe (card::System& cards, const std::vector<std::string>& args, std::ostream& out);
 
-    inline constexpr const char* deckLinkProbeVerb = "decklink-probe";
+    inline constexpr const char* videoProbeVerb = "video-probe";
 }

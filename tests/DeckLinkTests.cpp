@@ -25,7 +25,7 @@
 #include <wfg/engine/audio/CardSound.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/ShowDocument.h>
-#include <wfg/engine/video/DeckLinkProbe.h>
+#include <wfg/engine/video/VideoProbe.h>
 #include <wfg/engine/video/VideoHost.h>
 #include <wfg/engine/video/VideoModes.h>
 #include <wfg/engine/video/VideoRegion.h>
@@ -189,7 +189,7 @@ TEST_CASE ("decklink: the probe lists each card for a tester, and says in words 
     {
         auto cards = video::card::makeFakeSystem();
         std::ostringstream out;
-        CHECK (video::runDeckLinkProbe (*cards, {}, out) == 0);
+        CHECK (video::runVideoProbe (*cards, {}, out) == 0);
 
         const auto said = out.str();
         CHECK (said.find ("Go.dot test card  (fake-1)") != std::string::npos);
@@ -201,7 +201,7 @@ TEST_CASE ("decklink: the probe lists each card for a tester, and says in words 
     {
         Missing missing;
         std::ostringstream out;
-        CHECK (video::runDeckLinkProbe (missing, {}, out) == 2);
+        CHECK (video::runVideoProbe (missing, {}, out) == 2);
         CHECK (out.str().find ("Desktop Video is not installed") != std::string::npos);
     }
 
@@ -303,7 +303,7 @@ TEST_CASE ("decklink: a card output's and input's settings cross to the renderer
 
     video::region::OutputReading output;
     output.id = "MC000070";
-    output.kind = video::region::OutputKind::decklink;
+    output.kind = video::region::OutputKind::card;
     output.card = "dl-1a2b3c4d";
     output.videoMode = "2160p59.94";
     output.key = video::region::CardKey::internal;
@@ -311,7 +311,7 @@ TEST_CASE ("decklink: a card output's and input's settings cross to the renderer
 
     video::region::InputReading input;
     input.id = "MC000071";
-    input.kind = video::region::OutputKind::decklink;
+    input.kind = video::region::OutputKind::device;
     input.sender = "dl-1a2b3c4d";
     input.videoMode = "1080i50";
 
@@ -320,7 +320,7 @@ TEST_CASE ("decklink: a card output's and input's settings cross to the renderer
     video::region::ConfigReading read;
     REQUIRE (video::region::readConfig (*r, read));
     REQUIRE (read.outputs.size() == 1);
-    CHECK (read.outputs[0].kind == video::region::OutputKind::decklink);
+    CHECK (read.outputs[0].kind == video::region::OutputKind::card);
     CHECK (read.outputs[0].toCard());
     CHECK_FALSE (read.outputs[0].sends());
     CHECK (read.outputs[0].card == "dl-1a2b3c4d");
@@ -329,7 +329,7 @@ TEST_CASE ("decklink: a card output's and input's settings cross to the renderer
     CHECK (read.outputs[0].sound == std::vector<int> { 0, 1, -1, 5 });
 
     REQUIRE (read.inputs.size() == 1);
-    CHECK (read.inputs[0].kind == video::region::OutputKind::decklink);
+    CHECK (read.inputs[0].kind == video::region::OutputKind::device);
     CHECK (read.inputs[0].videoMode == "1080i50");
 
     //  The cards found, and a card output's state, the renderer's side.
@@ -342,8 +342,9 @@ TEST_CASE ("decklink: a card output's and input's settings cross to the renderer
     CHECK (r->outputs[0].soundLate.load() == 3u);
 
     //  A kind written past the last read back as the last, never as a smaller one.
-    CHECK (video::region::storedKind (99u) == video::region::OutputKind::decklink);
-    CHECK (video::region::outputKindFrom ("decklink") == video::region::OutputKind::decklink);
+    CHECK (video::region::storedKind (99u) == video::region::OutputKind::device);
+    CHECK (video::region::outputKindFrom ("card") == video::region::OutputKind::card);
+    CHECK (video::region::outputKindFrom ("device") == video::region::OutputKind::device);
 }
 
 TEST_CASE ("decklink: what videoOutput/cards says of the test card, and of Desktop Video missing (DL.2)")
@@ -425,13 +426,13 @@ TEST_CASE ("video gpu: a card output on the test card is paced by the card, and 
     REQUIRE (doc::Bundle::open (bundle, document).ok);
 
     //  The fixture's output, sent down the test card's cable at 720p50.
-    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "decklink").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "card").ok);
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/card", "fake-1").ok);
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/videoMode", "720p50").ok);
 
     //  A card whose clock runs a thousandth fast.
-    setVariable ("WFG_DECKLINK_FAKE", "1");
-    setVariable ("WFG_DECKLINK_FAKE_DRIFT", "1000");
+    setVariable ("WFG_CARD_FAKE", "1");
+    setVariable ("WFG_CARD_FAKE_DRIFT", "1000");
     setVariable ("WFG_VIDEO_SOFTWARE", "1");
 
     Ticks ticks;
@@ -439,8 +440,8 @@ TEST_CASE ("video gpu: a card output on the test card is paced by the card, and 
     host.configure (document);
 
     const auto running = tickUntil (host, ticks, [&host] { return host.readouts().renderer == "running"; });
-    setVariable ("WFG_DECKLINK_FAKE", nullptr);
-    setVariable ("WFG_DECKLINK_FAKE_DRIFT", nullptr);
+    setVariable ("WFG_CARD_FAKE", nullptr);
+    setVariable ("WFG_CARD_FAKE_DRIFT", nullptr);
     setVariable ("WFG_VIDEO_SOFTWARE", nullptr);
     REQUIRE (running);
 
@@ -586,7 +587,7 @@ TEST_CASE ("decklink: a card output's buses become the ring's lanes, each channe
     CHECK (cs::lanesOf (*file.region()).empty());
 
     //  The fixture's stereo bus on the card: its two channels, once each.
-    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "decklink").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "card").ok);
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/card", "fake-1").ok);
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/sound", "VD000004 VD000004").ok);
     host.configure (document);
@@ -701,12 +702,12 @@ TEST_CASE ("video gpu: a card output carrying a bus sends its sound behind the c
     doc::ShowDocument document;
     const juce::File bundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) + "/bundles/video" };
     REQUIRE (doc::Bundle::open (bundle, document).ok);
-    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "decklink").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "card").ok);
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/card", "fake-1").ok);
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/videoMode", "720p50").ok);
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/sound", "VD000004").ok);
 
-    setVariable ("WFG_DECKLINK_FAKE", "1");
+    setVariable ("WFG_CARD_FAKE", "1");
     setVariable ("WFG_VIDEO_SOFTWARE", "1");
 
     Ticks ticks;
@@ -732,7 +733,7 @@ TEST_CASE ("video gpu: a card output carrying a bus sends its sound behind the c
     };
 
     const auto running = tickUntil (host, ticks, [&] { pump(); return host.readouts().renderer == "running"; });
-    setVariable ("WFG_DECKLINK_FAKE", nullptr);
+    setVariable ("WFG_CARD_FAKE", nullptr);
     setVariable ("WFG_VIDEO_SOFTWARE", nullptr);
     REQUIRE (running);
 
@@ -814,14 +815,14 @@ TEST_CASE ("video gpu: a card's input takes in what the test card's output sends
     doc::ShowDocument document;
     const juce::File bundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) + "/bundles/video" };
     REQUIRE (doc::Bundle::open (bundle, document).ok);
-    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "decklink").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "card").ok);
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/card", "fake-1").ok);
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/videoMode", "720p50").ok);
 
     //  The test card's input, found by the card: it shows what its output last sent.
-    REQUIRE (document.createVideoInput ("Loop", "decklink", "fake-1", "VD000031").ok);
+    REQUIRE (document.createVideoInput ("Loop", "device", "fake-1", "VD000031").ok);
 
-    setVariable ("WFG_DECKLINK_FAKE", "1");
+    setVariable ("WFG_CARD_FAKE", "1");
     setVariable ("WFG_VIDEO_SOFTWARE", "1");
 
     Ticks ticks;
@@ -829,7 +830,7 @@ TEST_CASE ("video gpu: a card's input takes in what the test card's output sends
     host.configure (document);
 
     const auto running = tickUntil (host, ticks, [&host] { return host.readouts().renderer == "running"; });
-    setVariable ("WFG_DECKLINK_FAKE", nullptr);
+    setVariable ("WFG_CARD_FAKE", nullptr);
     setVariable ("WFG_VIDEO_SOFTWARE", nullptr);
     REQUIRE (running);
 
@@ -869,7 +870,7 @@ TEST_CASE ("decklink: the probe runs the test card - bars, a flash and a beep ea
     {
         auto cards = video::card::makeFakeSystem();
         std::ostringstream out;
-        CHECK (video::runDeckLinkProbe (*cards, { "--run", "--seconds=1.2", "--sound", "--mode=720p50" }, out) == 0);
+        CHECK (video::runVideoProbe (*cards, { "--run", "--seconds=1.2", "--sound", "--mode=720p50" }, out) == 0);
 
         const auto said = out.str();
         MESSAGE (said);
@@ -890,10 +891,10 @@ TEST_CASE ("decklink: the probe runs the test card - bars, a flash and a beep ea
         auto cards = video::card::makeFakeSystem();
         juce::TemporaryFile report;
         std::ostringstream out;
-        CHECK (video::runDeckLinkProbe (*cards, { "--run", "--seconds=0.6", "--ten-bit", "--mode=720p50",
+        CHECK (video::runVideoProbe (*cards, { "--run", "--seconds=0.6", "--ten-bit", "--mode=720p50",
                                                   "--report=" + report.getFile().getFullPathName().toStdString() }, out) == 0);
         CHECK (out.str().find ("pixels: 10-bit YUV") != std::string::npos);
-        CHECK (report.getFile().loadFileAsString().contains ("Go.dot DeckLink probe"));
+        CHECK (report.getFile().loadFileAsString().contains ("Go.dot video probe"));
     }
 
     //  No card that sends: said, and nothing run.
@@ -901,6 +902,6 @@ TEST_CASE ("decklink: the probe runs the test card - bars, a flash and a beep ea
     absent.present = false;
     auto none = video::card::makeFakeSystem (absent);
     std::ostringstream out;
-    CHECK (video::runDeckLinkProbe (*none, { "--run" }, out) == 2);
+    CHECK (video::runVideoProbe (*none, { "--run" }, out) == 2);
     CHECK (out.str().find ("No card to run: none sends pictures") != std::string::npos);
 }

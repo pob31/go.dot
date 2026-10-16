@@ -30360,6 +30360,10 @@ be read, never copied in.
 | `videoInput/<id>/kind` | `s` | rw | gains `decklink`; its `sender` is the card's identifier |
 | `videoInput/<id>/videoMode` | `s` | rw | `auto`, found by the card, or a format; `auto` |
 
+*Renamed in §72 (APV), before anything shipped:* an output's kind `decklink` is `card`, an input's
+`device`; `WFG_DECKLINK_FAKE` is `WFG_CARD_FAKE`; `wfg decklink-probe` is `wfg video-probe`; *Sent to a
+card* reads *Sent to a video card*.
+
 Every new row has a default, so an old show opens and saves unchanged. The screen words - *Sent to a
 card*, *Format*, *Key*, *Off*, *External*, *Internal*, *Sound*, *no signal* - are mine, for the author.
 *As built (DL.9):* also mine - an output row's *DeckLink · card · format · key external · sound Main L/R*,
@@ -30399,3 +30403,82 @@ A blur cue on a keyed card output keys solid where its outline lies: carrying th
 choices (level B, dual and quad link) beyond the card's default; HDR; timecode on the cable (RP188);
 deck control; changing a card's profile, which Desktop Video Setup does; the capture allocator of PRD
 §3.19a, a card input refusing a second user being the whole of it here.
+
+## 72. Video capture: cameras, and AJA cards
+
+The author, 2026-10-16, with §71 built and not yet landed: *"Can we also add AJA to the party and if
+there [is] no[t] video camera cues (input to output) then Media Foundation (Win) and AVFoundation
+(POSIX)?"* A capture cue already takes a video input onto a canvas and out to an output (§44); what
+was missing was a camera as an input, and a second maker of cards. AVFoundation is the Mac's alone;
+Linux has Video4Linux. Decisions run from APR.
+
+### 72.1 What it is, before its names
+
+A **camera** here is whatever the system lists as one: a webcam, a USB capture dongle, an ATEM Mini or
+a Web Presenter in webcam mode, a Mac's Continuity camera. Each system has its own way in - Media
+Foundation on Windows, AVFoundation on macOS, Video4Linux on Linux - and Go.dot uses each one's own.
+A camera brings a picture in; it is never an output.
+
+An **AJA card** does what a DeckLink card does - pictures out at a broadcast format on its own clock,
+sound in the cable, fill and key, pictures in - through AJA's own software. Its library, libajantv2,
+is open source under the MIT licence, so Go.dot compiles it in; the driver underneath is the user's,
+from AJA's installer (Windows, macOS) or a kernel module (Linux).
+
+So an input may be any device on this machine that brings a picture in - a card's input or a camera -
+and an output may go to any card, DeckLink's or AJA's.
+
+### 72.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **APR** | **Inputs read "Video capture", outputs "Sent to a video card".** One input kind for every device that brings a picture in - cards' inputs and cameras in one menu, each named with its maker; one output section for every card that sends, DeckLink's and AJA's together. | the author's (they offered "Video capture"; settled with the outputs' word, recommended, beside "Video card" everywhere and "Video capture" everywhere) |
+| **APS** | **Cameras on all three systems**: Media Foundation, AVFoundation, Video4Linux - a show plays the same everywhere. | the author's (recommended) |
+| **APT** | **Cameras first, then AJA**: cameras are seen on this machine's own, AJA is built against the test card and the testers' probe as DeckLink was. | the author's (recommended) |
+| **APU** | **Pictures only**: a camera's sound is not taken; a live rack input of its own, later. | the author's (recommended) |
+| **APV** | **The stored words, renamed while nothing has shipped**: an output's kind `card` (was `decklink`), an input's kind `device`, its `sender` the device's identifier - `dl-…` a DeckLink card's, `aja-…` an AJA card's, `cam:…` a camera's, after which the system's own (Media Foundation's symbolic link, AVFoundation's unique ID, the /dev/v4l/by-id link), so a camera is the same in another port. `WFG_CARD_FAKE` for the test card, `wfg video-probe` for the probe. | mine |
+| **APW** | **A camera is listed without lighting**: its name only; its formats are known once it has been opened, and said from then on. | mine |
+| **APX** | **A camera's `auto`**: its largest picture at 25 frames a second or more, else its largest, the faster rate breaking a tie. A card's `auto` stays the card's own detection. | mine |
+| **APY** | **What each system hands over, turned to colour off the render thread**: Media Foundation's own video processing (NV12, YUY2, MJPEG to RGB32), AVFoundation's BGRA, Video4Linux's YUYV by Go.dot (BT.601 below 720 lines, BT.709 from them, at the levels the driver says) and MJPEG decoded by JUCE only where no YUYV is offered at a size. | mine |
+| **APZ** | **A camera that stops is let go and opened again** every two seconds, as a card that cannot open is; a card's input with no cable stays open, waiting. Both draw black with a warning meanwhile (APM). One input per camera: a second is refused. | mine |
+| **AQA** | **Permission said in words**: macOS asks once (Info.plist's camera sentence, the hardened runtime's camera entitlement), and until it is answered the input says it waits; Windows's camera privacy switch and Linux's video group each named where they refuse. | mine |
+| **AQB** | **AJA in the same interface as DeckLink** (Card.h): its cards found by its device scanner and identified by serial number, its formats through the same words, output and input through AutoCirculate, embedded sound in the same transfer, keying through the board's mixer where it has one. The card list is the union of every maker's; everything above it - pacing, 10-bit, key, sound placement, the probe - is unchanged. | mine |
+| **AQC** | **AJA's library compiled in** as a pinned submodule (libajantv2, MIT), built with its demos, tools, tests, driver and plugin loading switched off - plugin loading would bring mbedtls; its driver the user's, its absence said in words. | mine |
+
+### 72.3 Rows
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `videoOutput/<id>/kind` | `s` | rw | `card` replaces §71's `decklink` |
+| `videoInput/<id>/kind` | `s` | rw | `device` replaces §71's `decklink`; its `sender` a device's identifier |
+| `videoInput/devices` | `s` | r | one device that brings a picture in a line: its identifier, name, maker (DeckLink, AJA, camera) and the formats it takes in - a camera's once it has been opened |
+
+Shown as *Video capture* (an input's kind), *Sent to a video card* (an output's section), *Automatic*
+(a format found by the card, or chosen for a camera), a camera named *Name - camera* - mine, for the
+author.
+
+### 72.4 Stages
+
+| Stage | What | Built |
+|---|---|---|
+| VC.0 | This section; the PRD; the devplan; the renames | |
+| VC.1 | Camera.h and the test camera; one receiver for every device; the devices published | |
+| VC.2 | Media Foundation | |
+| VC.3 | AVFoundation, its permission, Info.plist and the entitlement | |
+| VC.4 | Video4Linux | |
+| VC.5 | The Video tab: Video capture, the device menu, formats | |
+| VC.6 | libajantv2 carried and built | |
+| VC.7 | AJA's cards in Card.h's interface | |
+| VC.8 | The probe for both makers; the testers' instructions | |
+| VC.9 | M78, M79; the README, the guides; the whole suite | |
+
+### 72.5 Measurements
+
+- **M78** - a camera on this machine through a capture cue to a projector: how long from a flash in
+  front of the lens to the flash on the wall, and frames a second as the input says them; Release.
+- **M79** - an AJA card, by the testers, as M77 for DeckLink.
+
+### 72.6 Not built
+
+A camera's sound (APU); a camera's controls - focus, exposure, white balance - left to the camera or
+the system's own settings; a camera as an output (a virtual camera); more than one input on a camera;
+the formats a camera has before it has been opened.

@@ -148,19 +148,22 @@ namespace wfg::video::region
     /*  WHAT AN OUTPUT DOES WITH ITS CANVAS (namespace draft §44, YA): shows it
         on a display, or sends it to other programs - over the network (NDI),
         or on this machine (Spout on Windows, Syphon on macOS) - or down a
-        cable from a DeckLink card (§71). An unknown word is a display, as
-        every output was before. */
-    enum class OutputKind : std::uint32_t { display = 0, ndi = 1, spout = 2, syphon = 3, decklink = 4 };
+        video card's cable (§71, §72): `card`. An input's kinds are the same
+        numbers, a device on this machine - a card's input or a camera - being
+        `device` (§72, APV). An unknown word is a display, as every output was
+        before. */
+    enum class OutputKind : std::uint32_t { display = 0, ndi = 1, spout = 2, syphon = 3, card = 4, device = 5 };
 
     /** The highest kind: what a reader holds a stored number to. */
-    constexpr std::uint32_t lastOutputKind = static_cast<std::uint32_t> (OutputKind::decklink);
+    constexpr std::uint32_t lastOutputKind = static_cast<std::uint32_t> (OutputKind::device);
 
     inline OutputKind outputKindFrom (std::string_view word) noexcept
     {
         if (word == "ndi")       return OutputKind::ndi;
         if (word == "spout")     return OutputKind::spout;
         if (word == "syphon")    return OutputKind::syphon;
-        if (word == "decklink")  return OutputKind::decklink;
+        if (word == "card")      return OutputKind::card;
+        if (word == "device")    return OutputKind::device;
         return OutputKind::display;
     }
 
@@ -1056,8 +1059,8 @@ namespace wfg::video::region
         std::vector<int> sound {};
 
         /*  Sent to other programs; and sent down a card's cable. */
-        bool sends() const noexcept  { return kind != OutputKind::display && kind != OutputKind::decklink; }
-        bool toCard() const noexcept { return kind == OutputKind::decklink; }
+        bool sends() const noexcept  { return kind != OutputKind::display && kind != OutputKind::card && kind != OutputKind::device; }
+        bool toCard() const noexcept { return kind == OutputKind::card; }
     };
 
     struct InputReading

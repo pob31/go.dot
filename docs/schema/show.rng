@@ -4495,13 +4495,13 @@
       </optional>
       <optional>
         <attribute name="kind">
-          <a:documentation>What the output does with its canvas (namespace draft 44, YA): display shows it on a display of this machine, as every output did; ndi sends it over the network, spout to another program on this Windows machine, syphon to another on this Mac; decklink sends it down a cable from a Blackmagic DeckLink card, at the card&apos;s format and on the card&apos;s clock (namespace draft 71) - warped and calibrated as an output is, its display rows read by nothing. A kind this system has not got sends nothing and says so.</a:documentation>
+          <a:documentation>What the output does with its canvas (namespace draft 44, YA): display shows it on a display of this machine, as every output did; ndi sends it over the network, spout to another program on this Windows machine, syphon to another on this Mac; card sends it down a video card&apos;s cable - a Blackmagic DeckLink&apos;s or an AJA&apos;s - at the card&apos;s format and on the card&apos;s clock (namespace draft 71, 72) - warped and calibrated as an output is, its display rows read by nothing. A kind this system has not got sends nothing and says so.</a:documentation>
           <choice>
             <value>display</value>
             <value>ndi</value>
             <value>spout</value>
             <value>syphon</value>
-            <value>decklink</value>
+            <value>card</value>
           </choice>
         </attribute>
       </optional>
@@ -4664,12 +4664,12 @@
       </optional>
       <optional>
         <attribute name="kind">
-          <a:documentation>How the picture arrives: ndi over the network, spout from another program on this Windows machine, syphon from one on this Mac, decklink in a cable to a Blackmagic DeckLink card (namespace draft 71, APM) - its sender the card&apos;s identifier.</a:documentation>
+          <a:documentation>How the picture arrives: ndi over the network, spout from another program on this Windows machine, syphon from one on this Mac, device from a device on this machine - a video card&apos;s input or a camera (namespace draft 71 APM, 72 APR) - its sender the device&apos;s identifier.</a:documentation>
           <choice>
             <value>ndi</value>
             <value>spout</value>
             <value>syphon</value>
-            <value>decklink</value>
+            <value>device</value>
           </choice>
         </attribute>
       </optional>
@@ -4687,7 +4687,7 @@
       </optional>
       <optional>
         <attribute name="videoMode">
-          <a:documentation>The format a card input takes in: auto, found by the card, or a format&apos;s word as a card output&apos;s videoMode is written (namespace draft 71, APM). Read by nothing on another kind.</a:documentation>
+          <a:documentation>The format a device input takes in: auto - found by a card, a camera&apos;s largest picture at 25 frames a second or more - or a format&apos;s word as a card output&apos;s videoMode is written (namespace draft 71 APM, 72 APX). Read by nothing on another kind.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

@@ -6600,7 +6600,7 @@ namespace wfg::client::ui
                     //  A card input names its card, and its format unless the card finds it (§71, APM).
                     auto sender = juce::String (entry.sender);
 
-                    if (entry.kind == "decklink" && ! entry.sender.empty())
+                    if (entry.kind == "device" && ! entry.sender.empty())
                     {
                         const auto* card = page.cards.card (entry.sender);
                         sender = juce::String::fromUTF8 ((card != nullptr ? card->name : entry.sender + " (not on this machine)").c_str());
@@ -6650,7 +6650,7 @@ namespace wfg::client::ui
                         case 0: page.editCell (page.inputList, row, cells[0], base + "name", entry.name); return;
                         case 1: page.chooseKind (base + "kind", entry.kind, model::inputKindsHere (page.cards)); return;
                         case 2:
-                            if (entry.kind == "decklink")
+                            if (entry.kind == "device")
                                 page.chooseCardInput (base, entry);
                             else
                                 page.chooseSender (page.inputList, row, cells[2], base + "sender", entry.kind, entry.sender);
@@ -6901,7 +6901,7 @@ namespace wfg::client::ui
                     menu.addItem (3, "Frames a second...");
                 }
 
-                /*  SENT TO A CARD (namespace draft §71): each DeckLink card that
+                /*  SENT TO A VIDEO CARD (namespace draft §71, §72 APR): each card that
                     sends pictures, the one the show names marked even when this
                     machine has not got it, and why there is none when Desktop
                     Video says so. Then, for a card output, its format, its key
@@ -6916,7 +6916,7 @@ namespace wfg::client::ui
 
                 if (! sending.empty() || ! cards.problem.empty() || entry.toCard())
                 {
-                    menu.addSectionHeader ("Sent to a card");
+                    menu.addSectionHeader ("Sent to a video card");
 
                     for (std::size_t at = 0; at < sending.size(); ++at)
                         menu.addItem (static_cast<int> (at) + 200, juce::String::fromUTF8 (sending[at]->name.c_str()), true,
@@ -6977,7 +6977,7 @@ namespace wfg::client::ui
                                         if (chosen >= 200 && static_cast<std::size_t> (chosen - 200) < cardChoices.size())
                                         {
                                             const auto& picked = cardChoices[static_cast<std::size_t> (chosen - 200)];
-                                            safe->send (gesture::setNodes ({ { base + "kind", "decklink" },
+                                            safe->send (gesture::setNodes ({ { base + "kind", "card" },
                                                                              { base + "card", picked.first },
                                                                              { base + "cardName", picked.second } }));
                                             return;

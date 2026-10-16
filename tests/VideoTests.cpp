@@ -377,8 +377,8 @@ TEST_CASE ("video: a card output's rows and a card input's, a format judged as a
     const std::string out = "/godot/videoOutput/MC000070/";
 
     //  A new card output starts at 1080p50 (AOY), keying nothing, sending no sound.
-    REQUIRE (rig.applied ("node.set", { text (out + "kind"), text ("decklink") }));
-    CHECK (rig.at (out + "kind") == "decklink");
+    REQUIRE (rig.applied ("node.set", { text (out + "kind"), text ("card") }));
+    CHECK (rig.at (out + "kind") == "card");
     CHECK (rig.at (out + "videoMode") == "1080p50");
     CHECK (rig.at (out + "key") == "off");
     CHECK (rig.at (out + "sound").empty());
@@ -407,9 +407,9 @@ TEST_CASE ("video: a card output's rows and a card input's, a format judged as a
     CHECK (rig.exists ("/godot/videoOutput/cards"));
 
     //  A card's input: found by the card unless a format is said.
-    REQUIRE (rig.applied ("videoInput.create", { text ("Camera 1"), text ("decklink"), text ("dl-1a2b3c4d"), text ("MC000071") }));
+    REQUIRE (rig.applied ("videoInput.create", { text ("Camera 1"), text ("device"), text ("dl-1a2b3c4d"), text ("MC000071") }));
     const std::string in = "/godot/videoInput/MC000071/";
-    CHECK (rig.at (in + "kind") == "decklink");
+    CHECK (rig.at (in + "kind") == "device");
     CHECK (rig.at (in + "videoMode") == "auto");
     REQUIRE (rig.applied ("node.set", { text (in + "videoMode"), text ("1080i50") }));
     REQUIRE (rig.applied ("node.set", { text (in + "videoMode"), text ("auto") }));
@@ -417,7 +417,8 @@ TEST_CASE ("video: a card output's rows and a card input's, a format judged as a
     CHECK (rig.at (in + "format").empty());
 
     //  An insert is never a card's: its round trip is another program's.
-    CHECK_FALSE (rig.applied ("videoInsert.create", { text ("Wrong"), text ("decklink"), text (""), text (""), text ("MC000072") }));
+    CHECK_FALSE (rig.applied ("videoInsert.create", { text ("Wrong"), text ("device"), text (""), text (""), text ("MC000072") }));
+    CHECK_FALSE (rig.applied ("videoInput.create", { text ("Wrong"), text ("decklink"), text (""), text ("MC000073") }));
 }
 
 TEST_CASE ("video: wfg validate says a video cue on no canvas shows nothing, and a canvas row naming a cue")

@@ -14,7 +14,7 @@
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-#include <wfg/engine/video/DeckLinkProbe.h>
+#include <wfg/engine/video/VideoProbe.h>
 
 #include <wfg/engine/osc/OscValue.h>
 
@@ -302,7 +302,7 @@ namespace wfg::video
         }
     }
 
-    int runDeckLinkProbe (card::System& cards, const std::vector<std::string>& args, std::ostream& said)
+    int runVideoProbe (card::System& cards, const std::vector<std::string>& args, std::ostream& said)
     {
         const card::ThreadScope apartment;
         std::ostringstream out;
@@ -312,7 +312,7 @@ namespace wfg::video
         const auto found = cards.find();
         auto code = 0;
 
-        out << "Go.dot DeckLink probe\n";
+        out << "Go.dot video probe\n";
         out << "Desktop Video: " << (found.version.empty() ? "not found" : found.version) << "\n";
 
         if (! found.problem.empty())
