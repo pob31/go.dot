@@ -8542,13 +8542,15 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
     REQUIRE (doesAt + 1 < headings.size());
     CHECK (headings[doesAt + 1] == "sampler");
 
-    /*  The speed and its mode straight after where the file starts, then the
-        sampler's rows (namespace draft §22.7). */
+    /*  The speed and its mode straight after where the file starts, then its
+        delay (namespace draft §70), then the sampler's rows (§22.7). */
     const auto startOffsetAt = positionOf (does, "startOffset");
-    REQUIRE (startOffsetAt + 3 < does.size());
+    REQUIRE (startOffsetAt + 5 < does.size());
     CHECK (does[startOffsetAt + 1] == "rate");
     CHECK (does[startOffsetAt + 2] == "rateMode");
-    CHECK (does[startOffsetAt + 3] == "dca");
+    CHECK (does[startOffsetAt + 3] == "delay");
+    CHECK (does[startOffsetAt + 4] == "delayBy");
+    CHECK (does[startOffsetAt + 5] == "dca");
 
     //  Two words the tree runs together, said as two words.
     const std::vector<std::pair<std::string, std::string>> spoken {
@@ -8985,6 +8987,83 @@ TEST_CASE ("client: a sound's range wraps - asked of a sound with ranges, its le
     snapshot = rig.publish (2);
     CHECK (appliesIn (model::inspect (*snapshot, looped.id), "rangeJoinLength"));
 }
+TEST_CASE ("client: a cue's delay - after its speed, None, Sound or Picture, the amount greyed while nothing is held back, a locked sound's its movie's (§70)")
+{
+    Rig rig;
+
+    const std::string list = "7K2QM9X4";
+
+    const auto sound = rig.document.createCue (list, 0, "media", "Rain");
+    const auto movie = rig.document.createCue (list, 1, "video", "Film", {}, { { "source", "movie" } });
+    const auto locked = rig.document.createCue (list, 2, "media", "Film sound");
+
+    for (const auto* made : { &sound, &movie, &locked })
+        REQUIRE (made->ok);
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + locked.id + "/lockedTo", movie.id).ok);
+
+    rig.parameters.markStale();
+    auto snapshot = rig.publish (1);
+
+    const auto allNames = [] (const model::Inspection& inspection)
+    {
+        std::vector<std::string> names;
+
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+                names.push_back (field.name);
+
+        return names;
+    };
+
+    //  After its speed: a sound's after its speed mode, a movie's after its speed.
+    const auto soundRows = allNames (model::inspect (*snapshot, sound.id));
+    REQUIRE (positionOf (soundRows, "rateMode") + 2 < soundRows.size());
+    CHECK (soundRows[positionOf (soundRows, "rateMode") + 1] == "delay");
+    CHECK (soundRows[positionOf (soundRows, "rateMode") + 2] == "delayBy");
+
+    const auto movieRows = allNames (model::inspect (*snapshot, movie.id));
+    REQUIRE (positionOf (movieRows, "rate") + 2 < movieRows.size());
+    CHECK (movieRows[positionOf (movieRows, "rate") + 1] == "delay");
+    CHECK (movieRows[positionOf (movieRows, "rate") + 2] == "delayBy");
+
+    //  The menu's words over the stored ones; a sound has no picture to hold back.
+    const auto inspectedSound = model::inspect (*snapshot, sound.id);
+    const auto* soundDelay = rowIn (inspectedSound, "delay");
+    REQUIRE (soundDelay != nullptr);
+    CHECK (soundDelay->value == "none");
+    REQUIRE (soundDelay->choices.size() == 2u);
+    CHECK (soundDelay->choices[0] == std::pair<std::string, std::string> { "none", "None" });
+    CHECK (soundDelay->choices[1] == std::pair<std::string, std::string> { "sound", "Sound" });
+    REQUIRE (rowIn (inspectedSound, "delayBy") != nullptr);
+    CHECK (rowIn (inspectedSound, "delayBy")->label == "delay by");
+
+    const auto inspectedMovie = model::inspect (*snapshot, movie.id);
+    const auto* movieDelay = rowIn (inspectedMovie, "delay");
+    REQUIRE (movieDelay != nullptr);
+    REQUIRE (movieDelay->choices.size() == 3u);
+    CHECK (movieDelay->choices[2] == std::pair<std::string, std::string> { "picture", "Picture" });
+
+    //  The amount greyed while nothing is held back, live once something is.
+    CHECK_FALSE (appliesIn (inspectedSound, "delayBy"));
+    CHECK_FALSE (appliesIn (inspectedMovie, "delayBy"));
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie.id + "/delay", "picture").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+
+    CHECK (appliesIn (model::inspect (*snapshot, movie.id), "delayBy"));
+
+    //  Two cues whose choices differ: one of them holds something back, so the amount stays live.
+    CHECK (appliesIn (model::inspectMany (*snapshot, { sound.id, movie.id }), "delayBy"));
+
+    //  A locked sound's are its movie's: drawn, never typed into.
+    const auto inspectedLocked = model::inspect (*snapshot, locked.id);
+    REQUIRE (rowIn (inspectedLocked, "delay") != nullptr);
+    CHECK_FALSE (rowIn (inspectedLocked, "delay")->writable);
+    CHECK_FALSE (rowIn (inspectedLocked, "delayBy")->writable);
+}
+
 TEST_CASE ("client: a time group asks the engine's questions - no icon of a sequence, no follow mark, no length, no words at a scrub (§60)")
 {
     /*  The predicates the engine asks (cue/GroupMode.h) are the client's too.

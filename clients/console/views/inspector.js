@@ -108,7 +108,7 @@ const SAID_LAST = ["enabled", "preset"];
 const KIND_ORDER = {
   // The speed and its mode after where the file starts (namespace draft §22.7).
   // What its DCA mark carries straight after the DCA (namespace draft §50).
-  media:   ["file", "lockedTo", "level", "startOffset", "rate", "rateMode", "levelLane", "dca", "dcaCurve", "dcaOffset", "initialLevel", "release", "secondPress",
+  media:   ["file", "lockedTo", "level", "startOffset", "rate", "rateMode", "delay", "delayBy", "levelLane", "dca", "dcaCurve", "dcaOffset", "initialLevel", "release", "secondPress",
             "velocity", "velocityFloor", "pressure", "releaseFade", "rangeJoin", "rangeJoinLength",
             // The EQ (Phase 9a): the switch, the two filters, then four bands - each its
             // own switch (2026-09-25), then frequency, gain and width, the outer two with a
@@ -126,7 +126,7 @@ const KIND_ORDER = {
             "words", "font", "fontSize", "bold", "italic", "align", "alignV", "lineSpacing", "wrap",
             "outlineColour", "outline", "outlineBlur",
             "fit", "layer", "blend", "opacity", "dca",
-            "dcaCurve", "dcaOffset", "videoInsert", "paint", "fadeIn", "startOffset", "rate",
+            "dcaCurve", "dcaOffset", "videoInsert", "paint", "fadeIn", "startOffset", "rate", "delay", "delayBy",
             "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
             "contrast", "saturation", "gamma", "hue", "curveLuma", "curveRed", "curveGreen", "curveBlue",
             // Its own alpha and its key (namespace draft 61).
@@ -344,6 +344,8 @@ function detailsMarkup(ids, fields, kind) {
 const OPTION_WORDS = {
   join: { letPlay: "Let play", gapless: "Gapless", crossfade: "Crossfade" },
   rangeJoin: { gapless: "Gapless", crossfade: "Crossfade" },
+  // Which stream starts later (namespace draft 70, AON).
+  delay: { none: "None", sound: "Sound", picture: "Picture" },
 };
 
 export function wordFor(name, value) {

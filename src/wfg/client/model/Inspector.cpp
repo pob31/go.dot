@@ -85,7 +85,8 @@ namespace wfg::client::model
                     starts: two more things said about how the file is played
                     (namespace draft §22.7). */
                 { "media",   { "file", "lockedTo", "channels", "directOut",
-                               "level", "startOffset", "rate", "rateMode", "dca", "dcaCurve", "dcaOffset", "strip",
+                               "level", "startOffset", "rate", "rateMode", "delay", "delayBy",
+                               "dca", "dcaCurve", "dcaOffset", "strip",
                                "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
                                "releaseFade", "rangeJoin", "rangeJoinLength" } },
@@ -105,7 +106,7 @@ namespace wfg::client::model
                                "fit", "layer", "blend", "opacity", "dca",
                                "dcaCurve", "dcaOffset",
                                "videoInsert", "paint", "fadeIn",
-                               "startOffset", "rate",
+                               "startOffset", "rate", "delay", "delayBy",
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
                                "contrast", "saturation", "gamma", "hue",
                                "curveLuma", "curveRed", "curveGreen", "curveBlue",
@@ -192,6 +193,8 @@ namespace wfg::client::model
                 { "strip", "fader or pad" },
                 { "rate", "speed" },
                 { "rateMode", "speed mode" },
+                //  Which stream starts later, then by how much (namespace draft §70, AON).
+                { "delayBy", "delay by" },
                 { "levelOn", "moves level" },
                 { "rateOn", "moves speed" },
                 /*  NOT "colour", which is the cue's tint in the list and is on
@@ -1020,7 +1023,7 @@ namespace wfg::client::model
                 return;
 
             for (auto& field : decided)
-                if (field.name == "startOffset" || field.name == "rate")
+                if (field.name == "startOffset" || field.name == "rate" || field.name == "delay" || field.name == "delayBy")
                 {
                     field.writable = false;
                     field.description = "Locked to its movie, which leads: " + field.description;
@@ -1306,6 +1309,40 @@ namespace wfg::client::model
                 else if (field.name == "joinLength" || field.name == "joinCurve")
                 {
                     field.applies = field.applies && sequence && crossfade;
+                }
+            }
+        }
+
+        /*  WHICH STREAM STARTS LATER, AND BY HOW MUCH (namespace draft §70, AON,
+            the author's shape): "None", "Sound", "Picture" - a sound cue's
+            without "Picture" - writing the stored words; the amount greyed
+            while nothing is held back, and live on a selection whose choices
+            differ. The words are the implementer's, for the author. */
+        void wordTheDelay (const std::string& kind, std::vector<Field>& decided)
+        {
+            if (kind != "media" && kind != "video")
+                return;
+
+            const Field* delay = nullptr;
+
+            for (const auto& field : decided)
+                if (field.name == "delay")
+                    delay = &field;
+
+            const auto holds = delay == nullptr || delay->mixed || delay->value != "none";
+
+            for (auto& field : decided)
+            {
+                if (field.name == "delay" && field.writable)
+                {
+                    field.choices = { { "none", "None" }, { "sound", "Sound" } };
+
+                    if (kind == "video")
+                        field.choices.push_back ({ "picture", "Picture" });
+                }
+                else if (field.name == "delayBy")
+                {
+                    field.applies = field.applies && holds;
                 }
             }
         }
@@ -1878,6 +1915,7 @@ namespace wfg::client::model
         greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
         greyWhatOnlyACodeAsks (out.kind, asks, decided);
         wordTheJoin (out.kind, decided);
+        wordTheDelay (out.kind, decided);
         wordTheRangeJoin (snapshot, cueId, out.kind, decided);
         greyTheMapping (out.kind, decided);
 

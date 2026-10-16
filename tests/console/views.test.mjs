@@ -248,6 +248,12 @@ test("the inspector puts a cue's fields in the order somebody works through them
   assert.equal(wordFor("join", "letPlay"), "Let play");
   assert.equal(wordFor("join", "crossfade"), "Crossfade");
   assert.equal(wordFor("selection", "shuffle"), "shuffle");
+  // A cue's delay (namespace draft 70): after its speed, in words.
+  assert.deepEqual(ordered(["delayBy", "rateMode", "delay", "rate"], "media"),
+                   ["rate", "rateMode", "delay", "delayBy"]);
+  assert.deepEqual(ordered(["delayBy", "delay", "rate"], "video"), ["rate", "delay", "delayBy"]);
+  assert.equal(wordFor("delay", "picture"), "Picture");
+  assert.equal(wordFor("delay", "none"), "None");
 
   /*  WHAT A DCA MARK CARRIES straight after the DCA (namespace draft §50). */
   assert.deepEqual(ordered(["initialLevel", "dcaOffset", "dcaCurve", "dca"], "media"),
