@@ -106,10 +106,11 @@ has stood in front of the thing.
   movie cannot hold up a sound cue. Outputs sent to other programs over NDI,
   Spout or Syphon, live inputs taken from them, and inserts that pass a cue's
   picture through another program and back. Outputs sent down a Blackmagic
-  DeckLink card's cable at a broadcast format, paced by the card, with the
-  show's buses embedded and, on a card with a keyer, fill and key; a card's
+  DeckLink or AJA card's cable at a broadcast format, paced by the card, with
+  the show's buses embedded and, on a card with a keyer, fill and key; a card's
   input as a live picture - built against a test card, not yet seen on a real
-  one. Pictures in sampler groups, and
+  one; and a camera - a webcam, a USB capture dongle, a mixer in webcam mode -
+  as a live picture on Windows, macOS and Linux. Pictures in sampler groups, and
   the next GO's pictures read ahead. A movie in another format plays as a
   preview while FFmpeg (downloaded the first time it is needed) converts it to
   HAP.
@@ -284,7 +285,7 @@ and says afterwards what was built against what was drawn.
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |
 | Group joins | Let play, Gapless or Crossfade between a sequence's members, automatic and manual, pictures dissolving; a looping range's wraps crossfaded | §69 |
 | Sound or picture delay | A cue holds back its sound or its picture by a number of milliseconds, to line up with a projector or a long audio chain | §70 |
-| DeckLink cards | Pictures out at a card's format and on its clock, the show's buses embedded, fill and key, a card's input; `wfg video-probe` for testers | §71 |
+| Video cards and cameras | Pictures out on a DeckLink or AJA card at its format and on its clock, the show's buses embedded, fill and key; a card's input or a camera as a live picture; `wfg video-probe` for testers | §71, §72 |
 | Authoring | WFS-DIY and S21_HiJack write cues into Go.dot | §56, [authoring protocol](docs/godot-authoring-protocol-0.1.md) |
 | Device presets | Consoles, lighting desks and spatial processors, each protocol a preset | §57 |
 | Redundancy | A main and a backup playing one show, measured over Dante | §58 |
@@ -503,8 +504,8 @@ no Node, no build and no install, now or later.
 Data or plugdata, to open a process cue's patch in a program of its own (the
 canvas inside Go.dot needs neither); the NDI runtime, for pictures over NDI,
 found where its installer put it and never shipped with Go.dot; Blackmagic's
-Desktop Video, 16.0 or later, for a DeckLink card, likewise the user's own;
-and FFmpeg,
+Desktop Video, 16.0 or later, for a DeckLink card, and AJA's driver for an AJA
+card, likewise the user's own; and FFmpeg,
 which Go.dot downloads itself the first time a movie needs converting to HAP.
 
 ### Step by step

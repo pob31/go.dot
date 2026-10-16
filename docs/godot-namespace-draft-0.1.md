@@ -30464,16 +30464,16 @@ installed - is said under the devices in the menu, cameras or none.
 
 | Stage | What | Built |
 |---|---|---|
-| VC.0 | This section; the PRD; the devplan; the renames | |
-| VC.1 | Camera.h and the test camera; one receiver for every device; the devices published | |
-| VC.2 | Media Foundation | |
-| VC.3 | AVFoundation, its permission, Info.plist and the entitlement | |
-| VC.4 | Video4Linux | |
-| VC.5 | The Video tab: Video capture, the device menu, formats | |
-| VC.6 | libajantv2 carried and built | |
-| VC.7 | AJA's cards in Card.h's interface | |
-| VC.8 | The probe for both makers; the testers' instructions | |
-| VC.9 | M78, M79; the README, the guides; the whole suite | |
+| VC.0 | This section; the PRD; the devplan; the renames | 16679a24 |
+| VC.1 | Camera.h and the test camera; one receiver for every device; the devices published | 3b002b58 |
+| VC.2 | Media Foundation | 66e4f4ed |
+| VC.3 | AVFoundation, its permission, Info.plist and the entitlement | 43045d40, 888528fe |
+| VC.4 | Video4Linux | written in VC.1; the NUC owes its build |
+| VC.5 | The Video tab: Video capture, the device menu, formats | bbeca7a9 |
+| VC.6 | libajantv2 carried and built | 0ed7e9b1, 0c756e01 |
+| VC.7 | AJA's cards in Card.h's interface | dc575bc0 |
+| VC.8 | The probe for both makers; the testers' instructions | 74d79849 |
+| VC.9 | M78, M79; the README, the guides; the whole suite | this; M78 and M79 owed |
 
 ### 72.5 Measurements
 

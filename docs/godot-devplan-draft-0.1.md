@@ -1519,6 +1519,17 @@ against the test card and the testers' probe. Same branch, `decklink`, landed wi
 one that stops coming back by itself; an AJA card listed beside a DeckLink one on the test card's
 terms; macOS and Linux cameras built and seen on the farm; an old show saves unchanged; CI is green.
 
+*Built 2026-10-16*, VC.0-VC.9 (namespace draft §72.4), on the branch `decklink` with the DeckLink round:
+cameras through Media Foundation, AVFoundation and Video4Linux behind one interface, the test camera
+and its quiet twin; one receiver for every device; the devices published and offered on the Video tab;
+libajantv2 carried at NTV2 SDK 18.0 and AJA's cards behind the card interface, every maker's cards as
+one; the probe for both makers and the testers' instructions in both languages. Media Foundation was
+opened here on the NDI virtual camera, which sends nothing with no source picked: a synchronous read
+waited on it for ever, hence the asynchronous reader and AQD. The Mac mini built the whole branch and
+ran the camera and card cases in both locales. Owed: this machine's own camera through a capture cue to
+a projector, M78, with the author's leave; the Linux build on the NUC (the strict job) and a camera
+seen there; a real AJA card, by the testers (M79); the author's word on APV-AQD and the screen words.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M
