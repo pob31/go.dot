@@ -82,10 +82,16 @@ namespace wfg::video::camera
             if (output != nil)
                 [output setSampleBufferDelegate: nil queue: nil];
 
+            //  A frame already on the queue runs before the delegate lets go:
+            //  nothing reaches this source, or its lock, once it has gone.
+            if (queue != nullptr)
+                dispatch_sync (queue, ^{});
+
             if (delegate != nil)
             {
                 const std::scoped_lock hold (lock);
                 delegate->owner = nullptr;
+                delegate->lock = nullptr;
             }
 
             WFG_RELEASE (output);

@@ -8,6 +8,10 @@
     audio-input                 mic cues and takes (Phase 9b, 9c). Without it
                                 the hardened runtime hands wfg silence, and no
                                 prompt is ever shown.
+    camera                      a camera as a video input (namespace draft
+                                §72, AQA). Without it the hardened runtime
+                                hands the renderer no camera, and no prompt is
+                                ever shown.
     disable-library-validation  Go.dot hosts plugins (VST3, AU, LV2) in its
                                 child processes, and a plugin is signed by its
                                 maker's team, not ours. Without it the hardened
@@ -19,6 +23,8 @@
 <plist version="1.0">
 <dict>
     <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.device.camera</key>
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
