@@ -16,6 +16,8 @@
 
 #include <wfg/engine/video/render/Card.h>
 
+#include <wfg/engine/video/DeviceNames.h>
+
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
@@ -41,7 +43,12 @@ namespace wfg::video::card
         static const std::unique_ptr<System> made = []
         {
             if (juce::SystemStats::getEnvironmentVariable ("WFG_CARD_FAKE", {}) != "1")
-                return makeDeckLinkSystem();
+            {
+                std::vector<Maker> makers;
+                makers.push_back ({ {}, makeDeckLinkSystem() });
+                makers.push_back ({ "AJA", makeAjaSystem() });
+                return makeEverySystem (std::move (makers));
+            }
 
             FakeOptions options;
             options.driftPpm = juce::SystemStats::getEnvironmentVariable ("WFG_CARD_FAKE_DRIFT", "0").getDoubleValue();
@@ -50,6 +57,73 @@ namespace wfg::video::card
         }();
 
         return *made;
+    }
+
+    namespace
+    {
+        class Every final : public System
+        {
+        public:
+            explicit Every (std::vector<Maker> makersToUse) : makers (std::move (makersToUse)) {}
+
+            Found find() override
+            {
+                Found all;
+                std::string firstProblem;
+
+                for (std::size_t i = 0; i < makers.size(); ++i)
+                {
+                    auto found = makers[i].system->find();
+
+                    if (i == 0)
+                    {
+                        all.version = found.version;
+                        firstProblem = found.problem;
+                    }
+
+                    for (auto& one : found.cards)
+                        all.cards.push_back (std::move (one));
+                }
+
+                if (all.cards.empty())
+                    all.problem = firstProblem;
+
+                return all;
+            }
+
+            std::unique_ptr<Output> openOutput (const std::string& id, const OutputSettings& settings, std::string& why) override
+            {
+                return systemFor (id).openOutput (id, settings, why);
+            }
+
+            std::unique_ptr<Input> openInput (const std::string& id, const std::string& modeWord, std::string& why) override
+            {
+                return systemFor (id).openInput (id, modeWord, why);
+            }
+
+        private:
+            System& systemFor (const std::string& id)
+            {
+                const auto maker = makerOf (id);
+
+                for (auto& one : makers)
+                    if (one.maker == maker)
+                        return *one.system;
+
+                for (auto& one : makers)
+                    if (one.maker.empty())
+                        return *one.system;
+
+                return *makers.front().system;
+            }
+
+            std::vector<Maker> makers;
+        };
+    }
+
+    std::unique_ptr<System> makeEverySystem (std::vector<Maker> makers)
+    {
+        return std::make_unique<Every> (std::move (makers));
     }
 
     ThreadScope::ThreadScope()

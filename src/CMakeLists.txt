@@ -554,6 +554,7 @@ add_library(wfg_engine STATIC
     wfg/engine/video/render/Camera_fake.cpp
     wfg/engine/video/render/Card.cpp
     wfg/engine/video/render/Card.h
+    wfg/engine/video/render/Card_aja.cpp
     wfg/engine/video/render/Card_decklink.cpp
     wfg/engine/video/render/Card_fake.cpp
     wfg/engine/video/render/DeckLinkApi.h

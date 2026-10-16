@@ -198,12 +198,31 @@ namespace wfg::video::card
     };
 
     /*  The cards this process reaches: the test card when WFG_CARD_FAKE is
-        set to 1, the user's Desktop Video otherwise - made the first time,
-        kept for the process. */
+        set to 1, otherwise the user's - DeckLink's through Desktop Video and
+        AJA's through its driver - made the first time, kept for the process. */
     System& system();
 
-    /*  Desktop Video's own, behind system(). */
+    /*  Desktop Video's own, and AJA's (namespace draft §72, AQB), behind
+        system(). */
     std::unique_ptr<System> makeDeckLinkSystem();
+    std::unique_ptr<System> makeAjaSystem();
+
+    /*  EVERY MAKER'S CARDS AS ONE (§72, AQB): each system's cards listed one
+        after the other, a card opened by the system whose maker its
+        identifier names (DeviceNames.h's makerOf) - `maker` empty for the one
+        that takes the rest. Why there are none is said only when no maker
+        found any: the first system's, Desktop Video's. */
+    struct Maker
+    {
+        std::string maker;
+        std::unique_ptr<System> system;
+    };
+
+    std::unique_ptr<System> makeEverySystem (std::vector<Maker> makers);
+
+    /*  Every format AJA's library knows that Go.dot has a word for, each once:
+        what an AJA card's formats are read through, for the tests. */
+    std::vector<std::string> ajaFormatWords();
 
     /*  THE TEST CARD (APO), for tests and for looking at the screens with no
         card: one card, "Go.dot test card", with an output, an input that shows

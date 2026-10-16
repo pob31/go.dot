@@ -34,6 +34,7 @@
 #include <wfg/engine/video/render/DeckLinkApi.h>
 #include <wfg/engine/video/render/SoundPlacer.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cmath>
@@ -906,6 +907,91 @@ TEST_CASE ("decklink: the probe runs the test card - bars, a flash and a beep ea
     std::ostringstream out;
     CHECK (video::runVideoProbe (*none, { "--run" }, out) == 2);
     CHECK (out.str().find ("No card to run: none sends pictures") != std::string::npos);
+}
+
+TEST_CASE ("aja: AJA's formats read as Go.dot's words - progressive and interlaced up to 2K, never PsF (§72, VC.7)")
+{
+    const auto words = video::card::ajaFormatWords();
+    const auto has = [&words] (const std::string& word) { return std::find (words.begin(), words.end(), word) != words.end(); };
+
+    for (const auto* word : { "1080p50", "1080i50", "1080p59.94", "1080i59.94", "1080p25", "1080p29.97", "1080p23.98",
+                              "1080p24", "720p50", "720p59.94", "dci1080p24" })
+    {
+        INFO (word);
+        CHECK (has (word));
+    }
+
+    //  Every word reads back as a format, and none is past 2K.
+    for (const auto& word : words)
+    {
+        INFO (word);
+        const auto format = video::modes::parse (word);
+        REQUIRE (format.has_value());
+        CHECK (format->width <= 2048);
+        CHECK (format->height <= 1080);
+        CHECK (video::modes::wordFor (*format) == word);
+    }
+
+    MESSAGE (words.size() << " AJA formats have a word");
+}
+
+TEST_CASE ("aja: every maker's cards as one - the test card beside AJA's none, an aja- card opened by AJA's library, why none is said only when no maker found any (§72, VC.7)")
+{
+    struct Missing final : video::card::System
+    {
+        video::card::Found find() override
+        {
+            video::card::Found found;
+            found.version = "";
+            found.problem = "Desktop Video is not installed";
+            return found;
+        }
+
+        std::unique_ptr<video::card::Output> openOutput (const std::string&, const video::card::OutputSettings&, std::string& why) override
+        {
+            why = "missing";
+            return nullptr;
+        }
+
+        std::unique_ptr<video::card::Input> openInput (const std::string&, const std::string&, std::string& why) override
+        {
+            why = "missing";
+            return nullptr;
+        }
+    };
+
+    //  The test card where Desktop Video would be, AJA's library beside it:
+    //  AJA finds nothing here, and nothing is said of it.
+    std::vector<video::card::Maker> makers;
+    makers.push_back ({ {}, video::card::makeFakeSystem() });
+    makers.push_back ({ "AJA", video::card::makeAjaSystem() });
+    auto every = video::card::makeEverySystem (std::move (makers));
+
+    const auto found = every->find();
+    REQUIRE (found.cards.size() == 1);
+    CHECK (found.cards[0].id == "fake-1");
+    CHECK (found.problem.empty());
+
+    std::string why;
+    video::card::OutputSettings settings;
+    settings.mode = "1080p50";
+    CHECK (every->openOutput ("fake-1", settings, why) != nullptr);
+
+    std::string ajaWhy;
+    CHECK (every->openOutput ("aja-0Z0000001", settings, ajaWhy) == nullptr);
+    CHECK (ajaWhy == "the card is not connected");
+
+    std::string ajaInWhy;
+    CHECK (every->openInput ("aja-0Z0000001", "auto", ajaInWhy) == nullptr);
+    CHECK (ajaInWhy == "the card is not connected");
+
+    //  No maker with a card: the first one's reason.
+    std::vector<video::card::Maker> none;
+    none.push_back ({ {}, std::make_unique<Missing>() });
+    none.push_back ({ "AJA", video::card::makeAjaSystem() });
+    const auto nothing = video::card::makeEverySystem (std::move (none))->find();
+    CHECK (nothing.cards.empty());
+    CHECK (nothing.problem == "Desktop Video is not installed");
 }
 
 TEST_CASE ("camera: the test camera listed by name, its formats known once opened, automatic its largest at 25 a second or more, one input at a time (VC.1)")
