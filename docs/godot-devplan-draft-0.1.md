@@ -1570,6 +1570,14 @@ moment the show opens and a pad on a script cue holds it while pressed; the whee
 number; a MIDI CC rides a cue's level with pickup, live under the lock and kept by Keep; a cue-scoped
 binding lives exactly as long as its run; an old show saves unchanged; CI is green.
 
+**Built** (2026-10-17, BD.0-BD.12; §74.5 names the commits): all of the above, with one difference and
+one thing left. Under the lock a binding writes as a hand does: a send or an EQ number rides live and
+Keep keeps it, while a cue's own level is refused, as the lock refuses it to every hand (the remote's
+guide: "the lock keeps it"). A cue's level edited while it sounds is now heard (ARG), which the
+binding needed and the tablet's and the dial's edits had lacked. The web page shows and makes no
+bindings (§74.7). The whole suite once: 222 of 222 here, C and fr_FR; 215 of 215 on the NUC's Linux,
+with GCC's strict build clean there; the tablet's Cart tab is go.dot-remote dd049dc.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

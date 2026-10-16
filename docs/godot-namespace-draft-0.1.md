@@ -30648,13 +30648,13 @@ Every new row has a default, so an old show opens and saves unchanged.
 | BD.3 | Any kind under a pad in a cart; `cue.press`, `cue.release`, `trigger.release` (AQN, AQU, AQV) | 20cb8852 |
 | BD.4 | Key triggers, in the window and on the page (AQK, AQW) | 5eaa80f1 |
 | BD.5 | Tabs for lists, a cart among them, apart from the GO focus (AQM, AQS) | 1b1caf5c |
-| BD.6 | The tablet's Cart tab (AQQ) | go.dot-remote 0859979 (0.1.5); this repo's docs |
-| BD.7 | The binding's rows, schema and commands | |
-| BD.8 | Its matching and scaling, pure | |
-| BD.9 | MIDI and OSC wired; pickup; the cue-scoped arm and release; the stops | |
-| BD.10 | Feedback; Learn | |
-| BD.11 | The window: the Bindings section of the show settings, a cue's bindings, Learn | |
-| BD.12 | M80, the README, the guides, the whole suite | |
+| BD.6 | The tablet's Cart tab (AQQ) | go.dot-remote dd049dc (0.1.5), pushed; this repo's docs d269f5d3 |
+| BD.7 | The binding's rows, schema and commands | 7d2e5c11 |
+| BD.8 | Its matching and scaling, pure | bfa5d0d3 |
+| BD.9 | MIDI and OSC wired; pickup; the cue-scoped arm and release; the stops | a2a35325 |
+| BD.10 | Feedback; Learn | e537a769 |
+| BD.11 | The window: the Bindings page of the show settings, a number's right-click, Learn (ARF) | bf8e2423 |
+| BD.12 | M80, the README, the guides, the whole suite; a cue's level edited while it sounds (ARG) | ea30de7d |
 
 ### 74.6 Measurements
 
