@@ -76,7 +76,24 @@ namespace wfg::client::model
         std::string sendName;
         double frameRate = 60.0;
 
-        bool sends() const { return ! kind.empty() && kind != "display"; }
+        /*  DOWN A DECKLINK CARD'S CABLE (namespace draft §71): which card -
+            its identifier, and its name when it was picked - at which format,
+            keying how, carrying which buses; and how it goes tonight. */
+        std::string card;
+        std::string cardName;
+        std::string videoMode = "1080p50";
+        std::string key = "off";
+        std::vector<std::string> sound;
+        double latencyMs = 0.0;
+        double skewPpm = 0.0;
+        std::string reference = "none";
+        std::int64_t soundLate = 0;
+        std::int64_t soundSent = 0;
+
+        /*  Sent to other programs - NDI, Spout, Syphon - and sent down a card's
+            cable: neither is a display, and only the first has a send name. */
+        bool sends() const { return ! kind.empty() && kind != "display" && kind != "decklink"; }
+        bool toCard() const { return kind == "decklink"; }
         std::string label() const;
     };
 
@@ -91,6 +108,8 @@ namespace wfg::client::model
         std::string sender;
         bool enabled = true;
         bool alpha = false;             ///< the program sends a meaningful alpha (61, AKF)
+        std::string videoMode = "auto"; ///< a card input's format, or found by the card (§71, APM)
+        std::string format;             ///< the format arriving at a card input, tonight's
         bool connected = false;
         int width = 0;
         int height = 0;
@@ -132,6 +151,44 @@ namespace wfg::client::model
         Windows, Syphon on macOS - and each one's name on screen. */
     std::vector<std::string> pictureKindsHere();
     std::string pictureKindWord (const std::string& kind);
+
+    /*  THE DECKLINK CARDS THIS MACHINE HAS (namespace draft §71), as
+        `/godot/videoOutput/cards` says them: each card's identifier, name,
+        what it can do and the formats it sends and takes in; or why there are
+        none - Desktop Video not installed or too old. */
+    struct CardRow
+    {
+        std::string id;
+        std::string name;
+        bool output = false;
+        bool input = false;
+        bool internalKey = false;
+        bool externalKey = false;
+        bool tenBit = false;
+        int soundChannels = 0;
+        std::vector<std::string> sends;
+        std::vector<std::string> takes;
+    };
+
+    struct CardsFound
+    {
+        std::vector<CardRow> cards;
+        std::string problem;
+
+        const CardRow* card (const std::string& id) const;
+    };
+
+    CardsFound cardsFrom (const std::string& text);
+    CardsFound readCards (const tree::TreeSnapshot&);
+
+    /*  THE KINDS AN INPUT CAN BE HERE (APN): this system's, and DeckLink where a
+        card that takes pictures in is found. An insert's stay this system's. */
+    std::vector<std::string> inputKindsHere (const CardsFound& cards);
+
+    /*  WHAT A CARD OUTPUT SENDS, in a row's words: the card, its format, its
+        key, the buses its sound carries - named as `buses` names them. */
+    struct OutputRow;
+    std::string cardSummary (const VideoOutputRow& output, const CardsFound& cards, const std::vector<OutputRow>& buses);
 
     /*  A MENU OF THE SHOW'S VIDEO INPUTS AND OF ITS INSERTS, "(none)" first,
         identifier and label apart, as the canvases' menu is. */

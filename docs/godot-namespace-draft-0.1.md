@@ -30361,7 +30361,11 @@ be read, never copied in.
 | `videoInput/<id>/videoMode` | `s` | rw | `auto`, found by the card, or a format; `auto` |
 
 Every new row has a default, so an old show opens and saves unchanged. The screen words - *Sent to a
-card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine, for the author.
+card*, *Format*, *Key*, *Off*, *External*, *Internal*, *Sound*, *no signal* - are mine, for the author.
+*As built (DL.9):* also mine - an output row's *DeckLink · card · format · key external · sound Main L/R*,
+its state *sending, 40 ms, reference locked*, a card input's *Found by the card*, the problem marks' *no
+card*, and *no card chosen*, *(not on this machine)*, *no card takes pictures in here*, *the show has no
+outputs*.
 
 ### 71.4 Stages
 
@@ -30375,7 +30379,7 @@ card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine,
 | DL.5 | Fill and key | b217edd |
 | DL.6 | The sound taken off the audio thread | 7a7367f |
 | DL.7 | The sound placed and resampled on the card | 92eaf9b |
-| DL.8 | A card as a video input | |
+| DL.8 | A card as a video input | 4c917c1 |
 | DL.9 | The Video tab, the inputs, the problems, the inspector | |
 | DL.10 | `decklink-probe --run`, the testers' instructions, M77 | |
 | DL.11 | The README, the guides, the whole suite | |

@@ -6137,13 +6137,16 @@ namespace wfg::client::ui
                        std::vector<std::string> displaysNow, std::string renderer, std::string rendererProblem,
                        bool editable, std::vector<std::pair<std::string, std::string>> dcaChoicesToShow,
                        std::vector<model::VideoInputRow> inputRows, std::vector<model::VideoInsertRow> insertRows,
-                       std::vector<model::OfferedSender> offeredNow)
+                       std::vector<model::OfferedSender> offeredNow, model::CardsFound cardsNow = {},
+                       std::vector<model::OutputRow> busesNow = {})
             {
                 /*  THE INPUTS AND INSERTS (namespace draft §44), drawn again each
                     pass: their states move while nothing about the show does. */
                 inputs = std::move (inputRows);
                 inserts = std::move (insertRows);
                 offered = std::move (offeredNow);
+                cards = std::move (cardsNow);
+                buses = std::move (busesNow);
                 addInput.setVisible (editable);
                 addInsert.setVisible (editable);
                 inputList.updateContent();
@@ -6169,7 +6172,11 @@ namespace wfg::client::ui
                                                                      && a.bound == b.bound && a.problem == b.problem
                                                                      && a.testPattern == b.testPattern && a.grid == b.grid && a.zones == b.zones
                                                                      && a.kind == b.kind && a.sendName == b.sendName
-                                                                     && std::abs (a.frameRate - b.frameRate) < 1e-9; });
+                                                                     && std::abs (a.frameRate - b.frameRate) < 1e-9
+                                                                     && a.card == b.card && a.cardName == b.cardName
+                                                                     && a.videoMode == b.videoMode && a.key == b.key && a.sound == b.sound
+                                                                     && std::abs (a.latencyMs - b.latencyMs) < 0.5
+                                                                     && a.reference == b.reference; });
 
                 const auto sameLock = locked == ! editable;
 
@@ -6445,7 +6452,14 @@ namespace wfg::client::ui
 
                     /*  A SENDING OUTPUT (namespace draft §44, YA) says what it is
                         sent over, under which name, at what rate. */
-                    if (entry.sends())
+                    /*  A CARD OUTPUT (§71) says its card, format, key and sound. */
+                    if (entry.toCard())
+                    {
+                        g.setColour (Look::colour (page.theme, "ink-dim"));
+                        g.drawText (juce::String::fromUTF8 (model::cardSummary (entry, page.cards, page.buses).c_str()),
+                                    cells[2], juce::Justification::centredLeft, true);
+                    }
+                    else if (entry.sends())
                     {
                         g.setColour (Look::colour (page.theme, "ink-dim"));
                         g.drawText (juce::String (model::pictureKindWord (entry.kind)) + juce::String::fromUTF8 ("  \xc2\xb7  ")
@@ -6475,8 +6489,17 @@ namespace wfg::client::ui
                     /*  THE STATE IN WORDS, never a colour alone (§4.8): showing,
                         or why not. */
                     const auto showing = entry.bound && entry.problem.empty();
+
+                    /*  A card says how long it holds a frame and its reference,
+                        when it has one (§71.3). */
+                    auto shown = juce::String ("showing");
+
+                    if (entry.toCard())
+                        shown = "sending, " + juce::String (entry.latencyMs, 0) + " ms"
+                              + (entry.reference == "none" ? juce::String() : ", reference " + juce::String (entry.reference));
+
                     g.setColour (Look::colour (page.theme, showing || ! entry.enabled ? "ink-dim" : "failed"));
-                    g.drawText (showing ? juce::String ("showing")
+                    g.drawText (showing ? shown
                                         : juce::String (entry.problem.empty() ? std::string ("not showing") : entry.problem),
                                 cells[5], juce::Justification::centredLeft, true);
 
@@ -6574,8 +6597,20 @@ namespace wfg::client::ui
                     g.setColour (Look::colour (page.theme, "ink-dim"));
                     g.drawText (juce::String (model::pictureKindWord (entry.kind)), cells[1], juce::Justification::centredLeft);
 
+                    //  A card input names its card, and its format unless the card finds it (§71, APM).
+                    auto sender = juce::String (entry.sender);
+
+                    if (entry.kind == "decklink" && ! entry.sender.empty())
+                    {
+                        const auto* card = page.cards.card (entry.sender);
+                        sender = juce::String::fromUTF8 ((card != nullptr ? card->name : entry.sender + " (not on this machine)").c_str());
+
+                        if (entry.videoMode != "auto")
+                            sender += juce::String::fromUTF8 ("  \xc2\xb7  ") + juce::String (entry.videoMode);
+                    }
+
                     g.setColour (Look::colour (page.theme, entry.sender.empty() ? "ink-off" : "ink-dim"));
-                    g.drawText (entry.sender.empty() ? dash : juce::String (entry.sender), cells[2], juce::Justification::centredLeft, true);
+                    g.drawText (entry.sender.empty() ? dash : sender, cells[2], juce::Justification::centredLeft, true);
 
                     g.setColour (Look::colour (page.theme, entry.enabled ? "ink" : "ink-off"));
                     g.drawText (entry.enabled ? "ON" : "OFF", cells[3], juce::Justification::centredLeft);
@@ -6588,6 +6623,7 @@ namespace wfg::client::ui
                     g.setColour (Look::colour (page.theme, arriving || ! entry.enabled ? "ink-dim" : "failed"));
                     g.drawText (arriving ? juce::String (entry.width) + juce::String::fromUTF8 (" \xc3\x97 ") + juce::String (entry.height)
                                              + ", " + juce::String (entry.frameRate, 0) + " a second"
+                                             + (entry.format.empty() ? juce::String() : ", " + juce::String (entry.format))
                                          : juce::String (entry.problem.empty() ? std::string ("nothing arriving") : entry.problem),
                                 cells[5], juce::Justification::centredLeft, true);
 
@@ -6612,8 +6648,14 @@ namespace wfg::client::ui
                     switch (cellIndexAt (cells.data(), 7, event.x))
                     {
                         case 0: page.editCell (page.inputList, row, cells[0], base + "name", entry.name); return;
-                        case 1: page.chooseKind (base + "kind", entry.kind); return;
-                        case 2: page.chooseSender (page.inputList, row, cells[2], base + "sender", entry.kind, entry.sender); return;
+                        case 1: page.chooseKind (base + "kind", entry.kind, model::inputKindsHere (page.cards)); return;
+                        case 2:
+                            if (entry.kind == "decklink")
+                                page.chooseCardInput (base, entry);
+                            else
+                                page.chooseSender (page.inputList, row, cells[2], base + "sender", entry.kind, entry.sender);
+
+                            return;
                         case 3: page.send (gesture::setNode (base + "enabled", entry.enabled ? "false" : "true")); return;
                         case 4: page.send (gesture::setNode (base + "alpha", entry.alpha ? "false" : "true")); return;
                         case 6: page.send (gesture::deleteObject (entry.id)); return;
@@ -6686,7 +6728,7 @@ namespace wfg::client::ui
                     switch (cellIndexAt (cells.data(), 6, event.x))
                     {
                         case 0: page.editCell (page.insertList, row, cells[0], base + "name", entry.name); return;
-                        case 1: page.chooseKind (base + "kind", entry.kind); return;
+                        case 1: page.chooseKind (base + "kind", entry.kind, model::pictureKindsHere()); return;
                         case 2: page.editCell (page.insertList, row, cells[2], base + "sendName", entry.sendName); return;
                         case 3: page.chooseSender (page.insertList, row, cells[3], base + "returnSender", entry.kind, entry.returnSender); return;
                         case 5: page.send (gesture::deleteObject (entry.id)); return;
@@ -6699,9 +6741,8 @@ namespace wfg::client::ui
 
             /*  A KIND FROM A MENU of what this system has (§44): NDI everywhere,
                 Spout on Windows, Syphon on the Mac. */
-            void chooseKind (const std::string& address, const std::string& current)
+            void chooseKind (const std::string& address, const std::string& current, const std::vector<std::string>& kinds)
             {
-                const auto kinds = model::pictureKindsHere();
                 juce::PopupMenu menu;
 
                 for (std::size_t at = 0; at < kinds.size(); ++at)
@@ -6762,6 +6803,58 @@ namespace wfg::client::ui
                                     });
             }
 
+            /*  A CARD'S INPUT (namespace draft §71, APM): the card, from those
+                that take pictures in, and the format - found by the card, or one
+                it offers. */
+            void chooseCardInput (const std::string& base, const model::VideoInputRow& entry)
+            {
+                std::vector<std::pair<std::string, std::string>> taking;
+
+                for (const auto& card : cards.cards)
+                    if (card.input)
+                        taking.push_back ({ card.id, card.name });
+
+                const auto* chosenCard = cards.card (entry.sender);
+                std::vector<std::string> formats { "auto" };
+
+                if (chosenCard != nullptr)
+                    formats.insert (formats.end(), chosenCard->takes.begin(), chosenCard->takes.end());
+
+                juce::PopupMenu menu;
+                menu.addItem (1, "(none)", true, entry.sender.empty());
+
+                for (std::size_t at = 0; at < taking.size(); ++at)
+                    menu.addItem (static_cast<int> (at) + 10, juce::String::fromUTF8 (taking[at].second.c_str()), true,
+                                  taking[at].first == entry.sender);
+
+                if (taking.empty())
+                    menu.addItem (2, juce::String::fromUTF8 ((cards.problem.empty() ? std::string ("no card takes pictures in here")
+                                                                                     : cards.problem).c_str()), false);
+
+                juce::PopupMenu format;
+
+                for (std::size_t at = 0; at < formats.size(); ++at)
+                    format.addItem (static_cast<int> (at) + 300, at == 0 ? juce::String ("Found by the card") : juce::String (formats[at]),
+                                    true, formats[at] == entry.videoMode);
+
+                menu.addSeparator();
+                menu.addSubMenu ("Format", format);
+
+                menu.showMenuAsync (juce::PopupMenu::Options(),
+                                    [safe = juce::Component::SafePointer<VideoPage> (this), base, taking, formats] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || safe->send == nullptr)
+                                            return;
+
+                                        if (chosen == 1)
+                                            safe->send (gesture::setNode (base + "sender", {}));
+                                        else if (chosen >= 300 && static_cast<std::size_t> (chosen - 300) < formats.size())
+                                            safe->send (gesture::setNode (base + "videoMode", formats[static_cast<std::size_t> (chosen - 300)]));
+                                        else if (chosen >= 10 && static_cast<std::size_t> (chosen - 10) < taking.size())
+                                            safe->send (gesture::setNode (base + "sender", taking[static_cast<std::size_t> (chosen - 10)].first));
+                                    });
+            }
+
             /*  WHERE AN OUTPUT'S PICTURE GOES (§44, YA): one of this machine's
                 displays, or sent over a kind this system has - and, sent, the
                 name it goes under and its rate. */
@@ -6808,10 +6901,125 @@ namespace wfg::client::ui
                     menu.addItem (3, "Frames a second...");
                 }
 
+                /*  SENT TO A CARD (namespace draft §71): each DeckLink card that
+                    sends pictures, the one the show names marked even when this
+                    machine has not got it, and why there is none when Desktop
+                    Video says so. Then, for a card output, its format, its key
+                    and its sound, each a menu of what the card can do. */
+                std::vector<const model::CardRow*> sending;
+
+                for (const auto& card : cards.cards)
+                    if (card.output)
+                        sending.push_back (&card);
+
+                const auto* chosenCard = cards.card (entry.card);
+
+                if (! sending.empty() || ! cards.problem.empty() || entry.toCard())
+                {
+                    menu.addSectionHeader ("Sent to a card");
+
+                    for (std::size_t at = 0; at < sending.size(); ++at)
+                        menu.addItem (static_cast<int> (at) + 200, juce::String::fromUTF8 (sending[at]->name.c_str()), true,
+                                      entry.toCard() && entry.card == sending[at]->id);
+
+                    if (entry.toCard() && ! entry.card.empty() && chosenCard == nullptr)
+                        menu.addItem (199, juce::String::fromUTF8 ((entry.cardName.empty() ? entry.card : entry.cardName).c_str())
+                                             + "  (not on this machine)", false, true);
+
+                    if (sending.empty() && ! cards.problem.empty())
+                        menu.addItem (198, juce::String::fromUTF8 (cards.problem.c_str()), false);
+                }
+
+                std::vector<std::string> formats;
+
+                if (entry.toCard())
+                {
+                    formats = chosenCard != nullptr ? chosenCard->sends : std::vector<std::string> { entry.videoMode };
+
+                    juce::PopupMenu format;
+
+                    for (std::size_t at = 0; at < formats.size(); ++at)
+                        format.addItem (static_cast<int> (at) + 300, juce::String (formats[at]), true, formats[at] == entry.videoMode);
+
+                    juce::PopupMenu key;
+                    key.addItem (400, "Off", true, entry.key == "off");
+                    key.addItem (401, "External", chosenCard == nullptr || chosenCard->externalKey, entry.key == "external");
+                    key.addItem (402, "Internal", chosenCard == nullptr || chosenCard->internalKey, entry.key == "internal");
+
+                    juce::PopupMenu sound;
+
+                    for (std::size_t at = 0; at < buses.size(); ++at)
+                        sound.addItem (static_cast<int> (at) + 500, juce::String::fromUTF8 (buses[at].name.c_str()), true,
+                                       std::find (entry.sound.begin(), entry.sound.end(), buses[at].id) != entry.sound.end());
+
+                    if (buses.empty())
+                        sound.addItem (499, "the show has no outputs", false);
+
+                    menu.addSeparator();
+                    menu.addSubMenu ("Format", format);
+                    menu.addSubMenu ("Key", key);
+                    menu.addSubMenu ("Sound", sound);
+                }
+
+                std::vector<std::pair<std::string, std::string>> cardChoices;
+
+                for (const auto* card : sending)
+                    cardChoices.push_back ({ card->id, card->name });
+
                 menu.showMenuAsync (juce::PopupMenu::Options(),
-                                    [safe = juce::Component::SafePointer<VideoPage> (this), base, kinds, entry, row, cell] (int chosen)
+                                    [safe = juce::Component::SafePointer<VideoPage> (this), base, kinds, entry, row, cell,
+                                     cardChoices, formats] (int chosen)
                                     {
                                         if (safe == nullptr || chosen <= 0 || safe->send == nullptr)
+                                            return;
+
+                                        //  A card: its kind, the card and its name as one edit.
+                                        if (chosen >= 200 && static_cast<std::size_t> (chosen - 200) < cardChoices.size())
+                                        {
+                                            const auto& picked = cardChoices[static_cast<std::size_t> (chosen - 200)];
+                                            safe->send (gesture::setNodes ({ { base + "kind", "decklink" },
+                                                                             { base + "card", picked.first },
+                                                                             { base + "cardName", picked.second } }));
+                                            return;
+                                        }
+
+                                        if (chosen >= 300 && chosen < 400)
+                                        {
+                                            if (static_cast<std::size_t> (chosen - 300) < formats.size())
+                                                safe->send (gesture::setNode (base + "videoMode", formats[static_cast<std::size_t> (chosen - 300)]));
+
+                                            return;
+                                        }
+
+                                        if (chosen >= 400 && chosen <= 402)
+                                        {
+                                            static constexpr const char* keys[] { "off", "external", "internal" };
+                                            safe->send (gesture::setNode (base + "key", keys[chosen - 400]));
+                                            return;
+                                        }
+
+                                        //  A bus: carried, or no longer - in the order first picked.
+                                        if (chosen >= 500 && static_cast<std::size_t> (chosen - 500) < safe->buses.size())
+                                        {
+                                            const auto& bus = safe->buses[static_cast<std::size_t> (chosen - 500)].id;
+                                            auto carried = entry.sound;
+                                            const auto at = std::find (carried.begin(), carried.end(), bus);
+
+                                            if (at != carried.end())
+                                                carried.erase (at);
+                                            else
+                                                carried.push_back (bus);
+
+                                            std::string text;
+
+                                            for (const auto& one : carried)
+                                                text += (text.empty() ? "" : " ") + one;
+
+                                            safe->send (gesture::setNode (base + "sound", text));
+                                            return;
+                                        }
+
+                                        if (chosen >= 198 && chosen < 200)
                                             return;
 
                                         if (chosen == 2)
@@ -6834,7 +7042,7 @@ namespace wfg::client::ui
                                         }
 
                                         //  A display: shown, no longer sent - and chosen as the old menu chose it.
-                                        if (entry.sends())
+                                        if (entry.sends() || entry.toCard())
                                             safe->send (gesture::setNode (base + "kind", "display"));
 
                                         safe->choosingOutput = entry.id;
@@ -7088,6 +7296,10 @@ namespace wfg::client::ui
             std::vector<model::VideoInputRow> inputs;
             std::vector<model::VideoInsertRow> inserts;
             std::vector<model::OfferedSender> offered;
+
+            //  The DeckLink cards found, and the show's buses a card's sound picks from (§71).
+            model::CardsFound cards;
+            std::vector<model::OutputRow> buses;
             std::vector<std::string> displays;
 
             //  This machine's displays when a menu last looked (§64), merged into `displays` on every pass.
@@ -8980,7 +9192,7 @@ namespace wfg::client::ui
                          ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
                          model::dcaChoices (model::readDcas (snapshot)),
                          model::readVideoInputs (snapshot), model::readVideoInserts (snapshot),
-                         model::readOfferedSenders (snapshot));
+                         model::readOfferedSenders (snapshot), model::readCards (snapshot), model::readOutputs (snapshot));
 
             templates->show (model::readCueTemplates (snapshot),
                              ! model::isYes (model::flag (snapshot, "/godot/document/locked")));

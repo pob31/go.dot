@@ -15,6 +15,7 @@
 */
 
 #include <wfg/client/model/Video.h>
+#include <wfg/client/model/OutputList.h>
 
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/video/SendNames.h>
@@ -24,6 +25,7 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -387,6 +389,16 @@ namespace wfg::client::model
             else if (name == "kind")            row.kind = text (node).empty() ? std::string ("display") : text (node);
             else if (name == "sendName")        row.sendName = text (node);
             else if (name == "frameRate")       row.frameRate = numberOf (node, 60.0);
+            else if (name == "card")            row.card = text (node);
+            else if (name == "cardName")        row.cardName = text (node);
+            else if (name == "videoMode")       row.videoMode = text (node).empty() ? std::string ("1080p50") : text (node);
+            else if (name == "key")             row.key = text (node).empty() ? std::string ("off") : text (node);
+            else if (name == "sound")           row.sound = words (text (node));
+            else if (name == "latency")         row.latencyMs = numberOf (node, 0.0);
+            else if (name == "skew")            row.skewPpm = numberOf (node, 0.0);
+            else if (name == "reference")       row.reference = text (node).empty() ? std::string ("none") : text (node);
+            else if (name == "soundLate")       row.soundLate = integerOf (node, 0);
+            else if (name == "soundSent")       row.soundSent = integerOf (node, 0);
         }
 
         return inOrder (found, words (order));
@@ -647,6 +659,8 @@ namespace wfg::client::model
             else if (name == "height")     row.height = static_cast<int> (integerOf (node, 0));
             else if (name == "frameRate")  row.frameRate = numberOf (node, 0.0);
             else if (name == "problem")    row.problem = text (node);
+            else if (name == "videoMode")  row.videoMode = text (node).empty() ? std::string ("auto") : text (node);
+            else if (name == "format")     row.format = text (node);
         }
 
         return inOrder (found, words (order));
@@ -724,10 +738,138 @@ namespace wfg::client::model
 
     std::string pictureKindWord (const std::string& kind)
     {
-        if (kind == "ndi")     return "NDI";
-        if (kind == "spout")   return "Spout";
-        if (kind == "syphon")  return "Syphon";
+        if (kind == "ndi")       return "NDI";
+        if (kind == "spout")     return "Spout";
+        if (kind == "syphon")    return "Syphon";
+        if (kind == "decklink")  return "DeckLink";
         return "a display";
+    }
+
+    const CardRow* CardsFound::card (const std::string& id) const
+    {
+        for (const auto& one : cards)
+            if (one.id == id)
+                return &one;
+
+        return nullptr;
+    }
+
+    CardsFound cardsFrom (const std::string& all)
+    {
+        //  A line a card, its fields between tabs, its words between spaces.
+        CardsFound found;
+        std::size_t at = 0;
+
+        while (at < all.size())
+        {
+            const auto end = all.find ('\n', at);
+            const auto line = all.substr (at, end == std::string::npos ? std::string::npos : end - at);
+            std::vector<std::string> fields;
+            std::size_t from = 0;
+
+            while (true)
+            {
+                const auto tab = line.find ('\t', from);
+                fields.push_back (line.substr (from, tab == std::string::npos ? std::string::npos : tab - from));
+
+                if (tab == std::string::npos)
+                    break;
+
+                from = tab + 1;
+            }
+
+            if (fields.size() >= 2 && fields[0] == "problem")
+            {
+                found.problem = fields[1];
+            }
+            else if (fields.size() >= 2 && ! fields[0].empty())
+            {
+                CardRow row;
+                row.id = fields[0];
+                row.name = fields[1];
+
+                for (const auto& word : fields.size() > 2 ? words (fields[2]) : std::vector<std::string> {})
+                {
+                    if (word == "output")         row.output = true;
+                    else if (word == "input")     row.input = true;
+                    else if (word == "internal")  row.internalKey = true;
+                    else if (word == "external")  row.externalKey = true;
+                    else if (word == "10bit")     row.tenBit = true;
+                    else if (word.rfind ("sound", 0) == 0)
+                        row.soundChannels = std::atoi (word.c_str() + 5);
+                }
+
+                if (fields.size() > 3)
+                    row.sends = words (fields[3]);
+
+                if (fields.size() > 4)
+                    row.takes = words (fields[4]);
+
+                found.cards.push_back (std::move (row));
+            }
+
+            if (end == std::string::npos)
+                break;
+
+            at = end + 1;
+        }
+
+        return found;
+    }
+
+    CardsFound readCards (const tree::TreeSnapshot& snapshot)
+    {
+        return cardsFrom (text (snapshot, "/godot/videoOutput/cards"));
+    }
+
+    std::vector<std::string> inputKindsHere (const CardsFound& cards)
+    {
+        auto kinds = pictureKindsHere();
+
+        if (std::any_of (cards.cards.begin(), cards.cards.end(), [] (const CardRow& card) { return card.input; }))
+            kinds.push_back ("decklink");
+
+        return kinds;
+    }
+
+    std::string cardSummary (const VideoOutputRow& output, const CardsFound& cards, const std::vector<OutputRow>& buses)
+    {
+        const auto* card = cards.card (output.card);
+        std::string out = "DeckLink";
+
+        if (card != nullptr)
+            out += "  \xc2\xb7  " + card->name;
+        else if (! output.cardName.empty())
+            out += "  \xc2\xb7  " + output.cardName + " (not on this machine)";
+        else if (! output.card.empty())
+            out += "  \xc2\xb7  " + output.card + " (not on this machine)";
+        else
+            out += "  \xc2\xb7  no card chosen";
+
+        out += "  \xc2\xb7  " + output.videoMode;
+
+        if (output.key != "off")
+            out += "  \xc2\xb7  key " + output.key;
+
+        if (! output.sound.empty())
+        {
+            std::string names;
+
+            for (const auto& id : output.sound)
+            {
+                std::string name = id;
+
+                for (const auto& bus : buses)
+                    if (bus.id == id)
+                        name = bus.name.empty() ? id : bus.name;
+
+                names += (names.empty() ? "" : ", ") + name;
+            }
+
+            out += "  \xc2\xb7  sound " + names;
+        }
+
+        return out;
     }
 
     std::vector<std::pair<std::string, std::string>> videoInputChoices (const std::vector<VideoInputRow>& inputs)

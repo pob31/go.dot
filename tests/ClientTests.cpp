@@ -11105,6 +11105,99 @@ TEST_CASE ("client: an output's zones are read bottom first, a warp the wrong si
     CHECK (model::regridded (model::WarpPoints::whole(), 4, 3).isWhole());
 }
 
+TEST_CASE ("client: the DeckLink cards read as the renderer says them, offered as an input kind only where one takes pictures in (§71, DL.9)")
+{
+    const auto found = model::cardsFrom ("fake-1\tGo.dot test card\toutput input internal external 10bit sound16\t1080p50 1080p59.94\t1080p50\n"
+                                         "dl-2\tDeckLink Mini Monitor\toutput sound2\t1080i50\t");
+    REQUIRE (found.cards.size() == 2);
+    CHECK (found.problem.empty());
+
+    const auto& test = found.cards[0];
+    CHECK (test.id == "fake-1");
+    CHECK (test.name == "Go.dot test card");
+    CHECK (test.output);
+    CHECK (test.input);
+    CHECK (test.internalKey);
+    CHECK (test.externalKey);
+    CHECK (test.tenBit);
+    CHECK (test.soundChannels == 16);
+    CHECK (test.sends == std::vector<std::string> { "1080p50", "1080p59.94" });
+    CHECK (test.takes == std::vector<std::string> { "1080p50" });
+
+    const auto& monitor = found.cards[1];
+    CHECK (monitor.output);
+    CHECK_FALSE (monitor.input);
+    CHECK_FALSE (monitor.externalKey);
+    CHECK (monitor.soundChannels == 2);
+    CHECK (monitor.takes.empty());
+    CHECK (found.card ("dl-2") == &monitor);
+    CHECK (found.card ("dl-9") == nullptr);
+
+    //  Desktop Video missing: no card, and why.
+    const auto none = model::cardsFrom ("problem\tDesktop Video is not installed: Blackmagic's drivers, from www.blackmagicdesign.com/support");
+    CHECK (none.cards.empty());
+    CHECK (none.problem.rfind ("Desktop Video is not installed", 0) == 0);
+
+    //  DeckLink is an input's kind only where a card takes pictures in (APN).
+    const auto here = model::pictureKindsHere();
+    CHECK (model::inputKindsHere (none) == here);
+
+    model::CardsFound outputOnly;
+    outputOnly.cards.push_back (monitor);
+    CHECK (model::inputKindsHere (outputOnly) == here);
+
+    auto withInput = model::inputKindsHere (found);
+    REQUIRE (withInput.size() == here.size() + 1);
+    CHECK (withInput.back() == "decklink");
+    CHECK (model::pictureKindWord ("decklink") == "DeckLink");
+}
+
+TEST_CASE ("client: a card output's rows read, neither a display nor a sender, said in a row's words (§71, DL.9)")
+{
+    Rig rig;
+
+    const auto canvas = rig.document.createCanvas ("Stage");
+    REQUIRE (canvas.ok);
+    const auto output = rig.document.createVideoOutput ("Mixer", canvas.id);
+    REQUIRE (output.ok);
+
+    const auto base = "/godot/videoOutput/" + output.id + "/";
+    REQUIRE (rig.document.setAttribute (base + "kind", "decklink").ok);
+    REQUIRE (rig.document.setAttribute (base + "card", "fake-1").ok);
+    REQUIRE (rig.document.setAttribute (base + "cardName", "Go.dot test card").ok);
+    REQUIRE (rig.document.setAttribute (base + "key", "external").ok);
+    REQUIRE (rig.document.setAttribute (base + "sound", "BS000001 BS000002").ok);
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+    const auto outputs = model::readVideoOutputs (*snapshot);
+    REQUIRE (outputs.size() == 1);
+
+    const auto& row = outputs.front();
+    CHECK (row.toCard());
+    CHECK_FALSE (row.sends());
+    CHECK (row.card == "fake-1");
+    CHECK (row.videoMode == "1080p50");
+    CHECK (row.key == "external");
+    CHECK (row.sound == std::vector<std::string> { "BS000001", "BS000002" });
+    CHECK (row.reference == "none");
+
+    //  Never one of Go.dot's own send names (§47, AAK): a card is no sender.
+    CHECK (model::ownSendNames (outputs, {}).empty());
+
+    model::OutputRow main;
+    main.id = "BS000001";
+    main.name = "Main L/R";
+
+    const auto found = model::cardsFrom ("fake-1\tGo.dot test card\toutput\t1080p50\t");
+    const auto dot = std::string ("  \xc2\xb7  ");
+    CHECK (model::cardSummary (row, found, { main })
+           == "DeckLink" + dot + "Go.dot test card" + dot + "1080p50" + dot + "key external" + dot + "sound Main L/R, BS000002");
+
+    //  The card gone from this machine: its name as picked, said so.
+    CHECK (model::cardSummary (row, {}, { main }).find ("Go.dot test card (not on this machine)") != std::string::npos);
+}
+
 //==============================================================================
 /*  AN OSC CUE'S MESSAGES, AS THE FOOT'S TABLE READS THEM (namespace draft 45,
     O.5): its own first, then each further one in order, every value with its
