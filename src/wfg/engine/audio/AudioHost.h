@@ -184,6 +184,8 @@ namespace wfg::audio
     };
 
     //==============================================================================
+    namespace cardsound { struct Region; }
+
     class AudioHost
     {
     public:
@@ -549,6 +551,13 @@ namespace wfg::audio
             Tick thread, lock-free: a relaxed store a channel. Channels the
             interface was not opened with are passed over. */
         void setOutputGainDb (int firstChannel, int width, double gainDb) noexcept;
+
+        /*  THE SOUND A DECKLINK CARD EMBEDS (namespace draft §71, APJ): the
+            ring each block's logical outputs are copied into, after their
+            trim, DCA and LTC, for the renderer to put on a card; null for
+            none. Any thread, one store; the region must outlive every block
+            after it is set - Console's, made before any driver. */
+        void setCardSound (cardsound::Region* region) noexcept;
 
         /*  How many of a track's breakpoints arrived after the moment they were
             for had played, and were placed at the block instead - the horizon

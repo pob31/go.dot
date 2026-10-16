@@ -16,6 +16,7 @@
 
 #include <wfg/engine/video/VideoHost.h>
 
+#include <wfg/engine/audio/CardSound.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/plugin/ChildLaunch.h>
@@ -291,6 +292,10 @@ namespace wfg::video
             if (spec.headless)
                 command.push_back ("--no-window");
 
+            //  The sound cards embed, from the ring the audio thread fills (§71).
+            if (! spec.cardSoundPath.empty())
+                command.push_back ("--sound=" + spec.cardSoundPath);
+
             /*  THE OLD OPENGL RENDERER, asked for by name while the new one
                 (namespace draft §44) is being proved on the projectors. */
             if (juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_RENDERER", {}) == "gl")
@@ -487,6 +492,7 @@ namespace wfg::video
         std::vector<region::InputReading> inputs;
         std::vector<region::InsertReading> inserts;
         bool configured = false;
+        std::vector<int> lanes;   ///< the card sound's lane map as last published (§71)
         std::set<std::string> identified;
         std::set<std::string> gridded;     // outputs showing their alignment grid (§68, ANX)
         bool hideProjectors = false;
@@ -758,6 +764,27 @@ namespace wfg::video
                 its send is up from the moment it is declared, so the other
                 program can be patched to it before any cue goes through. */
             anyEnabled = true;
+        }
+
+        /*  THE LANES THE AUDIO THREAD TAKES (namespace draft §71, APJ): every
+            logical output channel a card output switched on carries, each
+            once, in the order first named - the ring's lane map, published
+            only when it changes. */
+        if (impl->spec.cardSound != nullptr)
+        {
+            std::vector<int> lanes;
+
+            for (const auto& output : outputs)
+                if (output.toCard() && output.enabled)
+                    for (const auto channel : output.sound)
+                        if (channel >= 0 && std::find (lanes.begin(), lanes.end(), channel) == lanes.end())
+                            lanes.push_back (channel);
+
+            if (lanes != impl->lanes)
+            {
+                audio::cardsound::publishLanes (*impl->spec.cardSound, lanes);
+                impl->lanes = std::move (lanes);
+            }
         }
 
         if (! impl->configured || ! sameCanvases (canvases, impl->canvases) || ! sameOutputs (outputs, impl->outputs)

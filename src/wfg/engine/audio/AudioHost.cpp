@@ -14,6 +14,7 @@
  */
 
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/audio/CardSound.h>
 
 #include <wfg/engine/rt/RtCheck.h>
 
@@ -1509,6 +1510,15 @@ namespace wfg::audio
             ltc.render (scratch.getArrayOfWritePointers(), current.outputChannels, current.blockSize,
                         tapView.blockStart);
 
+            /*  THE SOUND A CARD EMBEDS (namespace draft §71, APJ), taken where
+                the interface's is: every logical output the lane map names,
+                after its gain and LTC, copied into the ring the renderer
+                reads. Ours, and allocation-free: copies into slots made with
+                the file, and a count when they are full. */
+            if (auto* card = cardSound.load (std::memory_order_acquire); card != nullptr)
+                cardsound::write (*card, scratch.getArrayOfReadPointers(), current.outputChannels, current.blockSize,
+                                  tapView.blockStart, current.sampleRate);
+
             if (sink != nullptr)
                 sink->blockProduced (scratch.getArrayOfReadPointers(),
                                      current.outputChannels, current.blockSize);
@@ -2599,6 +2609,10 @@ namespace wfg::audio
         std::atomic<int> ltcInChannel { -1 };
         int ltcInDecoded = -1;
 
+        /*  THE RING A CARD'S SOUND IS TAKEN INTO (namespace draft §71, APJ),
+            or null: Console's, set when a driver is made. */
+        std::atomic<cardsound::Region*> cardSound { nullptr };
+
         AudioClockSource samples;
         std::atomic<std::int64_t> blocks { 0 };
 
@@ -3217,6 +3231,11 @@ namespace wfg::audio
     std::uint32_t AudioHost::timecodeLate() const noexcept        { return impl->ltc.lateCount(); }
     std::uint64_t AudioHost::timecodeProgram() const noexcept     { return impl->ltc.currentProgram(); }
     std::uint64_t AudioHost::timecodeGeneration() const noexcept  { return impl->ltc.generation(); }
+
+    void AudioHost::setCardSound (cardsound::Region* region) noexcept
+    {
+        impl->cardSound.store (region, std::memory_order_release);
+    }
 
     void AudioHost::setTimecodeInput (int channel) noexcept
     {

@@ -40,6 +40,7 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/audio/CardSound.h>
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/MediaInfo.h>
 
@@ -1840,6 +1841,68 @@ TEST_CASE ("rt: a cue playing through the matrix still allocates nothing of ours
            << " times while a cue was playing and its matrix was moving");
 
     CHECK (rt::violations() == 0);
+}
+
+TEST_CASE ("rt: a card's sound taken off the audio thread allocates nothing of ours, and keeps each block's sample (§71, DL.6)")
+{
+    REQUIRE (rt::isCounting());
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 8;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    auto ring = std::make_unique<audio::cardsound::Region>();
+    audio::cardsound::stamp (*ring);
+    audio::cardsound::publishLanes (*ring, { 0, 1, 6, 7 });
+    rig.host.setCardSound (ring.get());
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    //  What was taken before counting is let go, so the ring never fills.
+    audio::cardsound::Block block;
+
+    while (audio::cardsound::peek (*ring, block))
+        audio::cardsound::release (*ring);
+
+    rt::resetCounts();
+    std::int64_t expected = -1;
+    int taken = 0;
+    bool inStep = true;
+
+    for (int i = 0; i < 300; ++i)
+    {
+        rig.host.processBlock();
+
+        //  Read on this thread, as the renderer reads in its own process.
+        while (audio::cardsound::peek (*ring, block))
+        {
+            if (expected >= 0 && block.sample != expected)
+                inStep = false;
+
+            expected = block.sample + block.frames;
+            ++taken;
+            audio::cardsound::release (*ring);
+        }
+    }
+
+    rig.host.setCardSound (nullptr);
+
+    INFO ("Go.dot's own regions allocated " << rt::violations() << " times while a card's sound was taken");
+    CHECK (rt::violations() == 0);
+    CHECK (taken == 300);
+    CHECK (inStep);
+    CHECK (audio::cardsound::droppedFrames (*ring) == 0);
 }
 
 //==============================================================================

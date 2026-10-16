@@ -121,6 +121,7 @@
 #include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/audio/SettingsPump.h>
 #include <wfg/engine/audio/TakePictures.h>
+#include <wfg/engine/audio/CardSound.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/audio/InputCapture.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
@@ -4657,6 +4658,13 @@ namespace
             joins whatever the running device published (macOS; empty
             elsewhere; 2026-10-06). Declared before both, so it outlives them. */
         spatcore::rt::AudioWorkgroupCoordinator workgroups;
+
+        /*  THE SOUND DECKLINK CARDS EMBED (namespace draft §71, APJ): the ring
+            every audio host copies into and the renderer reads, made before
+            any driver so that it outlives every block they run. */
+        wfg::audio::cardsound::File cardSound { juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                                    .getChildFile ("godot-video").getFullPathName().toStdString() };
+
         std::unique_ptr<wfg::audio::DeviceAudioDriver> deviceDriver;
         audioState.sendTest = [&deviceDriver] (const wfg::audio::OutputTestSettings& settings)
         { if (deviceDriver) deviceDriver->setOutputTest (settings); };
@@ -4684,6 +4692,7 @@ namespace
             deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
                 engineCacheFolder().getFullPathName().toStdString());
             deviceDriver->host().setProxyServices (proxyServices);
+            deviceDriver->host().setCardSound (cardSound.region());
             deviceDriver->setWorkgroups (&workgroups);
             restartPlugin = [&deviceDriver] (const std::string& id, std::string& problem)
             {
@@ -5206,6 +5215,8 @@ namespace
         videoSpec.workFolder = juce::File::getSpecialLocation (juce::File::tempDirectory)
                                    .getChildFile ("godot-video").getFullPathName().toStdString();
         videoSpec.headless = args.containsOption ("--no-video-window");
+        videoSpec.cardSound = cardSound.region();
+        videoSpec.cardSoundPath = cardSound.region() != nullptr ? cardSound.path() : std::string {};
 
         wfg::video::VideoHost videoHost { std::move (videoSpec) };
         wfg::video::registerVideoCommands (engine.commands(), &videoHost);
@@ -6314,6 +6325,7 @@ namespace
             const auto spec = editSpecOf (shape, target, static_cast<std::int64_t> (proxyDeadlineUs));
 
             driver->host().setProxyServices (proxyServices);
+            driver->host().setCardSound (cardSound.region());
 
             if (! driver->host().buildEdit (spec))
             {
@@ -8638,6 +8650,7 @@ namespace
                     deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
                         engineCacheFolder().getFullPathName().toStdString());
                 deviceDriver->host().setProxyServices (proxyServices);
+                deviceDriver->host().setCardSound (cardSound.region());
                 deviceDriver->setWorkgroups (&workgroups);
                 if (! shape.problem.empty()) error = shape.problem;
                 else if (! deviceDriver->open (wanted)) error = deviceDriver->lastError();
@@ -8797,6 +8810,7 @@ namespace
                 else
                 {
                     driver->host().setProxyServices (proxyServices);
+                    driver->host().setCardSound (cardSound.region());
 
                     if (! driver->host().buildEdit (edit))
                         error = driver->host().lastError();

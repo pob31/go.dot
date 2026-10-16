@@ -22,6 +22,7 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include <wfg/engine/audio/CardSound.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/DeckLinkProbe.h>
@@ -490,4 +491,108 @@ TEST_CASE ("video gpu: a card output on the test card is paced by the card, and 
                           const auto* now = latest.output ("VD000021");
                           return now != nullptr && ! now->bound && now->problem == "the card is not connected";
                       }, 10000));
+}
+
+TEST_CASE ("decklink: the card's sound ring carries the lanes named, each slot stamped with its sample, and drops what it cannot hold (DL.6)")
+{
+    namespace cs = audio::cardsound;
+    auto r = std::make_unique<cs::Region>();
+    cs::stamp (*r);
+    CHECK (cs::looksValid (*r));
+
+    //  Four logical outputs, each a ramp of its own.
+    constexpr int frames = 300;
+    std::vector<std::vector<float>> outputs (4, std::vector<float> (frames));
+
+    for (int c = 0; c < 4; ++c)
+        for (int n = 0; n < frames; ++n)
+            outputs[static_cast<std::size_t> (c)][static_cast<std::size_t> (n)] = static_cast<float> (c * 1000 + n);
+
+    const float* pointers[4] { outputs[0].data(), outputs[1].data(), outputs[2].data(), outputs[3].data() };
+
+    //  No lanes, nothing taken: a show with no card carrying sound costs a load.
+    cs::write (*r, pointers, 4, frames, 48000, 48000);
+    cs::Block block;
+    CHECK_FALSE (cs::peek (*r, block));
+
+    //  Outputs 3 and 0, and one the interface has not got - silence.
+    cs::publishLanes (*r, { 3, 0, 9 });
+    CHECK (cs::lanesOf (*r) == std::vector<int> { 3, 0, 9 });
+    cs::write (*r, pointers, 4, frames, 48000, 48000);
+
+    //  A block longer than a slot takes two, the second stamped where it starts.
+    REQUIRE (cs::peek (*r, block));
+    CHECK (block.sample == 48000);
+    CHECK (block.frames == cs::slotFrames);
+    CHECK (block.rate == 48000);
+    CHECK (block.lanes == 3);
+    CHECK (block.lane[0][10] == doctest::Approx (3010.0f));
+    CHECK (block.lane[1][10] == doctest::Approx (10.0f));
+    CHECK (block.lane[2][10] == doctest::Approx (0.0f));
+    cs::release (*r);
+
+    REQUIRE (cs::peek (*r, block));
+    CHECK (block.sample == 48000 + cs::slotFrames);
+    CHECK (block.frames == frames - cs::slotFrames);
+    CHECK (block.lane[0][0] == doctest::Approx (static_cast<float> (3000 + cs::slotFrames)));
+    cs::release (*r);
+    CHECK_FALSE (cs::peek (*r, block));
+
+    //  A reader that does not come: the ring fills, the rest is dropped and
+    //  counted, and the next slot taken says how much went before it.
+    std::int64_t at = 100000;
+
+    for (int n = 0; n < cs::slotCount + 4; ++n, at += 128)
+        cs::write (*r, pointers, 4, 128, at, 48000);
+
+    CHECK (cs::droppedFrames (*r) == 4 * 128);
+
+    for (int n = 0; n < cs::slotCount; ++n)
+    {
+        REQUIRE (cs::peek (*r, block));
+        cs::release (*r);
+    }
+
+    cs::write (*r, pointers, 4, 128, at, 48000);
+    REQUIRE (cs::peek (*r, block));
+    CHECK (block.sample == at);
+    CHECK (block.droppedBefore == 4 * 128);
+}
+
+TEST_CASE ("decklink: a card output's buses become the ring's lanes, each channel once, published when they change (DL.6)")
+{
+    namespace cs = audio::cardsound;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-lanes-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    cs::File file { folder.getFullPathName().toStdString() };
+    REQUIRE (file.region() != nullptr);
+    MESSAGE ("the ring's pages " << std::string (file.locked() ? "are" : "are not") << " locked into memory here");
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.headless = true;
+    spec.cardSound = file.region();
+    spec.cardSoundPath = file.path();
+
+    doc::ShowDocument document;
+    const juce::File bundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) + "/bundles/video" };
+    REQUIRE (doc::Bundle::open (bundle, document).ok);
+
+    video::VideoHost host { spec };
+    host.configure (document);
+    CHECK (cs::lanesOf (*file.region()).empty());
+
+    //  The fixture's stereo bus on the card: its two channels, once each.
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "decklink").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/card", "fake-1").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/sound", "VD000004 VD000004").ok);
+    host.configure (document);
+    CHECK (cs::lanesOf (*file.region()) == std::vector<int> { 0, 1 });
+
+    //  Switched off, it carries nothing.
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/enabled", "false").ok);
+    host.configure (document);
+    CHECK (cs::lanesOf (*file.region()).empty());
 }

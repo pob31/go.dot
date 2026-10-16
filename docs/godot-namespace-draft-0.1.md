@@ -30370,7 +30370,7 @@ card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine,
 | DL.2 | The rows, the kinds, the renderer's region, the cards found published || cfd0136 |
 | DL.3 | A card output: paced by the card, at its format, latency, skew and reference, tried again || 04388a0 |
 | DL.4 | 10-bit YUV | 4540aa6 |
-| DL.5 | Fill and key | |
+| DL.5 | Fill and key | b217edd |
 | DL.6 | The sound taken off the audio thread | |
 | DL.7 | The sound placed and resampled on the card | |
 | DL.8 | A card as a video input | |

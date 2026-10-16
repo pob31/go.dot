@@ -83,6 +83,8 @@ add_library(wfg_engine STATIC
     wfg/engine/app/WindowApplication.h
     wfg/engine/audio/AudioSettings.cpp
     wfg/engine/audio/AudioSettings.h
+    wfg/engine/audio/CardSound.cpp
+    wfg/engine/audio/CardSound.h
     wfg/engine/audio/OutputTestSignal.h
     wfg/engine/Engine.cpp
     wfg/engine/Engine.h

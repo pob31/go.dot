@@ -49,6 +49,8 @@
 
 namespace wfg::doc { class ShowDocument; }
 
+namespace wfg::audio::cardsound { struct Region; }
+
 namespace wfg::video
 {
     struct HostSpec
@@ -62,6 +64,12 @@ namespace wfg::video
 
         /** The renderer with no window: CI's, and a machine with no screen. */
         bool headless = false;
+
+        /*  THE SOUND CARDS EMBED (namespace draft §71, APJ): the ring the
+            audio thread copies into and its file, which the renderer maps;
+            none, and no card carries sound. Console's, outliving the host. */
+        audio::cardsound::Region* cardSound = nullptr;
+        std::string cardSoundPath {};
     };
 
     struct Readouts
