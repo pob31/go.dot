@@ -149,7 +149,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Keys (new) | A picture, a movie or a camera made see-through by its own alpha, by its brightness, by its brightness as a shape in a colour, or by a blue or green screen with the screen's colour taken off the edges | *Picture* panel, *Key* |
 | Text cues (new) | Titles and slides: words in a font, a size and a colour, with an outline that can glow. The words can hold fields like `{score}`, which any program fills by sending `/godot/text/score` over OSC - at once, even while the show is locked, and never saved | *Add > video > Text*; *Picture* panel, *Fields* |
 | Blur cues (new) | Blurs everything beneath it on its canvas, inside or outside an outline; a fade moves how far | *Add > video > Blur*; *Picture* panel |
-| Canvases and mapping | Several canvases on one output, each bent onto the wall with a mesh warp, and an ASC CDL per output to match projectors | *Show settings > Video*; warp editor |
+| Canvases and mapping | Several canvases on one output, each bent onto the wall with a mesh warp, and an ASC CDL per output to match projectors. **Grid** shows a grid on the projector, bent by the warp, to set the geometry by | *Show settings > Video*; warp editor; the Android remote's *Mapping* tab |
 | NDI, Spout, Syphon | Send an output to another program, take a program's picture in as a live input, or pass a cue's picture through another program and back | *Show settings > Video* |
 | Read ahead | The next GO's stills and movies are loaded before you press it, and every cue row says whether its cue is ready | Cue list |
 | DCAs on pictures | A DCA rides pictures as opacity; the knob above a DCA strip sets the curve a picture comes in on and the sound's offset | Surfaces; virtual panel |
@@ -248,13 +248,38 @@ The same commands, with **Hand over** (the main lets the backup send), are under
 
 **Timing.** While it follows, the backup sends nothing to devices (OSC, MIDI, serial); a command you give it is passed on to the main. The two start each sound on the same sample: on two computers over Dante, within about a tenth of a millisecond. The *Redundancy* tab shows how closely they keep together, and each interface's output delay.
 
+### The Android remote (new)
+
+Go.dot has an Android app for a tablet or a phone. It stays connected in the background, so it is live the moment you look at it, and you can switch to another app and back without waiting.
+
+**Getting it.** Install the APK from the latest release at [github.com/pob31/go.dot-remote/releases](https://github.com/pob31/go.dot-remote/releases) (Android 8 or later; let your browser install it when Android asks). On the *Connections* tab, add the computer running Go.dot: its IP address and port 5010, the address the web console uses. The tablet and the computer must be on the same network.
+
+**Always on screen.** **GO**, **Doh!** and **PANIC** (twice within 0.75 s kills everything), the current cue and the next one with its notes, arrows to move the standby, and, in words, a locked show or a command that was refused. At the end of the tab bar, a mark for each connection: a green dot when it is live, an orange ring while it connects, a red cross when it is lost. Tap them to open *Connections*.
+
+| Tab | What you can do |
+| --- | --- |
+| *Cues* | Every list. Tap a cue to adjust it: level, trim while it plays, sends, the 16 EQ controls, its DCA, waits, speed, on or off, flag and notes, with its waveform. Tap the left edge to park the standby there; hold for *Fire now* |
+| *Running* | Everything that is playing: stop, kill (a long swipe or the menu), advance, skip a member of a round, drag the playhead, and a large trim fader for each sound |
+| *Surface* | The show's surfaces, strips and all: a D700 that is not plugged in works from the tablet. *This tablet* gives a fader for each DCA. *EQ* and *Sends* pages for the selected sound |
+| *Mapping* | Each video output's warp and zones: drag a point or nudge it, change the grid of points, a zone's opacity and blend, **Identify** the projector, and **Grid**, which shows a grid on the projector bent by the warp |
+| *Script* | Choufleur's script page, once its address is set (below) |
+| *Connections* | The computers, a main and its backup together with their *Take over* buttons; the tablet's name; Find this tablet; Choufleur and its wrist buzzer; *Quit the remote* |
+
+**Riding levels in a locked show.** A cue's own level is part of the show, so the lock keeps it. Ride the trim of the sound playing, or a DCA: both are tonight's and never saved. EQ and sends ride live, as on the D700.
+
+**Find this tablet.** In Go.dot, *Show settings > Network* lists the connected tablets with a **Find** button: the tablet flashes its screen and its camera light, sounds its alarm and vibrates until it is touched.
+
+**Choufleur on the tablet.** On *Connections*, type the operator address Choufleur gives you, or scan its code. The *Script* tab then shows the script following the show, under GO. A Choufleur wrist buzzer is linked on the same tab and taps your wrist before your cues.
+
+**Stopping it.** *Connections > Quit the remote* unlinks everything and stops it running in the background. The next launch links the same computers again.
+
 ## Coming next
 
 These are designed in the specification and not built yet. The order may change with what testers ask for, which is one more reason to send feedback.
 
-### Tablet app and HTML remote
+### The web console on a tablet
 
-The web console already runs in any browser on the network. It will grow into a full **remote**: a running pane to kill, advance and scrub what is playing; parameters to adjust while you walk the house; GO from a designer's seat; and a complete fallback if a control surface fails. Touch controls are relative from where your finger lands, so nothing jumps, and dangerous actions need a deliberate gesture rather than a tap. A **native tablet companion** will come on top of it, for one reason: it wakes instantly when you reach for it mid-cue.
+The web console already runs in any browser on the network, an iPad's included. It will gain the Android remote's touch controls, relative from where your finger lands so nothing jumps, with a deliberate gesture for anything dangerous.
 
 ### Video latency compensation
 
@@ -267,11 +292,10 @@ Set a projector's delay once, and sound is held back to line up with the picture
 | **WFS-DIY** (wave field synthesis) | Command its sources, positions and LFOs, claimed per cue so two cues never fight over one input. Writing its snapshots into Go.dot as cues already works (above) |
 | **XOA / Tight-WFS** | The same, for ambisonic and WFS rendering |
 | **S21-HiJack** | Drive it as a sidecar for the DiGiCo S21, under its own branch of addresses. Writing its snapshots into Go.dot and being driven by Go.dot's GO already work (above) |
-| **Choufleur** (script following) | Show the script position and upcoming cues next to the cue list. Choufleur never fires anything, by design |
 | **Millumin** | The escape hatch for shows whose video outgrows Go.dot |
 | Any OSCQuery device | Found on the network by itself. Today you give its address, and a device that describes itself already offers its addresses as menus (above) |
 
-WFS-DIY, XOA/Tight-WFS, S21-HiJack and Choufleur come from the same author as Go.dot. They stay separate applications, possibly on other machines; Go.dot directs them over the network.
+WFS-DIY, XOA/Tight-WFS and S21-HiJack come from the same author as Go.dot, as does Choufleur, the script follower the Android remote already shows (above). They stay separate applications, possibly on other machines; Go.dot directs them over the network.
 
 ### Integration with hardware
 

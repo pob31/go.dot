@@ -182,6 +182,18 @@ has stood in front of the thing.
   on a Redundancy tab of Show settings, which belongs to the computer. Measured
   between two computers over Dante: the backup starts each sound within about
   a tenth of a millisecond of the main's sample.
+- **The Android remote** (namespace draft §68), its own repository,
+  [go.dot-remote](https://github.com/pob31/go.dot-remote), APKs on its releases
+  page. It holds Go.dot's whole state in the background from one WebSocket that
+  Go.dot streams every tick, so it is live the moment it is looked at. GO, Doh!
+  and PANIC, the current cue and the next with its notes, always on screen; tabs
+  for the cues (levels, sends, EQ, DCAs, waits, speed, flags, notes - never the
+  list's shape), the running cues (kill, stop, advance, scrub, trims), a surface
+  (the show's surfaces, or a fader per DCA), the video mapping (warps, zones,
+  Identify and a projected grid), Choufleur's script page and its wrist buzzer,
+  and the connections - a main and its backup together. Go.dot's Network tab
+  finds a tablet: its screen and camera light flash and it sounds its alarm.
+  English and French. The contract is `docs/godot-remote-protocol-0.1.md`.
 
 ### Not built yet
 
@@ -190,12 +202,10 @@ has stood in front of the thing.
 - **Bindings** — a general way to bind any parameter to any control, with read,
   touch, latch and write modes (PRD §3.10). Today a surface reaches parameters
   through Go.dot's own pages.
-- **The tablet** (Phase 7) — the console runs in a tablet's browser, but as a
-  mouse-and-keyboard page, without the touch gestures PRD §3.17 describes. The
-  native Android remote, which stays live in the background, is its own
-  repository, [go.dot-remote](https://github.com/pob31/go.dot-remote)
-  (namespace draft §68): it runs on the author's tablet; a signed release and its
-  page in the tester guides are still to come.
+- **The web console's touch gestures** (Phase 7) — the console runs in a
+  tablet's browser, an iPad's included, but as a mouse-and-keyboard page,
+  without the touch gestures PRD §3.17 describes. The Android remote has them
+  (above).
 - **Video latency offsets and DeckLink output** (Phase 8b).
 - **Integrations** — OSCQuery devices found on the network by
   themselves, and commanding WFS-DIY's and XOA's sources with claims per cue

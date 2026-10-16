@@ -151,7 +151,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Incrustations (nouveau) | Rendre transparente une image, un film ou une caméra par sa propre couche alpha, par sa luminosité, par sa luminosité comme forme dans une couleur, ou par un fond bleu ou vert dont la couleur est retirée des bords | Panneau *Picture*, *Key* |
 | Cues texte (nouveau) | Titres et diapositives : des mots dans une police, une taille et une couleur, avec un contour qui peut rayonner. Les mots peuvent contenir des champs comme `{score}`, que n'importe quel programme remplit en envoyant `/godot/text/score` en OSC - aussitôt, même quand le spectacle est verrouillé, et jamais enregistrés | *Add > video > Text* ; panneau *Picture*, *Fields* |
 | Cues flou (nouveau) | Floute tout ce qui est en dessous sur son canevas, dans ou hors d'un contour ; un fondu fait varier son intensité | *Add > video > Blur* ; panneau *Picture* |
-| Canevas et mapping | Plusieurs canevas sur une sortie, chacun déformé sur le mur par un maillage, et un ASC CDL par sortie pour accorder les projecteurs | *Show settings > Video* ; éditeur de déformation |
+| Canevas et mapping | Plusieurs canevas sur une sortie, chacun déformé sur le mur par un maillage, et un ASC CDL par sortie pour accorder les projecteurs. **Grid** affiche sur le projecteur une grille courbée par la déformation, pour régler la géométrie | *Show settings > Video* ; éditeur de déformation ; l'onglet *Mapping* de la télécommande Android |
 | NDI, Spout, Syphon | Envoyer une sortie à un autre programme, recevoir l'image d'un programme comme entrée live, ou faire passer l'image d'une cue par un autre programme et retour | *Show settings > Video* |
 | Lecture anticipée | Les images fixes et films du prochain GO sont chargés avant l'appui, et chaque ligne de la liste dit si sa cue est prête | Liste de cues |
 | DCA sur les images | Un DCA agit sur les images comme opacité ; le potentiomètre au-dessus d'une tranche DCA règle la courbe d'arrivée de l'image et le décalage du son | Surfaces ; panneau virtuel |
@@ -250,13 +250,38 @@ Les mêmes commandes, avec **Hand over** (le principal laisse le secours envoyer
 
 **Le temps.** Tant qu'il suit, le secours n'envoie rien aux appareils (OSC, MIDI, série) ; une commande que vous lui donnez est transmise au principal. Les deux démarrent chaque son sur le même échantillon : sur deux ordinateurs en Dante, à environ un dixième de milliseconde. L'onglet *Redundancy* montre à quel point ils restent ensemble, et la latence de sortie de chaque interface.
 
+### La télécommande Android (nouveau)
+
+Go.dot a une application Android pour tablette ou téléphone. Elle reste reliée en arrière-plan : elle est à jour dès qu'on la regarde, et l'on passe à une autre application et retour sans attendre.
+
+**L'obtenir.** Installez l'APK de la dernière version publiée sur [github.com/pob31/go.dot-remote/releases](https://github.com/pob31/go.dot-remote/releases) (Android 8 ou plus récent ; laissez le navigateur l'installer quand Android le demande). Dans l'onglet *Connexions*, ajoutez l'ordinateur qui fait tourner Go.dot : son adresse IP et le port 5010, l'adresse de la console web. La tablette et l'ordinateur doivent être sur le même réseau. Elle est en français quand la tablette l'est, et les noms ci-dessous sont ceux qu'elle affiche alors.
+
+**Toujours à l'écran.** **GO**, **Doh!** et **PANIC** (deux fois en moins de 0,75 s coupe tout), la cue en cours et la suivante avec ses notes, des flèches pour déplacer la cue en attente, et, en toutes lettres, un spectacle verrouillé ou une commande refusée. Au bout de la barre d'onglets, une marque par connexion : un point vert quand elle est vivante, un anneau orange pendant qu'elle se relie, une croix rouge quand elle est perdue. Un appui ouvre *Connexions*.
+
+| Onglet | Ce qu'on y fait |
+| --- | --- |
+| *Cues* | Toutes les listes. Touchez une cue pour la régler : niveau, trim pendant qu'elle joue, envois, les 16 réglages d'EQ, son DCA, attentes, vitesse, active ou non, drapeau et notes, avec sa forme d'onde. Touchez le bord gauche pour y placer la cue en attente ; appui long pour *Lancer maintenant* |
+| *En cours* | Tout ce qui joue : arrêter, couper (un long balayage ou le menu), avancer, sauter un membre d'un tour, déplacer la tête de lecture, et un grand fader de trim pour chaque son |
+| *Surface* | Les surfaces du spectacle avec leurs tranches : une D700 débranchée fonctionne depuis la tablette. *Cette tablette* donne un fader par DCA. Des pages *EQ* et *Envois* pour le son sélectionné |
+| *Mapping* | La déformation et les zones de chaque sortie vidéo : glisser un point ou le pousser pas à pas, changer la grille de points, l'opacité et le mode de fusion d'une zone, **Identifier** pour reconnaître le projecteur, et **Grille**, qui affiche sur le projecteur une grille courbée par la déformation |
+| *Script* | La page de texte de Choufleur, une fois son adresse donnée (plus bas) |
+| *Connexions* | Les ordinateurs, un principal et son secours ensemble avec leurs boutons *Prendre la main* ; le nom de la tablette ; retrouver la tablette ; Choufleur et son vibreur de poignet ; *Quitter la télécommande* |
+
+**Régler les niveaux d'un spectacle verrouillé.** Le niveau d'une cue fait partie du spectacle, le verrou le protège. On règle le trim du son qui joue, ou un DCA : l'un comme l'autre valent pour ce soir et ne sont jamais enregistrés. L'EQ et les envois se règlent en direct, comme sur la D700.
+
+**Retrouver la tablette.** Dans Go.dot, *Show settings > Network* liste les tablettes reliées avec un bouton **Find** : la tablette fait clignoter son écran et la lumière de son appareil photo, sonne son alarme et vibre jusqu'à ce qu'on la touche.
+
+**Choufleur sur la tablette.** Dans *Connexions*, tapez l'adresse d'opérateur que donne Choufleur, ou scannez son code. L'onglet *Script* montre alors le texte qui suit la représentation, sous le GO. Un vibreur de poignet Choufleur se relie dans le même onglet et vous touche le poignet avant vos cues.
+
+**L'arrêter.** *Connexions > Quitter la télécommande* coupe toutes les liaisons et l'arrête en arrière-plan. Au lancement suivant, elle se relie aux mêmes ordinateurs.
+
 ## Ce qui vient très bientôt
 
 Ces fonctions sont conçues dans la spécification mais pas encore construites. L'ordre peut changer selon ce que demandent les testeurs : raison de plus pour envoyer vos retours.
 
-### Application tablette et télécommande HTML
+### La console web sur une tablette
 
-La console web tourne déjà dans n'importe quel navigateur du réseau. Elle deviendra une vraie **télécommande** : un panneau de conduite pour couper, avancer et déplacer ce qui joue ; des réglages à portée de main en arpentant la salle ; un GO depuis la place du concepteur ; et un secours complet si une surface de contrôle lâche. Les contrôles tactiles partent de l'endroit où le doigt se pose, donc rien ne saute, et les actions dangereuses demandent un geste délibéré plutôt qu'un simple appui. Une **application tablette native** viendra par-dessus, pour une raison : elle se réveille instantanément quand on la prend en pleine cue.
+La console web tourne déjà dans n'importe quel navigateur du réseau, celui d'un iPad compris. Elle recevra les contrôles tactiles de la télécommande Android, qui partent de l'endroit où le doigt se pose pour que rien ne saute, avec un geste délibéré pour tout ce qui est dangereux.
 
 ### Compensation de latence vidéo
 
@@ -269,11 +294,10 @@ On règle une fois le retard du vidéoprojecteur, et le son est retardé d'autan
 | **WFS-DIY** (synthèse de front d'onde) | Piloter ses sources, positions et LFO, réservés par cue pour que deux cues ne se disputent jamais une entrée. Écrire ses snapshots dans Go.dot sous forme de cues fonctionne déjà (plus haut) |
 | **XOA / Tight-WFS** | La même chose, pour le rendu ambisonique et WFS |
 | **S21-HiJack** | Le piloter comme compagnon de la DiGiCo S21, sous sa propre branche d'adresses. Écrire ses snapshots dans Go.dot et être piloté par le GO de Go.dot fonctionnent déjà (plus haut) |
-| **Choufleur** (suivi de texte) | Afficher la position dans le texte et les cues à venir à côté de la liste. Choufleur ne déclenche jamais rien, par principe |
 | **Millumin** | La porte de sortie pour les spectacles dont la vidéo dépasse Go.dot |
 | Tout appareil OSCQuery | Trouvé seul sur le réseau. Aujourd'hui on donne son adresse, et un appareil qui se décrit propose déjà ses adresses en menus (plus haut) |
 
-WFS-DIY, XOA/Tight-WFS, S21-HiJack et Choufleur viennent du même auteur que Go.dot. Ils restent des applications séparées, éventuellement sur d'autres machines ; Go.dot les dirige par le réseau.
+WFS-DIY, XOA/Tight-WFS et S21-HiJack viennent du même auteur que Go.dot, comme Choufleur, le suivi de texte que la télécommande Android montre déjà (plus haut). Ils restent des applications séparées, éventuellement sur d'autres machines ; Go.dot les dirige par le réseau.
 
 ### Intégration matérielle
 

@@ -1491,6 +1491,29 @@ the on/off switches, flags, notes and a mapping's mesh, and never the shape of
 the cue list. The desk can ask it to show itself (WFS-DIY's *find my device*).
 The web client stays primary and complete on its own.
 
+*Amended in 0.8, at the author's direction (2026-10-16), after a day with it on his
+tablet: "Everything I tested so far works flawlessly."* What the companion is, as
+built (go.dot-remote 0.1.4):
+- **Always on screen**: GO, Doh! and PANIC (two presses within 0.75 s are the
+  double Esc), the current cue and the next with as many lines of its notes as
+  GO's height holds, the standby arrows, the lock and this tablet's refusals in
+  words. The connections are marks at the end of the tab bar, each with its own
+  colour and shape (§4.8); one tap opens them. Android's own bars are hidden.
+- **Tabs**: Cues (the inspector the author allowed), Running (kill, stop, advance,
+  prune, scrub, trims), Surface (the show's surfaces, a D700 that is not plugged in
+  working from the tablet, or a fader per DCA; EQ and Send pages), Mapping (warps
+  and zones, Identify, and a **grid on the projector** bent by the warp - added the
+  same day on the desktop's warp editor too, namespace draft §68, ANX), Script
+  (Choufleur's page, §3.23), Connections (main and backup, find, Choufleur and its
+  wrist buzzer, Quit).
+- **Under the lock** a cue's own level stays locked; the tablet rides levels with a
+  run's or a DCA's trim, and EQ and sends ride live.
+- **Find**: the screen and the camera light flash, the alarm sounds - raised from
+  silence for the time it rings - and the tablet vibrates until touched.
+- **Quit** unlinks everything and stops the background service; the next launch
+  links the same computers again.
+- English and French, following the tablet's language.
+
 Modifier vocabulary is **deferred until the needs are clear**, then designed
 once across desktop, tablet and hardware together — two of the three have no
 keyboard, so per-feature decisions produce shift-clicks with no touch
@@ -1853,7 +1876,9 @@ the mesh editor below asks.
   document — which is exactly where the locale rule (§3.20) bites. One `fr_FR`
   comma in a coordinate list makes the show file unparseable.
 - Mesh adjustment is a prime **tablet** case (§3.17): walk to the projection
-  surface instead of squinting from the booth.
+  surface instead of squinting from the booth. *(Built 2026-10-16: the Android
+  remote's Mapping tab, with a grid on the projector, bent by the warp, toggled
+  from the tablet or the desktop's warp editor - namespace draft §68, ANX.)*
 
 #### 3.19b Compositing chain
 
