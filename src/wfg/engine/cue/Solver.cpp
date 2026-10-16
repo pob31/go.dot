@@ -208,8 +208,10 @@ namespace wfg::cue
                 at `sinceStart` less its delay, and one the instant finds still
                 inside it starts the rest of the delay later, from its top. */
             const auto held = heldBackOf (read, cue);
-            out.heldFor = std::max (held - sinceStart, 0.0);
-            const auto offset = std::max (sinceStart - held, 0.0);
+            out.heldFor = held > 0.0 ? std::max (held - sinceStart, 0.0) : 0.0;
+
+            //  Only a sound held back is moved: any other is where it always was, a hair before its start included.
+            const auto offset = held > 0.0 ? std::max (sinceStart - held, 0.0) : sinceStart;
 
             /*  `offset` IS THE CLOCK'S, seconds since the cue started, and the
                 file has moved its own speed times as far (§22.5). */
