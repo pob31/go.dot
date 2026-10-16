@@ -30375,18 +30375,18 @@ outputs*.
 
 | Stage | What | Built |
 |---|---|---|
-| DL.0 | This section; PRD §3.19, §3.19d, §6.3, §6.9; the devplan; the headers carried and built on the three systems | 42b9507 |
-| DL.1 | The card's interface, the real card and the test card, a format's word, `decklink-probe` listing || 5f8c6ac |
-| DL.2 | The rows, the kinds, the renderer's region, the cards found published || cfd0136 |
-| DL.3 | A card output: paced by the card, at its format, latency, skew and reference, tried again || 04388a0 |
-| DL.4 | 10-bit YUV | 4540aa6 |
-| DL.5 | Fill and key | b217edd |
-| DL.6 | The sound taken off the audio thread | 7a7367f |
-| DL.7 | The sound placed and resampled on the card | 92eaf9b |
-| DL.8 | A card as a video input | 4c917c1 |
-| DL.9 | The Video tab, the inputs, the problems, the inspector | e30cb62 |
-| DL.10 | `decklink-probe --run`, the testers' instructions, M77 | 4de8b0b, a248311 |
-| DL.11 | The README, the guides, the whole suite | |
+| DL.0 | This section; PRD §3.19, §3.19d, §6.3, §6.9; the devplan; the headers carried and built on the three systems | 951b32f |
+| DL.1 | The card's interface, the real card and the test card, a format's word, `decklink-probe` listing || 732a735 |
+| DL.2 | The rows, the kinds, the renderer's region, the cards found published || 3c069aa |
+| DL.3 | A card output: paced by the card, at its format, latency, skew and reference, tried again || c5a87d7 |
+| DL.4 | 10-bit YUV | 0edc69d |
+| DL.5 | Fill and key | 9cc4a0b |
+| DL.6 | The sound taken off the audio thread | 3ab7080 |
+| DL.7 | The sound placed and resampled on the card | d0fc8e4 |
+| DL.8 | A card as a video input | b1b32ee |
+| DL.9 | The Video tab, the inputs, the problems, the inspector | a09a108 |
+| DL.10 | `decklink-probe --run`, the testers' instructions, M77 | c7d74d6, 3195fd4 |
+| DL.11 | The README, the guides, the whole suite | 191870d6 |
 
 ### 71.5 Measurements
 
@@ -30464,16 +30464,16 @@ installed - is said under the devices in the menu, cameras or none.
 
 | Stage | What | Built |
 |---|---|---|
-| VC.0 | This section; the PRD; the devplan; the renames | 16679a24 |
-| VC.1 | Camera.h and the test camera; one receiver for every device; the devices published | 3b002b58 |
-| VC.2 | Media Foundation | 66e4f4ed |
-| VC.3 | AVFoundation, its permission, Info.plist and the entitlement | 43045d40, 888528fe |
-| VC.4 | Video4Linux | written in VC.1; the NUC owes its build |
-| VC.5 | The Video tab: Video capture, the device menu, formats | bbeca7a9 |
-| VC.6 | libajantv2 carried and built | 0ed7e9b1, 0c756e01 |
-| VC.7 | AJA's cards in Card.h's interface | dc575bc0 |
-| VC.8 | The probe for both makers; the testers' instructions | 74d79849 |
-| VC.9 | M78, M79; the README, the guides; the whole suite | this; M78 and M79 owed |
+| VC.0 | This section; the PRD; the devplan; the renames | a0c04b26 |
+| VC.1 | Camera.h and the test camera; one receiver for every device; the devices published | 0b29d208 |
+| VC.2 | Media Foundation | 0fe80e53 |
+| VC.3 | AVFoundation, its permission, Info.plist and the entitlement | 32dfb1e4, 7af76732 |
+| VC.4 | Video4Linux | written in VC.1; built strict on the NUC, the Linux suite green |
+| VC.5 | The Video tab: Video capture, the device menu, formats | d73fe87d |
+| VC.6 | libajantv2 carried and built | eb358ea5, fb122c05 |
+| VC.7 | AJA's cards in Card.h's interface | 2cb79f7b |
+| VC.8 | The probe for both makers; the testers' instructions | 6de5d8db |
+| VC.9 | M78, M79; the README, the guides; the whole suite | 52f5a217; M78 and M79 owed |
 
 ### 72.5 Measurements
 

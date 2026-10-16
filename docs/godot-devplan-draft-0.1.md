@@ -1526,9 +1526,14 @@ libajantv2 carried at NTV2 SDK 18.0 and AJA's cards behind the card interface, e
 one; the probe for both makers and the testers' instructions in both languages. Media Foundation was
 opened here on the NDI virtual camera, which sends nothing with no source picked: a synchronous read
 waited on it for ever, hence the asynchronous reader and AQD. The Mac mini built the whole branch and
-ran the camera and card cases in both locales. Owed: this machine's own camera through a capture cue to
-a projector, M78, with the author's leave; the Linux build on the NUC (the strict job) and a camera
-seen there; a real AJA card, by the testers (M79); the author's word on APV-AQD and the screen words.
+ran the camera and card cases in both locales. The NUC built it strict and ran the whole Linux suite,
+213 of 213, once two bugs already on main were mended: the mask shader's local hid its uniforms in
+OpenGL, so since VFX.8 (2026-10-13) Linux drew nothing on the new renderer; and the test build's
+allocator hook refused LLVM's small alignments, so llvmpipe aborted every renderer started by the
+tests. This laptop's own camera was opened through Media Foundation with the author's leave: it works,
+at 20 frames a second of its own (not a show camera). Owed: M78, a flash on Go.dot's output to its
+return through capture - best with a USB HDMI dongle looped back from this machine's output; a real
+AJA card, by the testers (M79); the author's word on APV-AQD and the screen words.
 
 ---
 
