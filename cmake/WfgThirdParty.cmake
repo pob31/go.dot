@@ -912,7 +912,9 @@ unset(_lua)
 # at configure time. FENCED, because its CMake reaches past itself:
 #  * a function scope holds its options; its macOS settings FORCE-write the
 #    deployment target from the environment's MACOSX_DEPLOYMENT_TARGET, so that
-#    is unset around it (the root's 13.3 stands);
+#    is unset around it (the root's 13.3 stands), and read the SDK's name off
+#    CMAKE_OSX_SYSROOT, which CMake 4 leaves empty - so the SDK xcrun names is
+#    given it, in that scope alone;
 #  * its target hands its users, PUBLIC, its warning and optimisation flags, and
 #    NDEBUG on every configuration (it reads CMAKE_BUILD_TYPE, empty under a
 #    multi-config generator), _CONSOLE, _WINDOWS, WIN32_LEAN_AND_MEAN and the CRT
@@ -944,6 +946,10 @@ function(_wfg_add_ajantv2 aja)
     set(AJA_INSTALL_MISC OFF)
     set(AJA_DISABLE_QT ON)
     set(AJA_QT_DEPLOY OFF)
+    if(APPLE AND NOT CMAKE_OSX_SYSROOT)
+        execute_process(COMMAND xcrun --sdk macosx --show-sdk-path
+                        OUTPUT_VARIABLE CMAKE_OSX_SYSROOT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
     set(_environment "$ENV{MACOSX_DEPLOYMENT_TARGET}")
     unset(ENV{MACOSX_DEPLOYMENT_TARGET})
     add_subdirectory("${aja}" libajantv2 EXCLUDE_FROM_ALL)
