@@ -4620,10 +4620,10 @@ Mackie vs HUI first — first week with the D700.
   by a script and its answer back at the client in 61 to 82 ms; 3 000 publishes from fifty clients
   in three seconds every one heard, the script's run late on a few Debug ticks of the 150; Release
   on a machine of its own still owed.
-- **DeckLink cards** (§3.19, 2026-10-16, namespace draft §71): **M77** - a flash and a beep each
-  second through a card, the beep embedded and on the interface: the flash against both beeps off the
-  cable and the interface, frames late over ten minutes, the card's latency and skew as shown. Owed to
-  the testers, there being no card on the bench.
+- **DeckLink cards** (§3.19, 2026-10-16, namespace draft §71): **M77** - the testers' probe's flash
+  against its embedded beep off a card's cable, frames late over ten minutes, the card's latency and
+  skew as its report says them; and in Go.dot a bus on a card against the same bus on the interface.
+  Owed to the testers, there being no card on the bench.
 
 ---
 

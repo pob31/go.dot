@@ -25,11 +25,27 @@
     reader who has never seen Go.dot can check it against the card's box.
 
         wfg decklink-probe          lists the cards
-        WFG_DECKLINK_FAKE=1 wfg decklink-probe
+        wfg decklink-probe --run [--card=<id or name>] [--mode=1080p50]
+                         [--seconds=60] [--key] [--sound] [--ten-bit]
+                         [--report=<file>]
+                                    and plays to the first card that sends
+                                    pictures, or the one named: colour bars,
+                                    a block stepping along the bottom, a
+                                    white frame and - with --sound - a beep
+                                    on channels 1 and 2 once a second, both on
+                                    the same moment of the card's stream; then
+                                    says what came of the frames, how much
+                                    the card held, its clock against the
+                                    computer's and its reference
+        WFG_DECKLINK_FAKE=1 wfg decklink-probe ...
                                     the same, of the test card
 
-    Exit 0 when Desktop Video answered (with cards or none), 2 when it is not
-    installed or too old.
+    It opens no sound interface and no show: a card on its own. --report
+    writes what was said to a file, to send back.
+
+    Exit 0 when Desktop Video answered (with cards or none) and a run ran, 2
+    when Desktop Video is not installed or too old or there is no card to run,
+    3 when the card would not open.
 */
 
 #include <wfg/engine/video/render/Card.h>

@@ -9681,8 +9681,8 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       [] (const juce::ArgumentList&) { listMidi(); } });
 
     app.addCommand ({ wfg::video::deckLinkProbeVerb,
-                      "decklink-probe",
-                      "Lists the DeckLink cards Desktop Video finds, what each can do and the formats it offers",
+                      "decklink-probe [--run] [--card=<id>] [--mode=1080p50] [--seconds=60] [--key] [--sound] [--ten-bit] [--report=<file>]",
+                      "Lists the DeckLink cards Desktop Video finds; with --run, plays bars, a flash and a beep to one and says what happened",
                       {},
                       [] (const juce::ArgumentList& args)
                       {

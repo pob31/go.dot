@@ -863,3 +863,44 @@ TEST_CASE ("video gpu: a card's input takes in what the test card's output sends
                           return input != nullptr && ! input->connected && input->problem == "no signal";
                       }, 10000));
 }
+
+TEST_CASE ("decklink: the probe runs the test card - bars, a flash and a beep each second - and says what came of them (DL.10)")
+{
+    {
+        auto cards = video::card::makeFakeSystem();
+        std::ostringstream out;
+        CHECK (video::runDeckLinkProbe (*cards, { "--run", "--seconds=1.2", "--sound", "--mode=720p50" }, out) == 0);
+
+        const auto said = out.str();
+        MESSAGE (said);
+        CHECK (said.find ("Running Go.dot test card at 720p50, with sound, for 1.2 s") != std::string::npos);
+        CHECK (said.find ("pixels: 8-bit BGRA, 1280 x 720, 50 frames a second") != std::string::npos);
+        CHECK (said.find ("late: 0, dropped: 0") != std::string::npos);
+        CHECK (said.find ("beeps placed: ") != std::string::npos);
+        CHECK (said.find ("refused: 0") != std::string::npos);
+        CHECK (said.find ("reference: none") != std::string::npos);
+
+        //  Fifty a second, give or take the start: some sixty frames in 1.2 s.
+        const auto at = said.find ("frames shown: ");
+        REQUIRE (at != std::string::npos);
+        CHECK (std::atoi (said.c_str() + at + 14) >= 40);
+    }
+
+    {
+        auto cards = video::card::makeFakeSystem();
+        juce::TemporaryFile report;
+        std::ostringstream out;
+        CHECK (video::runDeckLinkProbe (*cards, { "--run", "--seconds=0.6", "--ten-bit", "--mode=720p50",
+                                                  "--report=" + report.getFile().getFullPathName().toStdString() }, out) == 0);
+        CHECK (out.str().find ("pixels: 10-bit YUV") != std::string::npos);
+        CHECK (report.getFile().loadFileAsString().contains ("Go.dot DeckLink probe"));
+    }
+
+    //  No card that sends: said, and nothing run.
+    video::card::FakeOptions absent;
+    absent.present = false;
+    auto none = video::card::makeFakeSystem (absent);
+    std::ostringstream out;
+    CHECK (video::runDeckLinkProbe (*none, { "--run" }, out) == 2);
+    CHECK (out.str().find ("No card to run: none sends pictures") != std::string::npos);
+}

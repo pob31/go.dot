@@ -30339,7 +30339,7 @@ be read, never copied in.
 | **APM** | **A capture's format is found by the card**; it arrives as 8-bit YUV and is turned to colour on the graphics card. No signal **draws black**, with a warning, as a lost return does. One input per connector: a second is refused. Sound coming in is not taken. *As built (DL.8):* turned to colour on the CPU, on the input's own thread, never the render thread's - BT.709, BT.601 for a picture no taller than 576; a Debug build keeps up with a 720p input at some twenty frames a second, so 4K may want it moved to the graphics card, which M77 will say. | mine |
 | **APN** | **Card kinds are offered where a card is found.** The output and input menus list DeckLink when Desktop Video reports a card; an insert never takes one. | mine |
 | **APO** | **A test card stands in for a real one**: with `WFG_DECKLINK_FAKE=1` Go.dot finds one "Go.dot test card" with an output, an input that loops it back, both keyers and 16 channels, a clock that can drift and frames that can be dropped. Every test uses it, and the screens can be looked at with no card. | mine |
-| **APP** | **The testers' probe**: `wfg decklink-probe` lists each card, what it can do and the formats it offers, and with `--run` plays a moving pattern with a flash and a beep each second, on the cable and the interface, and writes what happened - frames late, latency, skew, where the sound fell. | mine |
+| **APP** | **The testers' probe**: `wfg decklink-probe` lists each card, what it can do and the formats it offers, and with `--run` plays a moving pattern with a flash and a beep each second, on the cable and the interface, and writes what happened - frames late, latency, skew, where the sound fell. *As built (DL.10):* a card on its own - no sound interface and no show: colour bars, a block stepping along the bottom, a white flash and, with `--sound`, a beep on channels 1 and 2 on the same moment of the card's stream; `--key`, `--ten-bit`, `--mode`, `--card`, `--seconds`, `--report` to a file. | mine |
 
 ### 71.3 Rows
 
@@ -30380,15 +30380,18 @@ outputs*.
 | DL.6 | The sound taken off the audio thread | 7a7367f |
 | DL.7 | The sound placed and resampled on the card | 92eaf9b |
 | DL.8 | A card as a video input | 4c917c1 |
-| DL.9 | The Video tab, the inputs, the problems, the inspector | |
+| DL.9 | The Video tab, the inputs, the problems, the inspector | e30cb62 |
 | DL.10 | `decklink-probe --run`, the testers' instructions, M77 | |
 | DL.11 | The README, the guides, the whole suite | |
 
 ### 71.5 Measurements
 
-- **M77** - on a card, Release: a flash and a beep each second through the card, its sound embedded, and
-  the beep on the interface; the flash against both beeps, recorded off the cable and the interface;
-  frames late over ten minutes; the card's latency and skew as shown. Owed to the testers.
+- **M77** - on a card, Release, by the testers (instructions in both languages kept beside the build,
+  not in the tree): (a) `wfg decklink-probe --run --sound --seconds=600` - the flash against its
+  embedded beep off the cable, frames shown, late and dropped over ten minutes, the latency held and
+  the skew against the computer's clock as the report says them; (b) in Go.dot, a picture and a bus
+  sent to a card against the same bus on the interface - the 60 ms of APQ and the interface's own
+  latency between them. Owed to the testers.
 
 ### 71.6 Not built
 
