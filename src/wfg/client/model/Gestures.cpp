@@ -355,6 +355,21 @@ namespace wfg::client::gesture
         return { origin::window, "trigger.release", { osc::Value::string (triggerId) } };
     }
 
+    Event createList (const std::string& name, bool cart)
+    {
+        if (! cart)
+            return { origin::window, "list.create", { osc::Value::string (name) } };
+
+        return { origin::window, "list.create",
+                 { osc::Value::string (name), osc::Value::string (""),
+                   osc::Value::string ("kind"), osc::Value::string ("cart") } };
+    }
+
+    Event focusList (const std::string& listId)
+    {
+        return { origin::window, "list.focus", { osc::Value::string (listId) } };
+    }
+
     Event createKeyTrigger (const std::string& cueId, const std::string& key)
     {
         return { origin::window, "trigger.create",

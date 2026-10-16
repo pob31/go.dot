@@ -62,6 +62,7 @@
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/KeyTriggers.h>
+#include <wfg/client/model/ListTabs.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
@@ -15466,4 +15467,47 @@ TEST_CASE ("client: the show's key triggers, read once, the key that fires them,
     CHECK (gesture::createKeyTrigger (cue, "F6").command == "trigger.create");
     CHECK (gesture::fireTrigger ("KEYTRG01").command == "trigger.fire");
     CHECK (gesture::releaseTrigger ("KEYTRG01").command == "trigger.release");
+}
+
+TEST_CASE ("client: the lists as tabs - a cart says so, GO's list is never one, and new names are free")
+{
+    /*  Namespace draft §74, AQM, AQS: the window shows a list apart from the
+        one GO acts on, and GO never acts on a cart. */
+    Rig rig;
+    const auto s = [] (const char* text) { return osc::Value::string (text); };
+
+    REQUIRE (rig.apply (1, "cli", "list.create", { s ("Pads"), s ("CART0001"), s ("kind"), s ("cart") }).rejected == 0);
+    REQUIRE (rig.apply (2, "cli", "list.create", { s ("Second"), s ("SECND001") }).rejected == 0);
+
+    auto snapshot = rig.publish (3);
+    const auto tabs = model::readListTabs (*snapshot);
+
+    REQUIRE (tabs.size() == 3u);
+    CHECK_FALSE (tabs[0].cart);
+    CHECK (tabs[1].id == "CART0001");
+    CHECK (tabs[1].cart);
+    CHECK (tabs[1].name == "Pads");
+
+    //  GO's list, and its mark; a cart in words.
+    const auto go = model::goListOf (*snapshot);
+    CHECK (go == tabs[0].id);
+    CHECK (model::readTransport (*snapshot).listId == go);
+    CHECK (model::tabWords (tabs[0], true) == "\xe2\x96\xb8 " + tabs[0].name);
+    CHECK (model::tabWords (tabs[1], false) == "Pads \xc2\xb7 cart");
+
+    //  Names nobody has used.
+    CHECK (model::newListName (tabs, true) == "Cart");
+    CHECK (model::newListName (tabs, false) == "List 2");
+    CHECK (model::newListName ({ { "A", "Cart", true } }, true) == "Cart 2");
+
+    //  The first list made a cart: GO's list is the next show list, and the reading says so.
+    REQUIRE (rig.apply (4, "cli", "node.set", { s (("/godot/list/" + tabs[0].id + "/kind").c_str()), s ("cart") }).rejected == 0);
+    snapshot = rig.publish (5);
+    CHECK (model::goListOf (*snapshot) == "SECND001");
+    CHECK (model::readTransport (*snapshot).listId == "SECND001");
+
+    //  What the window sends.
+    CHECK (gesture::createList ("Pads", true).args.size() == 4u);
+    CHECK (gesture::createList ("Next", false).args.size() == 1u);
+    CHECK (gesture::focusList ("SECND001").command == "list.focus");
 }

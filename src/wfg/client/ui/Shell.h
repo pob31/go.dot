@@ -37,6 +37,7 @@
 #include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/HistoryPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/ui/ListTabsComponent.h>
 #include <wfg/client/ui/LiveBarComponent.h>
 #include <wfg/client/ui/NewCueBarComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
@@ -99,6 +100,11 @@ namespace wfg::client::ui
         RunPaneComponent runs;
         InspectorComponent inspector;
         NewCueBarComponent newCues;
+
+        /*  THE SHOW'S LISTS AS TABS, over the cue list (namespace draft §74):
+            its actions given after it is made, by the window. */
+        ListTabsComponent tabs;
+
         HistoryPanelComponent history;
         UndoPanelComponent undoPanel;
 

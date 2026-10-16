@@ -4,6 +4,7 @@
 #include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/KeyNames.h>
+#include <wfg/client/ui/ListTabsComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/PicturePanelComponent.h>
@@ -7682,4 +7683,57 @@ TEST_CASE ("inspector: the key line takes the next key, refuses the show's own, 
     CHECK (ui::chordOfKey (juce::KeyPress (juce::KeyPress::leftKey, juce::ModifierKeys::altModifier, 0))
              == std::optional<std::string> ("Alt+ArrowLeft"));
     CHECK_FALSE (ui::chordOfKey (juce::KeyPress (',')).has_value());
+}
+
+TEST_CASE ("list tabs: one a list, the shown one lit, GO's marked, a cart in words, and a + while editable")
+{
+    /*  Namespace draft §74, AQM, AQS. */
+    std::vector<std::string> shown;
+    std::vector<bool> made;
+
+    ui::ListTabsComponent tabs (model::Theme {});
+    tabs.setSize (600, 30);
+
+    ui::ListTabsComponent::Actions actions;
+    actions.show = [&] (const std::string& id) { shown.push_back (id); };
+    actions.create = [&] (bool cart) { made.push_back (cart); };
+    tabs.setActions (std::move (actions));
+
+    const std::vector<model::ListTab> lists { { "MAIN0001", "Main", false }, { "CART0001", "Pads", true } };
+
+    tabs.setTabs (lists, "CART0001", "MAIN0001", true);
+    CHECK (tabs.wordsOf ("MAIN0001") == juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb8 Main")));
+    CHECK (tabs.wordsOf ("CART0001") == juce::String (juce::CharPointer_UTF8 ("Pads \xc2\xb7 cart")));
+
+    const auto lit = [&tabs] (const juce::String& words)
+    {
+        for (auto* child : tabs.getChildren())
+            if (auto* button = dynamic_cast<juce::TextButton*> (child); button != nullptr && button->getButtonText() == words)
+                return button->getToggleState();
+
+        return false;
+    };
+
+    CHECK (lit (juce::String (juce::CharPointer_UTF8 ("Pads \xc2\xb7 cart"))));
+    CHECK_FALSE (lit (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb8 Main"))));
+
+    tabs.pressTab ("CART0001");
+    tabs.pressNew (true);
+    CHECK (shown == std::vector<std::string> { "CART0001" });
+    CHECK (made == std::vector<bool> { true });
+
+    //  Under the lock, no +.
+    const auto plusShowing = [&tabs]
+    {
+        for (auto* child : tabs.getChildren())
+            if (auto* button = dynamic_cast<juce::TextButton*> (child); button != nullptr && button->getButtonText() == "+")
+                return button->isVisible();
+
+        return false;
+    };
+
+    CHECK (plusShowing());
+    tabs.setTabs (lists, "MAIN0001", "MAIN0001", false);
+    CHECK_FALSE (plusShowing());
+    CHECK (lit (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb8 Main"))));
 }

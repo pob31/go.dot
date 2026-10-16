@@ -20,6 +20,7 @@
 import { tree } from "../plumbing/tree.js";
 import { dbl, str } from "../plumbing/osc.js";
 import { selection } from "../model/selection.js";
+import { goList } from "../model/lists.js";
 import { gesture } from "../gestures/table.js";
 import { el, esc, cueName } from "./common.js";
 import { reconcile } from "./reconcile.js";
@@ -96,8 +97,8 @@ function renderSteps(focus, atCue) {
 }
 
 function renderAim() {
-  const lists = tree.ids("/godot/list/order");
-  const focus = tree.get("/godot/list/focus", "") || lists[0] || "";
+  //  The list GO acts on, never a cart - a cart has no order to aim into (namespace draft 74).
+  const focus = goList();
 
   const bar = el("aimbar");
   const plan = el("aim-plan");
@@ -192,8 +193,7 @@ function renderAim() {
 
 /*  The list the aim belongs to, which is the focused one. */
 function aimedList() {
-  const lists = tree.ids("/godot/list/order");
-  return tree.get("/godot/list/focus", "") || lists[0] || "";
+  return goList();
 }
 
 /*  Points the aim at the picked row, keeping whatever offset the slider has.

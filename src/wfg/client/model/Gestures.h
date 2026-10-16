@@ -163,6 +163,12 @@ namespace wfg::client::gesture
     Event releaseTrigger (const std::string& triggerId);
     Event createKeyTrigger (const std::string& cueId, const std::string& key);
 
+    /*  A NEW LIST, a cue list or a cart (namespace draft §74, AQR): the tabs'
+        +, born a cart in the one step when it is one. And GO's focus moved to
+        a show list - its tab pressed. */
+    Event createList (const std::string& name, bool cart);
+    Event focusList (const std::string& listId);
+
     /*  Makes a range on a media cue: a named region of its file, and one entry
         in the playlist the cue plays instead of the whole thing (§3.24). As
         `createCue`, the identifier is the engine's to draw and the log's to

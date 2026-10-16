@@ -37,6 +37,7 @@ namespace wfg::client::ui
           runs (themeToUse, std::move (runActions)),
           inspector (themeToUse, std::move (inspectorActions)),
           newCues (themeToUse, std::move (newCueActions)),
+          tabs (themeToUse),
           history (themeToUse, std::move (historyActions)),
           undoPanel (themeToUse, std::move (undoActions)),
           liveBar (themeToUse, {}),
@@ -53,6 +54,7 @@ namespace wfg::client::ui
 
         addAndMakeVisible (transport);
         addAndMakeVisible (newCues);
+        addAndMakeVisible (tabs);
         addAndMakeVisible (cues);
         addAndMakeVisible (runs);
 
@@ -75,6 +77,7 @@ namespace wfg::client::ui
         theme = themeToUse;
         transport.applyTheme (theme);
         newCues.applyTheme (theme);
+        tabs.applyTheme (theme);
         cues.applyTheme (theme);
         runs.applyTheme (theme);
         inspector.applyTheme (theme);
@@ -190,6 +193,8 @@ namespace wfg::client::ui
             area.removeFromRight (gap);
         }
 
+        //  The lists' tabs over the cue list, under the new-cue row (namespace draft §74).
+        tabs.setBounds (area.removeFromTop (juce::jmin (tabs.preferredHeight(), area.getHeight())));
         cues.setBounds (area);
     }
 

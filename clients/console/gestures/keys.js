@@ -20,6 +20,7 @@
 import { pointer, SLIDER_STEPS } from "./fields.js";
 import { gesture, press } from "./table.js";
 import { chordOf } from "../model/chords.js";
+import { shownList } from "../model/lists.js";
 import { selection } from "../model/selection.js";
 import { tree } from "../plumbing/tree.js";
 
@@ -276,7 +277,8 @@ document.addEventListener("keydown", (event) => {
 
         const anchor = selection.picked;
         const parent = anchor ? tree.cue(anchor, "parent", "") : "";
-        const list = tree.get("/godot/list/focus", "") || tree.ids("/godot/list/order")[0] || "";
+        //  The list on screen - a cart, when one is shown (namespace draft 74).
+        const list = shownList();
         const into = parent || list;
 
         if (into) {

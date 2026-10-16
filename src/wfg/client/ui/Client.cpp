@@ -56,6 +56,7 @@
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/KeyTriggers.h>
+#include <wfg/client/model/ListTabs.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/TemplateReview.h>
 #include <wfg/client/model/UndoHistory.h>
@@ -809,6 +810,16 @@ namespace wfg::client
                     keysHeld.emplace_back (code, std::move (fired));
                     return true;
                 };
+
+                /*  THE LISTS' TABS (namespace draft §74): a tab pressed shows its
+                    list, a + makes a list or a cart, a double click renames. */
+                {
+                    ui::ListTabsComponent::Actions tabActions;
+                    tabActions.show = [this] (const std::string& listId) { showList (listId); };
+                    tabActions.create = [this] (bool cart) { newList (cart); };
+                    tabActions.rename = [this] (const std::string& listId) { renameList (listId); };
+                    shell->tabs.setActions (std::move (tabActions));
+                }
 
                 shell->triggerKeysUp = [this]
                 {
@@ -2207,6 +2218,75 @@ namespace wfg::client
             std::vector<model::KeyTrigger> keyTriggers;
             std::vector<std::pair<int, std::vector<std::string>>> keysHeld;
 
+            /*  THE LIST THE WINDOW SHOWS, apart from the one GO acts on
+                (namespace draft §74, AQS): a cart picked by its tab, or empty to
+                follow GO's list. The list drawn on the last pass; and a list
+                just asked for by the tabs' +, shown once it arrives. */
+            std::string shownList;
+            std::string listDrawn;
+            std::string listAwaited;
+
+            /** The list to draw: the one shown, while the show still has it, else GO's. */
+            std::string drawnListFor (const tree::TreeSnapshot& snapshot, const std::string& goList) const
+            {
+                if (! shownList.empty())
+                    for (const auto& tab : model::readListTabs (snapshot))
+                        if (tab.id == shownList)
+                            return shownList;
+
+                return goList;
+            }
+
+            /*  A TAB PRESSED: a cart is shown and GO's list stays; a show list
+                is where GO's focus goes, and the window follows GO again. */
+            void showList (const std::string& listId)
+            {
+                const auto cart = latest != nullptr && model::text (*latest, "/godot/list/" + listId + "/kind") == "cart";
+
+                if (cart)
+                {
+                    shownList = listId;
+                    return;
+                }
+
+                shownList.clear();
+
+                if (listId != last.listId)
+                    send (gesture::focusList (listId));
+            }
+
+            void newList (bool cart)
+            {
+                if (latest == nullptr)
+                    return;
+
+                const auto name = model::newListName (model::readListTabs (*latest), cart);
+                listAwaited = name;
+                send (gesture::createList (name, cart));
+            }
+
+            void renameList (const std::string& listId)
+            {
+                if (latest == nullptr)
+                    return;
+
+                auto* ask = new juce::AlertWindow ("Rename the list", {}, juce::MessageBoxIconType::NoIcon);
+                ask->addTextEditor ("name", juce::String (model::text (*latest, "/godot/list/" + listId + "/name")), "Name");
+                ask->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                ask->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                ask->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, ask, listId, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int result)
+                    {
+                        const auto name = ask->getTextEditorContents ("name").trim().toStdString();
+
+                        if (safe == nullptr || result != 1 || name.empty())
+                            return;
+
+                        send (gesture::setNode ("/godot/list/" + listId + "/name", name));
+                    }), true);
+            }
+
             bool cueNeedsStale = true;
             bool problemMarksStale = true;
             model::CueNeeds cueNeeds;
@@ -2385,7 +2465,30 @@ namespace wfg::client
                     pass and costs two rows a repaint. Both from the same
                     pointer copy, so the list and the strip can never disagree
                     about which tick they are drawing. */
-                const auto rebuilt = show.refresh (*snapshot, reading.listId);
+                /*  THE LIST DRAWN, and the tabs over it (namespace draft §74): a
+                    list just made by the tabs' + is shown as it arrives. */
+                if (! listAwaited.empty())
+                    for (const auto& tab : model::readListTabs (*snapshot))
+                        if (tab.name == listAwaited)
+                        {
+                            listAwaited.clear();
+
+                            if (tab.cart)
+                                shownList = tab.id;
+                            else
+                            {
+                                shownList.clear();
+                                send (gesture::focusList (tab.id));
+                            }
+
+                            break;
+                        }
+
+                listDrawn = drawnListFor (*snapshot, reading.listId);
+                shell->tabs.setTabs (model::readListTabs (*snapshot), listDrawn, reading.listId,
+                                     ! model::isYes (reading.locked));
+
+                const auto rebuilt = show.refresh (*snapshot, listDrawn);
 
                 /*  WHAT IS MISSING (namespace draft §64). What the show declares
                     is read when the show changes, what each cue of the list
@@ -4784,7 +4887,8 @@ namespace wfg::client
                         return outsideASampler (parent, model::positionAfter (orderOf (parent), picked), kind);
                 }
 
-                return { last.listId, -1 };
+                //  The end of the list drawn - a cart, when one is shown (namespace draft §74).
+                return { listDrawn.empty() ? last.listId : listDrawn, -1 };
             }
 
             /*  A SAMPLER HOLDS SOUNDS AND PICTURES (namespace draft §39, §49): a
@@ -5376,8 +5480,10 @@ namespace wfg::client
                     }
                     if (isList)
                     {
-                        if (parent != last.listId)
-                            send ({ "window", "list.focus", { osc::Value::string (parent) } });
+                        /*  A CUE IN A CART IS SHOWN WITH ITS CART, and GO's list
+                            stays where it was (namespace draft §74). */
+                        if (parent != listDrawn)
+                            showList (parent);
                         break;
                     }
                     child = parent;

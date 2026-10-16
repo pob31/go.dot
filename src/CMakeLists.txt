@@ -779,6 +779,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Inspector.cpp
     wfg/client/model/KeyTriggers.h
     wfg/client/model/KeyTriggers.cpp
+    wfg/client/model/ListTabs.h
+    wfg/client/model/ListTabs.cpp
     wfg/client/model/LoadToTime.h
     wfg/client/model/LoadToTime.cpp
     wfg/client/model/UndoHistory.h
@@ -846,6 +848,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/UndoPanelComponent.cpp
     wfg/client/ui/NewCueBarComponent.h
     wfg/client/ui/NewCueBarComponent.cpp
+    wfg/client/ui/ListTabsComponent.h
+    wfg/client/ui/ListTabsComponent.cpp
     wfg/client/ui/NewCueMenu.h
     wfg/client/ui/NewCueMenu.cpp
     wfg/client/ui/LiveBarComponent.h

@@ -19,6 +19,7 @@
 
 import { tree } from "../plumbing/tree.js";
 import { panel } from "../model/remember.js";
+import { goList } from "../model/lists.js";
 import { selection } from "../model/selection.js";
 import { el, esc } from "./common.js";
 
@@ -249,7 +250,8 @@ function renderStrip() {
                                                 : "nothing to report";
 
   /*  A LIST WITH NO POINTER, said where the buttons that do nothing are. */
-  const focused = tree.get("/godot/list/focus", "") || tree.ids("/godot/list/order")[0] || "";
+  //  The list GO acts on, never a cart (namespace draft 74).
+  const focused = goList();
   const parked = focused ? tree.get("/godot/list/" + focused + "/standby", "") : "";
   const note = el("clear-note");
 

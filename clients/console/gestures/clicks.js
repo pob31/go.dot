@@ -22,6 +22,7 @@ import { tree } from "../plumbing/tree.js";
 import { dbl, int, str } from "../plumbing/osc.js";
 import { openForKey, panel, save, toggle } from "../model/remember.js";
 import { pickAlso, pickNothing, pickOne, pickThrough, selection } from "../model/selection.js";
+import { showList } from "../model/lists.js";
 import { view } from "../views/view.js";
 import { el } from "../views/common.js";
 import { aimedList } from "../views/aim.js";
@@ -194,7 +195,14 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (data && data.focus) { gesture("focus-list", [str(data.focus)]); return; }
+  /*  A LIST'S TAB (namespace draft §74, AQS): a show list's moves GO's focus
+      there, as it always has; a cart's is shown and moves nothing - GO never
+      meets a cart. */
+  if (data && data.focus) {
+    if (showList(data.focus)) view.render();
+    else gesture("focus-list", [str(data.focus)]);
+    return;
+  }
 
   /*  THE ONE THAT MAKES IT TRUE, and it is a button rather than the slider for
       exactly that reason: §3.13 lets an operator look before they leap, and a
@@ -235,6 +243,13 @@ document.addEventListener("click", (event) => {
   if (data && data.newlist) {
     const name = window.prompt("Name for the new list?", "");
     if (name) gesture("new-list", [str(name)]);
+    return;
+  }
+
+  /*  A CART (namespace draft §74): a list born a cart in one step. */
+  if (data && data.newcart) {
+    const name = window.prompt("Name for the new cart?", "Cart");
+    if (name) gesture("new-cart", [str(name), str(""), str("kind"), str("cart")]);
     return;
   }
 

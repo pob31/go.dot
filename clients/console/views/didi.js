@@ -20,6 +20,7 @@
 import { tree } from "../plumbing/tree.js";
 import { selection } from "../model/selection.js";
 import { folded } from "../model/remember.js";
+import { goList, isCart, shownList } from "../model/lists.js";
 import { el, esc, cueName, shownName } from "./common.js";
 import { refreshFields } from "./values.js";
 import { reconcile } from "./reconcile.js";
@@ -634,21 +635,32 @@ function listRows(focus, standby) {
 
 function renderLists() {
   const lists = tree.ids("/godot/list/order");
-  const focus = tree.get("/godot/list/focus", "") || lists[0] || "";
+
+  /*  THE LIST THIS PANE DRAWS, AND THE ONE GO ACTS ON (namespace draft §74,
+      AQS): the same list until a cart's tab is pressed - a cart is shown and
+      GO's list stays where it was, marked ▸ on its own tab. Named `focus` for
+      the reader of everything below, which draws what this pane shows. */
+  const go = goList();
+  const focus = shownList();
 
   /*  THE TABS ARE KEPT AS THE ROWS ARE, and for the same reason: each tab is
       something to click - `list.focus`, or the `+` that makes a list - and a
       tab written afresh on every poll can be swapped for a new element
-      between the press and the release, so the click does nothing. */
+      between the press and the release, so the click does nothing. A cart
+      says so in a word, so colour carries nothing alone (PRD §4.8). */
   const tabs = lists.map((id) => ({ key: "tab:" + id, html:
     '<div class="list-tab" data-focus="' + id + '"' +
       ' data-focused="' + (id === focus ? "yes" : "no") + '">' +
-      (id === focus ? '<span class="mark">▸ </span>' : "") +
+      (id === go ? '<span class="mark">▸ </span>' : "") +
       esc(tree.get("/godot/list/" + id + "/name", id)) +
+      (isCart(id) ? '<span class="kind"> · cart</span>' : "") +
     "</div>" }));
 
   tabs.push({ key: "tab:+", html:
     '<div class="list-tab" data-newlist="yes" title="a second list runs beside this one">+</div>' });
+  tabs.push({ key: "tab:+cart", html:
+    '<div class="list-tab" data-newcart="yes" title="a cart: a list GO never meets, its cues fired by a key,' +
+    ' a pad or a message">+ cart</div>' });
 
   reconcile(el("tabs"), tabs);
 

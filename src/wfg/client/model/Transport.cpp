@@ -17,6 +17,7 @@
 #include <wfg/client/model/Transport.h>
 
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/ListTabs.h>
 #include <wfg/client/model/Surfaces.h>
 
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -439,12 +440,10 @@ namespace wfg::client::model
 
         /*  THE FOCUSED LIST, WITH THE PAGE'S FALLBACK (strip.js:223): the
             engine's `focus` when it names one, else the first list there is,
-            else nothing - a show with no list has no standby to show. */
-        reading.listId = text (snapshot, "/godot/list/focus");
-
-        if (reading.listId.empty())
-            if (const auto lists = words (text (snapshot, "/godot/list/order")); ! lists.empty())
-                reading.listId = lists.front();
+            else nothing - a show with no list has no standby to show. Never a
+            cart, which GO never meets (namespace draft §74): the first show
+            list, as the engine falls back. */
+        reading.listId = goListOf (snapshot);
 
         if (! reading.listId.empty())
         {

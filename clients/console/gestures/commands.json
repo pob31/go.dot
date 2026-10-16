@@ -16,6 +16,7 @@
     "park":         { "command": "standby.set",      "args": ["s"],                  "where": "a row's left edge, or 'standby here' in the inspector" },
     "focus-list":   { "command": "list.focus",       "args": ["s"],                  "where": "a list's tab" },
     "new-list":     { "command": "list.create",      "args": ["s"],                  "where": "the + tab" },
+    "new-cart":     { "command": "list.create",      "args": ["s", "s", "s", "s"],   "where": "the + cart tab: a list born a cart (namespace draft 74)" },
     "aim":          { "command": "list.aim",         "args": ["s", "s", "d"],        "where": "a row, a step chip, or the aim slider" },
     "load-to-time": { "command": "list.loadToTime",  "args": ["s"],                  "where": "the aim's load button" },
     "kill":         { "command": "run.kill",         "args": ["s"],                  "where": "a run's kill button" },
