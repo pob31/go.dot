@@ -52,7 +52,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_sound_eqB1Shape[] = { "peak", "lowShelf" };
     inline constexpr std::string_view enum_sound_eqB4Shape[] = { "peak", "highShelf" };
     inline constexpr std::string_view enum_mic_onGo[] = { "wait", "loop", "clear" };
-    inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock" };
+    inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock", "key" };
     inline constexpr std::string_view enum_trigger_type[] = { "noteOn", "noteOff", "programChange", "controlChange" };
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_transport_verb[] = { "hard", "fade", "afterMember", "afterIteration", "advance", "record", "loop", "overdub", "clear", "enable", "disable", "jump" };
@@ -1804,10 +1804,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "osc",
           false, 0.0, false, 0.0,
-          enum_trigger_kind, 3,
+          enum_trigger_kind, 4,
           "", 50.0, false, "park",
           "",
-          "What kind of thing fires it. The three inputs Phase 3 builds: a message on Go.dot own OSC port, a MIDI event on an input it was told to open, and a time of day. Timecode is Phase 10, and GO is not in this list at all - GO is the operator, and the only trigger that moves the standby (PRD 3.5)." },
+          "What kind of thing fires it. The three inputs Phase 3 builds: a message on Go.dot own OSC port, a MIDI event on an input it was told to open, and a time of day - and since 2026-10-16 a key of the computer a client runs on (namespace draft 74). Timecode is Phase 10, and GO is not in this list at all - GO is the operator, and the only trigger that moves the standby (PRD 3.5)." },
         { "trigger", "enabled",
           ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "true",
@@ -1880,6 +1880,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "clock: a local time of day, HH:MM:SS, fired once each day it is crossed while the show is open. The wall clock is the one input the model refuses to read - nothing inside the engine reads a clock, which is what makes a replay reproducible - so a crossing is noticed outside it and arrives as a logged command like any other." },
+        { "trigger", "key",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "key: the key that fires this cue, on the computer the window or the page runs on (namespace draft 74, AQK, AQW): the modifiers Mod, Alt and Shift in that order, then the key - F6, Mod+K, Shift+1, ArrowLeft, Num1. Matched where the key arrives, never while a box has the keys; held, a hold member plays while it is down. Refused when it is no key in that spelling, or one the show keeps: Space, Escape and F9 with any modifier, and every shortcut either client answers to. Empty is no key yet." },
         { "fade", "target",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",

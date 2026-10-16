@@ -19,6 +19,7 @@
 
 import { pointer, SLIDER_STEPS } from "./fields.js";
 import { gesture, press } from "./table.js";
+import { chordOf } from "../model/chords.js";
 import { selection } from "../model/selection.js";
 import { tree } from "../plumbing/tree.js";
 
@@ -132,6 +133,25 @@ const PASSES_THE_KEYS = new Set(["range", "checkbox", "color", "button", "submit
 const DOUBLE_ESCAPE_MS = 750;
 let lastEscape = -Infinity;
 
+/*  EACH BOUND KEY HELD DOWN NOW, by where it is, with the triggers its press
+    fired (namespace draft §74): released when the key comes up, or when the
+    page loses the keys and would never hear it come up. */
+const keysHeld = new Map();
+
+function releaseHeld(code) {
+  for (const trigger of keysHeld.get(code) || []) gesture("release-trigger", [trigger]);
+
+  keysHeld.delete(code);
+}
+
+document.addEventListener("keyup", (event) => {
+  if (keysHeld.has(event.code)) releaseHeld(event.code);
+});
+
+window.addEventListener("blur", () => {
+  for (const code of [...keysHeld.keys()]) releaseHeld(code);
+});
+
 function wantsTheKeys(element) {
   if (!element) return false;
   if (element.isContentEditable) return true;
@@ -205,6 +225,27 @@ document.addEventListener("keydown", (event) => {
 
   if (event.code === "Space" && !!held && held.type === "checkbox" &&
       !event.ctrlKey && !event.metaKey && !event.altKey) return;
+
+  /*  A KEY BOUND TO CUES (namespace draft §74, AQW) fires each of their
+      triggers, once: a held key's repeats are its own and swallowed, and its
+      let-go below releases them, so a hold member plays while it is down.
+      HERE, BEFORE THE PAGE'S OWN KEYS, and safely so - a key the show keeps is
+      refused at the door, so no bound key is ever one answered below. */
+  if (keysHeld.has(event.code)) {
+    event.preventDefault();
+    return;
+  }
+
+  const bound = event.repeat ? undefined : tree.keyTriggers().get(chordOf(event));
+
+  if (bound && bound.length) {
+    event.preventDefault();
+
+    for (const trigger of bound) gesture("fire-trigger", [trigger]);
+
+    keysHeld.set(event.code, bound.slice());
+    return;
+  }
 
   if (event.metaKey || event.ctrlKey) {
     if (event.altKey) return;

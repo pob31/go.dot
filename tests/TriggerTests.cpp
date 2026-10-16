@@ -35,12 +35,14 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/KeyChord.h>
 #include <wfg/engine/cue/TriggerIndex.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -921,4 +923,97 @@ TEST_CASE ("validate: an OSC trigger may not listen inside the engine or a mount
     //  And an address of anybody else's is exactly what a trigger is for.
     rig.set (inside, "address", "/desk/go");
     CHECK (rig.document.validate().empty());
+}
+
+//==============================================================================
+/*  KEY TRIGGERS (namespace draft §74, AQK, AQW): one spelling for a key, the
+    page's, and never a key the show keeps. */
+TEST_CASE ("key chord: one spelling, whatever order and case it came in")
+{
+    CHECK (canonicalChord ("shift+mod+k") == std::optional<std::string> ("Mod+Shift+K"));
+    CHECK (canonicalChord ("ctrl+F6") == std::optional<std::string> ("Mod+F6"));
+    CHECK (canonicalChord ("Cmd+Option+1") == std::optional<std::string> ("Mod+Alt+1"));
+    CHECK (canonicalChord ("num3") == std::optional<std::string> ("Num3"));
+    CHECK (canonicalChord ("arrowleft") == std::optional<std::string> ("ArrowLeft"));
+    CHECK (canonicalChord ("F24") == std::optional<std::string> ("F24"));
+
+    for (const auto* nonsense : { "", "F25", "F0", "Mod+", "+K", "Hyper+K", ",", "Mod+Shift", "Num10" })
+    {
+        INFO (nonsense);
+        CHECK_FALSE (canonicalChord (nonsense).has_value());
+    }
+
+    CHECK (chordOf (true, false, true, "k") == std::optional<std::string> ("Mod+Shift+K"));
+    CHECK_FALSE (chordOf (false, false, false, "comma").has_value());
+
+    //  GO, Esc and Doh! whatever the modifiers, and every shortcut either client answers to.
+    for (const auto* kept : { "Space", "Mod+Space", "Shift+Escape", "Escape", "F9", "Alt+F9", "F5", "F",
+                              "Shift+F", "ArrowUp", "ArrowDown", "Mod+Z", "Mod+Shift+Z", "Mod+S", "Mod+T", "Delete" })
+    {
+        INFO (kept);
+        CHECK (isReservedChord (kept));
+    }
+
+    for (const auto* free : { "F6", "Mod+K", "Shift+1", "ArrowLeft", "Num1", "G", "Alt+F", "Mod+F6" })
+    {
+        INFO (free);
+        CHECK_FALSE (isReservedChord (free));
+    }
+}
+
+TEST_CASE ("key trigger: its key is spelled once, is never one the show keeps, and can be born with it")
+{
+    TriggerRig rig;
+    const auto id = rig.add (triggerKind::key);
+
+    const auto key = "/godot/trigger/" + id + "/key";
+
+    CHECK (rig.document.setAttribute (key, "F6").ok);
+    CHECK (rig.document.setAttribute (key, "Mod+Shift+K").ok);
+    CHECK (rig.document.setAttribute (key, "").ok);
+
+    //  Not the spelling, a key the show keeps, no key at all: refused, and the key stays.
+    REQUIRE (rig.document.setAttribute (key, "F7").ok);
+
+    for (const auto* refused : { "shift+mod+k", "Space", "F9", "Mod+S", "Comma" })
+    {
+        INFO (refused);
+        CHECK_FALSE (rig.document.setAttribute (key, refused).ok);
+    }
+
+    CHECK (rig.document.getAttribute (key) == std::optional<std::string> ("F7"));
+
+    //  Born with its key, in one step; and born with a key the show keeps, not at all.
+    const auto born = rig.document.createTrigger (rig.cueId, triggerKind::key, {}, { { "key", "F8" } });
+    REQUIRE (born.ok);
+    CHECK (rig.document.getAttribute ("/godot/trigger/" + born.id + "/key") == std::optional<std::string> ("F8"));
+
+    CHECK_FALSE (rig.document.createTrigger (rig.cueId, triggerKind::key, {}, { { "key", "Escape" } }).ok);
+    CHECK_FALSE (rig.document.createTrigger (rig.cueId, triggerKind::key, {}, { { "kind", "osc" } }).ok);
+
+    //  The engine's own inputs never answer one.
+    const auto index = rig.index();
+    CHECK (matchOsc (*index, "/desk/go", noArgs()).empty());
+}
+
+TEST_CASE ("key trigger: trigger.create makes one with its key, and trigger.fire fires its cue, standby still")
+{
+    FiringRig rig;
+    REQUIRE (rig.document.setAttribute (standbyAddressOf (rig.listId), rig.other).ok);
+
+    CHECK (rig.tick ("trigger.create", { osc::Value::string (rig.cueId), osc::Value::string ("key"),
+                                         osc::Value::string (""), osc::Value::string ("key"),
+                                         osc::Value::string ("F6") }).rejected == 0);
+
+    const auto trigger = rig.document.findById (rig.cueId).getChildWithName ("Trigger");
+    REQUIRE (trigger.isValid());
+    const auto id = trigger["id"].toString().toStdString();
+    CHECK (rig.document.getAttribute ("/godot/trigger/" + id + "/key") == std::optional<std::string> ("F6"));
+
+    CHECK (rig.tick ("trigger.fire", { osc::Value::string (id) }).rejected == 0);
+    CHECK (! rig.runOf (rig.cueId).empty());
+    CHECK (rig.document.getAttribute ("/godot/list/" + rig.listId + "/standby") == rig.other);
+
+    //  Its key let go: nothing to release on a memo, and no mistake.
+    CHECK (rig.tick ("trigger.release", { osc::Value::string (id) }).rejected == 0);
 }

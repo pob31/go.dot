@@ -19,6 +19,7 @@
 #include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/GroupMode.h>
+#include <wfg/engine/cue/KeyChord.h>
 #include <wfg/engine/cue/Override.h>
 #include <wfg/engine/cue/TriggerIndex.h>
 #include <wfg/engine/command/Command.h>
@@ -216,6 +217,20 @@ namespace wfg::doc
                 state.xml written against a show that has since been edited -
                 only ever comes through here. */
             return cue::mayStandOn (list, cueId);
+        }
+
+        /*  A TRIGGER'S KEY (namespace draft §74, AQK, AQW): spelled as both
+            clients spell a key, and never one the show keeps - GO's Space,
+            Esc, Doh!'s F9 or a shortcut either client answers to. Empty is no
+            key yet, and always legal. */
+        bool isLegalKey (std::string_view text)
+        {
+            if (text.empty())
+                return true;
+
+            const auto canonical = cue::canonicalChord (text);
+
+            return canonical.has_value() && *canonical == text && ! cue::isReservedChord (*canonical);
         }
 
         /*  The list a cue belongs to, however deep it is - or an invalid tree
@@ -1662,6 +1677,9 @@ namespace wfg::doc
                     if (! timeGroupTakes (member.getType().toString().toStdString(), groupModeOf (member)))
                         return EditResult::failed (reason::badValue);
         }
+
+        if (target.attribute->element == "Trigger" && target.attribute->name() == "key" && ! isLegalKey (text))
+            return EditResult::failed (reason::badValue);
 
         /*  A CARD'S FORMAT IS A WORD MADE FROM IT (namespace draft §71.3): a
             string as far as the table can say, so the word is judged here - a
@@ -4363,7 +4381,7 @@ namespace wfg::doc
     }
 
     EditResult ShowDocument::createTrigger (const std::string& cueId, const std::string& kind,
-                                            const std::string& id)
+                                            const std::string& id, const Attributes& attributes)
     {
         auto cue = findById (cueId);
 
@@ -4378,11 +4396,26 @@ namespace wfg::doc
         if (ownerForElement (cue.getType().toString().toStdString()) != "cue")
             return EditResult::failed (reason::typeMismatch);
 
-        if (kind != "osc" && kind != "midi" && kind != "clock")
+        if (kind != "osc" && kind != "midi" && kind != "clock" && kind != "key")
             return EditResult::failed (reason::badValue);
 
-        return insertObject (cue, endOfSequence, "Trigger", id,
-                             { { "kind", kind } });
+        /*  BORN WITH ITS SETTINGS (namespace draft §74), as a cue is: a key
+            trigger made with its key is one step. The kind has its own
+            argument; a key is refused here as the door refuses it. */
+        std::vector<std::pair<std::string_view, std::string>> born { { "kind", kind } };
+
+        for (const auto& [attributeName, text] : attributes)
+        {
+            if (attributeName == "kind" || attributeName == "id")
+                return EditResult::failed (reason::badValue);
+
+            if (attributeName == "key" && ! isLegalKey (text))
+                return EditResult::failed (reason::badValue);
+
+            born.emplace_back (attributeName, text);
+        }
+
+        return insertObject (cue, endOfSequence, "Trigger", id, born);
     }
 
     EditResult ShowDocument::createRole (const std::string& groupId, const std::string& role,

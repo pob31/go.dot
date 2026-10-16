@@ -268,9 +268,12 @@ namespace wfg::doc
             list to "a cue or a group". The kind is fixed at creation for the
             same reason a cue's is: a trigger that could be turned from a note
             into a time of day by writing a word would carry the fields of the
-            kind it used to be. */
+            kind it used to be.
+
+            AND THE SETTINGS IT IS BORN WITH (namespace draft §74), as a cue's
+            are: a key trigger made with its key is one step to undo. */
         EditResult createTrigger (const std::string& cueId, const std::string& kind,
-                                  const std::string& id = {});
+                                  const std::string& id = {}, const Attributes& attributes = {});
 
         /*  Adds a range to a media cue - a region of the cue's own file, and
             one more clip in a launcher slot when the cue is armed (§3.24).

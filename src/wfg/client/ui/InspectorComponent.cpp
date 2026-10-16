@@ -16,6 +16,7 @@
 
 #include <wfg/client/ui/InspectorComponent.h>
 
+#include <wfg/client/ui/KeyNames.h>
 #include <wfg/client/ui/Look.h>
 
 #include <wfg/engine/osc/OscValue.h>
@@ -149,6 +150,22 @@ namespace wfg::client::ui
         }
     };
 
+    /*  THE KEY LINE'S BUTTON, which says when the focus leaves it: a click
+        anywhere else stops it listening (namespace draft §74). */
+    class KeyButton final : public juce::TextButton
+    {
+    public:
+        std::function<void()> onFocusLost;
+
+        void focusLost (FocusChangeType cause) override
+        {
+            juce::TextButton::focusLost (cause);
+
+            if (onFocusLost != nullptr)
+                onFocusLost();
+        }
+    };
+
     /*  ONE ROW OF THE PANEL: a name, and whatever the node says its value
         should be edited with. A heading carries no field and draws itself. */
     struct InspectorComponent::Line
@@ -201,6 +218,11 @@ namespace wfg::client::ui
             focus leaves (author, 2026-09-18: "the edit field in the
             inspector is too limited for this"). */
         juce::TextEditor editor;
+
+        /*  THE KEY LINE (namespace draft §74): the button that takes the next
+            key, and the cross that takes the key away. */
+        KeyButton capture;
+        juce::TextButton clearKey { "x" };
     };
 
     namespace
@@ -411,6 +433,88 @@ namespace wfg::client::ui
         }
 
         return false;
+    }
+
+    //==========================================================================
+    //  The key line (namespace draft §74)
+    juce::String InspectorComponent::keyWords (const model::Field& field)
+    {
+        return field.value.empty() ? juce::String ("Choose a key") : juce::String (field.value);
+    }
+
+    void InspectorComponent::listenForKey()
+    {
+        for (auto& line : lines)
+            if (! line->isHeading && line->field.control == model::Control::keyCapture)
+            {
+                keyListener = line.get();
+                keyListener->capture.setButtonText ("Press a key - Esc cancels");
+                keyListener->capture.setWantsKeyboardFocus (true);
+
+                if (keyListener->capture.isShowing())
+                    keyListener->capture.grabKeyboardFocus();
+
+                return;
+            }
+    }
+
+    void InspectorComponent::stopListening()
+    {
+        auto* line = std::exchange (keyListener, nullptr);
+
+        if (line == nullptr)
+            return;
+
+        line->capture.setButtonText (keyWords (line->field));
+        line->capture.setWantsKeyboardFocus (false);
+
+        /*  THE FOCUS BACK WHERE GO HEARS IT: the nearest component above that
+            rests the keys - the shell, whose keys are GO's and the panes'. */
+        if (line->capture.hasKeyboardFocus (false))
+            for (auto* above = getParentComponent(); above != nullptr; above = above->getParentComponent())
+                if (above->getWantsKeyboardFocus())
+                {
+                    above->grabKeyboardFocus();
+                    break;
+                }
+    }
+
+    bool InspectorComponent::keyPressed (const juce::KeyPress& key)
+    {
+        if (keyListener == nullptr)
+            return false;
+
+        /*  ESC LETS IT GO, AND STOPS NOTHING: while the line listens, the key
+            is the line's, as Esc inside the list's own editor is the editor's. */
+        if (key == juce::KeyPress (juce::KeyPress::escapeKey))
+        {
+            stopListening();
+            return true;
+        }
+
+        const auto chord = chordOfKey (key);
+
+        /*  REFUSED IN WORDS, and still listening: a key no spelling has, and a
+            key the show keeps (AQK, AQW). */
+        if (! chord.has_value())
+        {
+            keyListener->capture.setButtonText ("Not a key a cue can have - try another");
+            return true;
+        }
+
+        if (cue::isReservedChord (*chord))
+        {
+            keyListener->capture.setButtonText (juce::String (*chord) + " is the show's own - try another");
+            return true;
+        }
+
+        const auto address = keyListener->field.address;
+        stopListening();
+
+        if (actions.setKey)
+            actions.setKey (drawnCue, address, *chord);
+
+        return true;
     }
 
     void InspectorComponent::pressedOn (const juce::Component* hit)
@@ -837,6 +941,14 @@ namespace wfg::client::ui
                     //  Nothing to poll: it holds no value and writes none.
                     break;
 
+                case model::Control::keyCapture:
+                    //  Its words, unless it is listening; and the cross while there is a key.
+                    if (keyListener != &line)
+                        line.capture.setButtonText (keyWords (field));
+
+                    line.clearKey.setVisible (! field.value.empty());
+                    break;
+
                 case model::Control::file:
                 case model::Control::cueRef:
                 case model::Control::text:
@@ -1013,6 +1125,9 @@ namespace wfg::client::ui
 
     void InspectorComponent::rebuild (const model::Inspection& inspection)
     {
+        //  The key line listening goes with its line (namespace draft §74).
+        keyListener = nullptr;
+
         lines.clear();
         content.removeAllChildren();
 
@@ -1074,6 +1189,35 @@ namespace wfg::client::ui
                 };
 
                 content.addAndMakeVisible (line->opener);
+            }
+            else if (field.control == model::Control::keyCapture)
+            {
+                /*  THE KEY THAT FIRES THIS CUE (namespace draft §74): the
+                    button listens for the next key, the cross takes the key
+                    away. What the trigger is called is read when pressed, off
+                    the line as the last poll left it. */
+                auto* raw = line.get();
+
+                line->capture.setButtonText (keyWords (field));
+                line->capture.setTooltip (juce::String (field.description));
+                line->capture.setWantsKeyboardFocus (false);
+                line->capture.onClick = [this] { listenForKey(); };
+                line->capture.onFocusLost = [this] { if (keyListener != nullptr) stopListening(); };
+
+                line->clearKey.setWantsKeyboardFocus (false);
+                line->clearKey.setTooltip ("Takes the key away");
+                line->clearKey.onClick = [this, raw]
+                {
+                    const std::string prefix = "/godot/trigger/";
+                    const auto& address = raw->field.address;
+
+                    if (actions.clearKey && address.rfind (prefix, 0) == 0)
+                        actions.clearKey (address.substr (prefix.size(), address.find ('/', prefix.size()) - prefix.size()));
+                };
+
+                content.addAndMakeVisible (line->capture);
+                content.addChildComponent (line->clearKey);
+                line->clearKey.setVisible (! field.value.empty());
             }
             else if (field.boolean && field.writable)
             {
@@ -1537,6 +1681,15 @@ namespace wfg::client::ui
                 line->box.setVisible (false);
             }
 
+            /*  The key line's button stands in for the box (namespace draft §74). */
+            const auto keys = line->field.control == model::Control::keyCapture;
+
+            line->capture.setVisible (! hidden && keys);
+            line->clearKey.setVisible (! hidden && keys && ! line->field.value.empty());
+
+            if (keys)
+                line->box.setVisible (false);
+
             /*  The tall box stands in for the one-line box when it exists. */
             const auto tall = line->field.control == model::Control::longText
                                 && line->editor.getParentComponent() != nullptr;
@@ -1589,6 +1742,15 @@ namespace wfg::client::ui
                 if (line->sends.isVisible())
                     line->sends.setBounds (boxArea.removeFromRight (juce::jmin (row * 3,
                                                                                 boxArea.getWidth() / 2)));
+
+                /*  THE KEY LINE: its cross kept at the right whether or not
+                    there is a key yet, so a key arriving by a poll needs no
+                    layout to show it. */
+                if (keys)
+                {
+                    line->clearKey.setBounds (boxArea.removeFromRight (row));
+                    line->capture.setBounds (boxArea);
+                }
 
                 line->box.setBounds (boxArea);
                 line->toggle.setBounds (boxArea);

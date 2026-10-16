@@ -86,6 +86,13 @@ namespace wfg::client::ui
             -shift-S reach the items they are printed beside. */
         std::function<bool (const juce::KeyPress&)> menuKeys;
 
+        /*  AND THE SHOW'S KEY TRIGGERS, asked after everything above (namespace
+            draft §74, AQW): a key nothing here claims may fire a cue. Its
+            let-go is asked for on every change of the keys, and when the focus
+            comes back. */
+        std::function<bool (const juce::KeyPress&)> triggerKeys;
+        std::function<void()> triggerKeysUp;
+
         TransportComponent transport;
         FootPanelComponent foot;
         CueListComponent cues;

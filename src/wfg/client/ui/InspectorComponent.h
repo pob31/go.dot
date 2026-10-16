@@ -100,6 +100,12 @@ namespace wfg::client::ui
             /*  A CLICK OR A TOUCH ON A NUMBER puts it on the surfaces' master
                 dial (author, 2026-09-26), by the address the node gave. */
             std::function<void (const std::string& address)> dial;
+
+            /*  THE KEY LINE (namespace draft §74): a key chosen for the cue -
+                written to its key trigger's row when it has one (`address`),
+                made with one otherwise - and the key taken away. */
+            std::function<void (const std::string& cueId, const std::string& address, const std::string& key)> setKey;
+            std::function<void (const std::string& triggerId)> clearKey;
         };
 
         InspectorComponent (const model::Theme& theme, Actions actions);
@@ -137,6 +143,18 @@ namespace wfg::client::ui
         void mouseDown (const juce::MouseEvent& event) override;
         void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override;
 
+        /*  WHILE THE KEY LINE IS LISTENING, every key is its (namespace draft
+            §74): the next one is the cue's key, Esc lets it go, and a key the
+            show keeps is refused in words. Otherwise nothing is taken here. */
+        bool keyPressed (const juce::KeyPress& key) override;
+
+        /*  THE KEY LINE'S BUTTON PRESSED: what its click does, and what a test
+            drives. Then `keyPressed` takes the next key. */
+        void listenForKey();
+
+        /** Whether the key line is waiting for a key. */
+        bool listeningForKey() const noexcept { return keyListener != nullptr; }
+
         /*  A PRESS THAT LANDED ON `hit`: what mouseDown forwards to, and what a
             test drives without inventing a mouse event. */
         void pressedOn (const juce::Component* hit);
@@ -164,6 +182,11 @@ namespace wfg::client::ui
         double scrolledAtMs = -1.0e9;
         float wheelCarried = 0.0f;
         bool wheelTaken = false;
+
+        /*  THE KEY LINE LISTENING, or null; and what it says while it does. */
+        Line* keyListener = nullptr;
+        void stopListening();
+        static juce::String keyWords (const model::Field& field);
 
         /*  A DRAWER'S HEAD: its twist, its icon, its name, and while it is
             shut how many rows are in it. Pressing it opens or shuts it. */

@@ -55,6 +55,7 @@
 #include <wfg/client/model/Flags.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/KeyTriggers.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/TemplateReview.h>
 #include <wfg/client/model/UndoHistory.h>
@@ -74,6 +75,7 @@
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
+#include <wfg/client/ui/KeyNames.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/NetworkMonitorWindow.h>
 #include <wfg/client/ui/VideoMonitorWindow.h>
@@ -386,6 +388,20 @@ namespace wfg::client
                 /*  A CLICK OR A TOUCH ON A NUMBER PUTS IT ON THE MASTER DIAL
                     (author, 2026-09-26) - here and at the foot. */
                 inspectorActions.dial = [this] (const std::string& address) { dialTo (address); };
+
+                /*  THE KEY LINE (namespace draft §74): a key chosen is written
+                    to the cue's key trigger, or makes one with it in a step; the
+                    cross deletes the trigger, as any object is deleted. */
+                inspectorActions.setKey = [this] (const std::string& cueId, const std::string& address,
+                                                  const std::string& key)
+                {
+                    send (address.empty() ? gesture::createKeyTrigger (cueId, key) : gesture::setNode (address, key));
+                };
+
+                inspectorActions.clearKey = [this] (const std::string& triggerId)
+                {
+                    send (gesture::deleteObject (triggerId));
+                };
 
                 /*  THE PANEL AT THE FOOT, ASKED FOR FROM THE CUE ITSELF. The
                     inspector hands back a word; the words are the ones
@@ -762,6 +778,53 @@ namespace wfg::client
                         menuItemSelected (item, 0);
 
                     return true;
+                };
+
+                /*  THE SHOW'S KEY TRIGGERS (namespace draft §74, AQW), asked
+                    after every key of the window's own: a key bound to cues
+                    fires each of their triggers once - a held key's repeats
+                    are its own, and swallowed - and its let-go releases them,
+                    so a hold member plays while the key is down. */
+                shell->triggerKeys = [this] (const juce::KeyPress& key)
+                {
+                    const auto code = key.getKeyCode();
+
+                    for (const auto& held : keysHeld)
+                        if (held.first == code)
+                            return true;
+
+                    const auto chord = ui::chordOfKey (key);
+
+                    if (! chord.has_value())
+                        return false;
+
+                    auto fired = model::triggersForKey (keyTriggers, *chord);
+
+                    if (fired.empty())
+                        return false;
+
+                    for (const auto& trigger : fired)
+                        send (gesture::fireTrigger (trigger));
+
+                    keysHeld.emplace_back (code, std::move (fired));
+                    return true;
+                };
+
+                shell->triggerKeysUp = [this]
+                {
+                    for (auto held = keysHeld.begin(); held != keysHeld.end();)
+                    {
+                        if (juce::KeyPress::isKeyCurrentlyDown (held->first))
+                        {
+                            ++held;
+                            continue;
+                        }
+
+                        for (const auto& trigger : held->second)
+                            send (gesture::releaseTrigger (trigger));
+
+                        held = keysHeld.erase (held);
+                    }
                 };
                #if JUCE_MAC
                 juce::MenuBarModel::setMacMainMenu (this);
@@ -2137,6 +2200,13 @@ namespace wfg::client
                 what that makes of the rows and of the warnings by page. */
             model::ObjectIndex problemIndex;
             bool problemsIndexed = false;
+
+            /*  THE SHOW'S KEY TRIGGERS, read with the object index when the show
+                changes; and each key of them held down now, with the triggers
+                its press fired - let go when the key is (namespace draft §74). */
+            std::vector<model::KeyTrigger> keyTriggers;
+            std::vector<std::pair<int, std::vector<std::string>>> keysHeld;
+
             bool cueNeedsStale = true;
             bool problemMarksStale = true;
             model::CueNeeds cueNeeds;
@@ -2328,6 +2398,9 @@ namespace wfg::client
                     problemIndex = model::indexObjects (*snapshot);
                     problemsIndexed = true;
                     cueNeedsStale = true;
+
+                    //  And the show's key triggers, read when the show changes (namespace draft §74).
+                    keyTriggers = model::readKeyTriggers (*snapshot);
                 }
 
                 if (rebuilt || cueNeedsStale)
@@ -2719,7 +2792,11 @@ namespace wfg::client
                                                  : ui::Shell::Panel::none);
 
                 if (inspecting && ! loadingToTime && ! browsingUndo)
-                    shell->inspector.show (model::inspectMany (*snapshot, selection.ids(), selection.anchor()));
+                {
+                    auto inspection = model::inspectMany (*snapshot, selection.ids(), selection.anchor());
+                    model::addKeyLine (inspection, keyTriggers);
+                    shell->inspector.show (inspection);
+                }
 
                 /*  WHICH PANEL IS OPEN AT THE FOOT, and on which cue, so the
                     inspector's panel buttons are lit while theirs is. */

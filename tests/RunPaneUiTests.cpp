@@ -3,6 +3,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 #include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/ui/KeyNames.h>
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/PicturePanelComponent.h>
@@ -60,6 +61,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -7594,4 +7596,90 @@ TEST_CASE ("cue list: F and Shift+F, once per key-down, and a flag drawn left of
         juce::PNGImageFormat png;
         png.writeImageToStream (paint(), out);
     }
+}
+
+TEST_CASE ("inspector: the key line takes the next key, refuses the show's own, and Esc lets it go")
+{
+    /*  Namespace draft §74, AQK, AQW: a key chosen in the window is the key
+        pressed on the page, and a key the show keeps is never a cue's. */
+    std::vector<std::vector<std::string>> chosen;
+    std::vector<std::string> cleared;
+
+    ui::InspectorComponent::Actions actions;
+    actions.setKey = [&] (const std::string& cue, const std::string& address, const std::string& key)
+    {
+        chosen.push_back ({ cue, address, key });
+    };
+    actions.clearKey = [&] (const std::string& trigger) { cleared.push_back (trigger); };
+
+    ui::InspectorComponent inspector (model::Theme {}, actions);
+    inspector.setSize (320, 200);
+
+    model::Field key;
+    key.name = "key";
+    key.label = "Key";
+    key.control = model::Control::keyCapture;
+    key.writable = true;
+    key.address = "/godot/trigger/KEYTRG01/key";
+    key.value = "F6";
+
+    model::Inspection inspection;
+    inspection.cueId = "CUE00001";
+    inspection.cueName = "Door";
+    inspection.kind = "media";
+    inspection.count = 1;
+    inspection.blocks.push_back ({ "key", { key } });
+    inspector.show (inspection);
+
+    //  Not listening, a key is nobody's here.
+    CHECK_FALSE (inspector.keyPressed (juce::KeyPress (juce::KeyPress::F7Key)));
+
+    inspector.listenForKey();
+    REQUIRE (inspector.listeningForKey());
+
+    //  GO's Space and an undo are the show's own: refused, and it goes on listening.
+    CHECK (inspector.keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK (inspector.keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0)));
+    CHECK (inspector.listeningForKey());
+    CHECK (chosen.empty());
+
+    //  Mod+K is the cue's now, written to its trigger's row.
+    CHECK (inspector.keyPressed (juce::KeyPress ('k', juce::ModifierKeys::commandModifier, 0)));
+    CHECK_FALSE (inspector.listeningForKey());
+    REQUIRE (chosen.size() == 1u);
+    CHECK (chosen[0] == std::vector<std::string> { "CUE00001", "/godot/trigger/KEYTRG01/key", "Mod+K" });
+
+    //  Esc lets it go, and chooses nothing - and stops nothing.
+    inspector.listenForKey();
+    CHECK (inspector.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+    CHECK_FALSE (inspector.listeningForKey());
+    CHECK (chosen.size() == 1u);
+
+    //  The cross takes the key away: the trigger, by its identifier.
+    juce::TextButton* cross = nullptr;
+
+    std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+    {
+        for (auto* child : at.getChildren())
+        {
+            if (auto* button = dynamic_cast<juce::TextButton*> (child); button != nullptr && button->getButtonText() == "x"
+                  && button->getTooltip() == "Takes the key away")
+                cross = button;
+
+            walk (*child);
+        }
+    };
+
+    walk (inspector);
+    REQUIRE (cross != nullptr);
+    cross->onClick();
+    CHECK (cleared == std::vector<std::string> { "KEYTRG01" });
+
+    //  The window's spelling of a key press, the page's.
+    CHECK (ui::chordOfKey (juce::KeyPress (juce::KeyPress::F6Key)) == std::optional<std::string> ("F6"));
+    CHECK (ui::chordOfKey (juce::KeyPress (juce::KeyPress::numberPad3)) == std::optional<std::string> ("Num3"));
+    CHECK (ui::chordOfKey (juce::KeyPress ('1', juce::ModifierKeys::shiftModifier, 0)) == std::optional<std::string> ("Shift+1"));
+    CHECK (ui::chordOfKey (juce::KeyPress (juce::KeyPress::leftKey, juce::ModifierKeys::altModifier, 0))
+             == std::optional<std::string> ("Alt+ArrowLeft"));
+    CHECK_FALSE (ui::chordOfKey (juce::KeyPress (',')).has_value());
 }

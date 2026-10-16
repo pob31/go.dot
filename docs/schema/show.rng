@@ -2292,12 +2292,19 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="key">
+          <a:documentation>key: the key that fires this cue, on the computer the window or the page runs on (namespace draft 74, AQK, AQW): the modifiers Mod, Alt and Shift in that order, then the key - F6, Mod+K, Shift+1, ArrowLeft, Num1. Matched where the key arrives, never while a box has the keys; held, a hold member plays while it is down. Refused when it is no key in that spelling, or one the show keeps: Space, Escape and F9 with any modifier, and every shortcut either client answers to. Empty is no key yet.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="kind">
-          <a:documentation>What kind of thing fires it. The three inputs Phase 3 builds: a message on Go.dot own OSC port, a MIDI event on an input it was told to open, and a time of day. Timecode is Phase 10, and GO is not in this list at all - GO is the operator, and the only trigger that moves the standby (PRD 3.5).</a:documentation>
+          <a:documentation>What kind of thing fires it. The three inputs Phase 3 builds: a message on Go.dot own OSC port, a MIDI event on an input it was told to open, and a time of day - and since 2026-10-16 a key of the computer a client runs on (namespace draft 74). Timecode is Phase 10, and GO is not in this list at all - GO is the operator, and the only trigger that moves the standby (PRD 3.5).</a:documentation>
           <choice>
             <value>osc</value>
             <value>midi</value>
             <value>clock</value>
+            <value>key</value>
           </choice>
         </attribute>
       </optional>

@@ -155,6 +155,14 @@ namespace wfg::client::gesture
         thing about what they are about to hear. */
     Event fireCue (const std::string& cueId);
 
+    /*  A KEY TRIGGER'S KEY, DOWN AND UP (namespace draft §74, AQU, AQW): the
+        trigger fires its cue, and its let-go stops a hold member it pressed.
+        And a key trigger made with its key, in one step - the panel's "Press a
+        key" on a cue that has none yet. */
+    Event fireTrigger (const std::string& triggerId);
+    Event releaseTrigger (const std::string& triggerId);
+    Event createKeyTrigger (const std::string& cueId, const std::string& key);
+
     /*  Makes a range on a media cue: a named region of its file, and one entry
         in the playlist the cue plays instead of the whole thing (§3.24). As
         `createCue`, the identifier is the engine's to draw and the log's to

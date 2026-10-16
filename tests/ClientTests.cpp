@@ -61,6 +61,7 @@
 #include <wfg/client/model/Traffic.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/KeyTriggers.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
@@ -15400,4 +15401,69 @@ TEST_CASE ("client: a device on an MQTT broker is put there by one gesture, is i
     model::DeviceRow plain;
     CHECK (plain.topics == "#");
     CHECK (model::kindWordOf (plain, {}) == "OSC");
+}
+
+TEST_CASE ("client: the show's key triggers, read once, the key that fires them, and the inspector's Key line")
+{
+    /*  Namespace draft §74, AQK, AQW: a key fires its cue where it arrives, so
+        the window holds the show's key triggers and answers a key from them. */
+    Rig rig;
+
+    const std::string cue = "B3N8R5TW";
+    const std::string group = "D9FH2JKA";
+    const auto s = [] (const char* text) { return osc::Value::string (text); };
+
+    REQUIRE (rig.apply (1, "cli", "trigger.create", { s (cue.c_str()), s ("key"), s ("KEYTRG01"),
+                                                      s ("key"), s ("F6") }).rejected == 0);
+    REQUIRE (rig.apply (2, "cli", "trigger.create", { s (group.c_str()), s ("key"), s ("KEYTRG02"),
+                                                      s ("key"), s ("F6") }).rejected == 0);
+    REQUIRE (rig.apply (3, "cli", "trigger.create", { s (group.c_str()), s ("osc"), s ("SCTRG003") }).rejected == 0);
+    REQUIRE (rig.apply (4, "cli", "node.set", { s ("/godot/trigger/KEYTRG02/enabled"), s ("false") }).rejected == 0);
+
+    const auto snapshot = rig.publish (5);
+    const auto keys = model::readKeyTriggers (*snapshot);
+
+    //  The two key triggers and not the OSC one; the one switched off fires nothing.
+    REQUIRE (keys.size() == 2u);
+    CHECK (model::triggersForKey (keys, "F6") == std::vector<std::string> { "KEYTRG01" });
+    CHECK (model::triggersForKey (keys, "F7").empty());
+    CHECK (model::triggersForKey (keys, "Space").empty());
+
+    REQUIRE (model::keyTriggerOf (keys, cue) != nullptr);
+    CHECK (model::keyTriggerOf (keys, cue)->key == "F6");
+    CHECK (model::keyTriggerOf (keys, "E4GP6QSC") == nullptr);
+
+    const auto keyLine = [] (const model::Inspection& inspection) -> const model::Field*
+    {
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+                if (field.control == model::Control::keyCapture)
+                    return &field;
+
+        return nullptr;
+    };
+
+    //  One cue with a key: the line says it, and writes its trigger's row.
+    auto one = model::inspect (*snapshot, cue);
+    model::addKeyLine (one, keys);
+    REQUIRE (keyLine (one) != nullptr);
+    CHECK (keyLine (one)->value == "F6");
+    CHECK (keyLine (one)->address == "/godot/trigger/KEYTRG01/key");
+
+    //  One with none: no key yet, and a key chosen makes the trigger.
+    auto none = model::inspect (*snapshot, "E4GP6QSC");
+    model::addKeyLine (none, keys);
+    REQUIRE (keyLine (none) != nullptr);
+    CHECK (keyLine (none)->value.empty());
+    CHECK (keyLine (none)->address.empty());
+
+    //  Several cues: no Key line.
+    auto several = model::inspectMany (*snapshot, { cue, "E4GP6QSC" }, cue);
+    model::addKeyLine (several, keys);
+    CHECK (keyLine (several) == nullptr);
+
+    //  What the window sends are commands the engine has, with the arguments it takes.
+    CHECK (gesture::createKeyTrigger (cue, "F6").command == "trigger.create");
+    CHECK (gesture::fireTrigger ("KEYTRG01").command == "trigger.fire");
+    CHECK (gesture::releaseTrigger ("KEYTRG01").command == "trigger.release");
 }

@@ -255,7 +255,8 @@ namespace wfg::client::ui
             the ones they press deliberately. Neither set overlaps except
             Space, which both would send to GO. */
         return cues.keyPressed (key) || transport.keyPressed (key)
-            || (menuKeys != nullptr && menuKeys (key));
+            || (menuKeys != nullptr && menuKeys (key))
+            || (triggerKeys != nullptr && triggerKeys (key));
     }
 
     bool Shell::keyStateChanged (bool isKeyDown)
@@ -264,15 +265,23 @@ namespace wfg::client::ui
             the transport, which holds the latch a held F9 is filtered by - nor
             at the list, which holds F's (namespace draft §63). */
         cues.keyStateChanged (isKeyDown);
+
+        if (triggerKeysUp != nullptr)
+            triggerKeysUp();
+
         return transport.keyStateChanged (isKeyDown);
     }
 
     /*  A RELEASE NOBODY HERE SAW: the transport asks the keyboard whether F9
-        is still down, and opens its latch when it is not; the list, F. */
+        is still down, and opens its latch when it is not; the list, F; and a
+        key trigger's key, its let-go (namespace draft §74). */
     void Shell::focusGained (FocusChangeType)
     {
         cues.keyStateChanged (false);
         transport.keyStateChanged (false);
+
+        if (triggerKeysUp != nullptr)
+            triggerKeysUp();
     }
 
     void Shell::focusLost (FocusChangeType)

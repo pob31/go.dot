@@ -61,6 +61,11 @@ namespace wfg::cue
         inline constexpr const char* osc   = "osc";
         inline constexpr const char* midi  = "midi";
         inline constexpr const char* clock = "clock";
+
+        /*  A key of the computer a client runs on (namespace draft §74): matched
+            where the key arrives, in the window and on the page, and so never by
+            this index, which answers the inputs the engine itself listens to. */
+        inline constexpr const char* key   = "key";
     }
 
     /** MIDI event types a trigger can listen for - the four a surface sends. */

@@ -137,6 +137,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/CueList.h
     wfg/engine/cue/TriggerIndex.h
     wfg/engine/cue/TriggerIndex.cpp
+    wfg/engine/cue/KeyChord.h
+    wfg/engine/cue/KeyChord.cpp
     wfg/engine/cue/DcaTable.h
     wfg/engine/cue/LiveRows.h
     wfg/engine/cue/LiveRows.cpp
@@ -775,6 +777,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Flags.cpp
     wfg/client/model/Inspector.h
     wfg/client/model/Inspector.cpp
+    wfg/client/model/KeyTriggers.h
+    wfg/client/model/KeyTriggers.cpp
     wfg/client/model/LoadToTime.h
     wfg/client/model/LoadToTime.cpp
     wfg/client/model/UndoHistory.h

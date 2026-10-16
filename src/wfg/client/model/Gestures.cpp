@@ -345,6 +345,23 @@ namespace wfg::client::gesture
         return { origin::window, "cue.fire", { osc::Value::string (cueId) } };
     }
 
+    Event fireTrigger (const std::string& triggerId)
+    {
+        return { origin::window, "trigger.fire", { osc::Value::string (triggerId) } };
+    }
+
+    Event releaseTrigger (const std::string& triggerId)
+    {
+        return { origin::window, "trigger.release", { osc::Value::string (triggerId) } };
+    }
+
+    Event createKeyTrigger (const std::string& cueId, const std::string& key)
+    {
+        return { origin::window, "trigger.create",
+                 { osc::Value::string (cueId), osc::Value::string ("key"), osc::Value::string (""),
+                   osc::Value::string ("key"), osc::Value::string (key) } };
+    }
+
     Event createRange (const std::string& cueId, double in, double out)
     {
         return { origin::window, "range.create",

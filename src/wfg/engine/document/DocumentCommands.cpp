@@ -614,17 +614,22 @@ namespace wfg::doc
 
         //----------------------------------------------------------------------
         registry.add ({ "trigger.create",
-                        "Adds a trigger to a cue: what fires it when nobody presses GO.",
+                        "Adds a trigger to a cue: what fires it when nobody presses GO. Settings it"
+                        " is born with follow the identifier as attribute-value pairs - key F6.",
                         { { "cue", 's', false }, { "kind", 's', false },
-                          { "id", 's', true } },
+                          { "id", 's', true }, { "attribute", 's', true, true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+                            const auto attributes = pairsFrom (args, 3);
+
+                            if (! attributes)
+                                return Outcome::rejected (reason::badValue);
 
                             const auto edit = document.createTrigger (args[0].getString(),
                                                                       args[1].getString(),
-                                                                      id);
+                                                                      id, *attributes);
 
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });

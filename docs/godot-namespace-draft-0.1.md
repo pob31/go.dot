@@ -30610,6 +30610,7 @@ evening or for as long as one cue runs.
 | **ARB** | **A double Esc stops what a binding is doing, never the binding**: a rate control held over at the press writes nothing more until it is let go and pushed again, and a control moved after the press is a hand moving a control (§23.11). | mine |
 | **ARC** | **Feedback is the binding's choice, off by default**: the value sent back to the control - a motor fader, an LED ring on a generic MIDI box - paced as the D700 is paced, never echoing a value the control itself just sent. | mine |
 | **ARD** | **Learn** on a binding, or on any number the master dial could take, takes the next control that moves as the endpoint: its port, channel, kind and number, or its address and argument. | mine |
+| **ARE** | **Where a key is chosen.** *As built (BD.4):* the window had no trigger editing at all, so a cue picked alone gains a **Key** line at the foot of its inspector: a button that takes the next key pressed (Esc lets it go and stops nothing; a key the show keeps is refused in words and it goes on listening) and a cross that deletes the key trigger. The page gains **+ key** beside + osc, + midi and + clock, its key typed in the spelling. Both clients keep the show's key triggers indexed once a revision and match a key after every key of their own; a held key fires once, and its let-go - or the window or page losing the keys - releases it. | mine |
 
 ### 74.3 Rows
 
@@ -30630,6 +30631,7 @@ Every new row has a default, so an old show opens and saves unchanged.
 | `cue.press` | `cue [velocity]` | AQU |
 | `cue.release` | `cue` | AQU |
 | `trigger.release` | `trigger` | a key let go (AQU) |
+| `trigger.create` | `cue kind [id] [attribute value]…` | gains `key` as a kind, and attribute pairs after the identifier: `key F6` makes a key trigger with its key in one step |
 
 ### 74.5 Stages
 
@@ -30638,7 +30640,7 @@ Every new row has a default, so an old show opens and saves unchanged.
 | BD.0 | This section; PRD §3.5, §3.7, §3.10, §3.27 and §6.9; the devplan | 892edb46 |
 | BD.1 | The wheel over a number (AQP) | ae95d1c1 |
 | BD.2 | The cart: `list/kind`, no standby, no GO focus, `list.create`'s pairs, its banks asserted (AQR, AQT) | 1156a4b5 |
-| BD.3 | Any kind under a pad in a cart; `cue.press`, `cue.release`, `trigger.release` (AQN, AQU, AQV) | |
+| BD.3 | Any kind under a pad in a cart; `cue.press`, `cue.release`, `trigger.release` (AQN, AQU, AQV) | 20cb8852 |
 | BD.4 | Key triggers, in the window and on the page (AQK, AQW) | |
 | BD.5 | Tabs for lists, a cart among them, apart from the GO focus (AQM, AQS) | |
 | BD.6 | The tablet's Cart tab (AQQ) | |

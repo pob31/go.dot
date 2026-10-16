@@ -21,8 +21,24 @@
     them. Imported by app.js for this effect before any view can ask. */
 
 import { tree } from "../plumbing/tree.js";
+import { keyTriggersIn } from "./chords.js";
 
 Object.assign(tree, {
+  /*  THE SHOW'S KEY TRIGGERS, by their key (namespace draft §74): worked out
+      once a reply, as a cue's triggers are, and asked when a key is pressed. */
+  keyIndexes: new WeakMap(),
+
+  keyTriggers() {
+    let index = this.keyIndexes.get(this.at);
+
+    if (!index) {
+      index = keyTriggersIn(this.at);
+      this.keyIndexes.set(this.at, index);
+    }
+
+    return index;
+  },
+
   /*  A cue's triggers, found by asking every trigger which cue it belongs to.
       There is no `triggerOrder` node to read: a trigger says where it sits and
       the containment is not copied anywhere, so this is the only answer that

@@ -807,6 +807,7 @@ function triggerSummary(id) {
 
   if (kind === "osc") return tree.trigger(id, "address", "") || "no address";
   if (kind === "clock") return tree.trigger(id, "at", "") || "no time";
+  if (kind === "key") return tree.trigger(id, "key", "") || "no key yet";
 
   const channel = Number(tree.trigger(id, "channel", 0));
 
@@ -946,7 +947,8 @@ function renderInspector() {
 
     out += '<div class="actions">';
 
-    for (const k of ["osc", "midi", "clock"]) {
+    //  A key too (namespace draft §74): its key is typed on its own page, spelled as F6 or Mod+K.
+    for (const k of ["osc", "midi", "clock", "key"]) {
       out += '<button data-trigger="' + k + '">+ ' + k + "</button>";
     }
 

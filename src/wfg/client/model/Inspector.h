@@ -200,7 +200,14 @@ namespace wfg::client::model
             one - the inspector is the place a cue is worked on, and a panel
             about this cue is a thing to ask for from there rather than from a
             menu three levels up. */
-        opener
+        opener,
+
+        /*  THE KEY THAT FIRES THIS CUE (namespace draft §74, AQK, AQW): a
+            button that takes the next key pressed, and a cross that takes the
+            key away. `value` is the key, spelled as KeyChord spells one, and
+            `address` the key trigger's own row - empty when the cue has none
+            yet, and a key chosen then makes one. */
+        keyCapture
     };
 
     struct Field
