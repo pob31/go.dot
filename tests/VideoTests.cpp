@@ -74,6 +74,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <set>
 #include <mutex>
 #include <memory>
 #include <string>
@@ -2255,6 +2256,212 @@ TEST_CASE ("video: a movie on standby arms its locked sound, and its GO takes th
     REQUIRE (sound != nullptr);
     CHECK (sound->parent == movie->id);
     CHECK (rig.runOf ("VD000061")->id == armedId);
+}
+
+/*  A SOUND OR A PICTURE HELD BACK (namespace draft 70): the movie says which
+    of its streams starts later, and that one is placed its delay after the
+    other, on the sample - the movie's picture, or every sound locked to it. */
+namespace
+{
+    struct LaunchingPlayer final : cue::Player
+    {
+        int trackCount() const override                                  { return 8; }
+        void requestArm (const cue::ArmRequest& request) override         { arms.push_back (request); }
+        int slotCount() const override                                   { return 1; }
+        bool launchAtSample (int track, int, std::int64_t sample) override
+        {
+            launches.push_back ({ track, sample });
+            return true;
+        }
+        bool stop (int track) override                                    { stops.push_back (track); return true; }
+        bool stopAtSample (int track, int, std::int64_t) override        { stops.push_back (track); return true; }
+        void setLevelDb (int, double) override                           {}
+        void setRouting (int, const std::vector<cue::Coefficient>&) override {}
+        bool isPlaying (int) const override                              { return false; }
+        bool isArmReady (int track) const override                       { return ready.count (track) > 0; }
+        std::int64_t samplesElapsed() const override                     { return now; }
+        int blockSize() const override                                   { return 128; }
+        int sampleRate() const override                                  { return 48000; }
+        int channelsPerTrack() const override                            { return 2; }
+
+        void completeArms (Engine& engine)
+        {
+            for (const auto& arm : arms)
+            {
+                engine.submit (origin::engine, "audio.armed",
+                               { osc::Value::string (arm.runId), osc::Value::int32 (arm.track) });
+                ready.insert (arm.track);
+            }
+
+            arms.clear();
+        }
+
+        std::vector<cue::ArmRequest> arms;
+        std::set<int> ready;
+        std::vector<std::pair<int, std::int64_t>> launches;
+        std::vector<int> stops;
+        std::int64_t now = 0;
+    };
+
+    void makeLockedMovie (VideoRig& rig, const char* delay, const char* delayBy)
+    {
+        REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                    osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                    osc::Value::string ("VD000060"),
+                                                    osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                    osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                    osc::Value::string ("file"), osc::Value::string ("clip.mov") }).applied >= 1);
+        REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (1),
+                                                    osc::Value::string ("media"), osc::Value::string ("Clip sound"),
+                                                    osc::Value::string ("VD000061"),
+                                                    osc::Value::string ("file"), osc::Value::string ("clip (sound).wav") }).applied >= 1);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/VD000061/lockedTo", "VD000060").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/delay", delay).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/delayBy", delayBy).ok);
+    }
+}
+
+TEST_CASE ("video: a movie holds back its sound or its picture by its delay, on the sample (namespace draft 70)")
+{
+    struct Placed { std::int64_t picture = -1; std::int64_t sound = -1; };
+
+    const auto fire = [] (const char* delay, const char* delayBy)
+    {
+        const std::map<std::string, double> lengths { { "clip.mov", 20.0 }, { "clip (sound).wav", 20.0 } };
+        LaunchingPlayer audio;
+        VideoRig rig;
+        rig.runner.setPlayer (&audio);
+        rig.runner.setMediaDurations (&lengths);
+        makeLockedMovie (rig, delay, delayBy);
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+        audio.completeArms (rig.engine);
+        rig.ticks (6);
+
+        Placed placed;
+        const auto* movie = rig.runOf ("VD000060");
+        REQUIRE (movie != nullptr);
+        REQUIRE_FALSE (rig.sink.points[movie->id].empty());
+        placed.picture = rig.sink.points[movie->id].front().sample;
+        REQUIRE (audio.launches.size() == 1);
+        placed.sound = audio.launches.front().second;
+        return placed;
+    };
+
+    const auto plain = fire ("none", "100");
+
+    //  100 ms at 48 kHz: 4800 samples, on the one stream named.
+    const auto heldSound = fire ("sound", "100");
+    CHECK (heldSound.picture == plain.picture);
+    CHECK (heldSound.sound == plain.sound + 4800);
+
+    const auto heldPicture = fire ("picture", "100");
+    CHECK (heldPicture.picture == plain.picture + 4800);
+    CHECK (heldPicture.sound == plain.sound);
+
+    //  Not a tick's worth: 12.5 ms is 600 samples.
+    CHECK (fire ("picture", "12.5").picture == plain.picture + 600);
+}
+
+TEST_CASE ("video: Esc inside a delay - the stream held back never starts (namespace draft 70, AOU)")
+{
+    const std::map<std::string, double> lengths { { "clip.mov", 20.0 }, { "clip (sound).wav", 20.0 } };
+
+    SUBCASE ("the picture held back is taken away before it was seen")
+    {
+        LaunchingPlayer audio;
+        VideoRig rig;
+        rig.runner.setPlayer (&audio);
+        rig.runner.setMediaDurations (&lengths);
+        makeLockedMovie (rig, "picture", "1000");
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+        audio.completeArms (rig.engine);
+        rig.ticks (4);
+
+        const auto runId = rig.runOf ("VD000060")->id;
+        const auto upAt = rig.sink.points[runId].front().sample;
+        const auto before = rig.sink.points[runId].size();
+
+        rig.submitAndTick ("run.stopAll");
+        rig.ticks (2);
+
+        //  Gone now, and no fade laid behind the point it was to come up on.
+        REQUIRE (rig.sink.removed.size() == 1);
+        CHECK (rig.sink.removed.front().first == runId);
+        CHECK (rig.sink.removed.front().second == -1);
+        CHECK (rig.sink.points[runId].size() == before);
+
+        for (const auto& point : rig.sink.points[runId])
+            CHECK (point.sample >= upAt);
+
+        rig.ticks (60);
+        CHECK (rig.runs.find (runId)->isFinished());
+    }
+
+    SUBCASE ("the sound held back is stopped, not faded in part way down")
+    {
+        LaunchingPlayer audio;
+        VideoRig rig;
+        rig.runner.setPlayer (&audio);
+        rig.runner.setMediaDurations (&lengths);
+        makeLockedMovie (rig, "sound", "1000");
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+        audio.completeArms (rig.engine);
+        rig.ticks (4);
+
+        const auto* sound = rig.runOf ("VD000061");
+        REQUIRE (sound != nullptr);
+        REQUIRE (sound->launchedAtSample > audio.now);
+        const auto soundId = sound->id;
+        const auto track = sound->track;
+
+        rig.submitAndTick ("run.stopAll");
+        rig.ticks (3);
+
+        CHECK (std::find (audio.stops.begin(), audio.stops.end(), track) != audio.stops.end());
+        CHECK (rig.runs.find (soundId)->isFinished());
+    }
+}
+
+TEST_CASE ("video: a movie sought keeps its sound or its picture held back by the same delay (namespace draft 70, AOT)")
+{
+    //  How far the sound's relaunch lands after the picture's step to the sought second.
+    const auto lagAfterSeek = [] (const char* delay)
+    {
+        const std::map<std::string, double> lengths { { "clip.mov", 20.0 }, { "clip (sound).wav", 20.0 } };
+        LaunchingPlayer audio;
+        VideoRig rig;
+        rig.runner.setPlayer (&audio);
+        rig.runner.setMediaDurations (&lengths);
+        makeLockedMovie (rig, delay, "100");
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+        audio.completeArms (rig.engine);
+        rig.ticks (6);
+        REQUIRE (audio.launches.size() == 1);
+
+        const auto movieId = rig.runOf ("VD000060")->id;
+        REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (movieId), osc::Value::float64 (7.0) }).applied == 1);
+        audio.completeArms (rig.engine);
+        rig.ticks (6);
+        REQUIRE (audio.launches.size() == 2);
+
+        //  The picture's step onto seven seconds: the last time point there.
+        std::int64_t step = -1;
+
+        for (const auto& point : rig.sink.geometry[movieId][video::Property::time])
+            if (std::abs (point.value - 7.0) < 1.0e-9)
+                step = point.sample;
+
+        REQUIRE (step >= 0);
+        return audio.launches.back().second - step;
+    };
+
+    CHECK (lagAfterSeek ("none") == 0);
+    CHECK (lagAfterSeek ("sound") == 4800);
+    CHECK (lagAfterSeek ("picture") == -4800);
 }
 
 /*  A FINISHED CONVERSION WITH ITS SOUND (namespace draft 37.5, WJ): a media

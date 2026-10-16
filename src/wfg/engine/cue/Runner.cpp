@@ -3583,8 +3583,11 @@ namespace wfg::cue
 
         /*  A STEP on the playhead's ring, a horizon ahead: where it is there,
             then where it goes. Before it is up there is no ring yet, and it
-            comes up where it was sought to. */
-        const auto at = videoSampleAhead();
+            comes up where it was sought to. A PICTURE HELD BACK steps its delay
+            after the sounds it is sought with (namespace draft §70, AOT). */
+        const auto* sought = runs.find (runId);
+        const auto ahead = videoSampleAhead();
+        const auto at = ahead >= 0 && sought != nullptr ? ahead + sought->pictureDelay : ahead;
 
         if (job->placed && at >= 0)
         {
@@ -8013,11 +8016,23 @@ namespace wfg::cue
         /*  WHAT IS SOUNDING, collected before anything is changed, since a fade
             begun here takes over the jobs the next one would be asked about. */
         std::vector<std::string> sounding;
+        std::vector<std::string> notHeard;
 
         for (const auto& run : runs.all())
         {
             if (run.isFinished() || run.track < 0 || run.stopIssued)
                 continue;
+
+            /*  A SOUND HELD BACK AND NOT HEARD YET (namespace draft §70, AOU):
+                placed, so `playing`, but faded it would come in part way down
+                the fade - so it is stopped now, before its sample comes round,
+                a locked sound too, which no root's stop reaches. */
+            if (run.state == runState::playing && run.soundDelay > 0 && audio != nullptr
+                  && run.launchedAtSample > audio->samplesElapsed())
+            {
+                notHeard.push_back (run.id);
+                continue;
+            }
 
             if (run.state == runState::playing)
             {
@@ -8050,6 +8065,10 @@ namespace wfg::cue
                 its launch, a cue in its pre-wait - has nothing to fade, and the
                 roots' stop ends it at once as it always did. */
         }
+
+        for (const auto& id : notHeard)
+            if (auto* held = runs.find (id))
+                held->askStop (0);
 
         /*  A SOONER STOP ON A VOICE LANDS, LET GO OF BY THE STOP CUE THAT
             STARTED IT. The roots' stop is about to reach that stop cue's own
@@ -16277,7 +16296,7 @@ namespace wfg::cue
 
     void Runner::readDelay (Run& run) const
     {
-        if (run.delayRead || audio == nullptr || audio->sampleRate() <= 0)
+        if (run.delayRead || samplesPerTick <= 0)
             return;
 
         run.delayRead = true;
@@ -16293,9 +16312,8 @@ namespace wfg::cue
         if (which != "sound" && which != "picture")
             return;
 
-        const auto samples = static_cast<std::int64_t> (std::llround (std::max (numberOf (cue, "delayBy"), 0.0)
-                                                                      * static_cast<double> (audio->sampleRate())
-                                                                      / 1000.0));
+        //  On the session's samples, as a picture's every point is - with a player or none.
+        const auto samples = videoSamplesFor (numberOf (cue, "delayBy") / 1000.0);
 
         /*  A SOUND IS HELD BACK ON A SOUND'S RUN, A PICTURE ON A PICTURE'S: a
             movie that holds back its sounds places its own picture when due. */
@@ -19395,6 +19413,17 @@ namespace wfg::cue
                                        { osc::Value::string (run->id),
                                          osc::Value::int32 (static_cast<std::int32_t> (std::min<std::int64_t> (blocks, 1'000'000))) });
 
+                /*  A PICTURE HELD BACK (namespace draft §70, AOT): its delay
+                    after the sample it was due on - after the lead, a seat and
+                    a code's lateness are reckoned on that one. */
+                if (auto* held = runs.find (job.self); held != nullptr && at >= 0)
+                {
+                    readDelay (*held);
+                    at += held->pictureDelay;
+                }
+
+                job.upAt = at;
+
                 const auto rise = videoSamplesFor (job.fadeInSeconds);
 
                 job.points.clear();
@@ -19465,6 +19494,20 @@ namespace wfg::cue
             if (job.fadeOutTicks >= 0 && ! job.removed)
             {
                 const auto at = videoSampleAhead();
+
+                /*  NOT UP YET, ITS PICTURE HELD BACK (namespace draft §70,
+                    AOU): taken away before it was ever seen, as a stream still
+                    inside its delay never starts. */
+                if (at >= 0 && job.upAt > at)
+                {
+                    if (videoSink != nullptr)
+                        videoSink->remove (job.self, -1);
+
+                    job.fadeOutTicks = -1;
+                    job.removed = true;
+                    continue;
+                }
+
                 const auto from = at >= 0 ? video::opacityAt (job.points, at) : job.opacity;
                 const auto end = at >= 0 ? at + static_cast<std::int64_t> (job.fadeOutTicks) * samplesPerTick
                                          : -1;
@@ -19518,10 +19561,20 @@ namespace wfg::cue
                                [] (const video::Point&) { return true; });
     }
 
-    void Runner::placeVideoPoint (VideoJob& job, video::Property property, const video::Point& point)
+    void Runner::placeVideoPoint (VideoJob& job, video::Property property, const video::Point& pointToUse)
     {
         auto& points = property == video::Property::opacity ? job.points
                                                             : job.moved[static_cast<std::size_t> (property)];
+
+        /*  NEVER BEFORE IT COMES UP (namespace draft §70): a picture held back
+            has its first point its delay ahead, and a ride, an edit or a fade
+            placed a horizon ahead inside that delay would land behind it. On
+            the sample it comes up on instead - the later of two there wins, so
+            the last one asked is the one it comes up with. */
+        auto point = pointToUse;
+
+        if (job.upAt > 0 && point.sample >= 0 && point.sample < job.upAt)
+            point.sample = job.upAt;
 
         /*  KEPT SHORT: a long fade places fifty a second, and only the last
             few say where the value is now. */
@@ -19688,10 +19741,17 @@ namespace wfg::cue
                 if (soundRun == nullptr || soundRun->isFinished())
                     continue;
 
+                /*  ON THE SAMPLE IT WAS DUE, and the picture's own delay after
+                    it (namespace draft §70): a sound held back is heard its
+                    delay after the picture, a picture held back its after the
+                    sound, and a seek keeps the lag either way (AOT). */
+                const auto* movieRun = runs.find (job.self);
+                const auto pictureDelay = movieRun != nullptr ? movieRun->pictureDelay : 0;
+
                 if (soundRun->launchedAtSample <= 0)
                     waiting = true;
                 else
-                    from = std::max (from, soundRun->launchedAtSample);
+                    from = std::max (from, soundRun->launchedAtSample - soundRun->soundDelay + pictureDelay);
             }
 
             if (waiting && ++job.soundWaitTicks < movieSoundWaitTicks)

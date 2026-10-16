@@ -3394,6 +3394,13 @@ namespace wfg::cue
             bool placed = false;            // brought up on the picture side
             std::vector<video::Point> points;
 
+            /*  THE SAMPLE IT COMES UP ON (namespace draft §70): a horizon ahead,
+                and its picture delay later. No point is placed before it - the
+                renderer reads points in the order of their samples - so a ride
+                or an edit inside the delay lands on it, and Esc there takes the
+                picture away before it was ever seen. */
+            std::int64_t upAt = -1;
+
             int fadeOutTicks = -1;          // asked by Esc, not yet placed
             std::int64_t endsAtTick = -1;   // the fade-out's last tick
             bool removed = false;
