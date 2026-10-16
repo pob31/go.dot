@@ -132,7 +132,10 @@ TEST_CASE ("qlab walk: a group's mode is the decision (ZS)")
     CHECK (attribute (items[1], "advance") == "auto");
     CHECK (attribute (items[1], "loops") == "0");
     CHECK (attribute (items[1], "selection") == "shuffle");
-    CHECK (said (plan, "the playlist's crossfade is not imported"));
+    //  Its crossfade is the sequence's join (§69, AOI): no length in the workspace, so two seconds, said.
+    CHECK (attribute (items[1], "join") == "crossfade");
+    CHECK (attribute (items[1], "joinLength") == "2");
+    CHECK (said (plan, "the workspace gave no length, so two seconds"));
 
     CHECK (attribute (items[2], "mode") == "timeline");
 
@@ -481,4 +484,24 @@ TEST_CASE ("qlab walk: a message split and typed as QLab spells it")
     CHECK (decibels (gain (-81.0), -80.0) == doctest::Approx (-120.0));
     CHECK (decibels (gain (-30.0), -80.0) == doctest::Approx (-30.0));
     CHECK (decibels (gain (20.0), -80.0) == doctest::Approx (12.0));
+}
+
+TEST_CASE ("qlab walk: a playlist's crossfade keeps its length as the sequence's join (§69, AOI)")
+{
+    auto playlist = group ("Walk-in", 6, { cue ("Memo", "a"), cue ("Memo", "b") });
+    playlist.playlistCrossfade = true;
+    playlist.playlistCrossfadeDuration = 3.5;
+
+    auto plain = group ("Plain", 6, { cue ("Memo", "c") });
+
+    const auto plan = walk (workspaceOf ({ playlist, plain }));
+    const auto& items = top (plan);
+    REQUIRE (items.size() == 2);
+
+    CHECK (attribute (items[0], "join") == "crossfade");
+    CHECK (attribute (items[0], "joinLength") == "3.5");
+    CHECK (said (plan, "at its length"));
+
+    //  A playlist with no crossfade lets its members play, as before.
+    CHECK (attribute (items[1], "join").empty());
 }

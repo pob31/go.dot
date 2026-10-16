@@ -163,6 +163,12 @@ namespace wfg::import::qlab
                 cue.playlistShuffle = f.flag (handle, "playlistShuffle");
                 cue.playlistCrossfade = f.flag (handle, "playlistCrossfade");
 
+                /*  ITS LENGTH, under the name the archive's other keys suggest -
+                    `playlist/crossfade/duration` in QLab's OSC dictionary, camel-
+                    cased as `preWait` and `duration` are. Not yet seen in a real
+                    workspace: nought when it is not there (§69, AOI). */
+                cue.playlistCrossfadeDuration = f.number (handle, "playlistCrossfadeDuration");
+
                 if (depth > 64)
                 {
                     problems.push_back ("a group nested more than 64 deep was read without its members");

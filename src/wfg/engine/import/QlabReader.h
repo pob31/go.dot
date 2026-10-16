@@ -125,6 +125,7 @@ namespace wfg::import::qlab
         bool playlistLoop = false;
         bool playlistShuffle = false;
         bool playlistCrossfade = false;
+        double playlistCrossfadeDuration = 0.0;   ///< seconds; nought when the archive carries none (§69, AOI)
         std::vector<Cue> children;
 
         //  An audio cue.

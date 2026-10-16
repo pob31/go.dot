@@ -22886,7 +22886,7 @@ that could not be read - a version neither 4 nor 5 among them - or a folder that
 - **Script cues are never run** (PRD §3.20): a memo holding the source.
 - **Audio effects on a cue and QLab 5's audio maps** are reported.
 - **MIDI file and timecode cues** are memos.
-- **A playlist's crossfade** is reported; its members still follow one another.
+- **A playlist's crossfade** is the sequence's Crossfade join at its length, Go.dot's equal-power shape, two seconds where the workspace says no length (§69, AOI; *amended 2026-10-16* - it was reported and dropped).
 - **Colours are not imported** (PRD §4.8).
 
 ### 46.5 The probe set (QL.1), and QLab 4 against QLab 5

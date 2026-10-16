@@ -415,9 +415,23 @@ namespace wfg::import::qlab
                         if (cue.playlistShuffle)
                             item.attributes.push_back ({ "selection", "shuffle" });
 
+                        /*  AND ITS CROSSFADE, as the sequence's join (namespace
+                            draft §69, AOI): equal power across its length, which
+                            QLab's own curve only approximates; two seconds where
+                            the workspace says no length. */
                         if (cue.playlistCrossfade)
-                            note (Note::Kind::dropped, cue, "the playlist's crossfade is not imported: its members "
-                                  "follow one another (§46.4)");
+                        {
+                            const auto known = cue.playlistCrossfadeDuration > 0.0;
+                            const auto seconds = known ? std::max (0.1, cue.playlistCrossfadeDuration) : 2.0;
+
+                            item.attributes.push_back ({ "join", "crossfade" });
+                            item.attributes.push_back ({ "joinLength", osc::formatDouble (seconds) });
+                            note (Note::Kind::approximated, cue,
+                                  known ? "the playlist's crossfade is the sequence's crossfade join, at its length, "
+                                          "Go.dot's equal-power shape (§69)"
+                                        : "the playlist's crossfade is the sequence's crossfade join; the workspace "
+                                          "gave no length, so two seconds (§69)");
+                        }
                         break;
 
                     default:
