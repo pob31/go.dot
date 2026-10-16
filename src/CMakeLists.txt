@@ -499,6 +499,8 @@ add_library(wfg_engine STATIC
     wfg/engine/video/Conversion.cpp
     wfg/engine/video/Conversion.h
     wfg/engine/video/DcaOpacity.h
+    wfg/engine/video/DeckLinkProbe.cpp
+    wfg/engine/video/DeckLinkProbe.h
     wfg/engine/video/Displays.cpp
     wfg/engine/video/Displays.h
     wfg/engine/video/Ffmpeg.cpp
@@ -537,11 +539,17 @@ add_library(wfg_engine STATIC
     wfg/engine/video/VideoCommands.h
     wfg/engine/video/VideoHost.cpp
     wfg/engine/video/VideoHost.h
+    wfg/engine/video/VideoModes.cpp
+    wfg/engine/video/VideoModes.h
     wfg/engine/video/VideoRamp.h
     wfg/engine/video/VideoRegion.h
     wfg/engine/video/VideoRenderChild.cpp
     wfg/engine/video/VideoRenderChild.h
     wfg/engine/video/VideoSink.h
+    wfg/engine/video/render/Card.cpp
+    wfg/engine/video/render/Card.h
+    wfg/engine/video/render/Card_decklink.cpp
+    wfg/engine/video/render/Card_fake.cpp
     wfg/engine/video/render/DeckLinkApi.h
     wfg/engine/video/render/Gpu.cpp
     wfg/engine/video/render/Gpu.h

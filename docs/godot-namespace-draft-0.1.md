@@ -30365,9 +30365,9 @@ card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine,
 
 | Stage | What | Built |
 |---|---|---|
-| DL.0 | This section; PRD §3.19, §3.19d, §6.3, §6.9; the devplan; the headers carried and built on the three systems | |
-| DL.1 | The card's interface, the real card and the test card, cards found and published, `decklink-probe` listing | |
-| DL.2 | The rows, the kinds, the renderer's region | |
+| DL.0 | This section; PRD §3.19, §3.19d, §6.3, §6.9; the devplan; the headers carried and built on the three systems | 42b9507 |
+| DL.1 | The card's interface, the real card and the test card, a format's word, `decklink-probe` listing | |
+| DL.2 | The rows, the kinds, the renderer's region, the cards found published | |
 | DL.3 | A card output: paced by the card, at its format, latency, skew and reference, tried again | |
 | DL.4 | 10-bit YUV | |
 | DL.5 | Fill and key | |

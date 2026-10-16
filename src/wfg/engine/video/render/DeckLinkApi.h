@@ -46,6 +46,7 @@
   #define NOMINMAX
  #endif
  #include <windows.h>
+ #include <objbase.h>
  #include <oleauto.h>
  #include <DeckLinkAPI_h.h>
 #else

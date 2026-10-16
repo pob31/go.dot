@@ -78,6 +78,7 @@
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/ScanJob.h>
 #include <wfg/engine/video/Conversion.h>
+#include <wfg/engine/video/DeckLinkProbe.h>
 #include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/TextRaster.h>
 #include <wfg/engine/video/VideoCommands.h>
@@ -9664,6 +9665,21 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       "Lists the MIDI ports this machine has, by the names --midi-in takes",
                       {},
                       [] (const juce::ArgumentList&) { listMidi(); } });
+
+    app.addCommand ({ wfg::video::deckLinkProbeVerb,
+                      "decklink-probe",
+                      "Lists the DeckLink cards Desktop Video finds, what each can do and the formats it offers",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          std::vector<std::string> words;
+
+                          for (int i = 1; i < args.size(); ++i)
+                              words.push_back (args[i].text.toStdString());
+
+                          if (const auto code = wfg::video::runDeckLinkProbe (wfg::video::card::system(), words, std::cout); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
 
     app.addCommand ({ "canon",
                       "canon <file> [--in-place]",

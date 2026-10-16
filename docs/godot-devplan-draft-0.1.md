@@ -1466,8 +1466,8 @@ card (`WFG_DECKLINK_FAKE=1`), and testers with cards run `wfg decklink-probe`. B
 | Stage | What | Depends on |
 |---|---|---|
 | DL.0 | Docs: namespace §71, the PRD, this; the headers carried, MIDL on Windows, built on the three systems | - |
-| DL.1 | The card's interface, the real card and the test card; cards found, published, listed by `decklink-probe` | DL.0 |
-| DL.2 | The rows, the kinds, the renderer's region | DL.1 |
+| DL.1 | The card's interface, the real card and the test card; a format's word; cards listed by `decklink-probe` | DL.0 |
+| DL.2 | The rows, the kinds, the renderer's region; the cards found, published | DL.1 |
 | DL.3 | A card output paced by the card at its format; latency, skew, reference; tried again | DL.2 |
 | DL.4 | 10-bit YUV | DL.3 |
 | DL.5 | Fill and key | DL.3 |
