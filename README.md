@@ -105,7 +105,11 @@ has stood in front of the thing.
   on Direct3D 11, Metal or OpenGL, which Go.dot restarts if it dies, so a slow
   movie cannot hold up a sound cue. Outputs sent to other programs over NDI,
   Spout or Syphon, live inputs taken from them, and inserts that pass a cue's
-  picture through another program and back. Pictures in sampler groups, and
+  picture through another program and back. Outputs sent down a Blackmagic
+  DeckLink card's cable at a broadcast format, paced by the card, with the
+  show's buses embedded and, on a card with a keyer, fill and key; a card's
+  input as a live picture - built against a test card, not yet seen on a real
+  one. Pictures in sampler groups, and
   the next GO's pictures read ahead. A movie in another format plays as a
   preview while FFmpeg (downloaded the first time it is needed) converts it to
   HAP.
@@ -206,7 +210,6 @@ has stood in front of the thing.
   tablet's browser, an iPad's included, but as a mouse-and-keyboard page,
   without the touch gestures PRD §3.17 describes. The Android remote has them
   (above).
-- **DeckLink output** (Phase 8b).
 - **Integrations** — OSCQuery devices found on the network by
   themselves, and commanding WFS-DIY's and XOA's sources with claims per cue
   (Phase 11). The device presets (twenty-four shipped) wait for a console to
@@ -281,6 +284,7 @@ and says afterwards what was built against what was drawn.
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |
 | Group joins | Let play, Gapless or Crossfade between a sequence's members, automatic and manual, pictures dissolving; a looping range's wraps crossfaded | §69 |
 | Sound or picture delay | A cue holds back its sound or its picture by a number of milliseconds, to line up with a projector or a long audio chain | §70 |
+| DeckLink cards | Pictures out at a card's format and on its clock, the show's buses embedded, fill and key, a card's input; `wfg decklink-probe` for testers | §71 |
 | Authoring | WFS-DIY and S21_HiJack write cues into Go.dot | §56, [authoring protocol](docs/godot-authoring-protocol-0.1.md) |
 | Device presets | Consoles, lighting desks and spatial processors, each protocol a preset | §57 |
 | Redundancy | A main and a backup playing one show, measured over Dante | §58 |
@@ -498,7 +502,9 @@ no Node, no build and no install, now or later.
 **At run time, none of these is needed to build, and each is optional:** Pure
 Data or plugdata, to open a process cue's patch in a program of its own (the
 canvas inside Go.dot needs neither); the NDI runtime, for pictures over NDI,
-found where its installer put it and never shipped with Go.dot; and FFmpeg,
+found where its installer put it and never shipped with Go.dot; Blackmagic's
+Desktop Video, 16.0 or later, for a DeckLink card, likewise the user's own;
+and FFmpeg,
 which Go.dot downloads itself the first time a movie needs converting to HAP.
 
 ### Step by step
@@ -720,6 +726,7 @@ live in `packaging/`.
 | Spout's SpoutDX (vendored in `ThirdParty/spout`, Windows) | master | `c2bcc12147711d12ace7d5f08e869d774d840f8a` |
 | Syphon (`ThirdParty/Syphon`, macOS) | main, 2026-09-21 | `f4761677a45b8034a3c2069ec0f3d2553da81fba` |
 | NDI's headers (vendored in `ThirdParty/ndi`; the runtime is the user's install) | 6.3, from DistroAV | `d34b4cc4c590426464bff4d59f88f68829010b4b` |
+| The DeckLink SDK's headers (vendored in `ThirdParty/decklink` by `scripts/vendor-decklink.py`; the library is the user's Desktop Video) | Desktop Video SDK 16.0 | `ThirdParty/decklink/MANIFEST.txt` |
 | Pure Data (`ThirdParty/pure-data`; a process cue's patches) | 0.56-5 | `f009fd8d7b537e209e09898d487fdf1bf547da2b` |
 | libpd (`ThirdParty/libpd`; its nested `pure-data` stays empty) | 0.16.1 | `ba0dc63262901d658af8bbda5e619a60fa975e78` |
 | Lua (`ThirdParty/lua`; a script cue's Lua) | 5.4.9 | `312b9efaa1061c2c4cad08554dbc1351c3270eef` |

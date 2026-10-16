@@ -108,7 +108,7 @@ namespace
         "audio/patchSettled", "audio/inputPatchSettled",
         "port/outputDevice", "port/outputDeviceId", "port/inputDevice", "port/inputDeviceId",
         "serial/path",
-        "videoOutput/display", "videoOutput/displayId",
+        "videoOutput/display", "videoOutput/displayId", "videoOutput/card", "videoOutput/cardName",
         "pair/role", "pair/peers", "pair/timeout"
     };
 

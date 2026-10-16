@@ -1461,7 +1461,13 @@ input** for `capture` cues (namespace draft §71; PRD §3.19, §3.19d, §6.3 and
 author's decisions are AOX (all four parts in one push) and AOY (1080p50 to start); AOZ-APP are the
 implementer's, the author's to overrule. No card is on the bench: everything is built against a test
 card (`WFG_DECKLINK_FAKE=1`), and testers with cards run `wfg decklink-probe`. Built on the branch
-`decklink`, in a worktree of its own.
+`decklink`, in a worktree of its own. *Built 2026-10-16*, DL.0-DL.10 (§71.4), against the test card
+only. Not built: sound coming in on a card, field-by-field interlace, the SDI link choices, HDR,
+timecode on the cable, a blur keyed rather than solid (§71.6). Owed: the Linux and macOS halves of the
+real card compiled and run (the farm); a real card, by the testers (M77, instructions in both languages
+for the author to send); the author's look at the Video tab on the test card and their word on AOZ-APQ
+and every screen word; the 60 ms of APQ and the two frames of APC settled on a card; a 4K capture's
+colour turned on the graphics card if M77 asks.
 
 | Stage | What | Depends on |
 |---|---|---|

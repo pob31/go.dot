@@ -30381,7 +30381,7 @@ outputs*.
 | DL.7 | The sound placed and resampled on the card | 92eaf9b |
 | DL.8 | A card as a video input | 4c917c1 |
 | DL.9 | The Video tab, the inputs, the problems, the inspector | e30cb62 |
-| DL.10 | `decklink-probe --run`, the testers' instructions, M77 | |
+| DL.10 | `decklink-probe --run`, the testers' instructions, M77 | 4de8b0b, a248311 |
 | DL.11 | The README, the guides, the whole suite | |
 
 ### 71.5 Measurements
