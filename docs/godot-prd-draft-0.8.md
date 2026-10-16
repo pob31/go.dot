@@ -427,9 +427,21 @@ alone. Tracktion has no crossfade (§3.24, spike 03), so a crossfade is Go.dot's
 own: two members sounding at once, each on its own voice, with a gain of
 Go.dot's on each — a term of the member's level beside its own level, trim,
 DCAs and lane, so a fade cue on a member still does what it says. **A picture
-dissolves** across the same length (2026-10-16): a movie or a still fades its
-opacity as a sound fades its level, and a movie's locked sounds go with it. A
-member of any other kind simply starts *length* early.
+dissolves** across the same length (2026-10-16): the incoming movie or still
+comes up from nothing over it, and a movie's locked sounds go with it. *As
+built (proposed):* the outgoing picture is held whole under one coming up on top
+of it — a higher layer, or the same layer later — and goes once it is covered,
+which is a dissolve rather than two pictures each half there; under a sound, or
+a picture beneath it, it fades out itself. A member of any other kind simply
+starts *length* early.
+
+In a **manual** sequence *(proposed, as built)*: only a member that sounds or
+shows — a sound, a picture, a live input, a scene of them — takes the place of
+the ones before it, and only those give theirs; a memo, an OSC or MIDI cue or a
+fade fired in the act leaves what sounds alone, so a light cue between two songs
+does not silence the song. And a member fades in only where there is something to
+cross from: the first of an act, or one whose GO finds nothing of the act still
+sounding, comes up as written.
 
 What a join needs, and what it changes:
 
@@ -444,7 +456,12 @@ What a join needs, and what it changes:
   so every kind takes part. The end is worked out from where the member is and
   the speed it plays at, so a speed fade moves it (§3.24), and the boundary is
   placed only once it is a launch horizon away; a stop or an advance on the
-  outgoing member re-places it.
+  outgoing member re-places it. *As built (2026-10-16):* Go.dot places a
+  boundary whose outgoing member is a sound with no ranges, playing forwards, or
+  a movie, of a known length; a ranged sound, a fade, a memo or a network cue
+  going out is Let play for now — the last three end within a tick of their
+  moment anyway — and the row says why. The crossfade a boundary gets is no
+  longer than either member.
 - **The fades stay on their member; the waits move them** (2026-10-16, replacing
   "pre-wait and post-wait win"). The outgoing member's fade-out always ends at
   its own end, and the incoming member's fade-in always starts at its own
@@ -2413,6 +2430,16 @@ the crossfade — placed *length* before the boundary on the slot that is
 sounding. It crosses every boundary of the cue's ranges, a range's own wrap
 included, and costs no slot. Its shape is the reader's equal power; a range
 crossfade has a length and no curve *(proposed)*.
+
+*As built (2026-10-16, §69 GJ.10):* the cue's `rangeJoin` (gapless or
+crossfade) and `rangeJoinLength` (no longer than half the range). **A looping
+range's wraps cross**: a pass is shorter by the crossfade, the reader jumps back
+to the in-point a crossfade before each wrap but the last, and the last pass
+plays to its out-point. Only at a speed of one, forwards, not bouncing, entered
+at its in-point and with its points unmoved; anything else wraps gapless, and so
+does a range a seek or a seat enters part-way. **Between two ranges** the
+boundary is still the gapless pair across slots: crossing it means the slot
+sounding differs from the range, through every live loop move, and is not built.
 
 #### Editing a sound
 
