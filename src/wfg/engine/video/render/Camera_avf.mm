@@ -43,6 +43,7 @@
 #include <wfg/engine/video/VideoModes.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -175,6 +176,7 @@ namespace wfg::video::camera
             latestWidth = w;
             latestHeight = h;
             ++frameSerial;
+            arrivedAt.store (nowNanos());
         }
 
         bool newest (std::vector<std::uint8_t>& bgra, int& width, int& height, std::uint64_t& serial) override
@@ -193,21 +195,27 @@ namespace wfg::video::camera
 
         bool signal() override
         {
-            return session != nil && session.isRunning && ! session.isInterrupted;
+            return running() && arrivedLately (arrivedAt.load());
         }
 
         std::string formatWord() override             { return word; }
 
         std::string problem() override
         {
-            return signal() ? std::string() : std::string ("the camera stopped: unplugged, or taken by another program");
+            return running() ? std::string() : std::string ("the camera stopped: unplugged, or taken by another program");
         }
 
         std::vector<std::string> formats() override   { return offered; }
 
     private:
+        bool running() const
+        {
+            return session != nil && session.isRunning && ! session.isInterrupted;
+        }
+
         const std::string word;
         const std::vector<std::string> offered;
+        std::atomic<std::int64_t> arrivedAt { 0 };
         AVCaptureSession* session = nil;
         AVCaptureDeviceInput* input = nil;
         AVCaptureVideoDataOutput* output = nil;

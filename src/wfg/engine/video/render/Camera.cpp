@@ -21,15 +21,110 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <mutex>
+#include <set>
 
 namespace wfg::video::camera
 {
+    namespace
+    {
+        struct Taken
+        {
+            std::mutex lock;
+            std::set<std::string> ids;
+        };
+
+        /*  A Source that gives its camera back when it goes. */
+        class Held final : public Source
+        {
+        public:
+            Held (std::unique_ptr<Source> sourceToUse, std::shared_ptr<Taken> takenToUse, std::string idToUse)
+                : source (std::move (sourceToUse)), taken (std::move (takenToUse)), id (std::move (idToUse))
+            {
+            }
+
+            ~Held() override
+            {
+                source.reset();
+                const std::scoped_lock hold (taken->lock);
+                taken->ids.erase (id);
+            }
+
+            bool newest (std::vector<std::uint8_t>& bgra, int& width, int& height, std::uint64_t& serial) override
+            {
+                return source->newest (bgra, width, height, serial);
+            }
+
+            bool signal() override                        { return source->signal(); }
+            std::string formatWord() override             { return source->formatWord(); }
+            std::string problem() override                { return source->problem(); }
+            std::vector<std::string> formats() override   { return source->formats(); }
+
+        private:
+            std::unique_ptr<Source> source;
+            const std::shared_ptr<Taken> taken;
+            const std::string id;
+        };
+
+        class OneInputEach final : public System
+        {
+        public:
+            explicit OneInputEach (std::unique_ptr<System> camerasToUse) : cameras (std::move (camerasToUse)) {}
+
+            Found find() override   { return cameras->find(); }
+
+            std::unique_ptr<Source> open (const std::string& id, const std::string& format, std::string& why) override
+            {
+                {
+                    const std::scoped_lock hold (taken->lock);
+
+                    if (! taken->ids.insert (id).second)
+                    {
+                        why = "the camera is already taken";
+                        return nullptr;
+                    }
+                }
+
+                auto source = cameras->open (id, format, why);
+
+                if (source == nullptr)
+                {
+                    const std::scoped_lock hold (taken->lock);
+                    taken->ids.erase (id);
+                    return nullptr;
+                }
+
+                return std::make_unique<Held> (std::move (source), taken, id);
+            }
+
+        private:
+            const std::unique_ptr<System> cameras;
+            const std::shared_ptr<Taken> taken = std::make_shared<Taken>();
+        };
+    }
+
+    std::unique_ptr<System> oneInputEach (std::unique_ptr<System> cameras)
+    {
+        return std::make_unique<OneInputEach> (std::move (cameras));
+    }
+
     System& system()
     {
         static const std::unique_ptr<System> made =
-            juce::SystemStats::getEnvironmentVariable ("WFG_CAMERA_FAKE", {}) == "1" ? makeFakeCameras() : makeSystemCameras();
+            oneInputEach (juce::SystemStats::getEnvironmentVariable ("WFG_CAMERA_FAKE", {}) == "1" ? makeFakeCameras() : makeSystemCameras());
         return *made;
+    }
+
+    std::int64_t nowNanos() noexcept
+    {
+        return std::chrono::duration_cast<std::chrono::nanoseconds> (std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    bool arrivedLately (std::int64_t arrivedAt) noexcept
+    {
+        return arrivedAt != 0 && nowNanos() - arrivedAt < 1'000'000'000;
     }
 
     bool isCamera (const std::string& id) noexcept

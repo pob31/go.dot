@@ -105,6 +105,12 @@ namespace wfg::video::camera
     std::unique_ptr<System> makeSystemCameras();
     std::unique_ptr<System> makeFakeCameras();
 
+    /*  ONE INPUT PER CAMERA (APZ): `cameras`, refusing a camera already
+        opened through it until that Source has gone - which Windows, sharing
+        a camera between programs, would not refuse by itself. `system()` is
+        made so. */
+    std::unique_ptr<System> oneInputEach (std::unique_ptr<System> cameras);
+
     /*  An identifier is a camera's when it starts so. */
     inline constexpr const char* idPrefix = "cam:";
     bool isCamera (const std::string& id) noexcept;
@@ -113,9 +119,20 @@ namespace wfg::video::camera
         frames a second or more, else the largest; ties by the faster rate. */
     std::string chooseAutomatic (const std::vector<std::string>& formats);
 
-    /*  The test camera's identifier and name. */
+    /*  QUIET A SECOND IS NO SIGNAL: a camera whose newest frame is older than
+        a second - a virtual camera given no picture, a dongle with no cable
+        in - says no signal and draws black, without being let go; one that
+        stopped says so in `problem` and is opened again. Every source stamps
+        its frames with `nowNanos`, the steady clock. */
+    std::int64_t nowNanos() noexcept;
+    bool arrivedLately (std::int64_t arrivedAt) noexcept;
+
+    /*  The test camera's identifier and name, and its quiet twin's, which
+        opens and sends nothing. */
     inline constexpr const char* fakeId = "cam:fake-1";
     inline constexpr const char* fakeName = "Go.dot test camera";
+    inline constexpr const char* fakeQuietId = "cam:fake-2";
+    inline constexpr const char* fakeQuietName = "Go.dot test camera, no picture";
 
     /*  YUYV (Y U Y V, two pixels in four bytes) into BGRA, BT.601 below 720
         lines and BT.709 from it, at legal levels or full range as the camera

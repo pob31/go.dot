@@ -29,8 +29,9 @@
 
     NO SIGNAL DRAWS BLACK: the picture is let go when nothing arrives, so a
     capture of it shows what lies beneath, and the input says why. A card with
-    no cable in stays open, waiting; a camera that stopped - unplugged, taken
-    by another program - is let go and opened again when it can be.
+    no cable in stays open, waiting, as does a camera that sends nothing; a
+    camera that stopped - unplugged, taken by another program - is let go and
+    opened again when it can be.
 */
 
 #include <wfg/engine/video/render/Camera.h>
@@ -180,11 +181,14 @@ namespace wfg::video::render
                         }
 
                         const auto signal = cameraSource->signal();
+                        const auto stopped = cameraSource->problem();
                         arriving.store (signal);
-                        say (signal ? std::string() : cameraSource->problem(), signal ? cameraSource->formatWord() : std::string());
+                        say (signal ? std::string() : (stopped.empty() ? std::string ("no signal") : stopped),
+                             signal ? cameraSource->formatWord() : std::string());
 
-                        //  A camera that stopped is let go, and opened again in two seconds.
-                        if (! signal && ! cameraSource->problem().empty())
+                        //  A camera that stopped is let go, and opened again in
+                        //  two seconds; a quiet one is kept, waiting.
+                        if (! signal && ! stopped.empty())
                         {
                             cameraSource.reset();
                             retryAt = secondsNow() + 2.0;

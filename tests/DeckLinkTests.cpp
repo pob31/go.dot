@@ -909,14 +909,16 @@ TEST_CASE ("decklink: the probe runs the test card - bars, a flash and a beep ea
 
 TEST_CASE ("camera: the test camera listed by name, its formats known once opened, automatic its largest at 25 a second or more, one input at a time (VC.1)")
 {
-    auto cameras = video::camera::makeFakeCameras();
+    auto cameras = video::camera::oneInputEach (video::camera::makeFakeCameras());
 
     //  Listed by name, its formats not yet known: nothing was opened to list it.
     auto found = cameras->find();
-    REQUIRE (found.cameras.size() == 1);
+    REQUIRE (found.cameras.size() == 2);
     CHECK (found.cameras[0].id == "cam:fake-1");
     CHECK (found.cameras[0].name == "Go.dot test camera");
     CHECK (found.cameras[0].formats.empty());
+    CHECK (found.cameras[1].id == "cam:fake-2");
+    CHECK (found.cameras[1].name == "Go.dot test camera, no picture");
     CHECK (video::camera::isCamera ("cam:fake-1"));
     CHECK_FALSE (video::camera::isCamera ("fake-1"));
 
@@ -953,6 +955,17 @@ TEST_CASE ("camera: the test camera listed by name, its formats known once opene
     CHECK (cameras->open ("cam:fake-9", "auto", gone) == nullptr);
     CHECK (gone == "the camera is not connected");
 
+    //  One that opens and sends nothing: quiet, no signal, nothing wrong -
+    //  and let go at once.
+    std::string quietWhy;
+    auto quiet = cameras->open ("cam:fake-2", "auto", quietWhy);
+    REQUIRE (quiet != nullptr);
+    waitMs (50);
+    CHECK_FALSE (quiet->newest (bgra, w, h, serial));
+    CHECK_FALSE (quiet->signal());
+    CHECK (quiet->problem().empty());
+    quiet.reset();
+
     //  Automatic: fast enough first, then the largest, then the faster.
     using video::camera::chooseAutomatic;
     CHECK (chooseAutomatic ({ "640x480p30", "1080p15", "720p30" }) == "720p30");
@@ -960,6 +973,110 @@ TEST_CASE ("camera: the test camera listed by name, its formats known once opene
     CHECK (chooseAutomatic ({ "720p30", "720p60", "720p25" }) == "720p60");
     CHECK (chooseAutomatic ({ "1080p29.97", "1080p30" }) == "1080p30");
     CHECK (chooseAutomatic ({}).empty());
+}
+
+/*  THIS MACHINE'S OWN CAMERA (§72, VC.2-VC.4), on the bench only: opening a
+    camera lights it, so it runs when WFG_CAMERA_REAL names one - a part of its
+    name, or 1 for the first listed. Opens no window. */
+TEST_CASE ("camera: a camera this machine lists, opened at automatic, its frames read, a second input refused, given back (VC.2)")
+{
+    const auto wanted = juce::SystemStats::getEnvironmentVariable ("WFG_CAMERA_REAL", {}).toStdString();
+
+    if (wanted.empty())
+        return;
+
+    auto& cameras = video::camera::system();
+    const auto found = cameras.find();
+    CHECK (found.problem.empty());
+
+    const video::camera::Camera* chosen = nullptr;
+
+    for (const auto& one : found.cameras)
+    {
+        MESSAGE ("listed: " << one.name << "  " << one.id);
+
+        if (chosen == nullptr && (wanted == "1" || one.name.find (wanted) != std::string::npos))
+            chosen = &one;
+    }
+
+    REQUIRE (chosen != nullptr);
+    const auto id = chosen->id;
+    CHECK (chosen->formats.empty());
+
+    std::string why;
+    auto source = cameras.open (id, "auto", why);
+    INFO (why);
+    REQUIRE (source != nullptr);
+
+    std::string offered;
+
+    for (const auto& word : source->formats())
+        offered += word + " ";
+
+    MESSAGE ("opened at " << source->formatWord() << " of " << offered);
+    const auto format = video::modes::parse (source->formatWord());
+    REQUIRE (format.has_value());
+    CHECK (source->formatWord() == video::camera::chooseAutomatic (source->formats()));
+
+    //  Frames, at the size its format says, for two seconds.
+    std::vector<std::uint8_t> bgra;
+    int w = 0, h = 0, frames = 0;
+    std::uint64_t serial = 0;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (8);
+    const auto firstAt = [&]
+    {
+        while (std::chrono::steady_clock::now() < until)
+        {
+            if (source->newest (bgra, w, h, serial))
+                return true;
+
+            waitMs (5);
+        }
+
+        return false;
+    }();
+
+    const auto problem = source->problem();
+    INFO (problem);
+    REQUIRE (firstAt);
+    CHECK (w == format->width);
+    CHECK (h == format->height);
+    CHECK (bgra.size() == static_cast<std::size_t> (w) * static_cast<std::size_t> (h) * 4);
+    CHECK (source->signal());
+
+    const auto from = std::chrono::steady_clock::now();
+
+    while (std::chrono::steady_clock::now() - from < std::chrono::seconds (2))
+    {
+        if (source->newest (bgra, w, h, serial))
+            ++frames;
+
+        waitMs (2);
+    }
+
+    double sum = 0.0;
+
+    for (std::size_t at = 0; at + 2 < bgra.size(); at += 4)
+        sum += 0.0722 * bgra[at] + 0.7152 * bgra[at + 1] + 0.2126 * bgra[at + 2];
+
+    MESSAGE ("frames a second: " << frames / 2.0 << ", mean light " << sum / (static_cast<double> (bgra.size()) / 4.0) << " of 255");
+    CHECK (frames > 0);
+
+    //  A second input on it refused; its formats now listed.
+    std::string busy;
+    CHECK (cameras.open (id, "auto", busy) == nullptr);
+    CHECK (busy == "the camera is already taken");
+
+    for (const auto& one : cameras.find().cameras)
+        if (one.id == id)
+            CHECK (one.formats == source->formats());
+
+    //  Given back, it opens again.
+    source.reset();
+    std::string again;
+    auto reopened = cameras.open (id, "auto", again);
+    INFO (again);
+    CHECK (reopened != nullptr);
 }
 
 TEST_CASE ("camera: YUYV turned to colour - legal and full range, BT.601 small and BT.709 large (VC.1)")
@@ -996,6 +1113,7 @@ TEST_CASE ("video gpu: a camera taken in by a renderer with no window, and what 
     REQUIRE (doc::Bundle::open (bundle, document).ok);
     REQUIRE (document.createVideoInput ("Lectern", "device", "cam:fake-1", "VD000032").ok);
     REQUIRE (document.createVideoInput ("Wings", "device", "cam:fake-9", "VD000033").ok);
+    REQUIRE (document.createVideoInput ("Gallery", "device", "cam:fake-2", "VD000034").ok);
 
     setVariable ("WFG_CAMERA_FAKE", "1");
     setVariable ("WFG_CARD_FAKE", "1");
@@ -1027,6 +1145,14 @@ TEST_CASE ("video gpu: a camera taken in by a renderer with no window, and what 
         CHECK (input->height == 1080);
         CHECK (input->format == "1080p30");
     }
+
+    //  A camera that sends nothing: kept open, drawing nothing, no signal.
+    CHECK (tickUntil (host, ticks, [&host]
+                      {
+                          const auto said = host.readouts();
+                          const auto* input = said.input ("VD000034");
+                          return input != nullptr && ! input->connected && input->problem == "no signal";
+                      }, 5000));
 
     //  A camera that is not there: nothing drawn, and the input says why.
     CHECK (tickUntil (host, ticks, [&host]

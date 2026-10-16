@@ -302,7 +302,7 @@ namespace wfg::video::camera
             bool signal() override
             {
                 const std::scoped_lock hold (lock);
-                return arriving;
+                return trouble.empty() && arrivedLately (arrivedAt);
             }
 
             std::string formatWord() override             { return word; }
@@ -337,7 +337,6 @@ namespace wfg::video::camera
                             continue;
 
                         const std::scoped_lock hold (lock);
-                        arriving = false;
                         trouble = "the camera stopped: unplugged, or taken by another program";
                         return;
                     }
@@ -359,7 +358,7 @@ namespace wfg::video::camera
                     const std::scoped_lock hold (lock);
                     latest.swap (frame);
                     ++frameSerial;
-                    arriving = true;
+                    arrivedAt = nowNanos();
                     trouble.clear();
                 }
             }
@@ -403,7 +402,7 @@ namespace wfg::video::camera
             std::mutex lock;
             std::vector<std::uint8_t> latest;
             std::uint64_t frameSerial = 0;
-            bool arriving = false;
+            std::int64_t arrivedAt = 0;
             std::string trouble;
         };
 

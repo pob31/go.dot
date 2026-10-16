@@ -18,8 +18,12 @@
     THE TEST CAMERA (namespace draft §72): one camera, "Go.dot test camera",
     offering 720p30, 1080p30 and 640x480p30, its picture a grey ground with a
     white bar stepping across, a frame each thirtieth of a second on the
-    machine's clock. It keeps no thread: each ask brings it up to now. Opened
-    once at a time, as a real camera is.
+    machine's clock. It keeps no thread: each ask brings it up to now. One
+    input at a time is oneInputEach's (Camera.cpp), as for a real camera.
+
+    And its QUIET TWIN, "Go.dot test camera, no picture": it opens and sends
+    nothing, as a virtual camera given no picture does - no signal, nothing
+    wrong.
 */
 
 #include <wfg/engine/video/render/Camera.h>
@@ -27,11 +31,11 @@
 #include <wfg/engine/video/VideoModes.h>
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstring>
-#include <map>
 #include <mutex>
+#include <set>
+#include <string_view>
 
 namespace wfg::video::camera
 {
@@ -51,26 +55,22 @@ namespace wfg::video::camera
         struct Shared
         {
             std::mutex lock;
-            bool open = false;
-            bool opened = false;    ///< opened once, so its formats are known
+            std::set<std::string> opened;    ///< opened once, so their formats are known
         };
 
         class FakeSource final : public Source
         {
         public:
-            FakeSource (std::string wordToUse, modes::Format formatToUse, std::shared_ptr<Shared> sharedToUse)
-                : word (std::move (wordToUse)), format (formatToUse), shared (std::move (sharedToUse)), began (steadyNanos())
+            FakeSource (std::string wordToUse, modes::Format formatToUse, bool quietToUse)
+                : word (std::move (wordToUse)), format (formatToUse), quiet (quietToUse), began (steadyNanos())
             {
-            }
-
-            ~FakeSource() override
-            {
-                const std::scoped_lock hold (shared->lock);
-                shared->open = false;
             }
 
             bool newest (std::vector<std::uint8_t>& bgra, int& width, int& height, std::uint64_t& serial) override
             {
+                if (quiet)
+                    return false;
+
                 const auto period = 1.0e9 / std::max (1.0, format.frameRate());
                 const auto frame = static_cast<std::uint64_t> (static_cast<double> (steadyNanos() - began) / period) + 1;
 
@@ -96,7 +96,7 @@ namespace wfg::video::camera
                 return true;
             }
 
-            bool signal() override                        { return true; }
+            bool signal() override                        { return ! quiet; }
             std::string formatWord() override             { return word; }
             std::string problem() override                { return {}; }
             std::vector<std::string> formats() override   { return fakeFormats(); }
@@ -104,7 +104,7 @@ namespace wfg::video::camera
         private:
             const std::string word;
             const modes::Format format;
-            const std::shared_ptr<Shared> shared;
+            const bool quiet;
             const std::int64_t began;
         };
 
@@ -114,22 +114,26 @@ namespace wfg::video::camera
             Found find() override
             {
                 Found found;
-                Camera camera;
-                camera.id = fakeId;
-                camera.name = fakeName;
-
                 const std::scoped_lock hold (shared->lock);
 
-                if (shared->opened)
-                    camera.formats = fakeFormats();
+                for (const auto* id : { fakeId, fakeQuietId })
+                {
+                    Camera camera;
+                    camera.id = id;
+                    camera.name = std::string_view (id) == fakeId ? fakeName : fakeQuietName;
 
-                found.cameras.push_back (std::move (camera));
+                    if (shared->opened.count (id) != 0)
+                        camera.formats = fakeFormats();
+
+                    found.cameras.push_back (std::move (camera));
+                }
+
                 return found;
             }
 
             std::unique_ptr<Source> open (const std::string& id, const std::string& format, std::string& why) override
             {
-                if (id != fakeId)
+                if (id != fakeId && id != fakeQuietId)
                 {
                     why = "the camera is not connected";
                     return nullptr;
@@ -144,16 +148,8 @@ namespace wfg::video::camera
                 }
 
                 const std::scoped_lock hold (shared->lock);
-
-                if (shared->open)
-                {
-                    why = "the camera is already taken";
-                    return nullptr;
-                }
-
-                shared->open = true;
-                shared->opened = true;
-                return std::make_unique<FakeSource> (word, *modes::parse (word), shared);
+                shared->opened.insert (id);
+                return std::make_unique<FakeSource> (word, *modes::parse (word), id == fakeQuietId);
             }
 
         private:

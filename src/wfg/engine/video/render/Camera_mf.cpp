@@ -21,9 +21,13 @@
     camera's identifier after `cam:` - and never activated to be listed (no
     light comes on). Opened, its native formats are read and kept, the one asked
     for (or `auto`'s) set, and a source reader with Media Foundation's own video
-    processing turns whatever it sends - NV12, YUY2, MJPEG - into RGB32, read on
-    a thread of its own in COM's multithreaded apartment. Going, the source is
-    shut down, which ends a read that waits.
+    processing turns whatever it sends - NV12, YUY2, MJPEG - into RGB32.
+
+    READ ASYNCHRONOUSLY: each frame asked for in turn, and handed over on Media
+    Foundation's own threads, so nothing of Go.dot's ever waits on a camera. A
+    camera that opens and sends nothing - a virtual one given no picture - is
+    quiet, says no signal (Camera.h), and is let go at once when its input goes:
+    a synchronous read would have waited on it for ever, shut down or not.
 
     Windows's camera privacy switch refuses the activation: said in words.
 */
@@ -47,10 +51,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <mutex>
-#include <thread>
 
 #pragma comment (lib, "mf.lib")
 #pragma comment (lib, "mfplat.lib")
@@ -165,175 +171,240 @@ namespace wfg::video::camera
         }
 
         //======================================================================
+        constexpr auto firstVideo = static_cast<DWORD> (MF_SOURCE_READER_FIRST_VIDEO_STREAM);
+
+        /*  What an opened camera and its reader's callback share. The callback
+            is COM's, held by the reader, and may outlive the camera by a
+            moment; it asks for the next frame only while `reader` is set. */
+        struct Shared
+        {
+            //  Set before the first frame is asked for, then only read.
+            UINT32 width = 0;
+            UINT32 height = 0;
+            LONG defaultStride = 0;
+
+            std::mutex lock;
+            std::condition_variable changed;
+            IMFSourceReader* reader = nullptr;    ///< not held: the reader holds the callback
+            std::vector<std::uint8_t> latest;
+            std::uint64_t frameSerial = 0;
+            std::int64_t arrivedAt = 0;
+            std::string trouble;
+            bool flushed = false;
+        };
+
+        /*  THE READER'S CALLBACK: a frame turned BGRA, top row first, and the
+            next asked for. One frame is asked at a time, so one call at a time. */
+        class ReadCallback final : public IMFSourceReaderCallback
+        {
+        public:
+            explicit ReadCallback (std::shared_ptr<Shared> sharedToUse) : shared (std::move (sharedToUse)) {}
+
+            ReadCallback (const ReadCallback&) = delete;
+            ReadCallback& operator= (const ReadCallback&) = delete;
+
+            STDMETHODIMP QueryInterface (REFIID iid, void** out) override
+            {
+                if (out == nullptr)
+                    return E_POINTER;
+
+                if (iid == __uuidof (IUnknown) || iid == __uuidof (IMFSourceReaderCallback))
+                {
+                    *out = static_cast<IMFSourceReaderCallback*> (this);
+                    AddRef();
+                    return S_OK;
+                }
+
+                *out = nullptr;
+                return E_NOINTERFACE;
+            }
+
+            STDMETHODIMP_ (ULONG) AddRef() override    { return static_cast<ULONG> (++count); }
+
+            STDMETHODIMP_ (ULONG) Release() override
+            {
+                const auto left = --count;
+
+                if (left == 0)
+                    delete this;
+
+                return static_cast<ULONG> (left);
+            }
+
+            STDMETHODIMP OnReadSample (HRESULT status, DWORD, DWORD flags, LONGLONG, IMFSample* sample) override
+            {
+                if (FAILED (status) || (flags & MF_SOURCE_READERF_ERROR) != 0 || (flags & MF_SOURCE_READERF_ENDOFSTREAM) != 0)
+                {
+                    const std::scoped_lock hold (shared->lock);
+
+                    if (shared->reader != nullptr)
+                        shared->trouble = "the camera stopped: unplugged, or taken by another program";
+
+                    return S_OK;
+                }
+
+                const auto taken = sample != nullptr && take (sample);
+                const std::scoped_lock hold (shared->lock);
+
+                if (taken)
+                {
+                    shared->latest.swap (frame);
+                    ++shared->frameSerial;
+                    shared->arrivedAt = nowNanos();
+                    shared->trouble.clear();
+                }
+
+                if (shared->reader != nullptr && FAILED (shared->reader->ReadSample (firstVideo, 0, nullptr, nullptr, nullptr, nullptr)))
+                    shared->trouble = "the camera stopped: unplugged, or taken by another program";
+
+                return S_OK;
+            }
+
+            STDMETHODIMP OnFlush (DWORD) override
+            {
+                const std::scoped_lock hold (shared->lock);
+                shared->flushed = true;
+                shared->changed.notify_all();
+                return S_OK;
+            }
+
+            STDMETHODIMP OnEvent (DWORD, IMFMediaEvent*) override    { return S_OK; }
+
+        private:
+            ~ReadCallback() = default;
+
+            /*  Row by row into `frame`, the top first whichever way the rows
+                run; the fourth byte of RGB32 means nothing, so it is made solid. */
+            bool take (IMFSample* sample)
+            {
+                Ref<IMFMediaBuffer> buffer;
+
+                if (FAILED (sample->ConvertToContiguousBuffer (buffer.put())))
+                    return false;
+
+                const auto width = shared->width;
+                const auto height = shared->height;
+                BYTE* first = nullptr;
+                LONG pitch = 0;
+                Ref<IMF2DBuffer> twoD;
+                const auto hasTwoD = SUCCEEDED (buffer->QueryInterface (IID_PPV_ARGS (twoD.put())));
+
+                if (hasTwoD)
+                {
+                    if (FAILED (twoD->Lock2D (&first, &pitch)))
+                        return false;
+                }
+                else
+                {
+                    BYTE* data = nullptr;
+                    DWORD length = 0;
+
+                    if (FAILED (buffer->Lock (&data, nullptr, &length)))
+                        return false;
+
+                    pitch = shared->defaultStride;
+                    first = pitch < 0 ? data + static_cast<std::ptrdiff_t> (-pitch) * static_cast<std::ptrdiff_t> (height - 1) : data;
+                }
+
+                const auto row = static_cast<std::size_t> (width) * 4;
+                frame.resize (row * static_cast<std::size_t> (height));
+
+                for (UINT32 y = 0; y < height; ++y)
+                {
+                    auto* to = frame.data() + static_cast<std::size_t> (y) * row;
+                    std::memcpy (to, first + static_cast<std::ptrdiff_t> (y) * pitch, row);
+
+                    for (std::size_t x = 3; x < row; x += 4)
+                        to[x] = 255;
+                }
+
+                if (hasTwoD)
+                    twoD->Unlock2D();
+                else
+                    buffer->Unlock();
+
+                return true;
+            }
+
+            const std::shared_ptr<Shared> shared;
+            std::atomic<long> count { 1 };
+            std::vector<std::uint8_t> frame;
+        };
+
+        //======================================================================
         class MfSource final : public Source
         {
         public:
-            MfSource (Ref<IMFMediaSource>&& sourceToUse, Ref<IMFSourceReader>&& readerToUse, std::string wordToUse,
-                      std::vector<std::string> formatsToUse)
-                : word (std::move (wordToUse)), offered (std::move (formatsToUse))
+            MfSource (Ref<IMFMediaSource>&& sourceToUse, Ref<IMFSourceReader>&& readerToUse, std::shared_ptr<Shared> sharedToUse,
+                      std::string wordToUse, std::vector<std::string> formatsToUse)
+                : shared (std::move (sharedToUse)), word (std::move (wordToUse)), offered (std::move (formatsToUse))
             {
                 *source.put() = sourceToUse.get();
                 source->AddRef();
                 *reader.put() = readerToUse.get();
                 reader->AddRef();
-                reading = std::thread ([this] { read(); });
+
+                const std::scoped_lock hold (shared->lock);
+                shared->reader = reader.get();
+
+                if (FAILED (reader->ReadSample (firstVideo, 0, nullptr, nullptr, nullptr, nullptr)))
+                    shared->trouble = "the camera would not be read";
             }
 
             ~MfSource() override
             {
-                stopping.store (true);
+                {
+                    const std::scoped_lock hold (shared->lock);
+                    shared->reader = nullptr;
+                }
 
-                //  A read that waits returns once the source is shut down.
-                if (source)
-                    source->Shutdown();
+                //  What was asked cancelled, waited for no more than a second,
+                //  then the camera let go.
+                if (SUCCEEDED (reader->Flush (firstVideo)))
+                {
+                    std::unique_lock hold (shared->lock);
+                    shared->changed.wait_for (hold, std::chrono::seconds (1), [this] { return shared->flushed; });
+                }
 
-                if (reading.joinable())
-                    reading.join();
+                source->Shutdown();
             }
 
             bool newest (std::vector<std::uint8_t>& bgra, int& width, int& height, std::uint64_t& serial) override
             {
-                const std::scoped_lock hold (lock);
+                const std::scoped_lock hold (shared->lock);
 
-                if (frameSerial == serial || latest.empty())
+                if (shared->frameSerial == serial || shared->latest.empty())
                     return false;
 
-                bgra = latest;
-                width = latestWidth;
-                height = latestHeight;
-                serial = frameSerial;
+                bgra = shared->latest;
+                width = static_cast<int> (shared->width);
+                height = static_cast<int> (shared->height);
+                serial = shared->frameSerial;
                 return true;
             }
 
             bool signal() override
             {
-                const std::scoped_lock hold (lock);
-                return arriving;
+                const std::scoped_lock hold (shared->lock);
+                return shared->trouble.empty() && arrivedLately (shared->arrivedAt);
             }
 
             std::string formatWord() override             { return word; }
 
             std::string problem() override
             {
-                const std::scoped_lock hold (lock);
-                return trouble;
+                const std::scoped_lock hold (shared->lock);
+                return shared->trouble;
             }
 
             std::vector<std::string> formats() override   { return offered; }
 
         private:
-            void read()
-            {
-                const card::ThreadScope apartment;
-                Ref<IMFMediaType> current;
-                LONG defaultStride = 0;
-                UINT32 width = 0, height = 0;
-
-                if (SUCCEEDED (reader->GetCurrentMediaType (static_cast<DWORD> (MF_SOURCE_READER_FIRST_VIDEO_STREAM), current.put())))
-                {
-                    MFGetAttributeSize (current.get(), MF_MT_FRAME_SIZE, &width, &height);
-                    UINT32 stride = 0;
-
-                    if (SUCCEEDED (current->GetUINT32 (MF_MT_DEFAULT_STRIDE, &stride)))
-                        defaultStride = static_cast<LONG> (stride);
-                    else
-                        defaultStride = static_cast<LONG> (width) * 4;
-                }
-
-                std::vector<std::uint8_t> frame;
-
-                while (! stopping.load())
-                {
-                    DWORD stream = 0, flags = 0;
-                    LONGLONG timestamp = 0;
-                    Ref<IMFSample> sample;
-                    const auto result = reader->ReadSample (static_cast<DWORD> (MF_SOURCE_READER_FIRST_VIDEO_STREAM), 0, &stream, &flags,
-                                                          &timestamp, sample.put());
-
-                    if (FAILED (result) || (flags & MF_SOURCE_READERF_ERROR) != 0 || (flags & MF_SOURCE_READERF_ENDOFSTREAM) != 0)
-                    {
-                        const std::scoped_lock hold (lock);
-                        arriving = false;
-                        trouble = stopping.load() ? std::string() : std::string ("the camera stopped: unplugged, or taken by another program");
-                        return;
-                    }
-
-                    if (! sample)
-                        continue;
-
-                    Ref<IMFMediaBuffer> buffer;
-
-                    if (FAILED (sample->ConvertToContiguousBuffer (buffer.put())))
-                        continue;
-
-                    frame.resize (static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 4);
-                    BYTE* first = nullptr;
-                    LONG pitch = 0;
-                    Ref<IMF2DBuffer> twoD;
-                    const auto hasTwoD = SUCCEEDED (buffer->QueryInterface (IID_PPV_ARGS (twoD.put())));
-                    bool locked = false;
-
-                    if (hasTwoD)
-                        locked = SUCCEEDED (twoD->Lock2D (&first, &pitch));
-                    else
-                    {
-                        BYTE* data = nullptr;
-                        DWORD length = 0;
-
-                        if (SUCCEEDED (buffer->Lock (&data, nullptr, &length)))
-                        {
-                            locked = true;
-                            pitch = defaultStride;
-                            first = defaultStride < 0 ? data + static_cast<std::ptrdiff_t> (-defaultStride) * static_cast<std::ptrdiff_t> (height - 1)
-                                                      : data;
-                        }
-                    }
-
-                    if (! locked)
-                        continue;
-
-                    //  Row by row, the top first whichever way the rows run; the
-                    //  fourth byte of RGB32 means nothing, so it is made solid.
-                    const auto row = static_cast<std::size_t> (width) * 4;
-
-                    for (UINT32 y = 0; y < height; ++y)
-                    {
-                        auto* to = frame.data() + static_cast<std::size_t> (y) * row;
-                        std::memcpy (to, first + static_cast<std::ptrdiff_t> (y) * pitch, row);
-
-                        for (std::size_t x = 3; x < row; x += 4)
-                            to[x] = 255;
-                    }
-
-                    if (hasTwoD)
-                        twoD->Unlock2D();
-                    else
-                        buffer->Unlock();
-
-                    const std::scoped_lock hold (lock);
-                    latest.swap (frame);
-                    latestWidth = static_cast<int> (width);
-                    latestHeight = static_cast<int> (height);
-                    ++frameSerial;
-                    arriving = true;
-                    trouble.clear();
-                }
-            }
-
             Ref<IMFMediaSource> source;
             Ref<IMFSourceReader> reader;
+            const std::shared_ptr<Shared> shared;
             const std::string word;
             const std::vector<std::string> offered;
-            std::thread reading;
-            std::atomic<bool> stopping { false };
-
-            std::mutex lock;
-            std::vector<std::uint8_t> latest;
-            int latestWidth = 0;
-            int latestHeight = 0;
-            std::uint64_t frameSerial = 0;
-            bool arriving = false;
-            std::string trouble;
         };
 
         //======================================================================
@@ -409,9 +480,13 @@ namespace wfg::video::camera
 
                 Ref<IMFAttributes> settings;
                 Ref<IMFSourceReader> reader;
+                const auto shared = std::make_shared<Shared>();
+                Ref<IMFSourceReaderCallback> callback;
+                *callback.put() = new ReadCallback (shared);
 
-                if (FAILED (MFCreateAttributes (settings.put(), 1))
+                if (FAILED (MFCreateAttributes (settings.put(), 2))
                       || FAILED (settings->SetUINT32 (MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE))
+                      || FAILED (settings->SetUnknown (MF_SOURCE_READER_ASYNC_CALLBACK, callback.get()))
                       || FAILED (MFCreateSourceReaderFromMediaSource (source.get(), settings.get(), reader.put())))
                 {
                     source->Shutdown();
@@ -424,7 +499,7 @@ namespace wfg::video::camera
                 std::vector<std::string> offered;
                 std::map<std::string, DWORD> typeOf;
                 std::map<std::string, bool> compressed;
-                const auto stream = static_cast<DWORD> (MF_SOURCE_READER_FIRST_VIDEO_STREAM);
+                const auto stream = firstVideo;
 
                 for (DWORD n = 0; ; ++n)
                 {
@@ -481,7 +556,22 @@ namespace wfg::video::camera
                     return nullptr;
                 }
 
-                return std::make_unique<MfSource> (std::move (source), std::move (reader), word, offered);
+                //  The size and the way its rows run, as the reader now sends it.
+                Ref<IMFMediaType> current;
+
+                if (FAILED (reader->GetCurrentMediaType (stream, current.put()))
+                      || FAILED (MFGetAttributeSize (current.get(), MF_MT_FRAME_SIZE, &shared->width, &shared->height)))
+                {
+                    source->Shutdown();
+                    why = "the camera would not say its size";
+                    return nullptr;
+                }
+
+                UINT32 stride = 0;
+                shared->defaultStride = SUCCEEDED (current->GetUINT32 (MF_MT_DEFAULT_STRIDE, &stride)) ? static_cast<LONG> (stride)
+                                                                                                       : static_cast<LONG> (shared->width) * 4;
+
+                return std::make_unique<MfSource> (std::move (source), std::move (reader), shared, word, offered);
             }
 
         private:
