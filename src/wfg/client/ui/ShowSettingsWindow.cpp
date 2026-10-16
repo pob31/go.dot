@@ -6811,11 +6811,11 @@ namespace wfg::client::ui
                 for (const auto& device : captures.devices)
                     taking.push_back ({ device.id, device.shown() });
 
-                const auto* chosen = captures.device (entry.sender);
+                const auto* current = captures.device (entry.sender);
                 std::vector<std::string> formats { "auto" };
 
-                if (chosen != nullptr)
-                    formats.insert (formats.end(), chosen->formats.begin(), chosen->formats.end());
+                if (current != nullptr)
+                    formats.insert (formats.end(), current->formats.begin(), current->formats.end());
 
                 juce::PopupMenu menu;
                 menu.addItem (1, "(none)", true, entry.sender.empty());
@@ -6836,7 +6836,7 @@ namespace wfg::client::ui
                     format.addItem (static_cast<int> (at) + 300, at == 0 ? juce::String ("Automatic") : juce::String (formats[at]),
                                     true, formats[at] == entry.videoMode);
 
-                if (chosen != nullptr && chosen->maker == "camera" && chosen->formats.empty())
+                if (current != nullptr && current->maker == "camera" && current->formats.empty())
                     format.addItem (4, "its formats are listed once it has been opened", false);
 
                 menu.addSeparator();
