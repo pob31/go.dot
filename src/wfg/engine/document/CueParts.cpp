@@ -57,7 +57,8 @@ namespace wfg::doc::parts
                     naming it share nothing that either can change. */
                 { Part::fx, "fx", { "Media", "Mic" }, {}, "Fx", { "plugin", "enabled", "values", "stateFile" } },
 
-                { Part::time, "time", { "Media", "Video" }, { "startOffset", "rate", "rateMode" },
+                { Part::time, "time", { "Media", "Video" },
+                  { "startOffset", "rate", "rateMode", "delay", "delayBy" },
                   "Range", { "name", "in", "out", "loops" } },
 
                 { Part::speed, "speed", { "Media", "Video" }, { "rate", "rateMode" }, {}, {} },
@@ -443,6 +444,13 @@ namespace wfg::doc
                     if (part == parts::Part::time && row == "startOffset"
                           && target.element == "Video" && ! sourceRanges.empty())
                         forced = "0";
+
+                    /*  A PICTURE HELD BACK, PASTED ONTO A SOUND (namespace draft
+                        70): a sound has no picture to hold back, so it holds
+                        nothing back. */
+                    if (part == parts::Part::time && row == "delay"
+                          && target.element == "Media" && source["delay"].toString() == "picture")
+                        forced = "none";
 
                     if (const auto written = writeRow (source, target.cue, row, forced); ! written.ok)
                         return written;

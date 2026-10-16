@@ -43,6 +43,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
     inline constexpr std::string_view enum_media_rateMode[] = { "varispeed", "timestretch" };
+    inline constexpr std::string_view enum_media_delay[] = { "none", "sound" };
     inline constexpr std::string_view enum_media_rangeJoin[] = { "gapless", "crossfade" };
     inline constexpr std::string_view enum_member_release[] = { "hold", "playOut" };
     inline constexpr std::string_view enum_member_secondPress[] = { "restart", "noop", "stop" };
@@ -111,6 +112,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_video_source[] = { "fill", "mask", "picture", "movie", "capture", "text", "blur" };
     inline constexpr std::string_view enum_video_blend[] = { "normal", "add", "screen", "multiply" };
     inline constexpr std::string_view enum_video_fit[] = { "fit", "fill", "stretch" };
+    inline constexpr std::string_view enum_video_delay[] = { "none", "sound", "picture" };
     inline constexpr std::string_view enum_video_key[] = { "none", "luma", "matte", "colour" };
     inline constexpr std::string_view enum_video_align[] = { "left", "centre", "right" };
     inline constexpr std::string_view enum_video_alignV[] = { "top", "middle", "bottom" };
@@ -1107,6 +1109,22 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "What a speed other than one does (namespace draft §22): varispeed moves the pitch with it, as a tape does; timestretch keeps the pitch where it was recorded and changes only how long the sound takes. Read when the cue is armed, because a mode is on Tracktion's rebuild list - a change reaches the next GO, never a sounding cue (DV). Timestretch goes through Signalsmith's stretcher even at one, because the operator chose it." },
+        { "media", "delay",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "none",
+          false, 0.0, false, 0.0,
+          enum_media_delay, 2,
+          "", 50.0, false, "park",
+          "",
+          "Whether this sound starts later than it is due (namespace draft 70, AON, AOO, the author's): none, it starts when it is due; sound, it starts delayBy after it, on the sample, so it lines up with a picture fired beside it whose projector shows it late. After the pre-wait, never instead of it. Read when the cue fires: an edit reaches the next GO. Refused on a sound locked to a movie, which follows the movie's (AOR). Rests at none (PRD 4.6)." },
+        { "media", "delayBy",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "0",
+          true, 0.0, true, 2000.0,
+          nullptr, 0,
+          "ms", 50.0, false, "park",
+          "",
+          "How much later the sound starts when delay says sound, in milliseconds (namespace draft 70, AOQ): placed on the sample, never rounded to a tick as a pre-wait is. The cue ends that much later too (AOP). Refused on a sound locked to a movie." },
         { "media", "channels",
           ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "0",
@@ -5115,6 +5133,22 @@ namespace wfg::doc::generated
           "s", 50.0, false, "park",
           "",
           "How far into the movie it begins, in seconds of the file, as a sound's start offset - and like a sound's, refused beside Ranges, which say where it plays instead (namespace draft 37.5, WL). A movie with no Range plays once from here to its end." },
+        { "video", "delay",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "none",
+          false, 0.0, false, 0.0,
+          enum_video_delay, 3,
+          "", 50.0, false, "park",
+          "",
+          "Which of the cue's streams starts later (namespace draft 70, AON, the author's): none, both together; sound, the sounds locked to this movie start delayBy after its picture, for an audio chain shorter than the projector's; picture, the picture comes up delayBy after its sounds, for an audio chain longer than the projector's. One stream, never both. After the pre-wait, never instead of it, and the cue ends with the later stream (AOP). Sound on a cue with no sound locked to it holds nothing back and wfg validate says so (AOS). Read when the cue fires. Rests at none (PRD 4.6)." },
+        { "video", "delayBy",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "0",
+          true, 0.0, true, 2000.0,
+          nullptr, 0,
+          "ms", 50.0, false, "park",
+          "",
+          "How much later the delayed stream starts, in milliseconds (namespace draft 70, AOQ): placed on the sample, never rounded to a tick as a pre-wait is." },
         { "video", "duration",
           ValueType::number, 'd', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",

@@ -428,6 +428,30 @@ TEST_CASE ("cue parts: time and loops pasted replace the playlist, and a movie t
     CHECK (document.validate().empty());
 }
 
+TEST_CASE ("cue parts: a delay goes with the time part, and a picture held back is nothing held back on a sound (namespace draft 70)")
+{
+    doc::ShowDocument document;
+    open (document);
+
+    REQUIRE (document.setAttribute ("/godot/cue/CP000002/delay", "sound").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/CP000002/delayBy", "12").ok);
+
+    REQUIRE (document.pastePart (document.partFragmentOf ("time", "CP000002"), { "CP000004", "CP000006" }, {}).ok);
+    CHECK (at (document, "/godot/cue/CP000004/delay") == "sound");
+    CHECK (at (document, "/godot/cue/CP000004/delayBy") == "12");
+    CHECK (at (document, "/godot/cue/CP000006/delay") == "sound");
+    CHECK (at (document, "/godot/cue/CP000006/delayBy") == "12");
+
+    //  The movie's picture held back, onto a sound: there is no picture there.
+    REQUIRE (document.setAttribute ("/godot/cue/CP000006/delay", "picture").ok);
+    REQUIRE (document.pastePart (document.partFragmentOf ("time", "CP000006"), { "CP000004" }, {}).ok);
+    CHECK (at (document, "/godot/cue/CP000004/delay") == "none");
+
+    //  The locked sound keeps the movie's say, so its own stays at rest.
+    CHECK (at (document, "/godot/cue/CP000007/delay") == "none");
+    CHECK (document.validate().empty());
+}
+
 TEST_CASE ("cue parts: every refusal comes before the first write, and a part is never pasted as a cue")
 {
     doc::ShowDocument document;

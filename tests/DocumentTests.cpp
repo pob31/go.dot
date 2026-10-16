@@ -3380,6 +3380,98 @@ TEST_CASE ("schema: a group's join - let play, gapless or crossfade, with a leng
     CHECK (read.validate().empty());
 }
 
+TEST_CASE ("schema: a sound or picture delay - which stream, by how much, refused on a locked sound (namespace draft 70)")
+{
+    const auto& schema = Schema::instance();
+
+    const auto* onVideo = schema.attribute ("Video", "delay");
+    const auto* onMedia = schema.attribute ("Media", "delay");
+    REQUIRE (onVideo != nullptr);
+    REQUIRE (onMedia != nullptr);
+    CHECK (onVideo->defaultText() == "none");
+    CHECK (onMedia->defaultText() == "none");
+
+    for (const auto* word : { "none", "sound", "picture" })
+        CHECK (onVideo->isEnumValue (word));
+
+    //  A sound has no picture to hold back (AOO).
+    CHECK (onMedia->isEnumValue ("sound"));
+    CHECK_FALSE (onMedia->isEnumValue ("picture"));
+
+    for (const auto* element : { "Video", "Media" })
+    {
+        INFO ("element " << element);
+        REQUIRE (schema.attribute (element, "delayBy") != nullptr);
+        CHECK (schema.attribute (element, "delayBy")->defaultText() == "0");
+    }
+
+    for (const auto* element : { "Group", "Mic", "Fade", "Osc", "Cue" })
+    {
+        INFO ("element " << element);
+        CHECK (schema.attribute (element, "delay") == nullptr);
+    }
+
+    ShowDocument document;
+    const auto list = document.createList ("Main").id;
+    const auto movie = document.createCue (list, 0, "video", "Film").id;
+    const auto sound = document.createCue (list, 1, "media", "Film sound").id;
+    const auto beside = document.createCue (list, 2, "media", "Beside").id;
+    const auto still = document.createCue (list, 3, "video", "Still").id;
+
+    REQUIRE (document.setAttribute ("/godot/cue/" + movie + "/source", "movie").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + movie + "/file", "film.mov").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + sound + "/file", "film.wav").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + beside + "/file", "beside.wav").ok);
+
+    //  At their defaults they are not written, so an old show saves as it was.
+    CHECK (CanonicalXml::write (document).find ("delay") == std::string::npos);
+
+    CHECK_FALSE (document.setAttribute ("/godot/cue/" + beside + "/delay", "picture").ok);
+    CHECK_FALSE (document.setAttribute ("/godot/cue/" + movie + "/delayBy", "-1").ok);
+    CHECK_FALSE (document.setAttribute ("/godot/cue/" + movie + "/delayBy", "2001").ok);
+
+    REQUIRE (document.setAttribute ("/godot/cue/" + beside + "/delay", "sound").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + beside + "/delayBy", "37.5").ok);
+
+    /*  LOCKED, the sound follows its movie: its own delay is refused (AOR),
+        and the movie's is the one that is set. */
+    REQUIRE (document.setAttribute ("/godot/cue/" + sound + "/lockedTo", movie).ok);
+    CHECK_FALSE (document.setAttribute ("/godot/cue/" + sound + "/delay", "sound").ok);
+    CHECK_FALSE (document.setAttribute ("/godot/cue/" + sound + "/delayBy", "40").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + movie + "/delay", "sound").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + movie + "/delayBy", "80").ok);
+
+    const auto nothingToDelay = [&document] (const std::string& id)
+    {
+        for (const auto& warning : document.warnings())
+            if (warning.find ("Video[" + id + "]/@delay") != std::string::npos
+                  && warning.find ("nothing to delay") != std::string::npos)
+                return true;
+
+        return false;
+    };
+
+    //  A movie with its sound locked to it has something to hold back.
+    CHECK_FALSE (nothingToDelay (movie));
+
+    /*  A STILL HOLDING BACK A SOUND IT DOES NOT HAVE (AOS): a warning, never a
+        refusal; holding back its picture is what it can do. */
+    REQUIRE (document.setAttribute ("/godot/cue/" + still + "/delay", "sound").ok);
+    CHECK (nothingToDelay (still));
+    REQUIRE (document.setAttribute ("/godot/cue/" + still + "/delay", "picture").ok);
+    CHECK_FALSE (nothingToDelay (still));
+
+    //  Read back in any locale: the amount is not "37,5" in fr_FR.
+    ShowDocument read;
+    REQUIRE (CanonicalXml::read (CanonicalXml::write (document), read).ok);
+    CHECK (read.getAttribute ("/godot/cue/" + beside + "/delay") == std::optional<std::string> ("sound"));
+    CHECK (read.getAttribute ("/godot/cue/" + beside + "/delayBy") == std::optional<std::string> ("37.5"));
+    CHECK (read.getAttribute ("/godot/cue/" + movie + "/delay") == std::optional<std::string> ("sound"));
+    CHECK (read.getAttribute ("/godot/cue/" + movie + "/delayBy") == std::optional<std::string> ("80"));
+    CHECK (read.getAttribute ("/godot/cue/" + sound + "/delay") == std::optional<std::string> ("none"));
+    CHECK (read.validate().empty());
+}
+
 TEST_CASE ("time group: holds sounds, pictures, timelines and automatic sequences - refused anything else at create, move, paste and wrap")
 {
     ShowDocument document;

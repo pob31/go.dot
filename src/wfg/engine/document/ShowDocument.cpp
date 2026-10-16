@@ -1810,8 +1810,11 @@ namespace wfg::doc
         if (keepingSounds)
             return false;
 
+        /*  A locked sound's delay is its movie's too (namespace draft 70, AOR):
+            the movie says which stream is held back, so the sound has no say. */
         if (node.hasType ("Media"))
-            return (row == "startOffset" || row == "rate") && followsAMovie (node);
+            return (row == "startOffset" || row == "rate" || row == "delay" || row == "delayBy")
+                     && followsAMovie (node);
 
         if (node.hasType ("Range"))
             return followsAMovie (node.getParent());
@@ -6532,9 +6535,18 @@ namespace wfg::doc
         struct Videos
         {
             std::vector<std::string>& problems;
+            const ShowDocument& document;
 
             void visit (const juce::ValueTree& node) const
             {
+                /*  A SOUND HELD BACK THAT IS NOT THERE (namespace draft 70, AOS):
+                    a still, a fill, a capture, or a movie with no sound locked to
+                    it. Not refused, since the source may change under it. */
+                if (node.hasType ("Video") && node["delay"].toString() == "sound"
+                      && (node["source"].toString() != "movie" || document.soundsLockedTo (node).empty()))
+                    problems.push_back ("/Show/.../Video[" + node[idProperty].toString().toStdString()
+                                          + "]/@delay: sound, and no sound is locked to it - nothing to delay");
+
                 if (node.hasType ("Video") && node["canvas"].toString().isEmpty())
                     problems.push_back ("/Show/.../Video[" + node[idProperty].toString().toStdString()
                                           + "]: is laid onto no canvas - pick one, or it shows nothing");
@@ -6573,7 +6585,7 @@ namespace wfg::doc
             }
         };
 
-        Videos { problems }.visit (showNode);
+        Videos { problems, *this }.visit (showNode);
 
         /*  A FADE ON A SPEED THAT HAS NO SPEED TO MOVE (namespace draft §22.6,
             EC), and a fade that moves nothing at all.
