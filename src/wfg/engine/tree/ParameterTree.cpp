@@ -3556,7 +3556,7 @@ namespace wfg::tree
             warning, asserted, seekable, roundFrom, roundLength, strip, held, solo, error,
             processState, processLate, processDropped, said, ports, iteration, iterations,
             round, pruned, seed, range, rangeIteration, timecode, chaseError, chaseState,
-            launchSample,
+            launchSample, joinDb,
 
             /*  A row this publish does not know, which reads its default - a
                 row added to the table before anybody wrote its reading. */
@@ -3600,7 +3600,7 @@ namespace wfg::tree
                     { "pruned", RunRow::pruned }, { "seed", RunRow::seed }, { "range", RunRow::range },
                     { "rangeIteration", RunRow::rangeIteration }, { "timecode", RunRow::timecode },
                     { "chaseError", RunRow::chaseError }, { "chaseState", RunRow::chaseState },
-                    { "launchSample", RunRow::launchSample }
+                    { "launchSample", RunRow::launchSample }, { "joinDb", RunRow::joinDb }
                 };
 
                 std::vector<RunRowEntry> entries;
@@ -5044,6 +5044,7 @@ namespace wfg::tree
                         draft §60, TG.8), as the Runner's hook last measured it: a
                         copy, nought and empty for every run nothing chases. */
                     case RunRow::chaseError: text = osc::formatDouble (std::round (run.chaseError * 100.0) / 100.0); break;
+                case RunRow::joinDb: text = osc::formatDouble (std::round (run.joinDb * 100.0) / 100.0); break;
                     case RunRow::chaseState: text = run.chaseState; break;
 
                     /*  THE SAMPLE ITS SOUND WAS PLACED ON (namespace draft §58,

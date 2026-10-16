@@ -312,7 +312,7 @@
       </optional>
       <optional>
         <attribute name="joinCurve">
-          <a:documentation>The shape of a crossfade between two members (namespace draft 69, AOC), the rule a sound edit&apos;s section fades follow: nought is equal power for a sound and a straight line for a picture; towards +1 the sound is held up longer, towards -1 let go sooner, and at -1 the two gains add to one, for material that is alike. Read when join is crossfade.</a:documentation>
+          <a:documentation>The shape of a crossfade between two members (namespace draft 69, AOC), the rule a sound edit&apos;s section fades follow: nought is equal power for a sound and a straight line for a picture; towards +1 both halves are lifted in the middle, a fuller crossing, towards -1 they dip, and at -1 the two gains add to one, for material that is alike. Read when join is crossfade.</a:documentation>
           <data type="double">
             <param name="minInclusive">-1</param>
             <param name="maxInclusive">1</param>

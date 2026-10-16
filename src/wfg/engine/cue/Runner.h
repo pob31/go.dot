@@ -51,6 +51,7 @@
 #include <wfg/engine/audio/EditRenderTable.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/command/CommandRegistry.h>
+#include <wfg/engine/cue/GroupJoin.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/GroupJob.h>
@@ -2130,6 +2131,28 @@ namespace wfg::cue
             The points are re-read when the show's revision moves - `applyEq`'s
             gate - and read at the second the voice will be at one slew ahead. */
         void applyLanes();
+
+        /*  WHAT EACH JOINED RUN'S FADE-IN AND FADE-OUT LET THROUGH ONE TICK
+            AHEAD (namespace draft §69, AOD), into `Run::joinDb` for
+            `applyLevels` to add - to the run and to its children. After the
+            fades and before the lanes; frozen on a run on its way out. */
+        void applyJoins();
+
+        /*  A GROUP'S JOIN, read from its rows (namespace draft §69): Let play for
+            anything that is not a sequence, whatever the row says - a timeline,
+            a sampler and a time group have no boundaries of this kind. */
+        join::Setting joinSettingOf (const juce::ValueTree& group) const;
+
+        /*  A MANUAL SEQUENCE'S GAPLESS AND CROSSFADE (§69, GJ.4), after the
+            launches: a member that sounds or shows, placed on its sample, takes
+            the place of every earlier member of its act still sounding - cut at
+            that sample, or faded out from it over the length - and they are
+            stopped once silent. A fade-out whose GO a Doh took back rises again
+            the way it fell (AOH). */
+        void joinManual (Engine& engine);
+
+        //  Whether a member of this kind takes the place of the ones before it, and gives its place.
+        static bool joinsByKind (const std::string& kind) noexcept;
 
         /*  EVERY SOUNDING MEDIA CUE'S SPEED (namespace draft §22.4): the cue's
             `rate` re-read when the show's revision moves - unless a speed fade

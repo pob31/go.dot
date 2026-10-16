@@ -56,6 +56,13 @@ namespace wfg::cue
                             /*  The voice is real and the media is ready, which
                                 is what a queued GO was waiting for. */
                             run->armConfirmed = true;
+
+                            /*  AND ITS LEVEL GOES TO THE VOICE AGAIN on the next
+                                pass (namespace draft §69): one worked out before
+                                there was a track to send it to - a join's
+                                silence, a fade begun on an armed run - was kept
+                                and never sent, and the arm put its own there. */
+                            run->levelOwed = true;
                             return Outcome::ok (args);
                         } });
 

@@ -32,6 +32,7 @@
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/cue/Override.h>
+#include <wfg/engine/cue/GroupJoin.h>
 
 #include <wfg/engine/midi/MidiMessages.h>
 #include <wfg/engine/midi/MidiSink.h>
@@ -226,6 +227,27 @@ namespace wfg::cue
                 out[bus] = doc::laneLevelDb (points, seconds);
 
             return out;
+        }
+
+        /*  A MEMBER OF AN ACT THAT IS SOUNDING OR SHOWING NOW (namespace draft
+            §69, GJ.4), which a manual join's next member takes the place of: a
+            sound or a live input placed on its sample, a picture or a scene
+            under way - and not one on its way out, holding its post-wait, or a
+            memo, a network cue or a fade, which sound nothing. */
+        bool soundsInAnAct (const Run& run) noexcept
+        {
+            if (run.isFinished() || run.state == runState::stopping || run.state == runState::postWait
+                  || run.stopAsked || run.stopIssued || run.killIssued || run.takenBack)
+                return false;
+
+            if (run.kind == "media" || run.kind == "mic")
+                return run.launchedAtSample > 0;
+
+            if (run.kind != "video" && run.kind != "group")
+                return false;
+
+            return run.state != runState::armed && run.state != runState::waiting
+                     && run.state != runState::preparing;
         }
     }
 
@@ -17349,8 +17371,29 @@ namespace wfg::cue
                     One launcher rather than two because `run.launch` begins a
                     pre-wait, and a member launched twice would begin its wait
                     twice. */
+                /*  A CROSSFADE'S INCOMING MEMBER IS SILENT FROM ITS ARM (namespace
+                    draft §69, GJ.4): set here, before its launch is placed, so the
+                    level the voice holds when the launch lands is already the fade's
+                    nothing. Only where there is something to cross from; once it is
+                    placed, `joinManual` says whether there still was. */
+                const auto joining = joinSettingOf (group);
+
                 for (auto i = job.launched; i < children.size(); ++i)
+                {
+                    if (joining.kind == join::Kind::crossfade && joinsByKind (children[i]->kind))
+                        if (auto* incoming = runs.find (children[i]->id);
+                            incoming != nullptr && ! incoming->joinTriggered && ! incoming->joinIn)
+                            for (const auto* sibling : runs.childrenOf (job.run))
+                                if (sibling->id != incoming->id && soundsInAnAct (*sibling) && ! sibling->joinOut)
+                                {
+                                    incoming->joinIn = true;
+                                    incoming->joinSamples = videoSamplesFor (joining.seconds);
+                                    incoming->joinCurve = joining.curve;
+                                    break;
+                                }
+
                     engine.submit (origin::engine, "run.launch", one (children[i]->id));
+                }
 
                 job.launched = children.size();
 
@@ -18775,6 +18818,7 @@ namespace wfg::cue
         flushDohWrites (engine);
 
         advanceFades (engine, tick);
+        applyJoins();
         applyLanes();
         recordLane (engine);
         applyLevels();
@@ -18832,6 +18876,11 @@ namespace wfg::cue
         armWaitingMics (engine);
         serviceTakes (engine);
         launchIfDue (engine, tick);
+
+        /*  AFTER THE LAUNCHES (namespace draft §69, GJ.4): a manual act's member
+            is placed on its sample there, and what it takes the place of is
+            faded from that sample. */
+        joinManual (engine);
 
         /*  A RUN CARRIED ON MID-FILE COMES UP FROM SILENCE, from the tick its
             launch was placed (K8's review; §24, GQ). */
@@ -21000,6 +21049,210 @@ namespace wfg::cue
         }
     }
 
+    void Runner::applyJoins()
+    {
+        /*  A SEQUENCE'S JOIN AS A TERM OF THE LEVEL (namespace draft §69, AOD),
+            worked out at the sample one tick ahead: the voice ramps to what it is
+            given over exactly one tick (`CueMatrix`), so the level it reaches as
+            the tick ends is the envelope's there, and a crossfade lands on its
+            shape to within a block rather than a tick behind it.
+
+            Above the null-player gate, as the fades are: with no player the
+            tick's own clock stands in, so a replay and a `serve` with no audio
+            side still say what the join is doing. */
+        const auto now = videoClockNow();
+
+        if (now < 0)
+            return;
+
+        const auto at = now + static_cast<std::int64_t> (samplesPerTick);
+
+        for (const auto& snapshot : runs.current())
+        {
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr || run->isFinished() || ! (run->joinIn || run->joinOut))
+                continue;
+
+            /*  ON ITS WAY OUT IT KEEPS WHAT IT HAD: a stop's fade, Esc's or a
+                stop cue's, takes it down from there rather than from a level
+                the join would have moved on to. */
+            if (run->state == runState::stopping || run->stopIssued || run->killIssued || run->takenBack)
+                continue;
+
+            auto gain = 1.0;
+
+            /*  NOTHING BEFORE ITS OWN LAUNCH: a member armed ahead is silent until
+                the sample it was placed on, and rises from there. */
+            if (run->joinIn)
+            {
+                const auto from = run->joinInFrom > 0 ? run->joinInFrom : run->launchedAtSample;
+
+                gain *= from > 0 ? join::gainIn (at, from, run->joinSamples, run->joinCurve, false) : 0.0;
+            }
+
+            if (run->joinOut)
+                gain *= join::gainOut (at, run->joinOutFrom, run->joinSamples, run->joinCurve, false);
+
+            run->joinDb = join::decibelsOf (gain);
+        }
+    }
+
+    join::Setting Runner::joinSettingOf (const juce::ValueTree& group) const
+    {
+        join::Setting setting;
+
+        if (! group.isValid() || ! group.hasType ("Group") || ! isSequence (groupMode (group)))
+            return setting;
+
+        setting.kind = join::kindOf (textOf (group, "join"));
+        setting.seconds = std::max (join::minimumSeconds, numberOf (group, "joinLength"));
+        setting.curve = std::clamp (numberOf (group, "joinCurve"), -1.0, 1.0);
+        return setting;
+    }
+
+    bool Runner::joinsByKind (const std::string& kind) noexcept
+    {
+        /*  WHAT SOUNDS OR SHOWS (§69): a sound, a picture, a live input, and a
+            scene of them. A memo, a network cue or a fade fired in an act takes
+            nobody's place - a light cue between two songs does not silence the
+            song (mine, for the author). */
+        return kind == "media" || kind == "video" || kind == "mic" || kind == "group";
+    }
+
+    void Runner::joinManual (Engine& engine)
+    {
+        const auto now = videoClockNow();
+
+        if (now < 0)
+            return;
+
+        for (const auto& snapshot : runs.current())
+        {
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr || run->isFinished())
+                continue;
+
+            /*  GIVEN ITS PLACE BACK (AOH): the member whose launch faded this one
+                was taken back by a Doh, or is gone. It rises the way it fell -
+                a fade-in started as far back as the fade-out had gone, so the
+                level it has now is where it rises from, and it is whole again in
+                the time it took to fall. One already stopped is not brought back. */
+            if (run->joinOut && ! run->joinOutBy.empty() && ! run->joinStopSent)
+                if (const auto* by = runs.find (run->joinOutBy); by == nullptr || by->takenBack)
+                {
+                    const auto length = std::max<std::int64_t> (run->joinSamples, 1);
+                    const auto fallen = std::clamp<std::int64_t> (now - run->joinOutFrom, 0, length);
+
+                    run->joinOut = false;
+                    run->joinOutBy.clear();
+                    run->joinStopAt = 0;
+                    run->joinIn = true;
+                    run->joinInFrom = std::max<std::int64_t> (1, now - (length - fallen));
+                    continue;
+                }
+
+            //  SILENT, and stopped: a hard stop, which owes no post-wait (§23.13).
+            if (run->joinStopAt > 0 && ! run->joinStopSent && now >= run->joinStopAt)
+            {
+                run->joinStopSent = true;
+
+                if (! run->stopAsked && ! run->stopIssued && run->state != runState::stopping)
+                    engine.submit (origin::engine, "run.stop", one (run->id));
+
+                continue;
+            }
+
+            if (run->joinTriggered || ! joinsByKind (run->kind) || run->parent.empty())
+                continue;
+
+            const auto* act = runs.find (run->parent);
+
+            if (act == nullptr)
+                continue;
+
+            const auto group = document.findById (act->cue);
+
+            if (! group.isValid() || ! isManual (groupMode (group)))
+                continue;
+
+            const auto setting = joinSettingOf (group);
+
+            if (setting.kind == join::Kind::letPlay)
+                continue;
+
+            //  A member, not one of the act's header or footer cues.
+            const auto cue = document.findById (run->cue);
+
+            if (! cue.isValid() || cue.getParent() != group)
+                continue;
+
+            /*  ITS PLACE: a sound's and a live input's launch sample, once it is
+                placed; a picture's appearance, a lead ahead; a scene's moment. */
+            std::int64_t at = 0;
+
+            if (run->kind == "media" || run->kind == "mic")
+            {
+                if (run->launchedAtSample <= 0)
+                    continue;
+
+                at = run->launchedAtSample;
+            }
+            else
+            {
+                if (run->state == runState::armed || run->state == runState::waiting
+                      || run->state == runState::preparing)
+                    continue;
+
+                at = run->kind == "video" ? videoSampleAhead() : now;
+                run->joinInFrom = at;
+            }
+
+            run->joinTriggered = true;
+
+            const auto crossfade = setting.kind == join::Kind::crossfade;
+            const auto length = crossfade ? videoSamplesFor (setting.seconds)
+                                          : static_cast<std::int64_t> (samplesPerTick);
+
+            /*  GAPLESS IS A CUT ON THE SAMPLE, de-clicked: a tick's ramp that
+                ends where the incoming member begins. A CROSSFADE begins there
+                and lasts its length. */
+            const auto from = crossfade ? at : at - static_cast<std::int64_t> (samplesPerTick);
+            auto tookAPlace = false;
+
+            for (const auto* sibling : runs.childrenOf (act->id))
+            {
+                if (sibling->id == run->id || sibling->joinOut || ! soundsInAnAct (*sibling))
+                    continue;
+
+                //  Placed after this one - a second GO in the same tick - it is not an earlier member.
+                if (sibling->launchedAtSample > 0 && sibling->launchedAtSample >= at)
+                    continue;
+
+                if (const auto siblingCue = document.findById (sibling->cue);
+                    ! siblingCue.isValid() || siblingCue.getParent() != group)
+                    continue;
+
+                auto* earlier = runs.find (sibling->id);
+                earlier->joinOut = true;
+                earlier->joinOutFrom = from;
+                earlier->joinSamples = length;
+                earlier->joinCurve = setting.curve;
+                earlier->joinOutBy = run->id;
+                earlier->joinStopAt = from + length;
+                tookAPlace = true;
+            }
+
+            //  Nothing was left to cross from by the time it was placed: it comes up as written.
+            if (crossfade && ! tookAPlace)
+            {
+                run->joinIn = false;
+                run->joinInFrom = 0;
+            }
+        }
+    }
+
     void Runner::applyLanes()
     {
         if (audio == nullptr)
@@ -22022,7 +22275,7 @@ namespace wfg::cue
             is one of its terms (namespace draft §50, `dcaTermsOf`). */
         const auto effectiveOf = [this] (const Run& run)
         {
-            auto total = run.ownLevel + run.trim + dcaTermsOf (run.cue);
+            auto total = run.ownLevel + run.trim + dcaTermsOf (run.cue) + run.joinDb;
             auto parent = run.parent;
 
             /*  BOUNDED BY THE TABLE, not by the tree, because a `parent` that
@@ -22035,7 +22288,9 @@ namespace wfg::cue
                 if (above == nullptr)
                     break;
 
-                total += above->ownLevel + above->trim + dcaTermsOf (above->cue);
+                /*  A JOIN'S TERM GOES DOWN AS A GROUP'S DO (namespace draft §69,
+                    AOD): a movie fading out takes its locked sounds with it. */
+                total += above->ownLevel + above->trim + dcaTermsOf (above->cue) + above->joinDb;
                 parent = above->parent;
             }
 
@@ -22078,10 +22333,13 @@ namespace wfg::cue
                 a member's lane is the member's. Nought for every run without. */
             const auto effective = effectiveOf (*run) + run->laneDb;
 
-            if (juce::approximatelyEqual (effective, run->level))
+            if (juce::approximatelyEqual (effective, run->level) && ! run->levelOwed)
                 continue;
 
             run->level = effective;
+
+            if (audio != nullptr && run->track >= 0)
+                run->levelOwed = false;
 
             /*  A GROUP RUN HAS NO VOICE, which is what makes its level a trim
                 rather than a level: the number reaches the outputs through its

@@ -497,6 +497,51 @@ namespace wfg::cue
         std::vector<doc::LanePoint> lane;
         double laneDb = 0.0;
 
+        /*  WHAT A SEQUENCE'S JOIN DOES TO THIS RUN'S LEVEL (namespace draft §69,
+            AOD): a fade-in from its own launch, a fade-out to wherever it was
+            given, or both - a fifth term of the sum, beside `ownLevel`, `trim`,
+            the DCAs and the lane, and walked into its children's sums as a
+            group's own terms are, so a movie's locked sounds follow it. Never a
+            fade job: a fade cue aimed at the run still moves `ownLevel`, and
+            nothing it does takes this away.
+
+            `joinIn` rises from the run's launch sample over `joinSamples`;
+            `joinOut` falls from `joinOutFrom` over the same length. Both shaped by
+            `joinCurve`, the sound edit's rule (§55). `joinDb` is what they give at
+            the sample one tick ahead - the level the voice ramps to over the
+            tick - worked out by `Runner::applyJoins`, and frozen once the run is
+            on its way out, so a stop's own fade takes it down from where it is.
+            Set by the hook that decides a join; never logged - the decision is
+            (`run.joined`), and the samples a replay does not have are what say
+            where a fade was. Off and nought for every other run. */
+        bool joinIn = false;
+        bool joinOut = false;
+        std::int64_t joinOutFrom = 0;
+        std::int64_t joinSamples = 0;
+        double joinCurve = 0.0;
+        double joinDb = 0.0;
+
+        /*  WHERE THE FADE-IN STARTS when it is not the launch: a fade-out a Doh
+            took back, rising again the way it fell (AOH). Nought is the launch. */
+        std::int64_t joinInFrom = 0;
+
+        /*  A MANUAL SEQUENCE'S JOIN (§69, GJ.4). `joinTriggered`: this member's
+            launch has acted on the ones before it, once. `joinOutBy`: the
+            member whose launch gave this one its fade-out, so a Doh of that GO
+            can give it back. `joinStopAt`: the sample its fade-out has reached
+            silence by, when it is stopped; `joinStopSent` once it has been. */
+        bool joinTriggered = false;
+        std::string joinOutBy;
+        std::int64_t joinStopAt = 0;
+        bool joinStopSent = false;
+
+        /*  ITS LEVEL IS OWED TO THE VOICE AGAIN (namespace draft §69): set when
+            the arm lands. A level worked out before the run had a track was
+            recorded and not sent - nothing can be sent to a voice that is not
+            there yet - and the host then applied the arm's own level; so the
+            next pass sends it whether or not it changed. */
+        bool levelOwed = false;
+
         /*  AND ITS SENDS' LANES (namespace draft §28): each a curve over the
             same file, by the bus its send feeds - the key a fade's moved
             send uses, so the two are found the same way (§26 PB). Read with
