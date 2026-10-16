@@ -1086,10 +1086,12 @@ TEST_CASE ("camera: the test camera listed by name, its formats known once opene
 
 /*  THIS MACHINE'S OWN CAMERA (§72, VC.2-VC.4), on the bench only: opening a
     camera lights it, so it runs when WFG_CAMERA_REAL names one - a part of its
-    name, or 1 for the first listed. Opens no window. */
+    name, or 1 for the first listed - at WFG_CAMERA_REAL_FORMAT, automatic when
+    unset. Opens no window. */
 TEST_CASE ("camera: a camera this machine lists, opened at automatic, its frames read, a second input refused, given back (VC.2)")
 {
     const auto wanted = juce::SystemStats::getEnvironmentVariable ("WFG_CAMERA_REAL", {}).toStdString();
+    const auto asked = juce::SystemStats::getEnvironmentVariable ("WFG_CAMERA_REAL_FORMAT", "auto").toStdString();
 
     if (wanted.empty())
         return;
@@ -1113,7 +1115,7 @@ TEST_CASE ("camera: a camera this machine lists, opened at automatic, its frames
     CHECK (chosen->formats.empty());
 
     std::string why;
-    auto source = cameras.open (id, "auto", why);
+    auto source = cameras.open (id, asked, why);
     INFO (why);
     REQUIRE (source != nullptr);
 
@@ -1125,7 +1127,7 @@ TEST_CASE ("camera: a camera this machine lists, opened at automatic, its frames
     MESSAGE ("opened at " << source->formatWord() << " of " << offered);
     const auto format = video::modes::parse (source->formatWord());
     REQUIRE (format.has_value());
-    CHECK (source->formatWord() == video::camera::chooseAutomatic (source->formats()));
+    CHECK (source->formatWord() == (asked == "auto" ? video::camera::chooseAutomatic (source->formats()) : asked));
 
     //  Frames, at the size its format says, for two seconds.
     std::vector<std::uint8_t> bgra;
@@ -1153,14 +1155,31 @@ TEST_CASE ("camera: a camera this machine lists, opened at automatic, its frames
     CHECK (bgra.size() == static_cast<std::size_t> (w) * static_cast<std::size_t> (h) * 4);
     CHECK (source->signal());
 
-    const auto from = std::chrono::steady_clock::now();
-
-    while (std::chrono::steady_clock::now() - from < std::chrono::seconds (2))
+    /*  A second to settle - a camera finds its exposure as it starts - then
+        five counted, each on its own: the frames that arrived, by the number
+        the camera gives each, not the ones a look happened to catch. */
+    const auto runFor = [&] (std::chrono::milliseconds span)
     {
-        if (source->newest (bgra, w, h, serial))
-            ++frames;
+        const auto from = std::chrono::steady_clock::now();
+        const auto before = serial;
 
-        waitMs (2);
+        while (std::chrono::steady_clock::now() - from < span)
+        {
+            source->newest (bgra, w, h, serial);
+            waitMs (2);
+        }
+
+        return static_cast<int> (serial - before);
+    };
+
+    runFor (std::chrono::milliseconds (1000));
+    std::string perSecond;
+
+    for (int second = 0; second < 5; ++second)
+    {
+        const auto arrived = runFor (std::chrono::milliseconds (1000));
+        frames += arrived;
+        perSecond += (perSecond.empty() ? "" : " ") + std::to_string (arrived);
     }
 
     double sum = 0.0;
@@ -1168,7 +1187,8 @@ TEST_CASE ("camera: a camera this machine lists, opened at automatic, its frames
     for (std::size_t at = 0; at + 2 < bgra.size(); at += 4)
         sum += 0.0722 * bgra[at] + 0.7152 * bgra[at + 1] + 0.2126 * bgra[at + 2];
 
-    MESSAGE ("frames a second: " << frames / 2.0 << ", mean light " << sum / (static_cast<double> (bgra.size()) / 4.0) << " of 255");
+    MESSAGE ("frames a second after the first: " << perSecond << " (" << frames / 5.0 << " on average), mean light "
+             << sum / (static_cast<double> (bgra.size()) / 4.0) << " of 255");
     CHECK (frames > 0);
 
     //  A second input on it refused; its formats now listed.
