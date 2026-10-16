@@ -144,7 +144,10 @@ const KIND_ORDER = {
   script:  ["language", "midiIn", "midiOut", "source"],
   osc:     ["address", "value", "wait", "timeout"],
   midi:    ["port", "channel", "type", "data1", "data2", "sysex", "wait"],
-  group:   ["mode", "takeover", "advance", "selection", "play", "loops", "seed", "dca", "dcaCurve", "dcaOffset"],
+  // The join after `advance` (namespace draft 69): what happens between two members follows
+  // how the next one is started.
+  group:   ["mode", "takeover", "advance", "join", "joinLength", "joinCurve", "selection", "play", "loops",
+            "seed", "dca", "dcaCurve", "dcaOffset"],
   range:   ["name", "in", "out", "loops"],
   trigger: ["kind", "enabled", "address", "value", "port", "channel",
             "type", "number", "data", "at"],
@@ -335,6 +338,18 @@ function detailsMarkup(ids, fields, kind) {
          "</details>";
 }
 
+/*  A CLOSED SET'S WORDS ON SCREEN where the stored word reads as code: a group's
+    join (namespace draft 69, ANY), as the desktop's menu says it. The value
+    written is still the stored word; a row not here shows its own words. */
+const OPTION_WORDS = {
+  join: { letPlay: "Let play", gapless: "Gapless", crossfade: "Crossfade" },
+};
+
+export function wordFor(name, value) {
+  const words = OPTION_WORDS[name];
+  return words && Object.prototype.hasOwnProperty.call(words, value) ? words[value] : String(value);
+}
+
 function controlFor(field) {
   const node = field.node;
   const writable = decided(field);
@@ -377,7 +392,7 @@ function controlFor(field) {
       (many ? '<option value="" disabled data-mixed="yes">' + MIXED + "</option>" : "") +
       range.VALS.map((v) =>
         '<option value="' + esc(v) + '"' + (String(v) === String(value) ? " selected" : "") +
-        ">" + esc(v) + "</option>").join("") +
+        ">" + esc(wordFor(field.name, v)) + "</option>").join("") +
       "</select>";
   }
 

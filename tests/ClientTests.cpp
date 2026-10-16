@@ -8800,6 +8800,73 @@ TEST_CASE ("client: what only a code asks is greyed where no code reaches, and a
     CHECK_FALSE (appliesIn (model::inspect (*snapshot, clock.id), "takeover"));
 }
 
+TEST_CASE ("client: a sequence's join - after how it advances, in the author's words, its length and curve a crossfade's (§69)")
+{
+    Rig rig;
+
+    const std::string list = "7K2QM9X4";
+
+    const auto manual = rig.document.createCue (list, 0, "group", "Act");
+    const auto automatic = rig.document.createCue (list, 1, "group", "Bed", {}, { { "advance", "auto" } });
+    const auto timeline = rig.document.createCue (list, 2, "group", "Storm", {}, { { "mode", "timeline" } });
+    const auto pads = rig.document.createCue (list, 3, "group", "Pads", {}, { { "mode", "sampler" } });
+    const auto clock = rig.document.createCue (list, 4, "group", "Clock", {}, { { "mode", "time" } });
+
+    for (const auto* made : { &manual, &automatic, &timeline, &pads, &clock })
+        REQUIRE (made->ok);
+
+    rig.parameters.markStale();
+    auto snapshot = rig.publish (1);
+
+    //  After `advance`, the length and the curve after the join.
+    const auto rows = namesUnder (model::inspect (*snapshot, manual.id), "what it does");
+    const auto advanceAt = positionOf (rows, "advance");
+    REQUIRE (advanceAt + 3 < rows.size());
+    CHECK (rows[advanceAt + 1] == "join");
+    CHECK (rows[advanceAt + 2] == "joinLength");
+    CHECK (rows[advanceAt + 3] == "joinCurve");
+
+    //  The menu says the author's words and writes the stored ones.
+    const auto inspected = model::inspect (*snapshot, manual.id);
+    const auto* join = rowIn (inspected, "join");
+    REQUIRE (join != nullptr);
+    CHECK (join->value == "letPlay");
+    REQUIRE (join->choices.size() == 3u);
+    CHECK (join->choices[0] == std::pair<std::string, std::string> { "letPlay", "Let play" });
+    CHECK (join->choices[1] == std::pair<std::string, std::string> { "gapless", "Gapless" });
+    CHECK (join->choices[2] == std::pair<std::string, std::string> { "crossfade", "Crossfade" });
+    REQUIRE (rowIn (inspected, "joinLength") != nullptr);
+    CHECK (rowIn (inspected, "joinLength")->label == "crossfade length");
+
+    //  A sequence is asked, manual and automatic; a timeline, a sampler and a time group are not.
+    CHECK (appliesIn (model::inspect (*snapshot, manual.id), "join"));
+    CHECK (appliesIn (model::inspect (*snapshot, automatic.id), "join"));
+
+    for (const auto& id : { timeline.id, pads.id, clock.id })
+    {
+        INFO ("group " << id);
+        const auto other = model::inspect (*snapshot, id);
+        CHECK_FALSE (appliesIn (other, "join"));
+        CHECK_FALSE (appliesIn (other, "joinLength"));
+        CHECK_FALSE (appliesIn (other, "joinCurve"));
+    }
+
+    //  The length and the curve are a crossfade's: greyed under the other two.
+    CHECK_FALSE (appliesIn (model::inspect (*snapshot, manual.id), "joinLength"));
+    CHECK_FALSE (appliesIn (model::inspect (*snapshot, manual.id), "joinCurve"));
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + manual.id + "/join", "crossfade").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+
+    CHECK (appliesIn (model::inspect (*snapshot, manual.id), "joinLength"));
+    CHECK (appliesIn (model::inspect (*snapshot, manual.id), "joinCurve"));
+
+    //  Two groups whose joins differ: one of them may be a crossfade, so both rows stay live.
+    const auto both = model::inspectMany (*snapshot, { automatic.id, manual.id });
+    CHECK (appliesIn (both, "joinLength"));
+}
+
 TEST_CASE ("client: a time group asks the engine's questions - no icon of a sequence, no follow mark, no length, no words at a scrub (§60)")
 {
     /*  The predicates the engine asks (cue/GroupMode.h) are the client's too.

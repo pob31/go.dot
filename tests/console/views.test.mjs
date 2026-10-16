@@ -240,6 +240,15 @@ test("the inspector puts a cue's fields in the order somebody works through them
                    ["mode", "takeover", "advance", "dca"]);
   assert.deepEqual(ordered(["level", "dca", "target"], "fade"), ["target", "dca", "level"]);
 
+  /*  A SEQUENCE'S JOIN after how it advances, its length and curve after it
+      (namespace draft 69), and the menu in the author's words over the stored ones. */
+  assert.deepEqual(ordered(["selection", "joinCurve", "advance", "join", "joinLength"], "group"),
+                   ["advance", "join", "joinLength", "joinCurve", "selection"]);
+  const { wordFor } = await import("../../clients/console/views/inspector.js");
+  assert.equal(wordFor("join", "letPlay"), "Let play");
+  assert.equal(wordFor("join", "crossfade"), "Crossfade");
+  assert.equal(wordFor("selection", "shuffle"), "shuffle");
+
   /*  WHAT A DCA MARK CARRIES straight after the DCA (namespace draft §50). */
   assert.deepEqual(ordered(["initialLevel", "dcaOffset", "dcaCurve", "dca"], "media"),
                    ["dca", "dcaCurve", "dcaOffset", "initialLevel"]);

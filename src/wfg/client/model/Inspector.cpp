@@ -149,9 +149,11 @@ namespace wfg::client::model
                     makes it one; the DCA the whole group answers to last.
                     `timeSource` after it for the same reason, a time group's
                     question (namespace draft §60) - and first of all on a time
-                    group itself, which `inspect` moves it to. */
-                { "group",   { "mode", "takeover", "timeSource", "advance", "selection", "play", "loops",
-                               "seed", "dca", "dcaCurve", "dcaOffset" } },
+                    group itself, which `inspect` moves it to. The join after
+                    `advance`, as what happens between two members follows how
+                    the next one is started (namespace draft §69). */
+                { "group",   { "mode", "takeover", "timeSource", "advance", "join", "joinLength", "joinCurve",
+                               "selection", "play", "loops", "seed", "dca", "dcaCurve", "dcaOffset" } },
                 { "range",   { "name", "in", "out", "loops" } },
                 { "trigger", { "kind", "enabled", "address", "value", "port", "channel",
                                "type", "number", "data", "at" } },
@@ -232,6 +234,11 @@ namespace wfg::client::model
                     what the knob above its DCA's strip turns. */
                 { "dcaCurve", "picture curve" },
                 { "dcaOffset", "sound offset" },
+                /*  A GROUP'S JOIN (namespace draft §69): the length and the
+                    curve are a crossfade's. The words are the implementer's,
+                    for the author. */
+                { "joinLength", "crossfade length" },
+                { "joinCurve", "crossfade curve" },
             };
 
             return table;
@@ -1220,6 +1227,53 @@ namespace wfg::client::model
             }
         }
 
+        /*  WHAT HAPPENS BETWEEN TWO MEMBERS (namespace draft §69, ANY), in the
+            author's words: "Let play", "Gapless", "Crossfade" - the stored words
+            `letPlay`, `gapless`, `crossfade` unchanged, as Doh!'s are. Asked of
+            a sequence only, automatic or manual: a timeline starts its members
+            together, and a sampler's and a time group's are started by a hand
+            and a code, so none of the three has a boundary to join. The length
+            and the curve are a crossfade's, greyed under the other two - and
+            left live on a selection whose joins differ, where one of them may
+            be a crossfade. Greyed, never hidden. */
+        void wordTheJoin (const std::string& kind, std::vector<Field>& decided)
+        {
+            if (kind != "group")
+                return;
+
+            const auto fieldOf = [&decided] (const std::string& name) -> const Field*
+            {
+                for (const auto& field : decided)
+                    if (field.name == name)
+                        return &field;
+
+                return nullptr;
+            };
+
+            const auto* mode = fieldOf ("mode");
+            const auto* join = fieldOf ("join");
+
+            const auto sequence = mode == nullptr || mode->mixed || mode->value == "sequence";
+            const auto crossfade = join == nullptr || join->mixed || join->value == "crossfade";
+
+            for (auto& field : decided)
+            {
+                if (field.name == "join")
+                {
+                    if (field.writable)
+                        field.choices = { { "letPlay", "Let play" },
+                                          { "gapless", "Gapless" },
+                                          { "crossfade", "Crossfade" } };
+
+                    field.applies = field.applies && sequence;
+                }
+                else if (field.name == "joinLength" || field.name == "joinCurve")
+                {
+                    field.applies = field.applies && sequence && crossfade;
+                }
+            }
+        }
+
         /*  WHAT A DCA MARK CARRIES MEANS SOMETHING ONLY WITH A DCA (namespace
             draft §50, ABT): both rows greyed on a cue marked with none. The
             picture's curve has nothing to shape under a sound or a mic; the
@@ -1787,6 +1841,7 @@ namespace wfg::client::model
 
         greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
         greyWhatOnlyACodeAsks (out.kind, asks, decided);
+        wordTheJoin (out.kind, decided);
         greyTheMapping (out.kind, decided);
 
         /*  THE EQ'S NINETEEN ROWS HAVE AN EDITOR OF THEIR OWN (Phase 9a), the
