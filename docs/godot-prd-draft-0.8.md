@@ -4414,7 +4414,7 @@ calls from AOZ in §71.2 are the author's to overrule:
   audio thread only copies into a ring of its own.
 - **A capture's format found by the card**; no signal draws black with a warning; one input per
   connector.
-- **A card that fails is tried again** every two seconds and on arrival; the problems said in words.
+- **A card that fails is tried again** every two seconds; the problems said in words.
 - **A test card** (`WFG_DECKLINK_FAKE=1`) and **a probe for testers** (`wfg decklink-probe`).
 
 What the work leaves out: sound coming in on a card; field-by-field interlace; the SDI link choices;

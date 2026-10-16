@@ -35,9 +35,17 @@ namespace wfg::video::card
     {
         //  Made once, from whichever thread asks first; a function-local
         //  static is made once whatever the threads (C++11).
-        static const std::unique_ptr<System> made =
-            juce::SystemStats::getEnvironmentVariable ("WFG_DECKLINK_FAKE", {}) == "1" ? makeFakeSystem()
-                                                                                       : makeDeckLinkSystem();
+        static const std::unique_ptr<System> made = []
+        {
+            if (juce::SystemStats::getEnvironmentVariable ("WFG_DECKLINK_FAKE", {}) != "1")
+                return makeDeckLinkSystem();
+
+            FakeOptions options;
+            options.driftPpm = juce::SystemStats::getEnvironmentVariable ("WFG_DECKLINK_FAKE_DRIFT", "0").getDoubleValue();
+            options.dropEvery = juce::SystemStats::getEnvironmentVariable ("WFG_DECKLINK_FAKE_DROP", "0").getIntValue();
+            return makeFakeSystem (options);
+        }();
+
         return *made;
     }
 

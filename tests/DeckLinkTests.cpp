@@ -22,13 +22,17 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include <wfg/engine/document/Bundle.h>
+#include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/DeckLinkProbe.h>
+#include <wfg/engine/video/VideoHost.h>
 #include <wfg/engine/video/VideoModes.h>
 #include <wfg/engine/video/VideoRegion.h>
 #include <wfg/engine/video/render/Card.h>
 #include <wfg/engine/video/render/DeckLinkApi.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <new>
@@ -353,4 +357,137 @@ TEST_CASE ("decklink: what videoOutput/cards says of the test card, and of Deskt
     video::card::FakeOptions absent;
     absent.present = false;
     CHECK (video::card::describe (video::card::makeFakeSystem (absent)->find()).empty());
+}
+
+namespace
+{
+    /*  The renderer is a child process and takes the environment it is
+        started with: a test card, and the software rasteriser on Windows. */
+    void setVariable (const char* name, const char* value)
+    {
+       #if defined (_WIN32)
+        SetEnvironmentVariableA (name, value);
+       #else
+        if (value != nullptr)
+            setenv (name, value, 1);
+        else
+            unsetenv (name);
+       #endif
+    }
+
+    /*  Go.dot's samples as the machine's time goes by, at 48 kHz, as the
+        tick writes them. */
+    struct Ticks
+    {
+        std::int64_t now() const
+        {
+            const auto elapsed = std::chrono::steady_clock::now() - began;
+            return std::chrono::duration_cast<std::chrono::microseconds> (elapsed).count() * 48 / 1000;
+        }
+
+        std::chrono::steady_clock::time_point began = std::chrono::steady_clock::now();
+    };
+
+    template <typename Done>
+    bool tickUntil (video::VideoHost& host, const Ticks& ticks, Done done, int milliseconds = 20000)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            host.tick (ticks.now(), 48000);
+
+            if (done())
+                return true;
+
+            waitMs (20);
+        }
+
+        return false;
+    }
+}
+
+TEST_CASE ("video gpu: a card output on the test card is paced by the card, and says its latency, its skew and its frames (§71, DL.3)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-card-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    const juce::File bundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) + "/bundles/video" };
+    REQUIRE (doc::Bundle::open (bundle, document).ok);
+
+    //  The fixture's output, sent down the test card's cable at 720p50.
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "decklink").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/card", "fake-1").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/videoMode", "720p50").ok);
+
+    //  A card whose clock runs a thousandth fast.
+    setVariable ("WFG_DECKLINK_FAKE", "1");
+    setVariable ("WFG_DECKLINK_FAKE_DRIFT", "1000");
+    setVariable ("WFG_VIDEO_SOFTWARE", "1");
+
+    Ticks ticks;
+    video::VideoHost host { spec };
+    host.configure (document);
+
+    const auto running = tickUntil (host, ticks, [&host] { return host.readouts().renderer == "running"; });
+    setVariable ("WFG_DECKLINK_FAKE", nullptr);
+    setVariable ("WFG_DECKLINK_FAKE_DRIFT", nullptr);
+    setVariable ("WFG_VIDEO_SOFTWARE", nullptr);
+    REQUIRE (running);
+
+    //  The card found, and published as `videoOutput/cards` says it.
+    REQUIRE (tickUntil (host, ticks, [&host] { return host.readouts().cards.rfind ("fake-1\t", 0) == 0; }, 5000));
+
+    //  Frames reach the card on its own clock (APB): bound, sent, counted.
+    REQUIRE (tickUntil (host, ticks, [&host]
+                        {
+                            const auto said = host.readouts();
+                            const auto* output = said.output ("VD000021");
+                            return output != nullptr && output->bound && output->framesPresented > 10;
+                        }, 15000));
+
+    const auto first = host.readouts().output ("VD000021")->framesPresented;
+    const auto from = std::chrono::steady_clock::now();
+    tickUntil (host, ticks, [] { return false; }, 2000);
+    const auto seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - from).count();
+
+    const auto said = host.readouts();
+    const auto* output = said.output ("VD000021");
+    REQUIRE (output != nullptr);
+
+    const auto rate = static_cast<double> (output->framesPresented - first) / seconds;
+    MESSAGE ("card frames a second: " << rate << ", late or dropped: " << output->framesLate << ", latency " << output->latencyMs
+             << " ms, skew " << output->skewPpm << " ppm");
+
+    //  The card asks fifty a second; a software rasteriser in a Debug build
+    //  keeps up with most of them, and what it misses is counted, not hidden.
+    CHECK (rate > 20.0);
+    CHECK (rate < 52.0);
+    CHECK (output->problem.empty());
+
+    //  Two frames waiting at most (APC): up to 40 ms.
+    CHECK (output->latencyMs >= 0.0);
+    CHECK (output->latencyMs <= 40.5);
+
+    //  The card's thousandth against the sound's clock, shown (§3.19d).
+    CHECK (output->skewPpm == doctest::Approx (1000.0).epsilon (0.3));
+    CHECK (output->reference == "none");
+
+    //  A card that is not there says so, in words, and is tried again.
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/card", "fake-9").ok);
+    host.configure (document);
+
+    CHECK (tickUntil (host, ticks, [&host]
+                      {
+                          const auto latest = host.readouts();
+                          const auto* now = latest.output ("VD000021");
+                          return now != nullptr && ! now->bound && now->problem == "the card is not connected";
+                      }, 10000));
 }

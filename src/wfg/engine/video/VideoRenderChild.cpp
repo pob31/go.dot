@@ -2367,6 +2367,16 @@ namespace wfg::video
             double frameRate = 60.0;
         };
 
+        /*  AN OUTPUT DOWN A CARD'S CABLE (namespace draft §71): which, its
+            frames' slot, the card, and how it is opened. */
+        struct CardSpec
+        {
+            std::string outputId;
+            int slot = 0;
+            std::string cardId;
+            card::OutputSettings settings;
+        };
+
         //==============================================================================
         /*  THE NEW RENDERER'S THREAD (namespace draft §44.4): the one device,
             the painter, a surface on each projector's view; woken by its
@@ -2395,11 +2405,13 @@ namespace wfg::video
             /*  THE PROJECTORS AND SENDERS TO DRAW, in place of those before -
                 returning once the render thread has let go of the old ones'
                 surfaces, so their windows may go. */
-            void setOutputs (std::vector<ProjectorSpec> specs, std::vector<SenderSpec> senderSpecs = {})
+            void setOutputs (std::vector<ProjectorSpec> specs, std::vector<SenderSpec> senderSpecs = {},
+                             std::vector<CardSpec> cardSpecs = {})
             {
                 std::unique_lock<std::mutex> hold (lock);
                 wanted = std::move (specs);
                 wantedSenders = std::move (senderSpecs);
+                wantedCards = std::move (cardSpecs);
                 ++generation;
                 changed.notify_all();
                 changed.wait_for (hold, std::chrono::seconds (2), [this] { return taken == generation || stopped; });
@@ -2479,6 +2491,27 @@ namespace wfg::video
                 Frames frames;
             };
 
+            /*  A CARD OUTPUT AS THE RENDER THREAD HOLDS IT (§71, APB): the
+                card's output, why there is none and when to try again; the
+                next frame number to schedule and when the first was drawn;
+                the card's stream fitted against the machine's clock, in
+                microseconds; and the pixels read back. */
+            struct Carding
+            {
+                CardSpec spec;
+                std::unique_ptr<card::Output> output {};
+                std::string why {};
+                std::int64_t retryAt = 0;
+                std::int64_t next = 0;
+                std::int64_t prerollBegan = 0;
+                ClockEstimate line {};
+                std::vector<std::uint8_t> pixels {};
+            };
+
+            /*  FRAMES WAITING ON A CARD (APC): two, 40 ms at 50p - the video
+                horizon. More would hold the picture behind the sound. */
+            static constexpr int cardDepth = 2;
+
             void run() override
             {
                 //  A card is opened and fed from this thread (§71): COM's apartment for it, on Windows.
@@ -2488,6 +2521,7 @@ namespace wfg::video
                 std::vector<std::unique_ptr<render::Surface>> surfaces;
                 std::vector<Frames> frames;
                 std::vector<Sending> sending;
+                std::vector<Carding> carding;
                 std::map<std::string, Taking> taking;
                 std::map<std::string, Inserting> inserting;
                 bool insertsDeclared = false;
@@ -2502,8 +2536,10 @@ namespace wfg::video
                 std::vector<std::string> keep;
                 std::uint32_t keepUnder = 0xffffffffu;
                 ClockReader clock;
+                soundLine = &clock.estimate;
                 std::int64_t nextStates = 0;
                 std::int64_t nextDiscovery = 0;
+                std::int64_t nextCardStates = 0;
                 auto sayInsertsLater = false;
 
                 /*  THE DEVICE, the first time there is something to draw or to
@@ -2778,13 +2814,26 @@ namespace wfg::video
                             for (const auto& spec : wantedSenders)
                                 sending.push_back ({ spec, nullptr, 0, -1, {} });
 
+                            for (auto& was : carding)
+                                if (painter != nullptr)
+                                    painter->releaseOffscreen ("card:" + was.spec.outputId);
+
+                            carding.clear();
+
+                            for (const auto& spec : wantedCards)
+                            {
+                                Carding held;
+                                held.spec = spec;
+                                carding.push_back (std::move (held));
+                            }
+
                             specs = wanted;
                             have = generation;
                             taken = generation;
                             rebuilt = true;
                             changed.notify_all();
                         }
-                        else if (surfaces.empty() && sending.empty() && ! insertsDeclared)
+                        else if (surfaces.empty() && sending.empty() && carding.empty() && ! insertsDeclared)
                         {
                             changed.wait_for (hold, std::chrono::milliseconds (100),
                                               [this, have] { return generation != have || threadShouldExit(); });
@@ -2811,7 +2860,7 @@ namespace wfg::video
 
                     if (rebuilt)
                     {
-                        if (! specs.empty() || ! sending.empty())
+                        if (! specs.empty() || ! sending.empty() || ! carding.empty())
                             openDevice (! specs.empty(), specs.empty() ? 0 : specs.front().pointX,
                                         specs.empty() ? 0 : specs.front().pointY);
 
@@ -2892,6 +2941,19 @@ namespace wfg::video
                         if (one.sender != nullptr && one.rides < 0)
                             waitMs = std::min (waitMs, std::max (0, static_cast<int> ((one.due - now) / 1000000)));
 
+                    /*  THE CARDS (§71, APF): each opened when it can be, tried
+                        again every two seconds when not; and while one is
+                        open, the loop looks at it every few milliseconds - a
+                        card asks for frames on its own clock (APB). */
+                    for (auto& held : carding)
+                    {
+                        if (held.output == nullptr && now >= held.retryAt)
+                            openCard (held, now);
+
+                        if (held.output != nullptr)
+                            waitMs = std::min (waitMs, 4);
+                    }
+
                     /*  AND THE INSERTS KEEP A BEAT OF THEIR OWN (namespace draft
                         §47, AAK): sixty frames a second while any is declared,
                         with no projector to ride - their send up before any cue
@@ -2924,7 +2986,31 @@ namespace wfg::video
                     if (insertBeat)
                         nextInsertBeat = began + 16'666'667;
 
-                    if (! refreshed && sendNow.empty() && ! insertBeat)
+                    /*  A CARD IS DUE while fewer than two frames wait on it, its
+                        clock fitted as it goes; one that went - unplugged - is
+                        let go and tried again. */
+                    std::vector<Carding*> cardNow;
+
+                    for (auto& held : carding)
+                    {
+                        if (held.output == nullptr)
+                            continue;
+
+                        if (const auto lost = held.output->problem(); ! lost.empty())
+                        {
+                            sayProblem (held.spec.slot, lost);
+                            held.output.reset();
+                            held.retryAt = began + 2'000'000'000;
+                            continue;
+                        }
+
+                        fitCard (held);
+
+                        if (held.output->waiting() < cardDepth)
+                            cardNow.push_back (&held);
+                    }
+
+                    if (! refreshed && sendNow.empty() && ! insertBeat && cardNow.empty())
                         continue;
 
                     region::ConfigReading config;
@@ -3049,6 +3135,47 @@ namespace wfg::video
                         sent.push_back (one);
                     }
 
+                    /*  THE CARDS DUE (APB): the next frame drawn at the card's
+                        format, for the sample at the moment the card will send
+                        it - which the stream fitted to the machine's clock says
+                        once it runs, a frame a period before then. Behind the
+                        stream, the next frame is the next one to come. */
+                    std::vector<Carding*> cardDrawn;
+
+                    for (auto* held : cardNow)
+                    {
+                        const region::OutputReading* output = nullptr;
+
+                        for (const auto& reading : config.outputs)
+                            if (reading.id == held->spec.outputId)
+                                output = &reading;
+
+                        if (output == nullptr || held->output->format() != card::PixelFormat::bgra8)
+                            continue;
+
+                        const auto& format = held->output->mode().format;
+                        const auto periodNanos = static_cast<double> (format.frameDuration) * 1.0e9 / static_cast<double> (format.timeScale);
+                        std::int64_t moment = 0;
+
+                        if (held->output->started() && held->line.hasStarted())
+                        {
+                            const auto streamMicros = held->next * format.frameDuration * 1'000'000 / format.timeScale;
+                            moment = held->line.nanosAt (streamMicros);
+                        }
+                        else
+                        {
+                            if (held->prerollBegan == 0)
+                                held->prerollBegan = began;
+
+                            moment = held->prerollBegan + static_cast<std::int64_t> (static_cast<double> (held->next) * periodNanos);
+                        }
+
+                        const auto sample = clock.sampleAt (r, moment);
+                        painter->drawOutput (*output, sample, painter->offscreenTarget ("card:" + held->spec.outputId, format.width,
+                                                                                        format.height, render::senderFormat()));
+                        cardDrawn.push_back (held);
+                    }
+
                     sg_commit();
 
                     for (const auto n : drawn)
@@ -3067,6 +3194,9 @@ namespace wfg::video
                             held.idleNow = false;
                         }
 
+                    for (auto* held : cardDrawn)
+                        sendToCard (*held, painter->offscreenImage ("card:" + held->spec.outputId));
+
                     for (auto* one : sent)
                     {
                         const auto image = painter->offscreenImage ("send:" + one->spec.outputId);
@@ -3082,6 +3212,15 @@ namespace wfg::video
                     }
 
                     painter->endFrame();
+
+                    //  What each card is doing, four times a second (§71).
+                    if (began >= nextCardStates)
+                    {
+                        nextCardStates = began + 250'000'000;
+
+                        for (auto& held : carding)
+                            sayCard (held);
+                    }
 
                     /*  AND WHAT OF THE READ-AHEAD IS SETTLED ON THE DEVICE, for
                         the session to say ready (§48, AAT). */
@@ -3100,6 +3239,8 @@ namespace wfg::video
 
                 surfaces.clear();
                 sending.clear();
+                carding.clear();
+                soundLine = nullptr;
                 taking.clear();
                 inserting.clear();
                 painter.reset();
@@ -3120,6 +3261,146 @@ namespace wfg::video
                 state.bound.store (0u, std::memory_order_relaxed);
                 region::writeText (state.problem, why);
                 region::endWrite (state.seq);
+            }
+
+            void sayBound (int slot)
+            {
+                if (slot < 0 || slot >= static_cast<int> (region::maxOutputs))
+                    return;
+
+                auto& state = r.outputs[static_cast<std::size_t> (slot)];
+                region::beginWrite (state.seq);
+                state.bound.store (1u, std::memory_order_relaxed);
+                region::writeText (state.problem, std::string {});
+                region::endWrite (state.seq);
+            }
+
+            /*  A CARD OPENED (§71, APF), or why not; tried again in two
+                seconds either way should it fail. */
+            void openCard (Carding& held, std::int64_t now)
+            {
+                held.retryAt = now + 2'000'000'000;
+                held.why.clear();
+
+                if (held.spec.cardId.empty())
+                {
+                    sayProblem (held.spec.slot, "no card chosen");
+                    return;
+                }
+
+                held.output = card::system().openOutput (held.spec.cardId, held.spec.settings, held.why);
+
+                if (held.output == nullptr)
+                {
+                    sayProblem (held.spec.slot, held.why.empty() ? std::string ("the card would not open") : held.why);
+                    return;
+                }
+
+                held.next = 0;
+                held.prerollBegan = 0;
+                held.line = {};
+                sayBound (held.spec.slot);
+            }
+
+            /*  THE CARD'S CLOCK AGAINST THE MACHINE'S (APB), fed from each
+                reading - the stream in microseconds, a rate the line takes as
+                it takes a sound's - and the next frame moved past the stream
+                when the stream has overtaken it. */
+            static void fitCard (Carding& held)
+            {
+                std::int64_t streamNanos = 0;
+                std::int64_t nanos = 0;
+
+                if (! held.output->started() || ! held.output->clock (streamNanos, nanos))
+                    return;
+
+                held.line.feed (streamNanos / 1000, nanos, 1'000'000);
+
+                const auto& format = held.output->mode().format;
+                const auto showing = streamNanos * format.timeScale / (format.frameDuration * 1'000'000'000);
+
+                if (held.next <= showing)
+                    held.next = showing + 1;
+            }
+
+            /*  THE FRAME DRAWN FOR THE CARD, read back into a frame the card
+                lends - its rows as long as the card wants them, blue first -
+                scheduled at its number; sending starts once two wait. */
+            void sendToCard (Carding& held, sg_image image)
+            {
+                int width = 0;
+                int height = 0;
+                auto format = SG_PIXELFORMAT_NONE;
+
+                if (! gpu::readBackBytes (image, held.pixels, width, height, format))
+                    return;
+
+                const auto frame = held.output->lend();
+
+                if (frame.pixels == nullptr)
+                    return;
+
+                const auto& mode = held.output->mode().format;
+                const auto rows = std::min (height, mode.height);
+                const auto rowBytes = static_cast<std::size_t> (std::min (width, mode.width)) * 4;
+                const auto swap = format == SG_PIXELFORMAT_RGBA8;
+
+                for (int y = 0; y < rows; ++y)
+                {
+                    const auto* from = held.pixels.data() + static_cast<std::size_t> (y) * static_cast<std::size_t> (width) * 4;
+                    auto* to = static_cast<std::uint8_t*> (frame.pixels) + static_cast<std::size_t> (y) * static_cast<std::size_t> (frame.rowBytes);
+                    std::memcpy (to, from, rowBytes);
+
+                    if (swap)
+                        for (std::size_t x = 0; x < rowBytes; x += 4)
+                            std::swap (to[x], to[x + 2]);
+                }
+
+                if (! held.output->schedule (frame, held.next))
+                    return;
+
+                ++held.next;
+
+                if (! held.output->started() && held.output->waiting() >= cardDepth)
+                    held.output->start (0);
+            }
+
+            /*  WHAT A CARD OUTPUT IS DOING (§71.3): its frames as the card
+                counted them, how long it holds one, its clock against the
+                sound's, its reference. */
+            void sayCard (Carding& held)
+            {
+                const auto slot = held.spec.slot;
+
+                if (held.output == nullptr || slot < 0 || slot >= static_cast<int> (region::maxOutputs))
+                    return;
+
+                const auto counted = held.output->completions();
+                auto& state = r.outputs[static_cast<std::size_t> (slot)];
+                state.framesPresented.store (static_cast<std::uint64_t> (counted.shown + counted.late), std::memory_order_relaxed);
+                state.framesLate.store (static_cast<std::uint64_t> (counted.late + counted.dropped), std::memory_order_relaxed);
+
+                const auto& format = held.output->mode().format;
+                const auto latencyMs = static_cast<double> (held.output->waiting()) * static_cast<double> (format.frameDuration) * 1000.0
+                                     / static_cast<double> (format.timeScale);
+
+                /*  THE SKEW (PRD §3.19d): the card's stream and the sound's
+                    samples, each against the machine's clock, against each
+                    other - nought until both lines have started. */
+                double skewPpm = 0.0;
+                const auto pair = region::readClock (r);
+
+                if (held.line.hasStarted() && soundLine != nullptr && soundLine->hasStarted() && pair.sampleRate > 0)
+                {
+                    const auto cardRate = held.line.samplesPerSecond() / 1.0e6;
+                    const auto soundRate = soundLine->samplesPerSecond() / static_cast<double> (pair.sampleRate);
+
+                    if (soundRate > 0.0)
+                        skewPpm = (cardRate / soundRate - 1.0) * 1.0e6;
+                }
+
+                region::writeCardState (r, static_cast<std::size_t> (slot), latencyMs, skewPpm,
+                                        static_cast<std::uint32_t> (held.output->reference()), 0);
             }
 
             /*  THE OUTPUT'S FRAMES AS NUMBERS (§35.7): every frame counted, one
@@ -3155,6 +3436,10 @@ namespace wfg::video
             std::condition_variable changed;
             std::vector<ProjectorSpec> wanted;
             std::vector<SenderSpec> wantedSenders;
+            std::vector<CardSpec> wantedCards;
+
+            //  The sound's line as the render thread fits it, for a card's skew (§71).
+            const ClockEstimate* soundLine = nullptr;
             std::uint64_t generation = 0;
             std::uint64_t taken = 0;
             bool stopped = false;
@@ -3656,6 +3941,7 @@ namespace wfg::video
 
                 std::vector<ProjectorSpec> specs;
                 std::vector<SenderSpec> senders;
+                std::vector<CardSpec> cards;
 
                 const auto count = std::min<std::size_t> (config.outputs.size(), region::maxOutputs);
 
@@ -3681,10 +3967,33 @@ namespace wfg::video
                         continue;
                     }
 
+                    /*  A CARD (§71) needs no display either: the render thread
+                        opens it, and says how it is. */
+                    if (output.toCard() && output.enabled && loop != nullptr)
+                    {
+                        CardSpec spec;
+                        spec.outputId = output.id;
+                        spec.slot = static_cast<int> (n);
+                        spec.cardId = output.card;
+                        spec.settings.mode = output.videoMode;
+                        spec.settings.key = output.key == region::CardKey::external ? card::Keying::external
+                                          : output.key == region::CardKey::internal ? card::Keying::internal
+                                                                                    : card::Keying::off;
+                        spec.settings.tenBit = false;
+                        cards.push_back (std::move (spec));
+
+                        region::beginWrite (state.seq);
+                        region::writeText (state.outputId, output.id);
+                        state.bound.store (0u, std::memory_order_relaxed);
+                        region::writeText (state.problem, std::string ("opening the card"));
+                        region::endWrite (state.seq);
+                        continue;
+                    }
+
                     if (output.sends())
                         why = output.enabled ? "the renderer was asked for OpenGL, which sends nothing" : "switched off";
                     else if (output.toCard())
-                        why = output.enabled ? "sending to a card is not built yet" : "switched off";
+                        why = output.enabled ? "the renderer was asked for OpenGL, which sends nothing to a card" : "switched off";
                     else if (! output.enabled)
                         why = "switched off";
                     else if (output.hidden)
@@ -3729,7 +4038,7 @@ namespace wfg::video
                 }
 
                 if (loop != nullptr)
-                    loop->setOutputs (std::move (specs), std::move (senders));
+                    loop->setOutputs (std::move (specs), std::move (senders), std::move (cards));
 
                 for (std::size_t n = count; n < static_cast<std::size_t> (region::maxOutputs); ++n)
                 {

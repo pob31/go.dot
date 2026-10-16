@@ -48,6 +48,29 @@ namespace wfg::video::gpu::native
         ID3D11Device* device = nullptr;
         ID3D11DeviceContext* context = nullptr;
 
+        /*  THE COPIES THE CPU READS, kept (namespace draft §71, DL.3): a card
+            output reads its picture back every frame, and a staging texture
+            made and let go each time is a driver allocation a frame. A few,
+            by size and format; the render thread's alone. */
+        struct Staging
+        {
+            UINT width = 0;
+            UINT height = 0;
+            DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+            ID3D11Texture2D* texture = nullptr;
+        };
+
+        std::vector<Staging> stagings;
+
+        void releaseStagings()
+        {
+            for (auto& staging : stagings)
+                if (staging.texture != nullptr)
+                    staging.texture->Release();
+
+            stagings.clear();
+        }
+
         std::string utf8 (const wchar_t* wide)
         {
             const auto bytes = WideCharToMultiByte (CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
@@ -200,6 +223,8 @@ namespace wfg::video::gpu::native
 
     void close()
     {
+        releaseStagings();
+
         if (context != nullptr)
         {
             context->ClearState();
@@ -238,8 +263,24 @@ namespace wfg::video::gpu::native
 
         ID3D11Texture2D* staging = nullptr;
 
-        if (FAILED (device->CreateTexture2D (&desc, nullptr, &staging)))
-            return false;
+        for (const auto& kept : stagings)
+            if (kept.width == desc.Width && kept.height == desc.Height && kept.format == desc.Format)
+                staging = kept.texture;
+
+        if (staging == nullptr)
+        {
+            if (FAILED (device->CreateTexture2D (&desc, nullptr, &staging)))
+                return false;
+
+            //  Four at most: the oldest goes for a fifth size.
+            if (stagings.size() >= 4)
+            {
+                stagings.front().texture->Release();
+                stagings.erase (stagings.begin());
+            }
+
+            stagings.push_back ({ desc.Width, desc.Height, desc.Format, staging });
+        }
 
         context->CopyResource (staging, texture);
 
@@ -258,7 +299,6 @@ namespace wfg::video::gpu::native
             context->Unmap (staging, 0);
         }
 
-        staging->Release();
         return ok;
     }
 }

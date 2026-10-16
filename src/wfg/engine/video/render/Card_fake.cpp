@@ -145,7 +145,7 @@ namespace wfg::video::card
         public:
             FakeOutput (Mode modeToUse, const OutputSettings& settings, const FakeOptions& optionsToUse, std::shared_ptr<Loop> loopToUse)
                 : chosen (std::move (modeToUse)),
-                  pixelFormat (settings.key == Keying::off ? PixelFormat::yuv10 : PixelFormat::bgra8),
+                  pixelFormat (settings.key == Keying::off && settings.tenBit ? PixelFormat::yuv10 : PixelFormat::bgra8),
                   options (optionsToUse),
                   loop (std::move (loopToUse)),
                   channels (settings.audioChannels)

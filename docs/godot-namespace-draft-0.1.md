@@ -30329,7 +30329,7 @@ be read, never copied in.
 | **APC** | **Two frames waiting**, 40 ms at 50p, the video horizon. More would hold the picture back behind the sound; fewer risks frames sent late. The card's **latency** is shown, and not compensated: a projector's own delay is the cue's *Delay* (§70). M77 settles the depth. | mine |
 | **APD** | **10-bit YUV when nothing is keyed**, converted on the graphics card in Rec.709 at legal levels, the canvas's 16 bits kept to the cable; 8-bit BGRA where the card will not take 10-bit, and always when keyed. | mine |
 | **APE** | **Interlaced formats are listed and drawn as whole frames**, each field from the same picture: right for stills, a little stepped on motion. | mine |
-| **APF** | **A card that fails is tried again** every two seconds, and at once when a Thunderbolt card arrives. What is wrong is said plainly on the output: Desktop Video is not installed; Desktop Video is older than 16.0; another program has the card; the card cannot send this format; the card is not connected. | mine |
+| **APF** | **A card that fails is tried again** every two seconds, which also finds a Thunderbolt card plugged back in. *As built (DL.3):* a card output that is let go - unplugged - says why and is tried again the same way. What is wrong is said plainly on the output: Desktop Video is not installed; Desktop Video is older than 16.0; another program has the card; the card cannot send this format; the card is not connected. | mine |
 | **APG** | **Fill and key keep the canvas's transparency for a keyed card output only.** The canvas is cleared transparent and its alpha carried through the level, the blur, the zones and the warp; every display, NDI, Spout and Syphon output still sends it opaque. The fill is **premultiplied** - a mixer set to *pre-multiplied key*. **External** sends fill and key on two connectors; **internal** lays the picture over the card's own input; a card without that keyer refuses, with a problem. | mine |
 | **APH** | **A card's sound is a list of the show's buses**, laid in order onto the cable's channels - a stereo bus two of them - rounded up to 2, 8, 16 or 32. The buses still play on the interface; one patched to no channel is heard on the card alone. | mine |
 | **APJ** | **The sound is taken after its trim, DCA and LTC**, where the interface's is, into a ring of its own beside the renderer's memory, its pages locked. The audio thread only copies: no allocation, lock or system call (§4.2). A full ring drops and counts. | mine |
@@ -30367,7 +30367,7 @@ card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine,
 |---|---|---|
 | DL.0 | This section; PRD §3.19, §3.19d, §6.3, §6.9; the devplan; the headers carried and built on the three systems | 42b9507 |
 | DL.1 | The card's interface, the real card and the test card, a format's word, `decklink-probe` listing || 5f8c6ac |
-| DL.2 | The rows, the kinds, the renderer's region, the cards found published | |
+| DL.2 | The rows, the kinds, the renderer's region, the cards found published || cfd0136 |
 | DL.3 | A card output: paced by the card, at its format, latency, skew and reference, tried again | |
 | DL.4 | 10-bit YUV | |
 | DL.5 | Fill and key | |

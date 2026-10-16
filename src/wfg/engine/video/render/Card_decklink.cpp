@@ -938,7 +938,7 @@ namespace wfg::video::card
                 //  take 10-bit, and always for a key, which carries alpha.
                 auto format = PixelFormat::yuv10;
 
-                if (settings.key != Keying::off || ! outputTakes (output.get(), chosen->second, bmdFormat10BitYUV))
+                if (settings.key != Keying::off || ! settings.tenBit || ! outputTakes (output.get(), chosen->second, bmdFormat10BitYUV))
                     format = PixelFormat::bgra8;
 
                 if (! outputTakes (output.get(), chosen->second, bmdFormatOf (format)))

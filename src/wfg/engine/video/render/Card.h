@@ -105,6 +105,7 @@ namespace wfg::video::card
         std::string mode = modes::defaultWord;
         Keying key = Keying::off;
         int audioChannels = 0;   ///< 0, 2, 8, 16 or 32
+        bool tenBit = true;      ///< 10-bit YUV where the card takes it and nothing is keyed (APD)
     };
 
     /*  A frame lent to be filled, and returned by scheduling it or giving it
@@ -206,7 +207,10 @@ namespace wfg::video::card
 
     /*  THE TEST CARD (APO), for tests and for looking at the screens with no
         card: one card, "Go.dot test card", with an output, an input that shows
-        what its output last sent, both keyers, 10-bit and 16 channels. */
+        what its output last sent, both keyers, 10-bit and 16 channels. Put in
+        the real one's place by WFG_DECKLINK_FAKE=1, its clock drifted by
+        WFG_DECKLINK_FAKE_DRIFT parts per million and every Nth frame late by
+        WFG_DECKLINK_FAKE_DROP. */
     struct FakeOptions
     {
         double driftPpm = 0.0;     ///< its clock against the machine's
