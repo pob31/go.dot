@@ -273,10 +273,12 @@ float cover_at(vec2 frag) {
         previous = n;
     }
     float feather = cover_shape.z;
-    float cover = points < 3 ? 0.0 : (feather > 0.0 ? clamp(0.5 + (inside ? nearest : -nearest) / feather, 0.0, 1.0)
-                                                    : (inside ? 1.0 : 0.0));
-    if (cover_shape.w > 0.5) cover = 1.0 - cover;
-    return cover;
+    //  Not "cover": OpenGL's flattened uniforms take the block's name, which a local
+    //  of that name hides - Mesa refused the mask shader, and Linux drew nothing.
+    float covered = points < 3 ? 0.0 : (feather > 0.0 ? clamp(0.5 + (inside ? nearest : -nearest) / feather, 0.0, 1.0)
+                                                      : (inside ? 1.0 : 0.0));
+    if (cover_shape.w > 0.5) covered = 1.0 - covered;
+    return covered;
 }
 @end
 
