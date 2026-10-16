@@ -89,6 +89,13 @@ namespace wfg::doc
             if (element == "Video")
                 return false;
 
+            /*  IN A CART'S BANK, ANY CUE A PRESS CAN START (namespace draft §74,
+                AQN) - an OSC or MIDI message, a script, a group - and still not
+                a memo, which starts nothing, nor a timecode cue, which a press
+                would locate. A sound locked to a movie keeps its rule below. */
+            if (cue::isCart (parent.getParent()) && element != "Media")
+                return element == "Cue" || element == "Timecode";
+
             if (element == "Media")
                 return lockedTo.isNotEmpty()
                          && ! parent.getChildWithProperty (idProperty, lockedTo).hasType ("Video")
@@ -2349,6 +2356,16 @@ namespace wfg::doc
                 for (const auto& node : ordered)
                 {
                     const auto lockedTo = node["lockedTo"].toString();
+
+                    /*  A NEW BANK IN A CART takes any cue a press can start
+                        (namespace draft §74, AQN). */
+                    if (cue::isCart (parent) && ! node.hasType ("Media"))
+                    {
+                        if (node.hasType ("Cue") || node.hasType ("Timecode"))
+                            return EditResult::failed (reason::typeMismatch);
+
+                        continue;
+                    }
 
                     if (! node.hasType ("Video")
                           && (! node.hasType ("Media")

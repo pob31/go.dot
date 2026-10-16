@@ -959,7 +959,23 @@ namespace wfg::cue
             member at all, so every other cue fires as it always did. */
         bool isSamplerMember (const std::string& cueId) const;
         std::string pressMember (Engine& engine, std::int64_t tick, const std::string& cueId,
-                                 const std::string& origin);
+                                 const std::string& origin, int velocity = -1);
+
+        /*  AND LET GO OF BY NAME (namespace draft §74, AQU): `cue.release`, a
+            key trigger's key coming up. A hold member stops, as its strip's
+            release stops it; anything else lets go of nothing. Never a refusal:
+            a hand coming up off a key is not a mistake. */
+        void releaseMember (Engine& engine, std::int64_t tick, const std::string& cueId,
+                            const std::string& origin);
+
+        /*  WHETHER A STRIP MEMBER IS A CUE THAT NEITHER SOUNDS NOR SHOWS - an
+            OSC, MIDI or script cue, a group, a fade - which only a cart's bank
+            holds (namespace draft §74, AQN): pressed, it is fired; its fader
+            rides nothing and starts nothing. */
+        static bool firedFromAStrip (const Run& run) noexcept
+        {
+            return run.kind != "media" && run.kind != "video";
+        }
 
         /*  A TIME GROUP'S MEMBER (namespace draft §60): a cue whose parent is a
             time group - not its header's or its footer's, whose parent is the

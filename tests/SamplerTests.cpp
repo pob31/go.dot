@@ -2503,3 +2503,131 @@ TEST_CASE ("cart: a bank made while programming is armed at once, and one Esc to
     rig.send ("go");
     CHECK (rig.tickUntil ([&] { return armedOnItsStrips (rig, pads); }));
 }
+
+//==============================================================================
+/*  ANY CUE UNDER A PAD, IN A CART (namespace draft §74, AQN, AQU, AQV): a
+    cart's bank holds what a press can start - here a start cue, which fires
+    the show list's memo - and a hand that is not a strip presses by name. */
+namespace
+{
+    struct CartPads
+    {
+        std::string cart, bank, fires, sound, loose;
+    };
+
+    CartPads cartPadsIn (Rig& rig)
+    {
+        CartPads pads;
+        pads.cart = rig.document.createList ("Cart", {}, { { "kind", "cart" } }).id;
+        pads.bank = rig.document.createCue (pads.cart, 0, "group", "Pads").id;
+        rig.set ("/godot/cue/" + pads.bank + "/mode", "sampler");
+
+        pads.fires = rig.document.createCue (pads.bank, 0, "start", "Fires after").id;
+        rig.set ("/godot/cue/" + pads.fires + "/target", rig.after);
+
+        pads.sound = rig.document.createCue (pads.bank, 1, "media", "Door").id;
+        rig.set ("/godot/cue/" + pads.sound + "/file", "door.wav");
+
+        //  And one at the cart's top level, on no strip.
+        pads.loose = rig.document.createCue (pads.cart, 1, "start", "Loose").id;
+        rig.set ("/godot/cue/" + pads.loose + "/target", rig.after);
+
+        rig.membersOf[pads.bank] = { pads.fires, pads.sound };
+        return pads;
+    }
+}
+
+TEST_CASE ("cart: a pad fires a cue that is not a sound, and the bank arms it again for the next press")
+{
+    Rig rig;
+    const auto pads = cartPadsIn (rig);
+
+    REQUIRE (rig.tickUntil ([&] { return armedOnItsStrips (rig, pads.bank); }));
+    CHECK (rig.document.findById (pads.fires).hasType ("Start"));
+
+    const auto first = rig.liveRunOf (pads.fires)->id;
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    REQUIRE (rig.tickUntil ([&] { return rig.runsOf (rig.after) == 1u; }));
+
+    //  Done at once, and armed again on its strip, a run of its own.
+    REQUIRE (rig.tickUntil ([&]
+                            {
+                                const auto* again = rig.liveRunOf (pads.fires);
+                                return again != nullptr && again->id != first && rig.holds (again, rig.strips[0]);
+                            }));
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    CHECK (rig.tickUntil ([&] { return rig.runsOf (rig.after) == 2u; }));
+
+    //  A memo is no pad, even in a cart: it starts nothing.
+    const auto memo = rig.document.createCue (pads.bank, 2, "memo", "A note");
+    CHECK_FALSE (memo.ok);
+}
+
+TEST_CASE ("cart: cue.press presses a bank's member at its velocity and fires any other cue, standby still")
+{
+    Rig rig;
+    const auto pads = cartPadsIn (rig);
+    rig.set ("/godot/cue/" + pads.sound + "/velocity", "true");
+
+    REQUIRE (rig.tickUntil ([&] { return armedOnItsStrips (rig, pads.bank); }));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    //  A member, at the top of its velocity: nought decibels, asked to start.
+    CHECK (rig.send ("cue.press", { osc::Value::string (pads.sound), osc::Value::int32 (127) }).rejected == 0);
+    const auto* door = rig.liveRunOf (pads.sound);
+    REQUIRE (door != nullptr);
+    CHECK (door->launchRequested);
+    CHECK (std::abs (door->trim) < 1.0e-9);
+
+    //  A cue on no strip is fired, as cue.fire fires it.
+    CHECK (rig.send ("cue.press", { osc::Value::string (pads.loose) }).rejected == 0);
+    CHECK (rig.tickUntil ([&] { return rig.runsOf (rig.after) == 1u; }));
+
+    //  A velocity no pad sends is refused; a cue that is not there too.
+    CHECK (rig.send ("cue.press", { osc::Value::string (pads.loose), osc::Value::int32 (200) }).rejected == 1);
+    CHECK (rig.send ("cue.release", { osc::Value::string ("ZZZZZZZZ") }).rejected == 1);
+
+    //  Letting go of a cue on no strip lets go of nothing, and is no mistake.
+    CHECK (rig.send ("cue.release", { osc::Value::string (pads.loose) }).rejected == 0);
+
+    //  Nothing moved the show list's pointer.
+    CHECK (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)).value_or ("x").empty());
+}
+
+TEST_CASE ("cart: a hold member pressed by name or by a trigger stops when it is let go")
+{
+    Rig rig;
+    const auto pads = cartPadsIn (rig);
+    rig.set ("/godot/cue/" + pads.sound + "/release", "hold");
+
+    REQUIRE (rig.tickUntil ([&] { return armedOnItsStrips (rig, pads.bank); }));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    //  By name: pressed, sounding, let go - it is asked to stop.
+    rig.send ("cue.press", { osc::Value::string (pads.sound) });
+    rig.sound (pads.sound);
+    rig.send ("cue.release", { osc::Value::string (pads.sound) });
+    REQUIRE (rig.liveRunOf (pads.sound) != nullptr);
+    CHECK (rig.liveRunOf (pads.sound)->stopAsked);
+
+    const auto pressed = rig.liveRunOf (pads.sound)->id;
+    rig.silence (pads.sound);
+    REQUIRE (rig.tickUntil ([&]
+                            {
+                                const auto* again = rig.liveRunOf (pads.sound);
+                                return again != nullptr && again->id != pressed && rig.holds (again, rig.strips[1]);
+                            }));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    //  By a trigger, and its key let go.
+    const auto trigger = rig.document.createTrigger (pads.sound, "osc");
+    REQUIRE (trigger.ok);
+    rig.send ("trigger.fire", { osc::Value::string (trigger.id) });
+    rig.sound (pads.sound);
+    rig.send ("trigger.release", { osc::Value::string (trigger.id) });
+    REQUIRE (rig.liveRunOf (pads.sound) != nullptr);
+    CHECK (rig.liveRunOf (pads.sound)->stopAsked);
+}

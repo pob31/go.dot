@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/SamplerLayout.h>
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/cue/Override.h>
 
@@ -104,12 +105,26 @@ namespace wfg::cue
             narrowed to what a strip can play (a memo among them would take a
             strip nothing could be played from). Not a sound locked to a movie
             (ABE): its movie plays it, and on a strip of its own it would play
-            without its picture. */
+            without its picture.
+
+            IN A CART'S BANK, ANY CUE A PRESS CAN START (namespace draft §74,
+            AQN): an OSC or MIDI message, a script, a group, a fade - fired
+            when its pad is pressed. Not a memo, which starts nothing, nor a
+            timecode cue, which a press would locate; and only cues - the
+            group's own triggers and sections are children too. */
+        const auto inACart = isCart (group.getParent());
+
         for (const auto& child : group)
         {
             const auto element = child.getType().toString();
 
-            if ((element != "Media" && element != "Video") || followsAMovie (document, child))
+            const auto plays = element == "Media" || element == "Video"
+                                 || (inACart && (element == "Group" || element == "Mic" || element == "Fade"
+                                                   || element == "Transport" || element == "Osc"
+                                                   || element == "Midi" || element == "Start"
+                                                   || element == "Process" || element == "Script"));
+
+            if (! plays || followsAMovie (document, child))
                 continue;
 
             const auto id = idOf (child);

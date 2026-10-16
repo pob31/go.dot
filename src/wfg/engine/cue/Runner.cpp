@@ -7958,7 +7958,10 @@ namespace wfg::cue
 
             const auto* holder = runs.holderOf (stripId);
 
-            if (holder == nullptr || ! holder->sampler)
+            /*  NOR A FADER OVER A CUE THAT NEITHER SOUNDS NOR SHOWS (namespace
+                draft §74, AQV): there is no level for it to ride, and a touch
+                starts nothing. Its pad fires it. */
+            if (holder == nullptr || ! holder->sampler || firedFromAStrip (*holder))
             {
                 stripEdges.erase (stripId);
                 continue;
@@ -13189,7 +13192,11 @@ namespace wfg::cue
             notePlayed (*run);
             step();
 
-            if (picture && ! waitsForSounds)
+            /*  A CUE THAT NEITHER SOUNDS NOR SHOWS IS FIRED BY THE PRESS
+                (namespace draft §74, AQV): an OSC or MIDI message, a script, a
+                group - the macro a cart's pad holds - started now, its pre-wait
+                passed over as a hand's press passes over a sound's. */
+            if ((picture && ! waitsForSounds) || firedFromAStrip (*run))
                 fireNow (engine, tick, run->id);
 
             return {};
@@ -13213,11 +13220,19 @@ namespace wfg::cue
             //  A picture down to black, its sounds with it (namespace draft §49).
             if (run->kind == "video")
                 releaseVideo (run->id, numberOf (cue, "releaseFade"), tick);
+            else if (firedFromAStrip (*run))
+                run->askStop (0);
             else
                 beginReleaseFade (run->id, numberOf (cue, "releaseFade"), tick);
 
             return {};
         }
+
+        /*  NOR HAS A CUE THAT NEITHER SOUNDS NOR SHOWS (§74, AQV): pressed again
+            while it is still going, it goes on; one done already was armed again
+            and is fired again by this press. */
+        if (firedFromAStrip (*run))
+            return {};
 
         /*  A PICTURE WITHOUT A PLAYHEAD HAS NO TOP to go back to (namespace
             draft §49, ABD): a restart of a still, a fill, a mask or a capture
@@ -13334,6 +13349,8 @@ namespace wfg::cue
         //  A picture let go goes down to black over its release fade (namespace draft §49).
         if (run->kind == "video")
             releaseVideo (run->id, numberOf (cue, "releaseFade"), tick);
+        else if (firedFromAStrip (*run))
+            run->askStop (0);          // a group, a message with its curves, a script (§74, AQV)
         else
             beginReleaseFade (run->id, numberOf (cue, "releaseFade"), tick);
 
@@ -13368,13 +13385,24 @@ namespace wfg::cue
 
         /*  A sound or a picture (namespace draft §49) - not a sound its movie
             plays (ABE): fired by name, that one plays as anywhere else. */
-        if (! cue.isValid() || (kindOfCue (cue) != "media" && kindOfCue (cue) != "video") || followsAMovie (cue))
+        if (! cue.isValid() || followsAMovie (cue))
             return false;
 
         const auto parent = cue.getParent();
 
-        return parent.isValid() && parent.getType().toString() == "Group"
-                 && isSampler (groupMode (parent));
+        if (! parent.isValid() || parent.getType().toString() != "Group" || ! isSampler (groupMode (parent)))
+            return false;
+
+        const auto kind = kindOfCue (cue);
+
+        /*  IN A CART'S BANK, ANY CUE A PRESS CAN START (namespace draft §74,
+            AQN) - not a memo, which starts nothing, nor a timecode cue, which a
+            press would locate. */
+        if (kind != "media" && kind != "video")
+            return isCartBank (parent[idProperty].toString().toStdString())
+                     && kind != "memo" && kind != "timecode";
+
+        return true;
     }
 
     bool Runner::isTimeMember (const std::string& cueId) const
@@ -13415,7 +13443,7 @@ namespace wfg::cue
     }
 
     std::string Runner::pressMember (Engine& engine, std::int64_t tick, const std::string& cueId,
-                                     const std::string& origin)
+                                     const std::string& origin, int velocity)
     {
         /*  THE STRIP THE MEMBER HOLDS, through its live run. A member waiting
             for its strip holds none yet, and a member of a group nobody armed
@@ -13430,10 +13458,28 @@ namespace wfg::cue
                   == candidate.claims.end())
                 continue;
 
-            return pressStrip (engine, tick, candidate.strip, -1, origin);
+            return pressStrip (engine, tick, candidate.strip, velocity, origin);
         }
 
         return reason::needsStrip;
+    }
+
+    void Runner::releaseMember (Engine& engine, std::int64_t tick, const std::string& cueId,
+                                const std::string& origin)
+    {
+        for (const auto& candidate : runs.all())
+        {
+            if (candidate.cue != cueId || candidate.isFinished() || ! candidate.sampler
+                 || candidate.strip.empty())
+                continue;
+
+            if (std::find (candidate.claims.begin(), candidate.claims.end(), candidate.strip)
+                  == candidate.claims.end())
+                continue;
+
+            releaseStrip (engine, tick, candidate.strip, origin);
+            return;
+        }
     }
 
     std::vector<CurveTarget> Runner::curveTargetsOf (const juce::ValueTree& cue) const
@@ -16712,7 +16758,7 @@ namespace wfg::cue
                 if (const auto* parent = runs.find (parentRun))
                     if (const auto parentCue = document.findById (parent->cue);
                         parentCue.isValid() && isSampler (groupMode (parentCue))
-                          && (kind == "media" || kind == "video"))
+                          && (kind == "media" || kind == "video" || isCartBank (parent->cue)))
                     {
                         adopted->sampler = true;
                         const auto stripId = stripForMember (parentCue, cueId);
@@ -16786,21 +16832,25 @@ namespace wfg::cue
             A PICTURE THE SAME (namespace draft §49): its strip, and its trim at
             `initialLevel` - its fader's place, which is how solid it comes up
             (AAV, AAW). Nothing to arm: no voice, no file opened here - the
-            read-ahead has it (ABF). */
-        if (kind == "media" || kind == "video")
-            if (const auto* parent = runs.find (parentRun))
-                if (const auto parentCue = document.findById (parent->cue);
-                    parentCue.isValid() && isSampler (groupMode (parentCue)))
-                {
-                    run->sampler = true;
-                    const auto stripId = stripForMember (parentCue, cueId);
-                    run->trim = numberOf (cue, "initialLevel");
-                    claimStripFor (*run, stripId);
+            read-ahead has it (ABF).
 
-                    if (std::find (run->claims.begin(), run->claims.end(), stripId)
-                          == run->claims.end())
-                        return id;
-                }
+            AND IN A CART'S BANK, ANY CUE A PRESS CAN START (namespace draft
+            §74, AQN): its strip, and nothing to make ready - pressed, it is
+            fired. */
+        if (const auto* parent = runs.find (parentRun))
+            if (const auto parentCue = document.findById (parent->cue);
+                parentCue.isValid() && isSampler (groupMode (parentCue))
+                  && (kind == "media" || kind == "video" || isCartBank (parent->cue)))
+            {
+                run->sampler = true;
+                const auto stripId = stripForMember (parentCue, cueId);
+                run->trim = numberOf (cue, "initialLevel");
+                claimStripFor (*run, stripId);
+
+                if (std::find (run->claims.begin(), run->claims.end(), stripId)
+                      == run->claims.end())
+                    return id;
+            }
 
         /*  A SOUND INSIDE A RUNNING ACT THAT A DOH PAUSED, made ready again by
             the horizon under that act (D2, HF): at its point, with no
@@ -24729,17 +24779,15 @@ namespace wfg::cue
                         } });
 
         //----------------------------------------------------------------------
-        registry.add ({ "cue.fire",
-                        "Fires a named cue without touching standby - what a button on a surface"
-                        " does. A start cue's fire carries the GO it fires under as its cause.",
-                        /*  THE CAUSE (2026-10-01, namespace draft §24): the serial
-                            of the GO whose start cue fired this one, carried in
-                            the record so a replay - which runs no hook - reads
-                            it; read only from the engine's own fires. */
-                        { { "cue", 's', false }, { "run", 's', true }, { "cause", 'h', true } },
-                        true,
-                        [&engine, &runner, &document, withRun]
-                        (CommandContext& context, const std::vector<osc::Value>& args)
+        /*  A CUE FIRED BY NAME, AND A CUE PRESSED (namespace draft §74, AQU):
+            one body, so a press never answers differently from a fire. `runAt`
+            is where the run identifier rides in the record - after the cue for
+            `cue.fire`, after the velocity for `cue.press`; `cause` is a start
+            cue's GO, nought for a hand; `velocity` reaches a strip's press, -1
+            for none. */
+        const auto fireByName = [&engine, &runner, &document, withRun]
+                                (CommandContext& context, const std::vector<osc::Value>& args,
+                                 std::size_t runAt, std::uint64_t cause, int velocity) -> Outcome
                         {
                             const auto cueId = args[0].getString();
                             const auto cue = document.findById (cueId);
@@ -24748,9 +24796,6 @@ namespace wfg::cue
                                 return Outcome::rejected (reason::unknownId);
 
                             const auto from = context.origin != nullptr ? *context.origin : std::string {};
-                            const auto cause = from == origin::engine && args.size() > 2 && args[2].isInt64()
-                                                 ? static_cast<std::uint64_t> (std::max<std::int64_t> (0, args[2].getInt64()))
-                                                 : std::uint64_t { 0 };
 
                             /*  A START CUE'S TARGET, FIRED UNDER A GO THAT DOH! HAS
                                 TAKEN BACK (§24): the fire was queued for the next
@@ -24815,8 +24860,8 @@ namespace wfg::cue
                             if (runner.isTimeMember (cueId))
                             {
                                 const auto made = runner.fireTimeMember (engine, context.tick, cueId,
-                                                                         args.size() > 1 ? args[1].getString()
-                                                                                         : std::string {});
+                                                                         args.size() > runAt ? args[runAt].getString()
+                                                                                             : std::string {});
 
                                 if (made.empty())
                                     return Outcome::rejected (reason::needsGo);
@@ -24826,7 +24871,7 @@ namespace wfg::cue
                                 if (const auto listId = runner.listOfCue (cueId); ! listId.empty())
                                     runner.listState().stepped (listId, { context.tick, cueId, 'f', cause });
 
-                                return Outcome::ok (withRun (args, 1, made));
+                                return Outcome::ok (withRun (args, runAt, made));
                             }
 
                             /*  A SAMPLER MEMBER FIRED BY NAME IS A PRESS on the
@@ -24836,7 +24881,7 @@ namespace wfg::cue
                                 from. The press records its own step. */
                             if (runner.isSamplerMember (cueId))
                             {
-                                const auto refusal = runner.pressMember (engine, context.tick, cueId, from);
+                                const auto refusal = runner.pressMember (engine, context.tick, cueId, from, velocity);
 
                                 /*  A PAD FIRED BY NAME IS A FIRE BY NAME (§24):
                                     when the press was taken, the last GO on its
@@ -24844,7 +24889,13 @@ namespace wfg::cue
                                 if (refusal.empty())
                                     runner.noteFireOnList (cueId, from, cause);
 
-                                return refusal.empty() ? Outcome::ok ({ args[0] })
+                                /*  The record keeps what the press was given -
+                                    the cue, and a press's velocity - and no run:
+                                    the strip's member already has one. */
+                                std::vector<osc::Value> kept (args.begin(),
+                                                              args.begin() + static_cast<std::ptrdiff_t> (std::min (args.size(), runAt)));
+
+                                return refusal.empty() ? Outcome::ok (std::move (kept))
                                                        : Outcome::rejected (refusal);
                             }
 
@@ -24858,8 +24909,8 @@ namespace wfg::cue
                             runner.noteFireOnList (cueId, from, cause);
                             runner.markFire (engine, context.tick, cueId, from, cause);
 
-                            const auto id = args.size() > 1 ? args[1].getString()
-                                                            : std::string {};
+                            const auto id = args.size() > runAt ? args[runAt].getString()
+                                                                : std::string {};
 
                             /*  A cue fired by name is a step too, on the list
                                 that holds it: going back to "before the shot"
@@ -24873,7 +24924,73 @@ namespace wfg::cue
                             const auto made = runner.fire (engine, context.tick, cueId, id);
                             runner.setFireCause (0);
 
-                            return Outcome::ok (withRun (args, 1, made));
+                            return Outcome::ok (withRun (args, runAt, made));
+                        };
+
+        registry.add ({ "cue.fire",
+                        "Fires a named cue without touching standby - what a button on a surface"
+                        " does. A start cue's fire carries the GO it fires under as its cause.",
+                        /*  THE CAUSE (2026-10-01, namespace draft §24): the serial
+                            of the GO whose start cue fired this one, carried in
+                            the record so a replay - which runs no hook - reads
+                            it; read only from the engine's own fires. */
+                        { { "cue", 's', false }, { "run", 's', true }, { "cause", 'h', true } },
+                        true,
+                        [fireByName] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto from = context.origin != nullptr ? *context.origin : std::string {};
+                            const auto cause = from == origin::engine && args.size() > 2 && args[2].isInt64()
+                                                 ? static_cast<std::uint64_t> (std::max<std::int64_t> (0, args[2].getInt64()))
+                                                 : std::uint64_t { 0 };
+
+                            return fireByName (context, args, 1, cause, -1);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  A HAND ON A CUE THAT IS NOT A STRIP (namespace draft §74, AQU): a pad
+            on the tablet's Cart tab, a key, later a Stream Deck key. Pressed, a
+            member of an armed bank presses its strip - its velocity setting the
+            level when the member asks for that - and any other cue is fired as
+            `cue.fire` fires it; let go, a hold member stops and anything else
+            lets go of nothing. The record always carries the velocity, -1 for
+            none, so the run identifier a fire draws rides after it. */
+        registry.add ({ "cue.press",
+                        "A hand on a cue that is not on a strip: a bank's member is pressed on its"
+                        " strip, at its velocity; any other cue is fired. Standby does not move.",
+                        { { "cue", 's', false }, { "velocity", 'i', true }, { "run", 's', true } },
+                        true,
+                        [fireByName] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            auto full = args;
+
+                            if (full.size() < 2)
+                                full.push_back (osc::Value::int32 (-1));
+
+                            const auto velocity = full[1].getInt32();
+
+                            if (velocity != -1 && (velocity < 1 || velocity > 127))
+                                return Outcome::rejected (reason::badValue);
+
+                            return fireByName (context, full, 2, 0, velocity);
+                        } });
+
+        registry.add ({ "cue.release",
+                        "The hand lets go of a cue it pressed: a bank's hold member stops; anything"
+                        " else lets go of nothing.",
+                        { { "cue", 's', false } },
+                        true,
+                        [&engine, &runner, &document] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto cueId = args[0].getString();
+
+                            if (! document.findById (cueId).isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (runner.isSamplerMember (cueId))
+                                runner.releaseMember (engine, context.tick, cueId,
+                                                      context.origin != nullptr ? *context.origin : std::string {});
+
+                            return Outcome::ok (args);
                         } });
 
         //----------------------------------------------------------------------
@@ -25102,6 +25219,31 @@ namespace wfg::cue
                             return Outcome::ok (withRun (args, 1,
                                                          runner.fire (engine, context.tick,
                                                                       cueId, id)));
+                        } });
+
+        /*  A KEY LET GO (namespace draft §74, AQU): the release a trigger's press
+            never had. A hold member its key pressed stops, as its strip's
+            release stops it; anything else lets go of nothing. A trigger
+            switched off since the press still lets go - a hand coming up is
+            never refused. */
+        registry.add ({ "trigger.release",
+                        "A trigger's key was let go: a hold member it pressed stops.",
+                        { { "trigger", 's', false } },
+                        true,
+                        [&engine, &runner, &document] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto trigger = document.findById (args[0].getString());
+
+                            if (! trigger.isValid() || trigger.getType().toString() != "Trigger")
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto cueId = trigger.getParent()[idProperty].toString().toStdString();
+
+                            if (runner.isSamplerMember (cueId))
+                                runner.releaseMember (engine, context.tick, cueId,
+                                                      context.origin != nullptr ? *context.origin : std::string {});
+
+                            return Outcome::ok (args);
                         } });
 
         /*  AN INCOMING CODE TURNED (namespace draft §60, TG.5; AIO, AIP): it

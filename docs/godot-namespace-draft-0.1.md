@@ -30599,9 +30599,9 @@ evening or for as long as one cue runs.
 | **AQQ** | **The tablet gains a Cart tab**: every cart's cues as pads, fired by touch, held while the finger is down. | the author's |
 | **AQR** | **`list/kind`: `show` or `cart`.** A cart has no standby: a write to it, `standby.set` and the arrows are refused (`not-a-stop`); GO focus never rests on a cart - `list.focus` refuses one (`not-a-stop`), and the focus that falls back to the first list falls back to the first show list. A list made a cart has its standby cleared. | mine |
 | **AQS** | **A client shows a list apart from the GO focus.** The window and the page draw the list whose tab is picked; picking a show list's tab still moves the GO focus there, as it does today, and picking a cart's tab moves nothing. The transport keeps saying which list GO acts on. | mine |
-| **AQT** | **A cart's sampler groups are armed all show**: each enabled sampler group at a cart's top level is asserted as a persistent cue is (§3.29) - armed when the show opens and at every step, left alone while armed. Esc stops a bank and the next step arms it again; so does a double Esc, as §3.29 already has it for beds. A cart's other cues are never fired by the pass. | mine |
+| **AQT** | **A cart's sampler groups are armed all show**: each enabled sampler group at a cart's top level is asserted as a persistent cue is (§3.29) - armed at every step, left alone while armed. Esc stops a bank and the next step arms it again; so does a double Esc, as §3.29 already has it for beds. A cart's other cues are never fired by the pass. *As built (BD.2):* a pass of the carts alone also runs when the show opens and after any edit, arming only a bank it has never armed, so a bank made while programming has its pads at once. **Sharing the strips with the show list's banks**: a cart's bank closes nothing and nothing closes it; a show bank arming takes the strips it needs from it, as `takeover=strip` would; a cart member never takes a strip another bank holds and gives it up at once rather than waiting on it, since a waiting claim would land between two of a bank's clips; and the step's pass gives the cart those strips back once nobody holds them. To keep a cart's pads clear of the show's banks, pin its members to strips the show leaves alone. | mine |
 | **AQU** | **One press for every hand that is not a strip**: `cue.press <cue> [velocity]` and `cue.release <cue>`. A member of an armed sampler group presses its strip, exactly as `strip.press` would, velocity and all; any other cue is fired as `cue.fire` fires it, and its release does nothing. A key trigger's key-down is `trigger.fire` and its key-up `trigger.release <trigger>`, which releases the trigger's cue the same way. Standby never moves. | mine |
-| **AQV** | **A pad on a cue that is not a sound or a picture** (a cart's bank, AQN) fires it under its bank's run when pressed. Released, a `hold` member's run is stopped, where it has one still going - a group, an OSC cue sending its curves, a script - and nothing happens otherwise; `playOut` lets it run. A second press follows the kind's own rule (PRD §3.8). Its fader rides nothing and starts nothing; its strip shows the cue's name. | mine |
+| **AQV** | **A pad on a cue that is not a sound or a picture** (a cart's bank, AQN) fires it under its bank's run when pressed, its pre-wait passed over as a sound's is; once it is done the bank arms it again for the next press. Its fader rides nothing and starts nothing; its strip shows the cue's name. *As built (BD.3):* the member rows - a strip of its own, `release`, `secondPress`, velocity - are a sound's and a picture's only, so such a member is placed in order, plays out, and a second press while it still runs does nothing. Giving every kind those rows is in 74.7. | mine |
 | **AQW** | **A key trigger is matched where the key arrives**, in the window and on the page, from the published triggers; never while a text box has the keys. Its key is spelled as the page's key table spells one: `Mod`, `Alt`, `Shift`, then the key (`F6`, `Mod+K`, `Shift+1`, `ArrowLeft`). The engine refuses the show's own keys (AQK) and the shortcuts both clients share: Space, Escape, F9, F5, F, Shift+F, ArrowUp, ArrowDown, Mod+Z, Mod+Shift+Z, Mod+S, Mod+C, Mod+V, Delete, Backspace. | mine |
 | **AQX** | **A binding is an endpoint, a target and a scaling.** The endpoint is a MIDI control on a declared port (a CC, a pair of CCs for 14 bits, a note's velocity, pitch bend, channel pressure) or an OSC address on Go.dot's UDP port and one of its arguments; it says its class - absolute, relative or rate (PRD §3.16). The target is a node's address, ridden through the one write verb (§16.4) with origin `binding:<id>`. The scaling maps the input's range onto the node's own, by the law of its unit - decibels along the fader's travel as a fader does - with invert, a step a notch for a relative control, and for a rate one the speed at a full push and a dead zone. | mine |
 | **AQY** | **Two lifetimes for a binding**: one in the show's settings is live while the show is open (persistent); one on a cue is live for each run of that cue, armed as it starts and let go as it ends - Esc's graceful ending included (cue-scoped). A cue-scoped binding may name its own cue's rows without its identifier, so it copies from cue to cue. | mine |
@@ -30635,9 +30635,9 @@ Every new row has a default, so an old show opens and saves unchanged.
 
 | Stage | What | Built |
 |---|---|---|
-| BD.0 | This section; PRD §3.5, §3.7, §3.10, §3.27 and §6.9; the devplan | |
-| BD.1 | The wheel over a number (AQP) | |
-| BD.2 | The cart: `list/kind`, no standby, no GO focus, `list.create`'s pairs, its banks asserted (AQR, AQT) | |
+| BD.0 | This section; PRD §3.5, §3.7, §3.10, §3.27 and §6.9; the devplan | 892edb46 |
+| BD.1 | The wheel over a number (AQP) | ae95d1c1 |
+| BD.2 | The cart: `list/kind`, no standby, no GO focus, `list.create`'s pairs, its banks asserted (AQR, AQT) | 1156a4b5 |
 | BD.3 | Any kind under a pad in a cart; `cue.press`, `cue.release`, `trigger.release` (AQN, AQU, AQV) | |
 | BD.4 | Key triggers, in the window and on the page (AQK, AQW) | |
 | BD.5 | Tabs for lists, a cart among them, apart from the GO focus (AQM, AQS) | |
@@ -30657,7 +30657,9 @@ Every new row has a default, so an old show opens and saves unchanged.
 
 ### 74.7 Not built
 
-A key or a note running a named command (AQO); touch and write automation and read as a mode;
+A key or a note running a named command (AQO); the member rows - a pinned strip, hold, a second
+press, velocity - on a cart's member that is neither a sound nor a picture (AQV); touch and write
+automation and read as a mode;
 update-cue; CC and pitch-bend curves on a MIDI cue, and MIDI clips; fades aimed at a device's nodes;
 2D paths and their top view; the SpaceMouse as a live binding; the Stream Deck, which arrives as a
 transport whose keys are cart triggers with pictures and whose dials are relative bindings.
