@@ -626,6 +626,30 @@ if(APPLE)
     unset(_syphon)
 endif()
 
+# The DeckLink SDK's headers (namespace draft §71, APA), carried in
+# ThirdParty/decklink by scripts/vendor-decklink.py: the SDK sits behind a
+# registration form, so no build fetches it. Only the headers and the small
+# file each system needs to reach the library at run time - MIDL's identifiers
+# on Windows, generated when the headers were copied in; the SDK's dispatch file
+# on macOS and Linux, which loads Desktop Video's framework or libDeckLinkAPI.so
+# when first asked. The library itself is the user's Desktop Video, never
+# linked and never shipped. Each system's folder is on the path as SYSTEM, so
+# render/DeckLinkApi.h includes <DeckLinkAPI.h> or <DeckLinkAPI_h.h> by name.
+set(_decklink "${CMAKE_SOURCE_DIR}/ThirdParty/decklink")
+if(WIN32)
+    target_include_directories(wfg_deps SYSTEM INTERFACE "${_decklink}/win/generated" "${_decklink}/win")
+    target_sources(wfg_thirdparty PRIVATE "${_decklink}/win/generated/DeckLinkAPI_i.c")
+elseif(APPLE)
+    target_include_directories(wfg_deps SYSTEM INTERFACE "${_decklink}/mac")
+    target_sources(wfg_thirdparty PRIVATE "${_decklink}/mac/DeckLinkAPIDispatch.cpp")
+    target_link_libraries(wfg_deps INTERFACE "-framework CoreFoundation")
+else()
+    target_include_directories(wfg_deps SYSTEM INTERFACE "${_decklink}/linux")
+    target_sources(wfg_thirdparty PRIVATE "${_decklink}/linux/DeckLinkAPIDispatch.cpp")
+    target_link_libraries(wfg_deps INTERFACE ${CMAKE_DL_LIBS})
+endif()
+unset(_decklink)
+
 # hidapi (BSD-3, libusb/hidapi at hidapi-0.15.0), for the SpaceMouse the engine
 # reads itself (namespace draft 45, O.11, ZE): the one platform file and nothing
 # of hidapi's own CMake - spatcore_add_hidapi's settings, transcribed (static, no

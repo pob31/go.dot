@@ -127,6 +127,12 @@ jobs:
         # of compile minutes to be noticed.
         run: python3 scripts/check-claude-md.py
 
+      - name: Check the DeckLink headers are the SDK's as carried
+        # ThirdParty/decklink is copied from an SDK no job can fetch (it sits
+        # behind a registration form), so its manifest is the only witness that
+        # nobody edited a header Blackmagic's notice asks be kept as shipped.
+        run: python3 scripts/vendor-decklink.py --check
+
   # ---------------------------------------------------------------------------
   # Job 2 — Linux. The busiest job: it is the cheapest runner, so it carries the
   # configure-warning gate, the Release build and the strict (-Werror) build in

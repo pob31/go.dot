@@ -562,7 +562,8 @@ HAP in QuickTime (demux, snappy, compressed textures) presented against the audi
 position, a cue's sound or picture delay on top (PRD §3.19c); capture inputs as
 allocator resources; the clock-skew readout; a DeckLink output sink once its
 SDK's licence has been read against GPL-3; the test clip. Drawn when 8a is on a
-projector.
+projector. *The licence was read on 2026-10-16 and the cards drawn as their own round,
+"DeckLink cards", after the delay on the cue.*
 
 *Added 2026-10-08, at the author's direction* (namespace draft §44; PRD §3.19
 and §6.3 amended): **the renderer on each system's own graphics, then pictures in
@@ -1448,6 +1449,43 @@ Picture), M76 on the RME and a projector.
 through a seek, a speed change, a chase and a pause; Delay: Picture the other way; a held-back sound's
 tail is not cut and the next cue follows from it; Esc, double Esc and Doh! inside the delay leave
 nothing behind; an old show saves unchanged; CI is green.
+
+---
+
+### DeckLink cards: pictures out, capture in, sound with the picture, fill and key · L
+
+*Added on 2026-10-16*, at the author's direction, once the SDK's licence was read against GPL-3 (PRD
+§6.3): a Blackmagic DeckLink card as an **output** at a broadcast format, paced by the card, with the
+show's **buses embedded** in the cable and, on a card with a keyer, **fill and key**; and as a **video
+input** for `capture` cues (namespace draft §71; PRD §3.19, §3.19d, §6.3 and §6.9 amended). The
+author's decisions are AOX (all four parts in one push) and AOY (1080p50 to start); AOZ-APP are the
+implementer's, the author's to overrule. No card is on the bench: everything is built against a test
+card (`WFG_DECKLINK_FAKE=1`), and testers with cards run `wfg decklink-probe`. Built on the branch
+`decklink`, in a worktree of its own.
+
+| Stage | What | Depends on |
+|---|---|---|
+| DL.0 | Docs: namespace §71, the PRD, this; the headers carried, MIDL on Windows, built on the three systems | - |
+| DL.1 | The card's interface, the real card and the test card; cards found, published, listed by `decklink-probe` | DL.0 |
+| DL.2 | The rows, the kinds, the renderer's region | DL.1 |
+| DL.3 | A card output paced by the card at its format; latency, skew, reference; tried again | DL.2 |
+| DL.4 | 10-bit YUV | DL.3 |
+| DL.5 | Fill and key | DL.3 |
+| DL.6 | The sound taken off the audio thread | DL.2 |
+| DL.7 | The sound placed and resampled on the card | DL.3, DL.6 |
+| DL.8 | A card as a video input | DL.2 |
+| DL.9 | The Video tab, the inputs, the problems, the inspector | DL.3-DL.8 |
+| DL.10 | `decklink-probe --run`, the testers' instructions, M77 | DL.7 |
+| DL.11 | The README, the guides, the whole suite, CI | all |
+
+**Done when:** on the test card, a canvas reaches the card at its format with every frame drawn for its
+own moment and a drifting card clock never pulling the picture from the sound; a keyed output carries
+its transparency and nothing else does; a click on a bus lands on the card within a millisecond of the
+frame drawn for it; a capture loops back; the stops reach the card; an old show saves unchanged; CI is
+green. Then M77 on a real card, by the testers.
+
+---
+
 ## Phase 10 — Timecode, panic, hardening · M
 
 **Goal:** the stop levels and the sync sources that a touring show requires.

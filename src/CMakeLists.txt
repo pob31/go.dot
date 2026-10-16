@@ -542,6 +542,7 @@ add_library(wfg_engine STATIC
     wfg/engine/video/VideoRenderChild.cpp
     wfg/engine/video/VideoRenderChild.h
     wfg/engine/video/VideoSink.h
+    wfg/engine/video/render/DeckLinkApi.h
     wfg/engine/video/render/Gpu.cpp
     wfg/engine/video/render/Gpu.h
     wfg/engine/video/render/GpuNative.h

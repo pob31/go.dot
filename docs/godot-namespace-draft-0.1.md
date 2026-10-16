@@ -30288,3 +30288,105 @@ refinement and the author's AOM leaves out; the test clip and its nudging UI (PR
 The solver does not seat movies, so load-to-time places a held-back picture as any picture, when
 it comes up; a walk counts a movie's delay into its length even when Sound holds back nothing
 (AOS's warning case).
+## 71. DeckLink cards: pictures out, capture in, sound with the picture, fill and key
+
+PRD §6.3 put Blackmagic DeckLink cards after the GPU outputs, and owed a reading of the SDK's licence
+against GPL-3 before any code. The author asked on 2026-10-16 whether an SDK was to be downloaded, put
+Desktop Video SDK 16.0 at `D:\dev\SDK\Blackmagic DeckLink SDK 16.0`, and asked to plan the integration.
+They have no card yet; a PCIe card in a Thunderbolt chassis is to be borrowed, and testers asked.
+Decisions run from AOX.
+
+### 71.1 What it is, before its names
+
+A DeckLink card is a video interface: it takes finished pictures from the computer and sends them down
+an SDI or HDMI cable to a projector, an LED processor or a vision mixer, at a broadcast format the far
+end expects - 1080p50, say - on a clock of its own. It can carry sound inside the same cable, take a
+picture in from a camera, and on some cards send a second signal saying how transparent each pixel is,
+so a mixer can lay Go.dot's graphics over another picture. The same software reaches Blackmagic's USB
+and Thunderbolt boxes run by the Desktop Video drivers; the boxes that appear as a webcam are not cards.
+
+In Go.dot a card is **an output of another kind**: it shows one canvas through its mapping, as a display
+or a sender does, but at a **format** chosen from those the card offers, and paced by the card. A card
+can also be a **video input**, feeding `capture` cues. Its sound is **buses of the show** laid onto the
+cable's channels, the same samples the interface plays.
+
+The licence, read 2026-10-16: the agreement's clause 0.1 lifts its clauses 1, 4.3, 4.4, 5, 7 and 8 -
+the permitted use, the bar on copying, distribution, termination and export - for the SDK's three
+`include` folders, and every header there grants use, copying, distribution and derivative works so
+long as its notice stays. What remains - warranty, liability, Blackmagic's ownership, its trademarks -
+is what GPL-3 §7 lets a work add. The examples and the manual stay under the whole agreement: they may
+be read, never copied in.
+
+### 71.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **AOX** | **All four in one push**: pictures out, capture in, sound with the picture, fill and key. | the author's (offered as four choices, pictures and capture recommended now, sound and key later) |
+| **AOY** | **A new card output starts at 1080p50**, changed from a menu of what the card offers. | the author's (offered as "1080p50", recommended, beside 1080p25, 1080p59.94 and none until chosen) |
+| **AOZ** | **Everything DeckLink lives in the renderer.** The picture is read back from the graphics device there, and one process must own a card's output for its sound and key to go with the picture; a capture is drawn there. A driver fault takes the renderer, never the sound or GO, and the relaunched renderer opens the card again. | mine |
+| **APA** | **The headers are carried, the library never.** `ThirdParty/decklink` holds the three `include` folders as Blackmagic ships them, copied and checked by `scripts/vendor-decklink.py`; Windows' interface file is turned into a header by MIDL when they are copied in, and the header carried with its notice, so no build needs MIDL. The library comes with the user's **Desktop Video, 16.0 or later**, and is loaded when first wanted, as NDI's runtime is. | mine |
+| **APB** | **The card paces its own output.** The renderer gives the card a frame whenever fewer than two are waiting, and draws frame *n* for the sound's sample at the moment the card will send it - the card's clock fitted against the machine's, as a display's refresh is. The card's clock and the interface's never pull the picture away from the sound; their difference is shown as a **skew** in parts per million, the PRD's clock-skew readout (§3.19d). | mine |
+| **APC** | **Two frames waiting**, 40 ms at 50p, the video horizon. More would hold the picture back behind the sound; fewer risks frames sent late. The card's **latency** is shown, and not compensated: a projector's own delay is the cue's *Delay* (§70). M77 settles the depth. | mine |
+| **APD** | **10-bit YUV when nothing is keyed**, converted on the graphics card in Rec.709 at legal levels, the canvas's 16 bits kept to the cable; 8-bit BGRA where the card will not take 10-bit, and always when keyed. | mine |
+| **APE** | **Interlaced formats are listed and drawn as whole frames**, each field from the same picture: right for stills, a little stepped on motion. | mine |
+| **APF** | **A card that fails is tried again** every two seconds, and at once when a Thunderbolt card arrives. What is wrong is said plainly on the output: Desktop Video is not installed; Desktop Video is older than 16.0; another program has the card; the card cannot send this format; the card is not connected. | mine |
+| **APG** | **Fill and key keep the canvas's transparency for a keyed card output only.** The canvas is cleared transparent and its alpha carried through the level, the blur, the zones and the warp; every display, NDI, Spout and Syphon output still sends it opaque. The fill is **premultiplied** - a mixer set to *pre-multiplied key*. **External** sends fill and key on two connectors; **internal** lays the picture over the card's own input; a card without that keyer refuses, with a problem. | mine |
+| **APH** | **A card's sound is a list of the show's buses**, laid in order onto the cable's channels - a stereo bus two of them - rounded up to 2, 8, 16 or 32. The buses still play on the interface; one patched to no channel is heard on the card alone. | mine |
+| **APJ** | **The sound is taken after its trim, DCA and LTC**, where the interface's is, into a ring of its own beside the renderer's memory, its pages locked. The audio thread only copies: no allocation, lock or system call (§4.2). A full ring drops and counts. | mine |
+| **APK** | **The sound is placed by its sample** at the card's moment for that sample - so it leaves the card with the picture drawn for it - and resampled to the card's 48 kHz, the ratio from the two clocks and trimmed on what the card holds. This is the adaptive resampling §3.19d left for v1.x, built for a card's sound alone. | mine |
+| **APL** | **The stops reach the card through the buses**: Esc fades, double Esc kills, Doh! takes back, the same samples as the interface's. Nothing outside Go.dot is muted (§4.4). A renderer killed stops the card's picture and sound until it is back. | mine |
+| **APM** | **A capture's format is found by the card**; it arrives as 8-bit YUV and is turned to colour on the graphics card. No signal **draws black**, with a warning, as a lost return does. One input per connector: a second is refused. Sound coming in is not taken. | mine |
+| **APN** | **Card kinds are offered where a card is found.** The output and input menus list DeckLink when Desktop Video reports a card; an insert never takes one. | mine |
+| **APO** | **A test card stands in for a real one**: with `WFG_DECKLINK_FAKE=1` Go.dot finds one "Go.dot test card" with an output, an input that loops it back, both keyers and 16 channels, a clock that can drift and frames that can be dropped. Every test uses it, and the screens can be looked at with no card. | mine |
+| **APP** | **The testers' probe**: `wfg decklink-probe` lists each card, what it can do and the formats it offers, and with `--run` plays a moving pattern with a flash and a beep each second, on the cable and the interface, and writes what happened - frames late, latency, skew, where the sound fell. | mine |
+
+### 71.3 Rows
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `videoOutput/<id>/kind` | `s` | rw | gains `decklink` |
+| `videoOutput/<id>/card` | `s` | rw | the card's own identifier, kept across restarts; empty |
+| `videoOutput/<id>/cardName` | `s` | rw | the card's name when picked, shown while it is absent; empty |
+| `videoOutput/<id>/videoMode` | `s` | rw | the format: `1080p50` (AOY), `1080p59.94`, `1080i50`, `2160p25` and the rest of one table; a card output's alone |
+| `videoOutput/<id>/key` | `s` | rw | `off`, `external`, `internal`; `off` |
+| `videoOutput/<id>/sound` | `s` | rw | the buses laid onto the cable, in order; empty |
+| `videoOutput/cards` | `s` | r | one card a line: its identifier, name, what it can do, its formats |
+| `videoOutput/<id>/latency` | `d` | r | milliseconds the card holds |
+| `videoOutput/<id>/skew` | `d` | r | the card's clock against the sound's, parts per million |
+| `videoOutput/<id>/reference` | `s` | r | `none`, `locked`, `unlocked` |
+| `videoOutput/<id>/soundLate` | `i` | r | sound blocks dropped or placed late |
+| `videoInput/<id>/kind` | `s` | rw | gains `decklink`; its `sender` is the card's identifier |
+| `videoInput/<id>/videoMode` | `s` | rw | `auto`, found by the card, or a format; `auto` |
+
+Every new row has a default, so an old show opens and saves unchanged. The screen words - *Sent to a
+card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine, for the author.
+
+### 71.4 Stages
+
+| Stage | What | Built |
+|---|---|---|
+| DL.0 | This section; PRD §3.19, §3.19d, §6.3, §6.9; the devplan; the headers carried and built on the three systems | |
+| DL.1 | The card's interface, the real card and the test card, cards found and published, `decklink-probe` listing | |
+| DL.2 | The rows, the kinds, the renderer's region | |
+| DL.3 | A card output: paced by the card, at its format, latency, skew and reference, tried again | |
+| DL.4 | 10-bit YUV | |
+| DL.5 | Fill and key | |
+| DL.6 | The sound taken off the audio thread | |
+| DL.7 | The sound placed and resampled on the card | |
+| DL.8 | A card as a video input | |
+| DL.9 | The Video tab, the inputs, the problems, the inspector | |
+| DL.10 | `decklink-probe --run`, the testers' instructions, M77 | |
+| DL.11 | The README, the guides, the whole suite | |
+
+### 71.5 Measurements
+
+- **M77** - on a card, Release: a flash and a beep each second through the card, its sound embedded, and
+  the beep on the interface; the flash against both beeps, recorded off the cable and the interface;
+  frames late over ten minutes; the card's latency and skew as shown. Owed to the testers.
+
+### 71.6 Not built
+
+Sound coming in on a card; a card's audio as a rack input; field-by-field interlace; the SDI link
+choices (level B, dual and quad link) beyond the card's default; HDR; timecode on the cable (RP188);
+deck control; changing a card's profile, which Desktop Video Setup does; the capture allocator of PRD
+§3.19a, a card input refusing a second user being the whole of it here.

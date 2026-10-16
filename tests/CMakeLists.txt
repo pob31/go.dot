@@ -146,6 +146,7 @@ add_executable(wfg_tests
     VideoTextTests.cpp
     VideoGpuTests.cpp
     VideoNdiTests.cpp
+    DeckLinkTests.cpp
     MovieTests.cpp
     MovieEditRenderTests.cpp
     StripTests.cpp

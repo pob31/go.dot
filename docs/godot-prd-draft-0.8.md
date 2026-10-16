@@ -1862,6 +1862,17 @@ fade moves how far. Proposed (§6.9): the switch on by default; a capture's alph
 input says it sends one; the key read before the grade; a text's frame the canvas; fields left alone by
 Esc and Doh!; a blur with no outline covering the whole canvas (AKE-AKS).
 
+*Amended 2026-10-16, at the author's direction* (namespace draft §71, AOX-AOY): **DeckLink cards.** An
+output may be a **Blackmagic DeckLink card**, showing its canvas through its mapping as a display does,
+at a broadcast **format** chosen from those the card offers - 1080p50 to start - and paced by the card's
+own clock. Its **sound** is buses of the show embedded in the cable beside the picture, the same samples
+the interface plays; on a card with a keyer it can send **fill and key**, the canvas's transparency as a
+second signal for a vision mixer. A card is also a **video input**, feeding `capture` cues. All four
+come in one push. The library is the user's Desktop Video, never shipped. Proposed (§6.9): everything
+DeckLink in the renderer; the picture drawn for the sound's sample at the moment the card sends it, two
+frames waiting; 10-bit YUV unless keyed; a premultiplied fill; a capture's lost signal drawing black;
+a test card standing in for a real one (AOZ-APP).
+
 #### 3.19a Surfaces and mapping
 
 *Amended 2026-10-06, at the author's direction:* **one canvas may feed several outputs**, each with
@@ -2038,6 +2049,14 @@ gives ~72 ms. Therefore:
 - Since drift cannot always be prevented, it is **measured and displayed**: a
   clock-skew readout per device, so a technician *sees* divergence accumulating
   instead of hearing it in act two.
+
+*Amended 2026-10-16* (namespace draft §71, APB and APK, *proposed*): **a DeckLink card is a second
+clock**, and is handled as this section asks. Its pictures are drawn each for the sound's sample at the
+moment the card will send it, so the card's clock never pulls them from the sound, and the difference
+between the two clocks is **shown as a skew** in parts per million on the card's output. **Its embedded
+sound is the one place the adaptive resampling above is built now**: placed by its sample at the card's
+moment for it and resampled to the card's 48 kHz, the ratio from the two clocks. A second audio
+interface still is not.
 
 ~~**Open:** DeckLink I/O vs GPU output for latency and sync.~~ **Answered 2026-10-06** — §6.3.
 
@@ -3909,6 +3928,16 @@ window used to draw everything again in an OpenGL context of its own; Spout is D
 Syphon's current path is Metal. A DeckLink card still takes a finished frame read back from the same
 device. Each display is paced by its own refresh (YJ).
 
+*Amended 2026-10-16, at the author's direction* (namespace draft §71): **the licence is read, and the
+cards are built.** Desktop Video SDK 16.0's agreement lifts its restrictive clauses - the permitted
+use, the bar on copying, distribution, termination and export - for the SDK's three `include` folders,
+whose headers grant use, copying, distribution and derivative works so long as their notice stays; what
+remains (warranty, liability, ownership, trademarks) is what GPL-3 §7 lets a work add. So Go.dot
+carries the headers, as it carries NDI's, and never the library, which comes with the user's Desktop
+Video; the SDK's examples are read, never copied in. The author's answers: all four parts in one push -
+pictures out, capture in, sound with the picture, fill and key (AOX) - and a new card output at 1080p50
+(AOY).
+
 ### 6.4 Asparion — remaining asks
 
 - ~~Request the **byte-level list of the Mackie extensions** (OLED lines, encoder
@@ -4370,6 +4399,27 @@ AND in §67.2 are the author's to overrule:
 What the work leaves out: TLS and MQTT over WebSocket; MQTT 5; persistent sessions; retained or a QoS
 per cue; a described MQTT device; the broker's `$SYS` topics; a bridge to another broker.
 
+Added 2026-10-16 *(proposed)*, with DeckLink cards (§3.19, namespace draft §71). The implementer's
+calls from AOZ in §71.2 are the author's to overrule:
+
+- **Everything DeckLink in the renderer**, picture, key, sound and capture, so a driver's fault takes
+  the renderer and never the sound or GO.
+- **The card paces its output**: a frame drawn whenever fewer than two wait, each for the sound's sample
+  at the moment the card sends it; the card's latency shown, not compensated - a projector's delay is
+  the cue's (§3.19c).
+- **10-bit YUV when nothing is keyed**, 8-bit BGRA otherwise; interlaced formats drawn as whole frames.
+- **Fill and key** keep transparency on a keyed card output alone, the fill premultiplied; external or
+  internal, refused by a card without that keyer.
+- **A card's sound is a list of buses** laid onto its channels, taken after trim, DCA and LTC; the
+  audio thread only copies into a ring of its own.
+- **A capture's format found by the card**; no signal draws black with a warning; one input per
+  connector.
+- **A card that fails is tried again** every two seconds and on arrival; the problems said in words.
+- **A test card** (`WFG_DECKLINK_FAKE=1`) and **a probe for testers** (`wfg decklink-probe`).
+
+What the work leaves out: sound coming in on a card; field-by-field interlace; the SDI link choices;
+HDR; timecode on the cable; deck control; a card's profile.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -4568,6 +4618,10 @@ Mackie vs HUI first — first week with the D700.
   by a script and its answer back at the client in 61 to 82 ms; 3 000 publishes from fifty clients
   in three seconds every one heard, the script's run late on a few Debug ticks of the 150; Release
   on a machine of its own still owed.
+- **DeckLink cards** (§3.19, 2026-10-16, namespace draft §71): **M77** - a flash and a beep each
+  second through a card, the beep embedded and on the interface: the flash against both beeps off the
+  cable and the interface, frames late over ten minutes, the card's latency and skew as shown. Owed to
+  the testers, there being no card on the bench.
 
 ---
 

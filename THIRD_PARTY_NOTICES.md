@@ -483,6 +483,27 @@ it. NDI® is a registered trademark of Vizrt NDI AB.
 
 ---
 
+## The DeckLink SDK's headers
+
+- **Website**: https://www.blackmagicdesign.com/developer/products/capture-and-playback/sdk-and-software
+- **Version**: Desktop Video SDK 16.0 (API `0x10000000`), its `Win/include`, `Mac/include` and
+  `Linux/include` folders
+- **Licence**: the grant at the head of every header - use, reproduce, distribute, sub-license and
+  prepare derivative works, the notice kept in every copy - under the SDK's End User License
+  Agreement, whose clause 0.1 lifts its clauses 1, 4.3, 4.4, 5, 7 and 8 for these three folders
+- **Copyright**: Blackmagic Design
+
+Only the headers, in `ThirdParty/decklink`, copied and checked by `scripts/vendor-decklink.py`
+against `ThirdParty/decklink/MANIFEST.txt`, so Go.dot can reach a DeckLink card (namespace draft §71,
+APA; PRD §6.3). On Windows the header and identifiers MIDL makes from `DeckLinkAPI.idl` are carried in
+`win/generated`, each headed by the `.idl`'s notice; on macOS and Linux the SDK's
+`DeckLinkAPIDispatch.cpp`, from the same folders, is compiled in. **The DeckLink library is not
+shipped**: it comes with Blackmagic's Desktop Video, which the user installs, and is loaded when first
+wanted. The SDK's examples and documentation are not carried. DeckLink® is a trademark of Blackmagic
+Design Pty. Ltd.
+
+---
+
 ## The LV2 SDK: lilv, serd, sord, sratom, zix and the LV2 headers
 
 Compiled in since 2026-09-26, when LV2 hosting was switched on
