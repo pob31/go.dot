@@ -161,10 +161,12 @@ has stood in front of the thing.
 - **Stopping.** Esc fades running cues out over the panic fade and runs their
   footers, as if they had ended; a persistent cue is paused instead, and the
   next GO resumes it. A double Esc stops everything Go.dot started, at once,
-  footers skipped. **Doh!** takes back a GO pressed too early: it stops what
-  that GO started, puts the standby back, and can send each device the command
-  that undoes what it was sent. F flags the picked cues to look at after the
-  run, and Shift+F the cue the last GO fired, the show locked or not.
+  footers skipped, and nothing it started writes again: every parameter rests
+  where the press left it (namespace draft §73). **Doh!** takes back a GO
+  pressed too early: it stops what that GO started, puts the standby back, and
+  can send each device the command that undoes what it was sent. F flags the
+  picked cues to look at after the run, and Shift+F the cue the last GO fired,
+  the show locked or not.
 - **What is missing, said where it is used** (namespace draft §64). A cue that
   needs something this computer lacks tonight - the audio interface, a screen,
   a MIDI port's device, a plugin, a video input or insert, a network device -
@@ -202,8 +204,6 @@ has stood in front of the thing.
 
 ### Not built yet
 
-- **Panic values** — every parameter declares a resting state (PRD §3.3), but
-  nothing yet puts a node back to it.
 - **Bindings** — a general way to bind any parameter to any control, with read,
   touch, latch and write modes (PRD §3.10). Today a surface reaches parameters
   through Go.dot's own pages.
@@ -271,7 +271,7 @@ and says afterwards what was built against what was drawn.
 | Phase 6 | Surfaces, strips, DCAs, sampler groups, the D700 | §16 |
 | Phase 9 | Per-cue EQ, the plugin sandbox and inserts; the live rack; live sampling | §17–§19 |
 | Lanes and speed | Level and send lanes, recorded from faders; varispeed and timestretch; fades on what a cue owns | §20, §22, §26, §28, §34 |
-| Phase 10, in part | The stop levels held to PRD §4.4, the panic fade and GO debounce, Doh! | §21, §23, §24 |
+| Phase 10, in part | The stop levels held to PRD §4.4, the panic fade and GO debounce, Doh!; panic values settled as `park` | §21, §23, §24, §73 |
 | Shows | Shows and performances, Enable/Disable/Jump, Save as | §25, §27, §32 |
 | Imports | Ableton Live and QLab | §29, §46 |
 | Phase 8 | Video: stills, movies, the native renderer, NDI/Spout/Syphon, read-ahead, pictures in sampler groups, the DCA knob; keys, text cues and blur | §35–§37, §40, §44, §47–§50, §61 |
