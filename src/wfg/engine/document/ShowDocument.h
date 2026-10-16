@@ -275,6 +275,13 @@ namespace wfg::doc
         EditResult createTrigger (const std::string& cueId, const std::string& kind,
                                   const std::string& id = {}, const Attributes& attributes = {});
 
+        /*  A BINDING (namespace draft §74, AQX-AQY): a control in the room wired
+            to a number. `cueId` empty for one live while the show is open, a
+            cue's for one live for each of its runs. Born with its settings, as
+            a cue is; the show's collection of them made by the first. */
+        EditResult createBinding (const std::string& cueId, const std::string& id = {},
+                                  const Attributes& attributes = {});
+
         /*  Adds a range to a media cue - a region of the cue's own file, and
             one more clip in a launcher slot when the cue is armed (§3.24).
 

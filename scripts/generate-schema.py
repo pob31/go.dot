@@ -123,6 +123,10 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # name: hard, fade, afterMember, afterIteration, advance - the
                 # last of which says "do not stop, move on".
                 "fade", "transport", "osc", "trigger", "midi", "port", "start", "fx",
+                # A binding (namespace draft 74): a control in the room wired to
+                # a number, scaled into its range; and the show's collection of
+                # them, made with the first, whose `order` lists them.
+                "binding", "bindings",
                 # An OSC cue's further messages (namespace draft 45): the cue's
                 # own address and value are its first, each <Message> one more.
                 # And a curve moving one value of the cue's own message or of

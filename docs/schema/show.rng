@@ -77,6 +77,9 @@
         <ref name="SerialPorts"/>
       </optional>
       <optional>
+        <ref name="Bindings"/>
+      </optional>
+      <optional>
         <ref name="Sync"/>
       </optional>
     </element>
@@ -4276,6 +4279,197 @@
         <attribute name="shortName">
           <a:documentation>The name for a seven-character scribble strip, written by somebody rather than cut by the machine (PRD 3.16). Empty, a display cuts the name to its width.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Bindings">
+    <element name="Bindings">
+      <zeroOrMore>
+        <ref name="Binding"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Binding">
+    <element name="Binding">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="address">
+          <a:documentation>osc: the address that moves it, arriving on Go.dot&apos;s own OSC port over UDP - never one under /godot, which is the tree itself.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="argument">
+          <a:documentation>osc: which of the message&apos;s arguments carries the value, counting from nought. Read as it comes.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">15</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="channel">
+          <a:documentation>midi: the channel, 1 to 16. Nought is any.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">16</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="control">
+          <a:documentation>How the control moves (PRD 3.16): absolute, where it is is the value - a fader, a knob; relative, it sends steps - an endless encoder, each step turning the value as the master dial turns it, a MIDI value 1 to 63 up and 65 to 127 down; rate, how far it is pushed is how fast the value moves - a pedal, a joystick - and let go in the middle it holds where it is.</a:documentation>
+          <choice>
+            <value>absolute</value>
+            <value>relative</value>
+            <value>rate</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="cue">
+          <a:documentation>Empty for a binding live while the show is open; a cue for one live for each run of that cue - armed as the run starts and let go as it ends, Esc&apos;s graceful ending included (namespace draft 74, AQY). Named here rather than held under the cue, so a cue&apos;s own children stay its sends, ranges and triggers.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="deadZone">
+          <a:documentation>rate: how far from its rest the control must be pushed before it moves anything, a fraction of its travel either way. Nought is none.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">0.5</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether it is live. A binding switched off during tech is still written down, which is the whole difference between switching one off and deleting it.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="feedback">
+          <a:documentation>midi: whether the value is sent back to the control as it changes - a motor fader, a knob&apos;s ring - paced as a surface is, and never the value the control has just sent itself (namespace draft 74, ARC).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="inHigh">
+          <a:documentation>absolute: and where it is at its high end.</a:documentation>
+          <data type="double"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="inLow">
+          <a:documentation>absolute: the place on the control&apos;s travel where the target is at its low end - nought to one for MIDI, the argument as it comes for OSC.</a:documentation>
+          <data type="double"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="invert">
+          <a:documentation>Whether the control works the other way up: its top is the target&apos;s low end, a step up turns it down, a push forward brings it down.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the binding is called in the show&apos;s settings. Empty is said from what moves it and what it moves.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>midi: the controller or the note.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">127</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="outHigh">
+          <a:documentation>absolute, with ownRange off: and at the high end.</a:documentation>
+          <data type="double"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="outLow">
+          <a:documentation>absolute, with ownRange off: the target&apos;s value at the low end of the control&apos;s travel.</a:documentation>
+          <data type="double"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="ownRange">
+          <a:documentation>absolute: whether the target moves over its own range by its own law - a level along a fader&apos;s travel, a frequency in ratios, as the master dial turns it - or in a straight line from outLow to outHigh.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="pickup">
+          <a:documentation>absolute: whether a control with no motor takes the value over only once it crosses where the value is, or lands within a step of it - so a knob left anywhere does not make a level jump when it is touched (namespace draft 74, AQZ).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="port">
+          <a:documentation>midi: the declared port the control is on, by identifier; empty is any input. The port the show declares and never a device on this machine (PRD 3.10).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="source">
+          <a:documentation>What moves it: a control on a declared MIDI port, or a message on Go.dot&apos;s own OSC port over UDP.</a:documentation>
+          <choice>
+            <value>midi</value>
+            <value>osc</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="speed">
+          <a:documentation>rate: how much of the target&apos;s range a full push moves in a second.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="target">
+          <a:documentation>What it moves: a number&apos;s address in the tree - /godot/cue/&lt;id&gt;/level, a send, an EQ gain, a device&apos;s parameter - or, on a binding of a cue, one of that cue&apos;s rows by its name alone (level), so the binding moves whichever cue it is given to.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="type">
+          <a:documentation>midi: what the control sends - a controller (7 bits), a pair of controllers for 14 bits (the number and the number plus 32, as a fine fader sends them), a note&apos;s velocity, pitch bend, or channel pressure. Read as a fraction of its travel, nought to one.</a:documentation>
+          <choice>
+            <value>controlChange</value>
+            <value>controlChange14</value>
+            <value>noteVelocity</value>
+            <value>pitchBend</value>
+            <value>channelPressure</value>
+          </choice>
         </attribute>
       </optional>
     </element>

@@ -233,6 +233,17 @@ namespace wfg::doc
             return canonical.has_value() && *canonical == text && ! cue::isReservedChord (*canonical);
         }
 
+        /*  A BINDING'S OSC ADDRESS (namespace draft §74): an address arriving
+            on Go.dot's own port - never one under /godot, which is the tree
+            itself and is written, not bound. Empty is none yet. */
+        bool isLegalBindingAddress (std::string_view text)
+        {
+            if (text.empty())
+                return true;
+
+            return text.front() == '/' && text != "/godot" && text.rfind ("/godot/", 0) != 0;
+        }
+
         /*  The list a cue belongs to, however deep it is - or an invalid tree
             when it is not in one. The standby repairs below need it because a
             cue can now be several levels down. */
@@ -553,6 +564,10 @@ namespace wfg::doc
             `/godot/cueTemplate/<id>/name`. */
         if (element == "CueTemplates") return "cueTemplate";
 
+        /*  And namespace draft §74's: `/godot/binding/order` beside
+            `/godot/binding/<id>/target`. */
+        if (element == "Bindings")     return "binding";
+
         /*  And namespace draft §59's, a container with no members at all:
             `/godot/sync/frameRate`, as `/godot/network/strictSenders`. */
         if (element == "Sync")         return "sync";
@@ -652,6 +667,10 @@ namespace wfg::doc
         /*  NAMESPACE DRAFT §38. The cue templates and their container. */
         if (element == "CueTemplates")              return "cueTemplates";
         if (element == "CueTemplate")               return "cueTemplate";
+
+        /*  NAMESPACE DRAFT §74. The bindings and their collection. */
+        if (element == "Bindings")                  return "bindings";
+        if (element == "Binding")                   return "binding";
 
         /*  NAMESPACE DRAFT §51. A serial port; its container carries nothing. */
         if (element == "Serial")                    return "serial";
@@ -965,6 +984,7 @@ namespace wfg::doc
         if (segment == "cueTemplate") return showNode.getChildWithName ("CueTemplates");
         if (segment == "serial")      return showNode.getChildWithName ("SerialPorts");
         if (segment == "sync")        return showNode.getChildWithName ("Sync");
+        if (segment == "binding")     return showNode.getChildWithName ("Bindings");
         return {};
     }
 
@@ -1679,6 +1699,10 @@ namespace wfg::doc
         }
 
         if (target.attribute->element == "Trigger" && target.attribute->name() == "key" && ! isLegalKey (text))
+            return EditResult::failed (reason::badValue);
+
+        if (target.attribute->element == "Binding" && target.attribute->name() == "address"
+              && ! isLegalBindingAddress (text))
             return EditResult::failed (reason::badValue);
 
         /*  A CARD'S FORMAT IS A WORD MADE FROM IT (namespace draft §71.3): a
@@ -4704,6 +4728,67 @@ namespace wfg::doc
             attributes.push_back ({ "name", name });
 
         return insertObject (container, endOfSequence, "Serial", id, attributes);
+    }
+
+    EditResult ShowDocument::createBinding (const std::string& cueId, const std::string& id,
+                                            const Attributes& attributes)
+    {
+        /*  ASKED HERE AS WELL AS AT THE DOOR, as a canvas's is: the collection
+            is made on demand before the door is reached, and a locked show
+            must not gain an empty one from a refusal. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        /*  A BINDING OF A CUE NAMES ONE (namespace draft §74, AQY): any kind,
+            a group included - its run is what arms the binding. */
+        if (! cueId.empty())
+        {
+            const auto cue = findById (cueId);
+
+            if (! cue.isValid())
+                return EditResult::failed (reason::unknownId);
+
+            if (ownerForElement (cue.getType().toString().toStdString()) != "cue")
+                return EditResult::failed (reason::typeMismatch);
+        }
+
+        /*  BORN WITH ITS SETTINGS, refused as a cue's are and before anything
+            is made: the cue has its own argument, and a row nobody could write
+            later is no setting to be born with. */
+        const auto* element = Schema::instance().element ("Binding");
+        std::vector<std::pair<std::string_view, std::string>> born;
+
+        if (! cueId.empty())
+            born.emplace_back ("cue", cueId);
+
+        for (const auto& [attributeName, text] : attributes)
+        {
+            if (attributeName == "cue" || attributeName == "id")
+                return EditResult::failed (reason::badValue);
+
+            if (attributeName == "address" && ! isLegalBindingAddress (text))
+                return EditResult::failed (reason::badValue);
+
+            if (element != nullptr)
+                if (const auto* attribute = element->attribute (attributeName);
+                    attribute != nullptr
+                      && (attribute->access() == Access::read || attribute->persist() == Persist::none))
+                    return EditResult::failed (reason::readOnly);
+
+            born.emplace_back (attributeName, text);
+        }
+
+        /*  AT THE END OF THE SHOW, BEFORE <Sync>, made by the first binding and
+            outside the history as the serial ports' collection is. */
+        auto container = showNode.getChildWithName ("Bindings");
+
+        if (! container.isValid())
+        {
+            container = juce::ValueTree ("Bindings");
+            showNode.addChild (container, showNode.indexOf (showNode.getChildWithName ("Sync")), nullptr);
+        }
+
+        return insertObject (container, endOfSequence, "Binding", id, born);
     }
 
     EditResult ShowDocument::createCanvas (const std::string& name, const std::string& id)

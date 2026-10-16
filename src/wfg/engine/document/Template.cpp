@@ -273,6 +273,7 @@ namespace wfg::doc::Template
                 { "Canvases", "video canvases" }, { "VideoOutputs", "video outputs and their mapping" },
                 { "VideoInputs", "video inputs" }, { "VideoInserts", "video inserts" },
                 { "CueTemplates", "cue templates" }, { "SerialPorts", "serial ports" },
+                { "Bindings", "bindings: controls wired to numbers" },
                 { "Sync", "timecode: the rate and where it leaves" },
             };
 

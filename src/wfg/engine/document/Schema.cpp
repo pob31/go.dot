@@ -121,7 +121,7 @@ namespace wfg::doc
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts", "Network",
                                      "Surfaces", "Dcas", "Canvases", "VideoOutputs", "VideoInputs", "VideoInserts",
-                                     "CueTemplates", "SerialPorts", "Sync" },
+                                     "CueTemplates", "SerialPorts", "Bindings", "Sync" },
                                                                           { "document" } },
                 /*  THE CONTAINER CARRIES A VALUE, which is why it is no
                     longer an empty pair of brackets. `focus` is a fact about
@@ -448,6 +448,16 @@ namespace wfg::doc
                     no more an audio object than a group is. */
                 { "Dcas",     false, { "Dca" },            { "dcas" } },
                 { "Dca",      true,  {},                   { "dca" } },
+
+                /*  THE SHOW'S BINDINGS (namespace draft §74, AQX-AQY): a control
+                    in the room wired to a number, scaled into its range - live
+                    while the show is open, or for each run of the cue it names.
+                    One collection for both, the cue named by a row rather than
+                    the binding held under it, so a cue's own children stay its
+                    sends, ranges and triggers. Made on demand by the first
+                    binding.create, before <Sync>, so no fixture gains a line. */
+                { "Bindings", false, { "Binding" },        { "bindings" } },
+                { "Binding",  true,  {},                   { "binding" } },
 
                 /*  PHASE 9a'S PLUGIN SET (PRD §3.18, decision AE, 2026-09-23):
                     the processors every voice carries, declared once under

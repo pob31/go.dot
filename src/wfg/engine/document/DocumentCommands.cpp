@@ -635,6 +635,28 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  A BINDING (namespace draft §74): a control wired to a number. The
+            cue empty for one live while the show is open; its settings follow
+            the identifier as a cue's do - source midi, number 7, target level. */
+        registry.add ({ "binding.create",
+                        "Adds a binding: a MIDI control or an OSC address wired to a number, scaled into"
+                        " its range - live while the show is open, or for each run of the cue named."
+                        " Settings it is born with follow the identifier as attribute-value pairs.",
+                        { { "cue", 's', false }, { "id", 's', true }, { "attribute", 's', true, true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto attributes = pairsFrom (args, 2);
+
+                            if (! attributes)
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto edit = document.createBinding (args[0].getString(), id, *attributes);
+                            return fromEdit (edit, withId (args, 1, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "group.role",
                         "Gives a group its header or its footer - the cue lists that run before"
                         " its members and at its exit. Asking twice answers with the one it has.",

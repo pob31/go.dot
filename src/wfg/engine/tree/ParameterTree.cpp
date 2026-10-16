@@ -2554,6 +2554,36 @@ namespace wfg::tree
                     dcaOrder.push_back (id);
                 }
             }
+            else if (containerName == "Bindings")
+            {
+                /*  THE SHOW'S BINDINGS (namespace draft §74): every row of each,
+                    as the show holds it, and their order. Whether one is armed
+                    now is the runtime's, not this half's. */
+                for (const auto* row : doc::Schema::rowsForOwner ("bindings"))
+                {
+                    const auto name = std::string (row->name);
+                    const auto text = name == "order" ? orderOf (container, "Binding") : std::string {};
+
+                    nodes.push_back (makeLeaf (std::string (godot) + "/binding/" + name, *row, text));
+                }
+
+                for (const auto& binding : container)
+                {
+                    const auto id = binding[idProperty].toString().toStdString();
+
+                    if (id.empty())
+                        continue;
+
+                    const auto base = std::string (godot) + "/binding/" + id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("binding"))
+                    {
+                        const doc::Attribute attribute { "Binding", row };
+                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
+                                                   storedText (attribute, binding)));
+                    }
+                }
+            }
             else if (containerName == "CueTemplates")
             {
                 /*  THE SHOW'S CUE TEMPLATES (namespace draft §38): each one's
