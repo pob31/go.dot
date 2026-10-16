@@ -4,6 +4,7 @@
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/Icons.h>
 #include <wfg/client/ui/WarpEditorPanel.h>
+#include <wfg/client/model/Bindings.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
@@ -2315,6 +2316,276 @@ namespace wfg::client::ui
             };
 
             std::optional<Waiting> waiting;
+        };
+
+        //==============================================================================
+        /*  THE BINDINGS TAB (namespace draft §74, BD.11): every control in the
+            room wired to a number - what moves it, what it moves, how, when it
+            is live - and Learn. A click on "Moved by" listens for the next
+            control that moves (ARD) and a click again stops; a click on "How"
+            goes round absolute, relative, rate; the switches are `node.set`s;
+            the cross deletes. What a binding moves is typed here as an address,
+            or made from the number itself: a right-click on it in the inspector.
+            One editor, moved to the cell clicked, as the Serial tab's is. */
+        class BindingsPage final : public juce::Component,
+                                   private juce::ListBoxModel
+        {
+        public:
+            /*  A row as drawn: the binding and its words, worked out by the
+                window from the snapshot it has. */
+            struct Shown
+            {
+                model::BindingRow row;
+                std::string movedBy, moves, live;
+
+                bool operator== (const Shown&) const = default;
+            };
+
+            BindingsPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch))
+            {
+                list.setModel (this);
+                list.setRowHeight (34);
+                list.setOutlineThickness (0);
+                list.setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                addAndMakeVisible (list);
+
+                addAndMakeVisible (addBinding);
+                addBinding.setTooltip ("Add a binding: then click its Moved by and move the control that should move it,"
+                                       " and type what it moves - or right-click a number in the inspector to bind it there.");
+                addBinding.onClick = [this]
+                {
+                    if (send)
+                        send (gesture::createBinding ({}, {}));
+                };
+
+                addChildComponent (cellEditor);
+                cellEditor.setEditable (false, true, false);
+                cellEditor.setColour (juce::Label::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                cellEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                cellEditor.onEditorHide = [this] { commitText(); };
+
+                addAndMakeVisible (summary);
+                summary.setJustificationType (juce::Justification::centredLeft);
+                summary.setText ("A control in the room wired to a number in the show: a MIDI controller, note or pitch bend on"
+                                 " a port, or an OSC address sent to this machine. Click Moved by, then move the control."
+                                 " A right-click on a number in the inspector binds one to it.",
+                                 juce::dontSendNotification);
+            }
+
+            void show (std::vector<Shown> bindings, std::string learningNow, bool editable)
+            {
+                const auto same = bindings == rows && learningNow == learning && locked == ! editable;
+
+                rows = std::move (bindings);
+                learning = std::move (learningNow);
+                locked = ! editable;
+
+                addBinding.setVisible (editable);
+
+                if (! same)
+                {
+                    list.updateContent();
+                    list.repaint();
+                }
+            }
+
+            //  For the UI suite: the rows as last shown.
+            const std::vector<Shown>& shownRows() const noexcept { return rows; }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+
+                auto bar = area.removeFromTop (30);
+                addBinding.setBounds (bar.removeFromLeft (128).reduced (3, 0));
+
+                summary.setBounds (area.removeFromBottom (32));
+
+                area.removeFromTop (6);
+                heading = area.removeFromTop (20);
+                area.removeFromTop (2);
+                list.setBounds (area);
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                g.setFont (Look::font (theme, 11.0f));
+                g.setColour (Look::colour (theme, "ink-off"));
+
+                const auto cells = cellsFor (heading.withWidth (rowWidth()));
+                const char* names[] { "Binding", "Moved by", "Moves", "How", "Live", "On", "Pick up", "Feedback" };
+
+                for (auto at = 0; at < 8; ++at)
+                    g.drawText (names[at], cells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
+            }
+
+        private:
+            int rowWidth() const
+            {
+                if (const auto* viewport = list.getViewport())
+                    if (const auto* viewed = viewport->getViewedComponent())
+                        if (viewed->getWidth() > 0)
+                            return viewed->getWidth();
+
+                return list.getWidth();
+            }
+
+            static std::array<juce::Rectangle<int>, 9> cellsFor (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+
+                const auto cross = area.removeFromRight (24);
+                const auto feedback = area.removeFromRight (76);
+                const auto pickup = area.removeFromRight (64);
+                const auto on = area.removeFromRight (42);
+                const auto live = area.removeFromRight (200);
+                const auto how = area.removeFromRight (84);
+                const auto name = area.removeFromLeft (160);
+                const auto movedBy = area.removeFromLeft (260);
+
+                return { name, movedBy, area, how, live, on, pickup, feedback, cross };
+            }
+
+            enum class Cell { name, movedBy, moves, how, live, on, pickup, feedback, cross };
+
+            static Cell cellAt (int x, int width)
+            {
+                const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
+                const Cell order[] { Cell::name, Cell::movedBy, Cell::moves, Cell::how, Cell::live, Cell::on,
+                                     Cell::pickup, Cell::feedback, Cell::cross };
+
+                for (auto at = 0; at < 9; ++at)
+                    if (x >= cells[static_cast<std::size_t> (at)].getX() && x < cells[static_cast<std::size_t> (at)].getRight())
+                        return order[at];
+
+                return Cell::live;
+            }
+
+            int getNumRows() override { return static_cast<int> (rows.size()); }
+
+            void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return;
+
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+                const auto& binding = entry.row;
+
+                g.setColour (Look::colour (theme, row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, height));
+                const auto dash = juce::String::fromUTF8 ("\xe2\x80\x93");
+                const auto off = ! binding.enabled;
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, binding.name.empty() || off ? "ink-off" : "ink"));
+                g.drawText (binding.name.empty() ? dash : juce::String::fromUTF8 (binding.name.c_str()), cells[0],
+                            juce::Justification::centredLeft, true);
+
+                /*  LISTENING, IN WORDS (§4.8): the cell says so while Learn
+                    waits for this binding, and a click again stops it. */
+                g.setFont (Look::font (theme, 12.0f));
+                const auto listening = ! learning.empty() && learning == binding.id;
+                g.setColour (Look::colour (theme, listening ? "ink" : (off ? "ink-off" : "ink-dim")));
+                g.drawText (listening ? juce::String ("listening - move a control")
+                                      : juce::String::fromUTF8 (entry.movedBy.c_str()),
+                            cells[1], juce::Justification::centredLeft, true);
+
+                g.setColour (Look::colour (theme, off ? "ink-off" : "ink-dim"));
+                g.drawText (juce::String::fromUTF8 (entry.moves.c_str()), cells[2], juce::Justification::centredLeft, true);
+                g.drawText (juce::String (model::howWords (binding.control)), cells[3], juce::Justification::centredLeft, true);
+                g.drawText (juce::String::fromUTF8 (entry.live.c_str()), cells[4], juce::Justification::centredLeft, true);
+
+                const bool switches[] { binding.enabled, binding.pickup, binding.feedback };
+
+                for (auto at = 0; at < 3; ++at)
+                {
+                    g.setColour (Look::colour (theme, switches[at] ? "ink" : "ink-off"));
+                    g.drawText (switches[at] ? "ON" : "OFF", cells[static_cast<std::size_t> (5 + at)],
+                                juce::Justification::centredLeft);
+                }
+
+                if (! locked)
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[8], juce::Justification::centred);
+                }
+            }
+
+            void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+            {
+                if (locked || row < 0 || static_cast<std::size_t> (row) >= rows.size() || ! send)
+                    return;
+
+                const auto& binding = rows[static_cast<std::size_t> (row)].row;
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth() : list.getWidth();
+                const auto base = "/godot/binding/" + binding.id + "/";
+                const auto flip = [] (bool on) { return std::string (on ? "false" : "true"); };
+
+                switch (cellAt (event.x, width))
+                {
+                    case Cell::cross:    send (gesture::deleteObject (binding.id)); return;
+                    case Cell::movedBy:  send (gesture::learnBinding (learning == binding.id ? std::string {} : binding.id)); return;
+                    case Cell::how:      send (gesture::setNode (base + "control", model::nextControl (binding.control))); return;
+                    case Cell::on:       send (gesture::setNode (base + "enabled", flip (binding.enabled))); return;
+                    case Cell::pickup:   send (gesture::setNode (base + "pickup", flip (binding.pickup))); return;
+                    case Cell::feedback: send (gesture::setNode (base + "feedback", flip (binding.feedback))); return;
+                    case Cell::name:     editAt (row, width, Cell::name); return;
+                    case Cell::moves:    editAt (row, width, Cell::moves); return;
+                    case Cell::live:     return;
+                }
+            }
+
+            void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
+
+            //  The name, or what it moves as an address: typed in place.
+            void editAt (int row, int width, Cell cell)
+            {
+                const auto& binding = rows[static_cast<std::size_t> (row)].row;
+
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                editing = binding.id;
+                editingRow = cell == Cell::name ? "name" : "target";
+                cellEditor.setBounds (cellsFor (place.withWidth (width).withX (list.getX()))[cell == Cell::name ? 0u : 2u]);
+                cellEditor.setText (juce::String::fromUTF8 ((cell == Cell::name ? binding.name : binding.target).c_str()),
+                                    juce::dontSendNotification);
+                cellEditor.setVisible (true);
+                cellEditor.showEditor();
+            }
+
+            void commitText()
+            {
+                const auto id = std::exchange (editing, {});
+                cellEditor.setVisible (false);
+
+                if (id.empty() || ! send)
+                    return;
+
+                const auto typed = cellEditor.getText().trim().toStdString();
+
+                for (const auto& entry : rows)
+                    if (entry.row.id == id && typed != (editingRow == "name" ? entry.row.name : entry.row.target))
+                        send (gesture::setNode ("/godot/binding/" + id + "/" + editingRow, typed));
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+
+            juce::ListBox list;
+            juce::TextButton addBinding { "ADD" };
+            juce::Label summary;
+            juce::Rectangle<int> heading;
+
+            juce::Label cellEditor;
+            std::string editing, editingRow;
+
+            std::vector<Shown> rows;
+            std::string learning;
+            bool locked = false;
         };
 
         /*  THE BOXES THIS SHOW TALKS TO.
@@ -8435,6 +8706,9 @@ namespace wfg::client::ui
                                                 " keep up. Nothing to do for a show that sends and follows none." },
             { "Controllers", pageName::serial,      "Serial ports - an Arduino on USB - whose lines a process cue's patch hears"
                                                 " and sends." },
+            { "Controllers", pageName::bindings,    "A MIDI control or an OSC address wired to a number in the show - a cue's"
+                                                " level, a send, a device's parameter - for the whole show or while a cue"
+                                                " runs, learned by moving it." },
 
             /*  AND LAST, what to do first (author, 2026-09-30): where somebody
                 looks who does not know which page they want. */
@@ -8918,6 +9192,7 @@ namespace wfg::client::ui
             redundancy = std::make_unique<RedundancyPage> (theme, send);
             midi = std::make_unique<MidiPage> (theme, send);
             serialPage = std::make_unique<SerialPage> (theme, send);
+            bindingsPage = std::make_unique<BindingsPage> (theme, send);
             surfaces = std::make_unique<SurfacesPage> (theme, send);
             plugins = std::make_unique<PluginsPage> (theme, send);
             rackPage = std::make_unique<RackPage> (theme, send);
@@ -8993,6 +9268,7 @@ namespace wfg::client::ui
                 { pageName::video, video.get() },
                 { pageName::network, network.get() }, { pageName::midi, midi.get() }, { pageName::surfaces, surfaces.get() },
                 { pageName::timecode, timecode.get() }, { pageName::serial, serialPage.get() },
+                { pageName::bindings, bindingsPage.get() },
                 { pageName::gettingStarted, gettingStarted.get() },
             };
 
@@ -9133,6 +9409,26 @@ namespace wfg::client::ui
             serialPage->show (model::readSerialPorts (snapshot), model::readSystemSerialPorts (snapshot),
                               ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
                               model::readSerialScans (snapshot));
+
+            /*  THE BINDINGS (namespace draft §74, BD.11): the document's, re-read
+                every pass as the ports are, each with its words - its port by the
+                show's name, read just above - and the one Learn listens for. */
+            {
+                std::vector<BindingsPage::Shown> shown;
+
+                for (auto& row : model::readBindings (snapshot))
+                {
+                    BindingsPage::Shown each;
+                    each.movedBy = model::movedByWords (row, ports);
+                    each.moves = model::movesWords (row, snapshot);
+                    each.live = model::liveWords (row, snapshot);
+                    each.row = std::move (row);
+                    shown.push_back (std::move (each));
+                }
+
+                bindingsPage->show (std::move (shown), model::bindingLearning (snapshot),
+                                    ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+            }
 
             /*  THE SURFACES, THEIR STRIPS AND THE DCAs are the document's and
                 re-read every pass for the ports' reason; the strips' words are
@@ -9489,6 +9785,7 @@ namespace wfg::client::ui
         std::unique_ptr<RedundancyPage> redundancy;
         std::unique_ptr<MidiPage> midi;
         std::unique_ptr<SerialPage> serialPage;
+        std::unique_ptr<BindingsPage> bindingsPage;
         std::unique_ptr<SurfacesPage> surfaces;
         std::unique_ptr<PluginsPage> plugins;
         std::unique_ptr<RackPage> rackPage;

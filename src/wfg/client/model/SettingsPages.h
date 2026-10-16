@@ -51,6 +51,7 @@ namespace wfg::client::model::settingsPages
     inline constexpr const char* network = "Network";
     inline constexpr const char* midi = "MIDI";
     inline constexpr const char* surfaces = "Surfaces";
+    inline constexpr const char* bindings = "Bindings";                     // §74
     inline constexpr const char* timecode = timecodeWords::tab;
     inline constexpr const char* serial = "Serial";
 

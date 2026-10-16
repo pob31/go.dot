@@ -357,7 +357,63 @@ namespace wfg::client::ui
         is sent; the window decides nothing else about it. */
     void InspectorComponent::mouseDown (const juce::MouseEvent& event)
     {
+        if (event.mods.isPopupMenu())
+            if (auto menu = bindMenuFor (event.eventComponent))
+            {
+                menu->showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+                return;
+            }
+
         pressedOn (event.eventComponent);
+    }
+
+    std::optional<juce::PopupMenu> InspectorComponent::bindMenuFor (const juce::Component* hit)
+    {
+        if (hit == nullptr || ! actions.bind)
+            return std::nullopt;
+
+        for (auto& line : lines)
+        {
+            if (hit != &line->name && hit != &line->box && ! line->box.isParentOf (hit))
+                continue;
+
+            /*  ONE CUE'S NUMBER: over several picked cues there is no one
+                number for a control to move. */
+            const auto& field = line->field;
+
+            if (! model::mayDial (field) || ! field.addresses.empty() || field.address.empty())
+                return std::nullopt;
+
+            const auto address = field.address;
+            const auto own = "/godot/cue/" + drawnCue + "/";
+            const auto ofThisCue = ! drawnCue.empty() && address.rfind (own, 0) == 0
+                                     && address.find ('/', own.size()) == std::string::npos;
+
+            juce::PopupMenu menu;
+            menu.addItem ("Bind a control to it", [this, address] { actions.bind (address, {}); });
+
+            /*  ONE OF THIS CUE'S OWN ROWS may be bound for its runs alone, by
+                the row's name, so the binding goes where the cue is copied. */
+            if (ofThisCue)
+                menu.addItem ("Bind a control to it while this cue runs",
+                              [this, address, cue = drawnCue] { actions.bind (address, cue); });
+
+            if (actions.boundTo)
+            {
+                const auto bound = actions.boundTo (address);
+
+                if (! bound.empty())
+                    menu.addSeparator();
+
+                for (const auto& [id, words] : bound)
+                    menu.addItem ("Unbind " + juce::String::fromUTF8 (words.c_str()),
+                                  [this, bindingId = id] { if (actions.unbind) actions.unbind (bindingId); });
+            }
+
+            return menu;
+        }
+
+        return std::nullopt;
     }
 
     /*  HEARD FOR EVERY WHEEL MOVEMENT OVER THE PANEL - the listener on

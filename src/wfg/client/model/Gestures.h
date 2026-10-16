@@ -163,6 +163,15 @@ namespace wfg::client::gesture
     Event releaseTrigger (const std::string& triggerId);
     Event createKeyTrigger (const std::string& cueId, const std::string& key);
 
+    /*  A BINDING (namespace draft §74, BD.11): of the show when `cueId` is
+        empty, of that cue otherwise, moving `target` - a number's address, or
+        on a binding of a cue one of its rows by name. */
+    Event createBinding (const std::string& cueId, const std::string& target);
+
+    /*  LEARN (ARD): the next control that moves becomes this binding's.
+        Empty stops listening. */
+    Event learnBinding (const std::string& bindingId);
+
     /*  A NEW LIST, a cue list or a cart (namespace draft §74, AQR): the tabs'
         +, born a cart in the one step when it is one. And GO's focus moved to
         a show list - its tab pressed. */

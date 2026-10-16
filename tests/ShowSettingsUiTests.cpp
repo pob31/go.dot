@@ -679,7 +679,7 @@ TEST_CASE ("show settings UI: the window is called Show settings, and its pages 
     const juce::StringArray pages { "Playback", "Templates", "Redundancy",
                                     "Audio interface", "Outputs", "Output patch", "Inputs", "Input patch", "Rack", "Plugins",
                                     "Video",
-                                    "Network", "MIDI", "Surfaces", "Timecode", "Serial",
+                                    "Network", "MIDI", "Surfaces", "Timecode", "Serial", "Bindings",
                                     "Getting started" };
     CHECK (tabs->getTabNames() == pages);
     CHECK_FALSE (tabs->getTabbedButtonBar().isVisible());
@@ -713,7 +713,7 @@ TEST_CASE ("show settings UI: the window is called Show settings, and its pages 
                                                 "Input patch", "Rack", "Plugins",
                                                 "Video",
                                                 "Controllers", "Network", "MIDI", "Surfaces", "Timecode", "Serial",
-                                                "Getting started" });
+                                                "Bindings", "Getting started" });
 
     //  The page showing is marked, and nothing else is.
     const auto marked = [&rows]
@@ -959,7 +959,7 @@ TEST_CASE ("show settings UI: a page asked for from outside is shown, by the mod
 
     for (const auto* name : { page::playback, page::templates, page::redundancy, page::audioInterface, page::outputs,
                               page::outputPatch, page::inputs, page::inputPatch, page::rack, page::plugins, page::video,
-                              page::network, page::midi, page::surfaces, page::timecode, page::serial,
+                              page::network, page::midi, page::surfaces, page::timecode, page::serial, page::bindings,
                               page::gettingStarted })
     {
         CAPTURE (name);
@@ -1022,7 +1022,7 @@ TEST_CASE ("show settings UI: Getting started names every other page under its s
                                                  "AUDIO", "Audio interface", "Outputs", "Output patch", "Inputs",
                                                  "Input patch", "Rack", "Plugins",
                                                  "VIDEO", "Video",
-                                                 "CONTROLLERS", "Network", "MIDI", "Surfaces", "Timecode", "Serial" });
+                                                 "CONTROLLERS", "Network", "MIDI", "Surfaces", "Timecode", "Serial", "Bindings" });
 
     //  The buttons alone are every other page, in the window's own order.
     std::vector<juce::String> others;
@@ -3152,4 +3152,93 @@ TEST_CASE ("show settings UI: the Network tab's MQTT broker switch sends the row
     on->onClick();
     CHECK (rig.sent.back().args[0].getString() == "/godot/network/broker");
     CHECK (rig.sent.back().args[1].getString() == "false");
+}
+
+//==============================================================================
+/*  THE BINDINGS TAB (namespace draft §74, BD.11): Learn on a click of Moved by
+    and off on a second, How going round, the switches, the cross, ADD. Its
+    cells from the right: the cross 24, Feedback 76, Pick up 64, On 42, Live
+    200, How 84; from the left Binding 160, then Moved by 260. */
+namespace
+{
+    int bindingMovedByAt (const juce::ListBox&)        { return 8 + 160 + 260 / 2; }
+    int bindingHowAt (const juce::ListBox& list)       { return list.getWidth() - 8 - 24 - 76 - 64 - 42 - 200 - 84 / 2; }
+    int bindingOnAt (const juce::ListBox& list)        { return list.getWidth() - 8 - 24 - 76 - 64 - 42 / 2; }
+    int bindingFeedbackAt (const juce::ListBox& list)  { return list.getWidth() - 8 - 24 - 76 / 2; }
+    int bindingCrossAt (const juce::ListBox& list)     { return list.getWidth() - 8 - 24 / 2; }
+}
+
+TEST_CASE ("show settings: the Bindings tab learns a binding, and edits it in place")
+{
+    Rig rig;
+    const auto list = rig.document.createList ("Main").id;
+    const auto cue = rig.document.createCue (list, 0, "media", "Door").id;
+    const auto port = rig.document.createPort ("Desk").id;
+
+    REQUIRE (rig.document.createBinding ("", "BND00001", { { "port", port }, { "number", "7" },
+                                                           { "target", "/godot/cue/" + cue + "/level" } }).ok);
+    REQUIRE (rig.document.createBinding (cue, "BND00002", { { "source", "osc" }, { "address", "/desk/fader/1" },
+                                                            { "target", "level" } }).ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setSize (1400, 740);
+    panel.showPage (client::model::settingsPages::bindings);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    CHECK (tabs->getCurrentTabName() == "Bindings");
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+    auto* rows = listOn (*page);
+    REQUIRE (rows != nullptr);
+    CHECK (rows->getListBoxModel()->getNumRows() == 2);
+
+    const auto last = [&rig] () -> const Event& { return rig.sent.back(); };
+
+    //  Moved by: Learn on it; once the engine listens, a second click stops it.
+    rig.sent.clear();
+    clickAt (*rows, bindingMovedByAt (*rows));
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (last().command == "binding.learn");
+    CHECK (last().args[0].getString() == "BND00001");
+
+    rig.state.bindingLearn = "BND00001";
+    panel.refresh (*rig.publish());
+    clickAt (*rows, bindingMovedByAt (*rows));
+    CHECK (last().command == "binding.learn");
+    CHECK (last().args[0].getString().empty());
+
+    //  How goes round; the switches flip; the cross deletes.
+    clickAt (*rows, bindingHowAt (*rows));
+    CHECK (last().command == "node.set");
+    CHECK (last().args[0].getString() == "/godot/binding/BND00001/control");
+    CHECK (last().args[1].getString() == "relative");
+
+    clickAt (*rows, bindingOnAt (*rows));
+    CHECK (last().args[0].getString() == "/godot/binding/BND00001/enabled");
+    CHECK (last().args[1].getString() == "false");
+
+    clickAt (*rows, bindingFeedbackAt (*rows));
+    CHECK (last().args[0].getString() == "/godot/binding/BND00001/feedback");
+    CHECK (last().args[1].getString() == "true");
+
+    clickAt (*rows, bindingCrossAt (*rows));
+    CHECK (last().command == "object.delete");
+    CHECK (last().args[0].getString() == "BND00001");
+
+    //  ADD makes one of the show's.
+    auto* add = button (*page, "ADD");
+    REQUIRE (add != nullptr);
+    add->onClick();
+    CHECK (last().command == "binding.create");
+    CHECK (last().args[0].getString().empty());
+
+    //  Locked: no ADD, and a click changes nothing.
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (add->isVisible());
+    rig.sent.clear();
+    clickAt (*rows, bindingOnAt (*rows));
+    CHECK (rig.sent.empty());
 }

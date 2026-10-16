@@ -48,7 +48,9 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::client::ui
@@ -106,6 +108,15 @@ namespace wfg::client::ui
                 made with one otherwise - and the key taken away. */
             std::function<void (const std::string& cueId, const std::string& address, const std::string& key)> setKey;
             std::function<void (const std::string& triggerId)> clearKey;
+
+            /*  A CONTROL BOUND TO A NUMBER (namespace draft §74, BD.11): a
+                binding made on its address - for the whole show, or while
+                `cueId` runs - and the next control moved learned. The bindings
+                already on an address, as their identifiers and what moves them,
+                and one taken off. */
+            std::function<void (const std::string& address, const std::string& cueId)> bind;
+            std::function<std::vector<std::pair<std::string, std::string>> (const std::string& address)> boundTo;
+            std::function<void (const std::string& bindingId)> unbind;
         };
 
         InspectorComponent (const model::Theme& theme, Actions actions);
@@ -125,6 +136,12 @@ namespace wfg::client::ui
             a dial before its name and a frame round its value - a mark and a
             line, never a colour alone (§4.8). Empty marks nothing. */
         void showDial (const std::string& address);
+
+        /*  THE RIGHT-CLICK ON A NUMBER (namespace draft §74, BD.11): what it
+            offers - a control bound to it, and the bindings on it taken off -
+            for a number of one cue that the dial could take; nothing for
+            anything else. Shown by the right-click; public for the suite. */
+        std::optional<juce::PopupMenu> bindMenuFor (const juce::Component* hit);
 
         /*  WHETHER THE FILE ROW OFFERS "-> HAP", and in what words: a movie
             played as a preview, or one converting ("HAP 42 %"). The window

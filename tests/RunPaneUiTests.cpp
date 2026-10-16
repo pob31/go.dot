@@ -7737,3 +7737,119 @@ TEST_CASE ("list tabs: one a list, the shown one lit, GO's marked, a cart in wor
     CHECK_FALSE (plusShowing());
     CHECK (lit (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb8 Main"))));
 }
+
+//==============================================================================
+TEST_CASE ("inspector: a right-click on a number binds a control to it, for the show or this cue's runs, and unbinds")
+{
+    /*  Namespace draft §74, BD.11: one cue's number the dial could take offers
+        a binding; one of the cue's own rows offers its runs too; the bindings
+        on it are offered to be taken off. */
+    std::vector<std::pair<std::string, std::string>> bound;
+    std::vector<std::string> unbound;
+
+    ui::InspectorComponent::Actions actions;
+    actions.bind = [&] (const std::string& address, const std::string& cueId) { bound.emplace_back (address, cueId); };
+    actions.boundTo = [] (const std::string& address)
+    {
+        std::vector<std::pair<std::string, std::string>> on;
+
+        if (address == "/godot/cue/CUE00001/preWait")
+            on.emplace_back ("BND00001", "Desk CC 7");
+
+        return on;
+    };
+    actions.unbind = [&] (const std::string& bindingId) { unbound.push_back (bindingId); };
+
+    ui::InspectorComponent inspector (model::Theme {}, actions);
+    inspector.setSize (320, 240);
+
+    const auto field = [] (std::string address, std::string name, std::string tags, std::string value)
+    {
+        model::Field made;
+        made.address = std::move (address);
+        made.name = name;
+        made.label = std::move (name);
+        made.typeTags = std::move (tags);
+        made.value = std::move (value);
+        made.writable = true;
+        made.hasMinimum = made.hasMaximum = true;
+        made.minimum = -120.0;
+        made.maximum = 3600.0;
+        return made;
+    };
+
+    model::Inspection inspection;
+    inspection.cueId = "CUE00001";
+    inspection.cueName = "The bed";
+    inspection.kind = "media";
+    inspection.count = 1;
+    inspection.blocks.push_back ({ "what it is", { field ("/godot/cue/CUE00001/name", "name", "s", "The bed") } });
+    inspection.blocks.push_back ({ "what it does", { field ("/godot/cue/CUE00001/preWait", "preWait", "d", "0.5"),
+                                                     field ("/godot/send/SND00001/level", "send", "d", "-3") } });
+    inspector.show (inspection);
+
+    const auto boxSaying = [&inspector] (const juce::String& word) -> juce::Label*
+    {
+        juce::Label* found = nullptr;
+
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+        {
+            for (auto* child : at.getChildren())
+            {
+                if (auto* label = dynamic_cast<juce::Label*> (child))
+                    if (label->getText() == word && found == nullptr)
+                        found = label;
+
+                walk (*child);
+            }
+        };
+
+        walk (inspector);
+        return found;
+    };
+
+    const auto offered = [] (juce::PopupMenu& menu)
+    {
+        std::vector<std::pair<juce::String, std::function<void()>>> items;
+        juce::PopupMenu::MenuItemIterator item (menu);
+
+        while (item.next())
+            if (! item.getItem().isSeparator)
+                items.emplace_back (item.getItem().text, item.getItem().action);
+
+        return items;
+    };
+
+    auto* wait = boxSaying ("0.5");
+    auto* send = boxSaying ("-3");
+    auto* name = boxSaying ("The bed");
+    REQUIRE (wait != nullptr);
+    REQUIRE (send != nullptr);
+    REQUIRE (name != nullptr);
+
+    //  The cue's own wait: for the show, for its runs, and the binding on it taken off.
+    auto menu = inspector.bindMenuFor (wait);
+    REQUIRE (menu.has_value());
+    auto items = offered (*menu);
+    REQUIRE (items.size() == 3u);
+    CHECK (items[0].first == "Bind a control to it");
+    CHECK (items[1].first == "Bind a control to it while this cue runs");
+    CHECK (items[2].first == "Unbind Desk CC 7");
+
+    for (auto& [words, act] : items)
+        act();
+
+    CHECK (bound == std::vector<std::pair<std::string, std::string>> { { "/godot/cue/CUE00001/preWait", "" },
+                                                                       { "/godot/cue/CUE00001/preWait", "CUE00001" } });
+    CHECK (unbound == std::vector<std::string> { "BND00001" });
+
+    //  A send's level is not one of the cue's own rows: for the show only.
+    menu = inspector.bindMenuFor (send);
+    REQUIRE (menu.has_value());
+    items = offered (*menu);
+    REQUIRE (items.size() == 1u);
+    CHECK (items[0].first == "Bind a control to it");
+
+    //  A word is no number to bind.
+    CHECK_FALSE (inspector.bindMenuFor (name).has_value());
+}

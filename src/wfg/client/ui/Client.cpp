@@ -53,6 +53,7 @@
 #include <wfg/client/model/DeviceTree.h>
 #include <wfg/client/model/Dual.h>
 #include <wfg/client/model/Flags.h>
+#include <wfg/client/model/Bindings.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/KeyTriggers.h>
@@ -402,6 +403,36 @@ namespace wfg::client
                 inspectorActions.clearKey = [this] (const std::string& triggerId)
                 {
                     send (gesture::deleteObject (triggerId));
+                };
+
+                /*  A CONTROL BOUND TO A NUMBER (namespace draft §74, BD.11): a
+                    right-click's binding, then Learn on it (`bindTo`); the
+                    bindings on a number in the words Show settings uses; one
+                    taken off as any object is deleted. */
+                inspectorActions.bind = [this] (const std::string& address, const std::string& cueId)
+                {
+                    bindTo (address, cueId);
+                };
+
+                inspectorActions.boundTo = [this] (const std::string& address)
+                {
+                    std::vector<std::pair<std::string, std::string>> bound;
+
+                    if (latest == nullptr)
+                        return bound;
+
+                    const auto ports = model::readPorts (*latest);
+
+                    for (const auto& row : model::bindingsOn (model::readBindings (*latest), address))
+                        bound.emplace_back (row.id, model::movedByWords (row, ports)
+                                                      + (row.cue.empty() ? std::string {} : ", " + model::liveWords (row, *latest)));
+
+                    return bound;
+                };
+
+                inspectorActions.unbind = [this] (const std::string& bindingId)
+                {
+                    send (gesture::deleteObject (bindingId));
                 };
 
                 /*  THE PANEL AT THE FOOT, ASKED FOR FROM THE CUE ITSELF. The
@@ -2226,6 +2257,21 @@ namespace wfg::client
             std::string listDrawn;
             std::string listAwaited;
 
+            /*  A BINDING ASKED FOR FROM A NUMBER and not yet arrived (§74,
+                BD.11): what it moves, for which cue's runs, the bindings the
+                show had then, and when it was asked for. And the binding the
+                foot last said Learn listens for. */
+            struct BindingAwaited
+            {
+                std::string target;
+                std::string cue;
+                std::vector<std::string> known;
+                juce::uint32 at = 0;
+            };
+
+            std::optional<BindingAwaited> bindingAwaited;
+            std::string learnSaid;
+
             /** The list to draw: the one shown, while the show still has it, else GO's. */
             std::string drawnListFor (const tree::TreeSnapshot& snapshot, const std::string& goList) const
             {
@@ -2253,6 +2299,30 @@ namespace wfg::client
 
                 if (listId != last.listId)
                     send (gesture::focusList (listId));
+            }
+
+            /*  A BINDING ASKED FOR FROM A NUMBER (namespace draft §74, BD.11):
+                made on its address - a row of the cue by its name when it is
+                for the cue's runs, so it goes where the cue is copied - and
+                Learn asked for it once it arrives. The window has no identifier
+                to give it, so it waits as a list made by the tabs' + is waited
+                for: the bindings the show had are remembered, and the new one
+                is the one that was not among them. */
+            void bindTo (const std::string& address, const std::string& cueId)
+            {
+                if (latest == nullptr || address.empty())
+                    return;
+
+                BindingAwaited awaited;
+                awaited.target = cueId.empty() ? address : address.substr (address.rfind ('/') + 1);
+                awaited.cue = cueId;
+                awaited.at = juce::Time::getMillisecondCounter();
+
+                for (const auto& row : model::readBindings (*latest))
+                    awaited.known.push_back (row.id);
+
+                send (gesture::createBinding (cueId, awaited.target));
+                bindingAwaited = std::move (awaited);
             }
 
             void newList (bool cart)
@@ -2483,6 +2553,50 @@ namespace wfg::client
 
                             break;
                         }
+
+                /*  AND A BINDING JUST ASKED FOR FROM A NUMBER (namespace draft
+                    §74, BD.11): Learn on it as it arrives, or nothing after three
+                    seconds - the show refused it, or it never came. */
+                if (bindingAwaited.has_value())
+                {
+                    for (const auto& row : model::readBindings (*snapshot))
+                        if (row.target == bindingAwaited->target && row.cue == bindingAwaited->cue
+                              && std::find (bindingAwaited->known.begin(), bindingAwaited->known.end(), row.id)
+                                   == bindingAwaited->known.end())
+                        {
+                            send (gesture::learnBinding (row.id));
+                            bindingAwaited.reset();
+                            break;
+                        }
+
+                    if (bindingAwaited.has_value() && juce::Time::getMillisecondCounter() - bindingAwaited->at > 3000u)
+                        bindingAwaited.reset();
+                }
+
+                /*  LEARN LISTENING, SAID AT THE FOOT (ARD): in words, what the
+                    control will move and how to stop - and taken away again when
+                    it has heard one, only if it was this that said it. */
+                if (const auto listening = model::bindingLearning (*snapshot); listening != learnSaid)
+                {
+                    const auto was = std::exchange (learnSaid, listening);
+
+                    if (! listening.empty())
+                    {
+                        auto moves = std::string ("it");
+
+                        for (const auto& row : model::readBindings (*snapshot))
+                            if (row.id == listening)
+                                moves = model::movesWords (row, *snapshot);
+
+                        shell->transport.setNotice (juce::String::fromUTF8 (("Learn: move the control that should move "
+                                                                             + moves + ". Show settings, Bindings: click"
+                                                                             " Moved by again to stop.").c_str()));
+                    }
+                    else if (! was.empty())
+                    {
+                        shell->transport.setNotice ({});
+                    }
+                }
 
                 listDrawn = drawnListFor (*snapshot, reading.listId);
                 shell->tabs.setTabs (model::readListTabs (*snapshot), listDrawn, reading.listId,

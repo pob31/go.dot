@@ -40,6 +40,8 @@
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/tree/Touches.h>
+#include <wfg/client/model/Bindings.h>
+#include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/Text.h>
 
 #include <cmath>
@@ -765,4 +767,63 @@ TEST_CASE ("binding bridge: Learn takes the next control that moves as the endpo
     REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
     CHECK (rig.send ("binding.learn", { s ("BNDTCH01") }).rejected == 1);
     CHECK (rig.bridge.learning().empty());
+}
+
+//==============================================================================
+/*  BD.11: THE WORDS THE WINDOW SAYS A BINDING IN. */
+TEST_CASE ("binding words: what moves it, what it moves and when, as the window says them")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    Rig rig;
+    namespace model = client::model;
+
+    const auto port = rig.document.createPort ("Desk").id;
+    const auto level = "/godot/cue/" + rig.cueId + "/level";
+
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BND00001"), s ("port"), s (port), s ("channel"), s ("2"),
+                                            s ("number"), s ("7"), s ("target"), s (level) }).rejected == 0);
+    REQUIRE (rig.send ("binding.create", { s (rig.cueId), s ("BND00002"), s ("source"), s ("osc"), s ("address"),
+                                            s ("/desk/fader/1"), s ("argument"), s ("1"), s ("target"), s ("level") }).rejected == 0);
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BND00003"), s ("type"), s ("controlChange14"), s ("number"), s ("1") }).rejected == 0);
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BND00004"), s ("type"), s ("noteVelocity"), s ("number"), s ("60"),
+                                            s ("control"), s ("rate"), s ("feedback"), s ("true") }).rejected == 0);
+
+    rig.published ("/godot/binding/order");
+    const auto& snapshot = *rig.snapshot;
+    const auto rows = model::readBindings (snapshot);
+    const auto ports = model::readPorts (snapshot);
+    const std::string dot { "\xc2\xb7" };
+
+    REQUIRE (rows.size() == 4u);
+    CHECK (rows[0].id == "BND00001");
+    CHECK (rows[3].control == "rate");
+    CHECK (rows[3].feedback);
+    CHECK (rows[0].pickup);
+
+    //  What moves it: a port by the show's name for it, any port, an OSC address and its argument from one.
+    CHECK (model::movedByWords (rows[0], ports) == "Desk " + dot + " ch 2 " + dot + " CC 7");
+    CHECK (model::movedByWords (rows[1], ports) == "OSC /desk/fader/1 " + dot + " argument 2");
+    CHECK (model::movedByWords (rows[2], ports) == "any port " + dot + " CC 1+33 (14 bits)");
+    CHECK (model::movedByWords (rows[3], ports) == "any port " + dot + " note 60");
+
+    //  What it moves: a cue's row by the cue's name, a row of its own cue, nothing yet.
+    const auto moves = model::movesWords (rows[0], snapshot);
+    CHECK (moves.find ("Door " + dot + " level") != std::string::npos);
+    CHECK (model::movesWords (rows[1], snapshot) == "its level");
+    CHECK (model::movesWords (rows[2], snapshot) == "nothing yet");
+
+    //  When it is live, and the address it writes.
+    CHECK (model::liveWords (rows[0], snapshot) == "all show");
+    CHECK (model::liveWords (rows[1], snapshot).rfind ("while ", 0) == 0);
+    CHECK (model::liveWords (rows[1], snapshot).find ("Door runs") != std::string::npos);
+    CHECK (model::targetAddressOf (rows[1]) == level);
+    CHECK (model::targetAddressOf (rows[2]).empty());
+    CHECK (model::bindingsOn (rows, level).size() == 2u);
+
+    //  How, and the way round a click takes it.
+    CHECK (model::howWords ("rate") == "Rate");
+    CHECK (model::nextControl ("absolute") == "relative");
+    CHECK (model::nextControl ("relative") == "rate");
+    CHECK (model::nextControl ("rate") == "absolute");
+    CHECK (model::bindingLearning (snapshot).empty());
 }

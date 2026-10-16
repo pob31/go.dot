@@ -377,6 +377,21 @@ namespace wfg::client::gesture
                    osc::Value::string ("key"), osc::Value::string (key) } };
     }
 
+    Event createBinding (const std::string& cueId, const std::string& target)
+    {
+        if (target.empty())
+            return { origin::window, "binding.create", { osc::Value::string (cueId) } };
+
+        return { origin::window, "binding.create",
+                 { osc::Value::string (cueId), osc::Value::string (""),
+                   osc::Value::string ("target"), osc::Value::string (target) } };
+    }
+
+    Event learnBinding (const std::string& bindingId)
+    {
+        return { origin::window, "binding.learn", { osc::Value::string (bindingId) } };
+    }
+
     Event createRange (const std::string& cueId, double in, double out)
     {
         return { origin::window, "range.create",

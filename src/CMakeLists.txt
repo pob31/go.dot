@@ -783,6 +783,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Flags.cpp
     wfg/client/model/Inspector.h
     wfg/client/model/Inspector.cpp
+    wfg/client/model/Bindings.h
+    wfg/client/model/Bindings.cpp
     wfg/client/model/KeyTriggers.h
     wfg/client/model/KeyTriggers.cpp
     wfg/client/model/ListTabs.h
