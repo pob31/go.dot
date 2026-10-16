@@ -44,12 +44,23 @@ namespace wfg::binding
         constexpr double nothing = 1.0e-12;
 
         /*  WHAT THE INPUT THREADS HEARD OF ONE BINDING since the last tick: the
-            latest place of an absolute or a rate control, the steps of a
-            relative one summed. */
+            latest place of an absolute or a rate control, and the lowest and
+            highest it passed through - a fader swept across the value inside
+            one tick has crossed it, though only its last place is written -
+            and the steps of a relative one summed. */
         struct Heard
         {
             std::optional<double> input;
+            double low = 0.0;
+            double high = 0.0;
             int steps = 0;
+
+            void take (double place) noexcept
+            {
+                low = input.has_value() ? std::min (low, place) : place;
+                high = input.has_value() ? std::max (high, place) : place;
+                input = place;
+            }
         };
 
         /*  A 14-BIT PAIR'S TWO HALVES AS LAST HEARD: the coarse on the
@@ -283,9 +294,9 @@ namespace wfg::binding
             binding last wrote it must be picked up again. Picked up on the
             control's travel, so a step means the same along a level's law as
             along a line. */
-        std::optional<double> absolute (const Binding& binding, Held& state, double input, const Target& target)
+        std::optional<double> absolute (const Binding& binding, Held& state, const Heard& heard, const Target& target)
         {
-            const auto travel = travelOf (binding.scale, input);
+            const auto travel = travelOf (binding.scale, *heard.input);
             const auto wanted = absoluteValue (binding.scale, travel, target.range);
 
             if (binding.pickup && target.current.has_value())
@@ -295,6 +306,13 @@ namespace wfg::binding
                 if (state.pickup.caught && state.written.has_value()
                       && std::abs (travelFor (binding.scale, *state.written, target.range) - at) > pickupStep)
                     state.pickup.caught = false;
+
+                //  Swept over the value inside this tick: caught, though only its last place is written.
+                const auto one = travelOf (binding.scale, heard.low);
+                const auto other = travelOf (binding.scale, heard.high);
+
+                if (at >= std::min (one, other) - pickupStep && at <= std::max (one, other) + pickupStep)
+                    state.pickup.caught = true;
 
                 if (! pickUp (state.pickup, travel, at, pickupStep))
                     return std::nullopt;
@@ -501,7 +519,7 @@ namespace wfg::binding
             }
             else
             {
-                heard.input = midiFraction (binding->type, value);
+                heard.take (midiFraction (binding->type, value));
             }
         }
 
@@ -560,7 +578,7 @@ namespace wfg::binding
             if (binding->control == Control::relative)
                 heard.steps += static_cast<int> (std::lround (std::clamp (number, -1000.0, 1000.0)));
             else
-                heard.input = number;
+                heard.take (number);
         }
 
         return ! matched.empty();
@@ -624,7 +642,7 @@ namespace wfg::binding
             {
                 case Control::absolute:
                     if (now->input.has_value())
-                        next = impl->absolute (binding, state, *now->input, *target);
+                        next = impl->absolute (binding, state, *now, *target);
                     break;
 
                 case Control::relative:

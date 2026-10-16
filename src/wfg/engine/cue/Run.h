@@ -468,6 +468,15 @@ namespace wfg::cue
             same number and every fade Phase 2 wrote behaves exactly as it did. */
         double ownLevel = 0.0;
 
+        /*  THE CUE'S LEVEL AS THIS RUN LAST READ IT, and whether a level fade
+            held it at the last pass (namespace draft §74, ARG): an edit of the
+            cue's `level` while it sounds moves `ownLevel` by what the edit moved
+            the decision - so what a fade or a join has done to the run is kept -
+            as an edit of its speed moves `ownRate` (DW). Set at the arm;
+            `Runner::applyLevelEdits` reads it. Never logged: the edit is. */
+        double levelSeen = 0.0;
+        bool levelHeld = false;
+
         /*  WHAT A HAND IS ADDING, in dB (Phase 6): the fader or the pad on the
             strip this run holds, written through `node.set` on
             `/godot/run/<id>/trim` and by nothing else. A term of the same sum

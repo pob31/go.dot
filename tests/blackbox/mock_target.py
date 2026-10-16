@@ -591,6 +591,13 @@ def make_handler(device: Device, listens: bool, osc_port_of, wire: str = "osc"):
                 self.reply(200, {"VALUE": device.everything_timed()})
                 return
 
+            #  WHEN `timed` COUNTS FROM, on this machine's monotonic clock - one
+            #  clock for every process on it - so a driver can put an arrival
+            #  on its own clock (M80, namespace draft §74).
+            if path == "/_mock/started":
+                self.reply(200, {"VALUE": [device.started]})
+                return
+
             if path == "/_mock/bundles":
                 self.reply(200, {"VALUE": [device.bundles]})
                 return

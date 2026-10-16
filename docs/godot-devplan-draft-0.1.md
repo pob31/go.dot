@@ -1544,7 +1544,7 @@ AJA card, by the testers (M79); the author's word on APV-AQD and the screen word
 GO never meets, holding any cue kind, each fired out of order by a key, a MIDI note, an OSC message,
 a pad on the tablet or a strip; a macro is a group in it. Then **bindings**: a MIDI control or an OSC
 address wired to a node and scaled into its range, for the evening or for a cue's run (namespace
-draft §74; PRD §3.5, §3.7, §3.10, §3.27 and §6.9 amended). The author's decisions are AQJ-AQQ; AQR-ARF
+draft §74; PRD §3.5, §3.7, §3.10, §3.27 and §6.9 amended). The author's decisions are AQJ-AQQ; AQR-ARG
 are the implementer's, the author's to overrule. On the branch `bindings`, in the worktree
 `go.dot-bindings`. The Stream Deck comes after, as a transport whose keys are a cart's triggers.
 

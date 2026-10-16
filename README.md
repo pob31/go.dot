@@ -56,7 +56,8 @@ has stood in front of the thing.
   or jump to another cue. Waits at both ends; groups that play as a timeline or
   a sequence, automatic or manual, with headers and footers that always run;
   shuffled rounds with a seed, so a random scene can be rehearsed; parallel
-  lists; triggers from OSC, MIDI and the wall clock; ranges and loops inside a
+  lists, shown as tabs; triggers from OSC, MIDI, the wall clock and the
+  computer's keys; ranges and loops inside a
   sound, with loop points that can move while it plays. Two GOs closer than half
   a second are taken as one bounce of the finger.
 - **Ready before the hand comes down.** Park the pointer on a scene and the scene
@@ -91,6 +92,14 @@ has stood in front of the thing.
   changes the show follows it and resamples.
 - **Live inputs.** Mic cues on named rack channels, through plugins; and live
   sampling — a take recorded during the show, then looped, layered or cleared.
+- **Carts and bindings** (namespace draft §74). A cart is a list GO never
+  meets, for cues fired out of order - by a trigger, a key, or the Android
+  remote's Cart tab - holding any kind of cue, a group being a macro; its
+  sampler groups are armed all show. A binding wires a MIDI control or an OSC
+  address to any number in the show, scaled into its range, for the whole
+  show or while one cue runs: absolute, relative or rate, picked up before it
+  moves a value, its value sent back to a motor fader, learned by moving the
+  control. The mouse wheel turns any number under it in the inspector.
 - **Control surfaces.** Mackie Control, and the Asparion D700 in full: sampler
   groups on the strips with fader-start, DCAs, EQ, Send and plugin pages on the
   rotaries, a master dial, standby on the arrows, and the faders flipped onto
@@ -204,9 +213,9 @@ has stood in front of the thing.
 
 ### Not built yet
 
-- **Bindings** — a general way to bind any parameter to any control, with read,
-  touch, latch and write modes (PRD §3.10). Today a surface reaches parameters
-  through Go.dot's own pages.
+- **Automation modes and the Stream Deck** — touch and write automation beside
+  the latch a level lane records with, and the Stream Deck as a surface whose
+  keys fire a cart's cues (PRD §3.10, §3.16).
 - **The web console's touch gestures** (Phase 7) — the console runs in a
   tablet's browser, an iPad's included, but as a mouse-and-keyboard page,
   without the touch gestures PRD §3.17 describes. The Android remote has them
@@ -234,7 +243,7 @@ the code.
   reproduce a session record for record. A replay fixture per phase runs in CI.
 - **Every serialising test runs twice**, under `C` and under `fr_FR`, because a
   number written with a decimal comma is a premiere-night bug.
-- **Measurements, numbered M1 to M68 so far**, report rather than gate: where a
+- **Measurements, numbered M1 to M80 so far**, report rather than gate: where a
   launch lands to the sample, how closely a rendered fade follows its curve, what
   a D700 refresh costs a tick, how long a Pd patch takes. They sit in the
   namespace draft beside the design they tested, and several changed a decision.
@@ -290,6 +299,7 @@ and says afterwards what was built against what was drawn.
 | Device presets | Consoles, lighting desks and spatial processors, each protocol a preset | §57 |
 | Redundancy | A main and a backup playing one show, measured over Dante | §58 |
 | The operator's window | Show settings in sections; flags; what is missing, said where it is used | §39.14, §63, §64 |
+| Carts, keys and bindings | A list GO never meets, fired by triggers, keys and the remote's Cart tab; a MIDI control or an OSC address bound to any number, learned by moving it; the wheel over a number | §74 |
 
 The documents, besides the PRD and the devplan:
 

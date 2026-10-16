@@ -1,0 +1,26 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="BD0SND01" name="Sound">
+      <Media id="BD0BED01" file="tone.wav" name="Bed" number="1">
+        <Route id="BD0RTE01" bus="BD0BS001" gains="1 0 0 1"/>
+        <Range id="BD0RNG01" in="0" loops="0" name="all" out="8"/>
+      </Media>
+      <Cue id="BD0CQR01" name="Clear" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="BD0BS001" name="Main L/R" width="2"/>
+  </Audio>
+  <MidiPorts>
+    <Port id="BD0PRT01" name="Desk"/>
+  </MidiPorts>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+  <Bindings>
+    <Binding id="BD0SC001" address="/desk/fader/1" outHigh="0" outLow="-20" ownRange="false" pickup="false" source="osc" target="/godot/cue/BD0BED01/level"/>
+    <Binding id="BD0MD001" number="7" outHigh="0" outLow="-20" ownRange="false" pickup="false" port="BD0PRT01" target="/godot/cue/BD0BED01/level"/>
+    <Binding id="BD0KN001" target="/godot/cue/BD0BED01/preWait"/>
+  </Bindings>
+</Show>

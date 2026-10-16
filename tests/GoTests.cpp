@@ -14716,6 +14716,38 @@ TEST_CASE ("speed: an edit reaches a sounding cue a horizon later over a tick, a
     CHECK (rig.audio.ratePoints.size() == placed + 2);
 }
 
+TEST_CASE ("level: an edit of a sounding cue's level is heard on the next tick, by what it moved, and waits for a fade that holds it")
+{
+    /*  DECISION ARG (namespace draft §74): as the speed's DW - a binding riding
+        a cue's level, the tablet's level and the master dial's are heard. */
+    LaneRig rig;
+    const auto id = rig.launch();
+    REQUIRE (rig.runs.find (id)->ownLevel == doctest::Approx (0.0));
+
+    rig.setCue (rig.mediaId, "level", "-6");
+    rig.tickOnce();
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (-6.0));
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-6.0));
+
+    //  An edit of anything else moves nothing.
+    rig.setCue (rig.mediaId, "name", "Renamed");
+    rig.tickOnce();
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (-6.0));
+
+    //  Under a fade the fade has it: the edit waits, and lands by what it moved as the fade lets go.
+    rig.fire (rig.fadeId);
+    rig.tickOnce();
+    rig.setCue (rig.mediaId, "level", "-9");
+    rig.tickOnce();
+    CHECK (rig.runs.find (id)->ownLevel <= -6.0);
+    CHECK (rig.runs.find (id)->ownLevel >= -20.0);
+
+    for (auto tick = 0; tick < 80; ++tick)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (-23.0));
+}
+
 TEST_CASE ("speed: the mode is the arm's, and a sounding cue keeps the one it was armed with")
 {
     /*  DECISION DV: a mode rebuilds Tracktion's graph, so it changes at the

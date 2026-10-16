@@ -2126,6 +2126,15 @@ namespace wfg::cue
             as a pass, a group trim reaches every descendant on the tick it
             moves, including the ones nothing else is touching. */
         void applyLevels();
+
+        /*  A CUE'S LEVEL EDITED WHILE IT SOUNDS (namespace draft §74, ARG):
+            heard on the next tick, as an edit of its speed (DW), its lanes
+            (DB), its EQ and its sends are. On a revision change each sounding
+            media or mic run moves `ownLevel` by what the edit moved the cue's
+            `level`; a level fade aimed at the run holds it, and the edit lands
+            as the fade lets go. A binding riding a cue's level is heard this
+            way, and so is the tablet's level and the master dial's. */
+        void applyLevelEdits();
         void applyRouting();
 
         /*  EVERY OUTPUT'S GAIN (namespace draft §38): its own trim plus the
@@ -3894,6 +3903,9 @@ namespace wfg::cue
 
         /** The show revision `applyRates` last read the speeds at; the same twin. */
         std::uint64_t rateRevision = 0;
+
+        /** And `applyLevelEdits` the levels. */
+        std::uint64_t levelRevision = 0;
 
         /*  THE PASS'S OWN BOOKS (§20.9, §34): the table `lane.*` moves; for
             each lane of the flipped cue, the ride so far - a segment per

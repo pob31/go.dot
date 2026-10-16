@@ -1655,6 +1655,20 @@ add_test(NAME blackbox.triggers.fr_FR
 set_tests_properties(blackbox.triggers.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# BINDINGS, HEARD (namespace draft §74, BD.12): a datagram on Go.dot's port and a
+# controller played into a declared port's input each moving a cue's level as
+# its binding, and the level heard in the render; a control learned by moving it.
+add_test(NAME blackbox.bindings.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/bindings.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.bindings.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.bindings.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/bindings.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.bindings.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # PHASE 6'S PADS, HEARD: a sampler bank armed by GO and played by hand over
 # the network, with a real Tracktion graph under it and the render read back as
 # arithmetic - a press at velocity 64 is a tenth of the constant, a hold clip is

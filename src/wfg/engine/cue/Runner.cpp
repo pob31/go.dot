@@ -4434,6 +4434,7 @@ namespace wfg::cue
             a burst at the top of a cue the designer drew as a fade-in. The
             lane is its own term, so the run's own level stays the cue's. */
         run.ownLevel = request.levelDb;
+        run.levelSeen = numberOf (cue, "level");
         request.levelDb += run.laneDb;
         run.level = request.levelDb;
 
@@ -19077,6 +19078,7 @@ namespace wfg::cue
         flushDohWrites (engine);
 
         advanceFades (engine, tick);
+        applyLevelEdits();
         applyJoins();
         applyLanes();
         recordLane (engine);
@@ -22183,6 +22185,56 @@ namespace wfg::cue
                 run->sendLaneDb = std::move (offsets);
                 ++sendLaneRevision;
             }
+        }
+    }
+
+    void Runner::applyLevelEdits()
+    {
+        /*  GATED AS `applyRates` IS: a tick with nobody editing compares one
+            number, and an edit - or an undo - reaches every sounding run of
+            the cue on the next tick (ARG). */
+        const auto revision = document.showRevision();
+        const auto reread = revision != levelRevision;
+        levelRevision = revision;
+
+        for (const auto& snapshot : runs.current())
+        {
+            if (snapshot.isFinished() || (snapshot.kind != "media" && snapshot.kind != "mic"))
+                continue;
+
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr)
+                continue;
+
+            /*  HELD WHILE A LEVEL FADE MOVES IT, asked of the fades themselves -
+                a fade aimed at the run, and not its speed's, a DCA's or one of
+                what it owns - and read again as it lets go, so an edit made
+                under the fade lands then. */
+            const auto held = std::any_of (running.begin(), running.end(),
+                                           [&snapshot] (const FadeJob& job)
+                                           {
+                                               return ! job.movesRate && job.move.empty() && job.dca.empty()
+                                                        && job.target == snapshot.id;
+                                           });
+            const auto letGo = run->levelHeld && ! held;
+            run->levelHeld = held;
+
+            if ((! reread && ! letGo) || held)
+                continue;
+
+            const auto cue = document.findById (run->cue);
+
+            if (! cue.isValid())
+                continue;
+
+            const auto decided = numberOf (cue, "level");
+
+            if (std::abs (decided - run->levelSeen) < 1.0e-9)
+                continue;
+
+            run->ownLevel += decided - run->levelSeen;
+            run->levelSeen = decided;
         }
     }
 
