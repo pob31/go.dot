@@ -30183,17 +30183,17 @@ Every new row has a default, so an old show opens and saves unchanged.
 
 | Stage | What | Built |
 |---|---|---|
-| GJ.0 | This section; PRD §3.6, §3.24 and the answered list; the devplan | |
-| GJ.1 | The rows, the schema | |
-| GJ.2 | The inspector, desktop and page: the rows after `advance`, their words, greyed where they mean nothing | |
-| GJ.3 | The join envelope and `joinDb` in the level sum | |
-| GJ.4 | Manual: Gapless and Crossfade at the incoming member's launch; Esc, double Esc and Doh! across one | |
-| GJ.5 | Automatic: the early arm (AOF), the placed launch, known ends and Let play where there is none, the waits, shuffle and loops, the stop verbs, replay | |
-| GJ.6 | Pictures: the dissolve, a movie's locked sounds | |
-| GJ.7 | What reads the show without playing it: a group's length, the solver, the slot analysis, the timeline, a backup's seat | |
-| GJ.8 | The row says where a boundary is Let play and why | |
-| GJ.9 | The QLab import (AOI) | |
-| GJ.10 | The range crossfade (AOJ) | |
+| GJ.0 | This section; PRD §3.6, §3.24 and the answered list; the devplan | 50bb774 |
+| GJ.1 | The rows, the schema | 8dcfb75 |
+| GJ.2 | The inspector, desktop and page: the rows after `advance`, their words, greyed where they mean nothing | 4b3d600 |
+| GJ.3 | The join envelope and `joinDb` in the level sum | be04257 |
+| GJ.4 | Manual: Gapless and Crossfade at the incoming member's launch; Esc, double Esc and Doh! across one | be04257 |
+| GJ.5 | Automatic: the early arm (AOF), the placed launch, known ends and Let play where there is none, the waits, shuffle and loops, the stop verbs, replay | ddb3c6a |
+| GJ.6 | Pictures: the dissolve, a movie's locked sounds | d87b75f |
+| GJ.7 | What reads the show without playing it: a group's length, the solver, the slot analysis, the timeline (a seat inside a crossfade not, §69.6) | 480c2d6 |
+| GJ.8 | The row says where a boundary is Let play and why | 77f57f1 |
+| GJ.9 | The QLab import (AOI) | 5b0ce75 |
+| GJ.10 | The range crossfade (AOJ): a looping range's wraps | 1776891 |
 | GJ.11 | M75, the README, the guides, the whole suite | |
 
 ### 69.5 Measurements

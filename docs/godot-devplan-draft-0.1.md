@@ -1395,8 +1395,11 @@ to SSL, Adamson and the grandMA1 manual.
 and manual - **Let play** (today's), **Gapless** (the next placed on the previous one's end, or its
 GO cutting what still sounds), **Crossfade** (a length and a curve; the two cross) - with a member's
 waits moving the fades, pictures dissolving, and the range crossfade of PRD §3.24 built after it
-(namespace draft §69; PRD §3.6, §3.24). The author's decisions are ANY-AOB; AOC-AOJ are the
-implementer's, the author's to overrule.
+(namespace draft §69; PRD §3.6, §3.24). The author's decisions are ANY-AOB; AOC-AOL are the
+implementer's, the author's to overrule. *Built 2026-10-16*, GJ.0-GJ.10 (§69.4); a crossfade between two
+ranges, a seek or seat inside a crossfade carrying its fades, and a nested group in a placed join are
+not built (§69.6). Owed: the author's look and words (Join, Let play, the marks, range wraps), M75 on
+the RME.
 
 | Stage | What | Depends on |
 |---|---|---|

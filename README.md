@@ -196,8 +196,6 @@ has stood in front of the thing.
   repository, [go.dot-remote](https://github.com/pob31/go.dot-remote)
   (namespace draft §68): it runs on the author's tablet; a signed release and its
   page in the tester guides are still to come.
-- **Group joins** — gap, gapless or crossfade between a sequence's members,
-  decided (PRD §3.6) and waiting for the client's layout to settle.
 - **Video latency offsets and DeckLink output** (Phase 8b).
 - **Integrations** — OSCQuery devices found on the network by
   themselves, and commanding WFS-DIY's and XOA's sources with claims per cue
@@ -271,6 +269,7 @@ and says afterwards what was built against what was drawn.
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
 | Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |
+| Group joins | Let play, Gapless or Crossfade between a sequence's members, automatic and manual, pictures dissolving; a looping range's wraps crossfaded | §69 |
 | Authoring | WFS-DIY and S21_HiJack write cues into Go.dot | §56, [authoring protocol](docs/godot-authoring-protocol-0.1.md) |
 | Device presets | Consoles, lighting desks and spatial processors, each protocol a preset | §57 |
 | Redundancy | A main and a backup playing one show, measured over Dante | §58 |

@@ -102,6 +102,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Feature | What it does | Where |
 | --- | --- | --- |
 | Groups | *Timeline* (members start together), *Sequential on GO*, *Sequential automatic*, *Shuffle* (new order each round), *Sampler* (sounds and pictures fired from pads and faders, a picture's fader setting its opacity), *Time group* (its members start when LTC, MTC or the clock reaches their time: see *Timecode in*) | *Add > group* |
+| Joining a sequence's members (new) | Choose how one member leads into the next, once for the whole group: *Let play* (each member as it is), *Gapless* (the next starts exactly as the previous ends) or *Crossfade*, with a length and a curve. In an automatic group the next member is placed on the end of the one before; in a group stepped with GO, each GO cuts or crossfades whatever of the group is still playing. Pictures dissolve into each other. A sound's looping range can crossfade its wraps the same way | A sequential group's *Join* in the inspector; a sound's *range wraps* |
 | Fades | Fade level, sends, EQ and plugin values of any cue or group, with a drawn curve | *Add > fade*, then *Mixer* and *Curve* |
 | Transport cues | Stop, stop after this member or round, start another cue; enable or disable a cue for this run; jump standby to a cue, or jump and GO | *Add > transport* |
 | Automatic names (new) | A cue nobody has named is called by what it does: a fade or a stop by its target (*Fade out Intro music*), an OSC or MIDI cue by its message, a sound, a picture or a mic by its file or input. It follows when the target, file or message changes. Type a name and it stays; clear it and the automatic one comes back | Name column; inspector, *Name* |
@@ -258,10 +259,6 @@ The web console already runs in any browser on the network. It will grow into a 
 ### Video latency compensation
 
 Set a projector's delay once, and sound is held back to line up with the picture.
-
-### Joining a sequence's members
-
-**Gap, gapless or crossfade**, set once on a sequential group: a silence between its members, none at all, or a crossfade whose length you choose.
 
 ### Integration with software
 
