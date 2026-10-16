@@ -30210,3 +30210,77 @@ Every new row has a default, so an old show opens and saves unchanged.
 A nested group as a member of a placed join, and a ranged sound, a fade, a memo or a network cue as the outgoing member of one (AOE); a crossfade's length or curve per member; a range
 crossfade's curve; a crossfade between two ranges of a sound (AOJ); a seek or a seat into a crossfaded range, which plays it with gapless wraps from there; a seek, or a backup seated, landing inside a crossfade - both members are placed where they are, by the solver and the timeline alike, but the crossing's fades are not carried into the seat, so the two sound whole until the outgoing one ends; the clash warning where an outgoing footer and an incoming header touch one target
 (PRD §3.6, *proposed* since 2026-09-18).
+
+## 70. Sound or picture delay, on the cue
+
+PRD §3.19c had a signed latency offset in machine config, perhaps per destination; nothing of it was
+built. The author, 2026-10-16: *"The audio/video latency compensation is a value to delay either the
+audio or the video to match the processing time of either. It is built into the cue rather than in the
+prewait, but it adds to it on either the audio or video. I would be explicit about which media is
+delayed rather than have a latency compensation parameter that can be confusing as to which stream gets
+delayed."* Decisions run from AOM.
+
+### 70.1 What it is, before its names
+
+A projector shows a picture a few frames after it is sent; a long audio chain - a processor's
+buffering, a network hop - plays a sound some milliseconds after it is sent. Go.dot cannot know either.
+So a cue says **which of its two streams starts later, and by how much**, and that stream is placed that
+much after the other, on the sample:
+
+| Delay | A movie and its locked sound | A sound cue | A picture with no sound |
+|---|---|---|---|
+| **None** | both start together - today's | the sound starts when it is due | it comes up when it is due |
+| **Sound** | the picture starts; its sounds *Delay by* later | the sound starts *Delay by* after it is due | nothing to hold back - a warning |
+| **Picture** | the sounds start; the picture *Delay by* later | not offered | the picture comes up *Delay by* after it is due |
+
+The cue's pre-wait runs first, for both streams; the delay is added on the delayed stream after it. A
+pre-wait counts in ticks, the delay in samples.
+
+### 70.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **AOM** | **On the cue, saved with the show**, not a rig value in machine config: a different projector at another venue is a multi-select edit across the cues it affects (§4.12). PRD §3.19c's machine-config and per-destination lines go. | the author's (offered as "On the cue", recommended, beside a machine value the cue applies and both) |
+| **AON** | **A choice and one amount**: *Delay* - None, Sound, Picture - and *Delay by*, in milliseconds. Only one stream is ever held back; delaying both by different amounts is delaying one by the difference. | the author's (offered beside two amounts, *Delay sound by* and *Delay picture by*, which I recommended) |
+| **AOO** | **Video cues and sound cues carry it.** A movie holds back its picture or its locked sounds; a sound cue fired beside a picture holds back its own sound, its choice None or Sound. | the author's (offered as "Video cues + sound cues", recommended) |
+| **AOP** | **The cue ends with its later stream.** The movie's end does not cut a held-back sound's tail; post-wait, a sequence's next member and the cue's length count from the later stream's end. | the author's (offered as "Yes, ends with the later stream", recommended) |
+| **AOQ** | **Four rows**: `delay` on a video cue (`none`, `sound`, `picture`; `none`) and on a sound cue (`none`, `sound`; `none`), and `delayBy` on each (milliseconds, 0..2000, nought). Milliseconds because the amounts are a projector's frames and a processor's buffers; two seconds is far past any rig and short of a pre-wait's work. Read when the cue fires, as `rateMode` is: an edit while it plays waits for the next GO. | mine |
+| **AOR** | **A locked sound follows its movie**: its own `delay` and `delayBy` are refused, as its start offset and speed are (§37.5), and the movie's choice decides - Sound holds back every sound locked to it, Picture holds back the picture. | mine |
+| **AOS** | **Sound on a video cue with no sound to hold back** - a still, a fill, a mask, a capture, or a movie with no locked sound - is not refused, since a source changed later would leave the refusal wrong; `wfg validate` and the cue's warnings say *nothing to delay*. | mine |
+| **AOT** | **The delay is added where the stream is placed, and nowhere before it.** A sound's launch sample and a picture's first point move by the delay after the lead, the seat, a time group's code sample and `run.late`'s reckoning are done, so a lateness report and a backup's seat keep their meaning. Every later placement of the delayed stream keeps the lag: a seek, a speed change (placed the delay later on the delayed stream, so the lag stays a constant in wall time), a chase (its target less the delay), the re-anchoring of a movie on its sounds, a resume. | mine |
+| **AOU** | **The stops end both streams together.** Esc fades what is sounding and showing from the moment it is pressed; double Esc kills both; Doh! takes both back. A stream still inside its delay never starts. | mine |
+| **AOV** | **What reads the show without playing it** - a cue's length, the solver, the slot analysis, load-to-time, a backup's seat - counts the delay: the delayed stream sits at *t* minus the delay, and where that is before its start it starts the difference later. | mine |
+
+### 70.3 Rows
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `cue/<id>/delay` | `s` | rw | a video cue's: `none`, `sound`, `picture`; a sound cue's: `none`, `sound`; `none`. Refused on a locked sound (AOR) |
+| `cue/<id>/delayBy` | `d` | rw | milliseconds, 0..2000; nought. Refused on a locked sound |
+
+Every new row has a default, so an old show opens and saves unchanged. Shown as **Delay** (*None*,
+*Sound*, *Picture*) and **Delay by** - the author's choice of shape, my words, for the author.
+
+### 70.4 Stages
+
+| Stage | What | Built |
+|---|---|---|
+| LC.0 | This section; PRD §3.19c, §3.19d and §6.9; the devplan | |
+| LC.1 | The rows, the refusal on a locked sound, the warning, the schema, the `time` part | |
+| LC.2 | A sound held back: its launch placed later on the sample | |
+| LC.3 | A picture held back; a movie's locked sounds following it; a seek and the re-anchoring | |
+| LC.4 | The later end: the movie's end no longer cutting a held-back sound; a cue's length, the solver, load-to-time, a backup's seat | |
+| LC.5 | Speed, chase and pause keeping the lag | |
+| LC.6 | The inspector, desktop and page | |
+| LC.7 | M76, the README, the guides, the whole suite | |
+
+### 70.5 Measurements
+
+- **M76** - a movie and its locked sound, Release, Delay: Sound 100 ms: the sound recorded off the
+  interface against the renderer's presented frames, the lag 100 ms within a frame; again with Delay:
+  Picture. Owed.
+
+### 70.6 Not built
+
+A delay per destination - a WFS-DIY slot's against a bus's - which the PRD had as a proposed
+refinement and the author's AOM leaves out; the test clip and its nudging UI (PRD §3.19c, later).

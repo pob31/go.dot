@@ -1940,29 +1940,43 @@ adjustment in practice)*:
   top, and of two on the same layer the one brought up later *(implementer's
   call, VI)*.
 
-#### 3.19c Latency compensation — user-set, audio adjusted to video
+#### 3.19c Sound or picture delay — on the cue, set by the user
+
+*Rewritten 2026-10-16, at the author's direction*
+(`docs/godot-namespace-draft-0.1.md` §70). It replaces a signed offset kept in
+machine config.
 
 External processing times are not available to Go.dot; the program cannot guess
-a rig. **The user sets the delays.**
+a rig. **The user sets the delays.** A projector holds its picture back by a few
+frames; a long audio chain — a WFS-DIY processor's buffering, a network hop —
+holds the sound back instead. Either can be the longer.
 
-**Video is the fixed reference; audio is adjusted to match it.** Screens and
-projectors rarely move on stage, so the video path's latency is stable for a
-production and is treated as the anchor. Audio is delayed (or, if the audio
-chain is longer, video is) to line up.
+**The delay is built into the cue, not into its pre-wait.** A cue says **which of
+its streams starts later, and by how much**: *Delay: None / Sound / Picture* and
+*Delay by:* a number of milliseconds. The delayed stream starts that much after
+the other one, on the sample. The cue's pre-wait comes first, for both, and the
+delay adds to it on the delayed stream alone. **Naming the stream is the point**:
+a signed "latency compensation" number leaves the operator working out which way
+it goes, in a hurry, in the dark.
 
-Model:
-
-- a **user-set offset, signed either way** — audio-late or video-late — because
-  a long audio chain can exceed a projector's internal delay and vice versa
-- **per-destination** *(proposed refinement)*: audio through a WFS-DIY slot
-  carries the processor's buffering and possibly a network hop; audio to a bus
-  does not. If a single offset per cue proves insufficient for shows mixing
-  spatialised and direct cues, the offset moves to the destination and the engine
-  sums per cue. Start simple; promote only if needed.
+- **One stream, never both.** Delaying both by different amounts is the same as
+  delaying one by the difference.
+- **Video cues and sound cues carry it.** A movie delays its picture or its
+  locked sound; a sound cue fired beside a picture holds its own sound back
+  (*None* or *Sound*). A locked sound follows its movie and has no delay of its
+  own.
+- **On the cue, saved with the show.** A different projector at the next venue
+  is a multi-select edit across the cues it affects (§4.12) — the document holds
+  what someone decided (§4.10).
+- **On the sample, never rounded to the tick.** A pre-wait counts in 20 ms ticks;
+  a delay of a frame and a half does not.
+- **The cue ends with its later stream.** A held-back sound plays its tail after
+  the movie's last frame; post-wait, follow-ons and the cue's length count from
+  the end of the later of the two.
+- **The stops keep their guarantees** (§4): Esc, double Esc and Doh! end both
+  streams together, and a stream still inside its delay never starts.
 - **WFS-DIY users will want minimal processor latency** to avoid variable delay,
   which keeps the audio side predictable and the correction small.
-- Offsets are rig properties, not show properties: store in **machine-level
-  config, not the show file** *(proposed)*.
 
 **Guidance, later:** a test clip — black/white inverting every 0.5 s with a beep
 on each transition — and a UI to nudge until they coincide. Cheap to ship once
@@ -1986,8 +2000,8 @@ position derived from it.
 - **Audio is the master clock.** The hardware audio clock is the most stable thing
   in the machine, and a dropped audio buffer is audible while a dropped video
   frame is not.
-- **Video frames are presented against the audio position** plus the destination
-  offset — never on vsync alone. Long-file divergence then appears as an
+- **Video frames are presented against the audio position** plus the cue's
+  picture delay (§3.19c) — never on vsync alone. Long-file divergence then appears as an
   occasional repeated or dropped frame rather than a slow slide. Never the
   reverse direction.
 - The 50 Hz data tick is derived from the same sample time, so a trajectory lane,
@@ -3923,8 +3937,14 @@ re-claims strips lost to eviction and cannot conjure strips the layout lacks.
 
 Marked *(proposed)* in the text. The ones worth a decision before they get
 built into something: stereo cue → two mono slots (§3.9b); tag targeting
-(§3.8); per-destination latency and machine-level storage (§3.19c). The
-infinite-loop load-to-time case (§3.24) is settled as solve-in-practice.
+(§3.8). The infinite-loop load-to-time case (§3.24) is settled as
+solve-in-practice.
+
+*Answered 2026-10-16, at the author's direction* (`docs/godot-namespace-draft-0.1.md`
+§70): per-destination latency and machine-level storage (§3.19c), no. The delay
+is on the cue, saved with the show, and names the stream it holds back — *Delay:
+None / Sound / Picture*, *Delay by* milliseconds — and the cue ends with its later
+stream.
 
 *Answered since* (amended in 0.8, at the author's direction, 2026-09-10; the
 decisions are in `docs/godot-namespace-draft-0.1.md` §9): processor-declared

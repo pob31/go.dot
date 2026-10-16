@@ -499,8 +499,8 @@ a signed release build and the tester guides' section once there is an APK to gi
 - **Compositing chain** in the stated order; blend modes; integer layer order;
   per-cue and per-display **ASC CDL** + 3D LUT.
 - **Capture inputs** as allocator resources.
-- **Latency offsets**: user-set, signed, stored in machine config; video the
-  fixed reference (PRD §3.19c). Test clip is v1.x.
+- **Sound or picture delay** on the cue, the stream named (PRD §3.19c, rewritten
+  2026-10-16; its own plan below). Test clip is v1.x.
 - Clock-skew readout per device.
 - **Video cues on sampler strips** (PRD §3.27): opacity from zero is fader-start
   for a picture; nothing new beyond the parameter the strip trims.
@@ -559,7 +559,7 @@ Doh! doing to the picture what they do to the sound.
 ### Phase 8b — Movies, capture and DeckLink · L
 
 HAP in QuickTime (demux, snappy, compressed textures) presented against the audio
-position with the signed latency offset in machine config; capture inputs as
+position, a cue's sound or picture delay on top (PRD §3.19c); capture inputs as
 allocator resources; the clock-skew readout; a DeckLink output sink once its
 SDK's licence has been read against GPL-3; the test clip. Drawn when 8a is on a
 projector.
@@ -1420,6 +1420,32 @@ the RME.
 across its length, a post-wait shrinking the crossing; a manual sequence's GO cuts or crosses what
 still sounds; Esc and Doh! across a crossfade do what §3.6 says; a ranged sound crosses its wraps; an
 old show saves unchanged; CI is green.
+
+---
+
+### Sound or picture delay, on the cue · M
+
+*Added on 2026-10-16*, at the author's direction: what the PRD called latency compensation is
+**built into the cue**, not its pre-wait, and **names the stream it holds back** - *Delay: None /
+Sound / Picture* and *Delay by* milliseconds - on video cues and sound cues, saved with the show; the
+cue ends with its later stream (namespace draft §70; PRD §3.19c rewritten, §6.9 answered). The
+author's decisions are AOM-AOP; AOQ-AOV are the implementer's, the author's to overrule.
+
+| Stage | What | Depends on |
+|---|---|---|
+| LC.0 | Docs: namespace §70, PRD §3.19c, §3.19d and §6.9, this | - |
+| LC.1 | The rows, the refusal on a locked sound, the warning, the schema, the `time` part | LC.0 |
+| LC.2 | A sound held back: its launch placed later on the sample | LC.1 |
+| LC.3 | A picture held back; a movie's locked sounds following it; a seek and the re-anchoring | LC.2 |
+| LC.4 | The later end: the movie's end no longer cutting a held-back sound; a cue's length, the solver, load-to-time, a backup's seat | LC.3 |
+| LC.5 | Speed, chase and pause keeping the lag | LC.3 |
+| LC.6 | The inspector, desktop and page | LC.1 |
+| LC.7 | M76, the README, the guides, the whole suite, CI | all |
+
+**Done when:** a movie with Delay: Sound 100 ms is heard 100 ms after its picture, on the sample,
+through a seek, a speed change, a chase and a pause; Delay: Picture the other way; a held-back sound's
+tail is not cut and the next cue follows from it; Esc, double Esc and Doh! inside the delay leave
+nothing behind; an old show saves unchanged; CI is green.
 ## Phase 10 — Timecode, panic, hardening · M
 
 **Goal:** the stop levels and the sync sources that a touring show requires.
