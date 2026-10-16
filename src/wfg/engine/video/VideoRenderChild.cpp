@@ -2621,7 +2621,7 @@ namespace wfg::video
                     {
                         present.insert (input.id);
                         auto& held = taking[input.id];
-                        const auto key = std::to_string (static_cast<int> (input.kind)) + "|" + input.sender;
+                        const auto key = std::to_string (static_cast<int> (input.kind)) + "|" + input.sender + "|" + input.videoMode;
 
                         if (! input.enabled)
                         {
@@ -2636,7 +2636,7 @@ namespace wfg::video
                             held.why.clear();
 
                             if (painter != nullptr)
-                                held.receiver = render::makeReceiver (input.kind, input.sender, held.why);
+                                held.receiver = render::makeReceiver (input.kind, input.sender, held.why, input.videoMode);
                             else
                                 held.why = deviceProblem;
 
@@ -2686,7 +2686,8 @@ namespace wfg::video
                                                      receiver != nullptr ? receiver->width() : 0,
                                                      receiver != nullptr ? receiver->height() : 0,
                                                      receiver != nullptr ? receiver->frameRate() : 0.0,
-                                                     receiver != nullptr ? receiver->problem() : held.why);
+                                                     receiver != nullptr ? receiver->problem() : held.why,
+                                                     receiver != nullptr ? receiver->format() : std::string {});
                         }
 
                         for (; n < static_cast<std::size_t> (region::maxInputs); ++n)

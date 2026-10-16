@@ -30336,7 +30336,7 @@ be read, never copied in.
 | **APK** | **The sound is placed by its sample** at the card's moment for that sample - so it leaves the card with the picture drawn for it - and resampled to the card's 48 kHz, the ratio from the two clocks and trimmed on what the card holds. This is the adaptive resampling §3.19d left for v1.x, built for a card's sound alone. *As built (DL.7):* no ratio is steered - each of the card's samples is read at the position on Go.dot's count the two lines say it stands for, by a windowed sinc whose cutoff is lowered under a faster source, so nothing drifts that would need trimming. | mine |
 | **APQ** | **A card carrying sound sends its picture and its sound 60 ms behind Go.dot's count**, together. A sample is known only once the audio thread has made it, and must reach the card before the card plays it; the picture waits with it so the two leave together. Its latency readout includes it; M77 settles the number. | mine |
 | **APL** | **The stops reach the card through the buses**: Esc fades, double Esc kills, Doh! takes back, the same samples as the interface's. Nothing outside Go.dot is muted (§4.4). A renderer killed stops the card's picture and sound until it is back. | mine |
-| **APM** | **A capture's format is found by the card**; it arrives as 8-bit YUV and is turned to colour on the graphics card. No signal **draws black**, with a warning, as a lost return does. One input per connector: a second is refused. Sound coming in is not taken. | mine |
+| **APM** | **A capture's format is found by the card**; it arrives as 8-bit YUV and is turned to colour on the graphics card. No signal **draws black**, with a warning, as a lost return does. One input per connector: a second is refused. Sound coming in is not taken. *As built (DL.8):* turned to colour on the CPU, on the input's own thread, never the render thread's - BT.709, BT.601 for a picture no taller than 576; a Debug build keeps up with a 720p input at some twenty frames a second, so 4K may want it moved to the graphics card, which M77 will say. | mine |
 | **APN** | **Card kinds are offered where a card is found.** The output and input menus list DeckLink when Desktop Video reports a card; an insert never takes one. | mine |
 | **APO** | **A test card stands in for a real one**: with `WFG_DECKLINK_FAKE=1` Go.dot finds one "Go.dot test card" with an output, an input that loops it back, both keyers and 16 channels, a clock that can drift and frames that can be dropped. Every test uses it, and the screens can be looked at with no card. | mine |
 | **APP** | **The testers' probe**: `wfg decklink-probe` lists each card, what it can do and the formats it offers, and with `--run` plays a moving pattern with a flash and a beep each second, on the cable and the interface, and writes what happened - frames late, latency, skew, where the sound fell. | mine |
@@ -30374,7 +30374,7 @@ card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine,
 | DL.4 | 10-bit YUV | 4540aa6 |
 | DL.5 | Fill and key | b217edd |
 | DL.6 | The sound taken off the audio thread | 7a7367f |
-| DL.7 | The sound placed and resampled on the card | |
+| DL.7 | The sound placed and resampled on the card | 92eaf9b |
 | DL.8 | A card as a video input | |
 | DL.9 | The Video tab, the inputs, the problems, the inspector | |
 | DL.10 | `decklink-probe --run`, the testers' instructions, M77 | |

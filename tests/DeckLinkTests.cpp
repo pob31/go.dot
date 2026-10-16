@@ -771,3 +771,95 @@ TEST_CASE ("video gpu: a card output carrying a bus sends its sound behind the c
     CHECK (perSecond > 40000.0);
     CHECK (perSecond < 56000.0);
 }
+
+TEST_CASE ("decklink: an input's 8-bit YUV turned to colour - legal black and white, BT.709's red, BT.601 for a small picture (DL.8)")
+{
+    //  Four pixels: black, white, red as BT.709 codes it, and the same codes read as BT.601.
+    const std::uint8_t row[] { 128, 16, 128, 16,     128, 235, 128, 235,     102, 63, 240, 63 };
+    std::uint8_t bgra[6 * 4] {};
+
+    video::card::uyvyToBgra (row, 6, 1, static_cast<int> (sizeof (row)), bgra, false);
+
+    CHECK (bgra[0] == 0);
+    CHECK (bgra[1] == 0);
+    CHECK (bgra[2] == 0);
+    CHECK (bgra[3] == 255);
+    CHECK (bgra[8] == 255);
+    CHECK (bgra[9] == 255);
+    CHECK (bgra[10] == 255);
+
+    //  Red: blue and green near nought, red near full.
+    CHECK (bgra[16] <= 3);
+    CHECK (bgra[17] <= 3);
+    CHECK (bgra[18] >= 252);
+
+    //  The same codes through BT.601: not the same red - which is why the
+    //  height chooses.
+    video::card::uyvyToBgra (row, 6, 1, static_cast<int> (sizeof (row)), bgra, true);
+    CHECK (bgra[18] < 240);
+    CHECK (bgra[18] > 220);
+}
+
+TEST_CASE ("video gpu: a card's input takes in what the test card's output sends - its size, format and rate - and says no signal when it stops (§71, DL.8)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-card-in-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    const juce::File bundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) + "/bundles/video" };
+    REQUIRE (doc::Bundle::open (bundle, document).ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "decklink").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/card", "fake-1").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/videoMode", "720p50").ok);
+
+    //  The test card's input, found by the card: it shows what its output last sent.
+    REQUIRE (document.createVideoInput ("Loop", "decklink", "fake-1", "VD000031").ok);
+
+    setVariable ("WFG_DECKLINK_FAKE", "1");
+    setVariable ("WFG_VIDEO_SOFTWARE", "1");
+
+    Ticks ticks;
+    video::VideoHost host { spec };
+    host.configure (document);
+
+    const auto running = tickUntil (host, ticks, [&host] { return host.readouts().renderer == "running"; });
+    setVariable ("WFG_DECKLINK_FAKE", nullptr);
+    setVariable ("WFG_VIDEO_SOFTWARE", nullptr);
+    REQUIRE (running);
+
+    REQUIRE (tickUntil (host, ticks, [&host]
+                        {
+                            const auto said = host.readouts();
+                            const auto* input = said.input ("VD000031");
+                            //  Each frame turned to colour on the CPU: a Debug build keeps up with some.
+                            return input != nullptr && input->connected && input->frameRate > 5.0;
+                        }, 15000));
+
+    {
+        const auto said = host.readouts();
+        const auto* input = said.input ("VD000031");
+        REQUIRE (input != nullptr);
+        MESSAGE ("taken in: " << input->width << "x" << input->height << " " << input->format << " at " << input->frameRate);
+        CHECK (input->width == 1280);
+        CHECK (input->height == 720);
+        CHECK (input->format == "720p50");
+        CHECK (input->problem.empty());
+    }
+
+    //  The output switched off: nothing comes, and the input says so (black, APM).
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/enabled", "false").ok);
+    host.configure (document);
+
+    CHECK (tickUntil (host, ticks, [&host]
+                      {
+                          const auto said = host.readouts();
+                          const auto* input = said.input ("VD000031");
+                          return input != nullptr && ! input->connected && input->problem == "no signal";
+                      }, 10000));
+}

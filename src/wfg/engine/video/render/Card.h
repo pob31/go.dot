@@ -275,4 +275,9 @@ namespace wfg::video::card
 
     /*  Sample `i` of row `y` - Cb Y Cr Y ... in their order - of v210 rows. */
     int v210Sample (const std::vector<std::uint8_t>& packed, int rowBytes, int y, int i) noexcept;
+
+    /*  AN INPUT'S FRAME AS COLOUR (APM): 8-bit YUV, U Y V Y, `rowBytes` a row,
+        into `width` by `height` BGRA - BT.709 at legal levels, or BT.601 for a
+        standard-definition picture. */
+    void uyvyToBgra (const std::uint8_t* uyvy, int width, int height, int rowBytes, std::uint8_t* bgra, bool rec601) noexcept;
 }

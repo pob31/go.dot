@@ -61,12 +61,17 @@ namespace wfg::video::render
         /*  How long ago the last picture arrived, in seconds; nought before
             any has. An insert's round trip shows here (YH). */
         virtual double age() const = 0;
+
+        /*  The format arriving, as its word, where the sender says one - a
+            DeckLink card's input (namespace draft §71); empty otherwise. */
+        virtual std::string format() const   { return {}; }
     };
 
     /*  A receiver of `kind` for what `sender` sends; null and why where this
         system has not got that kind, or NDI's runtime is not installed. Render
         thread, the device open. */
-    std::unique_ptr<Receiver> makeReceiver (region::OutputKind kind, const std::string& sender, std::string& why);
+    std::unique_ptr<Receiver> makeReceiver (region::OutputKind kind, const std::string& sender, std::string& why,
+                                            const std::string& mode = "auto");
 
     /*  WHAT OTHER PROGRAMS OFFER NOW, as `videoInputs/available` says it: the
         kind, a tab, the name, a line each. Render thread; a moment's work, so
@@ -77,6 +82,10 @@ namespace wfg::video::render
     std::unique_ptr<Receiver> makeSpoutReceiver (const std::string& sender, std::string& why);
     std::unique_ptr<Receiver> makeSyphonReceiver (const std::string& sender, std::string& why);
     std::unique_ptr<Receiver> makeNdiReceiver (const std::string& sender, std::string& why);
+
+    /*  A DeckLink card's input (namespace draft §71, APM): `cardId`'s, at
+        `mode` - `auto`, found by the card - opened on a thread of its own. */
+    std::unique_ptr<Receiver> makeDeckLinkReceiver (const std::string& cardId, const std::string& mode, std::string& why);
     std::string discoverSpout();
     std::string discoverSyphon();
     std::string discoverNdi();

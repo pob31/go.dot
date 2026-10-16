@@ -561,6 +561,7 @@ add_library(wfg_engine STATIC
     wfg/engine/video/render/Projector.h
     wfg/engine/video/render/Receiver.cpp
     wfg/engine/video/render/Receiver.h
+    wfg/engine/video/render/Receiver_decklink.cpp
     wfg/engine/video/render/Receiver_ndi.cpp
     wfg/engine/video/render/Ndi.cpp
     wfg/engine/video/render/Ndi.h

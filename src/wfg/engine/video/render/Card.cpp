@@ -213,6 +213,49 @@ namespace wfg::video::card
         return static_cast<int> ((value >> (10 * (i % 3))) & 0x3ffu);
     }
 
+    void uyvyToBgra (const std::uint8_t* uyvy, int width, int height, int rowBytes, std::uint8_t* bgra, bool rec601) noexcept
+    {
+        //  R = Y + a Cr, G = Y - b Cb - c Cr, B = Y + d Cb, on legal-range values.
+        const auto a = rec601 ? 1.402 : 1.5748;
+        const auto b = rec601 ? 0.344136 : 0.187324;
+        const auto c = rec601 ? 0.714136 : 0.468124;
+        const auto d = rec601 ? 1.772 : 1.8556;
+
+        const auto byte = [] (double v) noexcept
+        {
+            return static_cast<std::uint8_t> (std::clamp (std::lround (v * 255.0), 0L, 255L));
+        };
+
+        for (int y = 0; y < height; ++y)
+        {
+            const auto* row = uyvy + static_cast<std::size_t> (y) * static_cast<std::size_t> (rowBytes);
+            auto* out = bgra + static_cast<std::size_t> (y) * static_cast<std::size_t> (width) * 4;
+
+            for (int x = 0; x + 1 < width; x += 2)
+            {
+                const auto* group = row + static_cast<std::size_t> (x) * 2;
+                const auto cb = (static_cast<double> (group[0]) - 128.0) / 224.0;
+                const auto cr = (static_cast<double> (group[2]) - 128.0) / 224.0;
+
+                for (int k = 0; k < 2; ++k)
+                {
+                    const auto luma = (static_cast<double> (group[1 + 2 * k]) - 16.0) / 219.0;
+                    auto* px = out + static_cast<std::size_t> (x + k) * 4;
+                    px[0] = byte (luma + d * cb);
+                    px[1] = byte (luma - b * cb - c * cr);
+                    px[2] = byte (luma + a * cr);
+                    px[3] = 255;
+                }
+            }
+
+            //  An odd width's last pixel, as its neighbour.
+            if ((width & 1) != 0 && width > 1)
+                for (int k = 0; k < 4; ++k)
+                    out[static_cast<std::size_t> (width - 1) * 4 + static_cast<std::size_t> (k)]
+                        = out[static_cast<std::size_t> (width - 2) * 4 + static_cast<std::size_t> (k)];
+        }
+    }
+
     int rowBytesFor (PixelFormat format, int width) noexcept
     {
         switch (format)

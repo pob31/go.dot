@@ -18,7 +18,8 @@
 
 namespace wfg::video::render
 {
-    std::unique_ptr<Receiver> makeReceiver (region::OutputKind kind, const std::string& sender, std::string& why)
+    std::unique_ptr<Receiver> makeReceiver (region::OutputKind kind, const std::string& sender, std::string& why,
+                                            const std::string& mode)
     {
         if (sender.empty())
         {
@@ -31,9 +32,7 @@ namespace wfg::video::render
             case region::OutputKind::spout:   return makeSpoutReceiver (sender, why);
             case region::OutputKind::syphon:  return makeSyphonReceiver (sender, why);
             case region::OutputKind::ndi:     return makeNdiReceiver (sender, why);
-            case region::OutputKind::decklink:
-                why = "taking a card's picture in is not built yet";
-                return nullptr;
+            case region::OutputKind::decklink: return makeDeckLinkReceiver (sender, mode, why);
             case region::OutputKind::display: break;
         }
 
