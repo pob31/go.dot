@@ -316,6 +316,11 @@ namespace wfg::tree
         /*  WHAT GO.DOT'S OWN MQTT BROKER IS DOING (namespace draft §67, AND;
             MQ.5): `network/brokerState`, `brokerProblem` and `brokerClients`,
             copied here from the broker once a tick as the count above is. */
+        /*  THE BINDING LISTENING FOR LEARN (namespace draft §74, ARD):
+            `engine/bindingLearn`, empty when none is, copied from the binding
+            bridge once a tick. */
+        std::string bindingLearn;
+
         std::string brokerState = "off";
         std::string brokerProblem;
         std::uint64_t brokerClients = 0;

@@ -30608,8 +30608,8 @@ evening or for as long as one cue runs.
 | **AQZ** | **An absolute control without a motor picks the value up** before it moves it: the first message that crosses the value, or lands within a step of it, takes it over; before that, nothing is written. A binding may switch pickup off. *As built (BD.9):* picked up on the control's travel, so a step means the same along a level's law as along a line: one step of a seven-bit controller. A value moved by something else since the binding last wrote it - the window, an undo, another binding - is the knob's no more until it crosses it again. | mine |
 | **ARA** | **A bound value writes where a hand would.** Unlocked, it edits the show, joined into one undo step as a fader's move is; under the lock, it rides live, kept or dropped by `live.keep` and `live.drop` (§17.14, AM). | mine |
 | **ARB** | **A double Esc stops what a binding is doing, never the binding**: a rate control held over at the press writes nothing more until it is let go and pushed again, and a control moved after the press is a hand moving a control (§23.11). *As built (BD.9):* `run.killAll` is wrapped in serve so the bridge lets go once the press is applied; what was heard and not yet written is dropped with it. A pickup already caught stays caught: the press moved no value. | mine |
-| **ARC** | **Feedback is the binding's choice, off by default**: the value sent back to the control - a motor fader, an LED ring on a generic MIDI box - paced as the D700 is paced, never echoing a value the control itself just sent. | mine |
-| **ARD** | **Learn** on a binding, or on any number the master dial could take, takes the next control that moves as the endpoint: its port, channel, kind and number, or its address and argument. | mine |
+| **ARC** | **Feedback is the binding's choice, off by default**: the value sent back to the control - a motor fader, an LED ring on a generic MIDI box - paced as the D700 is paced, never echoing a value the control itself just sent. *As built (BD.10):* after each tick, a MIDI binding with feedback on and a port named is sent its target's value as its control would send it - the first channel when it names any, a 14-bit pair as its coarse half then its fine half - only when that value is not the one last sent or last heard from the control; once more when it comes alive. Through the MIDI sender's ordinary queue, as a surface's feedback goes, never dropped by a double Esc. Absolute and relative; a rate control has no place to show. | mine |
+| **ARD** | **Learn** on a binding, or on any number the master dial could take, takes the next control that moves as the endpoint: its port, channel, kind and number, or its address and argument. *As built (BD.10):* `binding.learn` is a door in every process (a binding of this show, the show not locked) and serve's bridge listens behind it: the next MIDI message on a port no surface claims - a controller, a note-on, pitch bend, channel pressure - or the next datagram over UDP not addressed under `/godot`, and the first of its arguments that carries a number. What it heard is written by `binding:<id>` as one `node.setMany` - one record, one undo step - and moves nothing else. `/godot/engine/bindingLearn` says which binding is listening. | mine |
 | **ARE** | **Where a key is chosen.** *As built (BD.4):* the window had no trigger editing at all, so a cue picked alone gains a **Key** line at the foot of its inspector: a button that takes the next key pressed (Esc lets it go and stops nothing; a key the show keeps is refused in words and it goes on listening) and a cross that deletes the key trigger. The page gains **+ key** beside + osc, + midi and + clock, its key typed in the spelling. Both clients keep the show's key triggers indexed once a revision and match a key after every key of their own; a held key fires once, and its let-go - or the window or page losing the keys - releases it. | mine |
 
 ### 74.3 Rows
@@ -30620,6 +30620,7 @@ evening or for as long as one cue runs.
 | `trigger/<id>/kind` | `s` | rw | gains `key` |
 | `trigger/<id>/key` | `s` | rw | **key**: the chord (AQW); refused when it is one the show keeps |
 | `binding/<id>/…` | | | the rows of AQX-ARD, written in this table when BD.7 builds them |
+| `engine/bindingLearn` | `s` | r | the binding listening for Learn, empty when none is (ARD); this machine's, never the show's |
 
 Every new row has a default, so an old show opens and saves unchanged.
 
@@ -30632,6 +30633,8 @@ Every new row has a default, so an old show opens and saves unchanged.
 | `cue.release` | `cue` | AQU |
 | `trigger.release` | `trigger` | a key let go (AQU) |
 | `trigger.create` | `cue kind [id] [attribute value]…` | gains `key` as a kind, and attribute pairs after the identifier: `key F6` makes a key trigger with its key in one step |
+| `binding.create` | `cue [id] [attribute value]…` | a binding: of the show when `cue` is empty, of that cue otherwise (AQX, AQY); its rows after the identifier as attribute pairs; an OSC `address` under `/godot` refused |
+| `binding.learn` | `[binding]` | listens for the next control that moves, for that binding (ARD); empty or nothing stops; refused `unknown-id` for what is not a binding of this show, `locked` under the lock |
 
 ### 74.5 Stages
 

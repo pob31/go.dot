@@ -656,6 +656,35 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 1, edit.id));
                         } });
 
+        /*  LEARN (namespace draft §74, ARD): the next control that moves becomes
+            this binding's endpoint, written by `binding:<id>` as one
+            `node.setMany` once it has moved. What listens is serve's bridge,
+            which specialises this (binding/BindingBridge.h, `hearCommands`);
+            here is the door alone - a binding of this show, which may be
+            edited - so a replay and a rig with no inputs answer as serve does.
+            Empty, or nothing, stops listening. */
+        registry.add ({ "binding.learn",
+                        "Listens for the next MIDI control or OSC address that moves, and makes it this"
+                        " binding's: its port, channel, kind and number, or its address and argument."
+                        " Empty stops listening.",
+                        { { "binding", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.empty() ? std::string {} : args.front().getString();
+
+                            if (id.empty())
+                                return Outcome::ok (args);
+
+                            if (! document.findById (id).hasType ("Binding"))
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (document.isLocked())
+                                return Outcome::rejected (reason::locked);
+
+                            return Outcome::ok (args);
+                        } });
+
         //----------------------------------------------------------------------
         registry.add ({ "group.role",
                         "Gives a group its header or its footer - the cue lists that run before"

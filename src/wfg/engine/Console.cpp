@@ -4899,9 +4899,10 @@ namespace
             room moves, heard on the MIDI and OSC threads and written by the
             tick. Made before the namespace and the MIDI inputs, which hand it
             what they hear, so it outlives both - and a double Esc lets go of
-            what it holds (ARB), which only this process has to hear. */
+            what it holds (ARB) and Learn listens (ARD), which only this
+            process has to hear. */
         wfg::binding::BindingBridge bindingBridge;
-        wfg::binding::letGoOnDoubleEsc (engine.commands(), bindingBridge);
+        wfg::binding::hearCommands (engine.commands(), bindingBridge);
 
         wfg::oscquery::EngineNamespace nameSpace { engine, parameters, touches, udp };
         nameSpace.hearFrom (heardBox);
@@ -4960,6 +4961,9 @@ namespace
             run with `no-port` while the rest of the show runs, because a rig
             that has not been patched yet is a rehearsal. */
         wfg::midi::MidiSender midiOut;
+
+        //  A binding's feedback goes out as a surface's does: queued, never dropped (§74, ARC).
+        bindingBridge.sendTo (&midiOut);
         midiOut.setTap (&traffic);
         midiOut.setHold (&machineHold);
 
@@ -8489,6 +8493,8 @@ namespace
 
                                 /*  AND WHAT GO.DOT'S BROKER IS DOING (namespace
                                     draft §67, AND; MQ.5), for its three rows. */
+                                state.bindingLearn = bindingBridge.learning();
+
                                 {
                                     const auto brokerNow = broker.stateNow();
                                     state.brokerState = brokerNow.state;

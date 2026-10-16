@@ -18,7 +18,7 @@
 
 /*
     THE BRIDGE BETWEEN A CONTROL IN THE ROOM AND THE NUMBER IT MOVES
-    (namespace draft §74, BD.9; AQX-ARB).
+    (namespace draft §74, BD.9, BD.10; AQX-ARD).
 
     What the show's bindings hear becomes `node.set` before each tick: the one
     write verb a hand uses (§16.4), with the origin `binding:<id>`, so the log
@@ -51,6 +51,21 @@
     its rest and is pushed again, and what was heard and not yet written is
     dropped. A pickup already caught stays caught: the press moved no value. A
     control moved after the press is a hand moving a control (§23.11).
+
+    FEEDBACK (ARC): a MIDI binding that asks for it is sent its target's value
+    after each tick, as its own control would send it - a motor fader moved, a
+    ring lit - on its port and channel (the first channel when it names any;
+    nothing when it names no port, since a value cannot go back to "any").
+    Only a value that changed, one message a binding a tick, which is how a
+    surface is paced; and never the value the control itself just sent, so a
+    fader being pushed is not pushed back. Absolute and relative bindings; a
+    rate control has no place to show.
+
+    LEARN (ARD): asked for one binding, the next control that moves - any MIDI
+    message on any port a surface has not claimed, any datagram over UDP not
+    addressed to the tree - becomes its endpoint, written as one `node.setMany`
+    by `binding:<id>`, one undo step. The move that is learned moves nothing
+    else. Asking for another binding, or for none, stops listening.
 
     NAMES NO JUCE TYPE, so a test drives it with bytes in and events out.
 */
@@ -108,9 +123,22 @@ namespace wfg::binding
             binding, read against the snapshot the last afterTick kept. */
         void beforeTick (const Submit& submit);
 
-        /*  Tick thread, after the tree is published: keeps the snapshot, and
-            arms or lets go every binding of a cue whose run began or ended. */
+        /*  Tick thread, after the tree is published: keeps the snapshot,
+            arms or lets go every binding of a cue whose run began or ended,
+            and sends what feedback is owed (ARC). */
         void afterTick (std::shared_ptr<const tree::TreeSnapshot> snapshot);
+
+        /*  Where feedback goes. Null sends nothing. Set before the ticks start;
+            the sink outlives every tick. */
+        void sendTo (midi::MidiSink* sink) noexcept;
+
+        /*  Tick thread: listen for the next control that moves, for this
+            binding (ARD). Empty stops listening. */
+        void learnFor (const std::string& bindingId);
+
+        /*  The binding listening, or empty: `/godot/engine/bindingLearn`.
+            Tick thread. */
+        const std::string& learning() const noexcept;
 
         /*  Tick thread: a double Esc (ARB). See above. */
         void letGo();
@@ -126,8 +154,10 @@ namespace wfg::binding
         std::unique_ptr<State> impl;
     };
 
-    /*  AND THE DOUBLE ESC HEARD (ARB): `run.killAll` as the registry holds it,
-        wrapped so the bridge lets go once it has been applied. Called after the
-        Runner has specialised it, in the one process that has a bridge. */
-    void letGoOnDoubleEsc (CommandRegistry& registry, BindingBridge& bridge);
+    /*  THE COMMANDS THE BRIDGE HEARS, as the registry holds them, wrapped so
+        the bridge acts once each has been applied: `run.killAll` lets go
+        (ARB), `binding.learn` listens (ARD). Called after the Runner has
+        specialised the first, in the one process that has a bridge; a replay
+        and a rig without one keep the plain commands. */
+    void hearCommands (CommandRegistry& registry, BindingBridge& bridge);
 }

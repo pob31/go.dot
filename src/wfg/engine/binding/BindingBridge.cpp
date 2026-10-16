@@ -32,6 +32,7 @@
 #include <set>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace wfg::binding
 {
@@ -130,6 +131,105 @@ namespace wfg::binding
             return event;
         }
 
+        /*  WHAT LEARN HEARD (ARD): a MIDI control - its port, channel, kind and
+            number - or an OSC address and the argument that carries a value. */
+        struct Learned
+        {
+            std::string binding;
+            bool osc = false;
+            std::string port;
+            int channel = 1;
+            MidiType type = MidiType::controlChange;
+            int number = 0;
+            std::string address;
+            int argument = 0;
+        };
+
+        const char* wordOf (MidiType type) noexcept
+        {
+            switch (type)
+            {
+                case MidiType::controlChange:   return "controlChange";
+                case MidiType::controlChange14: return "controlChange14";
+                case MidiType::noteVelocity:    return "noteVelocity";
+                case MidiType::pitchBend:       return "pitchBend";
+                case MidiType::channelPressure: return "channelPressure";
+            }
+
+            return "controlChange";
+        }
+
+        /*  THE ROWS IT WRITES, as one `node.setMany` - one record, one undo
+            step - by the binding that listened. */
+        Event learnedRows (const Learned& learned)
+        {
+            const auto row = [&learned] (const char* name)
+            {
+                return osc::Value::string ("/godot/binding/" + learned.binding + "/" + name);
+            };
+
+            Event event;
+            event.origin = "binding:" + learned.binding;
+            event.command = "node.setMany";
+
+            if (learned.osc)
+                event.args = { row ("source"), osc::Value::string ("osc"),
+                               row ("address"), osc::Value::string (learned.address),
+                               row ("argument"), osc::Value::int32 (learned.argument) };
+            else
+                event.args = { row ("source"), osc::Value::string ("midi"),
+                               row ("port"), osc::Value::string (learned.port),
+                               row ("channel"), osc::Value::int32 (learned.channel),
+                               row ("type"), osc::Value::string (wordOf (learned.type)),
+                               row ("number"), osc::Value::int32 (learned.number) };
+
+            return event;
+        }
+
+        bool isWide (MidiType type) noexcept
+        {
+            return type == MidiType::controlChange14 || type == MidiType::pitchBend;
+        }
+
+        //  A place on the control's travel as the value it sends: 0..127, or 0..16383 for 14 bits.
+        int midiValueOf (MidiType type, double fraction) noexcept
+        {
+            const auto top = isWide (type) ? 16383.0 : 127.0;
+            return static_cast<int> (std::lround (std::clamp (fraction, 0.0, 1.0) * top));
+        }
+
+        /*  FEEDBACK'S BYTES (ARC): what the control would send at that value,
+            on its channel - the first when it names any. A 14-bit pair is two
+            messages, the coarse half first. */
+        std::vector<midi::Bytes> feedbackOf (const Binding& binding, int value)
+        {
+            const auto channel = static_cast<std::uint8_t> (std::clamp (binding.channel, 1, 16) - 1);
+            const auto number = static_cast<std::uint8_t> (std::clamp (binding.number, 0, 127));
+            const auto low = static_cast<std::uint8_t> (value & 0x7F);
+            const auto high = static_cast<std::uint8_t> ((value >> 7) & 0x7F);
+
+            switch (binding.type)
+            {
+                case MidiType::controlChange:
+                    return { { static_cast<std::uint8_t> (0xB0 | channel), number, low } };
+
+                case MidiType::controlChange14:
+                    return { { static_cast<std::uint8_t> (0xB0 | channel), number, high },
+                             { static_cast<std::uint8_t> (0xB0 | channel), static_cast<std::uint8_t> ((number + 32) & 0x7F), low } };
+
+                case MidiType::noteVelocity:
+                    return { { static_cast<std::uint8_t> (0x90 | channel), number, low } };
+
+                case MidiType::pitchBend:
+                    return { { static_cast<std::uint8_t> (0xE0 | channel), low, high } };
+
+                case MidiType::channelPressure:
+                    return { { static_cast<std::uint8_t> (0xD0 | channel), low } };
+            }
+
+            return {};
+        }
+
         /*  WHAT A BINDING IS BOUND TO, as one word: a binding edited to move
             something else, or to move it another way, starts again. */
         std::string shapeOf (const Binding& binding)
@@ -148,6 +248,8 @@ namespace wfg::binding
         std::shared_ptr<const BindingIndex> heardIndex;
         std::map<std::string, Heard> inbox;
         std::map<std::string, Pair> pairs;
+        std::string listeningFor;
+        std::optional<Learned> learned;
 
         //  The tick thread's alone.
         struct Held
@@ -158,11 +260,14 @@ namespace wfg::binding
             std::optional<double> written;  ///< the value it last wrote
             bool live = false;
             std::string shape;
+            std::optional<int> sent;        ///< feedback: what the control last sent or was sent
         };
 
         std::shared_ptr<const BindingIndex> index;
         std::shared_ptr<const tree::TreeSnapshot> snapshot;
         std::map<std::string, Held> held;
+        midi::MidiSink* sink = nullptr;
+        std::string listening;
 
         static void arm (Held& held) noexcept
         {
@@ -170,6 +275,7 @@ namespace wfg::binding
             held.deflection = 0.0;
             held.heldOver = false;
             held.written.reset();
+            held.sent.reset();
         }
 
         /*  ABSOLUTE: the value for where the control is, once it has picked
@@ -248,6 +354,43 @@ namespace wfg::binding
                 }
             }
         }
+
+        /*  FEEDBACK (ARC), after the tree is published: the target's value as
+            the control would send it, when it is not what was last sent or
+            heard. */
+        void sendFeedback()
+        {
+            if (sink == nullptr || index == nullptr || snapshot == nullptr)
+                return;
+
+            for (const auto& binding : index->bindings)
+            {
+                if (! binding.feedback || binding.source != Source::midi || binding.port.empty()
+                      || binding.control == Control::rate)
+                    continue;
+
+                auto& state = held[binding.id];
+
+                if (! state.live)
+                    continue;
+
+                const auto target = targetOf (*snapshot, binding.targetAddress());
+
+                if (! target.has_value() || ! target->current.has_value())
+                    continue;
+
+                const auto travel = travelFor (binding.scale, *target->current, target->range);
+                const auto value = midiValueOf (binding.type, inputFor (binding.scale, travel));
+
+                if (state.sent == value)
+                    continue;
+
+                state.sent = value;
+
+                for (const auto& message : feedbackOf (binding, value))
+                    sink->send (binding.port, message);
+            }
+        }
     };
 
     //==========================================================================
@@ -296,6 +439,27 @@ namespace wfg::binding
             return false;
 
         const std::lock_guard<std::mutex> lock { impl->inboxGuard };
+
+        /*  LISTENING (ARD): this is the control, and it moves nothing else. */
+        if (! impl->listeningFor.empty())
+        {
+            Learned learned;
+            learned.binding = std::exchange (impl->listeningFor, {});
+            learned.port = portId;
+            learned.channel = arrival->channel;
+            learned.number = arrival->number;
+
+            switch (arrival->kind)
+            {
+                case MidiArrival::Kind::controlChange:   learned.type = MidiType::controlChange; break;
+                case MidiArrival::Kind::noteOn:          learned.type = MidiType::noteVelocity; break;
+                case MidiArrival::Kind::pitchBend:       learned.type = MidiType::pitchBend; break;
+                case MidiArrival::Kind::channelPressure: learned.type = MidiType::channelPressure; break;
+            }
+
+            impl->learned = std::move (learned);
+            return true;
+        }
 
         if (impl->heardIndex == nullptr)
             return false;
@@ -348,6 +512,26 @@ namespace wfg::binding
     {
         const std::lock_guard<std::mutex> lock { impl->inboxGuard };
 
+        /*  LISTENING (ARD): any address that is not the tree's, and the first
+            argument that carries a number - the first of all when none does. */
+        if (! impl->listeningFor.empty() && address.rfind ("/godot", 0) != 0)
+        {
+            Learned learned;
+            learned.binding = std::exchange (impl->listeningFor, {});
+            learned.osc = true;
+            learned.address = address;
+
+            for (std::size_t at = 0; at < args.size(); ++at)
+                if (args[at].isNumber() || args[at].isBool())
+                {
+                    learned.argument = static_cast<int> (at);
+                    break;
+                }
+
+            impl->learned = std::move (learned);
+            return true;
+        }
+
         if (impl->heardIndex == nullptr)
             return false;
 
@@ -385,10 +569,21 @@ namespace wfg::binding
     void BindingBridge::beforeTick (const Submit& submit)
     {
         std::map<std::string, Heard> heard;
+        std::optional<Learned> learned;
 
         {
             const std::lock_guard<std::mutex> lock { impl->inboxGuard };
             heard.swap (impl->inbox);
+            learned.swap (impl->learned);
+        }
+
+        //  What Learn heard, written - unless its binding has gone meanwhile.
+        if (learned.has_value())
+        {
+            impl->listening.clear();
+
+            if (impl->index != nullptr && impl->index->find (learned->binding) != nullptr)
+                submit (learnedRows (*learned));
         }
 
         if (impl->index == nullptr || impl->snapshot == nullptr)
@@ -402,6 +597,12 @@ namespace wfg::binding
 
             if (! state.live)
                 continue;
+
+            /*  WHERE THE CONTROL IS, as feedback counts it: what it sent is
+                what it shows, so it is not sent back (ARC). */
+            if (now != nullptr && now->input.has_value() && binding.source == Source::midi
+                  && binding.control == Control::absolute)
+                state.sent = midiValueOf (binding.type, *now->input);
 
             //  Nothing heard moves nothing, but a rate control pushed and held.
             if (now == nullptr && (binding.control != Control::rate || std::abs (state.deflection) < nothing))
@@ -452,6 +653,28 @@ namespace wfg::binding
     {
         impl->snapshot = std::move (snapshotToKeep);
         impl->refreshLiveness();
+        impl->sendFeedback();
+    }
+
+    void BindingBridge::sendTo (midi::MidiSink* sink) noexcept
+    {
+        impl->sink = sink;
+    }
+
+    void BindingBridge::learnFor (const std::string& bindingId)
+    {
+        {
+            const std::lock_guard<std::mutex> lock { impl->inboxGuard };
+            impl->listeningFor = bindingId;
+            impl->learned.reset();
+        }
+
+        impl->listening = bindingId;
+    }
+
+    const std::string& BindingBridge::learning() const noexcept
+    {
+        return impl->listening;
     }
 
     void BindingBridge::letGo()
@@ -474,24 +697,38 @@ namespace wfg::binding
     }
 
     //==========================================================================
-    void letGoOnDoubleEsc (CommandRegistry& registry, BindingBridge& bridge)
+    void hearCommands (CommandRegistry& registry, BindingBridge& bridge)
     {
-        const auto* plain = registry.find ("run.killAll");
-
-        if (plain == nullptr)
-            return;
-
-        auto wrapped = *plain;
-        wrapped.handler = [&bridge, before = plain->handler] (CommandContext& context, const std::vector<osc::Value>& args)
+        if (const auto* plain = registry.find ("run.killAll"))
         {
-            auto outcome = before (context, args);
+            auto wrapped = *plain;
+            wrapped.handler = [&bridge, before = plain->handler] (CommandContext& context, const std::vector<osc::Value>& args)
+            {
+                auto outcome = before (context, args);
 
-            if (outcome.applied)
-                bridge.letGo();
+                if (outcome.applied)
+                    bridge.letGo();
 
-            return outcome;
-        };
+                return outcome;
+            };
 
-        registry.add (std::move (wrapped));
+            registry.add (std::move (wrapped));
+        }
+
+        if (const auto* plain = registry.find ("binding.learn"))
+        {
+            auto wrapped = *plain;
+            wrapped.handler = [&bridge, before = plain->handler] (CommandContext& context, const std::vector<osc::Value>& args)
+            {
+                auto outcome = before (context, args);
+
+                if (outcome.applied)
+                    bridge.learnFor (args.empty() ? std::string {} : args.front().getString());
+
+                return outcome;
+            };
+
+            registry.add (std::move (wrapped));
+        }
     }
 }

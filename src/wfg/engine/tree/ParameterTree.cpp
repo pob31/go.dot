@@ -3859,6 +3859,7 @@ namespace wfg::tree
             else if (name == "lateness")       text = std::to_string (state.lateness);
             else if (name == "latenessMax")    text = std::to_string (state.latenessMax);
             else if (name == "clock")          text = state.clock;
+            else if (name == "bindingLearn")   text = state.bindingLearn;
             else if (name == "errorCount")     text = std::to_string (state.errorCount);
             else if (name == "launchLatencyTicks")
                                                text = std::to_string (state.launchLatencyTicks);

@@ -286,7 +286,8 @@ TEST_CASE ("binding index: read from the show, and matched by port, channel, kin
                                             s ("target"), s ("/godot/cue/x/level") }).rejected == 0);
     REQUIRE (rig.send ("binding.create", { s (""), s ("BNDCC014"), s ("type"), s ("controlChange14"),
                                             s ("number"), s ("1") }).rejected == 0);
-    REQUIRE (rig.send ("binding.create", { s (""), s ("BNDPB001"), s ("type"), s ("pitchBend") }).rejected == 0);
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BNDPB001"), s ("type"), s ("pitchBend"), s ("invert"), s ("true"),
+                                            s ("ownRange"), s ("false"), s ("feedback"), s ("true") }).rejected == 0);
     REQUIRE (rig.send ("binding.create", { s (rig.cueId), s ("BNDCQ001"), s ("source"), s ("osc"),
                                             s ("address"), s ("/desk/fader/1"), s ("target"), s ("level"),
                                             s ("inLow"), s ("0.25") }).rejected == 0);
@@ -314,6 +315,11 @@ TEST_CASE ("binding index: read from the show, and matched by port, channel, kin
     CHECK (ofCue->targetAddress() == "/godot/cue/" + rig.cueId + "/level");
     CHECK (std::abs (ofCue->scale.inLow - 0.25) < 1.0e-12);
     CHECK (index->find ("BNDXX001")->enabled == false);
+
+    //  A flag the show turned over reads as it was written, either way.
+    CHECK (index->find ("BNDPB001")->scale.invert);
+    CHECK_FALSE (index->find ("BNDPB001")->scale.ownRange);
+    CHECK (index->find ("BNDPB001")->feedback);
 
     const auto ids = [] (const std::vector<const binding::Binding*>& found)
     {
@@ -378,7 +384,8 @@ namespace
         BridgeRig()
         {
             cue::registerRunCommands (engine.commands(), runs);
-            binding::letGoOnDoubleEsc (engine.commands(), bridge);
+            binding::hearCommands (engine.commands(), bridge);
+            bridge.sendTo (&feedback);
             settle();
         }
 
@@ -412,11 +419,36 @@ namespace
                                                      static_cast<std::uint8_t> (value) });
         }
 
+        bool ccOn (const std::string& port, int channel, int controller, int value)
+        {
+            return bridge.midiArrived (port, { static_cast<std::uint8_t> (0xB0 | (channel - 1)),
+                                               static_cast<std::uint8_t> (controller), static_cast<std::uint8_t> (value) });
+        }
+
         double number (const std::string& address)
         {
             return osc::parseDouble (published (address)).value_or (-999.0);
         }
 
+        //  What feedback sends, in order.
+        struct Sink final : midi::MidiSink
+        {
+            struct Message
+            {
+                std::string port;
+                midi::Bytes bytes;
+            };
+
+            std::string send (const std::string& port, const midi::Bytes& bytes) override
+            {
+                sent.push_back ({ port, bytes });
+                return {};
+            }
+
+            std::vector<Message> sent;
+        };
+
+        Sink feedback;
         binding::BindingBridge bridge;
     };
 }
@@ -615,4 +647,122 @@ TEST_CASE ("binding bridge: an OSC address moves a number by its argument, and i
     nameSpace.write ("ws:1", osc::Packet::message ("/desk/fader/1", { s ("strip"), osc::Value::float32 (1.0f) }));
     CHECK (rig.engine.processTick (rig.tick++).rejected == 1u);
     CHECK (rig.step().empty());
+}
+
+TEST_CASE ("binding bridge: feedback sends a control where its value is, when it moved, and never back what it sent")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    BridgeRig rig;
+    const auto level = "/godot/cue/" + rig.cueId + "/level";
+
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BNDFB001"), s ("port"), s ("PORT0002"), s ("channel"), s ("3"),
+                                            s ("number"), s ("7"), s ("target"), s (level), s ("pickup"), s ("false"),
+                                            s ("feedback"), s ("true") }).rejected == 0);
+
+    //  Live: the fader is sent where the level is - nought decibels, 108 of 127 - on its port and channel.
+    rig.feedback.sent.clear();
+    rig.settle();
+    REQUIRE (rig.feedback.sent.size() == 1u);
+    CHECK (rig.feedback.sent[0].port == "PORT0002");
+    CHECK (rig.feedback.sent[0].bytes == midi::Bytes { 0xB2, 7, 108 });
+
+    //  Nothing moved, nothing sent.
+    rig.feedback.sent.clear();
+    rig.step();
+    CHECK (rig.feedback.sent.empty());
+
+    //  The fader moved it: the level is where the fader is, which is not sent back.
+    rig.ccOn ("PORT0002", 3, 7, 60);
+    CHECK (rig.step().size() == 1u);
+    CHECK (std::abs (rig.number (level) - surface::dbForFraction (60.0 / 127.0)) < 1.0e-3);
+    CHECK (rig.feedback.sent.empty());
+
+    //  Moved from the window: the fader is sent there.
+    REQUIRE (rig.send ("node.set", { s (level), osc::Value::float64 (-6.0) }).rejected == 0);
+    rig.settle();
+    REQUIRE (rig.feedback.sent.size() == 1u);
+    CHECK (rig.feedback.sent[0].bytes
+             == midi::Bytes { 0xB2, 7, static_cast<std::uint8_t> (std::lround (surface::fractionForDb (-6.0) * 127.0)) });
+
+    //  A 14-bit pair: its coarse half, then its fine half on the number plus 32.
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BNDFB014"), s ("port"), s ("PORT0002"), s ("type"), s ("controlChange14"),
+                                            s ("number"), s ("1"), s ("target"), s (level), s ("feedback"), s ("true") }).rejected == 0);
+    rig.feedback.sent.clear();
+    rig.settle();
+    const auto fine = static_cast<int> (std::lround (surface::fractionForDb (-6.0) * 16383.0));
+    REQUIRE (rig.feedback.sent.size() == 2u);
+    CHECK (rig.feedback.sent[0].bytes == midi::Bytes { 0xB0, 1, static_cast<std::uint8_t> (fine >> 7) });
+    CHECK (rig.feedback.sent[1].bytes == midi::Bytes { 0xB0, 33, static_cast<std::uint8_t> (fine & 0x7F) });
+
+    //  Asked for none, or with no port to go back to: nothing.
+    REQUIRE (rig.document.setAttribute ("/godot/binding/BNDFB014/feedback", "false").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/binding/BNDFB001/port", "").ok);
+    rig.feedback.sent.clear();
+    REQUIRE (rig.send ("node.set", { s (level), osc::Value::float64 (-12.0) }).rejected == 0);
+    rig.settle();
+    CHECK (rig.feedback.sent.empty());
+}
+
+TEST_CASE ("binding bridge: Learn takes the next control that moves as the endpoint, in one step")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    BridgeRig rig;
+    const auto level = "/godot/cue/" + rig.cueId + "/level";
+    const auto row = [] (const char* name) { return std::string ("/godot/binding/BNDTCH01/") + name; };
+
+    REQUIRE (rig.send ("binding.create", { s (""), s ("BNDTCH01"), s ("target"), s (level), s ("pickup"), s ("false") }).rejected == 0);
+    rig.settle();
+
+    REQUIRE (rig.send ("binding.learn", { s ("BNDTCH01") }).rejected == 0);
+    CHECK (rig.bridge.learning() == "BNDTCH01");
+
+    {
+        tree::EngineState state;
+        state.documentRevision = rig.document.showRevision();
+        state.bindingLearn = rig.bridge.learning();
+        const auto snapshot = rig.parameters.publish (rig.tick, state);
+        CHECK (client::model::text (*snapshot, "/godot/engine/bindingLearn") == "BNDTCH01");
+    }
+
+    //  A note on channel 5 of another port: learned as one edit by the binding, and it moves nothing.
+    CHECK (rig.bridge.midiArrived ("PORT0003", { 0x94, 60, 100 }));
+    const auto sent = rig.step();
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent[0].command == "node.setMany");
+    CHECK (sent[0].origin == "binding:BNDTCH01");
+    CHECK (rig.published (row ("source")) == "midi");
+    CHECK (rig.published (row ("port")) == "PORT0003");
+    CHECK (rig.published (row ("channel")) == "5");
+    CHECK (rig.published (row ("type")) == "noteVelocity");
+    CHECK (rig.published (row ("number")) == "60");
+    CHECK (rig.bridge.learning().empty());
+    CHECK (std::abs (rig.number (level)) < 1.0e-9);
+
+    //  From now on that note moves the level.
+    CHECK (rig.bridge.midiArrived ("PORT0003", { 0x94, 60, 127 }));
+    CHECK (rig.step().size() == 1u);
+    CHECK (std::abs (rig.number (level) - 12.0) < 1.0e-9);
+
+    //  An OSC address: never the tree's; the argument the first that carries a number.
+    REQUIRE (rig.send ("binding.learn", { s ("BNDTCH01") }).rejected == 0);
+    CHECK_FALSE (rig.bridge.oscArrived ("/godot/cue/" + rig.cueId + "/level", { osc::Value::float32 (1.0f) }));
+    CHECK (rig.bridge.oscArrived ("/desk/x", { s ("a"), osc::Value::float32 (0.5f) }));
+    CHECK (rig.step().size() == 1u);
+    CHECK (rig.published (row ("source")) == "osc");
+    CHECK (rig.published (row ("address")) == "/desk/x");
+    CHECK (rig.published (row ("argument")) == "1");
+
+    //  Asked again and then for nothing: it stops listening, and learns nothing.
+    REQUIRE (rig.send ("binding.learn", { s ("BNDTCH01") }).rejected == 0);
+    REQUIRE (rig.send ("binding.learn", {}).rejected == 0);
+    CHECK (rig.bridge.learning().empty());
+    CHECK_FALSE (rig.bridge.oscArrived ("/desk/y", { osc::Value::float32 (0.5f) }));
+    CHECK (rig.step().empty());
+
+    //  The door: a binding of this show, which may be edited.
+    CHECK (rig.send ("binding.learn", { s ("ZZZZZZZZ") }).rejected == 1);
+    CHECK (rig.send ("binding.learn", { s (rig.cueId) }).rejected == 1);
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    CHECK (rig.send ("binding.learn", { s ("BNDTCH01") }).rejected == 1);
+    CHECK (rig.bridge.learning().empty());
 }
