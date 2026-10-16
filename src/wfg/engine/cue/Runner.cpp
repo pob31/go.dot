@@ -2084,6 +2084,18 @@ namespace wfg::cue
         {
             assertedFor = lists.stepsTaken();
             assertDue = tick;
+            cartsOnlyPass = false;
+        }
+
+        /*  AND A CART'S NEW BANKS, as the show opens and after an edit
+            (namespace draft §74, AQT): a pass of the carts alone, arming only
+            a bank never armed - so a bank made while programming is there at
+            once, and one a stop took down still waits for the next step. */
+        else if (assertDue < 0 && document.showRevision() != cartsLookedAt)
+        {
+            cartsLookedAt = document.showRevision();
+            assertDue = tick;
+            cartsOnlyPass = true;
         }
 
         /*  WHAT A PASS OWES, paid on the tick the old run has ended (K8): a bed
@@ -2134,7 +2146,11 @@ namespace wfg::cue
 
             const auto listId = list[idProperty].toString().toStdString();
 
-            if (listId.empty() || ! list.getChildWithName ("Persistent").isValid())
+            /*  A CART IS ASKED EVEN WITH NO SECTION, for its banks (§74), and
+                the carts' own pass asks nothing else. */
+            const auto cart = isCart (list);
+
+            if (listId.empty() || (! cart && (cartsOnlyPass || ! list.getChildWithName ("Persistent").isValid())))
                 continue;
 
             /*  The pointer, read straight off the list: it is one property,
@@ -2198,6 +2214,17 @@ namespace wfg::cue
                 if (suspended.find (planned.cue) != suspended.end() || leftAlone (planned.cue))
                     continue;
 
+                /*  THE CARTS' OWN PASS ARMS A BANK ONCE (§74, AQT), and nothing
+                    else: a bed in a cart's section waits for a step as any bed
+                    does. Every pass notes the banks it finds, armed or arming. */
+                const auto bank = isCartBank (planned.cue);
+
+                if (cartsOnlyPass && (! bank || cartBanksArmed.count (planned.cue) > 0))
+                    continue;
+
+                if (bank)
+                    cartBanksArmed.insert (planned.cue);
+
                 const auto cue = document.findById (planned.cue);
                 const auto kind = kindOfCue (cue);
 
@@ -2223,6 +2250,16 @@ namespace wfg::cue
                         if (const auto found = paused.find (planned.cue);
                             found != paused.end() && found->second.run == live->id)
                             owed.insert (planned.cue);
+
+                        /*  A CART'S BANK GETS BACK A STRIP IT GAVE UP (§74,
+                            AQT) once nobody holds it: a refresh, as a GO on an
+                            armed bank is - and only then, so a strip the show
+                            still holds is not asked for at every step. */
+                        if (bank && ! cartsOnlyPass && ! live->closing
+                              && std::any_of (live->lostStrips.begin(), live->lostStrips.end(),
+                                              [this] (const std::string& strip)
+                                              { return runs.holderOf (strip) == nullptr; }))
+                            submitAssert (engine, planned.cue);
 
                         continue;
                     }
@@ -2252,7 +2289,7 @@ namespace wfg::cue
 
             for (const auto& value : plan.values)
             {
-                if (suspended.find (value.writer) != suspended.end() || leftAlone (value.writer))
+                if (cartsOnlyPass || suspended.find (value.writer) != suspended.end() || leftAlone (value.writer))
                     continue;
 
                 /*  WHAT THE DESK HOLDS, in the order §13.10 established: what it
@@ -2275,6 +2312,14 @@ namespace wfg::cue
                                { osc::Value::string (value.writer) });
             }
         }
+    }
+
+    bool Runner::isCartBank (const std::string& cueId) const
+    {
+        const auto node = document.findById (cueId);
+
+        return node.isValid() && node.getType().toString() == "Group"
+                 && isCart (node.getParent()) && isSampler (groupMode (node));
     }
 
     std::string Runner::listOfCue (const std::string& cueId) const
@@ -7656,6 +7701,22 @@ namespace wfg::cue
         if (holder->id == run.id)
             return;
 
+        /*  A CART'S BANK NEVER TAKES A STRIP ANOTHER BANK HOLDS (namespace draft
+            §74, AQT): the show list's banks come first, and the cart's
+            soundboard fills in under them. The member gives the strip up at
+            once - lost to its own bank, so it is ended and not armed there -
+            rather than waiting on it, since a waiting claim lands the moment
+            the holder's clip ends and would take the strip from a bank between
+            two of its clips. The step's pass gives it back once it is free. */
+        if (const auto* group = runs.find (run.parent); group != nullptr && isCartBank (group->cue))
+        {
+            if (auto* own = runs.find (run.parent);
+                own != nullptr && std::find (own->lostStrips.begin(), own->lostStrips.end(), stripId) == own->lostStrips.end())
+                own->lostStrips.push_back (stripId);
+
+            return;
+        }
+
         /*  BUSY: WAIT FOR IT, and the group holding it has lost it (PRD §3.27,
             `takeover=strip`). The claim is the slot table's own waiting claim
             (§3.9e): it lands when the holder's run ends, however it ends, and
@@ -7688,6 +7749,14 @@ namespace wfg::cue
         if (textOf (group, "takeover") != "group")
             return;
 
+        /*  A CART'S BANK CLOSES NOTHING, AND NOTHING CLOSES IT (namespace draft
+            §74, AQT): it is armed all show, so a show list's bank arming takes
+            the strips it needs from it, one claim at a time, as `strip` does -
+            and a cart's bank re-armed by a step's pass closes no bank the GO of
+            that step has just armed. */
+        if (isCartBank (group[idProperty].toString().toStdString()))
+            return;
+
         for (const auto& other : runs.all())
         {
             if (other.id == groupRunId || other.isFinished() || ! other.isGroup()
@@ -7696,7 +7765,7 @@ namespace wfg::cue
 
             const auto otherCue = document.findById (other.cue);
 
-            if (! otherCue.isValid() || ! isSampler (groupMode (otherCue)))
+            if (! otherCue.isValid() || ! isSampler (groupMode (otherCue)) || isCartBank (other.cue))
                 continue;
 
             if (auto* closing = runs.find (other.id))
@@ -23902,6 +23971,11 @@ namespace wfg::cue
 
                             if (! list.isValid() || list.getType().toString() != "List")
                                 return Outcome::rejected (reason::unknownId);
+
+                            /*  A CART HAS NO PLACE TO LOAD TO (namespace draft
+                                §74, AQR): nothing in it happens in order. */
+                            if (isCart (list))
+                                return Outcome::rejected (reason::notAStop);
 
                             std::vector<std::string> supplied;
 

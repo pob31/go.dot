@@ -1598,3 +1598,71 @@ TEST_CASE ("standby: deleting a group the pointer is inside lands on what follow
     CHECK (rig.run (3, "object.delete", { osc::Value::string (preshow) }).applied == 1);
     CHECK (rig.standbyOf (mainList) == after);
 }
+
+//==============================================================================
+/*  THE CART (namespace draft §74, AQR): a list GO never meets. It has no
+    standby, the GO focus never rests on one, and a list made a cart gives up
+    its pointer and the focus with it. */
+TEST_CASE ("cart: list.create makes one with kind cart, and GO's focus and standby refuse it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    Rig rig;
+
+    //  Born a cart, one step: the settings follow the identifier, as a cue's do.
+    REQUIRE (rig.run (1, "list.create", { osc::Value::string ("Cart"), osc::Value::string ("CART0001"),
+                                          osc::Value::string ("kind"), osc::Value::string ("cart") }).applied == 1);
+    CHECK (rig.document.getAttribute ("/godot/list/CART0001/kind").value_or ("") == "cart");
+    CHECK (isCart (rig.listNode ("CART0001")));
+
+    //  A list said nothing about is a show list, and the old shows open as they were.
+    CHECK (rig.document.getAttribute ("/godot/list/" + mainList + "/kind").value_or ("") == "show");
+    CHECK_FALSE (isCart (rig.listNode (mainList)));
+
+    //  An odd pair, a name given twice and a word the row does not take are refused.
+    CHECK (rig.run (2, "list.create", { osc::Value::string ("Odd"), osc::Value::string (""),
+                                        osc::Value::string ("kind") }).rejected == 1);
+    CHECK (rig.run (3, "list.create", { osc::Value::string ("Twice"), osc::Value::string (""),
+                                        osc::Value::string ("name"), osc::Value::string ("Other") }).rejected == 1);
+    CHECK (rig.run (4, "list.create", { osc::Value::string ("Wrong"), osc::Value::string (""),
+                                        osc::Value::string ("kind"), osc::Value::string ("banana") }).rejected == 1);
+
+    //  No standby in a cart, by the command or the node.
+    REQUIRE (rig.document.createCue ("CART0001", 0, "memo", "Door", "CARTDR01").ok);
+    CHECK_FALSE (rig.document.setAttribute (standbyAddressOf ("CART0001"), "CARTDR01").ok);
+    CHECK (rig.run (5, "standby.set", { osc::Value::string ("CARTDR01") }).rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notInList) != std::string::npos);
+
+    //  And never GO's focus: refused in its own word, and the focus stays where it was.
+    CHECK (rig.run (6, "list.focus", { osc::Value::string ("CART0001") }).rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notAStop) != std::string::npos);
+    CHECK (rig.focus.listId (rig.document) == mainList);
+}
+
+TEST_CASE ("cart: a list made a cart gives up its pointer, and GO's focus goes to the first show list")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+    Rig rig;
+
+    REQUIRE (rig.run (1, "list.create", { osc::Value::string ("Second"), osc::Value::string ("SECND001") }).applied == 1);
+    REQUIRE (rig.run (2, "standby.set", { osc::Value::string (houseToHalf) }).applied == 1);
+    REQUIRE (rig.standbyOf (mainList) == houseToHalf);
+    REQUIRE (rig.focus.listId (rig.document) == mainList);
+
+    //  The first list, focused and armed, made a cart.
+    REQUIRE (rig.run (3, "node.set", { osc::Value::string ("/godot/list/" + mainList + "/kind"),
+                                       osc::Value::string ("cart") }).applied == 1);
+
+    CHECK (rig.standbyOf (mainList).empty());
+    CHECK (rig.document.getAttribute (focusAddress()).value_or ("") == "SECND001");
+    CHECK (rig.focus.listId (rig.document) == "SECND001");
+
+    //  And a focus that still names it, written by hand, falls back past it.
+    REQUIRE (rig.document.setAttribute (focusAddress(), mainList).ok);
+    CHECK (rig.focus.listId (rig.document) == "SECND001");
+
+    //  A show of carts alone has no list for GO.
+    REQUIRE (rig.run (4, "node.set", { osc::Value::string ("/godot/list/SECND001/kind"),
+                                       osc::Value::string ("cart") }).applied == 1);
+    CHECK (rig.focus.listId (rig.document).empty());
+    CHECK (rig.run (5, "standby.next").rejected == 1);
+}

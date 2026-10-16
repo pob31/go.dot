@@ -2390,3 +2390,116 @@ TEST_CASE ("sampler: M55a, a pad puts a picture up on the sample it would start 
              static_cast<double> (aTick + horizon) / 48.0, " ms, as a sound's; a touch and a movie with its sound ",
              static_cast<double> (2 * aTick + horizon) / 48.0, " ms");
 }
+
+//==============================================================================
+/*  THE CART'S BANKS (namespace draft §74, AQT): a sampler group in a cart is
+    armed all show - as the show opens, as it is made, and again at the next
+    step after a stop - closes nothing, is closed by nothing, and never takes a
+    strip another bank holds. */
+namespace
+{
+    std::string cartBankIn (Rig& rig, const std::string& name, int members)
+    {
+        const auto cart = rig.document.createList ("Cart", {}, { { "kind", "cart" } }).id;
+        REQUIRE_FALSE (cart.empty());
+
+        const auto id = rig.document.createCue (cart, 0, "group", name).id;
+        rig.set ("/godot/cue/" + id + "/mode", "sampler");
+
+        for (int i = 0; i < members; ++i)
+        {
+            const auto member = rig.document.createCue (id, i, "media", name + " " + std::to_string (i)).id;
+            rig.set ("/godot/cue/" + member + "/file", "pad" + std::to_string (i) + ".wav");
+            rig.membersOf[id].push_back (member);
+        }
+
+        return id;
+    }
+
+    bool armedOnItsStrips (Rig& rig, const std::string& bank, std::size_t firstStrip = 0)
+    {
+        const auto& members = rig.membersOf[bank];
+
+        for (std::size_t i = 0; i < members.size(); ++i)
+        {
+            const auto* run = rig.liveRunOf (members[i]);
+
+            if (run == nullptr || ! rig.holds (run, rig.strips[firstStrip + i]))
+                return false;
+        }
+
+        return true;
+    }
+}
+
+TEST_CASE ("cart: its bank is armed as the show opens, with no GO, and GO never meets the cart")
+{
+    Rig rig;
+    const auto pads = cartBankIn (rig, "Pads", 2);
+
+    REQUIRE (rig.tickUntil ([&] { return armedOnItsStrips (rig, pads); }));
+    CHECK (rig.liveRunOf (pads) != nullptr);
+
+    //  The show list's pointer never moved, and GO there fires the show's cue alone.
+    CHECK (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)).value_or ("x").empty());
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), rig.after).ok);
+    rig.send ("go");
+    CHECK (rig.runsOf (rig.after) == 1u);
+    CHECK (rig.runsOf (pads) == 1u);
+    CHECK (armedOnItsStrips (rig, pads));
+}
+
+TEST_CASE ("cart: a show bank takes the strips it needs from the cart's, which takes them back once free")
+{
+    Rig rig;
+    const auto pads = cartBankIn (rig, "Pads", 2);
+    REQUIRE (rig.tickUntil ([&] { return armedOnItsStrips (rig, pads); }));
+    rig.audio.completeArms (rig.engine);
+
+    //  Bank A arms over the first four strips, and closes nothing of the cart's.
+    rig.arm (rig.bankA);
+    REQUIRE (rig.tickUntil ([&] { return armedOnItsStrips (rig, rig.bankA); }));
+
+    const auto* cart = rig.liveRunOf (pads);
+    REQUIRE (cart != nullptr);
+    CHECK_FALSE (cart->closing);
+    CHECK (rig.liveRunOf (rig.membersOf[pads][0]) == nullptr);
+
+    //  Bank A goes; at the next step the cart's pads come back where they were.
+    const auto* bankRun = rig.liveRunOf (rig.bankA);
+    REQUIRE (bankRun != nullptr);
+    rig.send ("run.kill", { osc::Value::string (bankRun->id) });
+    REQUIRE (rig.tickUntil ([&] { return rig.liveRunOf (rig.bankA) == nullptr; }));
+
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), rig.after).ok);
+    rig.send ("go");
+    CHECK (rig.tickUntil ([&] { return armedOnItsStrips (rig, pads); }));
+}
+
+TEST_CASE ("cart: a bank made while programming is armed at once, and one Esc took down waits for a step")
+{
+    Rig rig;
+    rig.set ("/godot/audio/panicFade", "0");
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    const auto pads = cartBankIn (rig, "Pads", 2);
+    REQUIRE (rig.tickUntil ([&] { return armedOnItsStrips (rig, pads); }));
+
+    rig.send ("run.stopAll");
+    REQUIRE (rig.tickUntil ([&] { return rig.liveRunOf (pads) == nullptr; }));
+
+    //  An edit is not a step: the bank stays down.
+    rig.set ("/godot/cue/" + rig.after + "/name", "After, renamed");
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.liveRunOf (pads) == nullptr);
+
+    //  The next GO is.
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), rig.after).ok);
+    rig.send ("go");
+    CHECK (rig.tickUntil ([&] { return armedOnItsStrips (rig, pads); }));
+}

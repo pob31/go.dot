@@ -132,6 +132,15 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="kind">
+          <a:documentation>What the list is (namespace draft 74, AQR): a show list, which GO walks with its standby, or a cart, which GO never meets - its cues are fired out of order, by their triggers, by a pad on the tablet&apos;s Cart tab, or by a strip when one of its sampler groups is armed. A cart has no standby, the GO focus never rests on one, and its sampler groups are armed for the whole show. A list made a cart has its standby cleared.</a:documentation>
+          <choice>
+            <value>show</value>
+            <value>cart</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>The cue list&apos;s name.</a:documentation>
           <data type="string"/>

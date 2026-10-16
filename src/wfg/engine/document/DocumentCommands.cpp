@@ -181,16 +181,25 @@ namespace wfg::doc
                             return fromEdit (document.configureAudio (settings), args);
                         } }));
         //----------------------------------------------------------------------
+        /*  AND THE SETTINGS A LIST IS BORN WITH (namespace draft §74), as a
+            cue's are: `kind cart` after the identifier makes a cart, one step
+            to undo. A log written before them replays as it always did. */
         registry.add ({ "list.create",
-                        "Creates a cue list. Generates an identifier if none is given.",
-                        { { "name", 's', false }, { "id", 's', true } },
+                        "Creates a cue list. Generates an identifier if none is given; settings it is"
+                        " born with follow as attribute-value pairs - kind cart makes a cart.",
+                        { { "name", 's', false }, { "id", 's', true },
+                          { "attribute", 's', true, true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto name = args[0].getString();
                             const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto attributes = pairsFrom (args, 2);
 
-                            const auto edit = document.createList (name, id);
+                            if (! attributes)
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto edit = document.createList (name, id, *attributes);
                             return fromEdit (edit, withId (args, 1, edit.id));
                         } });
 

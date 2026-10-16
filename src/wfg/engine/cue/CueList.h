@@ -254,6 +254,12 @@ namespace wfg::cue
         different one would be a door nobody could reason about. */
     std::string nearestStop (const juce::ValueTree& list, const std::string& cueId);
 
+    /*  WHETHER A LIST IS A CART (namespace draft §74, AQR): a list GO never
+        meets, whose cues are fired out of order. It has no standby, and the
+        GO focus never rests on one. Read raw, and safely so: the row's default
+        is `show`, which the writer leaves out, and only `cart` is asked about. */
+    bool isCart (const juce::ValueTree& list);
+
     //==============================================================================
     /*  Which list the argument-less standby commands act on.
 
@@ -266,7 +272,8 @@ namespace wfg::cue
         /*  Asks for a list by identifier. False, and nothing changes, when the
             id names no list - including when it names a cue or a mount, since
             an identifier alone is unambiguous and the wrong kind of object is a
-            mistake rather than a coincidence.
+            mistake rather than a coincidence - and when it names a cart, which
+            GO never meets (namespace draft §74, AQR).
 
             The document is not const because this WRITES: focus is an attribute
             of the show's list collection, and it goes through the same single
@@ -277,8 +284,9 @@ namespace wfg::cue
             focused list leaves behind. */
         void clear (doc::ShowDocument& document);
 
-        /*  The focused list: the requested one if it is still there, otherwise
-            the first list in the show, otherwise nothing.
+        /*  The focused list: the requested one if it is still there and still
+            a show list, otherwise the first show list, otherwise nothing. A
+            cart is never the answer (namespace draft §74, AQR).
 
             RESOLVED RATHER THAN MAINTAINED, which is the point. Nothing has to
             remember to move the focus when a list is created or deleted,

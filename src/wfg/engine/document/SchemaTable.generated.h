@@ -38,6 +38,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_pair_state[] = { "alone", "following", "leading", "bothSending", "waiting" };
     inline constexpr std::string_view enum_pair_peerInStep[] = { "unknown", "yes", "no" };
     inline constexpr std::string_view enum_pair_peerShowMatch[] = { "unknown", "yes", "no" };
+    inline constexpr std::string_view enum_list_kind[] = { "show", "cart" };
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode", "script" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
@@ -831,6 +832,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "The cue list's name." },
+        { "list", "kind",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "show",
+          false, 0.0, false, 0.0,
+          enum_list_kind, 2,
+          "", 50.0, false, "park",
+          "",
+          "What the list is (namespace draft 74, AQR): a show list, which GO walks with its standby, or a cart, which GO never meets - its cues are fired out of order, by their triggers, by a pad on the tablet's Cart tab, or by a strip when one of its sampler groups is armed. A cart has no standby, the GO focus never rests on one, and its sampler groups are armed for the whole show. A list made a cart has its standby cleared." },
         { "list", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",

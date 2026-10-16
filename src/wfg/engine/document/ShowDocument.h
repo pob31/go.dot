@@ -198,13 +198,18 @@ namespace wfg::doc
         // Structure
         //======================================================================
 
-        /*  `id` may be empty, in which case one is generated and returned in the
-            result. That is what makes replay work without randomness: the engine
-            logs the identifier it produced, and replaying the log supplies it. */
-        EditResult createList (const std::string& name, const std::string& id = {});
-
         /** Settings a cue is born with: each row's name and its value as text. */
         using Attributes = std::vector<std::pair<std::string, std::string>>;
+
+        /*  `id` may be empty, in which case one is generated and returned in the
+            result. That is what makes replay work without randomness: the engine
+            logs the identifier it produced, and replaying the log supplies it.
+
+            AND THE SETTINGS IT IS BORN WITH (namespace draft §74), as a cue's
+            are: `kind cart` makes a cart. Only a row somebody could write
+            afterwards; the name has its own argument. */
+        EditResult createList (const std::string& name, const std::string& id = {},
+                               const Attributes& attributes = {});
 
         /** `kind` is "memo" or "group"; a group is a cue that holds cues.
 

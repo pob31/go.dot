@@ -16,6 +16,7 @@
 
 #include <wfg/engine/cue/Solver.h>
 
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/CurveJob.h>
 #include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/cue/ShowWalk.h>
@@ -1771,8 +1772,9 @@ namespace wfg::cue
         plan.ok = true;
 
         const auto section = list.getChildWithName (juce::Identifier ("Persistent"));
+        const auto cart = isCart (list);
 
-        if (! section.isValid())
+        if (! section.isValid() && ! cart)
             return plan;
 
         /*  WHERE THE POINTER IS, AS A ROW. Everything before it has happened;
@@ -1872,6 +1874,30 @@ namespace wfg::cue
                 }
             }
         }
+
+        /*  A CART'S SAMPLER GROUPS ARE ARMED ALL SHOW (namespace draft §74,
+            AQT): each one at the cart's top level, switched on, is asserted as
+            a time group is - armed when it is not, left alone while it is - so
+            its pads are there whenever a hand reaches for them. The cart's
+            other cues are fired by their triggers and never by this pass. A
+            cart has no standby, so nothing in it counts as stopped. */
+        if (cart)
+            for (const auto& cue : list)
+            {
+                if (cue.getType().toString() != "Group" || ! read.flag (cue, "cue", "enabled")
+                      || ! isSampler (read.groupMode (cue)))
+                    continue;
+
+                const auto id = cue[idProperty].toString().toStdString();
+
+                if (id.empty() || std::find (stopped.begin(), stopped.end(), id) != stopped.end())
+                    continue;
+
+                PlannedRun run;
+                run.cue = id;
+                run.when = planned::sounding;
+                plan.runs.push_back (run);
+            }
 
         return plan;
     }

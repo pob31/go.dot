@@ -302,6 +302,12 @@ namespace wfg::cue
                         true,
                         [&document, &focus] (CommandContext&, const std::vector<osc::Value>& args)
                         {
+                            /*  NOT A CART (namespace draft §74, AQR): GO never
+                                meets one, so it is no list for GO to act on - a
+                                refusal with its own word, since the list exists. */
+                            if (isCart (document.findById (args[0].getString())))
+                                return Outcome::rejected (reason::notAStop);
+
                             /*  Exclusive without an exclusivity rule, because
                                 there is one value rather than a flag per list.
                                 Nothing has to be un-focused and nothing can end

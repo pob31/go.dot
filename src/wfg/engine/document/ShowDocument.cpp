@@ -189,6 +189,11 @@ namespace wfg::doc
             if (cueId.empty())
                 return true;             // empty is the resting value, always legal
 
+            /*  A CART HAS NO STANDBY (namespace draft §74, AQR): GO never
+                meets it, so nowhere in it is a place to stand. */
+            if (cue::isCart (list))
+                return false;
+
             /*  ANYWHERE THE POINTER MAY STAND, which has widened twice: to the
                 manual path in PR 3.4, and to any enabled cue this list holds on
                 2026-09-16, when the author asked to be able to park inside a
@@ -1741,6 +1746,36 @@ namespace wfg::doc
 
         keepSoundsAfter (target.node, target.attribute->name());
         letNameFollow (target.node, defaultName);
+
+        /*  A LIST MADE A CART GIVES UP ITS POINTER (namespace draft §74, AQR),
+            and the GO focus with it, which goes to the first show list. Both
+            are state rows, kept off the history: an Undo of the kind puts the
+            list back and leaves its pointer at rest, which is always legal. */
+        if (target.attribute->name() == "kind" && target.node.getType().toString() == "List"
+              && cue::isCart (target.node))
+        {
+            const auto listId = target.node[idProperty].toString().toStdString();
+
+            setAttribute (cue::standbyAddressOf (listId), "");
+            setAttribute (cue::finishedAddressOf (listId), "false");
+
+            const auto focused = getAttribute (cue::focusAddress()).value_or (std::string {});
+
+            if (focused.empty() || focused == listId)
+            {
+                std::string firstShowList;
+
+                for (const auto& list : showNode.getChildWithName ("Lists"))
+                    if (list.getType().toString() == "List" && ! cue::isCart (list))
+                    {
+                        firstShowList = list[idProperty].toString().toStdString();
+                        break;
+                    }
+
+                setAttribute (cue::focusAddress(), firstShowList);
+            }
+        }
+
         return EditResult::succeeded (target.node[idProperty].toString().toStdString());
     }
 
@@ -2169,8 +2204,30 @@ namespace wfg::doc
         return EditResult::succeeded (objectId);
     }
 
-    EditResult ShowDocument::createList (const std::string& name, const std::string& id)
+    EditResult ShowDocument::createList (const std::string& name, const std::string& id,
+                                         const Attributes& attributes)
     {
+        /*  BORN WITH ITS SETTINGS (namespace draft §74), refused as a cue's
+            are and before an identifier is drawn: the name and the identifier
+            have arguments of their own, and a row nobody could write later is
+            no setting to be born with. */
+        const auto* element = Schema::instance().element ("List");
+        std::vector<std::pair<std::string_view, std::string>> born { { "name", name } };
+
+        for (const auto& [attributeName, text] : attributes)
+        {
+            if (attributeName == "name" || attributeName == "id")
+                return EditResult::failed (reason::badValue);
+
+            if (element != nullptr)
+                if (const auto* attribute = element->attribute (attributeName);
+                    attribute != nullptr
+                      && (attribute->access() == Access::read || attribute->persist() == Persist::none))
+                    return EditResult::failed (reason::readOnly);
+
+            born.emplace_back (attributeName, text);
+        }
+
         /*  `endOfSequence` here and in every create below that appends rather
             than places: the index those creates pass is a member position like
             any other now, and a raw child count passed as one would be the very
@@ -2178,7 +2235,7 @@ namespace wfg::doc
             the same thing only because a container never has fewer children
             than members. */
         return insertObject (showNode.getChildWithName ("Lists"),
-                             endOfSequence, "List", id, { { "name", name } });
+                             endOfSequence, "List", id, born);
     }
 
     EditResult ShowDocument::createCue (const std::string& parentId, int index,

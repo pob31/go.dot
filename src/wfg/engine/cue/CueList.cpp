@@ -638,7 +638,7 @@ namespace wfg::cue
             list.focus must leave the previous focus exactly where it was, and
             assigning first would quietly clear it - a failure the fallback to
             the first list would then hide. */
-        if (! node.isValid() || node.getType().toString() != "List")
+        if (! node.isValid() || node.getType().toString() != "List" || isCart (node))
             return false;
 
         /*  THROUGH THE DOCUMENT'S ONE WRITE DOOR, which is what changed in PR
@@ -664,7 +664,7 @@ namespace wfg::cue
         {
             const auto node = document.findById (requested);
 
-            if (node.isValid() && node.getType().toString() == "List")
+            if (node.isValid() && node.getType().toString() == "List" && ! isCart (node))
                 return node;
         }
 
@@ -672,14 +672,24 @@ namespace wfg::cue
             focused whenever a list exists" true without anything having to
             maintain it: a request that no longer resolves - the list was
             deleted, or the show was replaced under it - falls back here rather
-            than leaving the engine pointed at nothing. */
+            than leaving the engine pointed at nothing.
+
+            THE FIRST SHOW LIST, since a list may be a cart (namespace draft
+            §74): a request naming a list made a cart since falls back here
+            too, and a show of carts alone has nothing for GO to act on. */
         const auto lists = listsContainer (document);
 
         for (const auto& child : lists)
-            if (child.getType().toString() == "List" && child.hasProperty (idProperty))
+            if (child.getType().toString() == "List" && child.hasProperty (idProperty) && ! isCart (child))
                 return child;
 
         return {};
+    }
+
+    bool isCart (const juce::ValueTree& list)
+    {
+        return list.isValid() && list.getType().toString() == "List"
+                 && list[juce::Identifier ("kind")].toString() == "cart";
     }
 
     std::string Focus::requested (const doc::ShowDocument& document) const

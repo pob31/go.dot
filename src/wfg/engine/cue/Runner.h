@@ -86,6 +86,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -3976,6 +3977,20 @@ namespace wfg::cue
 
         std::uint64_t assertedFor = 0;
         std::int64_t assertDue = -1;
+
+        /*  A CART'S SAMPLER GROUPS (namespace draft §74, AQT) are armed by the
+            step's pass like any persistent cue, and ALSO by a pass of their own
+            when the show opens and after any edit - so a bank made while
+            programming has its pads at once - which arms only a bank it has
+            never armed. A bank a stop took down waits for the next step, as a
+            bed does (§3.29). The show revision that pass last looked at; the
+            banks it has armed; and whether the pass now due is that one. */
+        std::uint64_t cartsLookedAt = std::numeric_limits<std::uint64_t>::max();
+        std::set<std::string> cartBanksArmed;
+        bool cartsOnlyPass = false;
+
+        /** Whether the cue is a sampler group at a cart's top level. */
+        bool isCartBank (const std::string& cueId) const;
 
         /*  The tick of the last double Esc applied, or -1: `killedInDrain`. */
         std::int64_t killedAtTick = -1;
