@@ -156,6 +156,14 @@ namespace wfg::client::model
         std::string dca;
         bool lane = false;           ///< a media cue with a level lane drawn over its file
 
+        /*  A SEQUENCE'S JOIN (namespace draft §69): a group's word and its
+            crossfade's length, and on a member, why its boundary into the next
+            is Let play where the group asks for more - the engine's sentence,
+            empty where the join is placed. */
+        std::string join;
+        std::string joinLength;
+        std::string joinNote;
+
         /*  A DUAL CUE (namespace draft 37.5, WM, the author's): a movie and the
             sound locked to it, drawn as one cue of two lines. `lockedTo` is the
             sound's movie, by identifier; `soundOfAbove` says the row above is

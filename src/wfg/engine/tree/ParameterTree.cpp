@@ -1256,7 +1256,7 @@ namespace wfg::tree
             stored, prepare, hash, frameRateOrCodec, kind, parent, autoName, index, role, fx,
             chainChannels, insertLatency, duration, outsBusy, outsMaybe, stripNow, stripsBefore,
             live, overrideWord, sends, sections, messages, curves, eq, dcaMark, headerDerived,
-            order, headerOrder, footerOrder, section, missing
+            order, headerOrder, footerOrder, section, missing, joinNote
         };
 
         CueRow classifyCueRow (std::string_view name)
@@ -1278,7 +1278,7 @@ namespace wfg::tree
                 { "dcaOffset", CueRow::dcaMark }, { "headerDerived", CueRow::headerDerived },
                 { "order", CueRow::order }, { "headerOrder", CueRow::headerOrder },
                 { "footerOrder", CueRow::footerOrder }, { "header", CueRow::section },
-                { "footer", CueRow::section }, { "missing", CueRow::missing }
+                { "footer", CueRow::section }, { "missing", CueRow::missing }, { "joinNote", CueRow::joinNote }
             };
 
             for (const auto& [word, which] : names)
@@ -1309,6 +1309,91 @@ namespace wfg::tree
 
             const auto at = doc::Schema::rowIndex (row);
             return at < classified.size() ? classified[at] : classifyCueRow (row.name);
+        }
+
+        /*  WHY A MEMBER'S BOUNDARY INTO THE NEXT IS LET PLAY (namespace draft
+            §69, AOE, GJ.8): the rule `Runner::joinTick` places by, read from the
+            show - only an automatic sequence asking for Gapless or Crossfade,
+            and only where it cannot be placed. The words are the implementer's,
+            for the author. */
+        std::string joinNoteOf (const juce::ValueTree& node, const char* role)
+        {
+            const auto group = node.getParent();
+
+            if (std::string_view (role) != "member" || ! group.isValid() || ! group.hasType ("Group"))
+                return {};
+
+            const auto word = [] (const juce::ValueTree& tree, const char* name, const char* otherwise)
+            {
+                return tree.getProperty (juce::Identifier (name), otherwise).toString().toStdString();
+            };
+
+            if (! cue::isAutoSequence (cue::GroupMode { word (group, "mode", "sequence"), word (group, "advance", "manual") })
+                  || word (group, "join", "letPlay") == "letPlay")
+                return {};
+
+            const auto enabled = [&word] (const juce::ValueTree& cue)
+            {
+                return word (cue, "enabled", "true") != "false" && word (cue, "enabled", "1") != "0";
+            };
+
+            if (! enabled (node))
+                return {};
+
+            //  The member after this one that plays - at the round's end, a looping group's first.
+            juce::ValueTree next;
+            auto passed = false;
+
+            for (const auto& child : group)
+            {
+                if (child == node)
+                {
+                    passed = true;
+                    continue;
+                }
+
+                if (passed && cue::isCueElement (child.getType().toString()) && enabled (child))
+                {
+                    next = child;
+                    break;
+                }
+            }
+
+            const auto loops = word (group, "loops", "1");
+
+            if (! next.isValid() && loops != "1" && word (group, "selection", "sequential") == "sequential")
+                for (const auto& child : group)
+                    if (cue::isCueElement (child.getType().toString()) && enabled (child))
+                    {
+                        next = child;
+                        break;
+                    }
+
+            if (! next.isValid())
+                return {};
+
+            const auto element = node.getType().toString();
+
+            if (next == node)
+                return "Let play at the round's end: a cue cannot cross into itself - a range crossfade on the cue loops it smoothly";
+
+            if (element == "Group")
+                return "Let play into the next: a scene's end is not known ahead";
+
+            if (next.hasType ("Group"))
+                return "Let play into the next: a scene is never placed";
+
+            if (element == "Video" && word (node, "source", "fill") != "movie")
+                return "Let play into the next: a picture that is not a movie holds until it is stopped";
+
+            if (element != "Media" && element != "Video")
+                return "Let play into the next: only a sound or a movie is placed on its end";
+
+            for (const auto& child : node)
+                if (child.hasType ("Range"))
+                    return "Let play into the next: a cue with ranges is not placed on its end yet";
+
+            return {};
         }
 
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
@@ -1523,6 +1608,7 @@ namespace wfg::tree
                         follows its target's name, so it is worked out on every
                         rebuild of this half, which any edit of the show brings. */
                     case CueRow::autoName: text = names.of (node); break;
+                    case CueRow::joinNote: text = joinNoteOf (node, role); break;
                     case CueRow::index:    text = std::to_string (index); break;
                     case CueRow::role:     text = role; break;
 

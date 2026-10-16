@@ -213,7 +213,29 @@ namespace wfg::client::model
                 a hand. */
             if (cue::isAutoSequence (cue::GroupMode { row.mode, row.advance }))
                 marks.push_back ({ Icon::follow, {}, "each member follows the one before, with no GO" });
+
+            /*  WHAT HAPPENS BETWEEN TWO MEMBERS (namespace draft §69), when it is
+                not Let play - which says nothing, as the ordinary case does. The
+                words are the implementer's, for the author. */
+            if (cue::isSequence (cue::GroupMode { row.mode, row.advance }))
+            {
+                if (row.join == "gapless")
+                    marks.push_back ({ Icon::curve, "gapless", "gapless: each member starts as the one before ends" });
+                else if (row.join == "crossfade")
+                {
+                    const auto seconds = osc::parseDouble (row.joinLength).value_or (2.0);
+                    const auto said = osc::formatDouble (std::round (seconds * 10.0) / 10.0) + " s";
+
+                    marks.push_back ({ Icon::curve, "crossfade " + said,
+                                       "crossfade: each member crosses into the next over " + said });
+                }
+            }
         }
+
+        /*  AND WHERE A MEMBER'S BOUNDARY CANNOT BE PLACED (§69, GJ.8): the
+            engine's own reason, as the mark's meaning. */
+        if (! row.joinNote.empty())
+            marks.push_back ({ Icon::info, "let play", row.joinNote });
 
         if ((row.kind == "media" || row.kind == "video") && ! row.rate.empty())
         {

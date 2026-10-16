@@ -30175,6 +30175,7 @@ always starts at its own launch, and a post-wait or a pre-wait between them push
 | `cue/<id>/rangeJoin` | `s` | rw | a sound's: `gapless`, `crossfade`; `gapless` |
 | `cue/<id>/rangeJoinLength` | `d` | rw | a sound's, seconds, at least 0.01; 0.1 |
 | `run/<id>/joinDb` | `d` | r | runtime: what the join takes from the run's level now, in dB; nought outside a crossfade |
+| `cue/<id>/joinNote` | `s` | r | derived: why this member's boundary into the next is Let play in an automatic Gapless or Crossfade sequence, in words; empty where it is placed. The cue list's **let play** mark carries it, and a joined group's row a **gapless** or **crossfade 2 s** mark (GJ.8; the words mine, for the author) |
 
 Every new row has a default, so an old show opens and saves unchanged.
 

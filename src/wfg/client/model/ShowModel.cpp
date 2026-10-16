@@ -464,7 +464,11 @@ namespace wfg::client::model
             row.advance = attribute (snapshot, cueId, "advance");
             row.play = attribute (snapshot, cueId, "play");
             row.members = words (attribute (snapshot, cueId, "order")).size();
+            row.join = attribute (snapshot, cueId, "join");
+            row.joinLength = attribute (snapshot, cueId, "joinLength");
         }
+
+        row.joinNote = attribute (snapshot, cueId, "joinNote");
 
         /*  A GROUP FOLDS LIKE A SECTION DOES, and by its own identifier: it
             holds cues, so an operator reading a long show wants it shut as

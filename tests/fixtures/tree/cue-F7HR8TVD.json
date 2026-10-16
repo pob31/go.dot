@@ -43,6 +43,14 @@
       "VALUE": [1],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     },
+    "joinNote": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/joinNote",
+      "DESCRIPTION": "Why the boundary from this member into the next is Let play although its automatic sequence asks for Gapless or Crossfade (namespace draft 69, AOE, GJ.8), in words - a scene's end is not known ahead, a still holds, a sound with ranges is not placed yet, a cue cannot cross into itself. Empty where the join is placed, and for every cue that is not a member of such a sequence. Derived from the show, never stored; what the Runner decides at the boundary is its own and can still fall back, a speed held at nought for one.",
+      "TYPE": "s",
+      "ACCESS": 1,
+      "VALUE": [""],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
     "kind": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/kind",
       "DESCRIPTION": "What kind of cue this is, derived from the element rather than stored: a Group is a group and a Media is media. Deriving it is what stops a client turning one kind into another by writing a word, and what lets the grammar refuse a file attribute on a cue that plays nothing.",

@@ -5532,6 +5532,57 @@ TEST_CASE ("client: an automatic Crossfade's members overlap on the timeline as 
     REQUIRE (reading.bars.size() == 3u);
     CHECK (reading.bars[2].at == doctest::Approx (8.0));
 }
+TEST_CASE ("client: a sequence's join is a mark on its row, and a member it cannot place says why (§69)")
+{
+    Rig rig;
+
+    const std::string list = "7K2QM9X4";
+    const auto chain = rig.document.createCue (list, 0, "group", "Chain", {}, { { "advance", "auto" } });
+    REQUIRE (chain.ok);
+
+    const auto sound = rig.document.createCue (chain.id, 0, "media", "Sound");
+    const auto scene = rig.document.createCue (chain.id, 1, "group", "Scene");
+    const auto after = rig.document.createCue (chain.id, 2, "media", "After");
+    REQUIRE (sound.ok);
+    REQUIRE (scene.ok);
+    REQUIRE (after.ok);
+
+    const auto rowOf = [&rig] (std::int64_t tick, const std::string& cueId)
+    {
+        rig.parameters.markStale();
+        model::ShowModel show;
+        REQUIRE (show.refresh (*rig.publish (tick), "7K2QM9X4"));
+        const auto at = show.indexOf (cueId);
+        REQUIRE (at >= 0);
+        return show.rows()[static_cast<std::size_t> (at)];
+    };
+
+    const auto said = [] (const model::Row& row, const std::string& text)
+    {
+        const auto marks = model::marksFor (row);
+        return std::any_of (marks.begin(), marks.end(), [&text] (const model::Mark& mark) { return mark.text == text; });
+    };
+
+    //  Let play says nothing, as the ordinary case does - nor do its members.
+    CHECK_FALSE (said (rowOf (1, chain.id), "gapless"));
+    CHECK (rowOf (1, sound.id).joinNote.empty());
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.id + "/join", "crossfade").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.id + "/joinLength", "1.5").ok);
+    CHECK (said (rowOf (2, chain.id), "crossfade 1.5 s"));
+
+    //  The sound crosses into the scene? No: a scene is never placed. The scene into the sound? Its end is not known.
+    const auto into = rowOf (3, sound.id);
+    CHECK (into.joinNote.find ("scene is never placed") != std::string::npos);
+    CHECK (said (into, "let play"));
+    CHECK (rowOf (3, scene.id).joinNote.find ("not known ahead") != std::string::npos);
+
+    //  The last member has no boundary after it, and a manual act none to read ahead.
+    CHECK (rowOf (3, after.id).joinNote.empty());
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + chain.id + "/advance", "manual").ok);
+    CHECK (rowOf (4, sound.id).joinNote.empty());
+    CHECK (said (rowOf (4, chain.id), "crossfade 1.5 s"));
+}
 TEST_CASE ("client: a nested group's bar is as long as what is inside it")
 {
     /*  The author, 2026-09-22: "can you resolve nested groups?" No group's
