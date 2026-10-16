@@ -35,7 +35,7 @@ namespace wfg::video::render
 {
     namespace
     {
-        enum class Program : int { fill = 0, picture, movie, movieQ, mask, warp, down, blur, blurMix, count };
+        enum class Program : int { fill = 0, picture, movie, movieQ, mask, warp, down, blur, blurMix, v210, count };
 
         /*  HOW A DRAW IS LAID ON WHAT IS UNDER IT: the layers' four (VD) on
             premultiplied colour - the compositor's formulas as equations - and
@@ -238,8 +238,8 @@ namespace wfg::video::render
                                             video_movie_shader_desc (backend), video_movie_q_shader_desc (backend),
                                             video_mask_shader_desc (backend), video_warp_shader_desc (backend),
                                             video_down_shader_desc (backend), video_blur_shader_desc (backend),
-                                            video_blur_mix_shader_desc (backend) };
-            const char* names[] { "fill", "picture", "movie", "movie_q", "mask", "warp", "down", "blur", "blur_mix" };
+                                            video_blur_mix_shader_desc (backend), video_v210_shader_desc (backend) };
+            const char* names[] { "fill", "picture", "movie", "movie_q", "mask", "warp", "down", "blur", "blur_mix", "v210" };
 
             for (std::size_t n = 0; n < shaders.size(); ++n)
             {
@@ -1748,6 +1748,34 @@ namespace wfg::video::render
         target.width = target.viewWidth = held.width;
         target.height = target.viewHeight = held.height;
         return target;
+    }
+
+    sg_image Painter::packV210 (const std::string& key, const std::string& into, int words)
+    {
+        const auto found = impl->targets.find ("own:" + key);
+
+        if (found == impl->targets.end() || words <= 0)
+            return {};
+
+        const auto source = found->second;
+        auto& packed = impl->offscreen ("own:" + into, words, source.height, SG_PIXELFORMAT_RGBA8);
+
+        sg_begin_pass (Impl::passInto (packed.colour));
+        sg_apply_pipeline (impl->pipeline (Program::v210, Lay::none, SG_PIXELFORMAT_RGBA8));
+
+        sg_bindings bindings {};
+        bindings.views[VIEW_video_card_picture] = source.texture;
+        bindings.samplers[SMP_video_card_picture_smp] = impl->nearest;
+        sg_apply_bindings (bindings);
+
+        apply (UB_video_corners, rectangle (-1.0, -1.0, 1.0, 1.0));
+        video_v210_t uniforms {};
+        uniforms.v210_size[0] = static_cast<float> (source.width);
+        uniforms.v210_size[1] = static_cast<float> (source.height);
+        apply (UB_video_v210, uniforms);
+        sg_draw (0, 4, 1);
+        sg_end_pass();
+        return packed.image;
     }
 
     void Painter::releaseOffscreen (const std::string& key)

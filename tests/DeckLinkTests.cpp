@@ -477,7 +477,7 @@ TEST_CASE ("video gpu: a card output on the test card is paced by the card, and 
     CHECK (output->latencyMs <= 40.5);
 
     //  The card's thousandth against the sound's clock, shown (§3.19d).
-    CHECK (output->skewPpm == doctest::Approx (1000.0).epsilon (0.3));
+    CHECK (output->skewPpm == doctest::Approx (1000.0).epsilon (0.15));
     CHECK (output->reference == "none");
 
     //  A card that is not there says so, in words, and is tried again.

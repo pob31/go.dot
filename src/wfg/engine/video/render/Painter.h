@@ -194,6 +194,12 @@ namespace wfg::video::render
         /** That picture let go, when its sender goes. */
         void releaseOffscreen (const std::string& key);
 
+        /*  THE PICTURE UNDER `key` AS A CARD TAKES IT IN 10-BIT YUV (namespace
+            draft §71, APD): packed as v210 into the picture under `into`, a
+            texel per 32-bit word, `words` of them a row - the card's row's
+            bytes over four. Before sg_commit; invalid when `key` has none. */
+        sg_image packV210 (const std::string& key, const std::string& into, int words);
+
     private:
         struct Impl;
         std::unique_ptr<Impl> impl;

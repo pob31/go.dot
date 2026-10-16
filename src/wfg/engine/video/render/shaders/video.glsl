@@ -432,3 +432,58 @@ void main() {
 @end
 
 @program warp mesh_vs warp_fs
+
+//------------------------------------------------------------------------------
+//  A PICTURE AS A CARD TAKES IT, IN 10-BIT YUV (namespace draft §71, APD):
+//  each texel of the target one 32-bit word of v210 - three 10-bit samples,
+//  the first in the low bits - its four bytes the texel's red, green, blue and
+//  alpha. Six pixels to four words: Cb Y Cr Y Cb Y Cr Y Cb Y Cr Y. BT.709 at
+//  legal levels, 64 to 940 for black to white, each chroma sample the mean of
+//  its two pixels; past the picture's right edge, its last pixel. Every read a
+//  texel by its integer place, as the blur's are, so a row is read and written
+//  in one orientation whichever way the backend runs its rows.
+@fs v210_fs
+layout(binding=1) uniform v210 {
+    vec4 v210_size;         // the picture read: width, height
+};
+
+layout(binding=0) uniform texture2D card_picture;
+layout(binding=0) uniform sampler card_picture_smp;
+
+in vec2 at;
+out vec4 frag_colour;
+
+vec3 rgb_at(int x, int y) {
+    int most = int(v210_size.x) - 1;
+    return clamp(texelFetch(sampler2D(card_picture, card_picture_smp), ivec2(min(x, most), y), 0).rgb, 0.0, 1.0);
+}
+
+float luma_of(vec3 c) {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+uint sample_of(int group, int i, int y) {
+    int first = group * 6;
+
+    if ((i & 1) == 1) {
+        float l = luma_of(rgb_at(first + (i - 1) / 2, y));
+        return uint(clamp(floor(64.0 + 876.0 * l + 0.5), 4.0, 1019.0));
+    }
+
+    int pair = i / 4;
+    vec3 c = (rgb_at(first + 2 * pair, y) + rgb_at(first + 2 * pair + 1, y)) * 0.5;
+    float l = luma_of(c);
+    float d = (i % 4) == 0 ? (c.b - l) / 1.8556 : (c.r - l) / 1.5748;
+    return uint(clamp(floor(512.0 + 896.0 * d + 0.5), 4.0, 1019.0));
+}
+
+void main() {
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    int group = p.x / 4;
+    int k = p.x % 4;
+    uint w = sample_of(group, 3 * k, p.y) | (sample_of(group, 3 * k + 1, p.y) << 10u) | (sample_of(group, 3 * k + 2, p.y) << 20u);
+    frag_colour = vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float((w >> 24u) & 255u)) / 255.0;
+}
+@end
+
+@program v210 quad_vs v210_fs

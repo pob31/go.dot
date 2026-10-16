@@ -2506,6 +2506,15 @@ namespace wfg::video
                 std::int64_t prerollBegan = 0;
                 ClockEstimate line {};
                 std::vector<std::uint8_t> pixels {};
+
+                /*  THE SKEW'S WINDOW (§3.19d): where the card's line and the
+                    sound's stood when it opened, and the skew last said - over
+                    a window as long as can be, a minute at most, so the
+                    jitter of each reading is divided by the time between. */
+                std::int64_t skewAt = 0;
+                double skewCard = 0.0;
+                double skewSound = 0.0;
+                double skewPpm = 0.0;
             };
 
             /*  FRAMES WAITING ON A CARD (APC): two, 40 ms at 50p - the video
@@ -2816,7 +2825,10 @@ namespace wfg::video
 
                             for (auto& was : carding)
                                 if (painter != nullptr)
+                                {
                                     painter->releaseOffscreen ("card:" + was.spec.outputId);
+                                    painter->releaseOffscreen ("card10:" + was.spec.outputId);
+                                }
 
                             carding.clear();
 
@@ -3150,7 +3162,9 @@ namespace wfg::video
                             if (reading.id == held->spec.outputId)
                                 output = &reading;
 
-                        if (output == nullptr || held->output->format() != card::PixelFormat::bgra8)
+                        const auto pixelFormat = held->output->format();
+
+                        if (output == nullptr || (pixelFormat != card::PixelFormat::bgra8 && pixelFormat != card::PixelFormat::yuv10))
                             continue;
 
                         const auto& format = held->output->mode().format;
@@ -3171,8 +3185,23 @@ namespace wfg::video
                         }
 
                         const auto sample = clock.sampleAt (r, moment);
-                        painter->drawOutput (*output, sample, painter->offscreenTarget ("card:" + held->spec.outputId, format.width,
-                                                                                        format.height, render::senderFormat()));
+
+                        /*  10-BIT YUV (APD): the output drawn at sixteen bits a
+                            channel, then packed on the graphics card, a texel a
+                            word of the card's row. BGRA as it is drawn. */
+                        if (pixelFormat == card::PixelFormat::yuv10)
+                        {
+                            painter->drawOutput (*output, sample, painter->offscreenTarget ("card:" + held->spec.outputId, format.width,
+                                                                                            format.height, SG_PIXELFORMAT_RGBA16));
+                            painter->packV210 ("card:" + held->spec.outputId, "card10:" + held->spec.outputId,
+                                               card::rowBytesFor (card::PixelFormat::yuv10, format.width) / 4);
+                        }
+                        else
+                        {
+                            painter->drawOutput (*output, sample, painter->offscreenTarget ("card:" + held->spec.outputId, format.width,
+                                                                                            format.height, render::senderFormat()));
+                        }
+
                         cardDrawn.push_back (held);
                     }
 
@@ -3195,7 +3224,8 @@ namespace wfg::video
                         }
 
                     for (auto* held : cardDrawn)
-                        sendToCard (*held, painter->offscreenImage ("card:" + held->spec.outputId));
+                        sendToCard (*held, painter->offscreenImage ((held->output->format() == card::PixelFormat::yuv10 ? "card10:" : "card:")
+                                                                    + held->spec.outputId));
 
                     for (auto* one : sent)
                     {
@@ -3299,6 +3329,8 @@ namespace wfg::video
                 held.next = 0;
                 held.prerollBegan = 0;
                 held.line = {};
+                held.skewAt = 0;
+                held.skewPpm = 0.0;
                 sayBound (held.spec.slot);
             }
 
@@ -3342,8 +3374,12 @@ namespace wfg::video
 
                 const auto& mode = held.output->mode().format;
                 const auto rows = std::min (height, mode.height);
-                const auto rowBytes = static_cast<std::size_t> (std::min (width, mode.width)) * 4;
-                const auto swap = format == SG_PIXELFORMAT_RGBA8;
+                const auto tenBit = held.output->format() == card::PixelFormat::yuv10;
+
+                //  A v210 picture is a texel a word, its row the card's row; BGRA a pixel a texel.
+                const auto rowBytes = tenBit ? std::min (static_cast<std::size_t> (width) * 4, static_cast<std::size_t> (frame.rowBytes))
+                                             : static_cast<std::size_t> (std::min (width, mode.width)) * 4;
+                const auto swap = ! tenBit && format == SG_PIXELFORMAT_RGBA8;
 
                 for (int y = 0; y < rows; ++y)
                 {
@@ -3384,22 +3420,35 @@ namespace wfg::video
                 const auto latencyMs = static_cast<double> (held.output->waiting()) * static_cast<double> (format.frameDuration) * 1000.0
                                      / static_cast<double> (format.timeScale);
 
-                /*  THE SKEW (PRD §3.19d): the card's stream and the sound's
-                    samples, each against the machine's clock, against each
-                    other - nought until both lines have started. */
-                double skewPpm = 0.0;
+                /*  THE SKEW (PRD §3.19d): how far the card's stream went
+                    against how far the sound's samples went, over the window -
+                    nought until both lines have started and a second has gone. */
                 const auto pair = region::readClock (r);
+                const auto now = steadyNanos();
 
                 if (held.line.hasStarted() && soundLine != nullptr && soundLine->hasStarted() && pair.sampleRate > 0)
                 {
-                    const auto cardRate = held.line.samplesPerSecond() / 1.0e6;
-                    const auto soundRate = soundLine->samplesPerSecond() / static_cast<double> (pair.sampleRate);
+                    const auto cardAt = static_cast<double> (held.line.sampleAt (now));
+                    const auto soundAt = static_cast<double> (soundLine->sampleAt (now));
+                    const auto span = static_cast<double> (now - held.skewAt) * 1.0e-9;
 
-                    if (soundRate > 0.0)
-                        skewPpm = (cardRate / soundRate - 1.0) * 1.0e6;
+                    if (held.skewAt == 0 || span > 60.0)
+                    {
+                        held.skewAt = now;
+                        held.skewCard = cardAt;
+                        held.skewSound = soundAt;
+                    }
+                    else if (span >= 1.0)
+                    {
+                        const auto cardSeconds = (cardAt - held.skewCard) * 1.0e-6;
+                        const auto soundSeconds = (soundAt - held.skewSound) / static_cast<double> (pair.sampleRate);
+
+                        if (soundSeconds > 0.0)
+                            held.skewPpm = (cardSeconds / soundSeconds - 1.0) * 1.0e6;
+                    }
                 }
 
-                region::writeCardState (r, static_cast<std::size_t> (slot), latencyMs, skewPpm,
+                region::writeCardState (r, static_cast<std::size_t> (slot), latencyMs, held.skewPpm,
                                         static_cast<std::uint32_t> (held.output->reference()), 0);
             }
 
@@ -3979,7 +4028,7 @@ namespace wfg::video
                         spec.settings.key = output.key == region::CardKey::external ? card::Keying::external
                                           : output.key == region::CardKey::internal ? card::Keying::internal
                                                                                     : card::Keying::off;
-                        spec.settings.tenBit = false;
+                        spec.settings.tenBit = true;
                         cards.push_back (std::move (spec));
 
                         region::beginWrite (state.seq);

@@ -32,6 +32,7 @@
 #include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Mapping.h>
 #include <wfg/engine/video/VideoRegion.h>
+#include <wfg/engine/video/render/Card.h>
 #include <wfg/engine/video/render/Gpu.h>
 #include <wfg/engine/video/render/Painter.h>
 
@@ -1041,6 +1042,83 @@ TEST_CASE ("video gpu: an output warps and calibrates the canvas once composited
     //  The zone covers the left half; its own canvas shows on the right.
     CHECK (near (at (laid, 10, height / 2), 0x2060E0u));
     CHECK (near (at (laid, width - 10, height / 2), 0xC04020u));
+}
+
+TEST_CASE ("video gpu: an output packed as a card takes 10-bit YUV is the reference's, sample for sample (§71, DL.4)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    Pictures pictures;
+
+    auto red = layerOf ("L1", region::Source::fill, 1.0, 1);
+    red.paint = 0xC04020u;
+
+    //  Not a multiple of six across, so a row ends inside a group of words.
+    constexpr int width = 100, height = 6;
+    const auto rowBytes = video::card::rowBytesFor (video::card::PixelFormat::yuv10, width);
+
+    region::ConfigReading config;
+    config.canvases.push_back ({ "C1", 64, 36 });
+
+    //  The canvas squeezed into the middle half: black either side, so the
+    //  chroma pairs straddle an edge somewhere.
+    region::OutputReading output;
+    output.id = "O1";
+    output.canvas = "C1";
+    output.mesh = video::Mesh::identity();
+    output.mesh.x = { 0.25f, 0.75f, 0.25f, 0.75f };
+
+    std::vector<float> rgba;
+    std::vector<std::uint8_t> packed;
+    int w = 0, h = 0, packedW = 0, packedH = 0;
+    auto packedFormat = SG_PIXELFORMAT_NONE;
+
+    {
+        video::render::Painter painter (pictures);
+        std::string why;
+        REQUIRE_MESSAGE (painter.make (why), why);
+
+        painter.beginFrame (config, { red }, {});
+        painter.drawOutput (output, 100, painter.offscreenTarget ("O1", width, height, SG_PIXELFORMAT_RGBA16));
+        REQUIRE (painter.packV210 ("O1", "V1", rowBytes / 4).id != SG_INVALID_ID);
+        sg_commit();
+
+        REQUIRE (video::gpu::readBack (painter.offscreenImage ("O1"), rgba, w, h));
+        REQUIRE (video::gpu::readBackBytes (painter.offscreenImage ("V1"), packed, packedW, packedH, packedFormat));
+        painter.endFrame();
+    }
+
+    REQUIRE (w == width);
+    REQUIRE (h == height);
+    CHECK (packedW == rowBytes / 4);
+    CHECK (packedH == height);
+    CHECK (packedFormat == SG_PIXELFORMAT_RGBA8);
+
+    //  The GPU's words against the CPU's from the same pixels: a 10-bit step
+    //  at most, where the two round a half differently.
+    const auto reference = video::card::packV210 (rgba.data(), w, h, rowBytes);
+    REQUIRE (packed.size() == reference.size());
+
+    int worst = 0;
+
+    for (int y = 0; y < height; ++y)
+        for (int i = 0; i < rowBytes / 4 * 3; ++i)
+            worst = std::max (worst, std::abs (video::card::v210Sample (packed, rowBytes, y, i)
+                                                - video::card::v210Sample (reference, rowBytes, y, i)));
+
+    CHECK (worst <= 1);
+
+    //  Black at the left edge, legal: Y 64, chroma at its middle, 512.
+    CHECK (video::card::v210Sample (packed, rowBytes, 0, 1) == 64);
+    CHECK (std::abs (video::card::v210Sample (packed, rowBytes, 0, 0) - 512) <= 1);
+
+    //  The fill in the middle: pixel 50 is the third of the ninth group of
+    //  six, its luma sample the group's sixth (Cb Y Cr Y Cb [Y]).
+    const auto luma = 0.2126 * 192.0 / 255.0 + 0.7152 * 64.0 / 255.0 + 0.0722 * 32.0 / 255.0;
+    CHECK (std::abs (video::card::v210Sample (packed, rowBytes, 3, 8 * 12 + 5) - static_cast<int> (std::floor (64.0 + 876.0 * luma + 0.5))) <= 2);
 }
 
 TEST_CASE ("video gpu: an output's alignment grid drawn white over its picture in the canvas's space, bent by its mesh and by each zone's (§68, ANX)")

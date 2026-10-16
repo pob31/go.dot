@@ -267,4 +267,12 @@ namespace wfg::video::card
         external, 10bit, soundN), the formats it sends and those it takes in,
         tab between, words within by spaces - or one line, problem and why. */
     std::string describe (const Found& found);
+
+    /*  10-BIT YUV ON THE CPU (APD): what the renderer's v210 pass makes of
+        RGBA floats, `width` by `height`, into rows of `rowBytes` - the
+        reference it is held to, and the test card's way back to colours. */
+    std::vector<std::uint8_t> packV210 (const float* rgba, int width, int height, int rowBytes);
+
+    /*  Sample `i` of row `y` - Cb Y Cr Y ... in their order - of v210 rows. */
+    int v210Sample (const std::vector<std::uint8_t>& packed, int rowBytes, int y, int i) noexcept;
 }
