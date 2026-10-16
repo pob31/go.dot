@@ -304,12 +304,8 @@ mechanics are in `docs/godot-namespace-draft-0.1.md` §15. **Still owed: M-B**, 
 ports bound from the document, and **M-C**, the network interfaces Go.dot listens on.
 
 **Queued behind Half B (2026-09-18):** the group join setting and the range
-crossfade of PRD §3.6 and §3.24 — gap, gapless, crossfade with a user-defined
-overlap. Decided, not *(proposed)*; planned and built as its own plan once the
-operator client's layout has stopped moving. It is Phase 3's scheduler and the
-namespace draft's placed boundary (§12.9) reused at a member boundary, plus two
-fade jobs per crossfaded boundary and a prepare horizon that reaches the
-incoming member.
+crossfade of PRD §3.6 and §3.24. Planned on 2026-10-16, widened to manual
+sequences: *Group joins* below.
 
 ---
 
@@ -1393,6 +1389,34 @@ to SSL, Adamson and the grandMA1 manual.
 
 ---
 
+### Group joins: Let play, Gapless, Crossfade · M
+
+*Added on 2026-10-16*, at the author's direction: one Join menu on every sequence group, automatic
+and manual - **Let play** (today's), **Gapless** (the next placed on the previous one's end, or its
+GO cutting what still sounds), **Crossfade** (a length and a curve; the two cross) - with a member's
+waits moving the fades, pictures dissolving, and the range crossfade of PRD §3.24 built after it
+(namespace draft §69; PRD §3.6, §3.24). The author's decisions are ANY-AOB; AOC-AOJ are the
+implementer's, the author's to overrule.
+
+| Stage | What | Depends on |
+|---|---|---|
+| GJ.0 | Docs: namespace §69, PRD §3.6, §3.24 and the answered list, this | - |
+| GJ.1 | The rows and the schema | GJ.0 |
+| GJ.2 | The inspector, desktop and page | GJ.1 |
+| GJ.3 | The join envelope and `joinDb` in the level sum | GJ.1 |
+| GJ.4 | Manual: Gapless and Crossfade at the incoming member's launch; Esc and Doh! across one | GJ.3 |
+| GJ.5 | Automatic: the early arm, the placed launch, known ends, waits, shuffle and loops, stop verbs, replay | GJ.3 |
+| GJ.6 | Pictures: the dissolve, a movie's locked sounds | GJ.4, GJ.5 |
+| GJ.7 | A group's length, the solver, the slot analysis, the timeline, a backup's seat | GJ.5 |
+| GJ.8 | The row says where a boundary is Let play and why | GJ.5 |
+| GJ.9 | The QLab import | GJ.1 |
+| GJ.10 | The range crossfade | GJ.1 |
+| GJ.11 | M75, the README, the guides, the whole suite, CI | all |
+
+**Done when:** an automatic sequence of sounds and movies plays Gapless on the sample and Crossfade
+across its length, a post-wait shrinking the crossing; a manual sequence's GO cuts or crosses what
+still sounds; Esc and Doh! across a crossfade do what §3.6 says; a ranged sound crosses its wraps; an
+old show saves unchanged; CI is green.
 ## Phase 10 — Timecode, panic, hardening · M
 
 **Goal:** the stop levels and the sync sources that a touring show requires.

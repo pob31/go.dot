@@ -30122,3 +30122,85 @@ The app (`go.dot-remote`, built 2026-10-15/16, local until the author has looked
 Discovery (ANN). A password on the WebSocket (AGB). The canvases' pictures on the tablet - the wall is
 the picture (§40.2, XI). Sound peaks (`.tpk`): only the timbre pyramid is served. An iPad app: iOS keeps
 nothing alive in the background (PRD §3.17), so the page stays its answer.
+
+## 69. Group joins: Let play, Gapless, Crossfade
+
+Decided on 2026-09-18 for automatic sequences (PRD §3.6, §3.24) and parked until the client's layout
+settled; brought back by the author on 2026-10-16 - *"there is still the gap, gapless and crossfade
+between media in a sequence group ... I guess a drop down menu for the whole group in sequence mode
+whether in manual mode or automatic mode. The gap is already post or prewait in a way. The crossfade
+allows to automatically add a fade out and a fade in of a given length. Prewait and post wait move
+these in and out too."* Decisions run from ANY.
+
+### 69.1 What it is, before its names
+
+A sequence group plays its members one after another. Between two of them there is a **join**, and the
+group says once, for all of them, what it is:
+
+| Join | Automatic sequence | Manual sequence (GO steps) |
+|---|---|---|
+| **Let play** | the next starts when the previous is seen to end, `sequenceGapTicks` later - today's | the previous plays on under the next - today's |
+| **Gapless** | the next is placed on the sample the previous ends on | the next's launch cuts every earlier member still sounding, de-clicked |
+| **Crossfade** | the next starts *length* before the previous ends, and the two cross | the next's launch fades every earlier member still sounding out over *length*, and the next fades in |
+
+A member's waits move the crossfade: its fade-out always ends at its own end, the next member's fade-in
+always starts at its own launch, and a post-wait or a pre-wait between them pushes the next member later.
+
+### 69.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **ANY** | **One Join menu on every sequence group, automatic and manual**: Let play, Gapless, Crossfade, with a length and a curve for Crossfade. Sequential and shuffle alike, the round wrap and every loop included; a timeline, a sampler and a time group are not asked (the rows greyed). The names are the author's: *gap* became **Let play** because in a manual sequence the previous member plays on, and what the choice means in both modes is that Go.dot leaves it alone. | the author's (offered "Let play / Gapless / Crossfade" beside his own "Multi / Single gapless / Single crossfade" and the PRD's "Gap / Gapless / Crossfade"; manual meanings offered as "all three mean something", recommended) |
+| **ANZ** | **The fades stay on their member; the waits move them.** The outgoing member's fade-out ends at its own end, the incoming member's fade-in starts at its own launch; the outgoing's post-wait and the incoming's pre-wait push the incoming later, so the crossfade shrinks and, past its length, becomes fade-out, silence, fade-in. In a manual sequence the fade-out starts when the incoming member actually starts, after its pre-wait. Replaces PRD §3.6's "pre-wait and post-wait win" (a wait made the boundary a gap). | the author's (offered as "Fades stay on their member", recommended) |
+| **AOA** | **A picture dissolves too**: a movie or a still fades its opacity over the same length as a sound its level, the picture's shape linear as the movie edit's dissolve is (§55); a movie's locked sounds go with it. | the author's (offered as "Yes, picture dissolves too", recommended) |
+| **AOB** | **The range crossfade (PRD §3.24) is built in the same plan**, last. | the author's (offered as "Yes, as the last stage", recommended) |
+| **AOC** | **Three group rows**: `join` (`letPlay`, `gapless`, `crossfade`; `letPlay`), `joinLength` (seconds, at least 0.1, 2 by default) and `joinCurve` (-1..1, nought). Shown as "Let play", "Gapless", "Crossfade". The length's floor is five ticks, below which a level moved fifty times a second is a ramp of a few steps; Gapless is the length-nought case. The curve is the one rule the sound edit's section fades use (`doc::fadeGain`, §55): nought is equal power, a positive curve holds the sound up longer, a negative one lets it go sooner. | mine |
+| **AOD** | **A join's gain is a term of the member's level, never a fade.** A run carries a join envelope - where it starts, how long, in or out, the curve - and the tick works out `joinDb` from it, added in the level sum beside the run's own level, trim, DCAs and lane, and into its children's sums, so a movie's locked sounds follow. Nothing a hand or a fade cue does takes it away, and it takes nothing from them: a fade cue aimed at a crossfading member still moves that member's own level. It goes with the run. A picture's is a factor multiplied into its opacity as the DCAs' is (§37.5), its points placed on samples a lead ahead. | mine |
+| **AOE** | **An automatic boundary needs a known end, or it is Let play.** A sound with a duration, a movie, a fade, a memo, an OSC or MIDI cue with `wait` none have one; an OSC or MIDI cue waiting on a reply, a still, a live input, a process or script cue, an infinite range and - for now - a **nested group** do not, and that boundary is Let play, logged and said on the member's row. Nested groups wait because their end is the hardest to know and because a member group's footer is where §3.6's *the incoming wins* lives; while they take Let play that clash cannot arise. The end is worked out every tick from where the member is and its speed, as a range's (§12.9), and placed once it is a launch horizon away, `run.late` when it cannot be honoured. A manual sequence needs no end: every kind takes part. | mine |
+| **AOF** | **Every automatic sequence arms its next member while the current one plays**, a load lead (two seconds, as a code-placed member, §60) before its launch - Let play too. §12.5's table and three comments in the Runner said it already did; it did not - the next member was armed only once the current one had finished, so a sound not yet read from the disk added its loading to the published gap. | mine |
+| **AOG** | **A cue does not cross into itself.** A one-member group looping wants its one cue sounding twice, and a cue has one live run: that wrap is Let play, and the row points at the cue's own range crossfade, which is the tool for a looped file. A shuffle never puts a round's last member first in the next, so it never meets this. | mine |
+| **AOH** | **Doh! on a GO that crossed** takes the incoming member back as any GO (§24), and an earlier member still fading out rises back to where it was; one already cut, or faded to its stop, is not brought back. | mine |
+| **AOI** | **QLab's playlist crossfade is imported** (§46.4 dropped it) as `join` Crossfade, its length the playlist's when the file carries one, else two seconds and the note says so. | mine |
+| **AOJ** | **A range crossfade is the reader's faded jump**, not a second slot: every slot of a track shares one output stage (`AudioHost::trackMatrix`), so two slots could not be faded apart without a gain per slot, and the reader already reads the old place and the new together, equal power, for a chase or a moved loop (§33). Placed *length* before the boundary on the slot sounding, at every boundary of the cue's ranges and every wrap. Two media rows: `rangeJoin` (`gapless`, `crossfade`; `gapless`) and `rangeJoinLength` (seconds, at least 0.01, 0.1 by default); no curve, the reader's shape is equal power. | mine |
+
+### 69.3 Rows
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `cue/<id>/join` | `s` | rw | a group's: `letPlay`, `gapless`, `crossfade`; `letPlay` |
+| `cue/<id>/joinLength` | `d` | rw | a group's, seconds, at least 0.1; 2 |
+| `cue/<id>/joinCurve` | `d` | rw | a group's, -1..1; nought, equal power |
+| `cue/<id>/rangeJoin` | `s` | rw | a sound's: `gapless`, `crossfade`; `gapless` |
+| `cue/<id>/rangeJoinLength` | `d` | rw | a sound's, seconds, at least 0.01; 0.1 |
+| `run/<id>/joinDb` | `d` | r | runtime: what the join takes from the run's level now, in dB; nought outside a crossfade |
+
+Every new row has a default, so an old show opens and saves unchanged.
+
+### 69.4 Stages
+
+| Stage | What | Built |
+|---|---|---|
+| GJ.0 | This section; PRD §3.6, §3.24 and the answered list; the devplan | |
+| GJ.1 | The rows, the schema | |
+| GJ.2 | The inspector, desktop and page: the rows after `advance`, their words, greyed where they mean nothing | |
+| GJ.3 | The join envelope and `joinDb` in the level sum | |
+| GJ.4 | Manual: Gapless and Crossfade at the incoming member's launch; Esc, double Esc and Doh! across one | |
+| GJ.5 | Automatic: the early arm (AOF), the placed launch, known ends and Let play where there is none, the waits, shuffle and loops, the stop verbs, replay | |
+| GJ.6 | Pictures: the dissolve, a movie's locked sounds | |
+| GJ.7 | What reads the show without playing it: a group's length, the solver, the slot analysis, the timeline, a backup's seat | |
+| GJ.8 | The row says where a boundary is Let play and why | |
+| GJ.9 | The QLab import (AOI) | |
+| GJ.10 | The range crossfade (AOJ) | |
+| GJ.11 | M75, the README, the guides, the whole suite | |
+
+### 69.5 Measurements
+
+- **M75** - a Gapless and a Crossfade boundary recorded off the interface, Release: the gapless join on
+  its sample (no click, as M12's range boundary); the crossfade's sum steady across it on uncorrelated
+  material at nought curve; a crossfaded range wrap on a loop of noise. Owed.
+
+### 69.6 Not built
+
+A nested group as a member of a placed join (AOE); a crossfade's length or curve per member; a range
+crossfade's curve; the clash warning where an outgoing footer and an incoming header touch one target
+(PRD §3.6, *proposed* since 2026-09-18).

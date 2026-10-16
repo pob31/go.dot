@@ -402,63 +402,75 @@ group model.
 
 #### Joins between members
 
-*Added in 0.8, at the author's direction (2026-09-18).* An automatic sequence
-group carries one **join** setting, chosen once for the group and applied at
-every member boundary the group owns — in `sequential` and in `shuffle` alike,
-the round wrap included. Shuffle qualifies because a round is materialised as a
-list (above), so the incoming member is known before the boundary. Setting it
-once is the point: forty files that need nothing special about their timing
-should not need forty negative offsets and forty fade cues. A member that does
-need something special keeps its own pre-wait and post-wait, and those win at
-its boundary (below).
+*Added in 0.8, at the author's direction (2026-09-18); widened to manual
+sequences and renamed on 2026-10-16, at the author's direction
+(`docs/godot-namespace-draft-0.1.md` §69).* A sequence group carries one
+**join** setting, chosen once for the group and applied at every member
+boundary the group owns — automatic or manual, in `sequential` and in
+`shuffle` alike, the round wrap included. Shuffle qualifies because a round is
+materialised as a list (above), so the incoming member is known before the
+boundary. Setting it once is the point: forty files that need nothing special
+about their timing should not need forty negative offsets and forty fade cues.
+A timeline, a sampler and a time group have no boundaries of this kind and are
+not asked.
 
-- **gap** — today's behaviour, and the default *(proposed)*: the scheduler
-  observes the outgoing member's end and launches the next a fixed number of
-  ticks later, published by the engine as `sequenceGapTicks`. The only join
-  every member kind can honour.
-- **gapless** — the boundary is **placed**, not observed. A media member's end
-  is known the moment its launch is: the launch sample plus the file's duration
-  or out-point, frozen at load. The incoming member's launch is placed on that
-  sample, the mechanism §3.24 uses for a range boundary, and the join is
-  sample-accurate.
-- **crossfade** — gapless with a user-defined **overlap** (seconds) and a curve
-  (§3.10). The incoming member launches *overlap* before the outgoing member's
-  end; across the overlap the outgoing fades out and the incoming fades in.
-  Tracktion has no crossfade (§3.24, spike 03), so this is the two-slots-and-
-  two-curves construction spike 03 measured, applied at a member boundary
-  instead of a range boundary. The fades apply to media members; a member of
-  any other kind simply starts *overlap* early.
+| Join | Automatic sequence | Manual sequence (GO steps) |
+|---|---|---|
+| **Let play** — the default *(proposed)* | the scheduler observes the outgoing member's end and launches the next a fixed number of ticks later, published as `sequenceGapTicks` | the previous member plays on under the next, as every manual GO always has |
+| **Gapless** | the boundary is **placed**, not observed: the incoming member's launch is placed on the outgoing member's end sample, the mechanism §3.24 uses for a range boundary | at the incoming member's launch, every earlier member of the group still sounding is cut there, de-clicked |
+| **Crossfade** (a length, a curve) | the incoming member launches *length* before the outgoing member's end; across it the outgoing fades out and the incoming fades in | at the incoming member's launch, every earlier member still sounding fades out over *length* and stops, and the incoming fades in |
 
-What a placed join needs, and what it changes:
+*Let play* was **gap** until 2026-10-16. The author renamed it because in a
+manual sequence nothing about it is a gap — the previous member plays on — and
+what the choice means in both modes is that Go.dot leaves the previous member
+alone. Tracktion has no crossfade (§3.24, spike 03), so a crossfade is Go.dot's
+own: two members sounding at once, each on its own voice, with a gain of
+Go.dot's on each — a term of the member's level beside its own level, trim,
+DCAs and lane, so a fade cue on a member still does what it says. **A picture
+dissolves** across the same length (2026-10-16): a movie or a still fades its
+opacity as a sound fades its level, and a movie's locked sounds go with it. A
+member of any other kind simply starts *length* early.
+
+What a join needs, and what it changes:
 
 - **Two members alive at once.** "Members run one after another" becomes one
-  member *audible* at a time, except during an overlap. Completion is
+  member *audible* at a time, except during a crossfade. Completion is
   unchanged: the group is done when its last member is.
-- **A known end.** Media with a duration, fades, memos, and OSC/MIDI with
-  `wait = none` have one. An OSC cue waiting on a reply, an infinite range, and
-  a nested group ending on one of those do not: that boundary falls back to
-  **gap**, and the row says so. A stop or an advance on the outgoing member
-  re-places the boundary; rate is fixed at arm (§3.24), so it never moves the
-  end.
-- **Pre-wait and post-wait win.** A post-wait is a delay after completion and
-  cannot overlap anything: a boundary whose outgoing member has a post-wait, or
-  whose incoming member has a pre-wait, is a **gap** boundary with that wait.
-  The join setting covers the boundaries that have neither, which in a plain
-  set of files is all of them.
-- **The incoming member is prepared ahead.** Its header, where it is a group,
-  must have completed by *end − overlap − launch latency*: the prepare horizon
-  (§3.12) extends to the incoming member of a placed join, as standby
-  auto-prepare already extends to the next row.
+- **A known end, in an automatic sequence.** Media with a duration, fades,
+  memos, and OSC/MIDI with `wait = none` have one. An OSC cue waiting on a
+  reply, a still that holds, a live input, an infinite range and a nested group
+  do not *(nested groups: proposed, for now)*: that boundary is **Let play**, and
+  the row says so. A manual sequence needs no known end — GO is the boundary —
+  so every kind takes part. The end is worked out from where the member is and
+  the speed it plays at, so a speed fade moves it (§3.24), and the boundary is
+  placed only once it is a launch horizon away; a stop or an advance on the
+  outgoing member re-places it.
+- **The fades stay on their member; the waits move them** (2026-10-16, replacing
+  "pre-wait and post-wait win"). The outgoing member's fade-out always ends at
+  its own end, and the incoming member's fade-in always starts at its own
+  launch. The outgoing member's post-wait and the incoming member's pre-wait
+  push the incoming member later, so the crossfade shrinks; a wait longer than
+  the length leaves a fade-out, a silence and a fade-in. In a manual sequence
+  the fade-out begins when the incoming member actually starts, after its
+  pre-wait.
+- **The incoming member is prepared ahead.** It is armed while the outgoing
+  member plays, a load lead before its launch, as the prepare horizon (§3.12)
+  arms the next row.
 - **A footer of the outgoing member runs after the incoming member's header.**
   Where the two touch the same target, **the incoming wins**: the outgoing
   footer's action on that target is not applied. The same rule holds between
   the two members' footers. Detecting the clash when the show is checked, and
   reporting it as a warning on the row, is *(proposed)*. The author's own
-  practice: do not give a footer to a member of a crossfaded group.
-- **Esc during an overlap** stops both members, and the later member's footer
+  practice: do not give a footer to a member of a crossfaded group. While nested
+  groups take Let play (above), the clash cannot arise.
+- **Esc during a crossfade** stops both members, and the later member's footer
   is the one applied; the group's own footer runs at group exit as always.
   Double Esc drops both, footers skipped (§4.4). An edge case rather than a
   design centre.
+- **Doh! on a GO that crossed** (§3.32, *proposed*): the incoming member is
+  taken back as any GO is, and an earlier member still fading out rises back to
+  where it was; one already cut or faded to its stop is not brought back — the
+  audio escaped (§4.5).
 
 #### Header and footer
 
@@ -2352,6 +2364,17 @@ range is the alternative)*. One mechanism for both owners; only the object that
 places the boundary differs. §3.9c's budget now carries the cost: a crossfaded
 range keeps a second slot alive across each boundary.
 
+*Amended 2026-10-16, at the author's direction (built in the same plan as the
+member joins, `docs/godot-namespace-draft-0.1.md` §69).* The range crossfade is
+not built as two slots after all *(proposed)*: every slot of a track shares one
+output stage, so two slots could not be faded apart without a gain per slot.
+It is the faded jump the slot's own reader already makes for a chase or a moved
+loop — the reader reads the old place and the new together, equal-power, over
+the crossfade — placed *length* before the boundary on the slot that is
+sounding. It crosses every boundary of the cue's ranges, a range's own wrap
+included, and costs no slot. Its shape is the reader's equal power; a range
+crossfade has a length and no curve *(proposed)*.
+
 #### Editing a sound
 
 *Added in 0.8, at the author's direction (2026-10-10).* A sound cue may be cut
@@ -3946,6 +3969,12 @@ member boundary it owns (§3.6). Added the same day: the group's default join
 (§3.6, gap); the edit-time warning where an outgoing footer and an incoming
 header touch the same target (§3.6); and where the range join setting lives
 (§3.24, per cue).
+
+*Answered 2026-10-16, at the author's direction* (`docs/godot-namespace-draft-0.1.md`
+§69): the join is asked of a **manual** sequence as well, and its three choices are
+**Let play**, **Gapless** and **Crossfade** (§3.6); a member's waits move the fades
+rather than turning the boundary into a gap; a picture dissolves; and the range
+crossfade is built with the member joins.
 
 *Answered 2026-09-23, at the author's direction* (decisions Z, AA, AB and AC,
 `docs/godot-namespace-draft-0.1.md` §9 and §16.1): the voices claim shape
