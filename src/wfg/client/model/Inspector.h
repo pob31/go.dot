@@ -54,6 +54,7 @@
 
 #include <cstddef>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -351,6 +352,21 @@ namespace wfg::client::model
         switch or a menu - the rows `surface.dial` takes. A field over several
         cues gives the dial its first cue's row. */
     bool mayDial (const Field& field);
+
+    /*  THE WHEEL OVER A NUMBER (namespace draft §74, AQP; the author,
+        2026-10-16: "Mouse wheel can also be used for hover-dial
+        adjustments"): a number the master dial could take, turned `steps`
+        notches by the dial's own law - the row's type, unit and range - from
+        `from`, and answered as the text a box would commit. `fine`, Shift
+        held, moves a tenth of what a notch moves; a whole number moves by one
+        either way. Empty when the field is not one the wheel turns, or when
+        the notches move nothing - an end already reached. */
+    std::optional<std::string> wheelTurned (const Field& field, double from, int steps, bool fine);
+
+    /*  WHOLE NOTCHES OUT OF A WHEEL'S MOVEMENT. A mouse's notch is about a
+        quarter in JUCE's units and a touchpad sends a trickle of small ones,
+        so what is left of a notch is carried, in `carried`, to the next. */
+    int wheelNotches (float deltaY, float& carried);
 
     /*  WHAT THE MASTER DIAL IS ON, in words: "Kick: level -6 dB", "Kick to
         Reverb: level -12 dB" for a send. Empty while it is free. The row's

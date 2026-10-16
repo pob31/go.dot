@@ -34,8 +34,10 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
+#include <wfg/engine/surface/SurfacePages.h>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -1664,6 +1666,56 @@ namespace wfg::client::model
                  && field.options.empty() && field.choices.empty()
                  && (field.typeTags == "d" || field.typeTags == "i")
                  && (field.control == Control::text || field.control == Control::loopCount);
+    }
+
+    std::optional<std::string> wheelTurned (const Field& field, double from, int steps, bool fine)
+    {
+        /*  A PLAIN NUMBER'S BOX ONLY. The loop control is a number too, and
+            the dial may take it, but its box says something else - nought is
+            "for ever" - so a notch down from one would be a show looping for
+            ever. Its switches and its box stay the way to set it. */
+        if (! mayDial (field) || field.control != Control::text || steps == 0 || ! std::isfinite (from))
+            return std::nullopt;
+
+        surface::DialRange range;
+        range.integer = field.typeTags == "i";
+        range.hasMinimum = field.hasMinimum;
+        range.minimum = field.minimum;
+        range.hasMaximum = field.hasMaximum;
+        range.maximum = field.maximum;
+        range.unit = field.unit;
+
+        auto next = surface::dialTurned (range, from, steps, surface::FaderLaw::generic);
+
+        /*  A TENTH OF A NOTCH, Shift held: the notch's own move, scaled, so a
+            level stays on the fader's law and a frequency on its ratios. Kept
+            to a thousandth, so the box does not show the arithmetic's tail. */
+        if (fine && ! range.integer)
+            next = std::round ((from + (next - from) / 10.0) * 1000.0) / 1000.0;
+
+        if (std::abs (next - from) < 1.0e-9)
+            return std::nullopt;
+
+        if (range.integer)
+            return std::to_string (std::lround (next));
+
+        /*  As the box shows a number, so a tenth of a second written is "0.6"
+            and not the arithmetic's 0.6000000000000001. */
+        return shownNumber (next, field.unit);
+    }
+
+    int wheelNotches (float deltaY, float& carried)
+    {
+        constexpr auto perNotch = 0.25f;
+
+        carried += deltaY / perNotch;
+
+        /*  Whole notches only, towards nought, and what is left carried. A
+            hair under a whole notch counts as one: a mouse's notch is not
+            always exactly a quarter, and 0.2499 must not wait for the next. */
+        const auto whole = static_cast<int> (carried + (carried > 0.0f ? 0.001f : -0.001f));
+        carried -= static_cast<float> (whole);
+        return whole;
     }
 
     std::string dialLine (const tree::TreeSnapshot& snapshot)

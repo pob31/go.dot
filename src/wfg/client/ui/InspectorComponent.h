@@ -135,13 +135,35 @@ namespace wfg::client::ui
         void paint (juce::Graphics& g) override;
         void resized() override;
         void mouseDown (const juce::MouseEvent& event) override;
+        void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override;
 
         /*  A PRESS THAT LANDED ON `hit`: what mouseDown forwards to, and what a
             test drives without inventing a mouse event. */
         void pressedOn (const juce::Component* hit);
 
+        /*  THE WHEEL OVER A NUMBER (namespace draft §74, AQP): what a value's
+            box forwards its wheel to, and what a test drives. `deltaY` in
+            JUCE's units, `fine` with Shift held. True when the box keeps the
+            wheel - it turned the number, or holds part of a notch towards it -
+            and false when the panel should scroll instead. */
+        bool wheeledOn (const juce::Component* hit, float deltaY, bool fine);
+
     private:
         struct Line;
+        class NumberBox;
+
+        /*  THE WHEEL'S OWN STATE. What it last wrote and when, so a notch
+            builds on the one before it while the poll has not yet brought that
+            back; what is left of a notch; and when the panel last scrolled,
+            so a scroll passing over a box keeps scrolling. */
+        static constexpr double wheelHoldMs = 1000.0;
+        static constexpr double scrollLatchMs = 400.0;
+        std::string wheelAddress;
+        double wheelValue = 0.0;
+        double wheelAtMs = -1.0e9;
+        double scrolledAtMs = -1.0e9;
+        float wheelCarried = 0.0f;
+        bool wheelTaken = false;
 
         /*  A DRAWER'S HEAD: its twist, its icon, its name, and while it is
             shut how many rows are in it. Pressing it opens or shuts it. */

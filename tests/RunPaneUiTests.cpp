@@ -1600,6 +1600,105 @@ TEST_CASE ("inspector: a press on a number puts it on the master dial, and its l
     }
 }
 
+TEST_CASE ("inspector: the wheel over a number turns it by the dial's law, and over a word scrolls")
+{
+    /*  The author, 2026-10-16: "Mouse wheel can also be used for hover-dial
+        adjustments" (namespace draft §74, AQP). A mouse's notch is a quarter
+        in JUCE's units. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::InspectorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+
+    ui::InspectorComponent inspector (model::Theme {}, actions);
+    inspector.setSize (320, 200);
+
+    const auto field = [] (std::string name, std::string tags, std::string value, std::string unit,
+                           double low, double high)
+    {
+        model::Field made;
+        made.address = "/godot/cue/CUE00001/" + name;
+        made.name = name;
+        made.label = name;
+        made.typeTags = std::move (tags);
+        made.value = std::move (value);
+        made.unit = std::move (unit);
+        made.writable = true;
+        made.hasMinimum = made.hasMaximum = true;
+        made.minimum = low;
+        made.maximum = high;
+        return made;
+    };
+
+    model::Inspection inspection;
+    inspection.cueId = "CUE00001";
+    inspection.cueName = "The bed";
+    inspection.kind = "media";
+    inspection.count = 1;
+    inspection.blocks.push_back ({ "what it is", { field ("name", "s", "The bed", "", 0.0, 0.0) } });
+    inspection.blocks.push_back ({ "what it does", { field ("preWait", "d", "0.5", "s", 0.0, 3600.0),
+                                                     field ("rounds", "i", "3", "", 0.0, 1000.0) } });
+    inspector.show (inspection);
+
+    const auto boxSaying = [&inspector] (const juce::String& word) -> juce::Label*
+    {
+        juce::Label* found = nullptr;
+
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+        {
+            for (auto* child : at.getChildren())
+            {
+                if (auto* label = dynamic_cast<juce::Label*> (child))
+                    if (label->getText() == word && found == nullptr)
+                        found = label;
+
+                walk (*child);
+            }
+        };
+
+        walk (inspector);
+        return found;
+    };
+
+    auto* wait = boxSaying ("0.5");
+    auto* name = boxSaying ("The bed");
+    REQUIRE (wait != nullptr);
+    REQUIRE (name != nullptr);
+
+    //  A notch up: a tenth of a second, as the dial turns a time.
+    CHECK (inspector.wheeledOn (wait, 0.25f, false));
+    REQUIRE (written.size() == 1);
+    CHECK (written.back() == std::pair<std::string, std::string> { "/godot/cue/CUE00001/preWait", "0.6" });
+
+    //  The next notch builds on the last one before the poll brings it back.
+    CHECK (inspector.wheeledOn (wait, 0.25f, false));
+    REQUIRE (written.size() == 2);
+    CHECK (written.back().second == "0.7");
+
+    //  A touchpad's trickle: kept, and sent once it makes a notch.
+    CHECK (inspector.wheeledOn (wait, 0.1f, false));
+    CHECK (written.size() == 2);
+    CHECK (inspector.wheeledOn (wait, 0.15f, false));
+    REQUIRE (written.size() == 3);
+    CHECK (written.back().second == "0.8");
+
+    //  Shift: a tenth of a notch.
+    CHECK (inspector.wheeledOn (wait, -0.25f, true));
+    REQUIRE (written.size() == 4);
+    CHECK (written.back().second == "0.79");
+
+    //  A whole number by one.
+    auto* rounds = boxSaying ("3");
+    REQUIRE (rounds != nullptr);
+    CHECK (inspector.wheeledOn (rounds, 0.25f, false));
+    REQUIRE (written.size() == 5);
+    CHECK (written.back() == std::pair<std::string, std::string> { "/godot/cue/CUE00001/rounds", "4" });
+
+    //  A word is not turned, and the panel scrolls.
+    CHECK_FALSE (inspector.wheeledOn (name, 0.25f, false));
+    CHECK (written.size() == 5);
+}
+
 TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes the send first")
 {
     /*  The author, 2026-09-22: "there is a general level for the file and a

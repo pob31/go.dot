@@ -132,6 +132,23 @@ namespace wfg::client::ui
         int count = 0;
     };
 
+    /*  A VALUE'S BOX, which keeps the wheel when what it holds is a number the
+        wheel turns (namespace draft §74, AQP) and passes it on otherwise - up
+        to the viewport, which scrolls. */
+    class InspectorComponent::NumberBox final : public juce::Label
+    {
+    public:
+        std::function<bool (const juce::MouseEvent&, const juce::MouseWheelDetails&)> onWheel;
+
+        void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override
+        {
+            if (onWheel != nullptr && onWheel (event, wheel))
+                return;
+
+            juce::Label::mouseWheelMove (event, wheel);
+        }
+    };
+
     /*  ONE ROW OF THE PANEL: a name, and whatever the node says its value
         should be edited with. A heading carries no field and draws itself. */
     struct InspectorComponent::Line
@@ -147,7 +164,7 @@ namespace wfg::client::ui
         std::unique_ptr<DrawerHead> head;
 
         juce::Label name;
-        juce::Label box;                    ///< editable in place, for text and numbers
+        NumberBox box;                      ///< editable in place, for text and numbers
         juce::ToggleButton toggle;          ///< a `T` row is a switch, not a word to type
         juce::ComboBox choice;              ///< a closed set of values is a choice, not typing
 
@@ -319,6 +336,81 @@ namespace wfg::client::ui
     void InspectorComponent::mouseDown (const juce::MouseEvent& event)
     {
         pressedOn (event.eventComponent);
+    }
+
+    /*  HEARD FOR EVERY WHEEL MOVEMENT OVER THE PANEL - the listener on
+        `content` - after the box under it has had it. One no box took is a
+        scroll, and starts the latch `wheeledOn` reads; what this did before is
+        done after, as it was. */
+    void InspectorComponent::mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+    {
+        if (std::exchange (wheelTaken, false))
+            return;
+
+        scrolledAtMs = juce::Time::getMillisecondCounterHiRes();
+        juce::Component::mouseWheelMove (event, wheel);
+    }
+
+    bool InspectorComponent::wheeledOn (const juce::Component* hit, float deltaY, bool fine)
+    {
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+
+        /*  A SCROLL PASSING OVER A BOX KEEPS SCROLLING. A wheel that moved the
+            panel a moment ago is somebody reading down it, and a number it
+            happens to cross on the way must not move. Mine, the author's to
+            overrule (namespace draft §74). */
+        if (now - scrolledAtMs < scrollLatchMs)
+            return false;
+
+        for (auto& line : lines)
+        {
+            if (line->isHeading || hit != &line->box)
+                continue;
+
+            const auto& field = line->field;
+
+            /*  ONE CUE'S NUMBER, AND NOT WHILE IT IS BEING TYPED INTO. Over
+                several cues the wheel scrolls as it always did: the cues hold
+                different values, and a notch from each is a gesture of its own. */
+            if (! model::mayDial (field) || field.control != model::Control::text
+                  || ! field.addresses.empty() || line->box.isBeingEdited())
+                return false;
+
+            if (wheelAddress != field.address)
+            {
+                wheelAddress = field.address;
+                wheelCarried = 0.0f;
+                wheelAtMs = -1.0e9;
+            }
+
+            wheelTaken = true;
+            const auto steps = model::wheelNotches (deltaY, wheelCarried);
+
+            if (steps == 0)
+                return true;
+
+            /*  ON WHAT THE LAST NOTCH WROTE, while the poll may not have brought
+                it back yet; on what the box shows once it has had time to. */
+            auto from = osc::parseDouble (field.value);
+
+            if (now - wheelAtMs < wheelHoldMs)
+                from = wheelValue;
+
+            if (! from.has_value())
+                return true;
+
+            const auto text = model::wheelTurned (field, *from, steps, fine);
+
+            if (! text.has_value())
+                return true;
+
+            wheelValue = osc::parseDouble (*text).value_or (*from);
+            wheelAtMs = now;
+            commitField (field, *text);
+            return true;
+        }
+
+        return false;
     }
 
     void InspectorComponent::pressedOn (const juce::Component* hit)
@@ -946,6 +1038,12 @@ namespace wfg::client::ui
             line->field = field;
             line->isDetail = detail;
             line->drawer = drawer;
+
+            line->box.onWheel = [this, raw = line.get()] (const juce::MouseEvent& event,
+                                                          const juce::MouseWheelDetails& wheel)
+            {
+                return wheeledOn (&raw->box, wheel.deltaY, event.mods.isShiftDown());
+            };
 
             line->name.setText (nameOf (field), juce::dontSendNotification);
             line->name.setTooltip (juce::String (field.description));

@@ -9499,6 +9499,69 @@ TEST_CASE ("client: a surface's page holds the foot on the aimed cue from the pr
     CHECK_FALSE (model::footForSurface (true, "eq", "").isOpen());
 }
 
+TEST_CASE ("client: the wheel over a number turns it by the master dial's law")
+{
+    /*  Namespace draft §74, AQP: the dial's own law, read off the field the
+        way `surface.dial` reads it off the row. */
+    const auto field = [] (std::string tags, std::string unit, double low, double high)
+    {
+        model::Field made;
+        made.address = "/godot/cue/CUE00001/x";
+        made.name = "x";
+        made.typeTags = std::move (tags);
+        made.unit = std::move (unit);
+        made.writable = true;
+        made.hasMinimum = made.hasMaximum = true;
+        made.minimum = low;
+        made.maximum = high;
+        return made;
+    };
+
+    const auto turned = [] (const model::Field& f, double from, int steps, bool fine = false)
+    {
+        return model::wheelTurned (f, from, steps, fine).value_or ("nothing");
+    };
+
+    //  A time: a tenth of a second a notch under ten seconds, a second past it.
+    const auto wait = field ("d", "s", 0.0, 3600.0);
+    CHECK (turned (wait, 0.5, 1) == "0.6");
+    CHECK (turned (wait, 12.0, 1) == "13");
+    CHECK (turned (wait, 0.5, 1, true) == "0.51");
+
+    //  A gain in half decibels; a level along the fader.
+    const auto gain = field ("d", "dB", -24.0, 24.0);
+    CHECK (turned (gain, 0.0, 1) == "0.5");
+    const auto level = field ("d", "dB", -120.0, 12.0);
+    CHECK (model::wheelTurned (level, -6.0, 1, false).has_value());
+    CHECK (osc::parseDouble (turned (level, -6.0, 1)).value_or (-99.0) > -6.0);
+
+    //  A whole number by one, Shift or not.
+    const auto count = field ("i", "", 0.0, 10.0);
+    CHECK (turned (count, 3.0, 2) == "5");
+    CHECK (turned (count, 3.0, 1, true) == "4");
+
+    //  At an end, nothing to send.
+    CHECK_FALSE (model::wheelTurned (count, 10.0, 1, false).has_value());
+
+    //  Not a number the dial takes: a word, a switch, a reading, the loop control.
+    auto word = field ("s", "", 0.0, 0.0);
+    CHECK_FALSE (model::wheelTurned (word, 1.0, 1, false).has_value());
+    auto reading = wait;
+    reading.writable = false;
+    CHECK_FALSE (model::wheelTurned (reading, 1.0, 1, false).has_value());
+    auto loops = count;
+    loops.control = model::Control::loopCount;
+    CHECK_FALSE (model::wheelTurned (loops, 1.0, 1, false).has_value());
+
+    //  Notches: a quarter each, a touchpad's trickle carried, either way.
+    float carried = 0.0f;
+    CHECK (model::wheelNotches (0.25f, carried) == 1);
+    CHECK (model::wheelNotches (0.1f, carried) == 0);
+    CHECK (model::wheelNotches (0.15f, carried) == 1);
+    CHECK (model::wheelNotches (-0.5f, carried) == -2);
+    CHECK (model::wheelNotches (0.2499f, carried) == 1);
+}
+
 TEST_CASE ("client: a click on a number puts it on the master dial, and the window says what the dial turns")
 {
     /*  The author, 2026-09-26: "Can selecting a parameter in the inspector or
