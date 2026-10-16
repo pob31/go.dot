@@ -40,7 +40,7 @@ namespace wfg::video::render
         /*  HOW A DRAW IS LAID ON WHAT IS UNDER IT: the layers' four (VD) on
             premultiplied colour - the compositor's formulas as equations - and
             none, for a pass that covers everything. */
-        enum class Lay : int { none = 0, normal, add, screen, multiply };
+        enum class Lay : int { none = 0, normal, add, screen, multiply, dim };
 
         Lay layOf (region::Blend blend) noexcept
         {
@@ -66,7 +66,19 @@ namespace wfg::video::render
                 case Lay::screen:   state.src_factor_rgb = SG_BLENDFACTOR_ONE;       state.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR; break;
                 case Lay::multiply: state.src_factor_rgb = SG_BLENDFACTOR_DST_COLOR; state.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA; break;
                 case Lay::normal:   state.src_factor_rgb = SG_BLENDFACTOR_ONE;       state.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA; break;
+                case Lay::dim:      state.src_factor_rgb = SG_BLENDFACTOR_ZERO;      state.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA; break;
                 case Lay::none:     break;
+            }
+
+            /*  DIM (namespace draft §71, APG): what is there taken towards
+                nothing by the source's alpha, its colour and its alpha alike -
+                a canvas's level, so a keyed card output's key goes down with
+                its picture. The colour is what a black laid normally made. */
+            if (lay == Lay::dim)
+            {
+                state.src_factor_alpha = SG_BLENDFACTOR_ZERO;
+                state.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+                return state;
             }
 
             /*  ALPHA LAID NORMALLY whatever the colour does: Direct3D 11 takes
@@ -409,6 +421,15 @@ namespace wfg::video::render
             pass.attachments.colors[0] = colour;
             pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
             pass.action.colors[0].clear_value = { 0.0f, 0.0f, 0.0f, 1.0f };
+            return pass;
+        }
+
+        /*  A PASS BEGUN SEE-THROUGH (namespace draft §71, APG): a canvas, and
+            a keyed card output - black, with nothing there. */
+        static sg_pass passClear (sg_view colour)
+        {
+            auto pass = passInto (colour);
+            pass.action.colors[0].clear_value = { 0.0f, 0.0f, 0.0f, 0.0f };
             return pass;
         }
 
@@ -1012,7 +1033,10 @@ namespace wfg::video::render
             const auto canvasHeight = static_cast<double> (std::max (1, canvas.height));
             const auto format = canvasFormat;
 
-            sg_begin_pass (passInto (into.colour));
+            /*  CLEARED SEE-THROUGH (§71, APG): a canvas's alpha is what its
+                layers laid, read by a keyed card output alone - every other
+                output takes its colour, the same either way. */
+            sg_begin_pass (passClear (into.colour));
 
             for (const auto* layer : sample < 0 ? std::vector<const region::LayerReading*> {} : stackOf (layers, canvasId))
             {
@@ -1223,7 +1247,7 @@ namespace wfg::video::render
                 composite taken towards black, once, over every layer. */
             if (const auto level = levelOf ? levelOf (canvasId) : 1.0; level < 1.0)
             {
-                sg_apply_pipeline (pipeline (Program::fill, Lay::normal, format));
+                sg_apply_pipeline (pipeline (Program::fill, Lay::dim, format));
                 apply (UB_video_corners, rectangle (-1.0, -1.0, 1.0, 1.0));
                 video_fill_t fill {};
                 fill.colour[3] = static_cast<float> (1.0 - level);
@@ -1296,7 +1320,7 @@ namespace wfg::video::render
         /*  THE WARP'S DRAW, in a pass already begun: `texture` through `mesh`,
             calibrated by `cdl` or laid by `opacity`. */
         void warp (const std::string& meshKey, const Mesh& mesh, sg_view texture, sg_pixel_format format, Lay lay,
-                   const Cdl* cdl, double opacity)
+                   const Cdl* cdl, double opacity, bool keepAlpha = false)
         {
             sg_apply_pipeline (pipeline (Program::warp, lay, format));
 
@@ -1317,6 +1341,7 @@ namespace wfg::video::render
                     uniforms.power[n] = static_cast<float> (cdl->power[n]);
                 }
 
+            uniforms.slope[3] = keepAlpha ? 1.0f : 0.0f;
             uniforms.misc[0] = cdl != nullptr ? static_cast<float> (cdl->saturation) : 1.0f;
             uniforms.misc[1] = static_cast<float> (opacity);
             uniforms.misc[2] = cdl != nullptr ? 1.0f : 0.0f;
@@ -1437,6 +1462,10 @@ namespace wfg::video::render
             const auto width = std::max (1, into.viewWidth);
             const auto height = std::max (1, into.viewHeight);
 
+            /*  A KEYED CARD OUTPUT (§71, APG) keeps its canvases' alpha, and
+                is begun see-through; every other output is as it was. */
+            const auto keepAlpha = output.toCard() && output.key != region::CardKey::off;
+
             //  A zoned output's own canvas and its zones, bottom first (§40, WY).
             struct Pass
             {
@@ -1485,11 +1514,11 @@ namespace wfg::video::render
             {
                 auto& whole = offscreen ("output:" + output.id, width, height, canvasFormat);
                 usedTargets.insert ("output:" + output.id);
-                sg_begin_pass (passInto (whole.colour));
+                sg_begin_pass (keepAlpha ? passClear (whole.colour) : passInto (whole.colour));
 
                 for (std::size_t n = 0; n < passes.size(); ++n)
                     warp (output.id + "#" + std::to_string (n), *passes[n].mesh, passes[n].texture, canvasFormat,
-                          passes[n].lay, nullptr, passes[n].opacity);
+                          passes[n].lay, nullptr, passes[n].opacity, keepAlpha);
 
                 drawGrids (canvasFormat, true);
                 sg_end_pass();
@@ -1501,11 +1530,16 @@ namespace wfg::video::render
                 calibrated = passes.front().texture;
             }
 
-            sg_begin_pass (passInto (into));
+            auto pass = passInto (into);
+
+            if (keepAlpha)
+                pass.action.colors[0].clear_value = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+            sg_begin_pass (pass);
             sg_apply_viewport (into.viewX, into.viewY, width, height, true);
 
             if (calibrated.id != SG_INVALID_ID)
-                warp (output.id + "#out", *calibratedMesh, calibrated, into.format, Lay::none, &output.cdl, 1.0);
+                warp (output.id + "#out", *calibratedMesh, calibrated, into.format, Lay::none, &output.cdl, 1.0, keepAlpha);
 
             //  Unzoned, the grid through the output's own mesh after the calibrated picture.
             if (output.zones.empty() && calibrated.id != SG_INVALID_ID)

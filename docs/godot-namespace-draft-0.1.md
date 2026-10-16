@@ -30369,7 +30369,7 @@ card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine,
 | DL.1 | The card's interface, the real card and the test card, a format's word, `decklink-probe` listing || 5f8c6ac |
 | DL.2 | The rows, the kinds, the renderer's region, the cards found published || cfd0136 |
 | DL.3 | A card output: paced by the card, at its format, latency, skew and reference, tried again || 04388a0 |
-| DL.4 | 10-bit YUV | |
+| DL.4 | 10-bit YUV | 4540aa6 |
 | DL.5 | Fill and key | |
 | DL.6 | The sound taken off the audio thread | |
 | DL.7 | The sound placed and resampled on the card | |
@@ -30386,7 +30386,7 @@ card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine,
 
 ### 71.6 Not built
 
-Sound coming in on a card; a card's audio as a rack input; field-by-field interlace; the SDI link
+A blur cue on a keyed card output keys solid where its outline lies: carrying the blur's alpha would change what a display shows under a half-transparent blur; sound coming in on a card; a card's audio as a rack input; field-by-field interlace; the SDI link
 choices (level B, dual and quad link) beyond the card's default; HDR; timecode on the cable (RP188);
 deck control; changing a card's profile, which Desktop Video Setup does; the capture allocator of PRD
 §3.19a, a card input refusing a second user being the whole of it here.

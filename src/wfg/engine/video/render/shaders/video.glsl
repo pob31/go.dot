@@ -402,7 +402,7 @@ void main() {
 //  (OpenGL) the right way up.
 @fs warp_fs
 layout(binding=1) uniform warp {
-    vec4 slope;         // r g b -
+    vec4 slope;         // r g b, and 1 to keep the canvas's alpha (a keyed card output, §71)
     vec4 offset;        // r g b -
     vec4 power;         // r g b -
     vec4 misc;          // saturation, opacity, calibrate (0 or 1), flip (0 or 1)
@@ -416,18 +416,27 @@ out vec4 frag_colour;
 
 float noise(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 
+//  KEPT ALPHA (namespace draft §71, APG): for a keyed card output alone, the
+//  canvas's own alpha goes out with its colour, premultiplied as the canvas
+//  holds it; laid, by its opacity too; calibrated, the CDL on the colour the
+//  alpha covers. Every other output's arithmetic is as it was.
 void main() {
     vec2 uv = vec2(at.x, misc.w > 0.5 ? 1.0 - at.y : at.y);
-    vec3 c = texture(sampler2D(canvas, canvas_smp), uv).rgb;
+    vec4 t = texture(sampler2D(canvas, canvas_smp), uv);
+    vec3 c = t.rgb;
+    bool keep = slope.w > 0.5;
     if (misc.z < 0.5) {
-        frag_colour = vec4(c * misc.y, misc.y);
+        frag_colour = vec4(c * misc.y, (keep ? clamp(t.a, 0.0, 1.0) : 1.0) * misc.y);
         return;
     }
+    float a = keep ? clamp(t.a, 0.0, 1.0) : 1.0;
+    if (keep)
+        c = a > 0.0 ? c / a : vec3(0.0);
     c = pow(clamp(c * slope.rgb + offset.rgb, 0.0, 1.0), power.rgb);
     float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
     c = clamp(luma + misc.x * (c - luma), 0.0, 1.0);
     c += (noise(gl_FragCoord.xy) - 0.5) / 255.0;
-    frag_colour = vec4(c, 1.0);
+    frag_colour = keep ? vec4(c * a, a) : vec4(c, 1.0);
 }
 @end
 

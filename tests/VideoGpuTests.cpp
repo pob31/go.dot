@@ -1121,6 +1121,88 @@ TEST_CASE ("video gpu: an output packed as a card takes 10-bit YUV is the refere
     CHECK (std::abs (video::card::v210Sample (packed, rowBytes, 3, 8 * 12 + 5) - static_cast<int> (std::floor (64.0 + 876.0 * luma + 0.5))) <= 2);
 }
 
+TEST_CASE ("video gpu: a keyed card output keeps its canvas's alpha, premultiplied, its level taking key and fill down together; a display's picture is as it was (§71, DL.5)")
+{
+    Device device;
+
+    if (! device.open)
+        return;
+
+    Pictures pictures;
+
+    //  A red fill at half its opacity, squeezed into the middle half across.
+    auto red = layerOf ("L1", region::Source::fill, 0.5, 1);
+    red.paint = 0xC04020u;
+
+    constexpr int width = 80, height = 8;
+
+    region::ConfigReading config;
+    config.canvases.push_back ({ "C1", 64, 36 });
+
+    region::OutputReading display;
+    display.id = "O1";
+    display.canvas = "C1";
+    display.mesh = video::Mesh::identity();
+    display.mesh.x = { 0.25f, 0.75f, 0.25f, 0.75f };
+
+    auto keyed = display;
+    keyed.id = "O2";
+    keyed.kind = region::OutputKind::decklink;
+    keyed.key = region::CardKey::external;
+
+    std::vector<float> shown, sent, dimmed;
+    int w = 0, h = 0;
+
+    {
+        video::render::Painter painter (pictures);
+        std::string why;
+        REQUIRE_MESSAGE (painter.make (why), why);
+
+        painter.beginFrame (config, { red }, {});
+        painter.drawOutput (display, 100, painter.offscreenTarget ("O1", width, height, SG_PIXELFORMAT_RGBA8));
+        painter.drawOutput (keyed, 100, painter.offscreenTarget ("O2", width, height, SG_PIXELFORMAT_RGBA8));
+        sg_commit();
+        REQUIRE (video::gpu::readBack (painter.offscreenImage ("O1"), shown, w, h));
+        REQUIRE (video::gpu::readBack (painter.offscreenImage ("O2"), sent, w, h));
+        painter.endFrame();
+
+        //  The canvas at half its level (§38): the key goes down with the fill.
+        painter.beginFrame (config, { red }, [] (const std::string&) { return 0.5; });
+        painter.drawOutput (keyed, 100, painter.offscreenTarget ("O3", width, height, SG_PIXELFORMAT_RGBA8));
+        sg_commit();
+        REQUIRE (video::gpu::readBack (painter.offscreenImage ("O3"), dimmed, w, h));
+        painter.endFrame();
+    }
+
+    const auto at = [w] (const std::vector<float>& rgba, int x, int y, int c)
+    {
+        return rgba[(static_cast<std::size_t> (y) * static_cast<std::size_t> (w) + static_cast<std::size_t> (x)) * 4 + static_cast<std::size_t> (c)];
+    };
+
+    constexpr float step = 2.5f / 255.0f;
+    const auto mid = width / 2, edge = 2, row = height / 2;
+
+    //  THE DISPLAY: half the red over black, solid, black either side - as
+    //  every display showed it before canvases were cleared see-through.
+    CHECK (at (shown, mid, row, 0) == doctest::Approx (0.5f * 192.0f / 255.0f).epsilon (0.02));
+    CHECK (at (shown, mid, row, 3) == doctest::Approx (1.0f));
+    CHECK (at (shown, edge, row, 0) < step);
+    CHECK (at (shown, edge, row, 3) == doctest::Approx (1.0f));
+
+    //  THE KEY: the same colour, premultiplied, its alpha the fill's half;
+    //  nothing either side - see-through, not black.
+    for (int c = 0; c < 3; ++c)
+        CHECK (std::abs (at (sent, mid, row, c) - at (shown, mid, row, c)) < step);
+
+    CHECK (at (sent, mid, row, 3) == doctest::Approx (0.5f).epsilon (0.02));
+    CHECK (at (sent, edge, row, 3) < step);
+    CHECK (at (sent, edge, row, 0) < step);
+
+    //  HALF THE LEVEL: a quarter's alpha, and the colour halved with it.
+    CHECK (at (dimmed, mid, row, 3) == doctest::Approx (0.25f).epsilon (0.04));
+    CHECK (at (dimmed, mid, row, 0) == doctest::Approx (0.5f * at (sent, mid, row, 0)).epsilon (0.04));
+}
+
 TEST_CASE ("video gpu: an output's alignment grid drawn white over its picture in the canvas's space, bent by its mesh and by each zone's (§68, ANX)")
 {
     Device device;
