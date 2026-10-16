@@ -102,6 +102,7 @@ namespace wfg::video
             double skewPpm = 0.0;
             std::string reference = "none";
             std::uint64_t soundLate = 0;
+            std::uint64_t soundSent = 0;
         };
 
         std::vector<OutputEntry> outputs;

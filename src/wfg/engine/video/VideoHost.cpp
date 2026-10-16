@@ -385,6 +385,7 @@ namespace wfg::video
                     entry.skewPpm = static_cast<double> (state.skewPpm.load (std::memory_order_relaxed));
                     entry.reference = references[std::min<std::uint32_t> (state.reference.load (std::memory_order_relaxed), 2u)];
                     entry.soundLate = state.soundLate.load (std::memory_order_relaxed);
+                    entry.soundSent = state.soundSent.load (std::memory_order_relaxed);
                 });
 
                 foundOutputs.push_back (std::move (entry));

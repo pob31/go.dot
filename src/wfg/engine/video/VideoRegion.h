@@ -474,6 +474,7 @@ namespace wfg::video::region
         std::atomic<float> skewPpm;
         std::atomic<std::uint32_t> reference;
         std::atomic<std::uint64_t> soundLate;
+        std::atomic<std::uint64_t> soundSent;
     };
 
     /*  WHAT A VIDEO INPUT IS DOING TONIGHT (§44, YB), the renderer's side:
@@ -1472,7 +1473,7 @@ namespace wfg::video::region
     /*  A CARD OUTPUT'S STATE (§71), the renderer's side, slot `n`: written
         under the slot's own `seq` beside its frames. */
     inline void writeCardState (Region& r, std::size_t n, double latencyMs, double skewPpm, std::uint32_t reference,
-                                std::uint64_t soundLate) noexcept
+                                std::uint64_t soundLate, std::uint64_t soundSent = 0) noexcept
     {
         if (n >= static_cast<std::size_t> (maxOutputs))
             return;
@@ -1483,6 +1484,7 @@ namespace wfg::video::region
         state.skewPpm.store (static_cast<float> (skewPpm), std::memory_order_relaxed);
         state.reference.store (std::min (reference, 2u), std::memory_order_relaxed);
         state.soundLate.store (soundLate, std::memory_order_relaxed);
+        state.soundSent.store (soundSent, std::memory_order_relaxed);
         endWrite (state.seq);
     }
 }

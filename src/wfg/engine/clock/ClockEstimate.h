@@ -117,6 +117,17 @@ namespace wfg
             return static_cast<std::int64_t> (std::llround (baseNanos + (static_cast<double> (sample) - baseSample) / slope));
         }
 
+        /*  The same as `sampleAt`, unrounded: where between two samples a
+            moment falls - what a card's sound is read at (namespace draft
+            §71, APK). -1 before the first pair. */
+        double sampleAtExact (std::int64_t nanos) const noexcept
+        {
+            if (! started)
+                return -1.0;
+
+            return baseSample + (static_cast<double> (nanos) - baseNanos) * slope;
+        }
+
         bool hasStarted() const noexcept       { return started; }
         double samplesPerSecond() const noexcept  { return slope * 1.0e9; }
 

@@ -4907,6 +4907,8 @@ namespace wfg::tree
                         text = entry != nullptr ? entry->reference : std::string ("none");
                     else if (name == "soundLate")
                         text = std::to_string (entry != nullptr ? entry->soundLate : 0);
+                    else if (name == "soundSent")
+                        text = std::to_string (entry != nullptr ? entry->soundSent : 0);
                     else
                         continue;
 

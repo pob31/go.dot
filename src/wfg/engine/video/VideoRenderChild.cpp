@@ -28,7 +28,9 @@
 #include <wfg/engine/video/TextRaster.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoRegion.h>
+#include <wfg/engine/audio/CardSound.h>
 #include <wfg/engine/video/render/Card.h>
+#include <wfg/engine/video/render/SoundPlacer.h>
 #include <wfg/engine/video/render/Gpu.h>
 #include <wfg/engine/video/render/Painter.h>
 #include <wfg/engine/video/render/Projector.h>
@@ -2375,7 +2377,18 @@ namespace wfg::video
             int slot = 0;
             std::string cardId;
             card::OutputSettings settings;
+
+            /*  The logical output channel each of the cable's channels
+                carries, -1 for silence (§71, APH); empty, no sound. */
+            std::vector<int> soundChannels {};
         };
+
+        /*  A CARD CARRYING SOUND SENDS ITS PICTURE AND ITS SOUND THIS FAR
+            BEHIND GO.DOT'S COUNT (§71, APK): a sample is known only once the
+            audio thread has made it, and must reach the card before the card
+            plays it - so both wait, together, and leave together. Shown in
+            the output's latency; M77 settles it. */
+        constexpr std::int64_t cardSoundDelayNanos = 60'000'000;
 
         //==============================================================================
         /*  THE NEW RENDERER'S THREAD (namespace draft §44.4): the one device,
@@ -2389,8 +2402,8 @@ namespace wfg::video
         {
         public:
             RenderLoop (region::Region& regionToDraw, const PictureStore& pictures, const MovieStore& movies,
-                        const TextStore& texts)
-                : juce::Thread ("video render"), r (regionToDraw), sources (pictures, movies, texts)
+                        const TextStore& texts, audio::cardsound::Region* soundToRead = nullptr)
+                : juce::Thread ("video render"), r (regionToDraw), sources (pictures, movies, texts), soundRing (soundToRead)
             {
                 startThread (juce::Thread::Priority::high);
             }
@@ -2515,6 +2528,16 @@ namespace wfg::video
                 double skewCard = 0.0;
                 double skewSound = 0.0;
                 double skewPpm = 0.0;
+
+                /*  ITS SOUND (§71, APK): placed by its sample, how far behind
+                    Go.dot's count it and the picture go, and the blocks the
+                    card would not take. */
+                card::SoundPlacer placer {};
+                std::vector<std::int32_t> soundOut {};
+                std::vector<const float*> soundLanes {};
+                std::int64_t delayNanos = 0;
+                std::uint64_t soundRefused = 0;
+                std::uint64_t soundSent = 0;
             };
 
             /*  FRAMES WAITING ON A CARD (APC): two, 40 ms at 50p - the video
@@ -3022,6 +3045,9 @@ namespace wfg::video
                             cardNow.push_back (&held);
                     }
 
+                    //  THE CARDS' SOUND (§71, APK): what the audio thread made, placed.
+                    feedCardSound (carding, clock, began);
+
                     if (! refreshed && sendNow.empty() && ! insertBeat && cardNow.empty())
                         continue;
 
@@ -3184,7 +3210,8 @@ namespace wfg::video
                             moment = held->prerollBegan + static_cast<std::int64_t> (static_cast<double> (held->next) * periodNanos);
                         }
 
-                        const auto sample = clock.sampleAt (r, moment);
+                        //  Behind Go.dot's count with the sound it carries, if it carries any (APK).
+                        const auto sample = clock.sampleAt (r, moment - held->delayNanos);
 
                         /*  10-BIT YUV (APD): the output drawn at sixteen bits a
                             channel, then packed on the graphics card, a texel a
@@ -3293,6 +3320,79 @@ namespace wfg::video
                 region::endWrite (state.seq);
             }
 
+            /*  THE CARDS' SOUND (§71, APK): every block the audio thread made
+                since the last pass taken from the ring - each card's channels
+                from the lanes that carry them - and each card's sound placed
+                from where it was up to 150 ms ahead of its stream, each sample
+                read at the position on Go.dot's count the two clock lines say
+                it stands for, as far behind as the card's picture. The ring is
+                emptied whether a card takes its sound or not, so it never
+                fills while none does. */
+            void feedCardSound (std::vector<Carding>& carding, ClockReader& clock, std::int64_t now)
+            {
+                if (soundRing == nullptr)
+                    return;
+
+                const auto lanes = audio::cardsound::lanesOf (*soundRing);
+                audio::cardsound::Block block;
+
+                while (audio::cardsound::peek (*soundRing, block))
+                {
+                    for (auto& held : carding)
+                    {
+                        if (held.output == nullptr || held.placer.channels() == 0)
+                            continue;
+
+                        held.soundLanes.assign (static_cast<std::size_t> (held.placer.channels()), nullptr);
+
+                        for (std::size_t c = 0; c < held.spec.soundChannels.size() && c < held.soundLanes.size(); ++c)
+                        {
+                            const auto at = std::find (lanes.begin(), lanes.end(), held.spec.soundChannels[c]);
+                            const auto lane = static_cast<int> (at - lanes.begin());
+
+                            if (at != lanes.end() && lane < block.lanes)
+                                held.soundLanes[c] = block.lane[static_cast<std::size_t> (lane)];
+                        }
+
+                        held.placer.take (block.sample, block.frames, block.rate, held.soundLanes);
+                    }
+
+                    audio::cardsound::release (*soundRing);
+                }
+
+                for (auto& held : carding)
+                {
+                    if (held.output == nullptr || held.placer.channels() == 0 || ! held.output->started()
+                          || ! held.line.hasStarted() || ! clock.estimate.hasStarted())
+                        continue;
+
+                    const auto cardSampleAt = [&held] (std::int64_t nanos)
+                    {
+                        return held.line.sampleAt (nanos) * 48 / 1000;   // the stream's microseconds, at 48 kHz
+                    };
+
+                    //  The first time: ten milliseconds ahead of the stream.
+                    if (! held.placer.started())
+                        held.placer.startAt (cardSampleAt (now) + 480);
+
+                    const auto goDotAt = [&held, &clock] (std::int64_t cardSample)
+                    {
+                        const auto moment = held.line.nanosAt (cardSample * 1000 / 48);
+                        return clock.estimate.sampleAtExact (moment - held.delayNanos);
+                    };
+
+                    const auto placed = held.placer.place (cardSampleAt (now + 150'000'000), goDotAt, held.soundOut);
+
+                    if (placed <= 0)
+                        continue;
+
+                    if (held.output->scheduleSound (held.soundOut.data(), placed, held.placer.next() - placed))
+                        held.soundSent += static_cast<std::uint64_t> (placed);
+                    else
+                        held.soundRefused += static_cast<std::uint64_t> (placed);
+                }
+            }
+
             void sayBound (int slot)
             {
                 if (slot < 0 || slot >= static_cast<int> (region::maxOutputs))
@@ -3331,6 +3431,10 @@ namespace wfg::video
                 held.line = {};
                 held.skewAt = 0;
                 held.skewPpm = 0.0;
+                held.soundRefused = 0;
+                held.soundSent = 0;
+                held.delayNanos = held.spec.soundChannels.empty() ? 0 : cardSoundDelayNanos;
+                held.placer.setChannels (held.spec.soundChannels.empty() ? 0 : held.spec.settings.audioChannels);
                 sayBound (held.spec.slot);
             }
 
@@ -3418,7 +3522,8 @@ namespace wfg::video
 
                 const auto& format = held.output->mode().format;
                 const auto latencyMs = static_cast<double> (held.output->waiting()) * static_cast<double> (format.frameDuration) * 1000.0
-                                     / static_cast<double> (format.timeScale);
+                                         / static_cast<double> (format.timeScale)
+                                     + static_cast<double> (held.delayNanos) * 1.0e-6;
 
                 /*  THE SKEW (PRD §3.19d): how far the card's stream went
                     against how far the sound's samples went, over the window -
@@ -3449,7 +3554,8 @@ namespace wfg::video
                 }
 
                 region::writeCardState (r, static_cast<std::size_t> (slot), latencyMs, held.skewPpm,
-                                        static_cast<std::uint32_t> (held.output->reference()), 0);
+                                        static_cast<std::uint32_t> (held.output->reference()),
+                                        held.placer.late() + held.soundRefused, held.soundSent);
             }
 
             /*  THE OUTPUT'S FRAMES AS NUMBERS (§35.7): every frame counted, one
@@ -3489,6 +3595,9 @@ namespace wfg::video
 
             //  The sound's line as the render thread fits it, for a card's skew (§71).
             const ClockEstimate* soundLine = nullptr;
+
+            //  The ring the audio thread fills with the sound cards embed, or none (§71, APJ).
+            audio::cardsound::Region* soundRing = nullptr;
             std::uint64_t generation = 0;
             std::uint64_t taken = 0;
             bool stopped = false;
@@ -3506,7 +3615,8 @@ namespace wfg::video
         class Session final : private juce::Timer
         {
         public:
-            Session (region::Region& regionToServe, std::int64_t parentPidToWatch, bool windowedToUse, bool nativeToUse)
+            Session (region::Region& regionToServe, std::int64_t parentPidToWatch, bool windowedToUse, bool nativeToUse,
+                     audio::cardsound::Region* soundToRead = nullptr)
                 : r (regionToServe), parentPid (parentPidToWatch), windowed (windowedToUse), sampler (pictures, movies, texts)
             {
                 /*  THE NEW RENDERER (namespace draft §44), unless the old
@@ -3515,7 +3625,7 @@ namespace wfg::video
                 /*  Without windows too: a sending output needs no display, and
                     a renderer with none (`--no-window`) still sends. */
                 if (nativeToUse)
-                    loop = std::make_unique<RenderLoop> (r, pictures, movies, texts);
+                    loop = std::make_unique<RenderLoop> (r, pictures, movies, texts, soundToRead);
 
                 /*  HOLDING NOTHING YET (namespace draft §48), said before this
                     renderer says it is up: a renderer started again must not be
@@ -4029,6 +4139,17 @@ namespace wfg::video
                                           : output.key == region::CardKey::internal ? card::Keying::internal
                                                                                     : card::Keying::off;
                         spec.settings.tenBit = true;
+
+                        /*  ITS SOUND (APH): the cable's channels the buses take,
+                            rounded up to what a card embeds - 2, 8, 16, 32. */
+                        spec.soundChannels = output.sound;
+
+                        if (! output.sound.empty())
+                        {
+                            const auto wanted = static_cast<int> (output.sound.size());
+                            spec.settings.audioChannels = wanted <= 2 ? 2 : wanted <= 8 ? 8 : wanted <= 16 ? 16 : 32;
+                        }
+
                         cards.push_back (std::move (spec));
 
                         region::beginWrite (state.seq);
@@ -4256,8 +4377,26 @@ namespace wfg::video
         juce::Process::setDockIconVisible (false);
        #endif
 
+        /*  THE SOUND CARDS EMBED (§71, APJ): the ring the engine's audio
+            thread fills, when it handed one; a card carries none without it. */
+        std::unique_ptr<juce::MemoryMappedFile> soundMapping;
+        audio::cardsound::Region* sound = nullptr;
+
+        if (const auto soundPath = optionFrom (args, "--sound"); ! soundPath.empty())
         {
-            Session session (r, parentPid, windowed, native);
+            soundMapping = std::make_unique<juce::MemoryMappedFile> (juce::File { juce::String (soundPath) },
+                                                                     juce::MemoryMappedFile::readWrite, false);
+
+            if (soundMapping->getData() != nullptr && soundMapping->getSize() >= audio::cardsound::regionBytes()
+                  && audio::cardsound::looksValid (*static_cast<audio::cardsound::Region*> (soundMapping->getData())))
+                sound = static_cast<audio::cardsound::Region*> (soundMapping->getData());
+            else
+                std::fprintf (stderr, "wfg video-render: the card sound ring at %s could not be read; no card carries sound\n",
+                              soundPath.c_str());
+        }
+
+        {
+            Session session (r, parentPid, windowed, native, sound);
             r.ready.store (1, std::memory_order_release);
             juce::MessageManager::getInstance()->runDispatchLoop();
         }

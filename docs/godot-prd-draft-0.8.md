@@ -4412,6 +4412,8 @@ calls from AOZ in §71.2 are the author's to overrule:
   internal, refused by a card without that keyer.
 - **A card's sound is a list of buses** laid onto its channels, taken after trim, DCA and LTC; the
   audio thread only copies into a ring of its own.
+- **A card carrying sound sends picture and sound 60 ms behind Go.dot's count**, together: a sample
+  exists only once the audio thread has made it (APQ).
 - **A capture's format found by the card**; no signal draws black with a warning; one input per
   connector.
 - **A card that fails is tried again** every two seconds; the problems said in words.

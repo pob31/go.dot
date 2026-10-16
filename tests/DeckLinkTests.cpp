@@ -31,6 +31,7 @@
 #include <wfg/engine/video/VideoRegion.h>
 #include <wfg/engine/video/render/Card.h>
 #include <wfg/engine/video/render/DeckLinkApi.h>
+#include <wfg/engine/video/render/SoundPlacer.h>
 
 #include <chrono>
 #include <cstdlib>
@@ -595,4 +596,178 @@ TEST_CASE ("decklink: a card output's buses become the ring's lanes, each channe
     REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/enabled", "false").ok);
     host.configure (document);
     CHECK (cs::lanesOf (*file.region()).empty());
+}
+
+namespace
+{
+    /*  Where a card's placed sound peaks on one channel, as a card sample. */
+    std::int64_t peakOf (const std::vector<std::int32_t>& interleaved, int channels, int channel, std::int64_t first)
+    {
+        std::int64_t at = -1;
+        std::int64_t best = 0;
+
+        for (std::size_t n = static_cast<std::size_t> (channel); n < interleaved.size(); n += static_cast<std::size_t> (channels))
+            if (std::abs (static_cast<std::int64_t> (interleaved[n])) > best)
+            {
+                best = std::abs (static_cast<std::int64_t> (interleaved[n]));
+                at = first + static_cast<std::int64_t> (n / static_cast<std::size_t> (channels));
+            }
+
+        return at;
+    }
+
+    /*  Go.dot's sound in blocks of 480 at `rate` from `from` to `to`: a click
+        on the first channel at `click`, a half on the second. */
+    void feed (video::card::SoundPlacer& placer, int rate, std::int64_t from, std::int64_t to, std::int64_t click)
+    {
+        std::vector<float> first (480), second (480, 0.5f);
+
+        for (auto at = from; at < to; at += 480)
+        {
+            std::fill (first.begin(), first.end(), 0.0f);
+
+            if (click >= at && click < at + 480)
+                first[static_cast<std::size_t> (click - at)] = 1.0f;
+
+            placer.take (at, 480, rate, { first.data(), second.data() });
+        }
+    }
+}
+
+TEST_CASE ("decklink: a card's sound is placed by its sample - a click lands where the line says, at 48 and 44.1 kHz, through a drifting clock (DL.7)")
+{
+    for (const int rate : { 48000, 44100 })
+    {
+        CAPTURE (rate);
+        video::card::SoundPlacer placer;
+        placer.setChannels (2);
+
+        //  Card sample k stands for Go.dot's 5000 + k at the source's rate,
+        //  the card's clock a ten-thousandth slow against the interface's.
+        const auto ratio = static_cast<double> (rate) / 48000.0 * 1.0001;
+        const auto goDotAt = [ratio] (std::int64_t k) { return 5000.0 + static_cast<double> (k) * ratio; };
+
+        feed (placer, rate, 4800, 4800 + 480 * 40, 10000);
+        placer.startAt (0);
+
+        std::vector<std::int32_t> all, out;
+
+        while (placer.place (48000, goDotAt, out) > 0)
+            all.insert (all.end(), out.begin(), out.end());
+
+        //  What is not here yet is not placed: placing stops short of the history's end.
+        REQUIRE (! all.empty());
+        CHECK (goDotAt (placer.next()) < static_cast<double> (placer.knownUntil()));
+
+        const auto expected = (10000.0 - 5000.0) / ratio;
+        const auto peak = peakOf (all, 2, 0, 0);
+        CHECK (std::abs (static_cast<double> (peak) - expected) <= 1.0);
+
+        //  The second channel: the half, steady, wherever it was known.
+        const auto middle = static_cast<std::size_t> (expected) * 2 + 1;
+        CHECK (static_cast<double> (all[middle]) / 2147483647.0 == doctest::Approx (0.5).epsilon (0.001));
+        CHECK (placer.late() == 0u);
+    }
+
+    //  READ WHERE NOTHING WAS KEPT: a card started before the first block's
+    //  sample places silence, counted late, until it reaches what came.
+    video::card::SoundPlacer placer;
+    placer.setChannels (2);
+    feed (placer, 48000, 20000, 30000, 25000);
+    placer.startAt (0);
+    std::vector<std::int32_t> out;
+    placer.place (20000, [] (std::int64_t k) { return 10000.0 + static_cast<double> (k); }, out);
+    CHECK (placer.late() >= 9990u);
+    CHECK (peakOf (out, 2, 0, 0) == 15000);
+}
+
+TEST_CASE ("video gpu: a card output carrying a bus sends its sound behind the count with its picture, none late (§71, DL.7)")
+{
+    namespace cs = audio::cardsound;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-card-sound-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    cs::File file { folder.getFullPathName().toStdString() };
+    REQUIRE (file.region() != nullptr);
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+    spec.cardSound = file.region();
+    spec.cardSoundPath = file.path();
+
+    doc::ShowDocument document;
+    const juce::File bundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) + "/bundles/video" };
+    REQUIRE (doc::Bundle::open (bundle, document).ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "decklink").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/card", "fake-1").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/videoMode", "720p50").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/sound", "VD000004").ok);
+
+    setVariable ("WFG_DECKLINK_FAKE", "1");
+    setVariable ("WFG_VIDEO_SOFTWARE", "1");
+
+    Ticks ticks;
+    video::VideoHost host { spec };
+    host.configure (document);
+    CHECK (cs::lanesOf (*file.region()) == std::vector<int> { 0, 1 });
+
+    /*  THE AUDIO THREAD, played by the test: two outputs, written in blocks
+        of 480 as Go.dot's count goes by - a tone on the first. */
+    std::int64_t written = ticks.now();
+    std::vector<float> left (480), right (480, 0.0f);
+    const float* pointers[2] { left.data(), right.data() };
+
+    const auto pump = [&]
+    {
+        for (const auto now = ticks.now(); written + 480 <= now; written += 480)
+        {
+            for (int n = 0; n < 480; ++n)
+                left[static_cast<std::size_t> (n)] = 0.25f * static_cast<float> (std::sin (static_cast<double> (written + n) * 0.06));
+
+            cs::write (*file.region(), pointers, 2, 480, written, 48000);
+        }
+    };
+
+    const auto running = tickUntil (host, ticks, [&] { pump(); return host.readouts().renderer == "running"; });
+    setVariable ("WFG_DECKLINK_FAKE", nullptr);
+    setVariable ("WFG_VIDEO_SOFTWARE", nullptr);
+    REQUIRE (running);
+
+    REQUIRE (tickUntil (host, ticks, [&]
+                        {
+                            pump();
+                            const auto said = host.readouts();
+                            const auto* output = said.output ("VD000021");
+                            return output != nullptr && output->bound && output->framesPresented > 10;
+                        }, 15000));
+
+    tickUntil (host, ticks, [&] { pump(); return false; }, 2000);
+
+    const auto said = host.readouts();
+    const auto* output = said.output ("VD000021");
+    REQUIRE (output != nullptr);
+    MESSAGE ("latency " << output->latencyMs << " ms, sound late or refused " << output->soundLate
+             << ", frames late " << output->framesLate << ", ring dropped " << cs::droppedFrames (*file.region()));
+
+    //  The picture and the sound 60 ms behind the count, with the frames waiting.
+    CHECK (output->latencyMs >= 60.0);
+    CHECK (output->latencyMs <= 100.5);
+    CHECK (output->soundLate == 0u);
+    CHECK (cs::droppedFrames (*file.region()) == 0);
+
+    //  And the sound flows: some 48 000 frames a second, counted four times a second.
+    const auto sentBefore = output->soundSent;
+    const auto from = std::chrono::steady_clock::now();
+    tickUntil (host, ticks, [&] { pump(); return false; }, 2000);
+    const auto seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - from).count();
+    const auto latest = host.readouts();
+    const auto* after = latest.output ("VD000021");
+    REQUIRE (after != nullptr);
+    const auto perSecond = static_cast<double> (after->soundSent - sentBefore) / seconds;
+    MESSAGE ("sound frames a second: " << perSecond);
+    CHECK (perSecond > 40000.0);
+    CHECK (perSecond < 56000.0);
 }

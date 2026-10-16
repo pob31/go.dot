@@ -30333,7 +30333,8 @@ be read, never copied in.
 | **APG** | **Fill and key keep the canvas's transparency for a keyed card output only.** The canvas is cleared transparent and its alpha carried through the level, the blur, the zones and the warp; every display, NDI, Spout and Syphon output still sends it opaque. The fill is **premultiplied** - a mixer set to *pre-multiplied key*. **External** sends fill and key on two connectors; **internal** lays the picture over the card's own input; a card without that keyer refuses, with a problem. | mine |
 | **APH** | **A card's sound is a list of the show's buses**, laid in order onto the cable's channels - a stereo bus two of them - rounded up to 2, 8, 16 or 32. The buses still play on the interface; one patched to no channel is heard on the card alone. | mine |
 | **APJ** | **The sound is taken after its trim, DCA and LTC**, where the interface's is, into a ring of its own beside the renderer's memory, its pages locked. The audio thread only copies: no allocation, lock or system call (§4.2). A full ring drops and counts. | mine |
-| **APK** | **The sound is placed by its sample** at the card's moment for that sample - so it leaves the card with the picture drawn for it - and resampled to the card's 48 kHz, the ratio from the two clocks and trimmed on what the card holds. This is the adaptive resampling §3.19d left for v1.x, built for a card's sound alone. | mine |
+| **APK** | **The sound is placed by its sample** at the card's moment for that sample - so it leaves the card with the picture drawn for it - and resampled to the card's 48 kHz, the ratio from the two clocks and trimmed on what the card holds. This is the adaptive resampling §3.19d left for v1.x, built for a card's sound alone. *As built (DL.7):* no ratio is steered - each of the card's samples is read at the position on Go.dot's count the two lines say it stands for, by a windowed sinc whose cutoff is lowered under a faster source, so nothing drifts that would need trimming. | mine |
+| **APQ** | **A card carrying sound sends its picture and its sound 60 ms behind Go.dot's count**, together. A sample is known only once the audio thread has made it, and must reach the card before the card plays it; the picture waits with it so the two leave together. Its latency readout includes it; M77 settles the number. | mine |
 | **APL** | **The stops reach the card through the buses**: Esc fades, double Esc kills, Doh! takes back, the same samples as the interface's. Nothing outside Go.dot is muted (§4.4). A renderer killed stops the card's picture and sound until it is back. | mine |
 | **APM** | **A capture's format is found by the card**; it arrives as 8-bit YUV and is turned to colour on the graphics card. No signal **draws black**, with a warning, as a lost return does. One input per connector: a second is refused. Sound coming in is not taken. | mine |
 | **APN** | **Card kinds are offered where a card is found.** The output and input menus list DeckLink when Desktop Video reports a card; an insert never takes one. | mine |
@@ -30354,7 +30355,8 @@ be read, never copied in.
 | `videoOutput/<id>/latency` | `d` | r | milliseconds the card holds |
 | `videoOutput/<id>/skew` | `d` | r | the card's clock against the sound's, parts per million |
 | `videoOutput/<id>/reference` | `s` | r | `none`, `locked`, `unlocked` |
-| `videoOutput/<id>/soundLate` | `i` | r | sound blocks dropped or placed late |
+| `videoOutput/<id>/soundLate` | `i` | r | sound samples placed late or refused by the card |
+| `videoOutput/<id>/soundSent` | `i` | r | sound sample frames handed to the card - 48 000 a second while it flows |
 | `videoInput/<id>/kind` | `s` | rw | gains `decklink`; its `sender` is the card's identifier |
 | `videoInput/<id>/videoMode` | `s` | rw | `auto`, found by the card, or a format; `auto` |
 
@@ -30371,7 +30373,7 @@ card*, *Format*, *Key*, *External*, *Internal*, *Sound*, *no signal* - are mine,
 | DL.3 | A card output: paced by the card, at its format, latency, skew and reference, tried again || 04388a0 |
 | DL.4 | 10-bit YUV | 4540aa6 |
 | DL.5 | Fill and key | b217edd |
-| DL.6 | The sound taken off the audio thread | |
+| DL.6 | The sound taken off the audio thread | 7a7367f |
 | DL.7 | The sound placed and resampled on the card | |
 | DL.8 | A card as a video input | |
 | DL.9 | The Video tab, the inputs, the problems, the inspector | |

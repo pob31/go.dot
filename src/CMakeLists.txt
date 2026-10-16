@@ -567,6 +567,8 @@ add_library(wfg_engine STATIC
     wfg/engine/video/render/Sender.cpp
     wfg/engine/video/render/Sender.h
     wfg/engine/video/render/Sender_ndi.cpp
+    wfg/engine/video/render/SoundPlacer.cpp
+    wfg/engine/video/render/SoundPlacer.h
     wfg/engine/video/render/shaders/video.glsl.h)
 add_library(wfg::engine ALIAS wfg_engine)
 
