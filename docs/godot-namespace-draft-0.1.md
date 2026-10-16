@@ -411,6 +411,9 @@ one, anything but `"park"` or `"snap"` is ignored in silence (§23.11).
 A mount's own `panic` stays `park` or `snap`: a device has nodes of many types. And the
 parameter table's `panic` column takes a literal of the row's own type too, checked by the
 generator (`docs/parameters/README.md`). Nothing applies any of them yet: devplan Phase 10.)*
+*(2026-10-16, §73, at the author's direction: nor will anything. Every parameter rests at `park`,
+which the double Esc honours by writing nothing after the press; `snap` and a declared value are
+published for other software and applied by nothing.)*
 
 ## 4. Change notification
 
@@ -7706,6 +7709,8 @@ is park mounted parameters at their §4.6 panic values - that is the mount table
 *(2026-10-02, H5: still so for `snap` and for a declared value. For `park`, which every row says,
 §23.11's invariant shows that none of the writers it runs - levels, speed, a DCA trim, a desk's
 values, launches - writes after the press, so a parameter they move stays where it was.)*
+*(2026-10-16, §73: settled - the double Esc parks, and sends nothing to rest a device's
+parameters; `snap` and declared values are published and never applied.)*
 
 **A ROW DRAGGED IN THE LIST (2026-09-18).** *"Can we have drag and drop reordering? Can we also have
 drag and drop onto a fade to set its target? Can we also use its user ID (not only the unique ID) to
@@ -8602,7 +8607,8 @@ single-valued row could say is lost — and checks a surface's ports one by one.
 space-separated too and never met this, because it refers to nothing.
 
 The rows, grouped by where they are published. Every one carries the panic policy `park`, and its
-resting value is its default.
+resting value is its default. *(2026-10-16, §73, AQI: loosely said - the default is what a show
+opens with; in an emergency a row stays where it is.)*
 
 | Node | Type, default | Access | Persist | Meaning |
 |---|---|---|---|---|
@@ -9793,7 +9799,8 @@ whichever was created first, so that the canonical bytes of a show do not depend
 containers happened to be asked for.
 
 The rows, grouped by where they are published. Every one carries the panic policy `park`, and its
-resting value is its default.
+resting value is its default. *(2026-10-16, §73, AQI: loosely said - the default is what a show
+opens with; in an emergency a row stays where it is.)*
 
 | Node | Type, default | Access | Persist | Meaning |
 |---|---|---|---|---|
@@ -9903,6 +9910,8 @@ preset was applied at open, the factory default with no preset — and the publi
 `param/<n>` is that baseline once the child has reported it. The CSV `panic` column says `park`
 throughout and is metadata still: Phase 10 applies it. *(2026-10-02, H5: checked now - the
 generator refuses a value the row could not hold, §23.11 - and still applied by nothing.)*
+*(2026-10-16, §73: and never will be - `park` is the rest, honoured by the double Esc as built; a
+baseline is where a parameter starts, not where an emergency puts it.)*
 
 **Replay** runs handlers and no hooks (§12.1), and every write above is a handler: the EQ rows
 and `values` are in the log as `node.set` records, the arms carry them, and `plugin.failed` marks
@@ -10366,7 +10375,8 @@ plugin's own window was on this list until the author asked for it on 2026-09-25
 **The live-input rack, rack-channel chains and the shared reverb channel** — Phase 9b, with
 `Media/Insert` and `Rack/Channel` waiting for it exactly as Phase 4 left them.
 
-**Panic values applied** — the column stays metadata until Phase 10.
+**Panic values applied** — the column stays metadata until Phase 10. *(2026-10-16, §73: and after
+it - settled on paper, nothing applies a panic value.)*
 
 ### 17.11 Decisions to overrule early
 
@@ -11091,7 +11101,8 @@ fit; the fold stays greyed on a mic cue until its chain's width is published (9b
 and `Mic` joins the children of `List`, `Group`, `Header`, `Footer` and `Persistent`.
 
 The rows, by where they are published. Every one carries the panic policy `park`, and rests at its
-default.
+default. *(2026-10-16, §73, AQI: loosely said - the default is what a show opens with; in an
+emergency a row stays where it is.)*
 
 | Node | Type, default | Access | Persist | Meaning |
 |---|---|---|---|---|
@@ -12643,7 +12654,7 @@ and §21.5. Nothing is renumbered. A reference to one of them says which section
 | ED | **Inside one fade, the speed lags the level by one lead** (five ticks at most), and a stop waits for the speed | implementer's call |
 | EE | **The list, the walk, the timeline and load-to-time read the cue's own speed**: a file's length over its speed, for ever at nought. Speed fades are not solved | implementer's call |
 | EF | **The master dial moves the speed a semitone a detent**, on the equal-tempered grid, down to nought below 2^(-52/12); a double click is one again | implementer's call |
-| EG | **It rests at one**: `park`, and a default of one | implementer's call (§4.6) |
+| EG | **It rests at one**: `park`, and a default of one *(2026-10-16, §73, AQI: it opens at one; a double Esc leaves it where it is)* | implementer's call (§4.6) |
 | EH | **The speed is not ridden under the lock** | implementer's call; a live ride, as EQ and sends have (§17.14, AM), is proposed |
 
 **DQ - a patch the build applies.** The author chose it over a fork. Tracktion stays at its upstream
@@ -12686,6 +12697,7 @@ a queue of sixty-four (`Looper.cpp:107-113, 534-544`).
 - **Owners.** The media rows are on owner `media`, not `sound`: a mic cue has no file to speed up
   (§18.2's split).
 - **Resting value.** All six are `park`, and rest at their defaults (§4.6). A speed rests at one.
+  *(2026-10-16, §73, AQI: they open at their defaults; a double Esc leaves each where it is.)*
 - **Names.** They are §12.10's, so the PRD's word stays *rate*; the window says **Speed**.
 - **The mode's second value** is the author's word, `timestretch`, where §12.10 had `stretch`.
 - **`media/duration` stays the file's own length**: a fact about the file, which the waveform draws
@@ -14909,7 +14921,8 @@ it for the double Esc with one case that runs, at once, every writer a unit rig 
 then watches them, and the whole published tree, for fifty ticks. It also readies the `panic`
 column itself - checked where it is written, read where a device describes it, published back -
 without applying anything: what `snap` snaps to, and which command applies a declared value, are
-still the author's, parked until after video.
+still the author's, parked until after video. *(2026-10-16, §73: ruled - none. Both are published
+and applied by nothing; `park`, honoured as this stage shows, is the rest.)*
 
 **The invariant** (`GoTests`, "double Esc: nothing Go.dot started keeps writing, for fifty ticks
 after"). A media cue sounds on a DCA with a level lane drawn over it; one four-second fade moves its
@@ -15022,7 +15035,7 @@ like any other - a warning, and the device loads. §23.12.)*
 **Not changed, and worth knowing.**
 
 - **Nothing applies a panic value.** `snap` and declared values are read, checked and published,
-  and nothing acts on them.
+  and nothing acts on them. *(2026-10-16, §73: so it stays, at the author's direction.)*
 - **A device's metadata is copied onto its nodes when its namespace loads**, and
   `MountTable::updateDeclaration` keeps the nodes: an edit of a mount's `panic`, rate cap or
   anticipatability while the show is open reaches its nodes only when the namespace is read again
@@ -30486,3 +30499,54 @@ installed - is said under the devices in the menu, cameras or none.
 A camera's sound (APU); a camera's controls - focus, exposure, white balance - left to the camera or
 the system's own settings; a camera as an output (a virtual camera); more than one input on a camera;
 the formats a camera has before it has been opened.
+
+## 73. Panic values: park is the rest, and the rest is published
+
+The author, 2026-10-16, taking up one of the core gaps parked after the audit of 2026-09-28 (devplan
+Phase 10, "Panic values on every node honoured"): *"Can we look into the panic values next?"* - and,
+asked what `snap` should put a parameter at: *"I really don't remember what we had in mind at the
+time."* Offered three ways - close it on paper, build resting values for devices, leave it parked -
+the author chose the first, recommended. Nothing is built: this section settles what §3, §23.11 and
+the devplan had left open. Decisions run from AQE.
+
+### 73.1 What it means, before its names
+
+Every parameter says where it goes when the show is stopped in an emergency (PRD §3.3, §4.6): left
+where it is (`park`), or put somewhere safe - `snap`, or a value written beside it. Every one of
+Go.dot's own parameters says `park`; a device's may say any of the three in its namespace file.
+
+A double Esc already leaves every parameter where it is: since H5 nothing Go.dot started writes
+after the press (§23.11), so `park` is honoured by what the press stops, not by anything it sends.
+What was never decided is what `snap` puts a parameter at, and when a declared value would be sent.
+The answer is that neither is sent: Go.dot reads both, checks them and publishes them for other
+software, and acts on neither. PRD §4.4 keeps the double Esc to what Go.dot itself makes - it "does
+not mute the PA" - and no show has yet asked for more.
+
+### 73.2 What already holds
+
+- **The parameter table's `panic` column**: `park` on every row, checked by
+  `scripts/generate-schema.py` - a policy, or one literal of the row's own type (IZ;
+  `docs/parameters/README.md`).
+- **A device's `GODOT.PANIC`**: read as the node's own type and published back as it came; one the
+  node could never hold is a warning, and the device loads (JB, JT; §3, §23.11-23.12).
+- **`/godot/mount/<id>/panic`**: the device's own policy, `park` or `snap`, stored in the show and
+  lent to every node of the device that says nothing of its own.
+- **The double Esc's invariant**: `GoTests` "double Esc: nothing Go.dot started keeps writing, for
+  fifty ticks after" (§23.11).
+
+### 73.3 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **AQE** | **Every parameter rests where the press left it**: `park` on every row of Go.dot's own, honoured by the double Esc as built (§23.11), so PRD §4.6 holds with nothing new. | the author's ("close it on paper", recommended) |
+| **AQF** | **`snap` and a declared value are published, never applied**: read, checked and published back - a device's own and the table's alike - as statements for other software. Go.dot sends neither, on any stop, and gives `snap` no meaning of its own. | the author's (the same choice) |
+| **AQG** | **The column stays as it is**: `park` on every row, and the generator still takes a literal of the row's type, so a show that one day wants a value needs no change of format. | mine |
+| **AQH** | **Putting outside equipment somewhere safe is never the double Esc's**: a desk's master pulled down, say, would be a named command of its own, pressed on purpose (§4.4, §4.11). Not built, not planned. | the author's (in the same choice) |
+| **AQI** | **"Its resting value is its default" was loose**: a row's default is what a show opens with and what a reset returns to; where it rests in an emergency is `park`, where it is. The sentences in §16.2, §17.2, §17.4, §17.10, §18.2 and §22 carry a note, not a rewrite. | mine |
+
+### 73.4 Not built
+
+A command that puts a device's parameters at rest (AQH); a Panic column on the Network tab - the
+device's policy is stored in the show and, as before, shown nowhere; what `snap` would put a
+parameter at. The parameter table's sentence for `mount/panic` ("Default resting state for the
+mounted nodes") stays as it is: changing it regenerates the schema for no change in behaviour.

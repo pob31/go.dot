@@ -201,8 +201,10 @@ namespace wfg::tree
             in `panicValues`. A policy is a word and a value is a value, so the
             two are kept apart rather than one string that might be either: a
             string node resting at the text "park" would otherwise read as the
-            policy. Nothing APPLIES any of them yet (devplan Phase 10); they are
-            declared, checked where they are read, and published. */
+            policy. Nothing APPLIES any of them, nor will (namespace draft §73,
+            2026-10-16): a double Esc parks by writing nothing after the press,
+            and the rest are declared, checked where they are read, and
+            published for other software. */
         std::string panic = "park";
 
         /*  THE DECLARED SAFE VALUE, when `panic` is "value", and empty

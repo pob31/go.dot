@@ -1546,7 +1546,10 @@ AJA card, by the testers (M79); the author's word on APV-AQD and the screen word
 - **Esc / double Esc / Doh!** per PRD §4.4: graceful abort runs footers;
   immediate skips them and kills internal processing only; Doh! recovers an
   early trigger within the anticipation window. Revert-of-GO (§4.5).
-- Panic values on every node honoured.
+- Panic values on every node honoured. *Settled on paper 2026-10-16, at the
+  author's direction (namespace draft §73): every node rests at `park`, which
+  the double Esc honours as built (H5, below); `snap` and declared values are
+  published, never applied. Nothing to build.*
 - Debounce as a user preference.
 - **Esc on a persistent media cue as a pause** (PRD §3.29): *decided by the
   author 2026-10-02 and built as K8 (namespace draft §23.17)*; §4.4 gained its
@@ -1756,6 +1759,12 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   anything but a policy is ignored. PRD §3.3's "snap-to" against the schema's
   `snap` was left for the author *(2026-10-02, K1: ruled - the PRD says `snap`
   now)*. Nothing applies a panic value yet.
+- **Panic values, 2026-10-16 — settled on paper** (namespace draft §73). The
+  author no longer recalled what `snap` was meant to do and chose to build
+  nothing: every parameter rests at `park`, which H5's invariant already shows
+  the double Esc honouring; `snap` and declared values stay read, checked and
+  published, and are never applied; a command that rests outside equipment
+  would be its own, never the double Esc's (AQE-AQI).
 
 ### Timecode generated: MTC and LTC cues · M
 

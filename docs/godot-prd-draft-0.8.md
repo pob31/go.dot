@@ -127,7 +127,14 @@ Each node declares:
 - **anticipatable**: may be pre-sent before GO (imperceptible *and* revocable in
   the current state); third-party defaults to false
 - **panic value**: park | snap | declared safe value *("snap-to" until 2026-10-02,
-  spelled `snap` at the author's direction to match the schema and `show.rng`)*
+  spelled `snap` at the author's direction to match the schema and `show.rng`)*.
+  *Settled 2026-10-16, at the author's direction:* every parameter of Go.dot's own
+  rests at `park` - where an emergency stop leaves it - which the double Esc
+  honours by writing nothing after the press; `snap` and a declared value, a
+  device's own included, are read, checked and published for other software, and
+  Go.dot applies neither. Putting outside equipment somewhere safe would be a
+  command of its own, never the double Esc's (§4.4).
+  `docs/godot-namespace-draft-0.1.md` §73.
 
 *Added in 0.8, at the author's direction (2026-09-22).* Each mount is a
 **device** in the show settings, and declares four more things about itself, all

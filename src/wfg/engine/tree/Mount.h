@@ -82,10 +82,10 @@
         names the address (2026-10-02, K1, the author's "stay flexible"; H5
         refused the namespace). On a container or an event anything but a
         policy is ignored in silence: neither has a value, and an event is
-        often only inferred. Nothing applies a panic value yet (devplan
-        Phase 10).
+        often only inferred. Nothing applies a panic value, nor will
+        (namespace draft §73, 2026-10-16): they are published, never sent.
 
-        AND, A TRAP FOR WHOEVER APPLIES IT: these are copied onto the nodes
+        AND, A TRAP: these are copied onto the nodes
         when the namespace loads, and `updateDeclaration` keeps the nodes - so
         an edit of the device's rate cap, anticipatability or panic while the
         show is open reaches the nodes only once the namespace is read again.
