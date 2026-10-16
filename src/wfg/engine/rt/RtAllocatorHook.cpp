@@ -39,6 +39,7 @@
 
 #if WFG_RT_CHECKS
 
+#include <algorithm>
 #include <cstdlib>
 #include <new>
 
@@ -74,10 +75,13 @@ namespace
        #else
         /*  std::aligned_alloc requires the size to be a multiple of the
             alignment; posix_memalign does not, and is available everywhere
-            Go.dot builds that is not Windows. */
+            Go.dot builds that is not Windows. It refuses an alignment smaller
+            than a pointer, though, which a library may ask for - LLVM, inside
+            Mesa's software rasteriser, asks for 4 and took the refusal for
+            memory run out: the alignment is raised to a pointer's. */
         void* result = nullptr;
 
-        if (::posix_memalign (&result, alignment, bytes) != 0)
+        if (::posix_memalign (&result, std::max (alignment, sizeof (void*)), bytes) != 0)
             return nullptr;
 
         return result;
