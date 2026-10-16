@@ -4920,8 +4920,12 @@ namespace wfg::tree
                 and what other programs offer this machine now. */
             if (! declaredVideoInputs.empty() || videoHost != nullptr)
                 for (const auto* row : doc::Schema::rowsForOwner ("videoInputs"))
+                {
                     if (row->name == "available")
                         runtime.push_back (makeLeaf (std::string (godot) + "/videoInput/available", *row, found.available));
+                    else if (row->name == "devices")
+                        runtime.push_back (makeLeaf (std::string (godot) + "/videoInput/devices", *row, found.devices));
+                }
 
             for (const auto& inputId : declaredVideoInputs)
             {

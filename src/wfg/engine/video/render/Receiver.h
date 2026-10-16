@@ -36,6 +36,8 @@
 #include <memory>
 #include <string>
 
+namespace wfg::video::card { struct Found; }
+
 namespace wfg::video::render
 {
     class Receiver
@@ -85,7 +87,13 @@ namespace wfg::video::render
 
     /*  A DeckLink card's input (namespace draft §71, APM): `cardId`'s, at
         `mode` - `auto`, found by the card - opened on a thread of its own. */
-    std::unique_ptr<Receiver> makeDeckLinkReceiver (const std::string& cardId, const std::string& mode, std::string& why);
+    std::unique_ptr<Receiver> makeDeviceReceiver (const std::string& deviceId, const std::string& mode, std::string& why);
+
+    /*  WHAT BRINGS A PICTURE IN on this machine (`videoInput/devices`, §72):
+        each card that takes pictures in, of `cards`, and each camera the system
+        lists - its identifier, name, maker and formats, a line each. Render
+        thread; a moment's work, asked once a second. */
+    std::string discoverDevices (const card::Found& cards);
     std::string discoverSpout();
     std::string discoverSyphon();
     std::string discoverNdi();

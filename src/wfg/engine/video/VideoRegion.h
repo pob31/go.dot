@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 22;
+    constexpr std::uint32_t version = 23;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -612,6 +612,11 @@ namespace wfg::video::region
             `cardsSeq`, a line each as `videoOutput/cards` says them. */
         std::atomic<std::uint32_t> cardsSeq;
         char cards[cardsChars];
+
+        /*  Renderer to engine (§72): what brings a picture in - cards' inputs
+            and cameras - under `devicesSeq`, as `videoInput/devices` says it. */
+        std::atomic<std::uint32_t> devicesSeq;
+        char devices[cardsChars];
 
         /** Renderer to engine (§44, YE): each video insert, in the configuration's order. */
         InsertState inserts[maxInserts];
@@ -1470,6 +1475,21 @@ namespace wfg::video::region
     {
         std::string out;
         readConsistent (r.cardsSeq, [&] { out = readText (r.cards); });
+        return out;
+    }
+
+    /*  WHAT BRINGS A PICTURE IN (§72), as `videoInput/devices` says it. */
+    inline void writeDevices (Region& r, std::string_view lines) noexcept
+    {
+        beginWrite (r.devicesSeq);
+        writeText (r.devices, lines);
+        endWrite (r.devicesSeq);
+    }
+
+    inline std::string readDevices (const Region& r)
+    {
+        std::string out;
+        readConsistent (r.devicesSeq, [&] { out = readText (r.devices); });
         return out;
     }
 

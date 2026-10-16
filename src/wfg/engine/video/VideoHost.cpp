@@ -414,6 +414,7 @@ namespace wfg::video
 
             auto offered = region::readAvailable (*r);
             auto cardsFound = region::readCards (*r);
+            auto devicesFound = region::readDevices (*r);
 
             /*  WHAT IS HELD OF THE READ-AHEAD (§48), and whether it answers the
                 list written last. */
@@ -455,6 +456,7 @@ namespace wfg::video
                 latest.inputs = std::move (foundInputs);
                 latest.available = std::move (offered);
                 latest.cards = std::move (cardsFound);
+                latest.devices = std::move (devicesFound);
                 latest.inserts = std::move (foundInserts);
                 latest.layerTints = region::readTints (r->layerTints);
                 latest.canvasTints = region::readTints (r->canvasTints);
@@ -471,6 +473,7 @@ namespace wfg::video
                 latest.inputs.clear();
                 latest.available.clear();
                 latest.cards.clear();
+                latest.devices.clear();
                 latest.inserts.clear();
                 latest.layerTints.clear();
                 latest.canvasTints.clear();

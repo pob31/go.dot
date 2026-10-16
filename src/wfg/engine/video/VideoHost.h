@@ -124,8 +124,10 @@ namespace wfg::video
         std::string available;
 
         /*  THE DECKLINK CARDS THIS MACHINE HAS (§71), as `videoOutput/cards`
-            says them. */
+            says them; and what brings a picture in (§72), as
+            `videoInput/devices` does. */
         std::string cards;
+        std::string devices;
 
         /*  AND EACH VIDEO INSERT (§44, YE, YH). */
         struct InsertEntry

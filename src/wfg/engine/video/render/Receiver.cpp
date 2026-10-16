@@ -32,7 +32,7 @@ namespace wfg::video::render
             case region::OutputKind::spout:   return makeSpoutReceiver (sender, why);
             case region::OutputKind::syphon:  return makeSyphonReceiver (sender, why);
             case region::OutputKind::ndi:     return makeNdiReceiver (sender, why);
-            case region::OutputKind::device: return makeDeckLinkReceiver (sender, mode, why);
+            case region::OutputKind::device: return makeDeviceReceiver (sender, mode, why);
             case region::OutputKind::card:
                 why = "a card's output is not an input";
                 return nullptr;

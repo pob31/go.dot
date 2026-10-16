@@ -2700,8 +2700,10 @@ namespace wfg::video
                         nextDiscovery = now + 1'000'000'000;
                         region::writeAvailable (r, render::discoverSenders());
 
-                        //  And the DeckLink cards (§71): a moment's work, as the senders are.
-                        region::writeCards (r, card::describe (card::system().find()));
+                        //  And the video cards (§71) and what brings a picture in (§72): a moment's work, as the senders are.
+                        const auto cardsFound = card::system().find();
+                        region::writeCards (r, card::describe (cardsFound));
+                        region::writeDevices (r, render::discoverDevices (cardsFound));
                     }
 
                     /*  THE INSERTS (§44, YE): a sender for the cue's picture and a

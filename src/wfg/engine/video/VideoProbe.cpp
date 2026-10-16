@@ -16,6 +16,8 @@
 
 #include <wfg/engine/video/VideoProbe.h>
 
+#include <wfg/engine/video/render/Camera.h>
+
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -336,6 +338,20 @@ namespace wfg::video
 
             if (flag (args, "run"))
                 code = run (cards, found, args, out);
+        }
+
+        /*  AND THE CAMERAS (§72): names only, as nothing is opened to be
+            listed - a camera lights up when an input opens it. */
+        if (! flag (args, "run"))
+        {
+            const auto cameras = camera::system().find();
+            out << "\n" << cameras.cameras.size() << (cameras.cameras.size() == 1 ? " camera\n" : " cameras\n");
+
+            if (! cameras.problem.empty())
+                out << cameras.problem << "\n";
+
+            for (const auto& one : cameras.cameras)
+                out << "  " << one.name << "  (" << one.id << ")\n";
         }
 
         said << out.str();

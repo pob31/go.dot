@@ -549,11 +549,15 @@ add_library(wfg_engine STATIC
     wfg/engine/video/VideoRenderChild.cpp
     wfg/engine/video/VideoRenderChild.h
     wfg/engine/video/VideoSink.h
+    wfg/engine/video/render/Camera.cpp
+    wfg/engine/video/render/Camera.h
+    wfg/engine/video/render/Camera_fake.cpp
     wfg/engine/video/render/Card.cpp
     wfg/engine/video/render/Card.h
     wfg/engine/video/render/Card_decklink.cpp
     wfg/engine/video/render/Card_fake.cpp
     wfg/engine/video/render/DeckLinkApi.h
+    wfg/engine/video/render/FrameUpload.h
     wfg/engine/video/render/Gpu.cpp
     wfg/engine/video/render/Gpu.h
     wfg/engine/video/render/GpuNative.h
@@ -562,7 +566,7 @@ add_library(wfg_engine STATIC
     wfg/engine/video/render/Projector.h
     wfg/engine/video/render/Receiver.cpp
     wfg/engine/video/render/Receiver.h
-    wfg/engine/video/render/Receiver_decklink.cpp
+    wfg/engine/video/render/Receiver_device.cpp
     wfg/engine/video/render/Receiver_ndi.cpp
     wfg/engine/video/render/Ndi.cpp
     wfg/engine/video/render/Ndi.h
@@ -631,15 +635,20 @@ endif()
 # The video renderer's device, each system's own (namespace draft §44.4).
 if(WIN32)
     target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_d3d11.cpp wfg/engine/video/render/Projector_d3d11.cpp
-                                      wfg/engine/video/render/Sender_spout.cpp wfg/engine/video/render/Receiver_spout.cpp)
+                                      wfg/engine/video/render/Sender_spout.cpp wfg/engine/video/render/Receiver_spout.cpp
+                                      wfg/engine/video/render/Camera_mf.cpp)
 elseif(APPLE)
     target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_metal.mm wfg/engine/video/render/Projector_metal.mm
-                                      wfg/engine/video/render/Sender_syphon.mm wfg/engine/video/render/Receiver_syphon.mm)
+                                      wfg/engine/video/render/Sender_syphon.mm wfg/engine/video/render/Receiver_syphon.mm
+                                      wfg/engine/video/render/Camera_avf.mm)
+    # A camera through AVFoundation (namespace draft §72, APS).
+    target_link_libraries(wfg_engine PRIVATE "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo")
 else()
     # Xlib for the projectors' child windows (Projector_gl.cpp): JUCE loads
     # libX11 itself at run time, so nothing else links it.
     find_package(X11 REQUIRED)
-    target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_gl.cpp wfg/engine/video/render/Projector_gl.cpp)
+    target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_gl.cpp wfg/engine/video/render/Projector_gl.cpp
+                                      wfg/engine/video/render/Camera_v4l2.cpp)
     target_link_libraries(wfg_engine PRIVATE X11::X11)
 endif()
 

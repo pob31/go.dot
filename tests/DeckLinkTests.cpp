@@ -29,6 +29,7 @@
 #include <wfg/engine/video/VideoHost.h>
 #include <wfg/engine/video/VideoModes.h>
 #include <wfg/engine/video/VideoRegion.h>
+#include <wfg/engine/video/render/Camera.h>
 #include <wfg/engine/video/render/Card.h>
 #include <wfg/engine/video/render/DeckLinkApi.h>
 #include <wfg/engine/video/render/SoundPlacer.h>
@@ -904,4 +905,143 @@ TEST_CASE ("decklink: the probe runs the test card - bars, a flash and a beep ea
     std::ostringstream out;
     CHECK (video::runVideoProbe (*none, { "--run" }, out) == 2);
     CHECK (out.str().find ("No card to run: none sends pictures") != std::string::npos);
+}
+
+TEST_CASE ("camera: the test camera listed by name, its formats known once opened, automatic its largest at 25 a second or more, one input at a time (VC.1)")
+{
+    auto cameras = video::camera::makeFakeCameras();
+
+    //  Listed by name, its formats not yet known: nothing was opened to list it.
+    auto found = cameras->find();
+    REQUIRE (found.cameras.size() == 1);
+    CHECK (found.cameras[0].id == "cam:fake-1");
+    CHECK (found.cameras[0].name == "Go.dot test camera");
+    CHECK (found.cameras[0].formats.empty());
+    CHECK (video::camera::isCamera ("cam:fake-1"));
+    CHECK_FALSE (video::camera::isCamera ("fake-1"));
+
+    std::string why;
+    auto source = cameras->open ("cam:fake-1", "auto", why);
+    REQUIRE (source != nullptr);
+    CHECK (source->formatWord() == "1080p30");
+    CHECK (source->signal());
+
+    //  Opened, its formats are known, and listed from then on.
+    found = cameras->find();
+    CHECK (found.cameras[0].formats == std::vector<std::string> { "720p30", "1080p30", "640x480p30" });
+
+    //  A frame, then a newer one a thirtieth of a second on.
+    std::vector<std::uint8_t> bgra;
+    int w = 0, h = 0;
+    std::uint64_t serial = 0;
+    REQUIRE (source->newest (bgra, w, h, serial));
+    CHECK (w == 1920);
+    CHECK (h == 1080);
+    CHECK (bgra.size() == 1920u * 1080u * 4u);
+    const auto first = serial;
+    waitMs (80);
+    CHECK (source->newest (bgra, w, h, serial));
+    CHECK (serial > first);
+
+    //  One input at a time; a format it does not offer; a camera that is not there.
+    std::string busy, notOffered, gone;
+    CHECK (cameras->open ("cam:fake-1", "auto", busy) == nullptr);
+    CHECK (busy == "the camera is already taken");
+    source.reset();
+    CHECK (cameras->open ("cam:fake-1", "1080p60", notOffered) == nullptr);
+    CHECK (notOffered == "the camera does not offer 1080p60");
+    CHECK (cameras->open ("cam:fake-9", "auto", gone) == nullptr);
+    CHECK (gone == "the camera is not connected");
+
+    //  Automatic: fast enough first, then the largest, then the faster.
+    using video::camera::chooseAutomatic;
+    CHECK (chooseAutomatic ({ "640x480p30", "1080p15", "720p30" }) == "720p30");
+    CHECK (chooseAutomatic ({ "640x480p15", "1080p10" }) == "1080p10");
+    CHECK (chooseAutomatic ({ "720p30", "720p60", "720p25" }) == "720p60");
+    CHECK (chooseAutomatic ({ "1080p29.97", "1080p30" }) == "1080p30");
+    CHECK (chooseAutomatic ({}).empty());
+}
+
+TEST_CASE ("camera: YUYV turned to colour - legal and full range, BT.601 small and BT.709 large (VC.1)")
+{
+    //  Two pixels: legal black, legal white.
+    const std::uint8_t legal[] { 16, 128, 235, 128 };
+    std::uint8_t bgra[8] {};
+    video::camera::yuyvToBgra (legal, 2, 1, 4, bgra, false);
+    CHECK (bgra[0] == 0);
+    CHECK (bgra[2] == 0);
+    CHECK (bgra[4] == 255);
+    CHECK (bgra[6] == 255);
+    CHECK (bgra[7] == 255);
+
+    //  The same codes read as full range: black is not black, white is not white.
+    video::camera::yuyvToBgra (legal, 2, 1, 4, bgra, true);
+    CHECK (bgra[0] > 10);
+    CHECK (bgra[4] < 245);
+}
+
+TEST_CASE ("video gpu: a camera taken in by a renderer with no window, and what brings a picture in listed with it (§72, VC.1)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-camera-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    const juce::File bundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) + "/bundles/video" };
+    REQUIRE (doc::Bundle::open (bundle, document).ok);
+    REQUIRE (document.createVideoInput ("Lectern", "device", "cam:fake-1", "VD000032").ok);
+    REQUIRE (document.createVideoInput ("Wings", "device", "cam:fake-9", "VD000033").ok);
+
+    setVariable ("WFG_CAMERA_FAKE", "1");
+    setVariable ("WFG_CARD_FAKE", "1");
+    setVariable ("WFG_VIDEO_SOFTWARE", "1");
+
+    Ticks ticks;
+    video::VideoHost host { spec };
+    host.configure (document);
+
+    const auto running = tickUntil (host, ticks, [&host] { return host.readouts().renderer == "running"; });
+    setVariable ("WFG_CAMERA_FAKE", nullptr);
+    setVariable ("WFG_CARD_FAKE", nullptr);
+    setVariable ("WFG_VIDEO_SOFTWARE", nullptr);
+    REQUIRE (running);
+
+    REQUIRE (tickUntil (host, ticks, [&host]
+                        {
+                            const auto said = host.readouts();
+                            const auto* input = said.input ("VD000032");
+                            return input != nullptr && input->connected && input->frameRate > 5.0;
+                        }, 15000));
+
+    {
+        const auto said = host.readouts();
+        const auto* input = said.input ("VD000032");
+        REQUIRE (input != nullptr);
+        MESSAGE ("camera taken in: " << input->width << "x" << input->height << " " << input->format << " at " << input->frameRate);
+        CHECK (input->width == 1920);
+        CHECK (input->height == 1080);
+        CHECK (input->format == "1080p30");
+    }
+
+    //  A camera that is not there: nothing drawn, and the input says why.
+    CHECK (tickUntil (host, ticks, [&host]
+                      {
+                          const auto said = host.readouts();
+                          const auto* input = said.input ("VD000033");
+                          return input != nullptr && ! input->connected && input->problem == "the camera is not connected";
+                      }, 5000));
+
+    //  What brings a picture in: the test card's input, and the test camera
+    //  with its formats now that it has been opened.
+    CHECK (tickUntil (host, ticks, [&host]
+                      {
+                          const auto devices = host.readouts().devices;
+                          return devices.find ("cam:fake-1\tGo.dot test camera\tcamera\t720p30 1080p30 640x480p30") != std::string::npos
+                              && devices.find ("fake-1\tGo.dot test card\t\t1080p50") != std::string::npos;
+                      }, 5000));
 }
