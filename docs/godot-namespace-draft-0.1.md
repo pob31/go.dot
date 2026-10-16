@@ -30244,12 +30244,13 @@ pre-wait counts in ticks, the delay in samples.
 | **AON** | **A choice and one amount**: *Delay* - None, Sound, Picture - and *Delay by*, in milliseconds. Only one stream is ever held back; delaying both by different amounts is delaying one by the difference. | the author's (offered beside two amounts, *Delay sound by* and *Delay picture by*, which I recommended) |
 | **AOO** | **Video cues and sound cues carry it.** A movie holds back its picture or its locked sounds; a sound cue fired beside a picture holds back its own sound, its choice None or Sound. | the author's (offered as "Video cues + sound cues", recommended) |
 | **AOP** | **The cue ends with its later stream.** The movie's end does not cut a held-back sound's tail; post-wait, a sequence's next member and the cue's length count from the later stream's end. | the author's (offered as "Yes, ends with the later stream", recommended) |
-| **AOQ** | **Four rows**: `delay` on a video cue (`none`, `sound`, `picture`; `none`) and on a sound cue (`none`, `sound`; `none`), and `delayBy` on each (milliseconds, 0..2000, nought). Milliseconds because the amounts are a projector's frames and a processor's buffers; two seconds is far past any rig and short of a pre-wait's work. Read when the cue fires, as `rateMode` is: an edit while it plays waits for the next GO. | mine |
+| **AOQ** | **Four rows**: `delay` on a video cue (`none`, `sound`, `picture`; `none`) and on a sound cue (`none`, `sound`; `none`), and `delayBy` on each (milliseconds, 0..2000, nought). Milliseconds because the amounts are a projector's frames and a processor's buffers; two seconds is far past any rig and short of a pre-wait's work. *As built (LC.2):* read the first time the stream is placed and kept on the run for its life, so an edit in a pre-wait counts and one while it plays waits for the next GO. | mine |
 | **AOR** | **A locked sound follows its movie**: its own `delay` and `delayBy` are refused, as its start offset and speed are (§37.5), and the movie's choice decides - Sound holds back every sound locked to it, Picture holds back the picture. | mine |
 | **AOS** | **Sound on a video cue with no sound to hold back** - a still, a fill, a mask, a capture, or a movie with no locked sound - is not refused, since a source changed later would leave the refusal wrong; `wfg validate` and the cue's warnings say *nothing to delay*. | mine |
 | **AOT** | **The delay is added where the stream is placed, and nowhere before it.** A sound's launch sample and a picture's first point move by the delay after the lead, the seat, a time group's code sample and `run.late`'s reckoning are done, so a lateness report and a backup's seat keep their meaning. Every later placement of the delayed stream keeps the lag: a seek, a speed change (placed the delay later on the delayed stream, so the lag stays a constant in wall time), a chase (its target less the delay), the re-anchoring of a movie on its sounds, a resume. | mine |
-| **AOU** | **The stops end both streams together.** Esc fades what is sounding and showing from the moment it is pressed; double Esc kills both; Doh! takes both back. A stream still inside its delay never starts. | mine |
+| **AOU** | **The stops end both streams together.** Esc fades what is sounding and showing from the moment it is pressed; double Esc kills both; Doh! takes both back. A stream still inside its delay never starts. *As built (LC.3):* Esc takes a picture still to come up away at once, and stops a sound still to be heard - a locked sound too, which no root's stop reaches - rather than fading it in part way down the fade. | mine |
 | **AOV** | **What reads the show without playing it** - a cue's length, the solver, the slot analysis, load-to-time, a backup's seat - counts the delay: the delayed stream sits at *t* minus the delay, and where that is before its start it starts the difference later. | mine |
+| **AOW** | **A sound carried on from its playhead starts at once** - a pause resumed, Doh!'s put-back: the playhead is where it was heard, so its delay is already behind it. One seated by the solver or on a code's second is at its time less the delay, the rest of the delay still to come (AOV, `PlannedRun::heldFor`). | mine |
 
 ### 70.3 Rows
 
@@ -30265,13 +30266,13 @@ Every new row has a default, so an old show opens and saves unchanged. Shown as 
 
 | Stage | What | Built |
 |---|---|---|
-| LC.0 | This section; PRD §3.19c, §3.19d and §6.9; the devplan | |
-| LC.1 | The rows, the refusal on a locked sound, the warning, the schema, the `time` part | |
-| LC.2 | A sound held back: its launch placed later on the sample | |
-| LC.3 | A picture held back; a movie's locked sounds following it; a seek and the re-anchoring | |
-| LC.4 | The later end: the movie's end no longer cutting a held-back sound; a cue's length, the solver, load-to-time, a backup's seat | |
-| LC.5 | Speed, chase and pause keeping the lag | |
-| LC.6 | The inspector, desktop and page | |
+| LC.0 | This section; PRD §3.19c, §3.19d and §6.9; the devplan | 975fc0f |
+| LC.1 | The rows, the refusal on a locked sound, the warning, the schema, the `time` part | 4b91da2 |
+| LC.2 | A sound held back: its launch placed later on the sample | 4aedacf |
+| LC.3 | A picture held back; a movie's locked sounds following it; Esc inside a delay; a seek and the re-anchoring | caff047 |
+| LC.4 | The later end: the movie's end no longer cutting a held-back sound; a cue's length, the solver, load-to-time, a backup's seat | 4c3dab5 |
+| LC.5 | Speed, chase and pause keeping the lag | 02fed91 |
+| LC.6 | The inspector, desktop and page | f886b22 |
 | LC.7 | M76, the README, the guides, the whole suite | |
 
 ### 70.5 Measurements
@@ -30284,3 +30285,6 @@ Every new row has a default, so an old show opens and saves unchanged. Shown as 
 
 A delay per destination - a WFS-DIY slot's against a bus's - which the PRD had as a proposed
 refinement and the author's AOM leaves out; the test clip and its nudging UI (PRD §3.19c, later).
+The solver does not seat movies, so load-to-time places a held-back picture as any picture, when
+it comes up; a walk counts a movie's delay into its length even when Sound holds back nothing
+(AOS's warning case).

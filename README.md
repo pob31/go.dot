@@ -206,7 +206,7 @@ has stood in front of the thing.
   tablet's browser, an iPad's included, but as a mouse-and-keyboard page,
   without the touch gestures PRD §3.17 describes. The Android remote has them
   (above).
-- **Video latency offsets and DeckLink output** (Phase 8b).
+- **DeckLink output** (Phase 8b).
 - **Integrations** — OSCQuery devices found on the network by
   themselves, and commanding WFS-DIY's and XOA's sources with claims per cue
   (Phase 11). The device presets (twenty-four shipped) wait for a console to
@@ -280,6 +280,7 @@ and says afterwards what was built against what was drawn.
 | Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |
 | Group joins | Let play, Gapless or Crossfade between a sequence's members, automatic and manual, pictures dissolving; a looping range's wraps crossfaded | §69 |
+| Sound or picture delay | A cue holds back its sound or its picture by a number of milliseconds, to line up with a projector or a long audio chain | §70 |
 | Authoring | WFS-DIY and S21_HiJack write cues into Go.dot | §56, [authoring protocol](docs/godot-authoring-protocol-0.1.md) |
 | Device presets | Consoles, lighting desks and spatial processors, each protocol a preset | §57 |
 | Redundancy | A main and a backup playing one show, measured over Dante | §58 |

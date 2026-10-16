@@ -143,6 +143,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Fonction | Ce qu'elle fait | Où |
 | --- | --- | --- |
 | Cues vidéo | Montrer un film, une image fixe, un aplat de couleur, un masque adouci ou une entrée live sur un canevas, avec GO, Échap et Doh! comme pour le son | *Add > video*, puis choisir le canevas |
+| Retard du son ou de l'image (nouveau) | Un vidéoprojecteur montre l'image un peu en retard, une longue chaîne audio joue le son un peu en retard. On indique à la cue lequel retenir et de combien : *Delay* sur *Sound* ou *Picture*, et *Delay by* en millisecondes. L'autre part avec la cue ; celui qui est retenu part d'autant plus tard et finit d'autant plus tard, et la cue se termine quand les deux ont fini. Une cue son peut retenir son son pour s'aligner sur une image lancée en même temps, et le son d'un film suit le film | Inspecteur, *Delay* et *Delay by* |
 | Lecture HAP | HAP, HAP Alpha et HAP Q jouent à pleine vitesse. Les autres films jouent en aperçu et se convertissent en HAP en arrière-plan (FFmpeg est téléchargé à la première utilisation) | Automatique ; inspecteur |
 | Cache d'analyse | Les couleurs, niveaux et bandes de film calculés par Go.dot sont gardés à côté des médias et réutilisés la fois suivante ; ceux des fichiers qui ne sont plus dans le dossier des médias sont nettoyés à chaque lancement | Automatique ; *Show > Clean up the analysis cache* |
 | Bande du film | Vignettes le long de la bande, changements de plan marqués ; la tête de lecture et les points d'entrée et de sortie s'accrochent à un changement de plan (Alt les libère) ; les cases *Scene changes* et *Snap to scene changes* désactivent l'un ou l'autre ; le son lié au film s'édite à côté | Haut de l'inspecteur |
@@ -282,10 +283,6 @@ Ces fonctions sont conçues dans la spécification mais pas encore construites. 
 ### La console web sur une tablette
 
 La console web tourne déjà dans n'importe quel navigateur du réseau, celui d'un iPad compris. Elle recevra les contrôles tactiles de la télécommande Android, qui partent de l'endroit où le doigt se pose pour que rien ne saute, avec un geste délibéré pour tout ce qui est dangereux.
-
-### Compensation de latence vidéo
-
-On règle une fois le retard du vidéoprojecteur, et le son est retardé d'autant pour s'aligner sur l'image.
 
 ### Intégration logicielle
 

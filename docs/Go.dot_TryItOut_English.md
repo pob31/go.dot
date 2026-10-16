@@ -141,6 +141,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Feature | What it does | Where |
 | --- | --- | --- |
 | Video cues | Show a movie, a still, a colour fill, a feathered mask or a live input on a canvas, with GO, Esc and Doh! as for sound | *Add > video*, then choose the canvas |
+| Sound or picture delay (new) | A projector shows its picture a little late, and a long audio chain plays its sound a little late. Tell a cue which one to hold back and by how much: *Delay* set to *Sound* or *Picture*, and *Delay by* in milliseconds. The other starts when the cue does; the one held back starts that much later and ends that much later, and the cue ends when both have. A sound cue can hold back its sound to match a picture fired beside it, and a movie's own sound follows the movie | Inspector, *Delay* and *Delay by* |
 | HAP playback | HAP, HAP Alpha and HAP Q play at full speed. Other movies play as a preview and convert to HAP in the background (FFmpeg is downloaded on first use) | Automatic; inspector |
 | Analysis cache | The colours, levels and movie strips Go.dot works out are kept beside the media and reused next time; those of files no longer in the media folder are cleaned up at every launch | Automatic; *Show > Clean up the analysis cache* |
 | Movie strip | Thumbnails along the strip with scene cuts marked; the playhead and the in and out points snap to a cut (Alt lets go); the *Scene changes* and *Snap to scene changes* ticks turn either off; a movie's locked sound is edited beside it | Top of the inspector |
@@ -280,10 +281,6 @@ These are designed in the specification and not built yet. The order may change 
 ### The web console on a tablet
 
 The web console already runs in any browser on the network, an iPad's included. It will gain the Android remote's touch controls, relative from where your finger lands so nothing jumps, with a deliberate gesture for anything dangerous.
-
-### Video latency compensation
-
-Set a projector's delay once, and sound is held back to line up with the picture.
 
 ### Integration with software
 

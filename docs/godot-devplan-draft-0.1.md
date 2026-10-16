@@ -1429,7 +1429,9 @@ old show saves unchanged; CI is green.
 **built into the cue**, not its pre-wait, and **names the stream it holds back** - *Delay: None /
 Sound / Picture* and *Delay by* milliseconds - on video cues and sound cues, saved with the show; the
 cue ends with its later stream (namespace draft §70; PRD §3.19c rewritten, §6.9 answered). The
-author's decisions are AOM-AOP; AOQ-AOV are the implementer's, the author's to overrule.
+author's decisions are AOM-AOP; AOQ-AOW are the implementer's, the author's to overrule. *Built
+2026-10-16*, LC.0-LC.6 (§70.4). Owed: the author's look and words (Delay, Delay by, None, Sound,
+Picture), M76 on the RME and a projector.
 
 | Stage | What | Depends on |
 |---|---|---|
