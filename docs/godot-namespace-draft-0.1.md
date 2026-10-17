@@ -30746,14 +30746,14 @@ None new. The gestures send `run.stop <run> hard|afterMember|afterIteration`, `r
 
 | Stage | What | Built |
 |---|---|---|
-| WT.0 | This section; PRD §3.17; the devplan | |
-| WT.1 | The rules, pure: PANIC's press, the swipe, the long press, the cross-axis rate, the dial's law and the fader's, in `model/touch.js`, under `node --test` | |
-| WT.2 | A page a finger can work: `touch-action`, finger-wide targets on a coarse pointer, hover marks shown, pointer events where mouse events were, no native row drag on a coarse pointer (ARL, ARO) | |
-| WT.3 | PANIC and Doh! in the transport (ARI) | |
-| WT.4 | The running pane: swipe to kill, the run's sheet, the pills | |
-| WT.5 | The playhead dragged | |
-| WT.6 | The cue list: the long press's sheet, the gutter, *Pick several* (ARJ) | |
-| WT.7 | Numbers dragged and held (ARN); the aim from the finger (ARK) | |
+| WT.0 | This section; PRD §3.17; the devplan || 77aa4aef |
+| WT.1 | The rules, pure: PANIC's press, the swipe, the long press, the cross-axis rate, the dial's law and the fader's, in `model/touch.js`, under `node --test` || ca269e0a |
+| WT.2 | A page a finger can work: `touch-action`, finger-wide targets on a coarse pointer, hover marks shown, pointer events where mouse events were, no native row drag on a coarse pointer (ARL, ARO) || 34dc83e1 |
+| WT.3 | PANIC and Doh! in the transport (ARI) || 340bb6e7 |
+| WT.4 | The running pane: swipe to kill, the run's sheet, the pills || 76dea3ae |
+| WT.5 | The playhead dragged || 7be25037 |
+| WT.6 | The cue list: the long press's sheet, the gutter, *Pick several* (ARJ) || c23ba4ac |
+| WT.7 | Numbers dragged and held (ARN); the aim from the finger (ARK) || c11afa88 |
 | WT.8 | The README and the guides; the console's tests and `client_page`; the whole suite | |
 
 ### 75.6 Measurements

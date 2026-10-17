@@ -137,6 +137,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Network monitor | See every message in and out | *Show > Network monitor…* |
 | Control surfaces | Faders, pads, dials and DCAs, on a Mackie Control surface or a virtual panel on screen. Full support for the Asparion D700: faders, EQ and plugin pages on the rotaries, a master dial, standby on the arrows | *Show > Surfaces…* |
 | Web console | The same show in a browser, on any machine on the network | `http://<this machine>:5010/ui` |
+| The web console on a tablet (new) | Worked by touch, an iPad's included, as the Android remote is: **PANIC** stops everything, and pressed again within 0.75 s drops everything, with **Doh!** beside it; swipe a running cue far either way to kill it, tap it for its stops; tap a member of a running group to skip it this round, hold it to skip it until the group ends; drag a playhead, finer the further your finger is above or below it; hold a cue for *Fire now*, *Park the standby here* and *Flag*; *pick several* to pick cues without a keyboard; drag a number sideways to move it from where it is, finer further from the box. A mouse does all of it the same way | `http://<this machine>:5010/ui` on the tablet |
 | Serial ports | Hear an Arduino's lines in a process cue or a script cue and send lines back | Show settings > Serial |
 
 ### Video (new)
@@ -283,9 +284,9 @@ Go.dot has an Android app for a tablet or a phone. It stays connected in the bac
 
 These are designed in the specification and not built yet. The order may change with what testers ask for, which is one more reason to send feedback.
 
-### The web console on a tablet
+### Two fingers to load to time
 
-The web console already runs in any browser on the network, an iPad's included. It will gain the Android remote's touch controls, relative from where your finger lands so nothing jumps, with a deliberate gesture for anything dangerous.
+On the web console, one finger holding where the show is while another sets where to land, the show worked out live as they move.
 
 ### Integration with software
 

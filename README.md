@@ -76,7 +76,10 @@ has stood in front of the thing.
 - **Two ways in.** A desktop window, compiled into the same process as the
   engine, which the launchers open; and a web console the engine serves at
   `/ui`, plain HTML and ES modules with no build step, kept as the redundancy
-  path. Both change the show only through the engine's named commands, as a
+  path - worked by touch on a tablet as the Android remote is: PANIC and Doh!,
+  a run swiped away to kill it and tapped for its stops, a group's round as
+  pills, a playhead dragged, a cue's sheet on a long press, numbers dragged
+  sideways from where they are (namespace draft §75). Both change the show only through the engine's named commands, as a
   hardware surface does. The show settings, in five sections down the left,
   hold audio, outputs, inputs and the rack, plugins, network devices, MIDI,
   surfaces, timecode, serial ports, video, playback and cue templates - and, for
@@ -216,10 +219,9 @@ has stood in front of the thing.
 - **Automation modes and the Stream Deck** — touch and write automation beside
   the latch a level lane records with, and the Stream Deck as a surface whose
   keys fire a cart's cues (PRD §3.10, §3.16).
-- **The web console's touch gestures** (Phase 7) — the console runs in a
-  tablet's browser, an iPad's included, but as a mouse-and-keyboard page,
-  without the touch gestures PRD §3.17 describes. The Android remote has them
-  (above).
+- **Two-finger load-to-time** (PRD §3.17) — one finger holding where the show
+  is while another sets where to land. The web console's aim moves from the
+  finger today.
 - **Integrations** — OSCQuery devices found on the network by
   themselves, and commanding WFS-DIY's and XOA's sources with claims per cue
   (Phase 11). The device presets (twenty-four shipped) wait for a console to
@@ -300,6 +302,7 @@ and says afterwards what was built against what was drawn.
 | Redundancy | A main and a backup playing one show, measured over Dante | §58 |
 | The operator's window | Show settings in sections; flags; what is missing, said where it is used | §39.14, §63, §64 |
 | Carts, keys and bindings | A list GO never meets, fired by triggers, keys and the remote's Cart tab; a MIDI control or an OSC address bound to any number, learned by moving it; the wheel over a number | §74 |
+| The web console by touch | The Android remote's gestures on the page: PANIC and Doh!, swipe to kill, a run's sheet, pills, the playhead, a cue's sheet, Pick several, numbers dragged and held | §75 |
 
 The documents, besides the PRD and the devplan:
 

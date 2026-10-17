@@ -139,6 +139,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Moniteur réseau | Voir chaque message entrant et sortant | *Show > Network monitor…* |
 | Surfaces de contrôle | Faders, pads, potentiomètres et DCA, sur une surface Mackie Control ou un panneau virtuel à l'écran. Prise en charge complète de l'Asparion D700 : faders, pages EQ et plugins sur les rotatifs, molette maître, attente sur les flèches | *Show > Surfaces…* |
 | Console web | Le même spectacle dans un navigateur, sur n'importe quelle machine du réseau | `http://<cette machine>:5010/ui` |
+| La console web sur une tablette (nouveau) | Au doigt, celle d'un iPad comprise, comme la télécommande Android : **PANIC** arrête tout, et pressé de nouveau dans les 0,75 s coupe tout, avec **Doh!** à côté ; glissez une cue qui joue loin d'un côté ou de l'autre pour la couper, touchez-la pour ses arrêts ; touchez un membre d'un groupe qui joue pour le sauter ce tour-ci, tenez-le pour le sauter jusqu'à la fin du groupe ; faites glisser une tête de lecture, plus finement à mesure que le doigt s'en éloigne au-dessus ou au-dessous ; tenez une cue pour *Fire now*, *Park the standby here* et *Flag* ; *pick several* pour choisir des cues sans clavier ; faites glisser un nombre de côté pour le déplacer depuis là où il est, plus finement loin de la case. Une souris fait tout cela de la même façon | `http://<cette machine>:5010/ui` sur la tablette |
 | Ports série | Recevoir les lignes d'un Arduino dans une cue process ou une cue script, et lui en renvoyer | Show settings > Serial |
 
 ### Vidéo (nouveau)
@@ -285,9 +286,9 @@ Go.dot a une application Android pour tablette ou téléphone. Elle reste relié
 
 Ces fonctions sont conçues dans la spécification mais pas encore construites. L'ordre peut changer selon ce que demandent les testeurs : raison de plus pour envoyer vos retours.
 
-### La console web sur une tablette
+### Deux doigts pour charger à un instant
 
-La console web tourne déjà dans n'importe quel navigateur du réseau, celui d'un iPad compris. Elle recevra les contrôles tactiles de la télécommande Android, qui partent de l'endroit où le doigt se pose pour que rien ne saute, avec un geste délibéré pour tout ce qui est dangereux.
+Sur la console web, un doigt qui tient l'endroit où en est le spectacle pendant qu'un autre choisit où arriver, le spectacle calculé en direct pendant qu'ils bougent.
 
 ### Intégration logicielle
 

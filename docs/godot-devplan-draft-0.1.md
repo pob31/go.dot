@@ -477,6 +477,11 @@ already shows (namespace draft §75, decisions ARH-ARK the author's, ARL-ARP min
 playhead and rides a level from the page without the page zooming, and PANIC twice drops everything
 while once stops it; a mouse does all of it the same way; CI is green.
 
+**Built** (2026-10-17, WT.0-WT.8; §75.5 names the commits): all of the above in code, against the
+app's numbers and words, with no C++ changed - the console's tests 144 of 144 and `client_page` in C
+and fr_FR, the page seen in a browser at desktop and tablet widths. Owed: the author's hands on an
+iPad, which no runner has, and his look at the words and calls ARL-ARP.
+
 ### The Android remote (2026-10-15)
 
 The author asked for a native Android app beside the page: a background link
