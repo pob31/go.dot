@@ -227,6 +227,7 @@ namespace wfg::client::model
             else if (name == "roots")      row.roots = text (node);
             else if (name == "nodeCount")  row.nodeCount = number (text (node), 0);
             else if (name == "problem")    row.problem = text (node);
+            else if (name == "origin")     row.origin = text (node).empty() ? std::string ("shipped") : text (node);
         }
 
         std::vector<PresetRow> rows;
@@ -235,10 +236,12 @@ namespace wfg::client::model
         for (auto& [slug, row] : found)
             rows.push_back (std::move (row));
 
-        /*  BY VENDOR, THEN MODEL: the chooser draws a heading per vendor, and
-            the table's own order is by slug, which is nobody's. */
+        /*  YOURS FIRST (namespace draft §76), THEN BY VENDOR AND MODEL: the
+            chooser draws a heading for yours and one per vendor, and the
+            table's own order is by slug, which is nobody's. */
         std::sort (rows.begin(), rows.end(), [] (const PresetRow& a, const PresetRow& b)
                    {
+                       if (a.yours() != b.yours()) return a.yours();
                        if (a.vendor != b.vendor) return a.vendor < b.vendor;
                        if (a.model != b.model)   return a.model < b.model;
                        return a.slug < b.slug;

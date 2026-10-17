@@ -1213,20 +1213,41 @@ namespace
         return program.getChildFile ("presets").getChildFile ("devices");
     }
 
-    /*  `wfg presets [--check] [--folder=<dir>]`: one line per installed preset -
-        its slug, the device, the transport and wire, the port, how many nodes,
-        its roots, and what is wrong with it when something is. With --check,
-        exit 1 when any cannot be used: the ctest gate over the source tree. */
+    /*  WHERE YOUR PRESETS ARE (namespace draft §76, ART): the folder an option
+        names, else `Documents/Go.dot/Device presets` - a folder a person can
+        see, open and share, which nothing creates until the first preset is
+        saved there. A driver names its own (ASB): the developer's presets are
+        no test's business. */
+    juce::File userPresetsFolder (const juce::ArgumentList& args)
+    {
+        if (args.containsOption ("--user-presets"))
+            return juce::File::getCurrentWorkingDirectory().getChildFile (args.getValueForOption ("--user-presets"));
+
+        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                 .getChildFile ("Go.dot").getChildFile ("Device presets");
+    }
+
+    /*  `wfg presets [--check] [--folder=<dir>] [--user-presets=<dir>]`: one line
+        per installed preset - its slug, the device, the transport and wire, the
+        port, how many nodes, its roots, whose it is (§76: `shipped`, or `yours`
+        with the shipped version it hides), and what is wrong with it when
+        something is. With --check, exit 1 when any cannot be used: the ctest
+        gate over the source tree, which reads your folder only when it is
+        named (ASB) - a broken file of the developer's is not the tree's fault. */
     int runPresets (const juce::ArgumentList& args)
     {
         const auto folder = presetsFolder (args, "--folder");
+        const auto check = args.containsOption ("--check");
+        const auto yours = check && ! args.containsOption ("--user-presets")
+                             ? std::string {}
+                             : userPresetsFolder (args).getFullPathName().toStdString();
         wfg::tree::PresetTable presets;
 
         //  The gate reads every file whole; a listing reads the heads, as serve does (DP.11).
-        if (args.containsOption ("--check"))
-            presets.scan (folder.getFullPathName().toStdString());
+        if (check)
+            presets.scan (folder.getFullPathName().toStdString(), yours);
         else
-            presets.scanQuickly (folder.getFullPathName().toStdString());
+            presets.scanQuickly (folder.getFullPathName().toStdString(), yours);
 
         if (presets.all().empty())
         {
@@ -1242,7 +1263,10 @@ namespace
                       << '\t' << preset.transport << '/' << preset.wire
                       << (preset.transport == "tcp" && preset.wire == "osc" ? "/" + preset.framing : std::string {})
                       << '\t' << preset.port << '\t' << preset.nodeCount << " nodes"
-                      << '\t' << preset.rootRow();
+                      << '\t' << preset.rootRow()
+                      << '\t' << preset.origin
+                      << (preset.shadows > 0 ? " (in place of version " + std::to_string (preset.shadows) + ")"
+                                             : std::string {});
 
             if (! preset.usable())
             {
@@ -4169,7 +4193,8 @@ namespace
             the parsing starved the tick through the Debug heap's one lock. The
             rows want the files' heads, which the quick read walks in a moment;
             the whole read stays the gate's. */
-        presets.scanQuickly (presetsFolder (args, "--presets").getFullPathName().toStdString());
+        presets.scanQuickly (presetsFolder (args, "--presets").getFullPathName().toStdString(),
+                             userPresetsFolder (args).getFullPathName().toStdString());
 
         wfg::tree::MountSender sender;
         sender.setHold (&machineHold);
@@ -9825,8 +9850,8 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       } });
 
     app.addCommand ({ "presets",
-                      "presets [--check] [--folder=<dir>]",
-                      "Lists the device presets installed beside the binary, or checks that every one loads and names its sources",
+                      "presets [--check] [--folder=<dir>] [--user-presets=<dir>]",
+                      "Lists the device presets installed beside the binary and your own, or checks that every one loads and names its sources",
                       {},
                       [] (const juce::ArgumentList& args)
                       {
@@ -9861,7 +9886,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--midi-play=<port>=<file>] [--midi-play-loop=<port>=<file>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
                       " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember]] [--engine-folder=<dir>]"
-                      " [--no-video-window] [--presets=<dir>] [--hold]"
+                      " [--no-video-window] [--presets=<dir>] [--user-presets=<dir>] [--hold]"
                       " [--role=main|backup|none] [--peer=<host>[:<port>]]... [--link-timeout=<seconds>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},

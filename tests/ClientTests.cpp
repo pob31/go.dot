@@ -13674,6 +13674,46 @@ TEST_CASE ("client: the installed presets are read from the tree, and a device s
     CHECK (gesture::createDeviceFromPreset ("adm-osc").command == "mount.createFromPreset");
     CHECK (gesture::createDeviceFromPreset ("adm-osc").args[0].getString() == "adm-osc");
     CHECK (gesture::refreshPreset (fromPreset).command == "mount.refreshPreset");
+
+    //  Every shipped preset says so (namespace draft §76, ART).
+    for (const auto& row : presets)
+        CHECK (row.origin == "shipped");
+}
+
+TEST_CASE ("client: your presets are read with their origin, come first, and a model that begins with its vendor is said once")
+{
+    /*  Namespace draft §76, ART: a preset of yours is published with
+        origin `yours`, and the chooser lists yours before the shipped ones. */
+    Rig rig;
+    tree::PresetTable table;
+    table.scan (std::string (WFG_REPO_ROOT) + "/presets/devices");
+    REQUIRE (table.find ("adm-osc") != nullptr);
+
+    auto mine = *table.find ("adm-osc");
+    mine.origin = "yours";
+    mine.vendor = "WFS-DIY";
+    mine.model = "WFS-DIY (OSCQuery)";
+    std::vector<tree::Preset> yours;
+    yours.push_back (std::move (mine));
+    table.adoptYours (std::move (yours), "/somewhere/yours");
+    rig.parameters.setPresets (&table);
+
+    const auto snapshot = rig.publish (1);
+    const auto presets = model::readPresets (*snapshot);
+    REQUIRE (presets.size() == table.all().size());
+    REQUIRE_FALSE (presets.empty());
+
+    CHECK (presets.front().slug == "adm-osc");
+    CHECK (presets.front().yours());
+    CHECK (presets.front().label() == "WFS-DIY (OSCQuery)");
+
+    for (std::size_t at = 1; at < presets.size(); ++at)
+        CHECK_FALSE (presets[at].yours());
+
+    const auto holophonix = std::find_if (presets.begin(), presets.end(),
+                                          [] (const model::PresetRow& row) { return row.slug == "holophonix-osc"; });
+    REQUIRE (holophonix != presets.end());
+    CHECK (holophonix->label() == holophonix->model);
 }
 
 TEST_CASE ("client: a node's role is published and named under the path, and a node without one says nothing")

@@ -94,6 +94,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_preset_transport[] = { "udp", "tcp", "midi" };
     inline constexpr std::string_view enum_preset_wire[] = { "osc", "rcp", "line", "midi" };
     inline constexpr std::string_view enum_preset_framing[] = { "length", "slip" };
+    inline constexpr std::string_view enum_preset_origin[] = { "shipped", "yours" };
     inline constexpr std::string_view enum_network_brokerState[] = { "off", "listening", "problem" };
     inline constexpr std::string_view enum_sync_frameRate[] = { "23.976", "24", "25", "29.97df", "29.97", "30" };
     inline constexpr std::string_view enum_sync_ltcInState[] = { "none", "absent", "running", "stopped" };
@@ -3739,6 +3740,14 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "Why the preset cannot be used, in a sentence, or empty: a file that does not load, a name that is not its file's, no sources named." },
+        { "preset", "origin",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "shipped",
+          false, 0.0, false, 0.0,
+          enum_preset_origin, 2,
+          "", 1.0, false, "park",
+          "",
+          "Whose preset it is (namespace draft 76, ART): shipped beside the binary, or yours, from the folder of your own (Documents/Go.dot/Device presets unless serve was told another) - which is used in place of a shipped preset of the same name." },
         { "network", "strictSenders",
           ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "false",

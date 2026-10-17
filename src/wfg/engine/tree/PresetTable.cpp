@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <utility>
 
 namespace wfg::tree
 {
@@ -370,35 +371,96 @@ namespace wfg::tree
         return preset;
     }
 
-    void PresetTable::scan (const std::string& path)
+    std::vector<Preset> readPresetFolder (const std::string& path, bool quickly, const std::string& origin)
     {
-        scanWith (path, readPreset);
-    }
+        std::vector<Preset> read;
 
-    void PresetTable::scanQuickly (const std::string& path)
-    {
-        scanWith (path, readPresetQuickly);
-    }
-
-    void PresetTable::scanWith (const std::string& path, Preset (*reader) (const std::string&, std::string_view))
-    {
-        presets.clear();
-        folderPath = path;
-        ++stamp;
+        if (path.empty())
+            return read;
 
         const auto directory = juce::File::isAbsolutePath (juce::String (path))
                                  ? juce::File (juce::String (path))
                                  : juce::File::getCurrentWorkingDirectory().getChildFile (juce::String (path));
 
         if (! directory.isDirectory())
-            return;
+            return read;
 
         for (const auto& file : directory.findChildFiles (juce::File::findFiles, false, "*.json"))
-            presets.push_back (reader (file.getFileNameWithoutExtension().toStdString(),
-                                       file.loadFileAsString().toStdString()));
+        {
+            const auto slug = file.getFileNameWithoutExtension().toStdString();
+            const auto text = file.loadFileAsString().toStdString();
+
+            auto preset = quickly ? readPresetQuickly (slug, text) : readPreset (slug, text);
+            preset.origin = origin;
+            preset.path = file.getFullPathName().toStdString();
+            read.push_back (std::move (preset));
+        }
+
+        std::sort (read.begin(), read.end(),
+                   [] (const Preset& a, const Preset& b) { return a.slug < b.slug; });
+        return read;
+    }
+
+    void PresetTable::scan (const std::string& path)
+    {
+        scan (path, {});
+    }
+
+    void PresetTable::scanQuickly (const std::string& path)
+    {
+        scanQuickly (path, {});
+    }
+
+    void PresetTable::scan (const std::string& shippedPath, const std::string& yours)
+    {
+        presets = readPresetFolder (shippedPath, false, "shipped");
+        hidden.clear();
+        folderPath = shippedPath;
+        adoptYours (readPresetFolder (yours, false, "yours"), yours);
+    }
+
+    void PresetTable::scanQuickly (const std::string& shippedPath, const std::string& yours)
+    {
+        presets = readPresetFolder (shippedPath, true, "shipped");
+        hidden.clear();
+        folderPath = shippedPath;
+        adoptYours (readPresetFolder (yours, true, "yours"), yours);
+    }
+
+    void PresetTable::adoptYours (std::vector<Preset> yours, const std::string& yoursFolderPath)
+    {
+        //  What was yours goes, and what it stood in for comes back.
+        std::erase_if (presets, [] (const Preset& each) { return each.origin == "yours"; });
+
+        for (auto& shipped : hidden)
+            presets.push_back (std::move (shipped));
+
+        hidden.clear();
+
+        /*  Yours in place of a shipped preset of the same name, which waits
+            aside: a file you take away gives the shipped one back. */
+        for (auto& mine : yours)
+        {
+            const auto same = std::find_if (presets.begin(), presets.end(),
+                                            [&mine] (const Preset& each) { return each.slug == mine.slug; });
+
+            if (same != presets.end())
+            {
+                mine.shadows = same->version;
+                hidden.push_back (std::move (*same));
+                *same = std::move (mine);
+            }
+            else
+            {
+                presets.push_back (std::move (mine));
+            }
+        }
 
         std::sort (presets.begin(), presets.end(),
                    [] (const Preset& a, const Preset& b) { return a.slug < b.slug; });
+
+        yoursPath = yoursFolderPath;
+        ++stamp;
     }
 
     const Preset* PresetTable::find (const std::string& slug) const noexcept

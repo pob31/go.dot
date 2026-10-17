@@ -228,12 +228,20 @@ namespace wfg::client::model
         int nodeCount = 0;
         /** Why it cannot be used, in the engine's sentence; empty when it can. */
         std::string problem;
+        /** `shipped`, or `yours` from the user's own folder (namespace draft §76, ART). */
+        std::string origin = "shipped";
 
         bool usable() const { return problem.empty(); }
-        std::string label() const { return vendor + " " + model; }
+        bool yours() const { return origin == "yours"; }
+
+        /*  The vendor, then the model - once: a model that begins with the
+            vendor's name ("HOLOPHONIX processor", a device saved under its own
+            name) is said alone rather than with the name twice. */
+        std::string label() const { return model.rfind (vendor, 0) == 0 ? model : vendor + " " + model; }
     };
 
-    /** Every installed preset, by vendor then model. One pass, as `readDevices`. */
+    /*  Every installed preset: yours first, then by vendor and model. One pass,
+        as `readDevices`. */
     std::vector<PresetRow> readPresets (const tree::TreeSnapshot& snapshot);
 
     /*  A REMOTE CONNECTED TO THIS MACHINE (namespace draft §68, ANT), as

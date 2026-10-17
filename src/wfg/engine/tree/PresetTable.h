@@ -55,6 +55,14 @@ namespace wfg::tree
         std::string problem;              ///< why it cannot be used, or empty
         std::string text;                 ///< the file's bytes, what a device made from it keeps
 
+        /*  WHOSE IT IS (namespace draft §76, ART): `shipped` beside the binary,
+            or `yours` from the user's own folder - which is used in place of a
+            shipped preset of the same name, `shadows` saying the version it
+            hides. */
+        std::string origin = "shipped";
+        std::string path;                 ///< the file it was read from, absolute
+        int shadows = 0;                  ///< the shipped VERSION this one hides; nought for none
+
         bool usable() const noexcept { return problem.empty(); }
 
         /** The roots as a prefix row: space-separated, the way `mount/prefix` spells several. */
@@ -77,9 +85,22 @@ namespace wfg::tree
         load says when one is made. */
     Preset readPresetQuickly (const std::string& slug, std::string_view json);
 
+    /*  Every preset in a folder, by slug, each marked with `origin`: what a
+        table reads, and what the thread that reads your folder again hands it
+        (§76, ARZ). Empty when the folder is not there. */
+    std::vector<Preset> readPresetFolder (const std::string& folderPath, bool quickly, const std::string& origin);
+
     /*  Every preset in a folder, by slug. Empty when the folder is not there,
         which a replay and a tree dump treat as the ordinary case: they offer
-        no menu and make no device. */
+        no menu and make no device.
+
+        TWO FOLDERS (namespace draft §76, ART): the shipped one beside the
+        binary, read once - it changes only with the program - and the user's
+        own, read at the start and again whenever `adoptYours` is handed a
+        fresh reading. A preset of yours with a shipped preset's name is used
+        in its place; the shipped one is kept aside, not dropped, so that
+        taking your file away brings it back. Swapping your part moves
+        presets, never copies them: the shipped text is twenty megabytes. */
     class PresetTable
     {
     public:
@@ -88,9 +109,21 @@ namespace wfg::tree
         /** The same folder through `readPresetQuickly`: serve's way in. */
         void scanQuickly (const std::string& folderPath);
 
+        /** The shipped folder and yours; `yoursPath` may be empty for none. */
+        void scan (const std::string& shippedPath, const std::string& yoursPath);
+        void scanQuickly (const std::string& shippedPath, const std::string& yoursPath);
+
+        /*  YOUR PRESETS, READ AGAIN: what was yours goes, what it hid comes
+            back, and these take their places. Tick thread, as every reader
+            of the table is; moves the revision. */
+        void adoptYours (std::vector<Preset> yours, const std::string& yoursPath);
+
         const std::vector<Preset>& all() const noexcept { return presets; }
         const Preset* find (const std::string& slug) const noexcept;
         const std::string& folder() const noexcept { return folderPath; }
+
+        /** Your folder, as last read; empty when none was given. */
+        const std::string& yoursFolder() const noexcept { return yoursPath; }
 
         /*  Moved by every scan, so a reader that caches what it made of the
             table - the tree's rows (DP.11) - knows when to make them again.
@@ -98,10 +131,10 @@ namespace wfg::tree
         std::uint64_t revision() const noexcept { return stamp; }
 
     private:
-        void scanWith (const std::string& folderPath, Preset (*reader) (const std::string&, std::string_view));
-
         std::vector<Preset> presets;
+        std::vector<Preset> hidden;       ///< shipped presets yours stand in for
         std::string folderPath;
+        std::string yoursPath;
         std::uint64_t stamp = 0;
     };
 }

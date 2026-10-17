@@ -18,6 +18,8 @@
 
 #include <wfg/engine/tree/PresetTable.h>
 
+#include <juce_core/juce_core.h>
+
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -211,4 +213,99 @@ TEST_CASE ("preset: the quick read says of every shipped preset what the whole r
     CHECK_FALSE (bad.usable());
     const auto none = readPresetQuickly ("x", R"JSON({"FULL_PATH": "/x", "CONTENTS": {}})JSON");
     CHECK (none.problem.find ("no GODOT key") != std::string::npos);
+}
+
+TEST_CASE ("preset: yours are read beside the shipped ones, used in their place, and give them back when taken away")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  Namespace draft §76, ART: a folder of the user's own, read beside the
+        shipped one, a file there named like a shipped preset used in its
+        place - and the shipped one kept aside, so that taking the file away
+        gives it back without reading the shipped folder again. */
+    const auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                        .getNonexistentChildFile ("wfg-presets-yours-" + juce::Uuid().toString().substring (0, 8), {}, false);
+    const auto shipped = root.getChildFile ("shipped");
+    const auto yours = root.getChildFile ("yours");
+    REQUIRE (shipped.createDirectory());
+    REQUIRE (yours.createDirectory());
+
+    std::string mine = twoRootDesk;
+    const auto at = mine.find ("\"VERSION\": 2");
+    REQUIRE (at != std::string::npos);
+    mine.replace (at, 12, "\"VERSION\": 3");
+
+    REQUIRE (shipped.getChildFile ("desk-osc.json").replaceWithText (twoRootDesk));
+    REQUIRE (shipped.getChildFile ("eos-osc.json").replaceWithText (juce::String (withGodot (
+        R"JSON({"PRESET": "eos-osc", "VERSION": 1, "VENDOR": "ETC", "MODEL": "Eos", "SOURCES": ["the manual"]})JSON"))));
+    REQUIRE (yours.getChildFile ("desk-osc.json").replaceWithText (juce::String (mine)));
+    REQUIRE (yours.getChildFile ("my-desk.json").replaceWithText (juce::String (withGodot (
+        R"JSON({"PRESET": "my-desk", "VERSION": 1, "VENDOR": "Me", "MODEL": "My desk", "SOURCES": ["by hand"]})JSON"))));
+
+    for (const auto quickly : { false, true })
+    {
+        INFO ("quickly: " << quickly);
+        PresetTable table;
+
+        if (quickly)
+            table.scanQuickly (shipped.getFullPathName().toStdString(), yours.getFullPathName().toStdString());
+        else
+            table.scan (shipped.getFullPathName().toStdString(), yours.getFullPathName().toStdString());
+
+        CHECK (table.yoursFolder() == yours.getFullPathName().toStdString());
+        REQUIRE (table.all().size() == 3u);
+
+        //  Yours in the shipped one's place: its version, its origin, the version it hides.
+        const auto* desk = table.find ("desk-osc");
+        REQUIRE (desk != nullptr);
+        CHECK (desk->usable());
+        CHECK (desk->version == 3);
+        CHECK (desk->origin == "yours");
+        CHECK (desk->shadows == 2);
+        CHECK (desk->path == yours.getChildFile ("desk-osc.json").getFullPathName().toStdString());
+
+        //  A shipped one nobody stands in for, and one of yours of a new name.
+        REQUIRE (table.find ("eos-osc") != nullptr);
+        CHECK (table.find ("eos-osc")->origin == "shipped");
+        CHECK (table.find ("eos-osc")->shadows == 0);
+        REQUIRE (table.find ("my-desk") != nullptr);
+        CHECK (table.find ("my-desk")->origin == "yours");
+        CHECK (table.find ("my-desk")->shadows == 0);
+
+        std::vector<std::string> slugs;
+
+        for (const auto& preset : table.all())
+            slugs.push_back (preset.slug);
+
+        CHECK (std::is_sorted (slugs.begin(), slugs.end()));
+
+        //  Your folder read again with the file gone: the shipped one is back, and the revision moved.
+        const auto before = table.revision();
+        auto again = readPresetFolder (yours.getFullPathName().toStdString(), quickly, "yours");
+        REQUIRE (again.size() == 2u);
+        std::erase_if (again, [] (const Preset& each) { return each.slug == "desk-osc"; });
+        table.adoptYours (std::move (again), yours.getFullPathName().toStdString());
+
+        CHECK (table.revision() == before + 1);
+        REQUIRE (table.all().size() == 3u);
+        REQUIRE (table.find ("desk-osc") != nullptr);
+        CHECK (table.find ("desk-osc")->origin == "shipped");
+        CHECK (table.find ("desk-osc")->version == 2);
+        CHECK (table.find ("my-desk") != nullptr);
+
+        //  And nothing of yours at all leaves the shipped folder as it was.
+        table.adoptYours ({}, {});
+        CHECK (table.all().size() == 2u);
+        CHECK (table.find ("my-desk") == nullptr);
+        CHECK (table.yoursFolder().empty());
+    }
+
+    //  The shipped folder alone, as before: nothing is yours.
+    PresetTable alone;
+    alone.scan (shipped.getFullPathName().toStdString());
+    REQUIRE (alone.all().size() == 2u);
+    CHECK (alone.find ("desk-osc")->origin == "shipped");
+    CHECK (alone.revision() == 1u);
+
+    root.deleteRecursively();
 }

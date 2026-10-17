@@ -3323,6 +3323,7 @@ namespace wfg::tree
                         else if (name == "roots")      text = preset.rootRow();
                         else if (name == "nodeCount")  text = std::to_string (preset.nodeCount);
                         else if (name == "problem")    text = preset.problem;
+                        else if (name == "origin")     text = preset.origin;
                         else
                             continue;
 
