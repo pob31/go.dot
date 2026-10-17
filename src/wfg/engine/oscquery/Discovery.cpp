@@ -410,9 +410,9 @@ namespace wfg::oscquery
             return made;
         };
 
-        const auto offer = [&] (const mdns::Name& service, const mdns::Name& instance, int port, bool asAnswer)
+        const auto offer = [&] (const mdns::Name& offered, const mdns::Name& instance, int port, bool asAnswer)
         {
-            auto ptr = record (service, mdns::type::ptr, 4500, false);
+            auto ptr = record (offered, mdns::type::ptr, 4500, false);
             ptr.target = instance;
             auto srv = record (instance, mdns::type::srv, 120, true);
             srv.port = static_cast<std::uint16_t> (port);
