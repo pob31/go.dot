@@ -34,7 +34,7 @@ import { installDocument } from "./fake-dom.mjs";
 installDocument();
 
 const { tree } = await import("../../clients/console/plumbing/tree.js");
-const { timeCell, listRows } = await import("../../clients/console/views/didi.js");
+const { timeCell, listRows, cueSheet } = await import("../../clients/console/views/didi.js");
 const { stateMark, offersSeek, sceneClock, pillsOf, runSheet, spanOf, scrubbable, through } = await import("../../clients/console/views/gogo.js");
 const { selection } = await import("../../clients/console/model/selection.js");
 const { folded } = await import("../../clients/console/model/remember.js");
@@ -255,6 +255,22 @@ test("a run's strip spans its file or its scene's round, and its head is where i
   assert.equal(scrubbable("S"), true);
   assert.equal(spanOf("U"), null);              // a file nobody measured has no strip to drag
   assert.equal(scrubbable("U"), false);
+});
+
+test("a cue's sheet fires it, parks the standby on it and flags it, a long press away (namespace draft 75)", () => {
+  const node = (path, type, value) => ({ FULL_PATH: path, TYPE: type, ACCESS: 3, VALUE: [value] });
+
+  serve([node("/godot/cue/Q/number", "s", "12"), node("/godot/cue/Q/name", "s", "Door"),
+         node("/godot/cue/Q/flagged", "T", true)]);
+
+  const sent = [];
+  const sheet = cueSheet("Q", (name, args) => sent.push(name + " " + args.join(" ")));
+
+  assert.equal(sheet.title, "12  Door");
+  assert.deepEqual(sheet.actions.map((a) => a.words),
+                   ["Fire now - the standby stays where it is", "Park the standby here", "Unflag"]);
+  sheet.actions.forEach((a) => a.run());
+  assert.deepEqual(sent, ["fire Q", "park Q", "flag /godot/cue/Q/flagged false"]);
 });
 
 test("the inspector keeps decisions and folds away what the engine says back", async () => {

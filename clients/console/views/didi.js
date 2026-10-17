@@ -22,6 +22,24 @@ import { selection } from "../model/selection.js";
 import { folded } from "../model/remember.js";
 import { goList, isCart, shownList } from "../model/lists.js";
 import { el, esc, cueName, shownName, byFinger } from "./common.js";
+
+/*  WHAT A CUE'S SHEET OFFERS, a long press away (namespace draft §75, WT.6;
+    the app's `CueSheet`): fire it now with the standby left where it is, park
+    the standby on it, flag it or take its flag off. The app's words. */
+function cueSheet(id, send) {
+  const number = String(tree.cue(id, "number", "") || "");
+  const flagged = tree.cue(id, "flagged", false) === true || tree.cue(id, "flagged", false) === "true";
+
+  return {
+    title: (number ? number + "  " : "") + (shownName(id) || id),
+    sub: tree.cue(id, "kind", "") || "",
+    actions: [
+      { words: "Fire now - the standby stays where it is", run: () => send("fire", [id]) },
+      { words: "Park the standby here", run: () => send("park", [id]) },
+      { words: flagged ? "Unflag" : "Flag", run: () => send("flag", ["/godot/cue/" + id + "/flagged", flagged ? "false" : "true"]) },
+    ],
+  };
+}
 import { refreshFields } from "./values.js";
 import { reconcile } from "./reconcile.js";
 import { view } from "./view.js";
@@ -818,4 +836,4 @@ function renderLists() {
   refreshFields(pane);
 }
 
-export { listRows, renderLists, timeCell };
+export { cueSheet, listRows, renderLists, timeCell };

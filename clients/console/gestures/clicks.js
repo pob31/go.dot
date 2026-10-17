@@ -21,7 +21,7 @@
 import { tree } from "../plumbing/tree.js";
 import { dbl, int, str } from "../plumbing/osc.js";
 import { openForKey, panel, save, toggle } from "../model/remember.js";
-import { pickAlso, pickNothing, pickOne, pickThrough, selection } from "../model/selection.js";
+import { pickAlso, pickNothing, pickOne, pickThrough, pickSeveral, selection } from "../model/selection.js";
 import { showList } from "../model/lists.js";
 import { view } from "../views/view.js";
 import { el } from "../views/common.js";
@@ -192,6 +192,15 @@ document.addEventListener("click", (event) => {
     panel.details = !panel.details;
     save();
     view.render();
+    return;
+  }
+
+  /*  PICK SEVERAL (namespace draft §75, ARJ): a switch, and the page's own -
+      the engine is not told; a tap on a row then adds it or takes it away. */
+  if (event.target && event.target.id === "pick-several") {
+    pickSeveral.on = !pickSeveral.on;
+    event.target.setAttribute("aria-pressed", pickSeveral.on ? "true" : "false");
+    event.target.textContent = pickSeveral.on ? "pick several: on" : "pick several";
     return;
   }
 
@@ -373,7 +382,7 @@ document.addEventListener("click", (event) => {
       anchor and here. ⌘ and ctrl are one gesture because this page is operated
       from both kinds of machine, often on the same show, and nobody should have
       to remember which desk they are sitting at. */
-  const adding = event.metaKey || event.ctrlKey;
+  const adding = event.metaKey || event.ctrlKey || pickSeveral.on;
   const ranging = event.shiftKey;
 
   /*  PICKING A ROW IS ASKING ABOUT IT. The inspector already opens on a click,

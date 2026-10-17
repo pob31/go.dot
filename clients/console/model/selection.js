@@ -206,4 +206,9 @@ function pickNothing() {
   selection.picked = null;
 }
 
-export { selection, pickAlso, pickNothing, pickOne, pickThrough };
+/*  WHETHER A TAP PICKS SEVERAL (namespace draft §75, ARJ): the switch in the
+    cue list's header, the page's own and never the engine's; the row's click
+    reads it as it reads ctrl/⌘. */
+const pickSeveral = { on: false };
+
+export { selection, pickAlso, pickNothing, pickOne, pickThrough, pickSeveral };

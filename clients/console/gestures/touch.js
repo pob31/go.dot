@@ -34,6 +34,8 @@ import { tree } from "../plumbing/tree.js";
 import { gesture } from "./table.js";
 import { swipeKills, SLOP_PX, LONG_PRESS_MS, SWIPE_BACK_MS, Scrub, outside, rateText, EDGE_PX } from "../model/touch.js";
 import { runsHold, runSheet, spanOf } from "../views/gogo.js";
+import { cueSheet } from "../views/didi.js";
+import { byFinger } from "../views/common.js";
 import { openSheet } from "../views/sheet.js";
 
 let press = null;
@@ -59,6 +61,22 @@ document.addEventListener("pointerdown", (event) => {
 
   const pill = event.target.closest("[data-pill]");
   const row = event.target.closest(".run[data-run]");
+  const cue = event.target.closest(".row[data-pick]");
+
+  /*  A CUE HELD (WT.6) opens its sheet as it is held, unless the finger moved:
+      a press on its boxes, its fold or its gutter is theirs. */
+  if (cue && !interactive(event.target) && !event.target.closest("[data-park], [data-fold]")) {
+    press = { pointer: event.pointerId, x: event.clientX, y: event.clientY, cue,
+              moved: false, held: false, swiping: false, dx: 0, timer: 0 };
+    press.timer = setTimeout(() => {
+      if (press && press.cue === cue && !press.moved) {
+        press.held = true;
+        swallowNextClick();
+        openSheet(cueSheet(cue.dataset.pick, send));
+      }
+    }, LONG_PRESS_MS);
+    return;
+  }
 
   if (!pill && (!row || interactive(event.target))) return;
 
@@ -94,7 +112,7 @@ document.addEventListener("pointermove", (event) => {
     press.moved = true;
     clearTimeout(press.timer);
 
-    if (press.pill || Math.abs(dx) <= Math.abs(dy)) return;
+    if (press.pill || press.cue || Math.abs(dx) <= Math.abs(dy)) return;
 
     press.swiping = true;
     runsHold.active = true;
@@ -126,7 +144,7 @@ document.addEventListener("pointerup", (event) => {
     return;
   }
 
-  if (done.moved || done.held) return;
+  if (done.moved || done.held || done.cue) return;
 
   if (done.pill) {
     tapPill(done.pill);
@@ -284,5 +302,28 @@ function endScrub() {
   scrubbing = null;
   runsHold.active = false;
 }
+
+/*  THE CLICK A LONG PRESS LEAVES BEHIND is not a pick: the row's click would
+    pick the cue the sheet is already about. Swallowed before any other
+    handler sees it, once, and only for a moment. And a long press is not the
+    browser's menu, where a finger works the page. */
+let swallowUntil = 0;
+
+function swallowNextClick() {
+  swallowUntil = performance.now() + 700;
+}
+
+document.addEventListener("click", (event) => {
+  if (performance.now() < swallowUntil) {
+    swallowUntil = 0;
+    event.stopPropagation();
+    event.preventDefault();
+  }
+}, true);
+
+document.addEventListener("contextmenu", (event) => {
+  if (byFinger() && event.target.closest && event.target.closest(".row[data-pick], .run, [data-pill]"))
+    event.preventDefault();
+});
 
 export { tapPill, holdPill };
