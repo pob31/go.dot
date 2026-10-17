@@ -1444,6 +1444,14 @@ are the implementer's, the author's to overrule. On the branch `discovery`, in t
 | UD.11 | The announcer | UD.7 |
 | UD.12 | M81, the README, the guides, the whole suite | all |
 
+**Built** (2026-10-17, UD.0-UD.12; namespace draft §76.6 names the commits): your folder read beside
+the shipped one and in its place where a name is shared, read again off the tick when the Network tab
+asks; *Save as a preset…* on a device's Kind cell, the description kept with a header and a
+`QUERY_PORT`; multicast DNS written for Go.dot - a codec, a browser on every interface sharing 5353 with
+the system's responder, and Go.dot announced; *FOUND* and *At an address…*, a device made at its
+description's roots or the one holding them moved; `blackbox.discovery` from found to replayed; M81.
+Owed: Chataigne or ossia score on the bench, and the author's look at ARW-ASC and the words.
+
 **Done when:** a device announced on the network shows in *FOUND*, is made with its menus in one pick,
 is saved as a preset in one click, and is made again from that preset on another machine; a file put
 by hand in the folder is in the PRESET menu the next time the tab is shown, and one named like a

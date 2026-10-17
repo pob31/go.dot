@@ -11,13 +11,29 @@ protocol's own spelling, so the address in a cue is the address in the device's 
 - The root's `GODOT` key names it: `PRESET` (the slug, equal to the file name without `.json`),
   `VERSION` (an integer, bumped when the tree changes), `VENDOR`, `MODEL`, `TRANSPORT` (`udp`, `tcp`
   or `midi`), `WIRE` (`osc`, `rcp`, `line` or `midi`), `FRAMING` (`length` or `slip`, for OSC over
-  TCP only), `PORT` (the device's usual port, `0` when the device has none) and `SOURCES`.
+  TCP only), `PORT` (the device's usual port, `0` when the device has none), `QUERY_PORT` (where it
+  answers OSCQuery, for a preset saved from such a device; §76) and `SOURCES`.
 - A root of `/` with the device's roots as its first-level children mounts each child as a root
   (an X32's `/ch`, `/bus`, `/dca`); a root of `/eos` or `/dbaudio1` mounts at that one root.
 - A node carries `TYPE`, `ACCESS` (2 a command, 3 a value), `RANGE` with `MIN`/`MAX` or `VALS`,
   `UNIT`, a `DESCRIPTION` that is a sentence, and under `GODOT`: `KIND`, `RATE_CAP`, `ANTICIPATABLE`,
   `PANIC` as `docs/godot-namespace-draft-0.1.md` §3 reads them; `ROLE` (§57, AFM); and the wire's own
   key where the address alone cannot say how to send it - `RCP`, `LINE`, `MIDI` (§57, AFJ).
+
+## Your presets
+
+Beside this folder, Go.dot reads a folder of the user's own - `Documents/Go.dot/Device presets`
+unless serve is told another with `--user-presets` (namespace draft §76). The same files, the same
+rules: a file there is offered in the Network tab's PRESET menu under *Yours*, and one named like a
+preset here is used in its place, which is how a shipped preset is corrected on one machine - copy
+it there, change it, raise its `VERSION`. The folder is read at the start, again whenever the
+Network tab is shown or PRESET opens, and after a save.
+
+*Save as a preset…* in a device's Kind cell writes the device's description there with its `GODOT`
+header made or kept: `PRESET`, `VERSION` one more than any of that name, `VENDOR`, `MODEL`, the
+device's `TRANSPORT`, `WIRE`, `FRAMING`, `PORT`, `QUERY_PORT` (where it answers OSCQuery; a device
+made from the preset is asked there) and `READBACK`, and one more line of `SOURCES` saying where it
+was captured or what it was copied from. `GENERATED` is dropped: no script wrote the copy.
 
 ## Provenance
 

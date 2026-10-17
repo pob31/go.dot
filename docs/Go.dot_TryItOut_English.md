@@ -128,6 +128,8 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Cues written by WFS-DIY and S21_HiJack (new) | Store a snapshot in WFS-DIY or S21_HiJack and it lands in Go.dot as one cue after the standby; store it again and the same cue is updated. Each declares itself as a device, and its own addresses and snapshot names become menus, one per part of the address, under the cue's *target* | WFS-DIY: *Network* tab, protocol Go.dot, then *Write to Go.dot*; S21_HiJack: *Setup > Cueing system: Go.dot* |
 | Address and value menus (new) | On a device that describes itself, pick the address part by part and the value from its list | Cue inspector, under *target* |
 | Device presets (new) | Make a device from a preset for your desk or processor - Yamaha, DiGiCo, Allen & Heath, Behringer and Midas, SSL Live, ETC Eos, grandMA, Holophonix, L-ISA, d&b Soundscape, Spat Revolution, ADM-OSC, MIDI Show Control. Every protocol the device speaks is a preset of its own, the cue's menus follow it, and the message leaves on the device's own wire: OSC over UDP or TCP, Yamaha's RCP, a telnet line or MIDI. The device's rows say where it is (the Where cell: by datagram, over a connection, a serial port, a MIDI port or an MQTT broker) and how it is heard back. | *Show settings > Network > PRESET* |
+| Your own presets (new) | Keep presets of your own beside the shipped ones: a file in your presets folder is offered under *Yours* when you open *PRESET*, and one named like a shipped preset is used in its place. Save any device that describes itself as a preset in one click - one found on the network, one that declared itself, or one made from a preset you want to change - and make it again in any show, on this computer or another once the file is copied there. | *Show settings > Network*: *Save as a preset…* in the device's *Kind* cell; *Show presets folder* |
+| Devices found on the network (new) | Go.dot lists the devices on the network that describe themselves over OSCQuery - another Go.dot, Chataigne, ossia score, anything that announces itself - and one pick makes one a device of the show, its addresses offered as menus. A device that does not announce itself is given by its address. Go.dot announces itself the same way, so those programs find it too. | *Show settings > Network > FOUND* |
 | MQTT (new) | A sensor, a controller or a hub that speaks MQTT is a device of the show: its topics are addresses under the device's prefix, so a patch, a script or an OSC cue hears it and publishes to it as with any device. Go.dot connects to any broker, and runs a broker of its own for a device that has nowhere else to publish. | *Show settings > Network* (the address cell's menu; the *MQTT broker* switch under the table) |
 | Doh! rollback | When a GO is taken back, send each device the command that undoes it | Cue inspector; *Network* tab |
 | MIDI cues | Program change, control change, notes, pitch bend, SysEx | *Add > midi* |
@@ -296,7 +298,6 @@ On the web console, one finger holding where the show is while another sets wher
 | **XOA / Tight-WFS** | The same, for ambisonic and WFS rendering |
 | **S21-HiJack** | Drive it as a sidecar for the DiGiCo S21, under its own branch of addresses. Writing its snapshots into Go.dot and being driven by Go.dot's GO already work (above) |
 | **Millumin** | The escape hatch for shows whose video outgrows Go.dot |
-| Any OSCQuery device | Found on the network by itself. Today you give its address, and a device that describes itself already offers its addresses as menus (above) |
 
 WFS-DIY, XOA/Tight-WFS and S21-HiJack come from the same author as Go.dot, as does Choufleur, the script follower the Android remote already shows (above). They stay separate applications, possibly on other machines; Go.dot directs them over the network.
 
@@ -305,7 +306,7 @@ WFS-DIY, XOA/Tight-WFS and S21-HiJack come from the same author as Go.dot, as do
 - **Sound consoles**: snapshot recall, fader and channel moves, and Doh! rollback, as presets (above): DiGiCo, Yamaha, Allen & Heath, Behringer and Midas, SSL Live; any desk that speaks OSC or MIDI also works as an opaque device.
 - **Lighting consoles**: GO and cue recall over OSC, MIDI and MIDI Show Control - ETC Eos and grandMA presets (above) - and sACN as an input source.
 - **Control surfaces**: HUI, Icon, Behringer, PreSonus and Stream Deck, after Mackie Control and the D700 (already built, above). A SpaceMouse already moves OSC cue curves.
-- **Device templates**: a shared library of device descriptions, written by users, for the desks and processors that cannot describe themselves. The presets above are its first entries.
+- **Device templates**: a shared library of the presets users make, for the desks and processors that cannot describe themselves. The shipped presets are its first entries, and yours can join them (above).
 
 ## Sending feedback
 

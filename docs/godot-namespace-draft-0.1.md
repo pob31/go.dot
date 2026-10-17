@@ -30923,25 +30923,38 @@ none of it: `--mdns-port=0` takes a port of the system's choosing and joins no g
 
 | Stage | What | Built |
 |---|---|---|
-| UD.0 | This section; PRD §3.22, §6.9; the devplan; §7a and §8 | |
-| UD.1 | Two folders: yours read beside the shipped, yours used in its place, `preset/<slug>/origin`, `--user-presets`, `wfg presets` | |
-| UD.2 | Your folder read again off the tick (`PresetScanner`), `preset.rescan`, the `network/presets*` rows | |
-| UD.3 | The text work: a compact JSON writer, the header found and replaced in place | |
-| UD.4 | `preset.save`; `QUERY_PORT` | |
-| UD.5 | The Network tab, part one: *Yours*, "yours", *Save as a preset…*, *Show presets folder*, reading again when shown | |
-| UD.6 | The mDNS messages, pure | |
-| UD.7 | The browser: `network.browse`, `network/found`, `network/discovery`, the serve options | |
-| UD.8 | `mount.describeAt` and `mount.discovered` | |
-| UD.9 | The Network tab, part two: *FOUND*, *At an address…* | |
-| UD.10 | The black box: a device announced by the mock, found, picked, saved, made again, replayed | |
-| UD.11 | The announcer | |
-| UD.12 | M81, the README and the guides, the presets' README, the whole suite | |
+| UD.0 | This section; PRD §3.22, §6.9; the devplan; §7a and §8 | 8fd08f80 |
+| UD.1 | Two folders: yours read beside the shipped, yours used in its place, `preset/<slug>/origin`, `--user-presets`, `wfg presets` | 904a3a41 |
+| UD.2 | Your folder read again off the tick (`PresetScanner`), `preset.rescan`, the `network/presets*` rows | ed2513b8 |
+| UD.3 | The text work: a compact JSON writer, the header found and replaced in place | 0333d4ea |
+| UD.4 | `preset.save`; `QUERY_PORT` | 1ec76897 |
+| UD.5 | The Network tab, part one: *Yours*, "yours", *Save as a preset…*, *Show presets folder*, reading again when shown | 5e095502 |
+| UD.6 | The mDNS messages, pure | 91630d68 |
+| UD.7 | The browser: `network.browse`, `network/found`, `network/discovery`, the serve options | fd22aa55 |
+| UD.8 | `mount.describeAt` and `mount.discovered` | 14dd1c8c |
+| UD.9 | The Network tab, part two: *FOUND*, *At an address…* | 66d0498c |
+| UD.10 | The black box: a device announced by the mock, found, picked, saved, made again, replayed | eb94b308 |
+| UD.11 | The announcer | bc7b1c23, 20843702 |
+| UD.12 | M81, the README and the guides, the presets' README, the whole suite | the close-out |
 
 ### 76.7 Measurements
 
-**M81**: the tick's lateness while both folders are read again and while a large description is
+**M81**: the tick's lateness while your folder is read again and while a large description is
 saved, in Debug and Release; and the time from a pick in *FOUND* to the device's rows, against the
-mock.
+mock. Measured 2026-10-17 on the author's box with `tests/blackbox/m81_presets_discovery.py`, an
+instrument in M25's idiom, your folder holding a copy of every shipped preset (twenty megabytes, every
+one standing in for a shipped one):
+
+| | Debug | Release |
+|---|---|---|
+| Idle: lateness median, p95 | 0, 1.3 ms | 0, 1.3 ms |
+| Your folder read again every half second: median, p95, worst moved by | 1.3, 2.7, 9.3 ms | 0, 1.3, 0 ms |
+| A three-megabyte preset saved every half second: median, p95, worst moved by | 1.3, 2.7, 0 ms | 1.3, 1.3, 0 ms |
+| A pick, from `mount.describeAt` to the device loaded (median of five) | 96 ms | 42 ms |
+
+Against a 20 ms tick: the worst a reading of twenty megabytes did in Debug is under half of one, and
+nothing in Release; the reading is the thread's, and what the tick pays is the tree's preset rows made
+again once a reading is taken.
 
 ### 76.8 Not built
 

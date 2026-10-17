@@ -136,6 +136,10 @@ has stood in front of the thing.
   their own addresses as menus (§56,
   [`docs/godot-authoring-protocol-0.1.md`](docs/godot-authoring-protocol-0.1.md); for another
   application, [`docs/godot-authoring-guide-0.1.md`](docs/godot-authoring-guide-0.1.md)).
+  Presets of your own beside the shipped ones, in `Documents/Go.dot/Device presets`, and any
+  device that describes itself saved as one in a click; OSCQuery devices found on the network
+  by multicast DNS and made a device in one pick, Go.dot announcing its own server the same
+  way (§76).
 - **Process cues.** A Pure Data patch inside a cue, running while the cue runs at
   control rate and never in the audio path. It hears device reports, OSC, MQTT, MIDI
   and serial lines, and sends to devices, to MIDI and to Go.dot's own commands.
@@ -223,9 +227,8 @@ has stood in front of the thing.
 - **Two-finger load-to-time** (PRD §3.17) — one finger holding where the show
   is while another sets where to land. The web console's aim moves from the
   finger today.
-- **Integrations** — OSCQuery devices found on the network by
-  themselves, and commanding WFS-DIY's and XOA's sources with claims per cue
-  (Phase 11). The device presets (twenty-four shipped) wait for a console to
+- **Integrations** — commanding WFS-DIY's and XOA's sources with claims per
+  cue (Phase 11). The device presets (twenty-four shipped) wait for a console to
   answer them.
 
 ---
@@ -300,6 +303,7 @@ and says afterwards what was built against what was drawn.
 | Video cards and cameras | Pictures out on a DeckLink or AJA card at its format and on its clock, the show's buses embedded, fill and key; a card's input or a camera as a live picture; `wfg video-probe` for testers | §71, §72 |
 | Authoring | WFS-DIY and S21_HiJack write cues into Go.dot | §56, [authoring protocol](docs/godot-authoring-protocol-0.1.md) |
 | Device presets | Consoles, lighting desks and spatial processors, each protocol a preset | §57 |
+| Your presets and devices found | Presets of your own beside the shipped ones, a device saved as one; OSCQuery devices found on the network and Go.dot announced | §76 |
 | Redundancy | A main and a backup playing one show, measured over Dante | §58 |
 | The operator's window | Show settings in sections; flags; what is missing, said where it is used | §39.14, §63, §64 |
 | Carts, keys and bindings | A list GO never meets, fired by triggers, keys and the remote's Cart tab; a MIDI control or an OSC address bound to any number, learned by moving it; the wheel over a number | §74 |
