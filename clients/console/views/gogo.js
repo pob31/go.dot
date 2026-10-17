@@ -252,6 +252,7 @@ function runRow(id, depth, out) {
   const seekable = offersSeek(id);
 
   const pills = pillsOf(id);
+  const strip = scrubbable(id) ? stripHtml(id) : "";
 
   out.push({ key: "run:" + id, html:
     '<div class="run" data-run="' + esc(id) + '" data-s="' + esc(state) + '"' +
@@ -272,6 +273,7 @@ function runRow(id, depth, out) {
              (kind === "group" ? "scene" : "file") + ' and press Enter">'
            : "") +
       "</div>" +
+      strip +
       (pills.length ? pillsHtml(id, pills) : "") +
     "</div>" });
 
@@ -301,6 +303,40 @@ function renderRuns() {
   const out = [];
   all.filter((id) => !tree.run(id, "parent", "")).forEach((id) => runRow(id, 0, out));
   reconcile(pane, out);
+}
+
+/*  THE STRETCH A RUN'S STRIP IS DRAWN OVER, in its own seconds (the app's
+    `span`): a scene's round as the engine solved it, a sound's file; none
+    when nobody knows its length. A drag on the strip is a seek where the
+    engine says one would move the run (namespace draft §75, WT.5). */
+function spanOf(id) {
+  if (tree.run(id, "kind", "") === "group") {
+    const from = Number(tree.run(id, "roundFrom", 0));
+    const length = Number(tree.run(id, "roundLength", 0));
+    return length > 0 && Number.isFinite(from) ? [from, from + length] : null;
+  }
+
+  const length = Number(tree.cue(tree.run(id, "cue", ""), "duration", 0));
+  return Number.isFinite(length) && length > 0 ? [0, length] : null;
+}
+
+function scrubbable(id) {
+  return offersSeek(id) && spanOf(id) !== null;
+}
+
+//  Where the head sits on the strip, nought to one.
+function through(id) {
+  const span = spanOf(id);
+  if (!span) return 0;
+  const position = Number(tree.run(id, "position", 0));
+  return Math.min(Math.max((position - span[0]) / (span[1] - span[0]), 0), 1);
+}
+
+function stripHtml(id) {
+  return '<div class="scrub" data-scrub="' + esc(id) + '" title="drag to move the playhead - above or below it for finer steps">' +
+    '<div class="head" style="left:' + (100 * through(id)).toFixed(2) + '%"></div>' +
+    '<span class="ghost"></span>' +
+  "</div>";
 }
 
 /*  A GROUP'S ROUND AS PILLS (PRD §3.6; the app's `pillsOf`): the round in
@@ -396,4 +432,4 @@ function runSheet(id, send) {
   return { title, sub: state, actions };
 }
 
-export { renderRuns, stateMark, offersSeek, sceneClock, runsHold, pillsOf, runSheet };
+export { renderRuns, stateMark, offersSeek, sceneClock, runsHold, pillsOf, runSheet, spanOf, scrubbable, through };

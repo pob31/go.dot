@@ -29,10 +29,11 @@
     `runsHold`); up or down first is the pane's scroll, which the browser keeps
     and tells this module by cancelling the pointer. */
 
-import { str } from "../plumbing/osc.js";
+import { str, dbl } from "../plumbing/osc.js";
+import { tree } from "../plumbing/tree.js";
 import { gesture } from "./table.js";
-import { swipeKills, SLOP_PX, LONG_PRESS_MS, SWIPE_BACK_MS } from "../model/touch.js";
-import { runsHold, runSheet } from "../views/gogo.js";
+import { swipeKills, SLOP_PX, LONG_PRESS_MS, SWIPE_BACK_MS, Scrub, outside, rateText, EDGE_PX } from "../model/touch.js";
+import { runsHold, runSheet, spanOf } from "../views/gogo.js";
 import { openSheet } from "../views/sheet.js";
 
 let press = null;
@@ -48,6 +49,13 @@ function interactive(target) {
 
 document.addEventListener("pointerdown", (event) => {
   if (event.button > 0 || !event.target.closest) return;
+
+  const strip = event.target.closest("[data-scrub]");
+
+  if (strip) {
+    beginScrub(event, strip);
+    return;
+  }
 
   const pill = event.target.closest("[data-pill]");
   const row = event.target.closest(".run[data-run]");
@@ -70,6 +78,11 @@ document.addEventListener("pointerdown", (event) => {
 });
 
 document.addEventListener("pointermove", (event) => {
+  if (scrubbing && event.pointerId === scrubbing.pointer) {
+    moveScrub(event);
+    return;
+  }
+
   if (!press || event.pointerId !== press.pointer) return;
 
   const dx = event.clientX - press.x;
@@ -97,6 +110,11 @@ document.addEventListener("pointermove", (event) => {
 });
 
 document.addEventListener("pointerup", (event) => {
+  if (scrubbing && event.pointerId === scrubbing.pointer) {
+    endScrub();
+    return;
+  }
+
   if (!press || event.pointerId !== press.pointer) return;
 
   const done = press;
@@ -120,6 +138,11 @@ document.addEventListener("pointerup", (event) => {
 });
 
 document.addEventListener("pointercancel", (event) => {
+  if (scrubbing && event.pointerId === scrubbing.pointer) {
+    endScrub();
+    return;
+  }
+
   if (!press || event.pointerId !== press.pointer) return;
 
   const done = press;
@@ -177,6 +200,89 @@ function holdPill(pill) {
 
   if (pill.dataset.state === "pruned") send("unprune", [run, cue]);
   else send("prune", [run, cue, "group"]);
+}
+
+/*  A PLAYHEAD DRAGGED (namespace draft §75, WT.5; the app's scrub): from
+    where the head is - a grab is not a seek - one strip's seconds across its
+    width, at half the rate for every 40 px the finger is above or below it;
+    held within 28 px of the screen's side it goes on moving that way; a seek
+    at most every 200 ms, and a scene's only as the finger lifts. Where it will
+    land is written on the strip while the finger is down, and how fine. */
+let scrubbing = null;
+
+function beginScrub(event, strip) {
+  const id = strip.dataset.scrub;
+  const span = spanOf(id);
+
+  if (!span) return;
+
+  const rect = strip.getBoundingClientRect();
+  const scrub = new Scrub();
+
+  scrub.begin({ position: Number(tree.run(id, "position", 0)), from: span[0], to: span[1],
+                secondsPerPixel: (span[1] - span[0]) / Math.max(1, rect.width), x: event.clientX,
+                onRelease: tree.run(id, "kind", "") === "group" });
+
+  scrubbing = { pointer: event.pointerId, id, strip, scrub, span, rect, x: event.clientX, y: event.clientY,
+                at: performance.now(), timer: 0 };
+  runsHold.active = true;
+  strip.dataset.held = "yes";
+
+  try { strip.setPointerCapture(event.pointerId); } catch (problem) { /* a pointer gone already */ }
+
+  //  Held at the screen's side, it keeps moving: the app's push, a tick of 50 ms.
+  scrubbing.timer = setInterval(() => {
+    if (!scrubbing) return;
+    const now = performance.now();
+    const direction = scrubbing.x < EDGE_PX ? -1 : scrubbing.x > window.innerWidth - EDGE_PX ? 1 : 0;
+    scrubbing.scrub.push(direction, (now - scrubbing.at) / 1000, distanceOff(scrubbing.y));
+    scrubbing.at = now;
+    showScrub();
+  }, 50);
+
+  showScrub();
+  event.preventDefault();
+}
+
+function distanceOff(y) {
+  return outside(y, scrubbing.rect.top, scrubbing.rect.bottom);
+}
+
+function moveScrub(event) {
+  scrubbing.x = event.clientX;
+  scrubbing.y = event.clientY;
+  scrubbing.at = performance.now();
+  scrubbing.scrub.moveTo(event.clientX, distanceOff(event.clientY));
+  showScrub();
+  event.preventDefault();
+}
+
+function showScrub() {
+  const { scrub, strip, span, id } = scrubbing;
+  const head = strip.querySelector(".head");
+  const ghost = strip.querySelector(".ghost");
+  const fraction = Math.min(Math.max((scrub.target - span[0]) / (span[1] - span[0]), 0), 1);
+
+  if (head) head.style.left = (100 * fraction).toFixed(2) + "%";
+  if (ghost) ghost.textContent = "to " + scrub.target.toFixed(1) + "s" +
+                                 (rateText(scrub.rate) ? "  finer " + rateText(scrub.rate) : "");
+
+  if (scrub.due(performance.now())) gesture("seek", [str(id), dbl(scrub.target)]);
+}
+
+function endScrub() {
+  const { scrub, strip, id, timer } = scrubbing;
+
+  clearInterval(timer);
+  if (scrub.settle()) gesture("seek", [str(id), dbl(scrub.target)]);
+  scrub.end();
+
+  delete strip.dataset.held;
+  const ghost = strip.querySelector(".ghost");
+  if (ghost) ghost.textContent = "";
+
+  scrubbing = null;
+  runsHold.active = false;
 }
 
 export { tapPill, holdPill };

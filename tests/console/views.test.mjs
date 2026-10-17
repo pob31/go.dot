@@ -35,7 +35,7 @@ installDocument();
 
 const { tree } = await import("../../clients/console/plumbing/tree.js");
 const { timeCell, listRows } = await import("../../clients/console/views/didi.js");
-const { stateMark, offersSeek, sceneClock, pillsOf, runSheet } = await import("../../clients/console/views/gogo.js");
+const { stateMark, offersSeek, sceneClock, pillsOf, runSheet, spanOf, scrubbable, through } = await import("../../clients/console/views/gogo.js");
 const { selection } = await import("../../clients/console/model/selection.js");
 const { folded } = await import("../../clients/console/model/remember.js");
 
@@ -233,6 +233,28 @@ test("a group's round is its pills, and a run's sheet offers its stops, the kill
   //  A run that is over says so and offers nothing.
   assert.deepEqual(runSheet("O", send).actions, []);
   assert.match(runSheet("O", send).sub, /Over/);
+});
+
+test("a run's strip spans its file or its scene's round, and its head is where it plays (namespace draft 75)", () => {
+  const node = (path, type, value) => ({ FULL_PATH: path, TYPE: type, ACCESS: 1, VALUE: [value] });
+
+  serve([
+    node("/godot/run/F/kind", "s", "media"), node("/godot/run/F/state", "s", "playing"), node("/godot/run/F/seekable", "T", true),
+    node("/godot/run/F/cue", "s", "C"), node("/godot/cue/C/duration", "d", 10), node("/godot/run/F/position", "d", 2.5),
+    node("/godot/run/S/kind", "s", "group"), node("/godot/run/S/state", "s", "playing"), node("/godot/run/S/seekable", "T", true),
+    node("/godot/run/S/roundFrom", "d", 4), node("/godot/run/S/roundLength", "d", 8), node("/godot/run/S/position", "d", 6),
+    node("/godot/run/U/kind", "s", "media"), node("/godot/run/U/state", "s", "playing"), node("/godot/run/U/seekable", "T", true),
+    node("/godot/run/U/cue", "s", "N"),
+  ]);
+
+  assert.deepEqual(spanOf("F"), [0, 10]);
+  assert.equal(through("F"), 0.25);
+  assert.deepEqual(spanOf("S"), [4, 12]);
+  assert.equal(through("S"), 0.25);
+  assert.equal(scrubbable("F"), true);
+  assert.equal(scrubbable("S"), true);
+  assert.equal(spanOf("U"), null);              // a file nobody measured has no strip to drag
+  assert.equal(scrubbable("U"), false);
 });
 
 test("the inspector keeps decisions and folds away what the engine says back", async () => {
