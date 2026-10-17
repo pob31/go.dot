@@ -13778,7 +13778,7 @@ TEST_CASE ("client: a device with a description can be saved as a preset, under 
     //  A device from a preset of yours says so, in the word.
     const auto adm = std::find_if (presets.begin(), presets.end(), [] (const model::PresetRow& row) { return row.slug == "adm-osc"; });
     REQUIRE (adm != presets.end());
-    CHECK (model::kindWordOf (rowOf (fromPreset), presets) == adm->label() + " - yours");
+    CHECK (model::kindWordOf (rowOf (fromPreset), presets) == "Yours: " + adm->label());
 
     //  The folder's rows, as serve publishes them.
     EngineState state;

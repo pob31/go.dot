@@ -339,10 +339,11 @@ namespace wfg::client::model
             const auto slug = row.preset.substr (0, row.preset.find ('@'));
 
             /*  A PRESET OF YOURS SAYS SO (namespace draft §76, ASC), in the
-                word rather than a colour (4.8). */
+                word rather than a colour (4.8), and FIRST: the cell cuts a long
+                label at its end, and the word is what must survive. */
             for (const auto& preset : presets)
                 if (preset.slug == slug)
-                    return preset.label() + (preset.yours() ? " - yours" : "");
+                    return (preset.yours() ? "Yours: " : "") + preset.label();
 
             return slug;
         }
