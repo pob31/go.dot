@@ -34,6 +34,7 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/json/JsonWrite.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <cstring>
@@ -301,4 +302,36 @@ TEST_CASE ("json: a value can be copied and moved without losing its children")
     // Self-assignment does not empty it.
     assigned = *&assigned;
     CHECK (assigned.find ("nested") != nullptr);
+}
+
+TEST_CASE ("json: a value is written compact, its numbers shortest and in no locale, and reads back the same")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  Namespace draft §76, ARY: the header a saved preset gains. */
+    const auto parsed = json::parse (R"JSON({ "VERSION": 2, "PORT": 5005, "GAIN": -0.5, "NAME": "Desk \"A\"\n",
+                                             "ON": true, "OFF": false, "NONE": null,
+                                             "SOURCES": [ "one", "two" ], "EMPTY": {}, "NOTHING": [] })JSON");
+    REQUIRE (parsed.ok());
+
+    const auto written = json::write (*parsed.value);
+    CHECK (written == R"JSON({"EMPTY":{},"GAIN":-0.5,"NAME":"Desk \"A\"\n","NONE":null,"NOTHING":[],"OFF":false,)JSON"
+                      R"JSON("ON":true,"PORT":5005,"SOURCES":["one","two"],"VERSION":2})JSON");
+
+    //  Read back, the same value: the writer and the reader agree.
+    const auto again = json::parse (written);
+    REQUIRE (again.ok());
+    CHECK (json::write (*again.value) == written);
+
+    //  What RFC 8259 forbids unescaped is escaped; UTF-8 passes as it is.
+    CHECK (json::quote (std::string ("a\tb\x01" "c")) == R"JSON("a\tb\u0001c")JSON");
+    CHECK (json::quote ("Ré\\") == R"JSON("Ré\\")JSON");
+    CHECK (json::write (json::Value (std::numeric_limits<double>::infinity())) == "null");
+}
+
+TEST_CASE ("json: compact takes the whitespace out between tokens and leaves every string as it was")
+{
+    CHECK (json::compact ("{\n  \"A B\" : [ 1, 2 ],\r\n\t\"C\": \"x \\\" y\" }") == R"JSON({"A B":[1,2],"C":"x \" y"})JSON");
+    CHECK (json::compact (R"JSON({"a":"\\"})JSON") == R"JSON({"a":"\\"})JSON");
+    CHECK (json::compact ("") == "");
 }

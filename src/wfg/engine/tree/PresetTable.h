@@ -14,9 +14,12 @@
 
 #pragma once
 
+#include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/tree/Mount.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -84,6 +87,23 @@ namespace wfg::tree
         cannot see - a node the description would refuse - the device's own
         load says when one is made. */
     Preset readPresetQuickly (const std::string& slug, std::string_view json);
+
+    /*  WHERE A DESCRIPTION'S HEADER IS (namespace draft §76, ARY): the root
+        object's `GODOT` value, from its `{` to just past its `}`, found by the
+        quick read's walk - or nothing, when the root has no GODOT object. */
+    struct TextSpan
+    {
+        std::size_t begin = 0;
+        std::size_t end = 0;
+    };
+
+    std::optional<TextSpan> rootGodotSpan (std::string_view json);
+
+    /*  THE DESCRIPTION WITH `header` AS ITS GODOT KEY: written compact in place
+        of the old one, or as the root's first member when it had none; every
+        other byte of the file as it was. Empty when the text is not a JSON
+        object. What `preset.save` writes (ARY). */
+    std::string withGodotHeader (std::string_view json, const json::Value& header);
 
     /*  Every preset in a folder, by slug, each marked with `origin`: what a
         table reads, and what the thread that reads your folder again hands it

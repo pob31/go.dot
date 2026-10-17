@@ -16,6 +16,8 @@
 
 #include "TestSupport.h"
 
+#include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/json/JsonWrite.h>
 #include <wfg/engine/tree/PresetTable.h>
 
 #include <juce_core/juce_core.h>
@@ -308,4 +310,65 @@ TEST_CASE ("preset: yours are read beside the shipped ones, used in their place,
     CHECK (alone.revision() == 1u);
 
     root.deleteRecursively();
+}
+
+TEST_CASE ("preset: a header is put in place of the old one, or first when there is none, and nothing else moves")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  Namespace draft §76, ARY: what preset.save writes is the device's own
+        description with its GODOT key replaced - every other byte as it was. */
+    wfg::json::Object fields;
+    fields["PRESET"] = wfg::json::Value (std::string ("my-desk"));
+    fields["VERSION"] = wfg::json::Value (3.0);
+    fields["VENDOR"] = wfg::json::Value (std::string ("Desk Co"));
+    fields["MODEL"] = wfg::json::Value (std::string ("Desk"));
+    fields["SOURCES"] = wfg::json::Value (wfg::json::Array { wfg::json::Value (std::string ("by hand")) });
+    const wfg::json::Value header (fields);
+
+    SUBCASE ("a file with a header: only the header changes")
+    {
+        const std::string before = twoRootDesk;
+        const auto span = rootGodotSpan (before);
+        REQUIRE (span.has_value());
+        CHECK (before[span->begin] == '{');
+        CHECK (before[span->end - 1] == '}');
+        CHECK (before.substr (span->begin, 12) == R"JSON({ "PRESET": )JSON");
+
+        const auto after = withGodotHeader (before, header);
+        REQUIRE_FALSE (after.empty());
+        CHECK (after.substr (0, span->begin) == before.substr (0, span->begin));
+        CHECK (after.substr (after.size() - (before.size() - span->end)) == before.substr (span->end));
+        CHECK (after.find (wfg::json::write (header)) == span->begin);
+
+        //  It reads as a preset under its new name, the version and the roots the file's.
+        const auto preset = readPreset ("my-desk", after);
+        INFO ("problem: " << preset.problem);
+        REQUIRE (preset.usable());
+        CHECK (preset.version == 3);
+        CHECK (preset.roots == std::vector<std::string> { "/bus", "/ch" });
+        CHECK (readPresetQuickly ("my-desk", after).version == 3);
+    }
+
+    SUBCASE ("a file with none: the header comes first, the rest follows")
+    {
+        const std::string fetched = R"JSON({
+  "FULL_PATH": "/wfs",
+  "CONTENTS": {"gain": {"FULL_PATH": "/wfs/gain", "TYPE": "f", "ACCESS": 3}}
+})JSON";
+        CHECK_FALSE (rootGodotSpan (fetched).has_value());
+
+        const auto after = withGodotHeader (fetched, header);
+        CHECK (after.rfind ("{\"GODOT\":" + wfg::json::write (header) + ",\n  \"FULL_PATH\"", 0) == 0);
+
+        const auto preset = readPreset ("my-desk", wfg::json::compact (after));
+        INFO ("problem: " << preset.problem);
+        CHECK (preset.usable());
+        CHECK (preset.roots == std::vector<std::string> { "/wfs" });
+        CHECK (rootGodotSpan (after).has_value());
+
+        //  An empty object takes the header and no comma; what is not an object takes nothing.
+        CHECK (withGodotHeader ("{ }", header) == "{\"GODOT\":" + wfg::json::write (header) + " }");
+        CHECK (withGodotHeader ("[1]", header).empty());
+    }
 }

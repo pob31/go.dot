@@ -430,6 +430,8 @@ add_library(wfg_engine STATIC
     wfg/engine/command/RescanCommands.cpp
     wfg/engine/json/JsonValue.cpp
     wfg/engine/json/JsonValue.h
+    wfg/engine/json/JsonWrite.cpp
+    wfg/engine/json/JsonWrite.h
     wfg/engine/import/AlsImport.cpp
     wfg/engine/import/AlsImport.h
     wfg/engine/import/AlsReader.cpp

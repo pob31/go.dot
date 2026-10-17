@@ -15,6 +15,7 @@
 #include <wfg/engine/tree/PresetTable.h>
 
 #include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/json/JsonWrite.h>
 
 #include <juce_core/juce_core.h>
 
@@ -155,6 +156,9 @@ namespace wfg::tree
         {
             std::string rootPath;
             std::string godot;
+            std::size_t godotBegin = std::string::npos;   ///< where the GODOT object's `{` is
+            std::size_t godotEnd = std::string::npos;     ///< just past its `}`
+            std::size_t rootBegin = std::string::npos;    ///< where the root object's `{` is
             std::vector<std::string> roots;
             int fullPaths = 0;
             bool rootIsObject = false;
@@ -239,7 +243,10 @@ namespace wfg::tree
                 if (c == '{' || c == '[')
                 {
                     if (depth == 0 && c == '{')
+                    {
                         out.rootIsObject = true;
+                        out.rootBegin = at;
+                    }
 
                     ++depth;
                 }
@@ -248,7 +255,11 @@ namespace wfg::tree
                     --depth;
 
                     if (c == '}' && depth == 1 && godotStart != std::string::npos && out.godot.empty())
+                    {
                         out.godot = std::string (text.substr (godotStart, at + 1 - godotStart));
+                        out.godotBegin = godotStart;
+                        out.godotEnd = at + 1;
+                    }
                 }
 
                 ++at;
@@ -369,6 +380,56 @@ namespace wfg::tree
             return failed (slug + ": the description has no node");
 
         return preset;
+    }
+
+    std::optional<TextSpan> rootGodotSpan (std::string_view text)
+    {
+        const auto skimmed = skim (text);
+
+        if (! skimmed.rootIsObject || skimmed.godotBegin == std::string::npos)
+            return std::nullopt;
+
+        return TextSpan { skimmed.godotBegin, skimmed.godotEnd };
+    }
+
+    std::string withGodotHeader (std::string_view text, const json::Value& header)
+    {
+        const auto skimmed = skim (text);
+
+        if (! skimmed.rootIsObject)
+            return {};
+
+        const auto written = json::write (header);
+        std::string out;
+        out.reserve (text.size() + written.size() + 10);
+
+        if (skimmed.godotBegin != std::string::npos)
+        {
+            out.append (text.substr (0, skimmed.godotBegin));
+            out.append (written);
+            out.append (text.substr (skimmed.godotEnd));
+            return out;
+        }
+
+        /*  NONE YET: the root's first member, a comma after it unless the
+            object was empty - a description fetched from a device that never
+            heard of Go.dot. */
+        auto after = skimmed.rootBegin + 1;
+
+        while (after < text.size() && isBlank (text[after]))
+            ++after;
+
+        const auto empty = after < text.size() && text[after] == '}';
+
+        out.append (text.substr (0, skimmed.rootBegin + 1));
+        out.append ("\"GODOT\":");
+        out.append (written);
+
+        if (! empty)
+            out.append (",");
+
+        out.append (text.substr (skimmed.rootBegin + 1));
+        return out;
     }
 
     std::vector<Preset> readPresetFolder (const std::string& path, bool quickly, const std::string& origin)
