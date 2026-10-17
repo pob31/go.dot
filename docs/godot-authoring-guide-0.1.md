@@ -53,7 +53,7 @@ receives OSC on UDP 9000, serves OSCQuery on HTTP 9001    receives OSC on UDP 80
 HTTP 200, the JSON tree                               <------  GET http://<you>:9001/myapp
                                                       <------  /godot/described "4X7KQ2MB" 4 ""
 
-/godot/cmd/cue/capture "standby" "" "9QWJ3T0E" "Storm" "" "" ""
+/godot/cmd/cue/capture "/myapp" "standby" "" "9QWJ3T0E" "Storm" "" "" ""
     "/myapp/gain" "f:-6" "/myapp/mode" "s:\"wide\""   ------>
                                                       <------  /godot/captured "9QWJ3T0E" "created" "" "Storm"
 
@@ -258,10 +258,11 @@ So:
 ## 6. `cue.capture`: create or update a cue
 
 ```
-/godot/cmd/cue/capture  ,sssssss(ss)...  where  target  id  name  number  notes  messageIds  address value  [address value]...
+/godot/cmd/cue/capture  ,ssssssss(ss)...  from  where  target  id  name  number  notes  messageIds  address value  [address value]...
 ```
 
-Every argument is a string.
+Every argument is a string. `from` is your root, exactly as you declared it (`/myapp`): it is how Go.dot
+knows who to answer (§6.6).
 
 ### 6.1 Where a new cue lands: `where` and `target`
 
@@ -318,10 +319,11 @@ A refusal writes nothing.
 
 A capture that would pass 1,200 bytes is split:
 
-1. The first datagram is the whole head - `where`, `target`, `id`, `name`, `number`, `notes`,
-   `messageIds` - followed by as many pairs as fit.
-2. Each following datagram has `where` = `"more"`, `target` = the identifier, `id` = the same
-   identifier, `name`, `number`, `notes` and `messageIds` empty, then the next pairs.
+1. The first datagram is the whole head - `from`, `where`, `target`, `id`, `name`, `number`,
+   `notes`, `messageIds` - followed by as many pairs as fit.
+2. Each following datagram has `from` = your root again, `where` = `"more"`, `target` = the
+   identifier, `id` = the same identifier, `name`, `number`, `notes` and `messageIds` empty, then
+   the next pairs.
 
 Go.dot applies them in the order they arrive: on an update, the first chunk replaces the messages
 and the `more` chunks add the rest. Each chunk is its own undo step and gets its own answer
@@ -345,14 +347,13 @@ overtakes its first chunk on a new cue is refused `unknown-id`.
 - `outcome` is `created`, `updated`, `appended`, or the reason it was refused (§6.4).
 - `number` and `name` are the cue's as they now stand - so you can say "Cue 14, Storm, updated" -
   and empty on a refusal.
-- It is sent to the declared port of the device that asked. Go.dot looks among the devices declared
-  at the address you sent from, and picks the one whose port the datagram left from; else the one
-  the cue is aimed at; else the only one. When several applications share your address and none of
-  those tells them apart - a cue aimed at a third device, sent from a socket that is not your
-  receive port - each of them gets the answer. When no device is declared at your address, the
-  device the cue is aimed at gets it; when there is none, nothing answers.
-- **So ignore a `/godot/captured` whose identifier you did not send**, and **send from the socket
-  you receive on** if you can: Go.dot then knows exactly which application asked.
+- It is sent to the device whose root is `from`, at the host and port it declared - where your
+  declare's answer went. It does not matter which socket you sent from, nor which device the cue is
+  aimed at: S21_HiJack captures cues aimed at a DiGiCo desk and is still the one answered.
+- Until Go.dot holds a device with that root - you have not been declared yet - it cannot use
+  `from`, and guesses as it does for a capture without one: the device at your address whose port
+  the datagram left from, else the one the cue is aimed at, else the only one, else every device at
+  your address. **So ignore a `/godot/captured` whose identifier you did not send.**
 - Expect one answer per datagram. WFS-DIY waits 2 seconds for them, reports the first refusal at
   once, and otherwise reports when they have all arrived. No answer means Go.dot is not running or
   not reachable, has dropped you (strict senders, §2), or refused a command whose type tags were
@@ -447,24 +448,26 @@ answers come from the main.
 
 - **One root per application.** Two copies of one application declaring the same root share one
   device in Go.dot, the second moving the first's host. Give each its own root.
-- **Two applications on one computer** are told apart by the port a capture is sent from, or by
-  the root the cue is aimed at. When neither tells them apart, both receive the answer (§6.6), and
-  the one that did not ask has to ignore it.
+- **Captures that do not name their sender.** WFS-DIY up to 1.0.0beta56 and S21_HiJack 0.3.0 send
+  captures without `from`, beginning at `where`; Go.dot still reads them, and tells the two forms
+  apart by the first argument alone - a root is empty or begins with `/`, `where` never does. Their
+  answers are guessed (§6.6), and two such applications on one computer may both receive one.
+  WFS-DIY 1.0.0beta57 and S21_HiJack 0.3.1 send `from`, and need a Go.dot from 2026-10-17 or later.
 - **Recall is fire-and-forget.** Go.dot does not wait for your application to confirm that it
   recalled anything.
 - **Go.dot asks nothing after the declare**: no polling, no subscription.
 
 ## 12. Checklist
 
-1. A UDP port you receive OSC on, and the same socket - or another - to send to Go.dot's port,
-   8010.
+1. A UDP port you receive OSC on, and a socket to send to Go.dot's port, 8010.
 2. `GET <prefix>` served as OSCQuery JSON, the connection closed after the body: `ACCESS` on every
    node a cue should reach, `TYPE` one tag per argument, `VALS` where a menu helps.
 3. A declare when the connection is set up, at launch, when the description changes, when your
    OSCQuery server starts, and every 10 seconds until answered.
 4. Identifiers of 8 Crockford base32 characters, drawn once and stored beside what they recall.
-5. Captures with `where` = `standby` and the stored identifier; atoms written in the C locale,
-   strings quoted and escaped; datagrams under 1,200 bytes, chunked with `more`.
+5. Captures beginning with your root as `from`, then `where` = `standby` and the stored
+   identifier; atoms written in the C locale, strings quoted and escaped; datagrams under 1,200
+   bytes, chunked with `more`, each chunk with `from` again.
 6. The three answers intercepted before your own routing; a `/godot/captured` for an identifier
    you did not send ignored; 2 seconds per expected answer; the outcome, the cue's number and its
    name shown to the operator.

@@ -154,16 +154,17 @@ namespace
 
         Engine::TickResult declare (const std::string& prefix = "/proc")
         {
+            root = prefix;
             return apply (fromProcessor(), "mount.declare",
                           { text (prefix), number (processor.port()), number (0), text ("Processor") });
         }
 
-        /** A capture from the processor: the seven-string head, then the pairs. */
+        /** A capture from the processor: the root it declared, the seven-string head, then the pairs. */
         Engine::TickResult capture (const std::string& where, const std::string& target, const std::string& id,
                                     const std::vector<std::pair<std::string, std::string>>& pairs,
                                     const std::string& name = "Snap", const std::string& origin = {})
         {
-            std::vector<osc::Value> args { text (where), text (target), text (id), text (name),
+            std::vector<osc::Value> args { text (root), text (where), text (target), text (id), text (name),
                                            text (""), text (""), text ("") };
 
             for (const auto& [address, value] : pairs)
@@ -209,6 +210,7 @@ namespace
 
         Socket processor;
         Socket goDot;
+        std::string root = "/proc";
         tree::RawSender answers;
         Engine engine;
         doc::ShowDocument document;
@@ -331,7 +333,7 @@ TEST_CASE ("authoring: a capture lands after the standby as one OSC cue, its mes
     REQUIRE (outcome.applied == 1u);
 
     const auto record = rig.lastRecord();
-    const auto cueId = record.args[2].getString();
+    const auto cueId = record.args[3].getString();
     REQUIRE (cueId.size() == 8u);
 
     CHECK (rig.memberIds (rig.listId) == std::vector<std::string> { first, cueId, second });
@@ -343,7 +345,7 @@ TEST_CASE ("authoring: a capture lands after the standby as one OSC cue, its mes
                                          { "/proc/b", "f:0.5" }, { "/proc/c", "s:\"x y\"" } });
 
     /*  THE MESSAGES' IDENTIFIERS ON THE RECORD, in order, so a replay draws none. */
-    CHECK (record.args[6].getString().size() == 17u);
+    CHECK (record.args[7].getString().size() == 17u);
 
     REQUIRE (rig.processor.waitFor (2));
     CHECK (rig.processor.words (1) == std::vector<std::string> { "/godot/captured", cueId, "created", "", "Snap" });
@@ -369,7 +371,7 @@ TEST_CASE ("authoring: a capture under the processor's root lands on it with a d
 
     const auto outcome = rig.capture ("standby", "", "", { { "/proc/a", "i:3" } });
     REQUIRE (outcome.applied == 1u);
-    const auto cueId = rig.lastRecord().args[2].getString();
+    const auto cueId = rig.lastRecord().args[3].getString();
 
     REQUIRE (rig.processor.waitFor (2));
     CHECK (rig.processor.words (1) == std::vector<std::string> { "/godot/captured", cueId, "created", "", "Snap" });
@@ -389,7 +391,7 @@ TEST_CASE ("authoring: with nothing standing by a capture lands at the end; with
         const auto only = rig.document.createCue (rig.listId, 0, "memo", "Only").id;
 
         REQUIRE (rig.capture ("standby", "", "", { { "/proc/a", "i:1" } }).applied == 1u);
-        const auto cueId = rig.lastRecord().args[2].getString();
+        const auto cueId = rig.lastRecord().args[3].getString();
         CHECK (rig.memberIds (rig.listId) == std::vector<std::string> { only, cueId });
     }
 
@@ -400,7 +402,7 @@ TEST_CASE ("authoring: with nothing standing by a capture lands at the end; with
         const auto other = rig.document.createList ("Video").id;
 
         REQUIRE (rig.capture ("list", "Video", "", { { "/proc/a", "i:1" } }).applied == 1u);
-        const auto cueId = rig.lastRecord().args[2].getString();
+        const auto cueId = rig.lastRecord().args[3].getString();
         CHECK (rig.memberIds (other) == std::vector<std::string> { cueId });
     }
 
@@ -508,12 +510,14 @@ TEST_CASE ("authoring: the answer goes to the device the sender is, else to the 
     REQUIRE (desk.waitFor (1));
 }
 
-TEST_CASE ("authoring: two processors at one address each hear their own capture's answer (ARQ)")
+TEST_CASE ("authoring: two processors at one address, naming no sender, each hear their own capture's answer (ARQ)")
 {
     /*  WFS-DIY AND S21_HIJACK ON ONE LAPTOP, both sending from sockets other
         than the ones they receive on - a JUCE sender's, a fresh one per export
         - and the desk S21_HiJack captures for somewhere else. Until 2026-10-17
-        the first of the two in the document heard every answer. */
+        the first of the two in the document heard every answer. These are
+        captures in the form before that day, which name no sender, as the
+        builds already released send them. */
     AuthoringRig rig;
     Socket wfs;
     Socket s21;
@@ -578,6 +582,79 @@ TEST_CASE ("authoring: two processors at one address each hear their own capture
         REQUIRE (rig.document.setAttribute ("/godot/mount/" + twinId + "/port", std::to_string (wfs.port())).ok);
 
         CHECK (answeredAt (fromSender, "/desk/fader") == std::vector<int> { wfs.port(), s21.port() });
+    }
+}
+
+TEST_CASE ("authoring: a capture that names its sender is answered to that device alone (ARR)")
+{
+    /*  THE SAME LAPTOP, the processors naming themselves: nothing about the
+        socket a capture leaves from, or the device its cue aims at, decides
+        any more. */
+    AuthoringRig rig;
+    Socket wfs;
+    Socket s21;
+    Socket sender;
+    const auto fromSender = "udp:127.0.0.1:" + std::to_string (sender.port());
+
+    REQUIRE (rig.apply (fromSender, "mount.declare", { text ("/wfs"), number (wfs.port()), number (0), text ("WFS-DIY") }).applied == 1u);
+    REQUIRE (rig.apply (fromSender, "mount.declare", { text ("/s21"), number (s21.port()), number (0), text ("S21") }).applied == 1u);
+
+    const auto deskId = rig.document.createMount ("/desk", {}).id;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + deskId + "/host", "10.255.255.1").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + deskId + "/port", "8000").ok);
+
+    const auto answeredAt = [&rig] (const std::string& origin, const std::string& from, const std::string& address,
+                                    const std::string& id = {})
+    {
+        REQUIRE (rig.engine.submit (origin, "cue.capture",
+                                    { text (from), text ("standby"), text (""), text (id), text ("S"), text (""),
+                                      text (""), text (""), text (address), text ("f:0.5") }));
+        CHECK (rig.engine.processTick (rig.tick++).applied == 1u);
+
+        std::vector<int> ports;
+        for (const auto& each : rig.answers.waiting())
+            ports.push_back (each.port);
+
+        rig.answers.flush();
+        return ports;
+    };
+
+    SUBCASE ("each is answered alone, whatever its cue aims at")
+    {
+        CHECK (answeredAt (fromSender, "/s21", "/desk/fader") == std::vector<int> { s21.port() });
+        CHECK (answeredAt (fromSender, "/wfs", "/desk/fader") == std::vector<int> { wfs.port() });
+        CHECK (answeredAt (fromSender, "/s21", "/wfs/input/1/x") == std::vector<int> { s21.port() });
+
+        //  From anywhere: the root names the device, the device says where it is.
+        CHECK (answeredAt ("udp:10.9.9.9:4000", "/s21", "/desk/fader") == std::vector<int> { s21.port() });
+    }
+
+    SUBCASE ("a root no device holds, or none, is answered as a capture that names no sender")
+    {
+        CHECK (answeredAt (fromSender, "/nobody", "/desk/fader") == std::vector<int> { wfs.port(), s21.port() });
+        CHECK (answeredAt (fromSender, "", "/wfs/input/1/x") == std::vector<int> { wfs.port() });
+    }
+
+    SUBCASE ("the record keeps the form it came in, and both replay")
+    {
+        CHECK (answeredAt (fromSender, "/s21", "/desk/fader", "9QWJ3T0E") == std::vector<int> { s21.port() });
+
+        auto record = rig.lastRecord();
+        REQUIRE (record.args.size() == 10u);
+        CHECK (record.args[0].getString() == "/s21");
+        CHECK (record.args[3].getString() == "9QWJ3T0E");
+
+        REQUIRE (rig.engine.submit (fromSender, "cue.capture",
+                                    { text ("standby"), text (""), text (""), text ("Old"), text (""), text (""),
+                                      text (""), text ("/desk/fader"), text ("f:0.25") }));
+        CHECK (rig.engine.processTick (rig.tick++).applied == 1u);
+        rig.answers.flush();
+
+        record = rig.lastRecord();
+        REQUIRE (record.args.size() == 9u);
+        CHECK (record.args[0].getString() == "standby");
+        CHECK (record.args[2].getString().size() == 8u);
+        CHECK (rig.attribute ("/godot/cue/" + record.args[2].getString() + "/name") == "Old");
     }
 }
 

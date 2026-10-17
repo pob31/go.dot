@@ -110,8 +110,13 @@ checked, and Go.dot's OSC cue editor offers them as menus (§6). The fetch ends 
 ## 4. `cue.capture`: make or update a cue
 
 ```
-/godot/cmd/cue/capture  ,sssssss[ss]...  where  target  id  name  number  notes  messageIds  [address value]...
+/godot/cmd/cue/capture  ,ssssssss[ss]...  from  where  target  id  name  number  notes  messageIds  [address value]...
 ```
+
+`from` is the processor's own root as it declared it - `/wfs`, `/s21` - and says who the answer
+is for (§4.5; 2026-10-17, namespace draft §56.7, ARR). A capture in the form before that day
+begins at `where` and is still read: Go.dot tells the two apart by the first argument alone, a
+root being empty or beginning with `/` and `where` never.
 
 ### 4.1 Where it lands
 
@@ -152,9 +157,9 @@ does not read as an atom list).
 ### 4.4 Chunks
 
 A capture longer than 1,200 bytes is sent as several datagrams, back to back:
-- The first is the capture, with its `where` and the full head.
-- Each following one is `where = more`, `target = <the same id>`, the other head fields empty
-  (an `id` repeating the identifier is read the same way), and the next pairs.
+- The first is the capture, with its `from`, its `where` and the full head.
+- Each following one is `from` again, `where = more`, `target = <the same id>`, the other head
+  fields empty (an `id` repeating the identifier is read the same way), and the next pairs.
 - Go.dot applies them in arrival order. An update's first chunk replaces the messages and the
   `more` chunks add the rest.
 
@@ -167,13 +172,15 @@ A capture longer than 1,200 bytes is sent as several datagrams, back to back:
 - `outcome` is `created`, `updated`, `appended` (a `more` chunk), or the refusal's reason:
   `locked`, `unknown-id`, `bad-address`, `bad-value`, `type-mismatch`.
 - `number` and `name` are the cue's as they now stand; empty on a refusal.
-- It goes to the processor that asked, among the declared devices at the sender's address: the
+- It goes to the device whose root is `from`, at its declared host and port, wherever the
+  datagram came from and whatever the cue aims at (ARR).
+- A capture with no `from`, or one naming a root no device holds, is answered to the processor
+  that asked as far as Go.dot can tell, among the declared devices at the sender's address: the
   one whose port the datagram left from, else the one the cue is aimed at, else the only one, else
-  each of them, and each ignores an identifier it did not send. The last is S21_HiJack's console
-  capture with WFS-DIY on the same computer (2026-10-17, namespace draft §56.6, ARQ). When no device
-  is at the sender's address, it goes to the device the cue is aimed at. When there is neither,
-  nothing answers, and the refusal is in Go.dot's log and at `/godot/engine/lastError`. The
-  device's Tx switch does not silence an answer.
+  each of them, and each ignores an identifier it did not send (§56.6, ARQ). When no device is at
+  the sender's address, it goes to the device the cue is aimed at. When there is neither, nothing
+  answers, and the refusal is in Go.dot's log and at `/godot/engine/lastError`.
+- The device's Tx switch does not silence an answer.
 - A processor waits 2 s for each answer it expects: one per datagram.
 
 ## 5. Firing Go.dot from a processor

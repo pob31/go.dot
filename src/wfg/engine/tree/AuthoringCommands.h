@@ -27,15 +27,18 @@
           first time, its host and ports moved after (AEJ). Answers
           /godot/declared <id> <outcome>.
 
-      cue.capture  where target id name number notes messageIds [address value]...
+      cue.capture  from where target id name number notes messageIds [address value]...
           One OSC cue, made after the standby or at the end of a list, or the
           same cue updated in place when its identifier already names one (AEK).
-          Answers /godot/captured <id> <outcome> <number> <name>.
+          Answers /godot/captured <id> <outcome> <number> <name> to the device
+          whose root `from` is (ARR); the form before 2026-10-17, which begins
+          at `where`, is still read.
 
     ONE COMMAND IS ONE UNDO STEP, which is the engine's rule already
     (`beginTransaction` per applied command), and ONE ANSWER, queued on the
     RawSender and sent at the end of the tick (AEI) - to each device at the
-    sender's address only when a capture cannot tell which of them asked (ARQ).
+    sender's address only when a capture that does not name its sender cannot
+    tell which of them asked (ARQ).
 
     REPLAY NEEDS NO SOCKET AND DRAWS NOTHING. The host a declare was answered
     at, the identifiers a capture drew - the cue's and every further

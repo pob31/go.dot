@@ -110,7 +110,8 @@ def run(locale: str) -> int:
                 return read(address)
 
             def capture(where, target, cue_id, pairs, name="Snap"):
-                args = [where, target, cue_id, name, "", "", ""]
+                """Named as the processor's own root, as a capture says who sent it (ARR)."""
+                args = ["/proc", where, target, cue_id, name, "", "", ""]
                 for address, value in pairs:
                     args += [address, value]
                 to_godot("/godot/cmd/cue/capture", args)

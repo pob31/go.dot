@@ -24915,7 +24915,7 @@ Mine, while building:
 |---|---|---|
 | `mount.declare` | `s:prefix i:port i:queryPort s:name [s:id] [s:host]` | `/godot/declared s:id s:outcome` |
 | `mount.described` | `s:mount s:file i:nodeCount s:problem` (sent by the engine) | `/godot/described s:id i:nodeCount s:problem` |
-| `cue.capture` | `s:where s:target s:id s:name s:number s:notes s:messageIds [s:address s:value]...` | `/godot/captured s:id s:outcome s:number s:name` |
+| `cue.capture` | `s:from s:where s:target s:id s:name s:number s:notes s:messageIds [s:address s:value]...` (`from` since §56.7; the form without it still read) | `/godot/captured s:id s:outcome s:number s:name` |
 | `cue.fireNumber` | `s:number [s:run]` | - |
 | `standby.setNumber` | `s:number` | - |
 
@@ -24991,6 +24991,30 @@ of its own - each hears a capture for its own root alone, both hear one for a de
 its receive socket is heard alone whatever its cue aims at, two rows naming one socket hear it once. The new
 case fails on the code before it (S21_HiJack's recall answered to WFS-DIY). Under C and fr_FR, with
 `blackbox.authoring`.
+
+### 56.7 A capture names its sender (2026-10-17)
+
+The same day, ARQ's guessing told to the author, who answered: *"There's still time to fix the reply on the
+device side (WFS-DIY, S21HiJack and possibly XOA, although I doubt we got that far on this app)."* XOA has no
+Go.dot client, so two senders changed.
+
+- **ARR** (mine) **`cue.capture` begins with `from`, the root of the processor that asks**, and the answer goes
+  to the device holding that root, at its declared host and port - where its declare's answer goes - whichever
+  socket the capture left from and whatever its cue aims at. Exact for every sender, including one that cannot
+  receive on the socket it sends from (Max's `udpsend`, Pd's `netsend`), which an answer to the datagram's own
+  port, QLab's way, would never reach. **The form before it is still read**, told apart by the first argument
+  alone: a root is empty or begins with `/`, and `where` is one of four words. Its answers, and those of a
+  capture naming a root no device holds - a processor not yet declared - are ARQ's. Each form is recorded as it
+  came, so an older log replays as written. A new WFS-DIY or S21_HiJack against an older Go.dot is refused
+  `bad-value` (it reads `/wfs` as `where`); the guide says which versions go together. Rejected: answering at
+  the datagram's own port (the send-only senders above); a new argument after the head (the pairs are the
+  variadic tail, so only an argument count's parity would tell the forms apart).
+
+Built 2026-10-17: `cue.capture`'s parameters gain `from`, the handler reads either form; WFS-DIY 1.0.0beta57
+(`GoDot::captureMessages`) and S21_HiJack 0.3.1 (`capture_messages`) send it, every chunk carrying it.
+`AuthoringTests`: each processor answered alone whatever its cue aims at and wherever it sends from; a root no
+device holds, and an empty one, answered as ARQ; both forms recorded as they came. `blackbox.authoring` sends the
+new form. The guide and the contract say both forms and which versions go together.
 
 ## 57. Device integration presets: consoles, lighting desks, spatial processors
 

@@ -497,28 +497,44 @@ namespace wfg::tree
             messages in order, all under ONE declared device (the one-device
             rule of §45, YV). Every address and every value is checked before
             anything is written, so the only refusal that can arrive half way
-            is a door's - and the lock, the one that could, is asked first. */
+            is a door's - and the lock, the one that could, is asked first.
+
+            THE SENDER NAMES ITSELF (namespace draft §56.7, ARR): the first
+            argument is the root of the processor that asks - `/wfs`, `/s21` -
+            and the answer goes to the device holding it, at its declared port,
+            like the answers to its declare. A capture in the form before
+            2026-10-17 begins with `where` instead, and is told apart by that
+            alone: a root is empty or begins with a slash, and `where` is one of
+            four words. Its answer, and one naming a root no device holds, goes
+            where `answeredMounts` finds the sender. Either form is recorded as
+            it came, so an older log replays as it was written. */
         registry.add ({ "cue.capture",
                         "A processor writes one OSC cue: after the standby, at the end of a list, in place of a"
                         " cue, or appended to one; the same cue updated when its id already exists. Answers"
-                        " /godot/captured <id> <outcome> <number> <name>.",
-                        { { "where", 's', false }, { "target", 's', false }, { "id", 's', false },
-                          { "name", 's', false }, { "number", 's', false }, { "notes", 's', false },
-                          { "messageIds", 's', false }, { "pair", 's', true, true } },
+                        " /godot/captured <id> <outcome> <number> <name> to the device whose root is `from`.",
+                        { { "from", 's', false }, { "where", 's', false }, { "target", 's', false },
+                          { "id", 's', false }, { "name", 's', false }, { "number", 's', false },
+                          { "notes", 's', false }, { "messageIds", 's', false }, { "pair", 's', true, true } },
                         true,
                         [&document, &answers] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
-                            const auto where = args[0].getString();
-                            const auto target = args[1].getString();
-                            auto cueId = args[2].getString();
-                            const auto cueName = args[3].getString();
-                            const auto cueNumber = args[4].getString();
-                            const auto cueNotes = args[5].getString();
-                            const auto recordedIds = wordsOf (args[6].getString());
+                            const auto first = args[0].getString();
+                            const auto namesSender = first.empty() || first.front() == '/';
+                            const std::size_t head = namesSender ? 1 : 0;
+
+                            const auto from = namesSender ? first : std::string {};
+                            const auto where = args[head].getString();
+                            const auto target = args[head + 1].getString();
+                            auto cueId = args[head + 2].getString();
+                            const auto cueName = args[head + 3].getString();
+                            const auto cueNumber = args[head + 4].getString();
+                            const auto cueNotes = args[head + 5].getString();
+                            const auto recordedIds = wordsOf (args[head + 6].getString());
+                            const auto firstPair = head + 7;
 
                             std::vector<std::pair<std::string, std::string>> pairs;
 
-                            for (std::size_t at = 7; at + 1 < args.size(); at += 2)
+                            for (std::size_t at = firstPair; at + 1 < args.size(); at += 2)
                                 pairs.emplace_back (args[at].getString(), args[at + 1].getString());
 
                             const auto senderHost = context.origin != nullptr ? originHost (*context.origin)
@@ -526,22 +542,26 @@ namespace wfg::tree
                             const auto senderPort = context.origin != nullptr ? originPort (*context.origin)
                                                                                : std::nullopt;
 
-                            /*  WHERE THE ANSWER GOES: the device that asked, as
-                                far as its address, its port and the cue's own
-                                device tell (`answeredMounts`) - S21_HiJack's
-                                console capture aims at the desk, and the answer
-                                still belongs to S21_HiJack. Nobody to answer:
-                                the `R` record and lastError are where a refusal
-                                is read. */
+                            /*  WHERE THE ANSWER GOES: the device the sender named
+                                itself as; else, as far as its address, its port
+                                and the cue's own device tell (`answeredMounts`),
+                                the device that asked - S21_HiJack's console
+                                capture aims at the desk, and the answer still
+                                belongs to S21_HiJack. Nobody to answer: the `R`
+                                record and lastError are where a refusal is read. */
                             const auto answer = [&] (const std::string& outcome)
                             {
+                                const auto named = from.empty() ? std::string {} : mountWithRoot (document, from);
                                 const auto aimed = pairs.empty() ? std::string {}
                                                                  : mountCovering (document, pairs.front().first);
+                                const auto answered = ! named.empty() && answerAddressOf (document, named)
+                                                          ? std::vector<std::string> { named }
+                                                          : answeredMounts (document, senderHost, senderPort, aimed);
                                 const auto landed = outcome == "created" || outcome == "updated" || outcome == "appended";
                                 const auto base = "/godot/cue/" + cueId + "/";
                                 std::vector<std::pair<std::string, int>> sentTo;
 
-                                for (const auto& deviceId : answeredMounts (document, senderHost, senderPort, aimed))
+                                for (const auto& deviceId : answered)
                                 {
                                     const auto to = answerAddressOf (document, deviceId);
 
@@ -574,7 +594,7 @@ namespace wfg::tree
                             if (where != "standby" && where != "list" && where != "cue" && where != "more")
                                 return refuse (reason::badValue);
 
-                            if (pairs.empty() || (args.size() - 7) % 2 != 0)
+                            if (pairs.empty() || (args.size() - firstPair) % 2 != 0)
                                 return refuse (reason::badValue);
 
                             for (const auto& [address, value] : pairs)
@@ -717,8 +737,8 @@ namespace wfg::tree
                             answer (outcome);
 
                             auto applied = args;
-                            applied[2] = osc::Value::string (cueId);
-                            applied[6] = osc::Value::string (joined (madeIds));
+                            applied[head + 2] = osc::Value::string (cueId);
+                            applied[head + 6] = osc::Value::string (joined (madeIds));
                             return Outcome::ok (std::move (applied));
                         } });
 
