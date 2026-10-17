@@ -6294,10 +6294,15 @@ namespace
         std::cout << "wfg: http " << server.boundPort() << std::endl;
         std::cout << "wfg: osc " << udp.boundPort() << std::endl;
 
-        //  The network asked (namespace draft §76), once this Go.dot's own port is known to leave out.
+        /*  The network asked, and this Go.dot announced on it (namespace draft
+            §76, ARU), once its own ports are known - to leave out of what it
+            finds, and to say where it answers. */
         if (! discoveryOff)
         {
             discoveryOptions.ownPort = server.boundPort();
+            discoveryOptions.oscPort = udp.boundPort();
+            discoveryOptions.announceAs = wfg::oscquery::Discovery::instanceName (
+                juce::SystemStats::getComputerName().toStdString(), server.boundPort());
 
             if (! discovery.start (discoveryOptions))
                 std::cerr << "wfg serve: OSCQuery discovery: " << discovery.problem() << std::endl;

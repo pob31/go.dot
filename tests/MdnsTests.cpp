@@ -641,3 +641,186 @@ TEST_CASE ("mdns: what is not refreshed goes when its time to live runs out, and
         browser.stop();
     }
 }
+
+//==============================================================================
+//  GO.DOT ANNOUNCED (namespace draft §76, UD.11), asked directly on loopback.
+namespace
+{
+    oscquery::Discovery::Options announcing (std::vector<std::pair<std::string, int>> peers = {})
+    {
+        oscquery::Discovery::Options options;
+        options.port = 0;
+        options.peers = std::move (peers);
+        options.ownPort = 5099;
+        options.oscPort = 8099;
+        options.announceAs = "Go.dot on TEST-BOX";
+        return options;
+    }
+
+    /*  A querier of the test's own: a socket on 127.0.0.1 that puts a
+        question to `port` and keeps every answer it gets. */
+    struct Querier
+    {
+        Querier()
+        {
+            REQUIRE (socket.bindToPort (0, "127.0.0.1"));
+        }
+
+        int port() const { return socket.getBoundPort(); }
+
+        void ask (int toPort, const std::vector<mdns::Question>& questions)
+        {
+            const auto bytes = mdns::encodeQuery (questions);
+            socket.write ("127.0.0.1", toPort, bytes.data(), static_cast<int> (bytes.size()));
+        }
+
+        /*  The next answer within the time, questions passed over: the
+            announcer browses too, and puts its own to whoever it asks. */
+        std::optional<mdns::Message> next (int milliseconds = 2000)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                if (socket.waitUntilReady (true, 50) != 1)
+                    continue;
+
+                std::vector<std::uint8_t> buffer (9000);
+                juce::String fromIp;
+                int fromPort = 0;
+                const auto got = socket.read (buffer.data(), static_cast<int> (buffer.size()), false, fromIp, fromPort);
+
+                if (got <= 0)
+                    continue;
+
+                if (auto message = mdns::decode (buffer.data(), static_cast<std::size_t> (got)); message && message->response)
+                    return message;
+            }
+
+            return std::nullopt;
+        }
+
+        juce::DatagramSocket socket { false };
+    };
+
+    const mdns::Name ownInstance { "Go.dot on TEST-BOX", "_oscjson", "_tcp", "local" };
+}
+
+TEST_CASE ("mdns: another browser finds Go.dot announced, under its name, at its HTTP port")
+{
+    oscquery::Discovery announcer;
+    REQUIRE (announcer.start (announcing()));
+
+    oscquery::Discovery browser;
+    REQUIRE (browser.start (askingOnly (announcer.boundPort())));
+
+    REQUIRE (within (4000, [&browser] { return ! browser.found().empty(); }));
+    const auto found = browser.found();
+    REQUIRE (found.size() == 1u);
+    CHECK (found[0].name == "Go.dot on TEST-BOX");
+    CHECK (found[0].queryPort == 5099);
+    CHECK (found[0].txt == std::vector<std::string> { "txtvers=1" });
+    CHECK_FALSE (found[0].host.empty());
+
+    //  The announcer, a browser too, does not list itself.
+    CHECK (announcer.found().empty());
+
+    browser.stop();
+    announcer.stop();
+}
+
+TEST_CASE ("mdns: the announcer answers about its instance, its host and the services it offers, and withdraws at the stop")
+{
+    Querier querier;
+    oscquery::Discovery announcer;
+    REQUIRE (announcer.start (announcing ({ { "127.0.0.1", querier.port() } })));
+
+    SUBCASE ("its instance's SRV and TXT, with the host's address beside them, the question echoed")
+    {
+        querier.ask (announcer.boundPort(), { { ownInstance, mdns::type::srv, false } });
+        const auto heard = querier.next();
+        REQUIRE (heard.has_value());
+        CHECK (heard->response);
+        REQUIRE (heard->questions.size() == 1u);
+
+        const auto all = heard->records();
+        const auto* srv = first (all, mdns::type::srv);
+        REQUIRE (srv != nullptr);
+        CHECK (mdns::sameName (srv->name, ownInstance));
+        CHECK (srv->port == 5099);
+        CHECK (srv->target.front().rfind ("godot-", 0) == 0);
+
+        //  Asked from this machine, the loopback is the first address.
+        const auto* a = first (all, mdns::type::a);
+        REQUIRE (a != nullptr);
+        CHECK (a->addressText() == "127.0.0.1");
+        CHECK (mdns::sameName (a->name, srv->target));
+    }
+
+    SUBCASE ("the OSC service on the OSC port")
+    {
+        querier.ask (announcer.boundPort(), { { mdns::nameOf ("_osc._udp.local"), mdns::type::ptr, false } });
+        const auto heard = querier.next();
+        REQUIRE (heard.has_value());
+        const auto all = heard->records();
+        const auto* ptr = first (all, mdns::type::ptr);
+        REQUIRE (ptr != nullptr);
+        CHECK (ptr->target.front() == "Go.dot on TEST-BOX");
+        const auto* srv = first (all, mdns::type::srv);
+        REQUIRE (srv != nullptr);
+        CHECK (srv->port == 8099);
+    }
+
+    SUBCASE ("what services there are")
+    {
+        querier.ask (announcer.boundPort(), { { mdns::nameOf ("_services._dns-sd._udp.local"), mdns::type::ptr, false } });
+        const auto heard = querier.next();
+        REQUIRE (heard.has_value());
+        std::vector<std::string> offered;
+
+        for (const auto& record : heard->answers)
+            offered.push_back (mdns::dotted (record.target));
+
+        CHECK (offered == std::vector<std::string> { "_oscjson._tcp.local", "_osc._udp.local" });
+    }
+
+    SUBCASE ("a question about somebody else is not answered")
+    {
+        querier.ask (announcer.boundPort(), { { mdns::nameOf ("_http._tcp.local"), mdns::type::ptr, false } });
+        CHECK_FALSE (querier.next (300).has_value());
+    }
+
+    //  At the stop, the goodbye: every record with nought to live.
+    announcer.stop();
+    std::optional<mdns::Message> goodbye;
+
+    for (auto tries = 0; tries < 8 && ! goodbye; ++tries)
+        if (auto heard = querier.next (500); heard && ! heard->answers.empty() && heard->answers.front().ttl == 0)
+            goodbye = std::move (heard);
+
+    REQUIRE (goodbye.has_value());
+    const auto* withdrawn = first (goodbye->answers, mdns::type::ptr);
+    REQUIRE (withdrawn != nullptr);
+    CHECK (mdns::sameName (withdrawn->target, ownInstance));
+    CHECK (withdrawn->ttl == 0u);
+}
+
+TEST_CASE ("mdns: a browser leaves out the Go.dot on its own HTTP port at its own address, and names itself as the author's machine does")
+{
+    oscquery::Discovery announcer;
+    REQUIRE (announcer.start (announcing()));
+
+    auto options = askingOnly (announcer.boundPort());
+    options.ownPort = 5099;
+
+    oscquery::Discovery itself;
+    REQUIRE (itself.start (options));
+    std::this_thread::sleep_for (std::chrono::milliseconds (600));
+    CHECK (itself.found().empty());
+
+    itself.stop();
+    announcer.stop();
+
+    CHECK (oscquery::Discovery::instanceName ("STAGE-PC", 5010) == "Go.dot on STAGE-PC");
+    CHECK (oscquery::Discovery::instanceName ("STAGE-PC", 5011) == "Go.dot on STAGE-PC, port 5011");
+}

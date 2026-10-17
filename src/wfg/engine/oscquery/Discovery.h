@@ -40,6 +40,18 @@
     LEAVING ITSELF OUT: a service at one of this machine's addresses on
     `ownPort` - Go.dot's own HTTP port - is this Go.dot, not a device.
 
+    AND GO.DOT ANNOUNCED (ARU, ASA), on the same socket, when `announceAs`
+    names it: "Go.dot on STAGE-PC" as `_oscjson._tcp` on the HTTP port and as
+    `_osc._udp` on the OSC port, with PTR, SRV, TXT (`txtvers=1`) and an A
+    record for each of this machine's addresses, under a host name of its own
+    (`godot-stage-pc.local`) so the system's own records are not contradicted.
+    Sent twice at the start, a second apart; answered whenever asked - to the
+    group, or straight back to a querier asking from another port or asking
+    so (RFC 6762 §5.4, §6.7); withdrawn at the stop with a time to live of
+    nought. It does not probe for a name already in use (§8.1): a second
+    Go.dot on one machine announces under its port, and two machines of one
+    name are a rig nobody can tell apart anyway.
+
     THE HANDLER OF EVERYTHING IS THE THREAD: the socket is read and written on
     it alone, the maps are its own, and what anybody else reads - the list, the
     mode, the problem - is copied out under one lock, a revision saying when it
@@ -72,7 +84,13 @@ namespace wfg::oscquery
             std::vector<std::pair<std::string, int>> peers {};   ///< responders asked directly as well
             std::string service = "_oscjson._tcp.local";
             int ownPort = 0;                                     ///< this Go.dot's HTTP port, left out of the list
+
+            std::string announceAs {};                           ///< the instance to announce, or empty for none
+            int oscPort = 0;                                     ///< the OSC port announced beside it
         };
+
+        /** The instance a serve on `httpPort` announces itself as: "Go.dot on <computer>". */
+        static std::string instanceName (const std::string& computer, int httpPort);
 
         /** A complete instance: its name, where it answers, what it says of itself. */
         struct Found
@@ -132,9 +150,19 @@ namespace wfg::oscquery
 
         struct Host
         {
-            std::string address {};
+            std::vector<std::string> addresses {};
             Clock::time_point expires {};
             Clock::time_point askedAt {};
+        };
+
+        /*  WHAT GO.DOT ANNOUNCES: the names, built once at the start. */
+        struct Own
+        {
+            mdns::Name jsonService {};
+            mdns::Name oscService {};
+            mdns::Name jsonInstance {};
+            mdns::Name oscInstance {};
+            mdns::Name host {};
         };
 
         void run();
@@ -145,6 +173,13 @@ namespace wfg::oscquery
         void sweep (Clock::time_point now);
         void publish();
         void say (std::string modeNow, std::string problemNow);
+
+        bool announcing() const noexcept { return ! options.announceAs.empty(); }
+        std::vector<mdns::Record> addressRecords (std::uint32_t ttl, bool withLoopback) const;
+        void answer (const mdns::Message& asked, const std::string& fromIp, int fromPort);
+        void announce (std::uint32_t ttl);
+        void sendToGroup (const std::vector<std::uint8_t>& bytes);
+        std::string preferred (const std::vector<std::string>& addresses) const;
 
         Options options;
         mdns::Name service;
@@ -158,6 +193,10 @@ namespace wfg::oscquery
 
         Clock::time_point nextQuery {};
         std::chrono::seconds interval { 1 };
+
+        Own own;
+        int announcementsLeft = 0;
+        Clock::time_point nextAnnouncement {};
 
         mutable std::mutex guard;
         std::vector<Found> list;

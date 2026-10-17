@@ -75,6 +75,41 @@ namespace wfg::oscquery
             return out;
         }
 
+        /*  A DNS label of a computer's name: lower case, letters, digits and
+            dashes - what a host name may hold. */
+        std::string hostLabelOf (const std::string& computer)
+        {
+            std::string label;
+
+            for (const auto c : computer)
+            {
+                if (c >= 'A' && c <= 'Z')
+                    label += static_cast<char> (c - 'A' + 'a');
+                else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+                    label += c;
+                else if (! label.empty() && label.back() != '-')
+                    label += '-';
+            }
+
+            while (! label.empty() && label.back() == '-')
+                label.pop_back();
+
+            return label.empty() ? std::string ("machine") : label;
+        }
+
+        mdns::Name under (const std::string& label, const mdns::Name& service)
+        {
+            mdns::Name name { label };
+            name.insert (name.end(), service.begin(), service.end());
+            return name;
+        }
+
+        bool sameNetwork (const std::string& a, const std::string& b)
+        {
+            const auto prefixOf = [] (const std::string& address) { return address.substr (0, address.rfind ('.')); };
+            return prefixOf (a) == prefixOf (b);
+        }
+
         std::string linesOf (const std::vector<Discovery::Found>& found)
         {
             std::string text;
@@ -87,6 +122,15 @@ namespace wfg::oscquery
     }
 
     Discovery::Discovery() = default;
+
+    std::string Discovery::instanceName (const std::string& computer, int httpPort)
+    {
+        /*  Under its port when it is not the usual one, so a main and its
+            backup on one machine - or a test beside the author's own Go.dot -
+            are two names, not one name twice. */
+        return "Go.dot on " + computer + (httpPort == 5010 || httpPort <= 0 ? std::string {}
+                                                                            : ", port " + std::to_string (httpPort));
+    }
 
     Discovery::~Discovery()
     {
@@ -143,6 +187,17 @@ namespace wfg::oscquery
 
         say (onGroup ? "browsing" : "unicast", problemNow);
 
+        if (announcing())
+        {
+            own.jsonService = mdns::nameOf ("_oscjson._tcp.local");
+            own.oscService = mdns::nameOf ("_osc._udp.local");
+            own.jsonInstance = under (options.announceAs, own.jsonService);
+            own.oscInstance = under (options.announceAs, own.oscService);
+            own.host = mdns::Name { "godot-" + hostLabelOf (juce::SystemStats::getComputerName().toStdString()), "local" };
+            announcementsLeft = 2;
+            nextAnnouncement = Clock::now();
+        }
+
         nextQuery = Clock::now();
         interval = std::chrono::seconds (1);
         stopping.store (false, std::memory_order_relaxed);
@@ -160,6 +215,10 @@ namespace wfg::oscquery
 
         if (thread.joinable())
             thread.join();
+
+        //  WITHDRAWN, on the socket's last breath: a time to live of nought (RFC 6762 §10.1).
+        if (announcing() && socket != nullptr)
+            announce (0);
 
         if (socket != nullptr)
             socket->shutdown();
@@ -245,6 +304,202 @@ namespace wfg::oscquery
             socket->joinMulticast (mdns::group);
     }
 
+    void Discovery::sendToGroup (const std::vector<std::uint8_t>& bytes)
+    {
+        const auto size = static_cast<int> (bytes.size());
+
+        if (onGroup)
+        {
+            if (interfaces.empty())
+                socket->write (mdns::group, mdns::port, bytes.data(), size);
+
+            for (const auto& address : interfaces)
+            {
+                multicast::sendFrom (socket->getRawSocketHandle(), address);
+                socket->write (mdns::group, mdns::port, bytes.data(), size);
+            }
+        }
+
+        for (const auto& [host, peerPort] : options.peers)
+            socket->write (juce::String (host), peerPort, bytes.data(), size);
+    }
+
+    /*  AN A RECORD FOR EACH OF THIS MACHINE'S ADDRESSES - the loopback first
+        when the one asking is on this machine, since that is the one it can
+        always reach. */
+    std::vector<mdns::Record> Discovery::addressRecords (std::uint32_t ttl, bool withLoopback) const
+    {
+        std::vector<mdns::Record> records;
+        auto addresses = ownAddresses;
+
+        std::erase (addresses, std::string ("127.0.0.1"));
+
+        if (withLoopback || addresses.empty())
+            addresses.insert (addresses.begin(), "127.0.0.1");
+
+        for (const auto& text : addresses)
+        {
+            const juce::IPAddress parsed { juce::String (text) };
+            mdns::Record record;
+            record.name = own.host;
+            record.type = mdns::type::a;
+            record.cacheFlush = true;
+            record.ttl = ttl;
+            record.address = { parsed.address[0], parsed.address[1], parsed.address[2], parsed.address[3] };
+            records.push_back (std::move (record));
+        }
+
+        return records;
+    }
+
+    void Discovery::announce (std::uint32_t ttl)
+    {
+        std::vector<mdns::Record> answers;
+        const auto shared = ttl == 0 ? 0u : 4500u;
+        const auto unique = ttl == 0 ? 0u : 120u;
+
+        const auto add = [&answers] (mdns::Name name, std::uint16_t type, std::uint32_t life, bool flush)
+        {
+            mdns::Record record;
+            record.name = std::move (name);
+            record.type = type;
+            record.ttl = life;
+            record.cacheFlush = flush;
+            answers.push_back (std::move (record));
+            return &answers.back();
+        };
+
+        add (own.jsonService, mdns::type::ptr, shared, false)->target = own.jsonInstance;
+        auto* json = add (own.jsonInstance, mdns::type::srv, unique, true);
+        json->port = static_cast<std::uint16_t> (options.ownPort);
+        json->target = own.host;
+        add (own.jsonInstance, mdns::type::txt, shared, true)->txt = { "txtvers=1" };
+
+        if (options.oscPort > 0)
+        {
+            add (own.oscService, mdns::type::ptr, shared, false)->target = own.oscInstance;
+            auto* osc = add (own.oscInstance, mdns::type::srv, unique, true);
+            osc->port = static_cast<std::uint16_t> (options.oscPort);
+            osc->target = own.host;
+            add (own.oscInstance, mdns::type::txt, shared, true)->txt = { "txtvers=1" };
+        }
+
+        sendToGroup (mdns::encodeResponse (answers, addressRecords (unique, false)));
+    }
+
+    /*  A QUESTION ABOUT GO.DOT, ANSWERED (ARU, ASA): the PTR of a service it
+        offers with the rest as additional records; its instances' SRV and
+        TXT; its host's A records; and the list of services for a browser that
+        asks what there is. To the group, unless the question came from
+        another port or asked for a direct answer. */
+    void Discovery::answer (const mdns::Message& asked, const std::string& fromIp, int fromPort)
+    {
+        std::vector<mdns::Record> answers, additionals;
+        const auto services = mdns::nameOf ("_services._dns-sd._udp.local");
+        const auto local = fromIp.rfind ("127.", 0) == 0;
+        bool wantsAddresses = false;
+        bool direct = fromPort != mdns::port;
+
+        const auto record = [] (mdns::Name name, std::uint16_t type, std::uint32_t ttl, bool flush)
+        {
+            mdns::Record made;
+            made.name = std::move (name);
+            made.type = type;
+            made.ttl = ttl;
+            made.cacheFlush = flush;
+            return made;
+        };
+
+        const auto offer = [&] (const mdns::Name& service, const mdns::Name& instance, int port, bool asAnswer)
+        {
+            auto ptr = record (service, mdns::type::ptr, 4500, false);
+            ptr.target = instance;
+            auto srv = record (instance, mdns::type::srv, 120, true);
+            srv.port = static_cast<std::uint16_t> (port);
+            srv.target = own.host;
+            auto txt = record (instance, mdns::type::txt, 4500, true);
+            txt.txt = { "txtvers=1" };
+
+            if (asAnswer)
+                answers.push_back (std::move (ptr));
+
+            additionals.push_back (std::move (srv));
+            additionals.push_back (std::move (txt));
+            wantsAddresses = true;
+        };
+
+        for (const auto& question : asked.questions)
+        {
+            direct = direct || question.unicastResponse;
+            const auto any = question.type == mdns::type::any;
+
+            if ((question.type == mdns::type::ptr || any) && mdns::sameName (question.name, own.jsonService))
+                offer (own.jsonService, own.jsonInstance, options.ownPort, true);
+            else if ((question.type == mdns::type::ptr || any) && options.oscPort > 0 && mdns::sameName (question.name, own.oscService))
+                offer (own.oscService, own.oscInstance, options.oscPort, true);
+            else if ((question.type == mdns::type::ptr || any) && mdns::sameName (question.name, services))
+            {
+                auto json = record (services, mdns::type::ptr, 4500, false);
+                json.target = own.jsonService;
+                answers.push_back (std::move (json));
+
+                if (options.oscPort > 0)
+                {
+                    auto osc = record (services, mdns::type::ptr, 4500, false);
+                    osc.target = own.oscService;
+                    answers.push_back (std::move (osc));
+                }
+            }
+            else if (mdns::sameName (question.name, own.jsonInstance) || mdns::sameName (question.name, own.oscInstance))
+            {
+                const auto json = mdns::sameName (question.name, own.jsonInstance);
+                offer (json ? own.jsonService : own.oscService, question.name, json ? options.ownPort : options.oscPort, false);
+
+                //  The instance's own records are the answer here, not additional ones.
+                for (auto& each : additionals)
+                    if (mdns::sameName (each.name, question.name))
+                        answers.push_back (each);
+
+                std::erase_if (additionals, [&question] (const mdns::Record& each) { return mdns::sameName (each.name, question.name); });
+            }
+            else if ((question.type == mdns::type::a || any) && mdns::sameName (question.name, own.host))
+            {
+                for (auto& each : addressRecords (120, local))
+                    answers.push_back (std::move (each));
+            }
+        }
+
+        if (answers.empty())
+            return;
+
+        if (wantsAddresses)
+            for (auto& each : addressRecords (120, local))
+                additionals.push_back (std::move (each));
+
+        if (direct)
+        {
+            //  Straight back, the question echoed for a querier on another port (§6.7).
+            const auto bytes = fromPort != mdns::port ? mdns::encodeResponse (answers, additionals, asked.id, asked.questions)
+                                                      : mdns::encodeResponse (answers, additionals);
+            socket->write (juce::String (fromIp), fromPort, bytes.data(), static_cast<int> (bytes.size()));
+            return;
+        }
+
+        sendToGroup (mdns::encodeResponse (answers, additionals));
+    }
+
+    std::string Discovery::preferred (const std::vector<std::string>& addresses) const
+    {
+        /*  A HOST ON SEVERAL NETWORKS answers with an address on each: the one
+            on a network this machine is on is the one it can reach. */
+        for (const auto& address : addresses)
+            for (const auto& mine : interfaces)
+                if (sameNetwork (address, mine))
+                    return address;
+
+        return addresses.empty() ? std::string {} : addresses.front();
+    }
+
     void Discovery::ask (const std::vector<mdns::Question>& questions, bool toGroup)
     {
         if (questions.empty() || socket == nullptr)
@@ -309,6 +564,14 @@ namespace wfg::oscquery
 
             followUp (now);
 
+            //  ANNOUNCED TWICE AT THE START, a second apart (RFC 6762 §8.3).
+            if (announcing() && onGroup && announcementsLeft > 0 && now >= nextAnnouncement)
+            {
+                announce (120);
+                --announcementsLeft;
+                nextAnnouncement = now + std::chrono::seconds (1);
+            }
+
             if (now - lastSweep >= std::chrono::seconds (1))
             {
                 sweep (now);
@@ -333,12 +596,21 @@ namespace wfg::oscquery
         }
     }
 
-    void Discovery::heard (const std::vector<std::uint8_t>& bytes, const std::string&, int)
+    void Discovery::heard (const std::vector<std::uint8_t>& bytes, const std::string& fromIp, int fromPort)
     {
         const auto message = mdns::decode (bytes);
 
-        if (! message || ! message->response)
+        if (! message)
             return;
+
+        //  A QUESTION: Go.dot's to answer, when it announces itself.
+        if (! message->response)
+        {
+            if (announcing())
+                answer (*message, fromIp, fromPort);
+
+            return;
+        }
 
         const auto now = Clock::now();
         const auto records = message->records();
@@ -396,7 +668,11 @@ namespace wfg::oscquery
                 }
 
                 auto& host = hosts[key];
-                host.address = record.addressText();
+                const auto address = record.addressText();
+
+                if (std::find (host.addresses.begin(), host.addresses.end(), address) == host.addresses.end())
+                    host.addresses.push_back (address);
+
                 host.expires = now + secondsOf (record.ttl);
             }
         }
@@ -426,7 +702,7 @@ namespace wfg::oscquery
 
             const auto hostKey = keyOf (instance.host);
 
-            if (const auto known = hosts.find (hostKey); known != hosts.end() && ! known->second.address.empty())
+            if (const auto known = hosts.find (hostKey); known != hosts.end() && ! known->second.addresses.empty())
                 continue;
 
             auto& host = hosts[hostKey];
@@ -459,7 +735,7 @@ namespace wfg::oscquery
 
         for (auto at = hosts.begin(); at != hosts.end();)
         {
-            if (! at->second.address.empty() && at->second.expires <= now)
+            if (! at->second.addresses.empty() && at->second.expires <= now)
                 at = hosts.erase (at);
             else
                 ++at;
@@ -481,18 +757,23 @@ namespace wfg::oscquery
 
             const auto host = hosts.find (keyOf (instance.host));
 
-            if (host == hosts.end() || host->second.address.empty())
+            if (host == hosts.end() || host->second.addresses.empty())
                 continue;
 
-            const auto own = options.ownPort > 0 && instance.port == options.ownPort
-                          && std::find (ownAddresses.begin(), ownAddresses.end(), host->second.address) != ownAddresses.end();
+            const auto& addresses = host->second.addresses;
+            const auto itself = options.ownPort > 0 && instance.port == options.ownPort
+                             && std::any_of (addresses.begin(), addresses.end(), [this] (const std::string& address)
+                                             {
+                                                 return std::find (ownAddresses.begin(), ownAddresses.end(), address)
+                                                          != ownAddresses.end();
+                                             });
 
-            if (own)
+            if (itself)
                 continue;
 
             Found entry;
             entry.name = instance.name.empty() ? key : instance.name.front();
-            entry.host = host->second.address;
+            entry.host = preferred (addresses);
             entry.queryPort = instance.port;
             entry.txt = instance.txt;
             now.push_back (std::move (entry));

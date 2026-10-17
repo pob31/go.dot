@@ -53,9 +53,11 @@
 
     WHAT PHASE 1 DOES NOT DO, so nobody looks for it:
 
-      * mDNS/Bonjour advertisement (`_oscjson._tcp`). Clients are pointed at a
-        host and port. juce::NetworkServiceDiscovery is NOT mDNS and would
-        advertise to nothing that speaks OSCQuery.
+      * mDNS/Bonjour advertisement (`_oscjson._tcp`) - not here: since
+        namespace draft §76 serve announces this server through
+        oscquery/Discovery, beside finding other servers; juce::
+        NetworkServiceDiscovery is not mDNS and would advertise to nothing that
+        speaks OSCQuery. Clients are still pointed at a host and port.
       * TLS. SIMPLEWEB_SECURE_SUPPORTED=0, no OpenSSL in the binary, and
         deps.no-openssl keeps it that way.
       * address patterns. A LISTEN or a write whose address carries a star
