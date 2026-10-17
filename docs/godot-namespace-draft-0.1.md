@@ -24962,6 +24962,36 @@ Not built, said here: nothing in Go.dot asks a processor anything once
 it has declared - a description is fetched only when it declares again; two processors with one root (two
 WFS-DIY boxes) share one device, the second moving the first's host.
 
+### 56.6 Two processors at one address (2026-10-17)
+
+Found while writing `docs/godot-authoring-guide-0.1.md`, the protocol for an application other than these
+two; the author: *"You can fix this bug since this is already an issue with these two applications and will
+only grow if more apps have this feature (mine or others')."* AEU sent a capture's answer to the first
+declared device whose host was the sender's address. WFS-DIY and S21_HiJack on one laptop are two devices at
+one host, so the first of them in the document heard the answers meant for both, and the other waited out its 2 s and said
+Go.dot never answered. The cue had landed.
+
+- **ARQ** (mine) **A capture's answer goes to the device that asked, as far as Go.dot can tell, and to each
+  device at the sender's address when it cannot.** Among the declared devices answerable at the sender's host:
+  the one whose port the datagram left from (a processor that sends from the socket it receives on, which the
+  guide recommends); else the one the cue aims at (a processor writing for its own root: every WFS-DIY capture,
+  S21_HiJack's recall); else the only one; else every one of them, once per socket. The last is S21_HiJack's
+  console capture beside WFS-DIY: the cue aims at the desk, S21_HiJack sends from a fresh socket per export and
+  WFS-DIY from its JUCE sender's, so nothing in the datagram says which asked. Both already ignore a
+  `/godot/captured` whose identifier they did not send (WFS-DIY's pending map, S21_HiJack's reply bus keyed by
+  identifier), so neither needed a change. No device at the sender's host: the device the cue aims at, as before.
+  Amends AEU, and AEI's "one message" where the sender cannot be told apart. Rejected: remembering the port a
+  declare came from (S21_HiJack declares from another fresh socket, and the memory is gone when Go.dot
+  restarts); a new argument naming the asker (the pairs are the variadic tail, and
+  every sender would change).
+
+Built 2026-10-17: `tree::originPort` beside `originHost`; `answeredMounts` in `AuthoringCommands.cpp` in place of
+`mountAtHost`. `AuthoringTests`: the origin's port; two processors at one address, each sending from a socket
+of its own - each hears a capture for its own root alone, both hear one for a desk elsewhere, one sending from
+its receive socket is heard alone whatever its cue aims at, two rows naming one socket hear it once. The new
+case fails on the code before it (S21_HiJack's recall answered to WFS-DIY). Under C and fr_FR, with
+`blackbox.authoring`.
+
 ## 57. Device integration presets: consoles, lighting desks, spatial processors
 
 ### 57.1 What it does

@@ -167,10 +167,13 @@ A capture longer than 1,200 bytes is sent as several datagrams, back to back:
 - `outcome` is `created`, `updated`, `appended` (a `more` chunk), or the refusal's reason:
   `locked`, `unknown-id`, `bad-address`, `bad-value`, `type-mismatch`.
 - `number` and `name` are the cue's as they now stand; empty on a refusal.
-- It goes to the declared device whose host is the sender's address, which is the processor
-  that asked. When the sender is not a device, it goes to the device the cue is aimed at. When
-  there is neither, nothing answers, and the refusal is in Go.dot's log and at
-  `/godot/engine/lastError`. The device's Tx switch does not silence an answer.
+- It goes to the processor that asked, among the declared devices at the sender's address: the
+  one whose port the datagram left from, else the one the cue is aimed at, else the only one, else
+  each of them, and each ignores an identifier it did not send. The last is S21_HiJack's console
+  capture with WFS-DIY on the same computer (2026-10-17, namespace draft §56.6, ARQ). When no device
+  is at the sender's address, it goes to the device the cue is aimed at. When there is neither,
+  nothing answers, and the refusal is in Go.dot's log and at `/godot/engine/lastError`. The
+  device's Tx switch does not silence an answer.
 - A processor waits 2 s for each answer it expects: one per datagram.
 
 ## 5. Firing Go.dot from a processor

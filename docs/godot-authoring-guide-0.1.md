@@ -345,9 +345,14 @@ overtakes its first chunk on a new cue is refused `unknown-id`.
 - `outcome` is `created`, `updated`, `appended`, or the reason it was refused (§6.4).
 - `number` and `name` are the cue's as they now stand - so you can say "Cue 14, Storm, updated" -
   and empty on a refusal.
-- It is sent to the declared device whose host is the address you sent from, else to the device the
-  cue's first address is under, at that device's declared port. When there is neither, nothing
-  answers.
+- It is sent to the declared port of the device that asked. Go.dot looks among the devices declared
+  at the address you sent from, and picks the one whose port the datagram left from; else the one
+  the cue is aimed at; else the only one. When several applications share your address and none of
+  those tells them apart - a cue aimed at a third device, sent from a socket that is not your
+  receive port - each of them gets the answer. When no device is declared at your address, the
+  device the cue is aimed at gets it; when there is none, nothing answers.
+- **So ignore a `/godot/captured` whose identifier you did not send**, and **send from the socket
+  you receive on** if you can: Go.dot then knows exactly which application asked.
 - Expect one answer per datagram. WFS-DIY waits 2 seconds for them, reports the first refusal at
   once, and otherwise reports when they have all arrived. No answer means Go.dot is not running or
   not reachable, has dropped you (strict senders, §2), or refused a command whose type tags were
@@ -442,17 +447,17 @@ answers come from the main.
 
 - **One root per application.** Two copies of one application declaring the same root share one
   device in Go.dot, the second moving the first's host. Give each its own root.
-- **Two applications on one computer.** The answer to a capture goes to the first declared device
-  whose host is the sender's address. When two declared applications share an IP address, one of
-  them may receive the other's `/godot/captured`: the cue lands, but the application that asked
-  waits in vain. The identifier in the answer lets the wrong one ignore it.
+- **Two applications on one computer** are told apart by the port a capture is sent from, or by
+  the root the cue is aimed at. When neither tells them apart, both receive the answer (§6.6), and
+  the one that did not ask has to ignore it.
 - **Recall is fire-and-forget.** Go.dot does not wait for your application to confirm that it
   recalled anything.
 - **Go.dot asks nothing after the declare**: no polling, no subscription.
 
 ## 12. Checklist
 
-1. A UDP port you receive OSC on, and a socket to send to Go.dot's port, 8010.
+1. A UDP port you receive OSC on, and the same socket - or another - to send to Go.dot's port,
+   8010.
 2. `GET <prefix>` served as OSCQuery JSON, the connection closed after the body: `ACCESS` on every
    node a cue should reach, `TYPE` one tag per argument, `VALS` where a menu helps.
 3. A declare when the connection is set up, at launch, when the description changes, when your
@@ -460,8 +465,9 @@ answers come from the main.
 4. Identifiers of 8 Crockford base32 characters, drawn once and stored beside what they recall.
 5. Captures with `where` = `standby` and the stored identifier; atoms written in the C locale,
    strings quoted and escaped; datagrams under 1,200 bytes, chunked with `more`.
-6. The three answers intercepted before your own routing; 2 seconds per expected answer; the
-   outcome, the cue's number and its name shown to the operator.
+6. The three answers intercepted before your own routing; a `/godot/captured` for an identifier
+   you did not send ignored; 2 seconds per expected answer; the outcome, the cue's number and its
+   name shown to the operator.
 7. Tried against `godot_mock.py` (`python godot_mock.py --port 8010`, and `--refuse locked` for a
    refusal), then against Go.dot: capture, GO, hear the messages arrive, capture again and read
    `updated`.

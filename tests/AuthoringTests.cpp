@@ -508,6 +508,79 @@ TEST_CASE ("authoring: the answer goes to the device the sender is, else to the 
     REQUIRE (desk.waitFor (1));
 }
 
+TEST_CASE ("authoring: two processors at one address each hear their own capture's answer (ARQ)")
+{
+    /*  WFS-DIY AND S21_HIJACK ON ONE LAPTOP, both sending from sockets other
+        than the ones they receive on - a JUCE sender's, a fresh one per export
+        - and the desk S21_HiJack captures for somewhere else. Until 2026-10-17
+        the first of the two in the document heard every answer. */
+    AuthoringRig rig;
+    Socket wfs;
+    Socket s21;
+    Socket sender;
+    const auto fromSender = "udp:127.0.0.1:" + std::to_string (sender.port());
+
+    REQUIRE (rig.apply (fromSender, "mount.declare", { text ("/wfs"), number (wfs.port()), number (0), text ("WFS-DIY") }).applied == 1u);
+    REQUIRE (rig.apply (fromSender, "mount.declare", { text ("/s21"), number (s21.port()), number (0), text ("S21") }).applied == 1u);
+
+    const auto deskId = rig.document.createMount ("/desk", {}).id;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + deskId + "/host", "10.255.255.1").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + deskId + "/port", "8000").ok);
+
+    /*  The ports a capture from `origin` aimed at `address` is answered at,
+        read off the queue before it leaves. */
+    const auto answeredAt = [&rig] (const std::string& origin, const std::string& address)
+    {
+        REQUIRE (rig.engine.submit (origin, "cue.capture",
+                                    { text ("standby"), text (""), text (""), text ("S"), text (""), text (""), text (""),
+                                      text (address), text ("f:0.5") }));
+        CHECK (rig.engine.processTick (rig.tick++).applied == 1u);
+
+        std::vector<int> ports;
+        for (const auto& each : rig.answers.waiting())
+        {
+            CHECK (each.host == "127.0.0.1");
+            ports.push_back (each.port);
+        }
+
+        rig.answers.flush();
+        return ports;
+    };
+
+    SUBCASE ("a capture for its own root is answered to that processor alone")
+    {
+        CHECK (answeredAt (fromSender, "/wfs/input/1/x") == std::vector<int> { wfs.port() });
+        CHECK (answeredAt (fromSender, "/s21/snapshot/recall") == std::vector<int> { s21.port() });
+    }
+
+    SUBCASE ("a capture for the desk is answered to both, which cannot be told apart")
+    {
+        CHECK (answeredAt (fromSender, "/desk/fader") == std::vector<int> { wfs.port(), s21.port() });
+
+        //  Each socket heard its declare's answer first, then the same capture's.
+        REQUIRE (wfs.waitFor (2));
+        REQUIRE (s21.waitFor (2));
+        CHECK (wfs.words (1)[0] == "/godot/captured");
+        CHECK (wfs.words (1) == s21.words (1));
+    }
+
+    SUBCASE ("sent from the socket it receives on, a processor is answered alone, whatever the cue aims at")
+    {
+        const auto fromS21 = "udp:127.0.0.1:" + std::to_string (s21.port());
+        CHECK (answeredAt (fromS21, "/desk/fader") == std::vector<int> { s21.port() });
+        CHECK (answeredAt (fromS21, "/wfs/input/1/x") == std::vector<int> { s21.port() });
+    }
+
+    SUBCASE ("two rows naming one socket hear it once")
+    {
+        const auto twinId = rig.document.createMount ("/twin", {}).id;
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + twinId + "/host", "127.0.0.1").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + twinId + "/port", std::to_string (wfs.port())).ok);
+
+        CHECK (answeredAt (fromSender, "/desk/fader") == std::vector<int> { wfs.port(), s21.port() });
+    }
+}
+
 TEST_CASE ("authoring: the applied records rebuild the same show with no socket and nothing drawn")
 {
     AuthoringRig rig;
@@ -571,6 +644,15 @@ TEST_CASE ("authoring: the origin's host")
     CHECK (tree::originHost ("udp:::1:9000") == "::1");
     CHECK (tree::originHost ("cli").empty());
     CHECK (tree::originHost ("mount:K3PV7WRB").empty());
+
+    CHECK (tree::originPort ("udp:192.168.1.7:9000") == 9000);
+    CHECK (tree::originPort ("ws:10.0.0.2:51234") == 51234);
+    CHECK (tree::originPort ("udp:::1:9000") == 9000);
+    CHECK (tree::originPort ("main:udp:10.0.0.7:9000") == 9000);
+    CHECK_FALSE (tree::originPort ("cli"));
+    CHECK_FALSE (tree::originPort ("udp:10.0.0.7"));
+    CHECK_FALSE (tree::originPort ("udp:10.0.0.7:90x"));
+    CHECK_FALSE (tree::originPort ("udp:10.0.0.7:0"));
 }
 
 //==============================================================================

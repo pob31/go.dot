@@ -34,7 +34,8 @@
 
     ONE COMMAND IS ONE UNDO STEP, which is the engine's rule already
     (`beginTransaction` per applied command), and ONE ANSWER, queued on the
-    RawSender and sent at the end of the tick (AEI).
+    RawSender and sent at the end of the tick (AEI) - to each device at the
+    sender's address only when a capture cannot tell which of them asked (ARQ).
 
     REPLAY NEEDS NO SOCKET AND DRAWS NOTHING. The host a declare was answered
     at, the identifiers a capture drew - the cue's and every further
@@ -81,6 +82,10 @@ namespace wfg::tree
         `ws:<ip>:<port>` give `<ip>` (the text between the first and the last
         colon, so an IPv6 address survives); any other origin gives nothing. */
     std::string originHost (const std::string& origin);
+
+    /*  The port in the same origins - the one the datagram left from - or
+        nullopt for any other origin or a port that does not read. */
+    std::optional<int> originPort (const std::string& origin);
 
     /*  Where a declared device is answered: its host and port, or nullopt for a
         device on a serial port or one with no port. */

@@ -23,10 +23,14 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/TreeCommands.h>
 
+#include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -103,20 +107,52 @@ namespace wfg::tree
             return true;
         }
 
-        /*  The declared device a datagram's host IS, by its `host` row - which
-            is how an answer reaches the processor that asked rather than the
-            device its cue happens to aim at. Empty when none is. */
-        std::string mountAtHost (const doc::ShowDocument& document, const std::string& host)
+        /*  WHO ASKED (namespace draft §56.6, ARQ): the devices a capture's
+            answer goes to, from the sender's address and port and the device
+            the cue aims at.
+
+            An address alone does not say: WFS-DIY and S21_HiJack on one laptop
+            are two devices at one host, and until 2026-10-17 the first of them
+            in the document heard every answer meant for either. So, among the
+            devices answerable at the sender's host:
+              - the one whose port the datagram left from - exact, for a
+                processor that sends from the socket it receives on;
+              - else the one the cue aims at - a processor writing a cue for
+                its own root, which is nearly every capture;
+              - else the only one;
+              - else every one of them: S21_HiJack's console capture aims at
+                the desk, it sends from a fresh socket each time, and the
+                processor beside it cannot be told from it. Each ignores an
+                identifier it did not send, so the one that asked hears and
+                the others drop it - better than an answer nobody waits for.
+            None at the sender's host - a script, a sender that never declared
+            - and the device the cue aims at hears, as before. */
+        std::vector<std::string> answeredMounts (const doc::ShowDocument& document, const std::string& host,
+                                                 std::optional<int> port, const std::string& aimed)
         {
-            if (host.empty())
-                return {};
+            std::vector<std::string> atHost;
+            std::string atPort;
 
-            for (const auto& mountId : declaredMountIds (document))
-                if (const auto declaration = mountDeclarationFor (document, mountId);
-                    declaration && declaration->host == host && declaration->serial.empty())
-                    return mountId;
+            if (! host.empty())
+                for (const auto& mountId : declaredMountIds (document))
+                    if (const auto to = answerAddressOf (document, mountId); to && to->host == host)
+                    {
+                        atHost.push_back (mountId);
 
-            return {};
+                        if (atPort.empty() && port == to->port)
+                            atPort = mountId;
+                    }
+
+            if (atHost.empty())
+                return aimed.empty() ? std::vector<std::string> {} : std::vector<std::string> { aimed };
+
+            if (! atPort.empty())
+                return { atPort };
+
+            if (std::find (atHost.begin(), atHost.end(), aimed) != atHost.end())
+                return { aimed };
+
+            return atHost;
         }
 
         /*  The declared device whose prefix covers `address` the furthest, or
@@ -292,6 +328,30 @@ namespace wfg::tree
         return std::string (spelled.substr (first + 1, last - first - 1));
     }
 
+    std::optional<int> originPort (const std::string& stamped)
+    {
+        //  The same spellings as `originHost`, and only those: after its last colon.
+        if (originHost (stamped).empty())
+            return std::nullopt;
+
+        const auto spelled = wfg::origin::firstOrigin (stamped);
+        const auto first = spelled.find (':');
+        const auto last = spelled.rfind (':');
+
+        if (last == first)
+            return std::nullopt;
+
+        int port = 0;
+        const auto digits = spelled.substr (last + 1);
+        const auto* const end = digits.data() + digits.size();
+        const auto [stoppedAt, error] = std::from_chars (digits.data(), end, port);
+
+        if (digits.empty() || error != std::errc {} || stoppedAt != end || port < 1 || port > 65535)
+            return std::nullopt;
+
+        return port;
+    }
+
     std::optional<AnswerAddress> answerAddressOf (const doc::ShowDocument& document, const std::string& mountId)
     {
         const auto declaration = mountDeclarationFor (document, mountId);
@@ -463,33 +523,40 @@ namespace wfg::tree
 
                             const auto senderHost = context.origin != nullptr ? originHost (*context.origin)
                                                                                : std::string {};
+                            const auto senderPort = context.origin != nullptr ? originPort (*context.origin)
+                                                                               : std::nullopt;
 
-                            /*  WHERE THE ANSWER GOES: the device the sender IS,
-                                else the device the cue aims at - S21_HiJack's
+                            /*  WHERE THE ANSWER GOES: the device that asked, as
+                                far as its address, its port and the cue's own
+                                device tell (`answeredMounts`) - S21_HiJack's
                                 console capture aims at the desk, and the answer
-                                still belongs to S21_HiJack when it declared
-                                itself. Neither: nobody is answered, and the `R`
-                                record and lastError are where a refusal is read. */
+                                still belongs to S21_HiJack. Nobody to answer:
+                                the `R` record and lastError are where a refusal
+                                is read. */
                             const auto answer = [&] (const std::string& outcome)
                             {
-                                auto deviceId = mountAtHost (document, senderHost);
-
-                                if (deviceId.empty() && ! pairs.empty())
-                                    deviceId = mountCovering (document, pairs.front().first);
-
-                                const auto to = deviceId.empty() ? std::nullopt : answerAddressOf (document, deviceId);
-
-                                if (! to)
-                                    return;
-
+                                const auto aimed = pairs.empty() ? std::string {}
+                                                                 : mountCovering (document, pairs.front().first);
                                 const auto landed = outcome == "created" || outcome == "updated" || outcome == "appended";
                                 const auto base = "/godot/cue/" + cueId + "/";
+                                std::vector<std::pair<std::string, int>> sentTo;
 
-                                answers.queue (to->host, to->port,
-                                               answerPacket ("/godot/captured",
-                                                             { cueId, outcome,
-                                                               landed ? attributeOr (document, base + "number") : std::string {},
-                                                               landed ? attributeOr (document, base + "name") : std::string {} }));
+                                for (const auto& deviceId : answeredMounts (document, senderHost, senderPort, aimed))
+                                {
+                                    const auto to = answerAddressOf (document, deviceId);
+
+                                    //  Two rows naming one socket hear it once.
+                                    if (! to || std::find (sentTo.begin(), sentTo.end(),
+                                                           std::pair { to->host, to->port }) != sentTo.end())
+                                        continue;
+
+                                    sentTo.emplace_back (to->host, to->port);
+                                    answers.queue (to->host, to->port,
+                                                   answerPacket ("/godot/captured",
+                                                                 { cueId, outcome,
+                                                                   landed ? attributeOr (document, base + "number") : std::string {},
+                                                                   landed ? attributeOr (document, base + "name") : std::string {} }));
+                                }
                             };
 
                             const auto refuse = [&] (const std::string& why)
