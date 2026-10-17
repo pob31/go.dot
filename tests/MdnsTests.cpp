@@ -25,13 +25,21 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include <wfg/engine/oscquery/Discovery.h>
 #include <wfg/engine/oscquery/Mdns.h>
 
 #include "TestSupport.h"
 
+#include <juce_core/juce_core.h>
+
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <functional>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 using namespace wfg;
@@ -355,4 +363,281 @@ TEST_CASE ("mdns: names compare as DNS compares them, and are split and joined a
     CHECK (mdns::sameName (mdns::nameOf ("_OSCJSON._TCP.Local"), mdns::nameOf ("_oscjson._tcp.local")));
     CHECK_FALSE (mdns::sameName (mdns::nameOf ("_osc._udp.local"), mdns::nameOf ("_oscjson._tcp.local")));
     CHECK_FALSE (mdns::sameName (mdns::nameOf ("a.local"), mdns::nameOf ("local")));
+}
+
+//==============================================================================
+//  THE BROWSER (namespace draft §76, UD.7), against a responder of the test's
+//  own on loopback, asked directly - no part of the network's 5353 is touched.
+namespace
+{
+    /*  A responder: a socket on 127.0.0.1 that answers each question it is
+        put with what `answer` says, to whoever asked. */
+    struct FakeResponder
+    {
+        using Answer = std::function<std::vector<std::uint8_t> (const mdns::Message&, int queryNumber)>;
+
+        explicit FakeResponder (Answer answerWith) : answer (std::move (answerWith))
+        {
+            REQUIRE (socket.bindToPort (0, "127.0.0.1"));
+            thread = std::thread ([this] { run(); });
+        }
+
+        ~FakeResponder()
+        {
+            stopping.store (true);
+            thread.join();
+            socket.shutdown();
+        }
+
+        int port() const { return socket.getBoundPort(); }
+
+        std::vector<mdns::Question> asked() const
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+            return questions;
+        }
+
+        void sendTo (int toPort, const std::vector<std::uint8_t>& bytes)
+        {
+            socket.write ("127.0.0.1", toPort, bytes.data(), static_cast<int> (bytes.size()));
+        }
+
+        void run()
+        {
+            std::vector<std::uint8_t> buffer (9000);
+
+            while (! stopping.load())
+            {
+                if (socket.waitUntilReady (true, 20) != 1)
+                    continue;
+
+                juce::String fromIp;
+                int fromPort = 0;
+                const auto got = socket.read (buffer.data(), static_cast<int> (buffer.size()), false, fromIp, fromPort);
+                const auto message = got > 0 ? mdns::decode (buffer.data(), static_cast<std::size_t> (got)) : std::nullopt;
+
+                if (! message || message->response)
+                    continue;
+
+                const auto number = ++queries;
+
+                {
+                    const std::lock_guard<std::mutex> lock { guard };
+                    questions.insert (questions.end(), message->questions.begin(), message->questions.end());
+                }
+
+                const auto bytes = answer (*message, number);
+
+                if (! bytes.empty())
+                    socket.write (fromIp, fromPort, bytes.data(), static_cast<int> (bytes.size()));
+            }
+        }
+
+        Answer answer;
+        juce::DatagramSocket socket { false };
+        std::atomic<bool> stopping { false };
+        std::atomic<int> queries { 0 };
+        mutable std::mutex guard;
+        std::vector<mdns::Question> questions;
+        std::thread thread;
+    };
+
+    const mdns::Name service = mdns::nameOf ("_oscjson._tcp.local");
+    const mdns::Name instance { "Chataigne", "_oscjson", "_tcp", "local" };
+    const mdns::Name host { "chataigne-pc", "local" };
+
+    mdns::Record ptrRecord (std::uint32_t ttl)
+    {
+        mdns::Record record;
+        record.name = service;
+        record.type = mdns::type::ptr;
+        record.ttl = ttl;
+        record.target = instance;
+        return record;
+    }
+
+    mdns::Record srvRecord (std::uint32_t ttl, std::uint16_t port = 42000)
+    {
+        mdns::Record record;
+        record.name = instance;
+        record.type = mdns::type::srv;
+        record.cacheFlush = true;
+        record.ttl = ttl;
+        record.port = port;
+        record.target = host;
+        return record;
+    }
+
+    mdns::Record txtRecord (std::uint32_t ttl)
+    {
+        mdns::Record record;
+        record.name = instance;
+        record.type = mdns::type::txt;
+        record.cacheFlush = true;
+        record.ttl = ttl;
+        record.txt = { "txtvers=1" };
+        return record;
+    }
+
+    mdns::Record aRecord (std::uint32_t ttl)
+    {
+        mdns::Record record;
+        record.name = host;
+        record.type = mdns::type::a;
+        record.cacheFlush = true;
+        record.ttl = ttl;
+        record.address = { 127, 0, 0, 1 };
+        return record;
+    }
+
+    /*  The whole answer to a question about the service, the way a responder
+        sends it: the PTR, and the rest as additional records. */
+    std::vector<std::uint8_t> wholeAnswer (std::uint32_t ttl)
+    {
+        return mdns::encodeResponse ({ ptrRecord (ttl) }, { srvRecord (ttl), txtRecord (ttl), aRecord (ttl) });
+    }
+
+    oscquery::Discovery::Options askingOnly (int responderPort)
+    {
+        oscquery::Discovery::Options options;
+        options.port = 0;
+        options.peers = { { "127.0.0.1", responderPort } };
+        return options;
+    }
+
+    template <typename Predicate>
+    bool within (int milliseconds, Predicate predicate)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            if (predicate())
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        return predicate();
+    }
+}
+
+TEST_CASE ("mdns: the browser finds a server announced to it, and lets it go on a goodbye")
+{
+    FakeResponder responder ([] (const mdns::Message& asked, int)
+                             {
+                                 for (const auto& question : asked.questions)
+                                     if (question.type == mdns::type::ptr && mdns::sameName (question.name, service))
+                                         return wholeAnswer (120);
+
+                                 return std::vector<std::uint8_t> {};
+                             });
+
+    oscquery::Discovery browser;
+    CHECK (browser.mode() == "off");
+    REQUIRE (browser.start (askingOnly (responder.port())));
+
+    //  From a port of its own, asking directly: unicast, no problem.
+    CHECK (browser.mode() == "unicast");
+    CHECK (browser.problem().empty());
+    CHECK (browser.boundPort() > 0);
+
+    REQUIRE (within (3000, [&browser] { return ! browser.found().empty(); }));
+    const auto found = browser.found();
+    REQUIRE (found.size() == 1u);
+    CHECK (found[0].name == "Chataigne");
+    CHECK (found[0].host == "127.0.0.1");
+    CHECK (found[0].queryPort == 42000);
+    CHECK (found[0].txt == std::vector<std::string> { "txtvers=1" });
+    CHECK (browser.foundText() == "Chataigne\t127.0.0.1\t42000");
+
+    //  Its question was the service's PTR, "answer me directly".
+    const auto asked = responder.asked();
+    REQUIRE_FALSE (asked.empty());
+    CHECK (mdns::sameName (asked.front().name, service));
+    CHECK (asked.front().type == mdns::type::ptr);
+    CHECK (asked.front().unicastResponse);
+
+    //  A goodbye, unasked: gone at once, and the revision says so.
+    const auto before = browser.revision();
+    responder.sendTo (browser.boundPort(), mdns::encodeResponse ({ ptrRecord (0) }));
+    CHECK (within (2000, [&browser] { return browser.found().empty(); }));
+    CHECK (browser.revision() > before);
+    CHECK (browser.foundText().empty());
+
+    browser.stop();
+}
+
+TEST_CASE ("mdns: an instance named alone is asked for its host and port, then for the host's address")
+{
+    /*  A responder that answers each question with that answer alone, as
+        one with a crowded packet or a quiet cache does: the browser has to
+        ask for what is missing. */
+    FakeResponder responder ([] (const mdns::Message& asked, int)
+                             {
+                                 std::vector<mdns::Record> answers;
+
+                                 for (const auto& question : asked.questions)
+                                 {
+                                     if (question.type == mdns::type::ptr)
+                                         answers.push_back (ptrRecord (120));
+                                     else if (question.type == mdns::type::srv && mdns::sameName (question.name, instance))
+                                         answers.push_back (srvRecord (120));
+                                     else if (question.type == mdns::type::txt && mdns::sameName (question.name, instance))
+                                         answers.push_back (txtRecord (120));
+                                     else if (question.type == mdns::type::a && mdns::sameName (question.name, host))
+                                         answers.push_back (aRecord (120));
+                                 }
+
+                                 return answers.empty() ? std::vector<std::uint8_t> {} : mdns::encodeResponse (answers);
+                             });
+
+    oscquery::Discovery browser;
+    REQUIRE (browser.start (askingOnly (responder.port())));
+    REQUIRE (within (4000, [&browser] { return ! browser.found().empty(); }));
+    CHECK (browser.foundText() == "Chataigne\t127.0.0.1\t42000");
+
+    bool askedService = false, askedAddress = false;
+
+    for (const auto& question : responder.asked())
+    {
+        askedService = askedService || (question.type == mdns::type::srv && mdns::sameName (question.name, instance));
+        askedAddress = askedAddress || (question.type == mdns::type::a && mdns::sameName (question.name, host));
+    }
+
+    CHECK (askedService);
+    CHECK (askedAddress);
+    browser.stop();
+}
+
+TEST_CASE ("mdns: what is not refreshed goes when its time to live runs out, and this Go.dot is left out")
+{
+    SUBCASE ("one second to live, answered once")
+    {
+        FakeResponder responder ([] (const mdns::Message&, int number)
+                                 {
+                                     return number == 1 ? wholeAnswer (1) : std::vector<std::uint8_t> {};
+                                 });
+
+        oscquery::Discovery browser;
+        REQUIRE (browser.start (askingOnly (responder.port())));
+        REQUIRE (within (3000, [&browser] { return ! browser.found().empty(); }));
+        CHECK (within (4000, [&browser] { return browser.found().empty(); }));
+        browser.stop();
+    }
+
+    SUBCASE ("a server at this machine's address on this Go.dot's own port is not a device")
+    {
+        FakeResponder responder ([] (const mdns::Message&, int) { return wholeAnswer (120); });
+
+        auto options = askingOnly (responder.port());
+        options.ownPort = 42000;
+
+        oscquery::Discovery browser;
+        REQUIRE (browser.start (options));
+        REQUIRE (within (3000, [&responder] { return responder.queries.load() > 0; }));
+        std::this_thread::sleep_for (std::chrono::milliseconds (400));
+        CHECK (browser.found().empty());
+        browser.stop();
+    }
 }

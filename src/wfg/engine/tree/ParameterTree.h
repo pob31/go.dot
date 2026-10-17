@@ -338,6 +338,13 @@ namespace wfg::tree
         std::string presetsProblem;
         std::string presetsSaved;
 
+        /*  WHAT THE NETWORK ANSWERED (namespace draft §76, ARW): `network/found`,
+            a line an OSCQuery server; `discovery`, how Go.dot is asking;
+            `discoveryProblem`, why it is not asking as it should. */
+        std::string found;
+        std::string discovery = "off";
+        std::string discoveryProblem;
+
         /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN (namespace draft §59.3):
             `sync/mtcLate` and `sync/mtcWorst` as the MIDI sender's MTC lane
             counts them, `sync/ltcLate` as the audio side's LTC generator does.

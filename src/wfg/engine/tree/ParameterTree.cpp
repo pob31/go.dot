@@ -4157,6 +4157,9 @@ namespace wfg::tree
             else if (name == "presetsFolder") text = state.presetsFolder;
             else if (name == "presetsProblem") text = state.presetsProblem;
             else if (name == "presetsSaved")  text = state.presetsSaved;
+            else if (name == "found")         text = state.found;
+            else if (name == "discovery")     text = state.discovery;
+            else if (name == "discoveryProblem") text = state.discoveryProblem;
             else                              text = std::string (row->defaultText);
 
             engineValue (*row, "network", text);

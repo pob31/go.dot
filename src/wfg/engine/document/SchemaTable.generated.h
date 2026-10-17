@@ -96,6 +96,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_preset_framing[] = { "length", "slip" };
     inline constexpr std::string_view enum_preset_origin[] = { "shipped", "yours" };
     inline constexpr std::string_view enum_network_brokerState[] = { "off", "listening", "problem" };
+    inline constexpr std::string_view enum_network_discovery[] = { "off", "browsing", "unicast" };
     inline constexpr std::string_view enum_sync_frameRate[] = { "23.976", "24", "25", "29.97df", "29.97", "30" };
     inline constexpr std::string_view enum_sync_ltcInState[] = { "none", "absent", "running", "stopped" };
     inline constexpr std::string_view enum_sync_mtcInState[] = { "none", "absent", "running", "stopped" };
@@ -3836,6 +3837,30 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "The preset last saved to your folder since this machine started, as <slug>@<version> (namespace draft 76, ARY): what preset.save wrote. Empty until one is." },
+        { "network", "found",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "The OSCQuery servers announced on the network now (namespace draft 76, ARU, ARW), one a line: the name it announces, a tab, its IPv4 address, a tab, the port it answers OSCQuery on. Found by multicast DNS (_oscjson._tcp), this Go.dot left out. What mount.describeAt takes, and what the Network tab's FOUND lists; never stored, since a device appearing is nobody's decision." },
+        { "network", "discovery",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "off",
+          false, 0.0, false, 0.0,
+          enum_network_discovery, 3,
+          "", 1.0, false, "park",
+          "",
+          "How Go.dot is asking the network for OSCQuery servers (namespace draft 76, ASA): off (serve was told --no-mdns, or no socket could be had), browsing (on port 5353 beside the system's responder, the group joined on every interface, Go.dot announced), unicast (5353 is another program's alone, so the question is put from a port of Go.dot's own every five seconds, and Go.dot is not announced)." },
+        { "network", "discoveryProblem",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "Why Go.dot is not asking the network as it should, or why the last device picked from it was not made, in a sentence; empty otherwise (namespace draft 76)." },
         { "network", "remotes",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",

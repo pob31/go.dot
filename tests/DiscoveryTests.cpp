@@ -31,6 +31,7 @@
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/log/Replay.h>
 #include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/tree/DiscoveryCommands.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/PresetCommands.h>
 #include <wfg/engine/tree/PresetScanner.h>
@@ -518,4 +519,25 @@ TEST_CASE ("discovery: a device saved as a preset is in the menu on the next rea
 
     scanner.stop();
     root.deleteRecursively();
+}
+
+TEST_CASE ("discovery: network.browse asks the hook, edits no show, and is this machine's alone")
+{
+    Rig rig;
+    int asked = 0;
+    tree::registerDiscoveryCommands (rig.engine.commands(), rig.document, rig.mounts, freshFolder ("wfg-bundle"),
+                                     { [&asked] { ++asked; }, {} });
+
+    const auto* command = rig.engine.commands().find ("network.browse");
+    REQUIRE (command != nullptr);
+    CHECK (command->machineLocal);
+    CHECK_FALSE (command->mutates);
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    REQUIRE (rig.apply ("window", "network.browse", {}).applied == 1u);
+    CHECK (asked == 1);
+
+    Rig replay;
+    tree::registerDiscoveryCommands (replay.engine.commands(), replay.document, replay.mounts, freshFolder ("wfg-bundle"));
+    CHECK (replay.apply ("window", "network.browse", {}).applied == 1u);
 }

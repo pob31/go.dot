@@ -107,6 +107,7 @@
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/PresetCommands.h>
+#include <wfg/engine/tree/DiscoveryCommands.h>
 #include <wfg/engine/tree/PresetScanner.h>
 #include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/tree/RawSender.h>
@@ -133,6 +134,7 @@
 #include <wfg/engine/monitor/TrafficTap.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/oscquery/EngineNamespace.h>
+#include <wfg/engine/oscquery/Discovery.h>
 #include <wfg/engine/oscquery/OscQueryServer.h>
 #include <wfg/engine/oscquery/RemoteCommands.h>
 #include <wfg/engine/oscquery/TimbreRoute.h>
@@ -454,6 +456,7 @@ namespace
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
         wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, nowhere, answers);
         wfg::tree::registerPresetCommands (engine.commands(), document, mounts, nowhere, nullptr);
+        wfg::tree::registerDiscoveryCommands (engine.commands(), document, mounts, nowhere);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
@@ -913,6 +916,7 @@ namespace
             wfg::tree::registerMountCommands (engine.commands(), document, mounts, bundle);
             wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, bundle, answers);
             wfg::tree::registerPresetCommands (engine.commands(), document, mounts, bundle, nullptr);
+            wfg::tree::registerDiscoveryCommands (engine.commands(), document, mounts, bundle);
 
             /*  AND THE TRANSACTION HOOK, which `serve` also installs and which
                 a replay is the reason to be careful about.
@@ -1514,6 +1518,7 @@ namespace
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, target, answers);
         wfg::tree::registerPresetCommands (engine.commands(), document, mounts, target, nullptr);
+        wfg::tree::registerDiscoveryCommands (engine.commands(), document, mounts, target);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
 
@@ -4203,6 +4208,28 @@ namespace
         presetScanner.setFolder (userPresetsFolder (args).getFullPathName().toStdString());
         std::uint64_t presetStatusSeen = 0;
 
+        /*  OSCQUERY SERVERS FOUND ON THE NETWORK (namespace draft §76, ARU,
+            ASA): multicast DNS on 5353, shared with the system's responder,
+            started once the HTTP port is known so this Go.dot leaves itself
+            out. `--no-mdns` asks nobody - every black-box driver passes it
+            unless it is about discovery; `--mdns-port=0` binds a port of the
+            system's choosing and joins no group, and `--mdns-peer=<host:port>`
+            (several, comma-separated) names responders asked directly: a test
+            touches no part of the network's 5353. */
+        wfg::oscquery::Discovery discovery;
+        wfg::oscquery::Discovery::Options discoveryOptions;
+        const auto discoveryOff = args.containsOption ("--no-mdns");
+        std::uint64_t discoverySeen = 0;
+
+        if (args.containsOption ("--mdns-port"))
+            discoveryOptions.port = args.getValueForOption ("--mdns-port").getIntValue();
+
+        if (args.containsOption ("--mdns-peer"))
+            for (const auto& peer : juce::StringArray::fromTokens (args.getValueForOption ("--mdns-peer"), ",", {}))
+                if (peer.containsChar (':'))
+                    discoveryOptions.peers.emplace_back (peer.upToLastOccurrenceOf (":", false, false).trim().toStdString(),
+                                                         peer.fromLastOccurrenceOf (":", false, false).getIntValue());
+
         wfg::tree::MountSender sender;
         sender.setHold (&machineHold);
         sender.setSerialSink ([&serialPorts] (const std::string& port, const std::vector<std::uint8_t>& packet)
@@ -4436,6 +4463,8 @@ namespace
                                            { [&presetScanner] { presetScanner.rescan(); },
                                              [&presetScanner] (wfg::tree::PresetSave job)
                                              { presetScanner.save (std::move (job)); } });
+        wfg::tree::registerDiscoveryCommands (engine.commands(), document, mounts, target,
+                                              { [&discovery] { discovery.browse(); }, {} });
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
@@ -6255,6 +6284,15 @@ namespace
             it had started perfectly. */
         std::cout << "wfg: http " << server.boundPort() << std::endl;
         std::cout << "wfg: osc " << udp.boundPort() << std::endl;
+
+        //  The network asked (namespace draft §76), once this Go.dot's own port is known to leave out.
+        if (! discoveryOff)
+        {
+            discoveryOptions.ownPort = server.boundPort();
+
+            if (! discovery.start (discoveryOptions))
+                std::cerr << "wfg serve: OSCQuery discovery: " << discovery.problem() << std::endl;
+        }
 
         //  --- the clock ------------------------------------------------------
         /*  TWO BLOCK SOURCES, ONE COUNTER, AND NOTHING ABOVE THEM KNOWS WHICH.
@@ -8562,6 +8600,16 @@ namespace
                                     state.presetsSaved = std::move (said.saved);
                                 }
 
+                                /*  AND WHAT THE NETWORK ANSWERED (namespace draft
+                                    §76, ARW), copied only when it moved. */
+                                if (const auto heardNow = discovery.revision(); heardNow != discoverySeen)
+                                {
+                                    discoverySeen = heardNow;
+                                    state.found = discovery.foundText();
+                                    state.discovery = discovery.mode();
+                                    state.discoveryProblem = discovery.problem();
+                                }
+
                                 /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN
                                     (namespace draft §59): MTC as its lane
                                     counts it, LTC as the audio side's generator
@@ -9671,6 +9719,7 @@ namespace
         server.stop();
         fetcher.stop();
         presetScanner.stop();
+        discovery.stop();
         probe.stop();
         listener.stop();
         dialler.stop();
@@ -9919,6 +9968,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
                       " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember]] [--engine-folder=<dir>]"
                       " [--no-video-window] [--presets=<dir>] [--user-presets=<dir>] [--hold]"
+                      " [--no-mdns | --mdns-port=N [--mdns-peer=<host>:<port>[,...]]]"
                       " [--role=main|backup|none] [--peer=<host>[:<port>]]... [--link-timeout=<seconds>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},

@@ -609,6 +609,12 @@ class Server:
         if not any(arg.startswith("--user-presets=") for arg in (extra_args or [])):
             argv.append(f"--user-presets={Path(machine_folder) / 'presets'}")
 
+        # AND NO MULTICAST DNS unless the driver is about it (namespace draft
+        # 76): a serve that announced itself would put every driver's Go.dot
+        # on the developer's network, coming and going for an hour.
+        if not any(arg.startswith("--mdns-") or arg == "--no-mdns" for arg in (extra_args or [])):
+            argv.append("--no-mdns")
+
         # --window opens the compiled client over this same engine, in this
         # same process (namespace draft section 14.16). Off by default here as
         # it is in the verb, and for the same reason: every driver in this

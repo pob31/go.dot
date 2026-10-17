@@ -143,6 +143,7 @@
 #include <wfg/engine/video/VideoCommands.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
+#include <wfg/engine/tree/DiscoveryCommands.h>
 #include <wfg/engine/tree/PresetCommands.h>
 #include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/json/JsonValue.h>
@@ -690,6 +691,9 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
 
     /*  And the device presets' two (namespace draft §57, AFO), with no table: the names are what is checked. */
     tree::registerPresetCommands (rig.engine.commands(), rig.document, rig.mounts, juce::File {}, nullptr);
+
+    //  And the network's: FOUND and a device from an address (§76).
+    tree::registerDiscoveryCommands (rig.engine.commands(), rig.document, rig.mounts, juce::File {});
 
     //  And the two looks for this machine's devices (§64).
     registerRescanCommands (rig.engine.commands(), {}, {});

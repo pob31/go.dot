@@ -465,8 +465,12 @@ add_library(wfg_engine STATIC
     wfg/engine/osc/UdpEndpoint.h
     wfg/engine/oscquery/EngineNamespace.cpp
     wfg/engine/oscquery/EngineNamespace.h
+    wfg/engine/oscquery/Discovery.cpp
+    wfg/engine/oscquery/Discovery.h
     wfg/engine/oscquery/Mdns.cpp
     wfg/engine/oscquery/Mdns.h
+    wfg/engine/oscquery/MulticastJoin.cpp
+    wfg/engine/oscquery/MulticastJoin.h
     wfg/engine/oscquery/OscQueryClient.h
     wfg/engine/oscquery/OscQueryClient.cpp
     wfg/engine/oscquery/OscQueryServer.cpp
@@ -482,6 +486,8 @@ add_library(wfg_engine STATIC
     wfg/engine/tree/PresetCommands.cpp
     wfg/engine/tree/PresetScanner.h
     wfg/engine/tree/PresetScanner.cpp
+    wfg/engine/tree/DiscoveryCommands.h
+    wfg/engine/tree/DiscoveryCommands.cpp
     wfg/engine/tree/Wires.cpp
     wfg/engine/tree/MidiEchoes.cpp
     wfg/engine/tree/MountProbe.h
