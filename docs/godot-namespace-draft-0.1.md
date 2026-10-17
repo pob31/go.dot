@@ -25010,8 +25010,9 @@ Go.dot client, so two senders changed.
   the datagram's own port (the send-only senders above); a new argument after the head (the pairs are the
   variadic tail, so only an argument count's parity would tell the forms apart).
 
-Built 2026-10-17: `cue.capture`'s parameters gain `from`, the handler reads either form; WFS-DIY 1.0.0beta57
-(`GoDot::captureMessages`) and S21_HiJack 0.3.1 (`capture_messages`) send it, every chunk carrying it.
+Built 2026-10-17: `cue.capture`'s parameters gain `from`, the handler reads either form (f060f29e); WFS-DIY
+1.0.0beta57 (`GoDot::captureMessages`, 876258e2, bumped 9d71c1f8) and S21_HiJack 0.3.1 (`capture_messages`,
+674d792, bumped 6259e99) send it, every chunk carrying it. Neither app is tagged.
 `AuthoringTests`: each processor answered alone whatever its cue aims at and wherever it sends from; a root no
 device holds, and an empty one, answered as ARQ; both forms recorded as they came. `blackbox.authoring` sends the
 new form. The guide and the contract say both forms and which versions go together.
