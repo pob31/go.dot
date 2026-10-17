@@ -1569,6 +1569,13 @@ built (go.dot-remote 0.1.4):
   links the same computers again.
 - English and French, following the tablet's language.
 
+*Amended in 0.8, at the author's direction (2026-10-17): "Take example on the tablet app."* The web
+client takes the remote's gestures onto its own panes (namespace draft §75): PANIC and Doh! always on
+screen, a run swiped away to kill it and tapped for its stops, pills to skip, a playhead dragged
+relative from the finger with cross-axis gain, a long press for a cue's Fire now, Park and Flag, a
+*Pick several* switch instead of modifier keys, numbers dragged from where they are and held as a
+fader is - and, for a mouse, the same gestures. Two-finger load-to-time stays to be built.
+
 Modifier vocabulary is **deferred until the needs are clear**, then designed
 once across desktop, tablet and hardware together — two of the three have no
 keyboard, so per-feature decisions produce shift-clicks with no touch

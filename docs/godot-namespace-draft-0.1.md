@@ -30682,3 +30682,85 @@ automation and read as a mode;
 update-cue; CC and pitch-bend curves on a MIDI cue, and MIDI clips; fades aimed at a device's nodes;
 a binding's ranges, invert, speed, dead zone, argument and kind on the Bindings page - Learn sets the kind, the rest is a `node.set` for now; the page's own bindings (it shows and makes none; the commands are there for it); 2D paths and their top view; the SpaceMouse as a live binding; the Stream Deck, which arrives as a
 transport whose keys are cart triggers with pictures and whose dials are relative bindings.
+
+## 75. The web page by touch
+
+Asked by the author on 2026-10-17, as §74 landed: *"could you look into the touch gesture for the
+webview remote? I think it's one of the last few things outstanding. Take example on the tablet app."*
+The page (`clients/console`) runs in a tablet's browser, an iPad's included, as a page made for a mouse
+and a keyboard: nothing tells the browser which gestures are the page's, so a pinch or a double tap
+zooms and a drag fights the scroll; one tap on *kill all* drops everything; a run's *kill* is the small
+cross PRD §3.17 rejects; the park wedge shows only under a hovering mouse; picking several cues needs
+Ctrl or Shift. The Android remote (§68) has the gestures, and this round takes them onto the page's own
+panes. PRD §3.17; the devplan's Phase 7. Decisions run from ARH.
+
+### 75.1 What it is, before its names
+
+On a tablet the page is worked by the finger as the app is: things big enough to hit, gestures that
+move a value from where it is rather than jumping it to where the finger landed, and a deliberate
+gesture for anything that stops the show. Every gesture works with a mouse too - the same events - and
+every one has a button or a command beside it (§4.11, PRD §3.17).
+
+- **Stopping.** One PANIC button: a press stops everything gracefully (Esc), a second within 0.75 s
+  drops everything (double Esc), and the word under it says what the next press will do. Doh! to its
+  left, with air between.
+- **The running pane.** A run swiped far enough either way is killed; a tap opens its sheet - stop now,
+  after this member, after this round, advance, solo, kill; a group's members as pills - a tap skips
+  one for this round, a hold until the group ends; a playhead dragged from where the finger lands,
+  finer the further above or below its strip the finger goes.
+- **The cue list.** A long press opens a cue's sheet - fire now, park the standby here, flag; the
+  gutter is a finger wide and always shows where to park; a *Pick several* switch makes each tap add
+  a cue to the pick or take it away.
+- **Numbers.** A number box dragged up or down moves the number from where it is - a level along the
+  fader's travel, anything else by the master dial's law - finer the further the finger is to the
+  side; a tap still types.
+- **The aim.** Its slider moves from where the finger lands, finer the further off it the finger goes.
+
+### 75.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **ARH** | **Gestures on what the page shows**: the running pane, the cue list, its numbers, the aim. The app's Surface, Cart and Mapping tabs stay the app's. | the author's (offered as "Gestures on what it shows", recommended) |
+| **ARI** | **PANIC as on the app** (ANW): one button, a press `run.stopAll`, a second within 0.75 s `run.killAll`, the word under it saying which the next press is; Doh! (`go.doh`) to its left with air between. The keyboard keeps Esc and Esc Esc. | the author's (offered as "PANIC as on the app", recommended) |
+| **ARJ** | **A *Pick several* switch** in the cue list's header: while it is on, a tap adds a cue to the pick or takes it away, and a long press still opens the sheet. | the author's (offered as "A Pick several switch", recommended) |
+| **ARK** | **Two-finger load-to-time later.** This round the aim's slider moves from the finger, with the cross-axis gain; one finger holding where the show is while another sets where to land is a round of its own. | the author's (offered as "Later", recommended) |
+| **ARL** | **One set of gestures for finger and mouse**: pointer events throughout. A coarse pointer (`pointer: coarse`) makes targets a finger wide - rows, buttons and the gutter 44 px - and shows what a mouse finds by hovering. The page takes the gestures it uses away from the browser where it uses them (`touch-action`) and leaves the browser's own zoom everywhere else. | mine |
+| **ARM** | **The app's numbers, as the app has them** (§68): a swipe kills past 0.6 of the row's width, either way, and slides back if the run is still there 1.5 s on; a long press is 500 ms; the playhead moves 1:1 within its strip and at half the rate for every 40 px above or below it, down to 1/256, seeks at most every 200 ms and a scene only as the finger lifts; a number's drag halves its rate for every 48 px to the side, down to 1/256; PANIC's second press within 750 ms; a value the page sent is shown for up to 1.5 s until the engine agrees. | mine |
+| **ARN** | **A number dragged is held as a fader is held**: `node.touch` as the finger goes down, the value at most every 20 ms, the last one and `node.release` as it lifts - so the touch table gates the page as it gates a surface, and one Undo takes the drag back. | mine |
+| **ARO** | **No dragging rows to reorder on a coarse pointer**: iPadOS starts a drag on a long press, which is the sheet's gesture here. The inspector's arrows move a cue, as they always could. | mine |
+| **ARP** | **The page's words are the app's** where the app has them - the running sheet, PANIC, Doh!, Fire now, Park the standby here, Flag; the page's own new words are owed the author's look. | mine |
+
+### 75.3 Rows
+
+None. The page writes what the app writes; nothing in the tree is new.
+
+### 75.4 Commands
+
+None new. The gestures send `run.stop <run> hard|afterMember|afterIteration`, `run.advance`,
+`run.solo`, `run.kill`, `run.prune <run> <cue> round|group`, `run.unprune`, `run.seek`, `cue.fire`,
+`standby.set`, `go.doh`, `run.stopAll`, `run.killAll`, `node.touch`, `node.release`, a cue's
+`flagged` row and a number's own address - each named in `gestures/commands.json` and checked against
+`wfg commands` by `tests/blackbox/client_page.py`.
+
+### 75.5 Stages
+
+| Stage | What | Built |
+|---|---|---|
+| WT.0 | This section; PRD §3.17; the devplan | |
+| WT.1 | The rules, pure: PANIC's press, the swipe, the long press, the cross-axis rate, the dial's law and the fader's, in `model/touch.js`, under `node --test` | |
+| WT.2 | A page a finger can work: `touch-action`, finger-wide targets on a coarse pointer, hover marks shown, pointer events where mouse events were, no native row drag on a coarse pointer (ARL, ARO) | |
+| WT.3 | PANIC and Doh! in the transport (ARI) | |
+| WT.4 | The running pane: swipe to kill, the run's sheet, the pills | |
+| WT.5 | The playhead dragged | |
+| WT.6 | The cue list: the long press's sheet, the gutter, *Pick several* (ARJ) | |
+| WT.7 | Numbers dragged and held (ARN); the aim from the finger (ARK) | |
+| WT.8 | The README and the guides; the console's tests and `client_page`; the whole suite | |
+
+### 75.6 Measurements
+
+None. The gestures and their numbers are the app's, which the author has had in his hands (§68).
+
+### 75.7 Not built
+
+Two-finger load-to-time (ARK); radial gain on a rotary - the page has none; the app's Surface, Cart
+and Mapping tabs on the page (ARH).

@@ -454,6 +454,29 @@ while the desktop shows the cue list.
 **Needs from the author:** modifier vocabulary decisions as they arise (PRD
 §6.7) — designed once across desktop, tablet and hardware.
 
+### The web page by touch (2026-10-17)
+
+The author, as §74 landed: the page on a tablet takes the Android remote's gestures, on what the page
+already shows (namespace draft §75, decisions ARH-ARK the author's, ARL-ARP mine). This is the
+"Multitouch" line above, but for two-finger load-to-time (ARK). On the branch `touch`, in the worktree
+`go.dot-touch`.
+
+| Stage | What | Depends on |
+|---|---|---|
+| WT.0 | Docs: namespace §75, PRD §3.17, this | - |
+| WT.1 | The gestures' rules, pure, in `model/touch.js` | WT.0 |
+| WT.2 | A page a finger can work: targets, `touch-action`, hover marks, pointer events | WT.0 |
+| WT.3 | PANIC and Doh! in the transport | WT.1 |
+| WT.4 | The running pane: swipe to kill, the sheet, the pills | WT.1, WT.2 |
+| WT.5 | The playhead dragged | WT.4 |
+| WT.6 | The cue list: the long press's sheet, the gutter, *Pick several* | WT.2 |
+| WT.7 | Numbers dragged and held; the aim from the finger | WT.1, WT.2 |
+| WT.8 | README, guides, tests, the whole suite | all |
+
+**Done when:** on an iPad the author stops a cue with a swipe, skips a member with a pill, scrubs a
+playhead and rides a level from the page without the page zooming, and PANIC twice drops everything
+while once stops it; a mouse does all of it the same way; CI is green.
+
 ### The Android remote (2026-10-15)
 
 The author asked for a native Android app beside the page: a background link
