@@ -222,6 +222,16 @@ namespace wfg::video
     {
         std::vector<DisplayInfo> out;
 
+        /*  ASKED OF THE SYSTEM EACH TIME, never JUCE's last answer (the
+            author, 2026-10-17: a screen plugged in while Go.dot ran was offered
+            in the show settings, but the output chosen on it stayed dark until
+            a restart). JUCE reads its list again only when a window of this
+            process hears the system say the displays changed - and the
+            renderer has no window on a display it has not found yet, so it
+            went on reading the list it started with. Asked once a second by
+            the renderer and on a menu opening by the window, where it is cheap. */
+        const_cast<juce::Displays&> (juce::Desktop::getInstance().getDisplays()).refresh();
+
         const auto& displays = juce::Desktop::getInstance().getDisplays().displays;
 
        #if defined (_WIN32)

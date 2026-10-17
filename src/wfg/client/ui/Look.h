@@ -97,6 +97,15 @@ namespace wfg::client::ui
             it hides one. */
         int getTabButtonBestWidth (juce::TabBarButton& button, int tabDepth) override;
 
+        /*  A MENU'S LINES WITH ROOM BETWEEN THEM (the author, 2026-10-17: "The
+            items in the menu could use a little padding, It's too dense"):
+            JUCE's line is 1.3 times its letters' height, and every line here
+            is given a few pixels more, which widens its margins with it. A
+            menu that asks for a height of its own keeps it. */
+        void getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int standardMenuItemHeight,
+                                        int& idealWidth, int& idealHeight) override;
+        int getPopupMenuBorderSize() override;
+
     private:
         /*  The type scale, kept because a look-and-feel is asked for a font
             long after the theme that set it has gone out of scope. Everything

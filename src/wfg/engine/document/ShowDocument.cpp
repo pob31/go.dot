@@ -5522,13 +5522,13 @@ namespace wfg::doc
             place cues live and not a thing to paste somewhere else, so an id
             that names one of those is passed over. Copies, because the writer
             reads the node and the fragment must not hold a handle on the show. */
-        std::vector<juce::ValueTree> nodes;
+        std::vector<juce::ValueTree> chosen;
 
         for (const auto& id : ids)
         {
             const auto node = findById (id);
 
-            if (! node.isValid())
+            if (! node.isValid() || std::find (chosen.begin(), chosen.end(), node) != chosen.end())
                 continue;
 
             const auto* element = Schema::instance().element (node.getType().toString().toStdString());
@@ -5541,8 +5541,28 @@ namespace wfg::doc
                   || ! list->mayContain (node.getType().toString().toStdString()))
                 continue;
 
-            nodes.push_back (node.createCopy());
+            chosen.push_back (node);
         }
+
+        /*  A CUE INSIDE A GROUP THAT IS COPIED TOO travels inside it, once (the
+            author, 2026-10-17: "Copying items in groups duplicates them after
+            the group"). Picking every row - ctrl/⌘-A, or shift across a group -
+            picks the group and each cue in it, and a copy of each pasted the
+            members twice: inside their new group, and again after it. */
+        const auto insideAnother = [&chosen] (const juce::ValueTree& node)
+        {
+            for (auto above = node.getParent(); above.isValid(); above = above.getParent())
+                if (std::find (chosen.begin(), chosen.end(), above) != chosen.end())
+                    return true;
+
+            return false;
+        };
+
+        std::vector<juce::ValueTree> nodes;
+
+        for (const auto& node : chosen)
+            if (! insideAnother (node))
+                nodes.push_back (node.createCopy());
 
         return nodes.empty() ? std::string {} : CanonicalXml::writeFragment (nodes);
     }

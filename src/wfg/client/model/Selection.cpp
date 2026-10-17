@@ -134,4 +134,37 @@ namespace wfg::client::model
     {
         return std::find (chosen.begin(), chosen.end(), id) != chosen.end();
     }
+
+    std::vector<std::string> Selection::outermost (const std::vector<Row>& rows) const
+    {
+        const auto parentOf = [&rows] (const std::string& id) -> std::string
+        {
+            for (const auto& row : rows)
+                if (row.rowKind == RowKind::cue && row.id == id)
+                    return row.parent;
+
+            return {};
+        };
+
+        std::vector<std::string> out;
+
+        for (const auto& id : chosen)
+        {
+            auto held = false;
+
+            //  Up through its groups, no further than the rows go: a list is never circular, a bound is cheap.
+            auto above = parentOf (id);
+
+            for (std::size_t steps = 0; ! above.empty() && steps <= rows.size() && ! held; ++steps)
+            {
+                held = contains (above);
+                above = parentOf (above);
+            }
+
+            if (! held)
+                out.push_back (id);
+        }
+
+        return out;
+    }
 }

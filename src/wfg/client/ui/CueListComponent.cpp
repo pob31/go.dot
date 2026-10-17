@@ -34,7 +34,9 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
+#include <array>
 #include <iterator>
+#include <memory>
 #include <utility>
 
 namespace wfg::client::ui
@@ -74,6 +76,109 @@ namespace wfg::client::ui
             the cue type"; namespace draft §63, ALQ): one column down the list,
             whatever the name, and the readiness cell one step further left. */
         constexpr int flagChars = 2;
+
+        /*  CUT, COPY AND PASTE AS THREE PICTURES ON ONE LINE, at the head of
+            the list's right-click (the author, 2026-10-17: "These actions can
+            be shown as three glyphs instead of text"). Each says its word and
+            its keys in a tooltip (PRD §4.8). A press on a picture closes the
+            menu with that verb, so the line is three items side by side; one
+            that cannot act now is drawn faint and takes no press. A release
+            counts only over the picture it was pressed on, so the button that
+            opened the menu can never choose for the hand. */
+        class ClipboardGlyphs final : public juce::PopupMenu::CustomComponent,
+                                      public juce::TooltipClient
+        {
+        public:
+            ClipboardGlyphs (double typeToUse, std::array<bool, 3> mayToUse, std::shared_ptr<int> chosenToUse)
+                : juce::PopupMenu::CustomComponent (false),
+                  type (typeToUse), may (mayToUse), chosen (std::move (chosenToUse))
+            {
+            }
+
+            //  In the Edit menu's order.
+            static constexpr int cut = 0, copy = 1, paste = 2;
+
+            void getIdealSize (int& idealWidth, int& idealHeight) override
+            {
+                idealHeight = juce::roundToInt (36.0 * type);
+                idealWidth = idealHeight * 4;
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                const auto side = static_cast<float> (getHeight()) * 0.55f;
+
+                for (int at = 0; at < 3; ++at)
+                {
+                    const auto cell = cellBounds (at);
+
+                    if (at == hovered && may[static_cast<std::size_t> (at)])
+                    {
+                        g.setColour (findColour (juce::PopupMenu::highlightedBackgroundColourId));
+                        g.fillRoundedRectangle (cell.reduced (3.0f), 4.0f);
+                    }
+
+                    const auto ink = findColour (juce::PopupMenu::textColourId)
+                                         .withMultipliedAlpha (may[static_cast<std::size_t> (at)] ? 1.0f : 0.35f);
+
+                    icons::draw (g, at == cut ? model::Icon::cut : at == copy ? model::Icon::copy : model::Icon::paste,
+                                 cell.withSizeKeepingCentre (side, side), ink);
+                }
+            }
+
+            juce::String getTooltip() override
+            {
+                if (hovered < 0)
+                    return {};
+
+                const auto key = hovered == cut ? 'x' : hovered == copy ? 'c' : 'v';
+                const auto word = hovered == cut ? "Cut" : hovered == copy ? "Copy" : "Paste";
+
+                return juce::String (word) + " ("
+                     + juce::KeyPress (key, juce::ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons() + ")";
+            }
+
+            void mouseMove (const juce::MouseEvent& event) override  { hover (cellAt (event.x)); }
+            void mouseExit (const juce::MouseEvent&) override         { hover (-1); }
+            void mouseDown (const juce::MouseEvent& event) override  { pressed = cellAt (event.x); }
+
+            void mouseUp (const juce::MouseEvent& event) override
+            {
+                const auto at = cellAt (event.x);
+
+                if (at < 0 || at != pressed || ! may[static_cast<std::size_t> (at)] || ! contains (event.getPosition()))
+                    return;
+
+                *chosen = at;
+                triggerMenuItem();
+            }
+
+        private:
+            double type = 1.0;
+            std::array<bool, 3> may;
+            std::shared_ptr<int> chosen;
+            int hovered = -1, pressed = -1;
+
+            juce::Rectangle<float> cellBounds (int at) const
+            {
+                const auto width = static_cast<float> (getWidth()) / 3.0f;
+                return { width * static_cast<float> (at), 0.0f, width, static_cast<float> (getHeight()) };
+            }
+
+            int cellAt (int x) const
+            {
+                return getWidth() > 0 ? juce::jlimit (0, 2, x * 3 / getWidth()) : -1;
+            }
+
+            void hover (int at)
+            {
+                if (at == hovered)
+                    return;
+
+                hovered = at;
+                repaint();
+            }
+        };
 
         /*  ONE FILE ONTO ONE MEDIA CUE NAMES ITS FILE, which is asked before
             anything else a dropped file could mean. More than one file could
@@ -1171,23 +1276,19 @@ namespace wfg::client::ui
 
         const auto& entry = rows[static_cast<std::size_t> (row)];
 
-        /*  A RIGHT-CLICK ON A CUE (namespace draft §65, AMJ): Copy for a patch,
-            the box that fires it by its id, which a patch needs and the list
-            does not show. Nothing is picked or parked by it. */
+        /*  A RIGHT-CLICK: cut, copy and paste, and on a cue the Copy for a
+            patch of namespace draft §65 (AMJ). A cue clicked that was not
+            picked is picked first (2026-10-17), as every list does, so the
+            three act on the row under the hand; one already picked keeps the
+            rest picked with it. Nothing is parked by it. */
         if (event.mods.isPopupMenu())
         {
-            if (entry.rowKind == model::RowKind::cue && ! entry.id.empty())
-            {
-                const auto words = juce::String::fromUTF8 (model::wordsToFireCue (entry.id).c_str());
-                const auto line = juce::String::fromUTF8 (process::scriptLineToFireCue ("javascript", entry.id).c_str());
-                const auto luaLine = juce::String::fromUTF8 (wfg::process::scriptLineToFireCue ("lua", entry.id).c_str());
-                juce::PopupMenu menu;
-                menu.addItem ("Copy for a patch", [words] { juce::SystemClipboard::copyTextToClipboard (words); });
-                //  And the line a script fires it with (namespace draft §66, AMV).
-                menu.addItem ("Copy for a script", [line] { juce::SystemClipboard::copyTextToClipboard (line); });
-                menu.addItem ("Copy for a Lua script", [luaLine] { juce::SystemClipboard::copyTextToClipboard (luaLine); });
-                menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
-            }
+            const auto cueId = entry.rowKind == model::RowKind::cue ? entry.id : std::string {};
+
+            if (! cueId.empty() && std::find (chosen.begin(), chosen.end(), cueId) == chosen.end() && actions.pick)
+                actions.pick (cueId, false, false);
+
+            popUpMenu (cueId, ! cueId.empty() || ! chosen.empty());
             return;
         }
 
@@ -1928,7 +2029,7 @@ namespace wfg::client::ui
         }
     }
 
-    void CueListComponent::backgroundClicked (const juce::MouseEvent&)
+    void CueListComponent::backgroundClicked (const juce::MouseEvent& event)
     {
         /*  EMPTY SPACE MEANS NOTHING IS PICKED (author, 2026-09-18: "clicking
             on empty space in the cuelist could also close the inspector"). The
@@ -1937,6 +2038,56 @@ namespace wfg::client::ui
             the one worth having. */
         if (actions.pick)
             actions.pick ({}, false, false);
+
+        //  And a right-click there offers Paste, which lands at the end of the list.
+        if (event.mods.isPopupMenu())
+            popUpMenu ({}, false);
+    }
+
+    void CueListComponent::popUpMenu (const std::string& cueId, bool picked)
+    {
+        const auto chosenGlyph = std::make_shared<int> (-1);
+
+        juce::PopupMenu menu;
+        menu.addCustomItem (1, std::make_unique<ClipboardGlyphs> (theme.type,
+                                                                  std::array<bool, 3> { picked && editable, picked, editable },
+                                                                  chosenGlyph),
+                            nullptr, "Cut, copy or paste");
+
+        /*  COPY FOR A PATCH (namespace draft §65, AMJ): the box that fires the
+            cue by its id, which a patch needs and the list does not show. */
+        if (! cueId.empty())
+        {
+            const auto words = juce::String::fromUTF8 (model::wordsToFireCue (cueId).c_str());
+            const auto line = juce::String::fromUTF8 (process::scriptLineToFireCue ("javascript", cueId).c_str());
+            const auto luaLine = juce::String::fromUTF8 (wfg::process::scriptLineToFireCue ("lua", cueId).c_str());
+
+            menu.addSeparator();
+            menu.addItem ("Copy for a patch", [words] { juce::SystemClipboard::copyTextToClipboard (words); });
+            //  And the line a script fires it with (namespace draft §66, AMV).
+            menu.addItem ("Copy for a script", [line] { juce::SystemClipboard::copyTextToClipboard (line); });
+            menu.addItem ("Copy for a Lua script", [luaLine] { juce::SystemClipboard::copyTextToClipboard (luaLine); });
+        }
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                            [safe = juce::Component::SafePointer<CueListComponent> (this), chosenGlyph] (int result)
+                            {
+                                if (safe == nullptr || result != 1)
+                                    return;
+
+                                const std::function<void()>* verb = nullptr;
+
+                                switch (*chosenGlyph)
+                                {
+                                    case ClipboardGlyphs::cut:   verb = &safe->actions.cut;   break;
+                                    case ClipboardGlyphs::copy:  verb = &safe->actions.copy;  break;
+                                    case ClipboardGlyphs::paste: verb = &safe->actions.paste; break;
+                                    default: break;
+                                }
+
+                                if (verb != nullptr && *verb)
+                                    (*verb)();
+                            });
     }
 
     int CueListComponent::headingHeight() const noexcept

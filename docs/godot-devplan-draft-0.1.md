@@ -2144,6 +2144,18 @@ line when a newer release is on GitHub, opens its page, and is told not now; Hel
 version runs; the switch turns the look off; the first `vX.Y.Z` tag publishes a release marked
 latest; CI is green.
 
+### Five fixes, for 0.1.1 (2026-10-17)
+
+The author, after using the first release: a group copied with its cues pasted them twice; the list
+tabs without pills, the one shown in yellow; a screen plugged in while Go.dot runs lit only after a
+restart; menus too dense; cut, copy and paste on a right-click in the cue list, as three pictures. *"This
+is part of v0.1.1"*: CMake's VERSION is 0.1.1, the tag his. Namespace draft §79; decisions ASZ-ATE mine.
+One stage, built and tested together.
+
+**Done when:** a group and its cues copied and pasted make one group; the tabs are words, the shown one
+yellow; an output on a screen plugged in after launch lights; menus breathe; a right-click offers the
+three pictures; CI is green.
+
 ---
 
 ## Cross-cutting, every phase

@@ -301,6 +301,11 @@ namespace wfg::client
                 listActions.pickAll         = [this] { selection.all (show.rows()); inspectNow(); };
                 listActions.removeChosen    = [this] { removeChosen(); };
 
+                //  The right-click's three, as the Edit menu does them.
+                listActions.cut             = [this] { if (! refusedWhileLocked()) { copyChosen(); removeChosen(); } };
+                listActions.copy            = [this] { copyChosen(); };
+                listActions.paste           = [this] { pasteFromClipboard(); };
+
                 /*  F AND SHIFT+F (the author, 2026-10-15; namespace draft §63):
                     the picked cues' flags written as one gesture, and the
                     engine's `go.flag` for the cue the last GO fired. */
@@ -1246,12 +1251,11 @@ namespace wfg::client
                     addMenuItem (menu, menuUndoHistory, browsingUndo ? "Close the undo history"
                                                                      : "Undo history...");
                     menu.addSeparator();
-                    addMenuItem (menu, menuCut, selection.size() > 1
-                                                  ? "Cut " + juce::String (static_cast<int> (selection.size())) + " cues"
-                                                  : "Cut cue");
-                    addMenuItem (menu, menuCopy, selection.size() > 1
-                                                   ? "Copy " + juce::String (static_cast<int> (selection.size())) + " cues"
-                                                   : "Copy cue");
+                    //  A group counts once, with the cues in it (the author, 2026-10-17).
+                    const auto clipped = static_cast<int> (selection.outermost (show.rows()).size());
+
+                    addMenuItem (menu, menuCut, clipped > 1 ? "Cut " + juce::String (clipped) + " cues" : "Cut cue");
+                    addMenuItem (menu, menuCopy, clipped > 1 ? "Copy " + juce::String (clipped) + " cues" : "Copy cue");
                     addMenuItem (menu, menuPaste, "Paste");
                     menu.addSeparator();
 
@@ -1794,9 +1798,12 @@ namespace wfg::client
                 if (selection.empty())
                     return;
 
-                send (gesture::copyCues (selection.ids()));
-                shell->transport.setNotice (juce::String (static_cast<int> (selection.size()))
-                                              + (selection.size() == 1 ? " cue copied" : " cues copied"));
+                //  A cue whose group is picked too is copied inside its group, once.
+                const auto ids = selection.outermost (show.rows());
+
+                send (gesture::copyCues (ids));
+                shell->transport.setNotice (juce::String (static_cast<int> (ids.size()))
+                                              + (ids.size() == 1 ? " cue copied" : " cues copied"));
             }
 
             void pasteFromClipboard()
@@ -1975,8 +1982,9 @@ namespace wfg::client
                 /*  ONE `object.delete` EACH, in the order they were picked:
                     N decisions, N records, N presses of undo to take back -
                     which the page's own delete says in its title. A copy of
-                    the ids, since the selection is cleared under them. */
-                const auto ids = selection.ids();
+                    the ids, since the selection is cleared under them; a cue
+                    whose group is picked too goes with its group. */
+                const auto ids = selection.outermost (show.rows());
 
                 for (const auto& id : ids)
                     send (gesture::deleteObject (id));

@@ -560,6 +560,14 @@ namespace wfg::client::ui
                     line (l, 8.5f, 15.0f, 13.5f, 15.0f);
                     break;
 
+                case model::Icon::cut:
+                    //  Scissors, open, blades up: two rings and two blades crossing above them.
+                    ring (l, 7.0f, 17.5f, 3.2f);
+                    ring (l, 17.0f, 17.5f, 3.2f);
+                    line (l, 9.2f, 15.2f, 17.5f, 3.0f);
+                    line (l, 14.8f, 15.2f, 6.5f, 3.0f);
+                    break;
+
                 /*  HOW READY A ROW'S CUE IS (namespace draft §48, AAS): one ring
                     told apart by what is inside it, so the four read without
                     their colours (PRD §4.8). */

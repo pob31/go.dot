@@ -109,6 +109,24 @@ namespace wfg::client::ui
         return juce::LookAndFeel_V4::getTabButtonBestWidth (button, tabDepth) + tabDepth * 2 / 3;
     }
 
+    void Look::getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int standardMenuItemHeight,
+                                          int& idealWidth, int& idealHeight)
+    {
+        LookAndFeel_V4::getIdealPopupMenuItemSize (text, isSeparator, standardMenuItemHeight, idealWidth, idealHeight);
+
+        if (isSeparator || standardMenuItemHeight > 0)
+            return;
+
+        const auto room = juce::roundToInt (8.0f * type);
+        idealHeight += room;
+        idealWidth += room * 2;
+    }
+
+    int Look::getPopupMenuBorderSize()
+    {
+        return juce::roundToInt (5.0f * type);
+    }
+
     juce::Font Look::getTextButtonFont (juce::TextButton& button, int buttonHeight)
     {
         auto font = LookAndFeel_V4::getTextButtonFont (button, buttonHeight);

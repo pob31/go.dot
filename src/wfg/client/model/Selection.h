@@ -69,6 +69,13 @@ namespace wfg::client::model
         /** In the order they were picked, which is the order a batch acts in. */
         const std::vector<std::string>& ids() const noexcept { return chosen; }
 
+        /*  THE PICKED CUES NO PICKED GROUP HOLDS, in the order they were
+            picked (the author, 2026-10-17): ctrl/⌘-A, or shift across a group,
+            picks the group and every cue in it, and a delete of the group
+            already takes them - their own deletes were refused one by one. A
+            row's group is read from `rows`, as the list draws them. */
+        std::vector<std::string> outermost (const std::vector<Row>& rows) const;
+
         /** The cue clicked last on purpose; empty when nothing is picked. */
         const std::string& anchor() const noexcept { return anchorId; }
 

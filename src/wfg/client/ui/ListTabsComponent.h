@@ -86,10 +86,29 @@ namespace wfg::client::ui
         std::string drawn, go;
         bool mayEdit = false;
 
-        std::vector<std::unique_ptr<juce::TextButton>> buttons;    ///< in step with `drawnTabs`
+        /*  A TAB IS ITS WORDS, NO PILL (the author, 2026-10-17: "The list of
+            cues should have no pills. Highlight the selected cuelist or cart in
+            yellow and keep the others light grey"). The one drawn below wears
+            GO's yellow and a bar of it along its foot, so it is not the colour
+            alone that says which (PRD §4.8); the others the light grey, the
+            full ink under the pointer. */
+        class Tab final : public juce::Button
+        {
+        public:
+            //  The strip's own theme, read as it paints, so F5's new colours reach every tab.
+            explicit Tab (const model::Theme& themeToUse) : juce::Button ({}), look (themeToUse) {}
+
+            const model::Theme& look;
+
+        protected:
+            void paintButton (juce::Graphics& g, bool over, bool down) override;
+        };
+
+        std::vector<std::unique_ptr<Tab>> buttons;    ///< in step with `drawnTabs`
         juce::TextButton plus { "+" };
 
         int rowHeight() const noexcept;
         void relight();
+        void flattenPlus();
     };
 }

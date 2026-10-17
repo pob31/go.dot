@@ -3293,6 +3293,88 @@ TEST_CASE ("client: copied cues come back as a fragment, and paste under new nam
 }
 
 //==============================================================================
+TEST_CASE ("client: a group copied with the cues in it carries each once, and is the one thing a cut or a delete sends")
+{
+    /*  The author, 2026-10-17: "Copying items in groups duplicates them after
+        the group". Ctrl/⌘-A picks the group and each cue in it; the copy held
+        the members twice - inside the group and again after it - and a paste
+        made them twice. The engine now copies a cue inside a copied group
+        once, inside it; the window's delete sends only the group. */
+    Rig rig;
+
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    auto tick = std::int64_t { 1 };
+
+    const auto create = [&] (const std::string& parent, int index, const char* kind, const char* name)
+    {
+        REQUIRE (rig.apply (tick++, "window", "cue.create",
+                            { osc::Value::string (parent), osc::Value::int32 (index),
+                              osc::Value::string (kind), osc::Value::string (name) }).applied == 1);
+        const auto order = model::text (*rig.publish (tick), parent == listId ? "/godot/list/" + listId + "/order"
+                                                                                : "/godot/cue/" + parent + "/order");
+        return model::createdAt (order, index);
+    };
+
+    const auto group = create (listId, 0, "group", "Scene");
+    const auto first = create (group, 0, "memo", "Rain");
+    const auto second = create (group, 1, "memo", "Wind");
+    const auto after = create (listId, 1, "memo", "After");
+    REQUIRE (model::text (*rig.publish (tick), "/godot/cue/" + first + "/parent") == group);
+
+    //  Copied as ctrl/⌘-A picks them: the group, the cues in it, the cue after it.
+    REQUIRE (rig.apply (tick++, "window", "document.copy",
+                        { osc::Value::string (group + " " + first + " " + second + " " + after) }).applied == 1);
+
+    const auto fragment = rig.document.clipboardText();
+    const auto count = [&fragment] (const std::string& what)
+    {
+        std::size_t found = 0;
+
+        for (auto at = fragment.find (what); at != std::string::npos; at = fragment.find (what, at + 1))
+            ++found;
+
+        return found;
+    };
+
+    CHECK (count ("name=\"Rain\"") == 1u);
+    CHECK (count ("name=\"Wind\"") == 1u);
+    CHECK (count ("name=\"After\"") == 1u);
+
+    //  Pasted at the end: one new group holding two cues, and one memo after it - nothing loose between.
+    const auto before = model::words (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order"));
+    REQUIRE (rig.apply (tick++, "window", "document.paste",
+                        { osc::Value::string (listId), osc::Value::int32 (static_cast<int> (before.size())),
+                          osc::Value::string (fragment) }).applied == 1);
+
+    const auto snapshot = rig.publish (tick);
+    const auto now = model::words (model::text (*snapshot, "/godot/list/" + listId + "/order"));
+    REQUIRE (now.size() == before.size() + 2);
+
+    const auto newGroup = now[before.size()];
+    CHECK (model::text (*snapshot, "/godot/cue/" + newGroup + "/kind") == "group");
+    CHECK (model::words (model::text (*snapshot, "/godot/cue/" + newGroup + "/order")).size() == 2u);
+    CHECK (model::text (*snapshot, "/godot/cue/" + now[before.size() + 1] + "/name") == "After");
+
+    //  The window's side: of the group, its cues and the one after, the group and the one after are sent.
+    model::ShowModel show;
+    show.refresh (*snapshot, listId);
+
+    model::Selection picked;
+    picked.all (show.rows());
+    REQUIRE (picked.contains (first));
+
+    const auto outermost = picked.outermost (show.rows());
+    CHECK (std::find (outermost.begin(), outermost.end(), group) != outermost.end());
+    CHECK (std::find (outermost.begin(), outermost.end(), first) == outermost.end());
+    CHECK (std::find (outermost.begin(), outermost.end(), second) == outermost.end());
+    CHECK (std::find (outermost.begin(), outermost.end(), after) != outermost.end());
+
+    //  A cue picked without its group is sent as itself.
+    picked.set (first);
+    CHECK (picked.outermost (show.rows()) == std::vector<std::string> { first });
+}
+
+//==============================================================================
 TEST_CASE ("client: the foot copies the part it shows, and pastes it onto the picked cues that take it")
 {
     /*  Copy and Paste on the foot (namespace draft §38): each panel's part,

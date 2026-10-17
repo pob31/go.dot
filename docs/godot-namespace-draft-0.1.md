@@ -31543,3 +31543,79 @@ without curl has wget is the system's; Ubuntu's desktop ships wget.
 Installing an update; signing the Windows build (a certificate is the author's to buy); the Android
 remote's own updates, which are its repository's and its store's; a newer version said on the web
 page.
+
+## 79. Five fixes, for 0.1.1
+
+Asked by the author on 2026-10-17, evening, after using the first release: *"1. Copying items in
+groups duplicates them after the group. 2. The list of cues should have no pills. Highlight the
+selected cuelist or cart in yellow and keep the others light grey. 3. When the screen is connected on
+the fly, the name now appears in the show parameters, but it's not active once selected. It still
+needs a restart of the app. 4. The items in the manu could use a little padding, It's too dense. 5.
+In the Cuelist panel, there is no right click for copy, paste and cut at least. These actions can be
+shown as three glyphs instead of text."* And: *"This is part of v0.1.1"* - so CMake's VERSION is
+0.1.1 with them; the tag is the author's (§78, ASX). The five asks are his; the decisions below, ASZ
+to ATE, are mine, proposed.
+
+### 79.1 What was wrong
+
+1. **A group copied with the cues in it.** The command log of the author's session shows a
+   `document.copy` naming fourteen cues: two groups and every cue inside them, as ctrl/⌘-A picks them
+   (or a shift-click across a group). Each was copied - the groups with their members inside, then
+   each member again on its own - so a paste made every member twice: inside the new group, and loose
+   after it. A cut or a delete of the same pick deleted the group, which takes its members, and then
+   sent a delete for each member, each refused.
+2. **The list tabs** were JUCE's buttons, drawn as filled pills.
+3. **A screen plugged in while Go.dot runs.** The renderer is a program of its own (§44). JUCE reads
+   the system's displays again only when a window of the program hears the system say they changed,
+   and the renderer has no window on a display it has not found - so it went on reading the list it
+   started with, and an output chosen on the new screen stayed "no display called ...". Show settings
+   offered the name because it lists the displays in Go.dot's own process, whose main window hears the
+   change (§64's rescan on the menu opening).
+4. **A menu's lines** were JUCE's: 1.3 times their letters' height, two pixels of border.
+5. **A right-click on a cue** offered only *Copy for a patch* and its two script lines (§65, AMJ;
+   §66, AMV); cut, copy and paste were in the Edit menu and on the keys alone.
+
+### 79.2 Decisions
+
+Mine (proposed):
+
+- **ASZ** A copy carries **a cue inside a group that is copied too inside it, once**: `document.copy`
+  passes over every cue whose group (or a group above it) it also copies, for every client, the page
+  and the remote as much as the window. The window's cut and delete send the outermost picked cues
+  alone, a group's members going with it; Edit's *Copy N cues* counts a group once.
+- **ATA** The tabs are **their words, no pill**: the list drawn below in GO's yellow (`go`), in bold,
+  with a bar of the same yellow along the tab's foot, so the colour is not alone in saying which (PRD
+  §4.8); the others in the light grey (`ink-dim`), the full ink under the pointer. The `+` beside them
+  is a word too. The ▸ before the list GO acts on and "· cart" after a cart are as they were.
+- **ATB** **Displays are asked of the system each time they are listed** - JUCE's list read again
+  first - in the renderer once a second and in the window when a menu opens. A screen plugged in is
+  found by the renderer within a second, and an output already chosen on it, or chosen after, lights
+  without a restart. The same on macOS and Linux, where JUCE's own news of a change comes by other ways.
+- **ATC** **Every menu's line is eight pixels taller** than JUCE's (times the type scale), and wider by
+  as much at each side; a menu's border is five. A menu that asks for a line height of its own keeps it.
+- **ATD** A right-click on a cue **picks it first when it was not picked**, as every list does, so cut
+  and copy act on the row under the hand; on a picked cue the rest stay picked. On empty space nothing
+  is picked, and a paste lands at the end of the list. Overrules AMJ's "nothing is picked by it" (§65).
+- **ATE** **Cut, copy and paste are three pictures on one line** at the head of the right-click menu,
+  above the lines that fire the cue: scissors (a new icon), and the two sheets and the clipboard the
+  foot's Copy and Paste wear (§38). Each says its word and its keys in a tooltip. Cut and Paste are
+  faint and take no press in show mode or under the lock, Cut and Copy with nothing picked. Each does
+  exactly what the Edit menu's does - Paste reads the clipboard as ctrl/⌘-V does: cues land after the
+  picked cue, a part (§38) lands on the picked cues. A release counts only over the picture it was
+  pressed on, so the button that opened the menu can never choose for the hand.
+
+### 79.3 Tests
+
+`ClientTests`: *a group copied with the cues in it carries each once, and is the one thing a cut or a
+delete sends* - a group of two cues and a cue after it, copied as ctrl/⌘-A picks them, hold each name
+once, paste as one group of two and one cue, and the window's outermost pick is the group and the cue
+after it, or a lone member when it is picked alone. `wfg_audio_ui_tests`: the list tabs' case now also
+reads the picture - GO's yellow under the shown tab and nowhere under the other, no pill's fill behind
+either. The rest is drawn or needs a screen plugged in: the menus' spacing, the three pictures, and the
+display found again are the author's to see.
+
+### 79.4 Owed
+
+The author's look at the tabs, the menus and the three pictures, and his review of the words (the
+tooltips). A screen plugged in while Go.dot runs, its output chosen and lit, on Windows - the case
+reported - and on a Mac.

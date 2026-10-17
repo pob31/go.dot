@@ -79,8 +79,9 @@ namespace wfg::client::model
         //  The inspector's drawers.
         identity, clock, list, info, sound,
 
-        //  What the foot's head does to the part it shows (namespace draft §38).
-        copy, paste,
+        /*  What the foot's head does to the part it shows (namespace draft §38),
+            and the cue list's right-click to the cues picked (2026-10-17). */
+        copy, paste, cut,
 
         //  How ready a row's cue is for GO (namespace draft §48, AAS).
         loading, ready, partly, missing,

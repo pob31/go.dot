@@ -7818,7 +7818,8 @@ TEST_CASE ("inspector: the key line takes the next key, refuses the show's own, 
 
 TEST_CASE ("list tabs: one a list, the shown one lit, GO's marked, a cart in words, and a + while editable")
 {
-    /*  Namespace draft §74, AQM, AQS. */
+    /*  Namespace draft §74, AQM, AQS; drawn as words, no pill, the shown one
+        in GO's yellow (§79, ATA). */
     std::vector<std::string> shown;
     std::vector<bool> made;
 
@@ -7839,7 +7840,7 @@ TEST_CASE ("list tabs: one a list, the shown one lit, GO's marked, a cart in wor
     const auto lit = [&tabs] (const juce::String& words)
     {
         for (auto* child : tabs.getChildren())
-            if (auto* button = dynamic_cast<juce::TextButton*> (child); button != nullptr && button->getButtonText() == words)
+            if (auto* button = dynamic_cast<juce::Button*> (child); button != nullptr && button->getButtonText() == words)
                 return button->getToggleState();
 
         return false;
@@ -7847,6 +7848,42 @@ TEST_CASE ("list tabs: one a list, the shown one lit, GO's marked, a cart in wor
 
     CHECK (lit (juce::String (juce::CharPointer_UTF8 ("Pads \xc2\xb7 cart"))));
     CHECK_FALSE (lit (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb8 Main"))));
+
+    /*  WHAT IS DRAWN (the author, 2026-10-17: "no pills. Highlight the
+        selected cuelist or cart in yellow and keep the others light grey"):
+        GO's yellow under the shown tab and nowhere under the other, and no
+        button's fill behind either - the strip's own panel shows through. */
+    {
+        const model::Theme theme;
+        const auto picture = tabs.createComponentSnapshot (tabs.getLocalBounds());
+        const auto yellow = ui::Look::colour (theme, "go");
+        const auto pill = ui::Look::colour (theme, "panel-high");
+
+        const auto count = [&picture] (juce::Rectangle<int> area, juce::Colour colour)
+        {
+            int found = 0;
+
+            for (int y = area.getY(); y < area.getBottom(); ++y)
+                for (int x = area.getX(); x < area.getRight(); ++x)
+                    if (picture.getPixelAt (x, y).getARGB() == colour.getARGB())
+                        ++found;
+
+            return found;
+        };
+
+        juce::Rectangle<int> shownTab, otherTab;
+
+        for (auto* child : tabs.getChildren())
+            if (auto* button = dynamic_cast<juce::Button*> (child); button != nullptr && button->getButtonText() != "+")
+                (button->getToggleState() ? shownTab : otherTab) = button->getBounds();
+
+        REQUIRE (! shownTab.isEmpty());
+        REQUIRE (! otherTab.isEmpty());
+        CHECK (count (shownTab, yellow) > 0);
+        CHECK (count (otherTab, yellow) == 0);
+        CHECK (count (shownTab, pill) == 0);
+        CHECK (count (otherTab, pill) == 0);
+    }
 
     tabs.pressTab ("CART0001");
     tabs.pressNew (true);
@@ -7857,7 +7894,7 @@ TEST_CASE ("list tabs: one a list, the shown one lit, GO's marked, a cart in wor
     const auto plusShowing = [&tabs]
     {
         for (auto* child : tabs.getChildren())
-            if (auto* button = dynamic_cast<juce::TextButton*> (child); button != nullptr && button->getButtonText() == "+")
+            if (auto* button = dynamic_cast<juce::Button*> (child); button != nullptr && button->getButtonText() == "+")
                 return button->isVisible();
 
         return false;

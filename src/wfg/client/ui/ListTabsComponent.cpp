@@ -43,13 +43,23 @@ namespace wfg::client::ui
         };
 
         addChildComponent (plus);
+        flattenPlus();
     }
 
     void ListTabsComponent::applyTheme (const model::Theme& themeToUse)
     {
         theme = themeToUse;
+        flattenPlus();
         resized();
         repaint();
+    }
+
+    //  The + is a word beside the tabs, as they are: no fill, no outline, the tabs' grey.
+    void ListTabsComponent::flattenPlus()
+    {
+        plus.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+        plus.setColour (juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
+        plus.setColour (juce::TextButton::textColourOffId, Look::colour (theme, "ink-dim"));
     }
 
     int ListTabsComponent::rowHeight() const noexcept
@@ -84,7 +94,7 @@ namespace wfg::client::ui
 
             for (const auto& tab : drawnTabs)
             {
-                auto button = std::make_unique<juce::TextButton>();
+                auto button = std::make_unique<Tab> (theme);
                 button->setWantsKeyboardFocus (false);
                 button->setClickingTogglesState (false);
                 button->setTooltip (tab.cart ? "A cart: GO never meets it. Double click to rename."
@@ -149,6 +159,27 @@ namespace wfg::client::ui
 
                 return;
             }
+    }
+
+    void ListTabsComponent::Tab::paintButton (juce::Graphics& g, bool over, bool down)
+    {
+        const auto lit = getToggleState();
+        const auto yellow = Look::colour (look, "go");
+        const auto ink = lit ? yellow : Look::colour (look, over || down ? "ink" : "ink-dim");
+        const auto font = Look::font (look, 13.0f);
+
+        auto area = getLocalBounds();
+
+        if (lit)
+        {
+            const auto bar = juce::jmax (2, juce::roundToInt (2.0 * look.type));
+            g.setColour (yellow);
+            g.fillRect (area.removeFromBottom (bar).reduced (juce::roundToInt (6.0 * look.type), 0));
+        }
+
+        g.setColour (ink);
+        g.setFont (lit ? font.boldened() : font);
+        g.drawFittedText (getButtonText(), area.reduced (4, 0), juce::Justification::centred, 1, 0.8f);
     }
 
     void ListTabsComponent::paint (juce::Graphics& g)

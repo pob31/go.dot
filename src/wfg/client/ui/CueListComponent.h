@@ -108,6 +108,12 @@ namespace wfg::client::ui
             /** Picks every cue the list draws: ctrl/⌘-A. */
             std::function<void()> pickAll;
 
+            /*  CUT, COPY AND PASTE FROM A RIGHT-CLICK (the author, 2026-10-17):
+                the Edit menu's three, on what is picked - a row clicked that
+                was not picked is picked first, and a click on empty space
+                picks nothing, so a paste lands at the end of the list. */
+            std::function<void()> cut, copy, paste;
+
             /*  F FLAGS OR UNFLAGS THE PICKED CUES, SHIFT+F FLAGS THE CUE THE
                 LAST GO FIRED (the author, 2026-10-15; namespace draft §63,
                 ALM). Under the lock too: a flag is a state row. */
@@ -202,6 +208,12 @@ namespace wfg::client::ui
         void listBoxItemClicked (int row, const juce::MouseEvent& event) override;
         void listBoxItemDoubleClicked (int row, const juce::MouseEvent& event) override;
         void backgroundClicked (const juce::MouseEvent& event) override;
+
+        /*  THE RIGHT-CLICK'S MENU: cut, copy and paste as three pictures, and
+            for a cue (`cueId`, empty off one) the lines that fire it. `picked`
+            is whether anything is picked now - said by the caller, since what
+            this list holds as picked arrives a pass after a pick. */
+        void popUpMenu (const std::string& cueId, bool picked);
 
         /*  EDITING IN PLACE (author, 2026-09-18): a double-click on the
             number, the name or one of the three times opens a box over that
