@@ -157,6 +157,12 @@ namespace wfg
             the author's. */
         std::string rememberIn {};
 
+        /*  WHERE A NEWER GO.DOT IS ASKED ABOUT (namespace draft §78): empty for
+            GitHub's own `latest`; `--update-url=<url>` names another, for a test -
+            a `file:` URL is read as a file. The window asks at launch only when
+            `rememberIn` is set, which only the launchers make so (ASS). */
+        std::string updateUrl {};
+
         /*  THE FOURTH DOOR (author, 2026-09-30: a network monitor "similar to
             the one in WFS-DIY"): what crossed the wire, OSC and MIDI, in and
             out. Not a reach past the tick thread either - it is a ring the

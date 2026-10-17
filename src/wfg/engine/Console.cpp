@@ -9479,6 +9479,10 @@ namespace
                 if (remember)
                     clientHost.rememberIn = lastShowFile().getParentDirectory().getFullPathName().toStdString();
 
+                //  Where a newer Go.dot is asked about (§78): GitHub's, unless a test names another.
+                if (args.containsOption ("--update-url"))
+                    clientHost.updateUrl = args.getValueForOption ("--update-url").toStdString();
+
                 clientHost.traffic = &traffic;
 
                 //  The fifth door (Console.h): the canvases, small, for the video monitor.
@@ -9982,8 +9986,8 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>] [--midi-render=<port>=<file>]"
                       " [--midi-play=<port>=<file>] [--midi-play-loop=<port>=<file>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
-                      " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember]] [--engine-folder=<dir>]"
-                      " [--no-video-window] [--presets=<dir>] [--user-presets=<dir>] [--hold]"
+                      " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember] [--update-url=<url>]]"
+                      " [--engine-folder=<dir>] [--no-video-window] [--presets=<dir>] [--user-presets=<dir>] [--hold]"
                       " [--no-mdns | --mdns-port=N [--mdns-peer=<host>:<port>[,...]]]"
                       " [--role=main|backup|none] [--peer=<host>[:<port>]]... [--link-timeout=<seconds>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",

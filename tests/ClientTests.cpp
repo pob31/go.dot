@@ -54,6 +54,7 @@
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
+#include <wfg/client/model/Updates.h>
 #include <wfg/client/model/DeviceTree.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/Icons.h>
@@ -15672,4 +15673,191 @@ TEST_CASE ("client: the lists as tabs - a cart says so, GO's list is never one, 
     CHECK (gesture::createList ("Pads", true).args.size() == 4u);
     CHECK (gesture::createList ("Next", false).args.size() == 1u);
     CHECK (gesture::focusList ("SECND001").command == "list.focus");
+}
+
+
+//==============================================================================
+/*  A NEWER GO.DOT (namespace draft §78): what a version is, which is newer,
+    what of GitHub's answer is believed, what the machine remembers, and the
+    ask itself, read from a file a test wrote. */
+namespace
+{
+    std::string releaseReply (const std::string& tag, const std::string& page, const std::string& more = {})
+    {
+        return "{\"tag_name\": \"" + tag + "\", \"html_url\": \"" + page + "\", \"name\": \"Go.dot\"" + more + "}";
+    }
+}
+
+TEST_CASE ("updates: a version is three numbers, and newer is the three of them in order")
+{
+    namespace up = wfg::client::model::updates;
+
+    const auto plain = up::readVersion ("v0.1.10");
+    REQUIRE (plain.has_value());
+    CHECK (plain->major == 0);
+    CHECK (plain->minor == 1);
+    CHECK (plain->patch == 10);
+    CHECK (up::readVersion ("1.2.3").has_value());
+    CHECK (up::versionText (*plain) == "0.1.10");
+
+    //  No beta in a version number (the author, 2026-10-17): anything else is no version.
+    for (const auto* refused : { "", "v", "1.2", "1.2.3.4", "v1.2.3-rc.1", "1.0.0beta55", "V1.2.3",
+                                 " 1.2.3", "1.2.x", "-1.2.3", "1..3", "1234567.0.0" })
+        CHECK_MESSAGE (! up::readVersion (refused).has_value(), refused);
+
+    const auto at = [] (const char* text) { return *up::readVersion (text); };
+    CHECK (up::isNewer (at ("0.1.1"), at ("0.1.0")));
+    CHECK (up::isNewer (at ("0.1.10"), at ("0.1.9")));      // numbers, not letters
+    CHECK (up::isNewer (at ("0.2.0"), at ("0.1.99")));
+    CHECK (up::isNewer (at ("1.0.0"), at ("0.99.99")));
+    CHECK (! up::isNewer (at ("0.1.0"), at ("0.1.0")));
+    CHECK (! up::isNewer (at ("0.1.0"), at ("0.1.1")));
+}
+
+TEST_CASE ("updates: GitHub's answer is believed only where it is safe to")
+{
+    namespace up = wfg::client::model::updates;
+    const std::string page = "https://github.com/pob31/go.dot/releases/tag/v0.1.2";
+
+    const auto release = up::readRelease (releaseReply ("v0.1.2", page, ", \"draft\": false, \"prerelease\": false"));
+    REQUIRE (release.has_value());
+    CHECK (up::versionText (release->version) == "0.1.2");
+    CHECK (release->page == page);
+
+    //  A page that is not this project's releases is never offered as a link.
+    CHECK (! up::readRelease (releaseReply ("v0.1.2", "https://example.com/pob31/go.dot/releases/tag/v0.1.2")));
+    CHECK (! up::readRelease (releaseReply ("v0.1.2", "https://github.com/pob31/go.dot.evil/releases/x")));
+    CHECK (! up::readRelease (releaseReply ("v0.1.2", "https://github.com/pob31/WFS-DIY/releases/tag/v0.1.2")));
+
+    //  A tag that is not v and three numbers; a draft; a pre-release.
+    CHECK (! up::readRelease (releaseReply ("0.1.2", page)));
+    CHECK (! up::readRelease (releaseReply ("v0.1.2-rc.1", page)));
+    CHECK (! up::readRelease (releaseReply ("v0.1.2", page, ", \"draft\": true")));
+    CHECK (! up::readRelease (releaseReply ("v0.1.2", page, ", \"prerelease\": true")));
+
+    //  Not JSON, not an object, a field missing or of the wrong kind, too large.
+    CHECK (! up::readRelease ("Not Found"));
+    CHECK (! up::readRelease ("[]"));
+    CHECK (! up::readRelease ("{\"html_url\": \"" + page + "\"}"));
+    CHECK (! up::readRelease ("{\"tag_name\": 12, \"html_url\": \"" + page + "\"}"));
+    CHECK (! up::readRelease (releaseReply ("v0.1.2", page, ", \"body\": \"" + std::string (up::largestReply, 'x') + "\"")));
+}
+
+TEST_CASE ("updates: the machine remembers, asks once a day, and a not-now holds until a newer one")
+{
+    namespace up = wfg::client::model::updates;
+    const auto running = *up::readVersion ("0.1.1");
+    const std::string page = "https://github.com/pob31/go.dot/releases/tag/v0.1.2";
+    const std::int64_t day = up::secondsBetweenAsks;
+
+    //  A machine that has never asked asks; a day later it asks again; the switch off never does.
+    up::Memory memory;
+    CHECK (memory.askAtLaunch);
+    CHECK (up::dueToAsk (memory, 1'000'000));
+
+    up::remember (memory, 1'000'000, up::Release { *up::readVersion ("0.1.2"), page });
+    CHECK (! up::dueToAsk (memory, 1'000'000 + day - 1));
+    CHECK (up::dueToAsk (memory, 1'000'000 + day));
+    CHECK (up::dueToAsk (memory, 999'000));                 // a clock gone back past the last ask
+
+    //  Newer and not said not now to: the mark names it, in words.
+    const auto mark = up::markFor (memory, running);
+    REQUIRE (mark.has_value());
+    CHECK (up::markWords (*mark) == "Go.dot 0.1.2 is out");
+    CHECK (! up::markFor (memory, *up::readVersion ("0.1.2")).has_value());     // this is it
+    CHECK (! up::markFor (memory, *up::readVersion ("0.2.0")).has_value());     // this is newer still
+
+    //  Not now: gone until a newer one than that is out.
+    memory.dismissed = "0.1.2";
+    CHECK (! up::markFor (memory, running).has_value());
+    up::remember (memory, 1'000'000 + day, up::Release { *up::readVersion ("0.1.3"), page });
+    CHECK (up::markFor (memory, running).has_value());
+
+    //  An answer with no release forgets what was found: a release taken down is offered no more.
+    up::remember (memory, 1'000'000 + 2 * day, std::nullopt);
+    CHECK (memory.found.empty());
+    CHECK (! up::markFor (memory, running).has_value());
+
+    //  Written and read back, and the file a newer Go.dot might write still read.
+    memory.askAtLaunch = false;
+    memory.found = "0.1.4";
+    memory.foundPage = page;
+    const auto back = up::readMemory (up::writeMemory (memory) + "colour blue\r\nshiny\n");
+    CHECK (! back.askAtLaunch);
+    CHECK (back.lastAsked == memory.lastAsked);
+    CHECK (back.found == "0.1.4");
+    CHECK (back.foundPage == page);
+    CHECK (back.dismissed == "0.1.2");
+    CHECK (! up::dueToAsk (back, back.lastAsked + 10 * day));
+
+    //  A page that is not this project's, read from the file, is not believed, nor its version.
+    const auto tampered = up::readMemory ("found 9.9.9\npage https://example.com/x\n");
+    CHECK (tampered.found.empty());
+    CHECK (tampered.foundPage.empty());
+
+    //  What a check asked from the menu says, whatever it found (ASW).
+    CHECK (up::checkedWords (false, std::nullopt, running) == "Could not reach GitHub to look for a newer Go.dot.");
+    CHECK (up::checkedWords (true, std::nullopt, running) == "No newer Go.dot than this one, 0.1.1.");
+    CHECK (up::checkedWords (true, up::Release { *up::readVersion ("0.1.2"), page }, running)
+             == "Go.dot 0.1.2 is out - the Help menu opens its page.");
+}
+
+TEST_CASE ("updates: what an ask came back with - a release, none yet, or no answer at all")
+{
+    namespace up = wfg::client::model::updates;
+    const auto reply = releaseReply ("v0.1.2", "https://github.com/pob31/go.dot/releases/tag/v0.1.2");
+
+    const auto found = up::answerFor (200, reply);
+    CHECK (found.reached);
+    REQUIRE (found.release.has_value());
+    CHECK (up::versionText (found.release->version) == "0.1.2");
+
+    //  None published yet: GitHub answered, with nothing in it.
+    const auto none = up::answerFor (404, "{\"message\": \"Not Found\"}");
+    CHECK (none.reached);
+    CHECK (! none.release.has_value());
+
+    //  A reply that is not a release is an answer with no release in it.
+    const auto odd = up::answerFor (200, "{\"message\": \"Moved\"}");
+    CHECK (odd.reached);
+    CHECK (! odd.release.has_value());
+
+    //  No connection, the allowance spent, a server's error, a reply past the cap: no answer at all.
+    for (const auto status : { -1, 0, 301, 403, 429, 500, 503 })
+        CHECK_MESSAGE (! up::answerFor (status, reply).reached, status);
+
+    CHECK (! up::answerFor (200, reply + std::string (up::largestReply, ' ')).reached);
+}
+
+TEST_CASE ("updates: on Linux the answer is a program's - curl's status on its last line, wget's by its exit")
+{
+    namespace up = wfg::client::model::updates;
+    const auto reply = releaseReply ("v0.1.2", "https://github.com/pob31/go.dot/releases/tag/v0.1.2");
+
+    //  curl, `--write-out "\n%{http_code}"`: the body, then the status alone on the last line.
+    const auto found = up::answerFromCurl (reply + "\n200");
+    CHECK (found.reached);
+    REQUIRE (found.release.has_value());
+    CHECK (up::versionText (found.release->version) == "0.1.2");
+
+    const auto none = up::answerFromCurl ("{\"message\": \"Not Found\"}\n404");
+    CHECK (none.reached);
+    CHECK (! none.release.has_value());
+
+    //  A body with lines of its own: only the last is the status.
+    CHECK (up::answerFromCurl ("{\n  \"tag_name\": \"v0.1.2\",\n  \"html_url\": "
+                               "\"https://github.com/pob31/go.dot/releases/tag/v0.1.2\"\n}\n200").release.has_value());
+
+    //  Never connected (000), the allowance spent, nothing at all, no status line.
+    CHECK (! up::answerFromCurl ("\n000").reached);
+    CHECK (! up::answerFromCurl (reply + "\n403").reached);
+    CHECK (! up::answerFromCurl ("").reached);
+    CHECK (! up::answerFromCurl (reply).reached);
+    CHECK (! up::answerFromCurl (reply + "\n20").reached);
+
+    //  wget: the body alone, and its exit code says only whether it was a 200.
+    CHECK (up::answerFromWget (0, reply).release.has_value());
+    CHECK (! up::answerFromWget (8, "{\"message\": \"Not Found\"}").reached);
+    CHECK (! up::answerFromWget (4, "").reached);
+    CHECK (! up::answerFromWget (255, "").reached);         // not installed: started, said nothing
 }

@@ -3,10 +3,18 @@
 #
 name: Release
 
-# THE TEST BUILD: three archives anybody can download, unpack and run, so that
+# THE RELEASE: the downloads anybody can install or unpack and run, so that
 # people other than the author can try Go.dot and say what they found. The
 # `release.yml` ci.yml's header promised, kept apart from CI for the reason it
 # gives: a packaging pipeline must never run on every push.
+#
+# A REAL RELEASE SINCE 2026-10-17 (namespace draft §78, ASX), and the author's
+# numbering: "version increments will start at 0.1.0 (no beta in the version
+# number). Version 0.2.0 will feature an MCP server. Until then it will mostly be
+# maintenance." So a tag is a plain vX.Y.Z and publishes a release GitHub marks
+# as the latest - the one Go.dot's own "look for a newer Go.dot" reads
+# (`releases/latest`, which never names a pre-release). v0.1.0, of 2026-09-29,
+# was the last pre-release.
 #
 # SIGNING. macOS is signed with the author's Developer ID, notarized and
 # stapled, as Go.dot.app in a DMG (the job `macos` and scripts/package-macos.sh
@@ -15,12 +23,12 @@ name: Release
 # SmartScreen meanwhile. Nothing here builds an installer.
 #
 # TWO WAYS IN:
-#   * push a tag `vX.Y.Z` or `vX.Y.Z-anything` (v0.1.0-alpha.1, say). The three
-#     archives are built and published as a GitHub PRE-release under that tag,
-#     with the commits since the last one listed under it. X.Y.Z must be the
-#     root CMakeLists.txt's project VERSION, which is what `wfg --version`
-#     prints - the job `meta` refuses a tag that disagrees, before any compile
-#     minute is spent.
+#   * push a tag `vX.Y.Z`. The downloads are built and published as a GitHub
+#     release under that tag, marked latest, with the commits since the last one
+#     listed under it. X.Y.Z must be the root CMakeLists.txt's project VERSION,
+#     which is what `wfg --version` prints - the job `meta` refuses a tag that
+#     disagrees, or that carries anything after the three numbers, before any
+#     compile minute is spent.
 #   * run it by hand (Actions > Release > Run workflow) on any branch. The same
 #     three archives, uploaded to the run as artifacts for 14 days and published
 #     nowhere: the way to hand a branch to one tester, or to check this file
@@ -89,9 +97,14 @@ jobs:
 
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
-            base="${version%%-*}"
-            if [ "$base" != "$project" ]; then
-              echo "::error::tag ${GITHUB_REF_NAME} says ${base}, but CMakeLists.txt says ${project} - and wfg --version prints the latter. Bump project(VERSION) or retag."
+            # A release is three numbers and nothing after them (ASX): the
+            # update check in every Go.dot reads no other kind of tag.
+            if ! printf '%s' "${GITHUB_REF_NAME}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::tag ${GITHUB_REF_NAME} is not a plain vX.Y.Z - a release carries no suffix. Retag."
+              exit 1
+            fi
+            if [ "$version" != "$project" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} says ${version}, but CMakeLists.txt says ${project} - and wfg --version prints the latter. Bump project(VERSION) or retag."
               exit 1
             fi
           else
@@ -457,7 +470,7 @@ jobs:
   # missing is a release somebody downloads the wrong thing from.
   # ---------------------------------------------------------------------------
   publish:
-    name: publish the pre-release
+    name: publish the release
     if: github.ref_type == 'tag'
     needs: [meta, linux, macos, windows]
     runs-on: ubuntu-latest
@@ -473,20 +486,27 @@ jobs:
         working-directory: dist
         run: sha256sum go.dot-* | tee SHA256SUMS.txt
 
-      - name: Create the GitHub pre-release
+      - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.meta.outputs.version }}
-        # --prerelease, always, until the author decides otherwise: nothing this
-        # workflow makes is signed, and "Latest release" on the repo page should
-        # not point a stranger at it. --generate-notes lists the commits since
-        # the previous tag under the paragraph written here.
+        # --latest (ASX): the release every Go.dot's update check reads
+        # (`releases/latest`). Ready to test, not yet for a show - the author,
+        # 2026-10-17: "reliable enough for testing from day-1, but not show ready
+        # before we spend some time putting it through its paces". The words are
+        # mine. --generate-notes lists the commits since the previous tag under the
+        # paragraph written here.
         run: |
           set -euo pipefail
           cat > notes.md <<'EOF'
-          **A test build, not a release.** The macOS app is signed and notarized; the
-          Windows and Linux builds are not signed. Each download's `README.txt` says
-          how to start it.
+          **Ready to try, not yet for a show.** Use it, push it, and tell us what you
+          find before you trust it with a performance. The macOS app is signed and
+          notarized; the Windows and Linux builds are not signed. Each download's
+          `README.txt` says how to start it.
+
+          Go.dot looks for a newer release once a day when it starts and says so on its
+          title line; *Help > Look for a newer Go.dot at launch* turns that off.
+
           Please report what you find in the issues, with the download's name, your OS
           and audio device, and the log (its `README.txt` says where each system keeps it).
 
@@ -501,8 +521,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --prerelease \
-            --title "Go.dot $VERSION (test build)" \
+            --latest \
+            --title "Go.dot $VERSION" \
             --notes-file notes.md \
             --generate-notes \
             dist/go.dot-* dist/SHA256SUMS.txt

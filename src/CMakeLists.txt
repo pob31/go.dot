@@ -805,6 +805,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/LoadToTime.cpp
     wfg/client/model/UndoHistory.h
     wfg/client/model/UndoHistory.cpp
+    wfg/client/model/Updates.h
+    wfg/client/model/Updates.cpp
     wfg/client/model/RunModel.h
     wfg/client/model/RunModel.cpp
     wfg/client/model/Scrub.h
@@ -852,6 +854,10 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/InspectorComponent.cpp
     wfg/client/ui/NetworkMonitorWindow.h
     wfg/client/ui/NetworkMonitorWindow.cpp
+    wfg/client/ui/AboutWindow.h
+    wfg/client/ui/AboutWindow.cpp
+    wfg/client/ui/UpdateCheck.h
+    wfg/client/ui/UpdateCheck.cpp
     wfg/client/ui/VideoMonitorWindow.h
     wfg/client/ui/VideoMonitorWindow.cpp
     wfg/client/ui/WarpEditorPanel.h

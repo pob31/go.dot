@@ -417,6 +417,37 @@ namespace wfg::client::ui
         resized();
     }
 
+    void TransportComponent::showUpdate (const juce::String& words, std::function<void()> onPress)
+    {
+        if (words.isEmpty())
+        {
+            if (updateButton != nullptr)
+            {
+                removeChildComponent (updateButton.get());
+                updateButton.reset();
+                resized();
+            }
+
+            return;
+        }
+
+        if (updateButton == nullptr)
+        {
+            updateButton = std::make_unique<IconButton> (model::Icon::info, words);
+            updateButton->setColours (Look::colour (theme, "ink"), Look::colour (theme, "panel-high"),
+                                      Look::colour (theme, "picked"));
+            updateButton->setTextHeight (12.0f * static_cast<float> (theme.type));
+            updateButton->setWantsKeyboardFocus (false);
+            updateButton->setComponentID ("update");
+            addAndMakeVisible (*updateButton);
+        }
+
+        updateButton->setButtonText (words);
+        updateButton->setTooltip (words + " - press to see what is new, or to be told again only of the next one");
+        updateButton->onClick = std::move (onPress);
+        resized();
+    }
+
     void TransportComponent::setNotice (const juce::String& notice)
     {
         /*  CLIPPED, WHATEVER THE CALLER THINKS IT IS SENDING. This label is one
@@ -628,6 +659,13 @@ namespace wfg::client::ui
         {
             auto& button = *problemButtons[at];
             button.setBounds (top.removeFromRight (button.idealWidth (row - 6)).reduced (0, 3));
+            top.removeFromRight (pad / 2);
+        }
+
+        //  A NEWER GO.DOT (§78), left of the warnings: what is wrong stays nearer the clock.
+        if (updateButton != nullptr)
+        {
+            updateButton->setBounds (top.removeFromRight (updateButton->idealWidth (row - 6)).reduced (0, 3));
             top.removeFromRight (pad / 2);
         }
 

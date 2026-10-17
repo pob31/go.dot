@@ -132,7 +132,10 @@ done
 # and the system's FFmpeg, which converts and previews a movie that is not HAP
 # (namespace draft 37.5, WN) - without it, Go.dot offers to download one; and
 # Pure Data's editor, which a process cue's patch opens in when plugdata is not
-# there (namespace draft 51, ACO) - Go.dot runs patches without it.
+# there (namespace draft 51, ACO) - Go.dot runs patches without it; and curl or
+# wget, through which the window asks GitHub for a newer release (namespace draft
+# §78, ASY) - Go.dot speaks no TLS itself, and without either it says it could
+# not reach GitHub.
 install -d -m 755 "$root/DEBIAN"
 cat > "$root/DEBIAN/control" <<EOF
 Package: go.dot
@@ -141,14 +144,14 @@ Architecture: amd64
 Maintainer: Pierre-Olivier Boulant <po2528@gmail.com>
 Installed-Size: $(du -sk --exclude=DEBIAN "$root" | cut -f1)
 Depends: libc6 (>= 2.39), libstdc++6, libgcc-s1, libasound2t64 | libasound2, libfreetype6, libfontconfig1, libx11-6, libxext6, libxinerama1, libxrandr2, libxcursor1, libxcomposite1, libxrender1, libgl1, libegl1, libopengl0, libudev1
-Recommends: pipewire-jack, ffmpeg, puredata-gui
+Recommends: pipewire-jack, ffmpeg, puredata-gui, curl | wget
 Section: sound
 Priority: optional
 Homepage: https://github.com/pob31/go.dot
 Description: cross-platform show control
  Go.dot plays a show: cues of sound, fades, OSC and MIDI, run from a list
- with GO, in a window and from a web page beside it. This is a test build,
- not ready to run a show - see /opt/go.dot/README.txt.
+ with GO, in a window and from a web page beside it. Ready to try, not yet
+ ready to run a show - see /opt/go.dot/README.txt.
 EOF
 
 dpkg-deb --root-owner-group --build "$root" "$out" >/dev/null

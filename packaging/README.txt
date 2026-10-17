@@ -1,9 +1,9 @@
-Go.dot - test build
-===================
+Go.dot
+======
 
-This is an early build for testing and comments. The Windows and Linux builds
-are not signed, and it is not ready to run a show. Please do try it, and please
-tell us what you find:
+This release is ready to try, and not yet ready to run a show. The Windows and
+Linux builds are not signed. Please do try it, and please tell us what you
+find:
 
     https://github.com/pob31/go.dot/issues
 
@@ -86,7 +86,8 @@ tick back into the template, for the performances still to come.
             `sudo apt remove go.dot` takes it away. The tarball installs
             nothing: unpack it and run ./go.dot.sh (or ./go.dot.sh
             ~/shows/Tuesday). Either needs ALSA, FreeType, fontconfig and
-            the X11 libraries, which a desktop install already has.
+            the X11 libraries, which a desktop install already has, and
+            looks for a newer version through curl or wget.
 
             The first time, it copies the empty show to
             ~/.local/share/Go.dot/Untitled and opens that. Started from the
@@ -111,6 +112,16 @@ tick back into the template, for the performances still to come.
 The web client is served beside the window: the log (or the terminal)
 prints its address (http://localhost:<port>/ui). A tablet on the same network can open it with
 this machine's address in place of localhost.
+
+
+Newer versions
+--------------
+
+Once a day, when it starts, Go.dot asks GitHub whether a newer release is out,
+and says so on its title line; press it to see what is new. Nothing is
+downloaded or installed: you install a new version as you installed this one.
+Help > "Look for a newer Go.dot at launch" turns the asking off, for a show
+computer kept offline, and Help > "Look for a newer Go.dot now" asks at once.
 
 
 Everything else

@@ -121,6 +121,12 @@ namespace wfg::client::ui
             is left to its banner. Cheap when nothing changed. */
         void showProblems (const std::vector<model::PageProblems>& pages);
 
+        /*  A NEWER GO.DOT IS OUT (namespace draft §78, ASQ): its words on the
+            title line - "Go.dot 1.2.3 is out" - left of the warnings, and what a
+            press does. Quiet: the page's colour and never a pop-up, the words
+            saying what it is (§4.8). Empty words take it away. */
+        void showUpdate (const juce::String& words, std::function<void()> onPress);
+
         /** Revert's question, asked before the revert; the button and the menu both come here. */
         void askThenRevert();
 
@@ -161,6 +167,9 @@ namespace wfg::client::ui
         //  The warnings shown (§64), and their buttons, on the title line before the clock.
         std::vector<model::PageProblems> problemsShown;
         std::vector<std::unique_ptr<IconButton>> problemButtons;
+
+        //  A newer Go.dot (§78), on the title line left of the warnings; null when there is none.
+        std::unique_ptr<IconButton> updateButton;
         std::optional<model::PairAct> pairAct;
         juce::Rectangle<int> pairArea;
         juce::Label pairLabel, pairHeading, pairSentence;

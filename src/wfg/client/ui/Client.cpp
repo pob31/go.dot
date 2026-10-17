@@ -61,6 +61,7 @@
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/TemplateReview.h>
 #include <wfg/client/model/UndoHistory.h>
+#include <wfg/client/model/Updates.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/NewCueMenus.h>
@@ -80,6 +81,8 @@
 #include <wfg/client/ui/KeyNames.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/NetworkMonitorWindow.h>
+#include <wfg/client/ui/AboutWindow.h>
+#include <wfg/client/ui/UpdateCheck.h>
 #include <wfg/client/ui/VideoMonitorWindow.h>
 #include <wfg/client/ui/ImportWindow.h>
 #include <wfg/client/ui/TemplateReviewWindow.h>
@@ -144,6 +147,10 @@ namespace wfg::client
             /*  F AND SHIFT+F (namespace draft §63, ALM): the picked cues
                 flagged or unflagged, and the cue the last GO fired flagged. */
             menuFlagPicked, menuFlagLastGo,
+
+            /*  HELP (namespace draft §78, ASQ): which Go.dot this is, a newer one
+                asked about now, whether to ask at launch, and the release page. */
+            menuAbout, menuCheckUpdates, menuAskAtLaunch, menuReleasePage,
 
             /*  THE TEMPLATES APPLY TEMPLATE OFFERS, numbered from here in the
                 order the show keeps them (namespace draft §38). */
@@ -899,12 +906,18 @@ namespace wfg::client
                 window->setVisible (true);
                 shell->grabKeyboardFocus();
 
+                //  A newer Go.dot (§78): what was found before, at once; GitHub again once a day.
+                askForUpdateAtLaunch();
+
                 startTimerHz (juce::jmax (1, juce::roundToInt (theme.refreshHz)));
             }
 
             ~Window() override
             {
                 stopTimer();
+
+                //  A newer Go.dot asked about (§78): told to give up before anything it would answer to goes.
+                updateCheck.reset();
 
                 /*  THE COPY UNDER WAY ENDS HERE, before anything it would
                     answer to goes: its part-file is removed, and what it would
@@ -941,7 +954,7 @@ namespace wfg::client
             //  The menu (juce::MenuBarModel)
             juce::StringArray getMenuBarNames() override
             {
-                return { "File", "Edit", "Show" };
+                return { "File", "Edit", "Show", "Help" };
             }
 
             /*  THE KEY EACH ITEM IS PRINTED BESIDE, and the one it answers to:
@@ -1017,6 +1030,10 @@ namespace wfg::client
                     case menuKeepShow:
                     case menuRealign:
                     case menuAdoptShow:
+                    case menuAbout:
+                    case menuCheckUpdates:
+                    case menuAskAtLaunch:
+                    case menuReleasePage:
                     case menuApplyTemplateFirst: break;
                 }
 
@@ -1155,6 +1172,14 @@ namespace wfg::client
                     case menuAdoptShow:  return last.pair.offer (model::PairAct::adoptShow).open;
                     case menuApplyTemplateFirst:
                         return unlocked && ! selection.empty() && ! templatesForAnchor().empty();
+
+                    /*  HELP, UNDER THE LOCK TOO (§78): looking at which Go.dot this is
+                        changes nothing. Asking now is a person's, whenever no ask is
+                        under way; the switch needs a folder to be kept in. */
+                    case menuAbout:        return true;
+                    case menuCheckUpdates: return ! askingForUpdate;
+                    case menuAskAtLaunch:  return updatesFile() != juce::File();
+                    case menuReleasePage:  return true;
                 }
 
                 return false;
@@ -1340,6 +1365,28 @@ namespace wfg::client
                         menu.addItem (hide);
                     }
                 }
+                else if (index == 3)
+                {
+                    /*  HELP (namespace draft §78, ASQ): About, then a newer Go.dot -
+                        asked about now, asked about at launch, and its page, named
+                        for the version when one is known to be out. */
+                    addMenuItem (menu, menuAbout, "About Go.dot");
+                    menu.addSeparator();
+                    addMenuItem (menu, menuCheckUpdates, askingForUpdate ? "Looking for a newer Go.dot..."
+                                                                          : "Look for a newer Go.dot now");
+                    {
+                        juce::PopupMenu::Item ask { "Look for a newer Go.dot at launch" };
+                        ask.itemID = menuAskAtLaunch;
+                        ask.isEnabled = menuItemEnabled (menuAskAtLaunch);
+                        ask.isTicked = updateMemory.askAtLaunch && updatesFile() != juce::File();
+                        menu.addItem (ask);
+                    }
+
+                    const auto newer = newerFound();
+                    addMenuItem (menu, menuReleasePage,
+                                 newer ? "What is new in Go.dot " + juce::String (model::updates::versionText (*newer)) + "..."
+                                       : juce::String ("Go.dot's releases on GitHub..."));
+                }
 
                 return menu;
             }
@@ -1349,6 +1396,10 @@ namespace wfg::client
                 switch (itemId)
                 {
                     case menuNew:       chooseShowFolder (true); break;
+                    case menuAbout:        openAbout(); break;
+                    case menuCheckUpdates: askForUpdate (true); break;
+                    case menuAskAtLaunch:  setAskAtLaunch (! updateMemory.askAtLaunch); break;
+                    case menuReleasePage:  openReleasePage(); break;
                     case menuNewPerformance: askForANewPerformance(); break;
                     case menuImportAls: chooseLiveSets(); break;
                     case menuImportQlab: chooseQlabWorkspace(); break;
@@ -2049,6 +2100,187 @@ namespace wfg::client
                 }
 
                 networkMonitor->open();
+            }
+
+            //======================================================================
+            /*  A NEWER GO.DOT (namespace draft §78). The author's: say so and link
+                to the release page (ASO), real releases only (ASP), the Help menu
+                and a quiet mark on the title line (ASQ), at launch at most once a
+                day with a switch to turn it off (ASR). Mine: only a launch the
+                launchers made asks by itself, it being the one with a folder to
+                remember in (ASS); nothing of it reaches the show (AST). */
+
+            /*  `<Go.dot's own folder>/updates.txt`, beside `last-show.txt`, or nothing
+                when the launch asked for nothing to be remembered (`rememberIn`). */
+            juce::File updatesFile() const
+            {
+                return host.rememberIn.empty() ? juce::File()
+                                               : juce::File (juce::String::fromUTF8 (host.rememberIn.c_str()))
+                                                   .getChildFile ("updates.txt");
+            }
+
+            static model::updates::Version runningVersion()
+            {
+                return model::updates::readVersion (WFG_VERSION).value_or (model::updates::Version {});
+            }
+
+            static std::int64_t secondsNow()
+            {
+                return juce::Time::currentTimeMillis() / 1000;
+            }
+
+            void saveUpdateMemory() const
+            {
+                if (const auto file = updatesFile(); file != juce::File())
+                    file.replaceWithText (juce::String::fromUTF8 (model::updates::writeMemory (updateMemory).c_str()),
+                                          false, false, "\n");
+            }
+
+            //  The version known to be out and newer than this one, said not now to or not.
+            std::optional<model::updates::Version> newerFound() const
+            {
+                const auto found = model::updates::readVersion (updateMemory.found);
+
+                if (found && ! updateMemory.foundPage.empty() && model::updates::isNewer (*found, runningVersion()))
+                    return found;
+
+                return std::nullopt;
+            }
+
+            void askForUpdateAtLaunch()
+            {
+                const auto file = updatesFile();
+
+                if (file == juce::File())
+                    return;
+
+                updateMemory = model::updates::readMemory (file.loadFileAsString().toStdString());
+                showUpdateMark();
+
+                if (model::updates::dueToAsk (updateMemory, secondsNow()))
+                    askForUpdate (false);
+            }
+
+            void askForUpdate (bool byAPerson)
+            {
+                if (askingForUpdate)
+                    return;
+
+                askingForUpdate = true;
+                askedByAPerson = byAPerson;
+
+                if (byAPerson && shell != nullptr)
+                    shell->transport.setNotice ("Looking for a newer Go.dot...");
+
+                if (updateCheck == nullptr)
+                    updateCheck = std::make_unique<ui::UpdateCheck> (host.updateUrl.empty()
+                                                                       ? std::string (model::updates::latestUrl)
+                                                                       : host.updateUrl,
+                                                                     std::string (WFG_VERSION));
+
+                updateCheck->ask ([this] (const ui::UpdateCheck::Answer& answer) { updateAnswered (answer); });
+            }
+
+            void updateAnswered (const ui::UpdateCheck::Answer& answer)
+            {
+                askingForUpdate = false;
+
+                //  Only an answer is kept: no network leaves what was found as it was.
+                if (answer.reached)
+                {
+                    model::updates::remember (updateMemory, secondsNow(), answer.release);
+
+                    /*  A PERSON ASKING WANTS TO KNOW: a version said not now to is
+                        offered again when they ask for it themselves. */
+                    if (askedByAPerson && answer.release
+                         && updateMemory.dismissed == model::updates::versionText (answer.release->version))
+                        updateMemory.dismissed.clear();
+
+                    saveUpdateMemory();
+                }
+
+                if (askedByAPerson && shell != nullptr)
+                    shell->transport.setNotice (juce::String::fromUTF8 (
+                        model::updates::checkedWords (answer.reached, answer.release, runningVersion()).c_str()));
+
+                showUpdateMark();
+            }
+
+            void showUpdateMark()
+            {
+                if (shell == nullptr)
+                    return;
+
+                if (const auto mark = model::updates::markFor (updateMemory, runningVersion()))
+                    shell->transport.showUpdate (juce::String (model::updates::markWords (*mark)),
+                                                 [this] { updateMarkPressed(); });
+                else
+                    shell->transport.showUpdate ({}, {});
+            }
+
+            /*  THE MARK PRESSED: its page, or not now - the mark then stays away
+                until a newer one than this is out (ASW). */
+            void updateMarkPressed()
+            {
+                const auto newer = newerFound();
+
+                if (! newer || shell == nullptr)
+                    return;
+
+                const auto version = juce::String (model::updates::versionText (*newer));
+
+                juce::PopupMenu menu;
+                menu.addItem (1, "What is new in Go.dot " + version + "...");
+                menu.addItem (2, "Not now - tell me of the next one");
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                    [this, version, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int chosen)
+                    {
+                        if (safe == nullptr)
+                            return;
+
+                        if (chosen == 1)
+                            openReleasePage();
+                        else if (chosen == 2)
+                        {
+                            updateMemory.dismissed = version.toStdString();
+                            saveUpdateMemory();
+                            showUpdateMark();
+                        }
+                    });
+            }
+
+            //  Its page when one is known to be out, else every release; only ever this project's (ASU).
+            void openReleasePage() const
+            {
+                const auto page = newerFound() ? updateMemory.foundPage : std::string (model::updates::releasesPage);
+                juce::URL (juce::String::fromUTF8 (page.c_str())).launchInDefaultBrowser();
+            }
+
+            void setAskAtLaunch (bool on)
+            {
+                updateMemory.askAtLaunch = on;
+                saveUpdateMemory();
+
+                if (shell != nullptr)
+                    shell->transport.setNotice (on ? "Go.dot will look for a newer version when it starts."
+                                                   : "Go.dot will look for a newer version only when asked.");
+            }
+
+            //  Help > About Go.dot: made once and kept, as the monitors are.
+            void openAbout()
+            {
+                if (! about)
+                {
+                    ui::AboutWindow::Facts facts;
+                    facts.version = WFG_VERSION;
+                    facts.builtWith = "Built with " + juce::SystemStats::getJUCEVersion().toStdString()
+                                        + " and Tracktion Engine " + juce::String (WFG_PIN_TE).substring (0, 7).toStdString()
+                                        + ".";
+                    about = std::make_unique<ui::AboutWindow> (theme, std::move (facts), [this] { panic(); });
+                }
+
+                about->open();
             }
 
             std::vector<wfg::monitor::Capture> trafficArrived;
@@ -5482,6 +5714,17 @@ namespace wfg::client
             std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
             std::unique_ptr<ui::NetworkMonitorWindow> networkMonitor;   // Show > Network monitor...
             std::unique_ptr<ui::VideoMonitorWindow> videoMonitor;       // Show > Video monitor...
+            std::unique_ptr<ui::AboutWindow> about;                     // Help > About Go.dot
+
+            /*  A NEWER GO.DOT (namespace draft §78): what this machine remembers,
+                the ask under way, and whether the one under way was a person's -
+                whose answer is said at the foot, as a launch's is not. The check
+                is let go first thing in ~Window: its token is cleared, and nothing
+                it finds lands on a window that is going. */
+            model::updates::Memory updateMemory;
+            std::unique_ptr<ui::UpdateCheck> updateCheck;
+            bool askingForUpdate = false;
+            bool askedByAPerson = false;
             ui::Shell* shell = nullptr;                     // owned by the window
 
             /*  The plugins' own windows, each a helper process. Declared after
