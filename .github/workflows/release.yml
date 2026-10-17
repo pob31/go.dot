@@ -518,6 +518,25 @@ jobs:
           | Ubuntu 24.04 or newer, x86_64 | `*-linux-x86_64.deb` — `sudo apt install ./<file>.deb`, then Go.dot is in the applications menu and opens `.wfg` shows |
           | Linux x86_64, no install (glibc of Ubuntu 24.04 or newer) | `*-linux-x86_64.tar.gz` — run `./go.dot.sh` |
           EOF
+
+          # A RELEASE ALREADY MADE BY HAND for this tag - GitHub's "Draft a new
+          # release" page makes the tag, which is what started this run - is
+          # given the downloads rather than refused (2026-10-17: the first
+          # release stopped here on "a release with the same tag name already
+          # exists"). What the hand wrote stays; notes left empty get these.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+              dist/go.dot-* dist/SHA256SUMS.txt
+            if [ -z "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body)" ]; then
+              gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" \
+                --jq .body > generated.md
+              { cat notes.md; echo; cat generated.md; } > body.md
+              gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file body.md
+            fi
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --latest --prerelease=false --draft=false
+            exit 0
+          fi
+
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
