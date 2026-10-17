@@ -224,9 +224,6 @@ has stood in front of the thing.
 - **Automation modes and the Stream Deck** — touch and write automation beside
   the latch a level lane records with, and the Stream Deck as a surface whose
   keys fire a cart's cues (PRD §3.10, §3.16).
-- **Integrations** — commanding WFS-DIY's and XOA's sources with claims per
-  cue (Phase 11). The device presets (twenty-four shipped) wait for a console to
-  answer them.
 
 ---
 
