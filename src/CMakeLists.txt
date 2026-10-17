@@ -465,6 +465,8 @@ add_library(wfg_engine STATIC
     wfg/engine/osc/UdpEndpoint.h
     wfg/engine/oscquery/EngineNamespace.cpp
     wfg/engine/oscquery/EngineNamespace.h
+    wfg/engine/oscquery/Mdns.cpp
+    wfg/engine/oscquery/Mdns.h
     wfg/engine/oscquery/OscQueryClient.h
     wfg/engine/oscquery/OscQueryClient.cpp
     wfg/engine/oscquery/OscQueryServer.cpp
