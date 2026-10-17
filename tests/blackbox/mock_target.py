@@ -50,6 +50,16 @@ which is WFS-DIY's rule and why Go.dot playing a curve into it cannot loop back.
 nobody's datagram caused, pushed to every listener. A bundle arriving is taken
 apart and counted, and every message is kept with the moment it arrived.
 
+AND, WITH --describe, A DEVICE THAT DESCRIBES ITSELF WHOLE (namespace draft 76,
+UD.10): GET / answers the file's description and HOST_INFO names the device
+(--name), its OSC port and VALUE - what Go.dot's discovery fetches. With
+--mdns-port it is FOUND as well: a socket on 127.0.0.1 answering multicast DNS
+questions put to it directly - the service _oscjson._tcp, its instance's SRV
+and TXT, the host's A, 127.0.0.1 - straight back to whoever asked, the question
+echoed, as a responder answers a querier on another port (RFC 6762 6.7). No
+part of the network's 5353 is touched. Its port is the third pair on the ports
+line: `osc N query N mdns N`.
+
 FOUR BEHAVIOURS, because those are the four a real device has and each sends a
 different person to look at a different thing:
 
@@ -80,6 +90,7 @@ import sys
 import threading
 import urllib.parse
 import time
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 
 HOST = "127.0.0.1"
@@ -517,8 +528,108 @@ def listen_tcp(device: Device, port_out, framing: str, wire: str = "osc") -> soc
     return sock
 
 
+# --------------------------------------------------------------------------- mDNS
+#  Multicast DNS, written from RFC 1035 and 6762 in this file's own few lines:
+#  names as labels, the four records a service is found by, pointers followed
+#  when reading. Separate from the codec under test, for common.py's reason.
+
+def dns_name(labels) -> bytes:
+    return b"".join(bytes([len(label.encode("utf-8"))]) + label.encode("utf-8") for label in labels) + b"\0"
+
+
+def read_dns_name(data: bytes, at: int):
+    labels, end, hops = [], None, 0
+
+    while True:
+        length = data[at]
+
+        if length == 0:
+            return labels, (end if end is not None else at + 1)
+
+        if length & 0xC0 == 0xC0:
+            if end is None:
+                end = at + 2
+            at = ((length & 0x3F) << 8) | data[at + 1]
+            hops += 1
+            if hops > 20:
+                raise ValueError("a name that loops")
+            continue
+
+        labels.append(data[at + 1:at + 1 + length].decode("utf-8", "replace"))
+        at += 1 + length
+
+
+def dns_record(labels, kind: int, ttl: int, rdata: bytes, flush: bool) -> bytes:
+    return dns_name(labels) + struct.pack(">HHIH", kind, 0x8001 if flush else 1, ttl, len(rdata)) + rdata
+
+
+def same_name(a, b) -> bool:
+    return [label.lower() for label in a] == [label.lower() for label in b]
+
+
+def serve_mdns(port: int, name: str, query_port_of) -> int:
+    """Answers questions put directly to 127.0.0.1:port; returns the port bound."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((HOST, port))
+    service = ["_oscjson", "_tcp", "local"]
+    instance = [name] + service
+    host = ["mock-host", "local"]
+
+    def records_for(question_name, question_type):
+        answers, additionals = [], []
+        srv = dns_record(instance, 33, 120, struct.pack(">HHH", 0, 0, query_port_of()) + dns_name(host), True)
+        txt = dns_record(instance, 16, 4500, bytes([9]) + b"txtvers=1", True)
+        a = dns_record(host, 1, 120, bytes([127, 0, 0, 1]), True)
+
+        if question_type in (12, 255) and same_name(question_name, service):
+            answers.append(dns_record(service, 12, 4500, dns_name(instance), False))
+            additionals += [srv, txt, a]
+        elif same_name(question_name, instance):
+            if question_type in (33, 255):
+                answers.append(srv)
+            if question_type in (16, 255):
+                answers.append(txt)
+            additionals.append(a)
+        elif question_type in (1, 255) and same_name(question_name, host):
+            answers.append(a)
+
+        return answers, additionals
+
+    def loop():
+        while True:
+            try:
+                data, sender = sock.recvfrom(9000)
+                ident, flags, count = struct.unpack_from(">HHH", data, 0)
+
+                if flags & 0x8000:
+                    continue                            # an answer, not a question
+
+                at, questions, answers, additionals = 12, [], [], []
+
+                for _ in range(count):
+                    labels, at = read_dns_name(data, at)
+                    kind, _klass = struct.unpack_from(">HH", data, at)
+                    at += 4
+                    questions.append(dns_name(labels) + struct.pack(">HH", kind, 1))
+                    more, extra = records_for(labels, kind)
+                    answers += more
+                    additionals += [record for record in extra if record not in additionals]
+
+                if not answers:
+                    continue
+
+                reply = struct.pack(">HHHHHH", ident, 0x8400, len(questions), len(answers), 0, len(additionals))
+                sock.sendto(reply + b"".join(questions) + b"".join(answers) + b"".join(additionals), sender)
+            except (OSError, ValueError, IndexError, struct.error):
+                continue
+
+    threading.Thread(target=loop, daemon=True).start()
+    return sock.getsockname()[1]
+
+
 # --------------------------------------------------------------------------- HTTP
-def make_handler(device: Device, listens: bool, osc_port_of, wire: str = "osc"):
+def make_handler(device: Device, listens: bool, osc_port_of, wire: str = "osc",
+                 description: "str | None" = None, name: str = "mock"):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass                                    # quiet: the driver owns stdout
@@ -531,9 +642,19 @@ def make_handler(device: Device, listens: bool, osc_port_of, wire: str = "osc"):
                 self.websocket()
                 return
 
-            if listens and query == "HOST_INFO":
-                self.reply(200, {"NAME": "mock", "OSC_PORT": osc_port_of(), "OSC_TRANSPORT": "UDP",
-                                 "EXTENSIONS": {"VALUE": True, "LISTEN": True}})
+            if (listens or description is not None) and query == "HOST_INFO":
+                self.reply(200, {"NAME": name, "OSC_PORT": osc_port_of(), "OSC_TRANSPORT": "UDP",
+                                 "EXTENSIONS": {"VALUE": True, "LISTEN": listens}})
+                return
+
+            #  THE WHOLE DESCRIPTION, as the file says it (UD.10).
+            if description is not None and path == "/" and not query:
+                encoded = description.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
                 return
 
             #  A HAND ON THE DEVICE'S OWN SCREEN, and what arrived when, and how
@@ -725,6 +846,11 @@ def main() -> int:
     parser.add_argument("--queries", action="store_true",
                         help="answer a bare address with no atoms with what the box holds, as a DS100 does (DP.10); "
                              "off, such a message is a write of nothing, as every driver before DP.10 expects")
+    parser.add_argument("--describe", default=None,
+                        help="a file whose OSCQuery description GET / answers, with HOST_INFO beside it (UD.10)")
+    parser.add_argument("--name", default="mock", help="the name HOST_INFO and the mDNS instance give")
+    parser.add_argument("--mdns-port", type=int, default=None,
+                        help="answer multicast DNS questions put directly to 127.0.0.1 on this port (0: any)")
     parser.add_argument("--wire", default="osc", choices=("osc", "rcp", "line", "midi"),
                         help="what the bytes are: OSC; lines of Yamaha's RCP answered with OK (DP.7); "
                              "a telnet console's command lines (DP.8); MIDI bytes as they come (DP.9)")
@@ -746,14 +872,17 @@ def main() -> int:
         #  Threaded with --listen: a WebSocket holds its request thread for as
         #  long as it is open, and the questions must still be answered.
         kind = ThreadingHTTPServer if args.listen else HTTPServer
-        server = kind((HOST, 0), make_handler(device, args.listen, lambda: ports[0], args.wire))
+        description = Path(args.describe).read_text(encoding="utf-8") if args.describe else None
+        server = kind((HOST, 0), make_handler(device, args.listen, lambda: ports[0], args.wire, description, args.name))
         server.daemon_threads = True
         query_port = server.server_address[1]
+
+    mdns_port = serve_mdns(args.mdns_port, args.name, lambda: query_port) if args.mdns_port is not None else None
 
     # The ports, on one line, flushed: the driver reads this to find out where
     # to point Go.dot's mount. Binding zero and reporting back is this suite's
     # rule — a fixed number makes a test that cannot run twice at once.
-    print(f"osc {ports[0]} query {query_port}", flush=True)
+    print(f"osc {ports[0]} query {query_port}" + (f" mdns {mdns_port}" if mdns_port is not None else ""), flush=True)
 
     if server is None:
         threading.Event().wait()

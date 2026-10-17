@@ -1283,6 +1283,19 @@ set_tests_properties(blackbox.authoring.C blackbox.authoring.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
 
 # -----------------------------------------------------------------------------
+# A DEVICE FOUND ON THE NETWORK, SAVED AS A PRESET (namespace draft §76, UD.10):
+# the shipped binary against mock_target.py describing itself and answering
+# multicast DNS put to it directly - found, made, saved into a folder of the
+# driver's own, made again from the preset - and `wfg replay` rebuilds the
+# show from the log. No part of the network's 5353 is touched.
+add_test(NAME blackbox.discovery.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/discovery.py" --wfg-locale=C)
+add_test(NAME blackbox.discovery.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/discovery.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.discovery.C blackbox.discovery.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
+
+# -----------------------------------------------------------------------------
 # A DEVICE OVER A CONNECTION (namespace draft §57, AFJ; DP.6): the shipped
 # binary against mock_target.py listening for connections - the link opened on
 # its own thread, a cue arriving down the stream cut by length, the console
