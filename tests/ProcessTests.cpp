@@ -678,9 +678,33 @@ namespace
             return done();
         }
 
+        /*  A PATCH OPENS ON ITS OWN THREAD, IN REAL TIME, and three hundred of
+            this rig's ticks pass in tens of milliseconds - which a starved CI
+            runner's patch outlasted (Windows, 2026-10-17: two cases failed this
+            on their first REQUIRE after 0.065 s, the patch not yet open). So
+            past them the rig ticks on a millisecond apart, as a show's clock
+            would while the patch opens, for up to ten seconds. A quick machine
+            never gets that far, and the counted waits elsewhere - a run ended
+            within five ticks - keep their count. */
         bool running (const std::string& cueId)
         {
-            return tickUntil ([&] { const auto* run = runOf (cueId); return run != nullptr && run->processState == "running"; });
+            const auto isRunning = [&] { const auto* run = runOf (cueId); return run != nullptr && run->processState == "running"; };
+
+            if (tickUntil (isRunning))
+                return true;
+
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (10);
+
+            while (std::chrono::steady_clock::now() < until)
+            {
+                std::this_thread::sleep_for (std::chrono::milliseconds (1));
+                tickOnce();
+
+                if (isRunning())
+                    return true;
+            }
+
+            return false;
         }
 
         std::vector<wfg::LogRecord> records()
