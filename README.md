@@ -134,7 +134,8 @@ has stood in front of the thing.
   protocol - OSC, Yamaha's RCP, a telnet line or MIDI (namespace draft §57); and
   WFS-DIY and S21_HiJack writing their snapshots into Go.dot as cues, offering
   their own addresses as menus (§56,
-  [`docs/godot-authoring-protocol-0.1.md`](docs/godot-authoring-protocol-0.1.md)).
+  [`docs/godot-authoring-protocol-0.1.md`](docs/godot-authoring-protocol-0.1.md); for another
+  application, [`docs/godot-authoring-guide-0.1.md`](docs/godot-authoring-guide-0.1.md)).
 - **Process cues.** A Pure Data patch inside a cue, running while the cue runs at
   control rate and never in the audio path. It hears device reports, OSC, MQTT, MIDI
   and serial lines, and sends to devices, to MIDI and to Go.dot's own commands.

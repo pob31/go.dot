@@ -4,7 +4,8 @@
 fire Go.dot cues, and that Go.dot implements to answer them. It replaces, for these two apps,
 the QLab cue-writing exchange both use today. PRD §3.26 is the reason for it; namespace draft
 §56 records the decisions and the stages. Where this page and the code disagree, the code is
-being wrong and one of them gets fixed.
+being wrong and one of them gets fixed. For an application other than these two, the same protocol
+is written for its implementer in [`godot-authoring-guide-0.1.md`](godot-authoring-guide-0.1.md).
 
 The author decided eight things on 2026-10-10 (§56.2, AEI-AEP): Go.dot answers a capture with
 one message; a processor may declare itself as a device; a re-export updates the cue it made
