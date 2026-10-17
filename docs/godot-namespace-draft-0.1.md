@@ -30785,12 +30785,13 @@ every one has a button or a command beside it (§4.11, PRD §3.17).
 | **ARH** | **Gestures on what the page shows**: the running pane, the cue list, its numbers, the aim. The app's Surface, Cart and Mapping tabs stay the app's. | the author's (offered as "Gestures on what it shows", recommended) |
 | **ARI** | **PANIC as on the app** (ANW): one button, a press `run.stopAll`, a second within 0.75 s `run.killAll`, the word under it saying which the next press is; Doh! (`go.doh`) to its left with air between. The keyboard keeps Esc and Esc Esc. | the author's (offered as "PANIC as on the app", recommended) |
 | **ARJ** | **A *Pick several* switch** in the cue list's header: while it is on, a tap adds a cue to the pick or takes it away, and a long press still opens the sheet. | the author's (offered as "A Pick several switch", recommended) |
-| **ARK** | **Two-finger load-to-time later.** This round the aim's slider moves from the finger, with the cross-axis gain; one finger holding where the show is while another sets where to land is a round of its own. | the author's (offered as "Later", recommended) |
+| **ARK** | **Two-finger load-to-time later.** This round the aim's slider moves from the finger, with the cross-axis gain; one finger holding where the show is while another sets where to land is a round of its own. *Looked at the same day and not taken: ASN.* | the author's (offered as "Later", recommended) |
 | **ARL** | **One set of gestures for finger and mouse**: pointer events throughout. A coarse pointer (`pointer: coarse`) makes targets a finger wide - rows, buttons and the gutter 44 px - and shows what a mouse finds by hovering. The page takes the gestures it uses away from the browser where it uses them (`touch-action`) and leaves the browser's own zoom everywhere else. | mine |
 | **ARM** | **The app's numbers, as the app has them** (§68): a swipe kills past 0.6 of the row's width, either way, and slides back if the run is still there 1.5 s on; a long press is 500 ms; the playhead moves 1:1 within its strip and at half the rate for every 40 px above or below it, down to 1/256, seeks at most every 200 ms and a scene only as the finger lifts; a number's drag, sideways, halves its rate for every 48 px above or below the box, down to 1/256, a level's whole travel 240 px and a detent of the dial 8 px; PANIC's second press within 750 ms; a value the page sent is shown for up to 1.5 s until the engine agrees. | mine |
 | **ARN** | **A number dragged is held as a fader is held**: `node.touch` as the finger goes down, the value at most every 20 ms, the last one and `node.release` as it lifts - so the touch table gates the page as it gates a surface, and one Undo takes the drag back. | mine |
 | **ARO** | **No dragging rows to reorder on a coarse pointer**: iPadOS starts a drag on a long press, which is the sheet's gesture here. The inspector's arrows move a cue, as they always could. | mine |
 | **ARP** | **The page's words are the app's** where the app has them - the running sheet, PANIC, Doh!, Fire now, Park the standby here, Flag; the page's own new words are owed the author's look. | mine |
+| **ASN** | **Two-finger load-to-time is not built** (2026-10-17, asked by the author: *"Can we have a look at the 2-finger load to time. This might be an entirely cumbersome idea. I don't know."*). A finger held as the anchor while another moves the aim adds nothing: the solve already runs live under one finger, and the load is a button of its own, which is the look before the leap the held finger was for (PRD §3.13, §3.17). A second finger setting the standby apart from the state would be a jump with two places to set where the solver has one - the standby lands after the target (§3.5) - and *Park the standby here* after a load already does it. And two fingers on the page are a pinch or a pan to the browser before the page sees them. What the look found instead: the aim's slider stopped at a minute, so a four-minute song could not be aimed at 3:00 from a tablet. It now reaches the aimed cue's whole length, a group's members summed, rounded up to ten seconds and never less than a minute, and never short of where the aim stands; in tenths; the offset said as the window says a step once past a minute, `4:12.3` (WT.9). | the author's (offered as "Drop it, fix the slider's reach", recommended) |
 
 ### 75.3 Rows
 
@@ -30817,6 +30818,7 @@ None new. The gestures send `run.stop <run> hard|afterMember|afterIteration`, `r
 | WT.6 | The cue list: the long press's sheet, the gutter, *Pick several* (ARJ) | c23ba4ac |
 | WT.7 | Numbers dragged and held (ARN); the aim from the finger (ARK) | c11afa88 |
 | WT.8 | The README and the guides; the console's tests and `client_page`; the whole suite |  8d8d8f0f |
+| WT.9 | The aim's slider reaches the whole cue, in tenths, the offset in the window's words (ASN); `membersOf` in `model/lists.js` | f3d28797 |
 
 ### 75.6 Measurements
 
@@ -30824,8 +30826,12 @@ None. The gestures and their numbers are the app's, which the author has had in 
 
 ### 75.7 Not built
 
-Two-finger load-to-time (ARK); radial gain on a rotary - the page has none; the app's Surface, Cart
-and Mapping tabs on the page (ARH).
+Two-finger load-to-time, by decision (ARK, then ASN). Had it been built, the cheapest honest shape was a
+finger held on the aim's cue name as the anchor and a second finger's sideways travel as the offset,
+finer the further it is from the first, the solve live and the button committing; weighed and left.
+Radial gain on a rotary - the page has none; the app's Surface, Cart and Mapping tabs on the page (ARH).
+The slider's reach is not yet seen on a tablet, and `client_page` was not run for WT.9 (the built engine
+was older than its arguments; WT.9 adds no command and no module).
 
 ## 76. Your presets, and OSCQuery devices found on the network
 

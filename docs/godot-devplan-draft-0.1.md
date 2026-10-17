@@ -443,7 +443,9 @@ walk of `make_d700_bench.py`.
   §3.17).
 - Multitouch: kill, advance, prune, playhead drag; radial and cross-axis
   precision gain, relative from touch-down; dual-touch load-to-time with the
-  solve running live.
+  solve running live. *(Dual-touch load-to-time looked at 2026-10-17 and not
+  built, the author's choice: one finger and a button do it - namespace draft
+  §75, ASN.)*
 - Disconnect handling: visibly stale, in-flight adjustments land on a defined
   value.
 - Per-client edit selection; standby stays engine state.
@@ -458,7 +460,8 @@ while the desktop shows the cue list.
 
 The author, as §74 landed: the page on a tablet takes the Android remote's gestures, on what the page
 already shows (namespace draft §75, decisions ARH-ARK the author's, ARL-ARP mine). This is the
-"Multitouch" line above, but for two-finger load-to-time (ARK). On the branch `touch`, in the worktree
+"Multitouch" line above, but for two-finger load-to-time (ARK), which was then looked at and not built
+(ASN): WT.9 gives the aim's slider the whole cue's reach instead. On the branch `touch`, in the worktree
 `go.dot-touch`.
 
 | Stage | What | Depends on |
@@ -472,6 +475,7 @@ already shows (namespace draft §75, decisions ARH-ARK the author's, ARL-ARP min
 | WT.6 | The cue list: the long press's sheet, the gutter, *Pick several* | WT.2 |
 | WT.7 | Numbers dragged and held; the aim from the finger | WT.1, WT.2 |
 | WT.8 | README, guides, tests, the whole suite | all |
+| WT.9 | The aim's slider reaches the whole cue, in tenths; two-finger load-to-time not built (ASN) | WT.7 |
 
 **Done when:** on an iPad the author stops a cue with a swipe, skips a member with a pill, scrubs a
 playhead and rides a level from the page without the page zooming, and PANIC twice drops everything

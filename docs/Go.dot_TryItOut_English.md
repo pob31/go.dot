@@ -109,7 +109,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Automatic names (new) | A cue nobody has named is called by what it does: a fade or a stop by its target (*Fade out Intro music*), an OSC or MIDI cue by its message, a sound, a picture or a mic by its file or input. It follows when the target, file or message changes. Type a name and it stays; clear it and the automatic one comes back | Name column; inspector, *Name* |
 | Triggers | Fire cues from incoming OSC, MIDI, the wall clock, or a key of the computer's keyboard - any key but the show's own (Space, Esc, F9 and the window's shortcuts). The standby never moves when a trigger fires | Cue inspector, *when*; a cue's *Key* line, then press the key |
 | Carts (new) | A list that GO never meets, for cues fired out of order: by their triggers, a key, or the Android remote's *Cart* tab. Any kind of cue - a sound, an OSC or MIDI message, a script, a fade - and a group as a macro: a timeline group fires everything in it at once, an automatic sequence one after the other with its waits. A sampler group in a cart is armed all show, and its pads hold any kind of cue | The **+** beside the list tabs, *New cart*. The tabs over the list show each list; ▸ marks the one GO acts on, and a double click renames one |
-| Load to time | Jump into the middle of a scene with the right cues playing at the right offsets | Ctrl+T |
+| Load to time | Jump into the middle of a scene with the right cues playing at the right offsets | Ctrl+T. On the web console, the *aim* bar: pick a cue, slide to the moment and read what would be playing, then press *load to time* |
 | Anticipation | The cue on standby is loaded and its devices prepared before you press GO | Automatic |
 
 ### Live sound
@@ -285,10 +285,6 @@ Go.dot has an Android app for a tablet or a phone. It stays connected in the bac
 ## Coming next
 
 These are designed in the specification and not built yet. The order may change with what testers ask for, which is one more reason to send feedback.
-
-### Two fingers to load to time
-
-On the web console, one finger holding where the show is while another sets where to land, the show worked out live as they move.
 
 ### Integration with software
 

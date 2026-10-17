@@ -1170,7 +1170,9 @@ group **recomputes forward** from the top of the list; it does not unwind.
 After a jump they agree; after a manual tweak they do not, and that divergence
 is what the running view shows.
 
-Dual-touch load-to-time (§3.17) is these two pointers, one per hand.
+Dual-touch load-to-time (§3.17) is these two pointers, one per hand. *Not built, at the author's
+direction (2026-10-17, namespace draft §75, ASN): the standby lands after the target, so a jump has one
+place to set, and one finger sets it while a button makes it true.*
 
 ### 3.14 Timecode
 
@@ -1477,7 +1479,11 @@ Multitouch principles:
   - **continuous ratio**, no discontinuity as radius changes mid-gesture
 - **Dual-touch load-to-time**: one finger holds the anchor, the other sets the
   target — the two solver pointers, one per hand, with the solve running live so
-  the operator sees the result before committing.
+  the operator sees the result before committing. *Not built, at the author's
+  direction (2026-10-17, namespace draft §75, ASN), after a look: one finger
+  already moves the aim with the cross-axis gain while the solve runs live, and
+  the load is a button of its own, which is the look before the leap the second
+  hand was for.*
 - Accidental contact is real (a forearm on a screen in the dark). In show mode,
   destructive targets want a deliberate gesture — swipe-to-kill beats a 9 mm
   (X).
@@ -1574,7 +1580,8 @@ client takes the remote's gestures onto its own panes (namespace draft §75): PA
 screen, a run swiped away to kill it and tapped for its stops, pills to skip, a playhead dragged
 relative from the finger with cross-axis gain, a long press for a cue's Fire now, Park and Flag, a
 *Pick several* switch instead of modifier keys, numbers dragged from where they are and held as a
-fader is - and, for a mouse, the same gestures. Two-finger load-to-time stays to be built.
+fader is - and, for a mouse, the same gestures. Two-finger load-to-time was looked at the same day and
+not taken (ASN, above); the aim's slider reaches the whole of the cue it is aimed at instead of a minute.
 
 Modifier vocabulary is **deferred until the needs are clear**, then designed
 once across desktop, tablet and hardware together — two of the three have no

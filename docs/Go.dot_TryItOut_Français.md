@@ -111,7 +111,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Noms automatiques (nouveau) | Une cue que personne n'a nommée porte le nom de ce qu'elle fait : un fondu ou un arrêt celui de sa cible (*Fade out Intro music*), une cue OSC ou MIDI son message, un son, une image ou un micro son fichier ou son entrée. Il suit quand la cible, le fichier ou le message change. Un nom tapé reste ; effacé, le nom automatique revient | Colonne du nom ; inspecteur, *Name* |
 | Déclencheurs | Lancer des cues sur OSC, MIDI entrant, à une heure donnée, ou sur une touche du clavier de l'ordinateur - toute touche sauf celles du spectacle (Espace, Échap, F9 et les raccourcis de la fenêtre). Le standby ne bouge pas quand un déclencheur part | Inspecteur, *when* ; la ligne *Key* d'une cue, puis la touche |
 | Chariots, *carts* (nouveau) | Une liste que le GO ne rencontre jamais, pour des cues lancées dans le désordre : par leurs déclencheurs, une touche, ou l'onglet *Cart* de la télécommande Android. Tout type de cue - un son, un message OSC ou MIDI, un script, un fondu - et un groupe comme macro : un groupe *Timeline* lance tout à la fois, une séquence automatique l'une après l'autre avec ses attentes. Un groupe sampler dans un chariot est armé tout le spectacle, et ses pads portent tout type de cue | Le **+** à côté des onglets de listes, *New cart*. Les onglets au-dessus de la liste montrent chaque liste ; ▸ marque celle sur laquelle agit le GO, et un double-clic en renomme une |
-| Charger à un instant | Sauter au milieu d'une scène avec les bonnes cues aux bons endroits | Ctrl+T |
+| Charger à un instant | Sauter au milieu d'une scène avec les bonnes cues aux bons endroits | Ctrl+T. Sur la console web, la barre *aim* : choisir une cue, glisser jusqu'à l'instant et lire ce qui jouerait, puis appuyer sur *load to time* |
 | Anticipation | La cue en attente est chargée et ses appareils préparés avant le GO | Automatique |
 
 ### Son live
@@ -287,10 +287,6 @@ Go.dot a une application Android pour tablette ou téléphone. Elle reste relié
 ## Ce qui vient très bientôt
 
 Ces fonctions sont conçues dans la spécification mais pas encore construites. L'ordre peut changer selon ce que demandent les testeurs : raison de plus pour envoyer vos retours.
-
-### Deux doigts pour charger à un instant
-
-Sur la console web, un doigt qui tient l'endroit où en est le spectacle pendant qu'un autre choisit où arriver, le spectacle calculé en direct pendant qu'ils bougent.
 
 ### Intégration logicielle
 
