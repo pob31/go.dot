@@ -23755,6 +23755,10 @@ All of it, 2026-10-09, each stage its own commit on main:
 Owed to the bench: the detents and the screen's words with the D700 in hand; a movie and its sound on
 one D700 DCA, both turned.
 
+**Seen by the author, 2026-10-17**, on the first release: *"The DCA curves/offset on a video with
+sound is great."* Whether that was with the D700 in hand he did not say, so its detents and screen's
+words stay owed.
+
 ## 51. Process cues: a Pure Data patch that runs while a cue runs
 
 Written 2026-10-09. The author asked for *"a data processor that takes in various types of data
@@ -31448,6 +31452,9 @@ The author's bench: a long clip played from a pad and from a fader, a hard stop 
 Doh! two seconds later - the clip back at its point, fading in over the panic fade, its fader where
 it was, the other strips armed; then with a hold pad kept down, and let go before the Doh. And the
 author's review of the words (ASH-ASM, L47-L51).
+
+**Seen by the author, 2026-10-17**, on the first release: *"Doh! on the sampler with active sounds is
+working as expected."* The hold pad's two cases and the words stay owed until he says.
 
 ### 77.7 Not built
 
