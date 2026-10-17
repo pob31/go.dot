@@ -31,6 +31,7 @@ import "./gestures/clicks.js";
 import "./gestures/fields.js";
 import "./gestures/drag.js";
 import "./gestures/keys.js";
+import "./gestures/touch.js";
 import { table, loadTable } from "./gestures/table.js";
 
 /*  A CLIENT FOR THE ENGINE, over the OSCQuery surface it already publishes: it

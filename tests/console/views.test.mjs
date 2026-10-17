@@ -35,7 +35,7 @@ installDocument();
 
 const { tree } = await import("../../clients/console/plumbing/tree.js");
 const { timeCell, listRows } = await import("../../clients/console/views/didi.js");
-const { stateMark, offersSeek, sceneClock } = await import("../../clients/console/views/gogo.js");
+const { stateMark, offersSeek, sceneClock, pillsOf, runSheet } = await import("../../clients/console/views/gogo.js");
 const { selection } = await import("../../clients/console/model/selection.js");
 const { folded } = await import("../../clients/console/model/remember.js");
 
@@ -185,6 +185,54 @@ test("a running scene's row has a clock, the second its seek box means", () => {
   assert.equal(sceneClock("S"), "at 12.3s");
   assert.equal(sceneClock("W"), "");      // not started: no clock to read
   assert.equal(sceneClock("F"), "");      // a file's row says its own, against its length
+});
+
+test("a group's round is its pills, and a run's sheet offers its stops, the kill last (namespace draft 75)", () => {
+  const node = (path, type, value) => ({ FULL_PATH: path, TYPE: type, ACCESS: 1, VALUE: [value] });
+
+  serve([
+    node("/godot/run/G/kind", "s", "group"), node("/godot/run/G/state", "s", "playing"),
+    node("/godot/run/G/cue", "s", "GRP"), node("/godot/run/G/round", "s", "B A"),
+    node("/godot/run/G/pruned", "s", "D"), node("/godot/run/G/children", "s", "R1 R2"),
+    node("/godot/cue/GRP/order", "s", "A B C D"),
+    node("/godot/cue/A/number", "s", "1"), node("/godot/cue/A/name", "s", "Wind"),
+    node("/godot/cue/B/name", "s", "Rain"), node("/godot/cue/C/name", "s", "Hail"), node("/godot/cue/D/name", "s", "Snow"),
+    node("/godot/run/R1/cue", "s", "B"), node("/godot/run/R1/state", "s", "done"),
+    node("/godot/run/R2/cue", "s", "A"), node("/godot/run/R2/state", "s", "playing"),
+    node("/godot/run/M/kind", "s", "media"), node("/godot/run/M/state", "s", "playing"),
+    node("/godot/run/M/cue", "s", "A"), node("/godot/run/M/range", "i", 0),
+    node("/godot/run/M/strip", "s", "STRP0001"), node("/godot/run/M/solo", "T", true),
+    node("/godot/run/O/kind", "s", "media"), node("/godot/run/O/state", "s", "done"), node("/godot/run/O/cue", "s", "C"),
+  ]);
+
+  //  The round in its order, each by its latest run; then out of this round; then skipped until the group ends.
+  assert.deepEqual(pillsOf("G").map((p) => p.cue + ":" + p.state), ["B:played", "A:playing", "C:out", "D:pruned"]);
+  assert.equal(pillsOf("G")[1].number, "1");
+  assert.deepEqual(pillsOf("M"), []);
+
+  const sent = [];
+  const send = (name, args) => sent.push(name + " " + args.join(" "));
+
+  //  A group: its three stops, then the kill of it and the two under it, with air before.
+  const group = runSheet("G", send);
+  assert.deepEqual(group.actions.map((a) => a.words), [
+    "Stop now - its footer runs", "Stop after this member", "Stop after this round",
+    "Kill it and everything under it (2) - no footer"]);
+  assert.equal(group.actions[3].air, true);
+  group.actions.forEach((a) => a.run());
+  assert.deepEqual(sent, ["stop-run G hard", "stop-run G afterMember", "stop-run G afterIteration", "kill G"]);
+
+  //  A sampler clip in a slice: advance, and its solo let go.
+  const clip = runSheet("M", send);
+  assert.deepEqual(clip.actions.map((a) => a.words), [
+    "Stop now - its footer runs", "Advance to the next slice", "Release the solo", "Kill now - no footer"]);
+  sent.length = 0;
+  clip.actions[2].run();
+  assert.deepEqual(sent, ["solo M false"]);
+
+  //  A run that is over says so and offers nothing.
+  assert.deepEqual(runSheet("O", send).actions, []);
+  assert.match(runSheet("O", send).sub, /Over/);
 });
 
 test("the inspector keeps decisions and folds away what the engine says back", async () => {

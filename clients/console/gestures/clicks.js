@@ -221,8 +221,6 @@ document.addEventListener("click", (event) => {
       marks it already lives. */
   if (data && data.park) { gesture("park", [str(data.park)]); return; }
 
-  if (data && data.kill) { gesture("kill", [str(data.kill)]); return; }
-
   if (data && data.trigger && selection.picked) {
     gesture("add-trigger", [str(selection.picked), str(data.trigger)]);
     return;

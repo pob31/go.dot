@@ -21,6 +21,11 @@ import { tree } from "../plumbing/tree.js";
 import { el, esc, shownName } from "./common.js";
 import { reconcile } from "./reconcile.js";
 
+/*  HELD STILL WHILE A FINGER SWIPES A RUN (namespace draft §75, WT.4): the pane
+    is drawn again at every poll, and a row moved under a finger must not be
+    drawn back where it was. Set and cleared by gestures/touch.js. */
+const runsHold = { active: false };
+
 /*  WHETHER A RUN'S LAUNCH HAS BEEN PLACED, asked of the one node that knows.
 
     `run/state` publishes eight words and four of them are a run whose launch
@@ -218,8 +223,6 @@ function runRow(id, depth, out) {
     bits.push("round " + iteration + (iterations === 0 ? "" : " of " + iterations));
   }
 
-  const pruned = tree.run(id, "pruned", "");
-  if (pruned) bits.push(pruned.trim().split(/\s+/).length + " pruned");
 
   const late = Number(tree.run(id, "late", 0));
   if (Number.isFinite(late) && late > 0) bits.push("late " + late);
@@ -248,8 +251,10 @@ function runRow(id, depth, out) {
       Before the review the row had no such clock. */
   const seekable = offersSeek(id);
 
+  const pills = pillsOf(id);
+
   out.push({ key: "run:" + id, html:
-    '<div class="run" data-s="' + esc(state) + '"' +
+    '<div class="run" data-run="' + esc(id) + '" data-s="' + esc(state) + '"' +
       ' style="padding-left:' + (12 + depth * 14) + 'px">' +
       '<div class="who">' +
         stateMark(state) +
@@ -266,9 +271,8 @@ function runRow(id, depth, out) {
              ' placeholder="s" title="seek: type a second of this ' +
              (kind === "group" ? "scene" : "file") + ' and press Enter">'
            : "") +
-        (finished ? ""
-                  : '<button data-kill="' + id + '" title="immediate: no footer">kill</button>') +
       "</div>" +
+      (pills.length ? pillsHtml(id, pills) : "") +
     "</div>" });
 
   tree.ids("/godot/run/" + id + "/children").forEach((child) => runRow(child, depth + 1, out));
@@ -280,6 +284,8 @@ function runRow(id, depth, out) {
     one poll to the next. Whether or not the row changed: this is the pane
     where it changes on every poll, for as long as a cue is playing. */
 function renderRuns() {
+  if (runsHold.active) return;
+
   const all = tree.ids("/godot/run/order");
   const pane = el("runs");
 
@@ -297,4 +303,97 @@ function renderRuns() {
   reconcile(pane, out);
 }
 
-export { renderRuns, stateMark, offersSeek, sceneClock };
+/*  A GROUP'S ROUND AS PILLS (PRD §3.6; the app's `pillsOf`): the round in
+    progress in the order it plays, each member's state from the latest of this
+    run's runs of it; then the members not in this round; then those skipped
+    until the group ends. None for a group that has drawn no round and skipped
+    nothing. */
+const PILL_WORDS = { played: "played", out: "not this round", pruned: "skipped" };
+
+function words(text) {
+  return String(text || "").trim().split(/\s+/).filter(Boolean);
+}
+
+function pillsOf(id) {
+  const round = words(tree.run(id, "round", ""));
+  const pruned = words(tree.run(id, "pruned", ""));
+
+  if (!round.length && !pruned.length) return [];
+
+  const latest = {};
+  tree.ids("/godot/run/" + id + "/children").forEach((child) => { latest[tree.run(child, "cue", "")] = child; });
+
+  const pill = (cue, state) => ({ cue, state, number: String(tree.cue(cue, "number", "") || ""),
+                                  name: shownName(cue) || cue });
+  const out = round.map((cue) => {
+    const state = latest[cue] ? tree.run(latest[cue], "state", "") : "";
+    return pill(cue, ["waiting", "playing", "stopping", "postWait"].includes(state) ? "playing"
+                   : state === "done" || state === "failed" ? "played" : "pending");
+  });
+
+  const group = tree.run(id, "cue", "");
+  if (round.length && group) {
+    tree.ids("/godot/cue/" + group + "/order").forEach((cue) => {
+      if (!round.includes(cue) && !pruned.includes(cue)) out.push(pill(cue, "out"));
+    });
+  }
+
+  pruned.forEach((cue) => out.push(pill(cue, "pruned")));
+  return out;
+}
+
+function pillsHtml(id, pills) {
+  return '<div class="pills">' +
+    pills.map((p) =>
+      '<button class="pill" data-pill="' + esc(p.cue) + '" data-pill-run="' + esc(id) + '" data-state="' + p.state + '">' +
+        (p.state === "playing" ? '<span class="mark" aria-hidden="true">\u25B6</span>' : "") +
+        (p.number ? '<span class="number">' + esc(p.number) + "</span>" : "") +
+        '<span class="text">' + esc(p.name) + "</span>" +
+        (PILL_WORDS[p.state] ? '<span class="word">' + PILL_WORDS[p.state] + "</span>" : "") +
+      "</button>").join("") +
+    '<div class="pills-hint">tap: skip this round \u00b7 hold: skip until the group ends</div>' +
+  "</div>";
+}
+
+/*  WHAT A RUN'S SHEET OFFERS (the app's `RunSheet`): its stops - now, and for a
+    group after this member and after this round - advance out of its slice
+    when it plays one, solo on its strip when it holds one, and the kill last,
+    which takes everything under it and says how many. Nothing but the words
+    for a run that is over. The app's words. */
+function countUnder(id) {
+  return tree.ids("/godot/run/" + id + "/children").reduce((n, child) => n + 1 + countUnder(child), 0);
+}
+
+function runSheet(id, send) {
+  const state = tree.run(id, "state", "armed");
+  const cue = tree.run(id, "cue", "");
+  const kind = tree.run(id, "kind", "");
+  const finished = state === "done" || state === "failed";
+  const number = String(tree.cue(cue, "number", "") || "");
+  const title = (number ? number + "  " : "") + (shownName(cue) || cue || id);
+
+  if (finished) return { title, sub: "Over: it leaves this list in a few seconds.", actions: [] };
+
+  const actions = [{ words: "Stop now - its footer runs", tone: "stop", run: () => send("stop-run", [id, "hard"]) }];
+
+  if (kind === "group") {
+    actions.push({ words: "Stop after this member", tone: "stop", run: () => send("stop-run", [id, "afterMember"]) });
+    actions.push({ words: "Stop after this round", tone: "stop", run: () => send("stop-run", [id, "afterIteration"]) });
+  }
+
+  if (Number(tree.run(id, "range", -1)) >= 0) actions.push({ words: "Advance to the next slice", run: () => send("advance", [id]) });
+
+  if (tree.run(id, "strip", "")) {
+    const solo = tree.run(id, "solo", false);
+    const on = solo === true || solo === "true";
+    actions.push({ words: on ? "Release the solo" : "Solo on its strip", run: () => send("solo", [id, !on]) });
+  }
+
+  const under = countUnder(id);
+  actions.push({ words: under > 0 ? "Kill it and everything under it (" + under + ") - no footer" : "Kill now - no footer",
+                 tone: "kill", air: true, run: () => send("kill", [id]) });
+
+  return { title, sub: state, actions };
+}
+
+export { renderRuns, stateMark, offersSeek, sceneClock, runsHold, pillsOf, runSheet };
