@@ -20,17 +20,17 @@ Three promises shape everything in it:
 - **Three ways to stop.** Esc stops gracefully and tidies up as if the cue had ended normally. Esc twice stops everything Go.dot is doing, immediately. **Doh!** recovers from the most common mistake: a cue fired too early.
 - **Nothing is lost.** Every edit can be undone, and the show is saved continuously so a crash costs you nothing.
 
-This is a **test build** (v0.1). It is meant for trying things out, in rehearsal rooms and on your own machine, not yet for opening night.
+This is an **early release** (0.1). It is ready for trying things out, in rehearsal rooms and on your own machine, and not yet for opening night.
 
 ## Getting it running
 
-Download the test build for your system from the [releases page](https://github.com/pob31/go.dot/releases), install it, and launch Go.dot. It opens an empty show called *Untitled* on your default audio interface, with the show settings open so you can choose another.
+Download the latest release for your system from the [releases page](https://github.com/pob31/go.dot/releases), install it, and launch Go.dot. It opens an empty show called *Untitled* on your default audio interface, with the show settings open so you can choose another.
 
 | System | Download | First launch | Log for bug reports |
 | --- | --- | --- | --- |
 | Windows 10/11 | `-setup.exe` (installer, adds the Start menu entry and opens `.wfg` files) or a `.zip` (unzip anywhere, run `Go.dot.exe`) | Not signed yet: SmartScreen warns, choose *More info*, then *Run anyway* | `%APPDATA%\Go.dot\logs` |
 | macOS 13.3+ (Apple silicon and Intel) | `.dmg`, drag Go.dot to Applications | Signed and notarized, opens without a warning. Allow microphone access for mic cues | `~/Library/Logs/Go.dot` |
-| Linux (built on Ubuntu 24.04) | `.deb` (`sudo apt install ./go.dot-…deb`) or a tarball (run `./go.dot.sh`) | Needs ALSA, FreeType, fontconfig, X11 (any desktop has them) | `~/.local/state/Go.dot/logs` |
+| Linux (built on Ubuntu 24.04) | `.deb` (`sudo apt install ./go.dot-…deb`) or a tarball (run `./go.dot.sh`) | Needs ALSA, FreeType, fontconfig, X11 (any desktop has them), and curl or wget to look for a newer version | `~/.local/state/Go.dot/logs` |
 
 **On Linux with a multichannel interface**, PipeWire only offers two channels through ALSA. Install `pipewire-jack`, set the interface profile to *Pro Audio* in pavucontrol, and choose JACK in Show settings.
 
@@ -43,6 +43,8 @@ Useful checks from a terminal (on Windows, `wfg.exe` in the install folder; on m
 - `wfg midi` — the MIDI ports it sees
 - `wfg plugins --scan` — find your VST3, AU and LV2 plugins
 - `wfg validate <show>` — check a show folder and list every problem
+
+**Newer versions.** Once a day, when it starts, Go.dot looks on GitHub for a newer release and says so on its title line: press it to see what is new, or to be told only of the next one. Nothing is downloaded: install the new version as you installed this one. *Help > About Go.dot* says which version you have, *Help > Look for a newer Go.dot now* looks at once, and *Help > Look for a newer Go.dot at launch* turns the daily look off, for a show computer kept offline.
 
 *Show settings* lists its tabs down the left in five sections: Show, Audio, Video, Controllers and Getting started. The last, **Getting started**, lists every other tab under its section, with one sentence on what each is for.
 
@@ -306,13 +308,13 @@ WFS-DIY, XOA/Tight-WFS and S21-HiJack come from the same author as Go.dot, as do
 
 ## Sending feedback
 
-A test build exists so that people other than the author can say what they found. Tell us what you liked, what you would change, and what went wrong: all three shape what comes next. Every message helps, including "I could not work out how to…".
+This release exists so that people other than the author can say what they found. Tell us what you liked, what you would change, and what went wrong: all three shape what comes next. Every message helps, including "I could not work out how to…".
 
 **Where:** [github.com/pob31/go.dot/issues](https://github.com/pob31/go.dot/issues). A free GitHub account is enough. Write in English or French.
 
 **A bug report is most useful with:**
 
-1. The build's name (the download's file name, or the first line of `wfg --version`).
+1. The build's name (the download's file name, *Help > About Go.dot*, or the first line of `wfg --version`).
 2. Your system and your audio interface.
 3. What you did, what you expected, and what happened.
 4. The newest log file (see the table in *Getting it running*).

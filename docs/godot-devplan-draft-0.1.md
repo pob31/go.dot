@@ -2103,6 +2103,28 @@ word clock and then none. **Owed to the author:** the words of
 RD.11 and RD.12 and those earlier stages left for him (§58.7, RD.11's and RD.12's lists). Deterministic
 replay as a tool is not part of it and is not built.
 
+### A newer Go.dot said, and releases from tags (2026-10-17)
+
+The author: *"The last thing we need to make is an automatic update checking for newer version on
+GH. And as soon as this is ready we can start cutting real release version for which the build
+action on GH might need some updating."* Versions are three numbers - *"no beta in the version
+number"* - 0.1.x maintenance and 0.2.0 an MCP server. Namespace draft §78, PRD §3.33; decisions
+ASO-ASR the author's (every recommended option), ASS-ASY mine.
+
+| Stage | What | Depends on |
+|---|---|---|
+| UC.0 | Docs: namespace §78, PRD §3.33, this | - |
+| UC.1 | `model/Updates`: a version, newer, GitHub's answer, the machine's memory, the words | UC.0 |
+| UC.2 | `ui/UpdateCheck`: the detached ask; `--update-url` for a test | UC.1 |
+| UC.3 | The window: the Help menu, About, the title line's mark, the switch | UC.2 |
+| UC.4 | `release.yml`: a plain tag a release, marked latest; Linux asks through curl or wget | - |
+| UC.5 | README, both guides, the downloads' README; the tests | all |
+
+**Done when:** a window launched as a tester launches it shows "Go.dot X.Y.Z is out" on its title
+line when a newer release is on GitHub, opens its page, and is told not now; Help > About says which
+version runs; the switch turns the look off; the first `vX.Y.Z` tag publishes a release marked
+latest; CI is green.
+
 ---
 
 ## Cross-cutting, every phase

@@ -20,19 +20,19 @@ Trois engagements façonnent tout le reste :
 - **Trois façons d'arrêter.** Échap arrête proprement, comme si les cues s'étaient terminées normalement. Échap deux fois coupe immédiatement tout ce que Go.dot produit. **Doh!** rattrape l'erreur la plus courante : un GO parti trop tôt.
 - **Rien ne se perd.** Chaque modification peut être annulée, et le spectacle est sauvegardé en continu : un plantage ne vous coûte rien.
 
-Ceci est une **version de test** (v0.1), faite pour essayer en salle de répétition ou chez soi, pas encore pour une première.
+Ceci est une **première version** (0.1), prête à essayer en salle de répétition ou chez soi, et pas encore pour une première.
 
 L'interface du logiciel est en anglais ; les noms des menus et des boutons sont donc cités en anglais ci-dessous.
 
 ## Installer et lancer
 
-Téléchargez la version de test pour votre système sur la [page des versions](https://github.com/pob31/go.dot/releases), installez-la et lancez Go.dot. Il ouvre un spectacle vide, *Untitled*, sur votre interface audio par défaut, avec les réglages du spectacle ouverts pour en choisir une autre.
+Téléchargez la dernière version pour votre système sur la [page des versions](https://github.com/pob31/go.dot/releases), installez-la et lancez Go.dot. Il ouvre un spectacle vide, *Untitled*, sur votre interface audio par défaut, avec les réglages du spectacle ouverts pour en choisir une autre.
 
 | Système | Téléchargement | Premier lancement | Journal pour les rapports de bug |
 | --- | --- | --- | --- |
 | Windows 10/11 | `-setup.exe` (installateur : menu Démarrer, ouverture des `.wfg` par double-clic) ou `.zip` (à décompresser où vous voulez, lancer `Go.dot.exe`) | Pas encore signé : SmartScreen avertit, choisir *Informations complémentaires* puis *Exécuter quand même* | `%APPDATA%\Go.dot\logs` |
 | macOS 13.3+ (Apple silicon et Intel) | `.dmg`, glisser Go.dot dans Applications | Signé et notarié, s'ouvre sans avertissement. Autoriser l'accès au micro pour les cues micro | `~/Library/Logs/Go.dot` |
-| Linux (compilé sur Ubuntu 24.04) | `.deb` (`sudo apt install ./go.dot-…deb`) ou archive tar (lancer `./go.dot.sh`) | Demande ALSA, FreeType, fontconfig, X11 (présents sur tout bureau) | `~/.local/state/Go.dot/logs` |
+| Linux (compilé sur Ubuntu 24.04) | `.deb` (`sudo apt install ./go.dot-…deb`) ou archive tar (lancer `./go.dot.sh`) | Demande ALSA, FreeType, fontconfig, X11 (présents sur tout bureau), et curl ou wget pour chercher une version plus récente | `~/.local/state/Go.dot/logs` |
 
 **Sous Linux avec une interface multicanal**, PipeWire ne donne que deux canaux via ALSA. Installez `pipewire-jack`, passez le profil de l'interface en *Pro Audio* dans pavucontrol, et choisissez JACK dans les réglages du spectacle.
 
@@ -45,6 +45,8 @@ Quelques vérifications depuis un terminal (sous Windows, `wfg.exe` dans le doss
 - `wfg midi` — les ports MIDI visibles
 - `wfg plugins --scan` — trouver vos plugins VST3, AU et LV2
 - `wfg validate <spectacle>` — vérifier un dossier de spectacle et lister chaque problème
+
+**Nouvelles versions.** Une fois par jour, au lancement, Go.dot regarde sur GitHub si une version plus récente est sortie et le dit sur sa ligne de titre : un appui montre les nouveautés, ou ne signale plus que la suivante. Rien n'est téléchargé : installez la nouvelle version comme celle-ci. *Help > About Go.dot* dit quelle version vous avez, *Help > Look for a newer Go.dot now* regarde tout de suite, et *Help > Look for a newer Go.dot at launch* coupe ce regard quotidien, pour un ordinateur de spectacle gardé hors ligne.
 
 *Show settings* range ses onglets à gauche en cinq sections : Show, Audio, Video, Controllers et Getting started. La dernière, **Getting started**, reprend chaque autre onglet sous sa section, avec une phrase sur son rôle.
 
@@ -308,13 +310,13 @@ WFS-DIY, XOA/Tight-WFS et S21-HiJack viennent du même auteur que Go.dot, comme 
 
 ## Faire un retour
 
-Une version de test existe pour que d'autres que l'auteur disent ce qu'ils y ont trouvé. Dites-nous ce qui vous a plu, ce que vous changeriez et ce qui n'a pas marché : les trois orientent la suite. Chaque message aide, y compris « je n'ai pas compris comment… ».
+Cette version existe pour que d'autres que l'auteur disent ce qu'ils y ont trouvé. Dites-nous ce qui vous a plu, ce que vous changeriez et ce qui n'a pas marché : les trois orientent la suite. Chaque message aide, y compris « je n'ai pas compris comment… ».
 
 **Où :** [github.com/pob31/go.dot/issues](https://github.com/pob31/go.dot/issues). Un compte GitHub gratuit suffit. Écrivez en français ou en anglais.
 
 **Un rapport de bug est le plus utile avec :**
 
-1. Le nom de la version (le nom du fichier téléchargé, ou la première ligne de `wfg --version`).
+1. Le nom de la version (le nom du fichier téléchargé, *Help > About Go.dot*, ou la première ligne de `wfg --version`).
 2. Votre système et votre interface audio.
 3. Ce que vous avez fait, ce que vous attendiez, ce qui s'est passé.
 4. Le journal le plus récent (voir le tableau dans *Installer et lancer*).

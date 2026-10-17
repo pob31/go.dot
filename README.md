@@ -29,19 +29,21 @@ The specification lives in `docs/`, and it is the spec — not background readin
 
 **To try it rather than build it**, read the tester's guide —
 [English](docs/Go.dot_TryItOut_English.md) or
-[français](docs/Go.dot_TryItOut_Français.md) — and download a test build from
-the [releases page](https://github.com/pob31/go.dot/releases).
+[français](docs/Go.dot_TryItOut_Français.md) — and download the latest release
+from the [releases page](https://github.com/pob31/go.dot/releases).
 
 ---
 
-## Status: test builds, not yet for a performance
+## Status: ready to try, not yet for a performance
 
 Go.dot runs shows. It plays sound and pictures from a cue list, takes GO from
 the keyboard, a control surface or the network, and stops in the three ways
-PRD §4.4 asks for. Test builds for Windows, macOS and Linux are published from
-version tags (the first, v0.1.0, on 2026-09-29). They are for rehearsal rooms
-and for people's own machines, to try and to report on — **not yet for opening
-night**.
+PRD §4.4 asks for. Releases for Windows, macOS and Linux are published from
+version tags of three numbers (the first test build, v0.1.0, on 2026-09-29):
+0.1.x for maintenance, and 0.2.0 will bring an MCP server. They are for
+rehearsal rooms and for people's own machines, to try and to report on — **not
+yet for opening night**. Go.dot says on its title line when a newer release is
+out, and never installs one itself (namespace draft §78).
 
 Much of what touches hardware is built and tested in software only. The devplan
 ends each piece of work with what is still **owed to the bench** — the D700 on
@@ -649,7 +651,7 @@ without telling anyone.
 | `strict` | `WFG_WARNINGS_AS_ERRORS=ON`. Applies to our code only — the vendor sources live in a separate target that never sees the flag. Inherits `dev`, so it runs on all three platforms |
 | `strict-ci` | `strict` plus the two `ccache` launchers; what the Linux CI job runs. Keeping them out of `strict` is what lets a Windows or macOS contributor run `strict` without installing ccache |
 | `spikes` | `WFG_BUILD_SPIKES=ON`, its own build tree and its own CI job |
-| `package` / `package-macos` / `package-windows` | The test build's archive, run by `release.yml` on a tag (or by hand). `WFG_BUILD_TESTS=OFF`; `package-macos` is universal (arm64 + x86_64). See [Test builds](#test-builds) |
+| `package` / `package-macos` / `package-windows` | A release's archive, run by `release.yml` on a tag (or by hand). `WFG_BUILD_TESTS=OFF`; `package-macos` is universal (arm64 + x86_64). See [Test builds](#test-builds) |
 | `rtsan` | Clang's real-time sanitizer, the second net under PRD §4.2. **Clang 20 or newer only** — `-fsanitize=realtime` does not exist before it, so this preset fails to configure on MSVC and on Apple Clang, and that is not a defect. Its own CI job installs the toolchain; the suppression list goes in at run time through `RTSAN_OPTIONS`, never in the preset |
 
 Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …).
@@ -676,10 +678,10 @@ test step runs, four, three and four entries at once — each runner's cores.
 | `wfg` | executable | The product binary (PRD §7's binary name) |
 | `wfg_tests` | executable | doctest runner, registered with CTest under both locales |
 | `wfg_audio_ui_tests` | executable | Windows only: the native-window checks, against a live device |
-| `wfg_windows_launcher` / `wfg_macos_launcher` | executables | `Go.dot.exe`, and the app's launcher on macOS, in a test build |
+| `wfg_windows_launcher` / `wfg_macos_launcher` | executables | `Go.dot.exe`, and the app's launcher on macOS, in a release |
 | `spike01…07_*` | executables | PRD §6.1 validation programs, behind `WFG_BUILD_SPIKES` |
 
-### Test builds
+### Releases
 
 `.github/workflows/release.yml` makes one download per platform for people to
 try. Windows and Linux get a folder: the `wfg` binary, `console/` (the web
@@ -699,16 +701,18 @@ installed, checked and removed by the workflow the same way. Windows and Linux
 are not signed. `cmake/WfgInstall.cmake` is the list; the extra files
 live in `packaging/`.
 
-- **To publish one**, bump `project(VERSION)` in the root `CMakeLists.txt` if
-  needed and push a tag whose numbers match it:
+- **To publish one**, bump `project(VERSION)` in the root `CMakeLists.txt` and
+  push a tag of the same three numbers:
 
   ```bash
-  git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1
+  git tag -a v0.1.1 -m "Go.dot 0.1.1" && git push origin v0.1.1
   ```
 
-  The workflow refuses a tag that disagrees with `project(VERSION)`, builds the
-  three archives, smoke-tests each installed binary, and publishes them as a
-  GitHub **pre-release** with checksums and the commits since the previous tag.
+  The workflow refuses a tag that disagrees with `project(VERSION)` or carries
+  anything after the three numbers, builds the downloads, smoke-tests each
+  installed binary, and publishes them as a GitHub **release** marked latest -
+  the one every Go.dot's update check reads - with checksums and the commits
+  since the previous tag.
 - **To hand a branch to one tester**, run it by hand (*Actions → Release → Run
   workflow*). The archives are attached to that run for 14 days and published
   nowhere.
@@ -853,7 +857,7 @@ scripts/             bootstrap, the Linux package list, the pin gate, the
                      gates' scripts and the packaging scripts
 patches/             Go.dot's own changes to Tracktion Engine, applied by the
                      build (see below)
-packaging/           what a test build carries beside the binary: the
+packaging/           what a release carries beside the binary: the
                      launchers, the tester's README.txt, an empty show, the
                      example shows, the icons, macos/ (Go.dot.app's launcher,
                      Info.plist, entitlements) and windows/ (the installer)

@@ -31080,3 +31080,94 @@ author's review of the words (ASH-ASM, L47-L51).
 ### 77.7 Not built
 
 Time groups (ASG); a picture in a bank (ASJ); a solo (ASK).
+
+## 78. A newer Go.dot, said; and releases cut from tags
+
+Asked by the author on 2026-10-17: *"The last thing we need to make is an automatic update checking
+for newer version on GH. And as soon as this is ready we can start cutting real release version for
+which the build action on GH might need some updating."* And of how ready a release is: *"reliable
+enough for testing from day-1, but not show ready before we spend some time putting it through its
+paces."* And of its numbers: *"version increments will start at 0.1.0 (no beta in the version
+number). Version 0.2.0 will feature an MCP server. Until then it will mostly be maintenance."*
+
+Go.dot never said which version it was anywhere in its window, and never asked whether a newer one was
+out. Every tag was published as a pre-release, titled a test build. WFS-DIY has had an update check
+since its betas (its `Source/UpdateChecker.h`, audited 2026-09-29), and this is that check, ported. PRD
+§3.33; the devplan. Decisions run from ASO.
+
+### 78.1 What it does
+
+- **Once a day, at launch, Go.dot asks GitHub for its latest release.** The one GitHub marks latest,
+  which is never a pre-release or a draft. The ask is one HTTPS request on a thread of its own; a
+  machine with no network finds nothing and says nothing.
+- **A newer one is a mark on the title line**, "Go.dot 0.1.2 is out", left of the warnings, in the
+  picked colour and in words. Pressed, it offers what is new - the release's page in the browser - or
+  *Not now - tell me of the next one*, after which it stays away until a newer one than that is out.
+- **The Help menu**, new: *About Go.dot* (its version, its licence, what it is built with, its page),
+  *Look for a newer Go.dot now*, which says what it found at the foot whatever it found, *Look for a
+  newer Go.dot at launch*, ticked until somebody turns it off, and the release page - named for the
+  version when one is known to be out.
+- **Nothing is downloaded or installed.** A new version is installed as the first one was.
+- **A tag is a release.** `vX.Y.Z` - three numbers and nothing after them - is published as a release,
+  marked latest, which is what the check reads; a tag with anything after the numbers is refused.
+
+### 78.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **ASO** | **Say so and link to the release page; never download or install.** A show computer must not change itself, and the Windows builds are unsigned. | the author's (offered as "Say so, link to the page", recommended) |
+| **ASP** | **Real releases only**: GitHub's `releases/latest`, which never names a pre-release or a draft. A test build is told of the next real release. | the author's (offered as "Releases only", recommended) |
+| **ASQ** | **A Help menu and a quiet mark on the title line**, never a pop-up. *As built:* About is a window of its own, never modal - a modal box would take Space and Esc, which are GO and PANIC in every window - with Esc PANIC there too. | the author's (offered as "Help menu + top-bar mark", recommended) |
+| **ASR** | **On by default, at most once a day at launch, a switch on each machine to turn it off.** The switch is the Help menu's ticked item, kept with the machine, never with the show. | the author's (offered as "On, once a day, switch off", recommended) |
+| **ASS** | **Only a launch the launchers made asks by itself**: the one started with `--remember`, which is the one with a folder to remember in (`rememberIn`, §32). `wfg serve` without a window, the drivers, the tests and CI never reach the network. *Look for a newer Go.dot now* asks on any window, being a person's. `--update-url=<url>` points the window elsewhere, for a test; a `file:` URL is read as a file. | mine |
+| **AST** | **It can never touch the show.** A detached thread, never joined - a blocking request on Windows cannot be interrupted, and a window that waited for it on its way out could hang (WFS-DIY's finding) - which touches nothing of the window's once the window has let it go, and hands its answer to the message thread. No lock or wait on any thread the engine uses, nothing on the audio thread, and nothing in the tree or the log: what the machine happened to find is not something anybody decided (§4.10). | mine |
+| **ASU** | **What it sends and what it believes.** One GET with `User-Agent: Go.dot/<version>`, which GitHub's API requires, and the API's Accept; nothing about the machine or the show. `tag_name` believed only as `v` and three numbers, `html_url` only under `https://github.com/pob31/go.dot/releases/`, never a draft or a pre-release, nothing larger than a mebibyte. A 404 is GitHub saying none is published yet; any other refusal - 403 when the hourly allowance is spent, 5xx - is no answer, and forgets nothing found before. | mine |
+| **ASV** | **Newer is the three numbers in order**, `0.1.10` after `0.1.9`. A tag that is not a plain `vX.Y.Z` is no version and is never offered. | mine, from the author's numbering |
+| **ASW** | **What it remembers**, in `updates.txt` beside `last-show.txt`: whether to ask at launch, when it last asked, the newest release it heard of and its page, and the version somebody said not now to. A launch shows what was found before at once and asks again once a day; a clock gone back past the last ask asks again. A version said not now to comes back when a person asks for it themselves. An answer with no release forgets what was found, so a release taken down is offered no more. | mine |
+| **ASX** | **A tag is a release**: `release.yml` publishes `vX.Y.Z` as a release, marked latest, titled "Go.dot X.Y.Z", its notes saying it is ready to try and not yet for a show, and how the check is turned off. The `meta` job refuses a tag with anything after the numbers, as it refuses one that differs from CMake's VERSION. `v0.1.0`, of 2026-09-29, stays the last pre-release, so the first release is 0.1.1. | mine, from the author's numbering; the first number the author's to confirm when cutting |
+| **ASY** | **Linux asks through the system's own program**, curl, else wget. JUCE's Linux web stream without libcurl speaks `http://` alone, and libcurl would bring OpenSSL into the binary, which `deps.no-openssl` refuses - nothing in the tree speaks TLS (ANB). So the window starts `curl` with the status written on a last line of its own, or `wget`, whose exit code says only whether it had a 200; a program that is not installed starts and prints nothing, which is how its absence is known; with neither, the look says GitHub could not be reached. The package recommends `curl \| wget`. Windows and macOS ask through the system's own web stack, as JUCE does there. *Found on the way:* the FFmpeg download (§37.5) reads its archive through JUCE's web stream, so on Linux it cannot fetch over HTTPS either; its Linux link had never been run, and it is left as it was, said here. | mine |
+
+### 78.3 Rows
+
+None. What the window found is the machine's and the window's, never a node.
+
+### 78.4 Commands
+
+None. Like the monitors, the check and the menu are the window's own: they change nothing of the show
+and send nothing to the engine.
+
+### 78.5 Stages
+
+| Stage | What | Built |
+|---|---|---|
+| UC.0 | This section; PRD §3.33; the devplan | the commit after 3a844f49 |
+| UC.1 | `model/Updates`: a version, newer, GitHub's answer, the machine's memory, the words (ASU-ASW) | 3a844f49 |
+| UC.2 | `ui/UpdateCheck`: the detached ask, a file for a test (AST); `--update-url` (ASS) | 3a844f49 |
+| UC.3 | The window: the Help menu, About, the title line's mark, the switch (ASQ, ASR) | 3a844f49 |
+| UC.4 | `release.yml`: a plain tag a release, marked latest (ASX); Linux through curl or wget (ASY) | 3a844f49 |
+| UC.5 | The README, both guides and the downloads' README; the tests | 3a844f49 and the commit after it |
+
+### 78.6 Tests
+
+`ClientTests`, five cases: a version and which is newer, the refused spellings among them; GitHub's
+answer believed only where it is safe to - another site's page, another project's, a tag with a
+suffix, a draft, a pre-release, a field of the wrong kind, a reply past the cap; the machine's memory -
+once a day, a clock gone back, not now and the next one, a release taken down, a file written and read
+back with lines a newer Go.dot might add, a page from elsewhere not believed; what an ask came back
+with - a release, none yet (404), or no answer (no connection, 403, 5xx, past the cap); and curl's and
+wget's output as Linux reads it. `wfg_audio_ui_tests` (Windows), two: the ask itself, read from a file
+a test wrote, a file that is not there no answer; and the title line's mark, left of a warning, its
+version in words, a press its own, gone when taken away, a picture of it written when asked.
+
+### 78.7 Owed
+
+The author's look at the mark and the Help menu, and his review of the words: the mark's, the menu's,
+the foot's three sentences, the release notes' first paragraph and the downloads' README. The first
+real tag, when the author says, with CMake's VERSION bumped to it first. Whether a Linux desktop
+without curl has wget is the system's; Ubuntu's desktop ships wget.
+
+### 78.8 Not built
+
+Installing an update; signing the Windows build (a certificate is the author's to buy); the Android
+remote's own updates, which are its repository's and its store's; a newer version said on the web
+page.

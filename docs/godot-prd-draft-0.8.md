@@ -3726,6 +3726,26 @@ over and loops sends it in its later rounds. With a plugin's own window in front
 in that window, which hands back only Space and Esc; the Doh! button still works. The namespace
 draft lists the rest.
 
+### 3.33 A newer Go.dot, said
+
+*Added in 0.8, at the author's direction (2026-10-17); the mechanics are the namespace draft's §78.*
+The author: *"an automatic update checking for newer version on GH"*, and *"as soon as this is ready
+we can start cutting real release version"*.
+
+- **Go.dot says when a newer release is out, and never installs anything.** Once a day, at launch,
+  the window asks GitHub for the latest release - a real one, never a pre-release - and a newer one
+  is a quiet mark on the title line, in words, which opens the release's page or is put off until
+  the next. A show computer never changes itself.
+- **A Help menu**: About Go.dot, a look for a newer one now, the switch that turns the look at launch
+  off on that computer, and the release page.
+- **It can never touch the show**: a thread of its own, never waited for, nothing on the audio
+  thread, nothing in the document or the log (§4.10). Only a window started by the launchers looks by
+  itself; the headless engine, the tests and CI never reach the network.
+- **Versions are three numbers** (the author: *"no beta in the version number"*): 0.1.x is
+  maintenance, and 0.2.0 brings an MCP server. A tag `vX.Y.Z` is published as a release, marked
+  latest - ready to try, not yet for a show (the author: *"reliable enough for testing from day-1,
+  but not show ready before we spend some time putting it through its paces"*).
+
 ---
 
 ## 4. Constraints as law
