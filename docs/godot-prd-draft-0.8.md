@@ -2266,6 +2266,18 @@ broker is a device** too, transport `mqtt`, opaque - its topics are addresses
 under its prefix and need no template; a described MQTT device, a preset whose
 nodes are topics, is left for later (§67.7).
 
+*Added 2026-10-17, at the author's direction (namespace draft §76):* presets
+are **a user's to add and to correct**. A folder of the user's own,
+`Documents/Go.dot/Device presets`, is read beside the shipped one, and a file
+there named like a shipped preset is used in its place. A device whose
+description Go.dot holds - declared, found, or made from a preset - is saved
+there on request, as its description plus a header saying where it came from.
+And Go.dot **finds OSCQuery devices on the network** by mDNS (`_oscjson._tcp`,
+the OSCQuery proposal's own way) and announces its own server the same way; a
+device that does not announce itself is given by its address. The format stays
+the OSCQuery description, which is what a device answers (ARS). The author's
+decisions are ARS-ARV; ARW-ASC are the implementer's, the author's to overrule.
+
 ### 3.23 Choufleur integration (script following and cue prompting)
 
 **Choufleur** — `github.com/pob31/choufleur_prompt`, MIT OR Apache-2.0 — is a
@@ -4118,7 +4130,9 @@ Added 2026-09-22, with the network devices (§3.3, §3.11, §3.22):
   so. A rename-and-rewrite command would fix it and does not exist.
 - **Machine-level defaults for the network side**, the twin of
   `audio-defaults.xml`: the devices a machine usually talks to, copied into new
-  shows. Not built, and worth leaving until the tabs have been used.
+  shows. Not built, and worth leaving until the tabs have been used. *(2026-10-17:
+  a machine's device presets are its own folder now, namespace draft §76; the
+  devices a show talks to are still made in each show.)*
 - **The specialised device kinds** (§3.22): a described tree with values,
   two-way OSCQuery, a device that writes its own cues into the show.
 
@@ -4361,7 +4375,9 @@ from AFV in §58.2 are the author's to overrule:
 What the work leaves out: correcting the drift between two sound clocks by speed; a backup's TCP
 connections open but silent, for consoles that take two sessions; a shared secret on the link; finding
 the other machine by itself on the network (mDNS), left for the remote app - which the author then
-chose to point at its machines by a typed address (2026-10-15, namespace draft §68, ANN).
+chose to point at its machines by a typed address (2026-10-15, namespace draft §68, ANN). Go.dot
+itself announces its OSCQuery server and finds OSCQuery devices by mDNS since 2026-10-17 (§76);
+a backup is still pointed at its main by address.
 
 Added 2026-10-12 *(proposed)*, with outgoing timecode (§3.14, namespace draft §59). The implementer's
 calls from AHD in §59.2 are the author's to overrule:

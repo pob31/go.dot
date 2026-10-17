@@ -1420,6 +1420,39 @@ to SSL, Adamson and the grandMA1 manual.
 
 ---
 
+### Your presets, and OSCQuery devices found on the network · L
+
+*Added on 2026-10-17*, at the author's direction: the device presets made a user's to add and to
+correct, a device's description saved as a preset, and OSCQuery devices found on the network - *"one of
+the last pieces missing"* (namespace draft §76; PRD §3.22). The author's decisions are ARS-ARV; ARW-ASC
+are the implementer's, the author's to overrule. On the branch `discovery`, in the worktree
+`go.dot-discovery`.
+
+| Stage | What | Depends on |
+|---|---|---|
+| UD.0 | Docs: namespace §76, §7a, §8; PRD §3.22, §6.9; this | - |
+| UD.1 | Your folder read beside the shipped one; `origin`; `--user-presets`; `wfg presets` | UD.0 |
+| UD.2 | Reading again off the tick; `preset.rescan`; the `network/presets*` rows | UD.1 |
+| UD.3 | A compact JSON writer; the header found and replaced in place | UD.0 |
+| UD.4 | `preset.save`; `QUERY_PORT` | UD.2, UD.3 |
+| UD.5 | The Network tab: *Yours*, *Save as a preset…*, *Show presets folder* | UD.4 |
+| UD.6 | The mDNS messages, pure | UD.0 |
+| UD.7 | The browser; `network.browse`; `network/found`; the serve options | UD.6 |
+| UD.8 | `mount.describeAt`, `mount.discovered` | UD.0 |
+| UD.9 | The Network tab: *FOUND*, *At an address…* | UD.7, UD.8 |
+| UD.10 | The black box: found, picked, saved, made again, replayed | UD.4, UD.7, UD.8 |
+| UD.11 | The announcer | UD.7 |
+| UD.12 | M81, the README, the guides, the whole suite | all |
+
+**Done when:** a device announced on the network shows in *FOUND*, is made with its menus in one pick,
+is saved as a preset in one click, and is made again from that preset on another machine; a file put
+by hand in the folder is in the PRESET menu the next time the tab is shown, and one named like a
+shipped preset replaces it; Go.dot is seen by an OSCQuery browser; `wfg replay` rebuilds the show with
+no network; CI is green.
+
+**Needs from the author:** a look at the words and at ARW-ASC; a bench with Chataigne or ossia score
+announcing themselves, and two machines finding each other.
+
 ### Group joins: Let play, Gapless, Crossfade · M
 
 *Added on 2026-10-16*, at the author's direction: one Join menu on every sequence group, automatic
@@ -1948,7 +1981,9 @@ Left: the show half rebuilt on every tick that applies a command (§31.5).
 - **OSC device templates** as OSCQuery namespace descriptions; ADM-OSC built in.
   *(2026-10-10: being built as the device presets - one file per device family and
   protocol, consoles, lighting desks and spatial processors - the item before Phase 10,
-  namespace draft §57; the author's decisions AFA-AFF.)*
+  namespace draft §57; the author's decisions AFA-AFF.)* *(2026-10-17: a user's own presets beside
+  them, a device saved as one, and OSCQuery devices found on the network by mDNS - namespace draft
+  §76, the round after the device presets.)*
 - **Authoring from a processor** (PRD §3.26, added 2026-09-06): the capture verb
   that lets WFS-DIY write a cue rather than only be commanded by one — QLab's
   authoring API in Go.dot's own protocol. It needs no new transport (§4.11 already

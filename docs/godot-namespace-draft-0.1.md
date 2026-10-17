@@ -676,7 +676,9 @@ the bytes.
 
 **mDNS is not implemented.** Clients are pointed at a host and a port.
 `juce::NetworkServiceDiscovery` is not mDNS and would advertise to nothing that speaks
-OSCQuery.
+OSCQuery. *(2026-10-17: Go.dot announces its OSCQuery server and finds OSCQuery devices by
+mDNS since §76, with its own messages rather than JUCE's; clients are still pointed at a host
+and a port.)*
 
 **Three commands this draft did not list**, added because the things they name are things
 that happen:
@@ -704,6 +706,7 @@ that happen:
 | OSC over UDP | **8010** | WFS-DIY is on 8000/8001 |
 | OSC over TCP | 8011 | reserved, Phase 2 |
 | MCP | 7410 | reserved; WFS-DIY is on 7400 |
+| mDNS (DNS-SD) | 5353 | the standard's own, shared with the system's responder: OSCQuery devices found, Go.dot announced (§76, ASA) |
 
 Tests never use these numbers: they bind port 0 and read the bound port back.
 
@@ -30823,3 +30826,128 @@ None. The gestures and their numbers are the app's, which the author has had in 
 
 Two-finger load-to-time (ARK); radial gain on a rotary - the page has none; the app's Surface, Cart
 and Mapping tabs on the page (ARH).
+
+## 76. Your presets, and OSCQuery devices found on the network
+
+Asked by the author on 2026-10-17: *"Are the devices for which we have added the valuetree for easier
+programming user editable? Could this data, whether for an OSC or a MIDI interfaced device customisable
+by the user? In this case accessible xml would be great rather than hardcoded data? It also means that
+on OSCQuery discovery of a new device we could write out its device profile and add it to the bank of
+devices. Or it lets user add their own. Then we also need to add the OSCQuery discovery of new devices
+to the program which is one of the last pieces missing."*
+
+The presets of §57 were already data: OSCQuery files, one per device family and protocol, MIDI ones
+included. What a user could not do was keep their own. The folder sat beside the program, was read
+once at the start, and an upgrade replaced it. A file edited there reached no show that already held
+its version, and nothing made a preset from a device. Nothing found a device on the network either: a
+device was typed in, or declared itself (§56). PRD §3.22; the devplan's Phase 11. Decisions run from
+ARS.
+
+### 76.1 What it is, before its names
+
+- **Your presets.** A folder of your own, `Documents/Go.dot/Device presets`, is read beside the
+  shipped one. Its files are in the PRESET menu under *Yours*, and a file there named like a shipped
+  preset is used in its place. That is how a shipped preset is corrected: copy it, change it, raise
+  its `VERSION`. The Network tab reads the folder again each time it is shown, and *Show presets
+  folder* opens it.
+- **A device saved as a preset.** A device whose description Go.dot holds can be saved as a preset in
+  one click: one that declared itself, one found on the network, or one made from a preset.
+  The file is the device's description as it came, with a header saying what it is and where it was
+  captured. Made again from that preset on another machine, the device is the same.
+- **Devices found.** Go.dot asks the network for OSCQuery servers the way the OSCQuery proposal says
+  they announce themselves: multicast DNS, service `_oscjson._tcp`. *FOUND* lists them. Picking one
+  fetches its description, and the device is made with its menus, as a processor that declares itself
+  is. A device that does not announce itself is given by its address and query port.
+- **Go.dot found.** Go.dot announces its own OSCQuery server the same way. Chataigne, ossia score and
+  another Go.dot see it without being told where it is.
+
+### 76.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **ARS** | **Presets stay OSCQuery JSON**, not XML. It is what a device answers when asked, the show already keeps one per described device, and a found device's profile is written out as it came plus a `GODOT` header. A hand-written file is the same file. | the author's (offered as "Keep OSCQuery JSON", recommended) |
+| **ART** | **Your presets live in `<Documents>/Go.dot/Device presets/`**, a folder a person can see, open, copy and share. A file there named like a shipped preset is used in its place. | the author's (offered as "Documents/Go.dot/Device presets", recommended) |
+| **ARU** | **Go.dot finds OSCQuery devices by mDNS** (DNS-SD, `_oscjson._tcp`) **and announces its own server the same way**; a device not found is given by its address. ANN (§68) stands for the remote app, which still finds Go.dot by a typed address. | the author's (offered as "Browse mDNS and advertise Go.dot too", recommended) |
+| **ARV** | **A description reaches your presets only when you ask** (*Save as a preset*). Picking a found device puts its description in the show, as a declared processor's is (§56); nothing is written to the folder unasked. | the author's (offered as "On request, one click", recommended) |
+| **ARW** | **What is found is not a decision.** The services seen are one runtime row, `network/found`, a line each, as `network/remotes` lists the remotes: no command, nothing in the log. Picking one is the gesture, `mount.describeAt <host> <queryPort>`, which is also what *At an address…* sends. | mine |
+| **ARX** | **A device from an address.** `mount.describeAt` draws the device's identifier on the tick, so the file can be named before the device exists, and hands the fetch to the thread that fetches a processor's description (§56, AEM). That thread asks `GET /` and `GET /?HOST_INFO`, checks the answer as a description whose roots are its own first-level names (AFK), writes `namespaces/<id>.json` and sends `mount.discovered`. That record makes the device: host; OSC port and transport from HOST_INFO (`tcp` framed by SLIP, as OSC 1.1 is); query port; name; rx and tx on; `readback` `oscquery` when HOST_INFO offers VALUE. When one device already holds every root, that device is moved to the new address and description instead. Roots split across devices, or a root Go.dot keeps for itself (`/godot`, `/ui`: another Go.dot), are refused in a sentence. | mine |
+| **ARY** | **Saving puts a `GODOT` header into the device's description and leaves the rest as it was.** `PRESET` is the name given: lower-case letters, digits and dashes, because it is a file name and an address. `VERSION` is one more than any preset of that name on this machine. `VENDOR` and `MODEL` are as typed, else the device's name. `TRANSPORT`, `WIRE`, `FRAMING`, `PORT`, `QUERY_PORT` and `READBACK` come from the device's rows. `SOURCES` keeps the file's own lines and gains one: "captured from WFS-DIY at 10.0.0.7:5005 on 2026-10-17", or "copied from behringer-x32-osc@1 on 2026-10-17" for a device made from a preset. `GENERATED` is dropped, since no script wrote the copy. `QUERY_PORT` is new: a device made from such a preset is asked there, as the device it was captured from was. | mine |
+| **ARZ** | **The folders are read again only when asked**: when the Network tab is shown, when PRESET opens, after a save, and by `preset.rescan`. The reading is done on a thread of its own, a file whose size and time have not changed is carried over unread, and the table is swapped on the tick. It never runs on a timer: twenty megabytes parsed beside the tick starved it through the Debug heap (§57.7). | mine |
+| **ASA** | **The browser and the announcer share one socket on port 5353**, joined to 224.0.0.251 on every IPv4 interface. A show machine has a control network and an audio network, and the default interface is not always the one the devices are on. The announcement is "Go.dot on <computer>": `_oscjson._tcp` on the HTTP port and `_osc._udp` on the OSC port, with PTR, SRV, TXT (`txtvers=1`) and A records. It is sent twice at the start and withdrawn at the stop, and it does not probe for a name already in use (RFC 6762 §8.1). When 5353 cannot be shared, Go.dot asks from a port of its own every five seconds (RFC 6762 §6.7), is not announced, and `network/discovery` says `unicast`. | mine |
+| **ASB** | **Tests never read the developer's presets.** `wfg presets --check` reads only the folders it is given, and every driver starts serve with `--user-presets` inside its own temporary folder, as it already does with `--engine-folder`. | mine |
+| **ASC** | **The words on screen are mine and owed the author's look**: *FOUND*, *At an address…*, *Save as a preset…*, *Show presets folder*, *Yours* (the PRESET menu's heading for your files) and "yours" in the Kind column. | mine |
+
+### 76.3 Rows
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `preset/<slug>/origin` | `s` | r | `shipped` or `yours`; runtime |
+| `network/presetsFolder` | `s` | r | the folder your presets are read from and saved to, whether it exists yet or not; runtime |
+| `network/presetsProblem` | `s` | r | why the last save or reading failed, in a sentence; empty after one that worked; runtime |
+| `network/presetsSaved` | `s` | r | `<slug>@<version>` of the last preset saved since the start; runtime |
+| `network/found` | `s` | r | the OSCQuery services seen, a line each: name, a tab, IPv4 address, a tab, query port; runtime |
+| `network/discovery` | `s` | r | `off`, `browsing` (5353 shared, Go.dot announced) or `unicast` (asking from a port of its own); runtime |
+| `network/discoveryProblem` | `s` | r | why discovery is off, or why the last pick made no device, in a sentence; runtime |
+
+### 76.4 Commands
+
+| Command | Arguments | Does |
+|---|---|---|
+| `preset.rescan` | - | reads both folders again (ARZ) |
+| `preset.save` | `s:mount [s:slug] [s:vendor] [s:model]` | writes the device's description to your presets (ARY); the name decided is on the record |
+| `network.browse` | - | asks the network now |
+| `mount.describeAt` | `s:host i:queryPort [s:name] [s:id]` | fetches the description at that address and makes the device (ARX); the identifier drawn is on the record |
+| `mount.discovered` | `s:id s:file s:host s:transport i:oscPort i:queryPort s:readback s:name s:roots i:nodeCount s:problem [s:device]` | the engine's: what the fetch learned, applied; `device` is the device made or moved, on the record |
+| `mount.createFromPreset` | gains `[i:queryPort]` as its eleventh argument | a preset's `QUERY_PORT` (ARY) |
+
+`preset.save`, `preset.rescan` and `network.browse` edit no show: they are allowed under the lock, take
+no undo step, and a replay applies them as records that do nothing.
+
+### 76.5 Refused
+
+`bad-value` for a host that is not an IPv4 address, a port outside 1..65535, a name outside
+`[a-z0-9-]`, a device saved that has no description, a transport a preset cannot name (`serial`,
+`mqtt`), and roots split across devices; `unknown-id`; `locked` for `mount.describeAt` and
+`mount.discovered` when they would write. In words, on `network/discoveryProblem`: nothing answering,
+an answer that is not a description, a description that cannot be mounted, another Go.dot. On
+`network/presetsProblem`: a folder that cannot be written, a saved file that does not read back as a
+preset.
+
+### 76.5a Ports
+
+mDNS is port 5353, the standard's own, shared with the system's responder (§8; ASA). A test binds
+none of it: `--mdns-port=0` takes a port of the system's choosing and joins no group, and
+`--mdns-peer=<host:port>` names a responder to ask directly.
+
+### 76.6 Stages
+
+| Stage | What | Built |
+|---|---|---|
+| UD.0 | This section; PRD §3.22, §6.9; the devplan; §7a and §8 | |
+| UD.1 | Two folders: yours read beside the shipped, yours used in its place, `preset/<slug>/origin`, `--user-presets`, `wfg presets` | |
+| UD.2 | Reading again off the tick (`PresetScanner`), `preset.rescan`, the `network/presets*` rows | |
+| UD.3 | The text work: a compact JSON writer, the header found and replaced in place | |
+| UD.4 | `preset.save`; `QUERY_PORT` | |
+| UD.5 | The Network tab, part one: *Yours*, "yours", *Save as a preset…*, *Show presets folder*, reading again when shown | |
+| UD.6 | The mDNS messages, pure | |
+| UD.7 | The browser: `network.browse`, `network/found`, `network/discovery`, the serve options | |
+| UD.8 | `mount.describeAt` and `mount.discovered` | |
+| UD.9 | The Network tab, part two: *FOUND*, *At an address…* | |
+| UD.10 | The black box: a device announced by the mock, found, picked, saved, made again, replayed | |
+| UD.11 | The announcer | |
+| UD.12 | M81, the README and the guides, the presets' README, the whole suite | |
+
+### 76.7 Measurements
+
+**M81**: the tick's lateness while both folders are read again and while a large description is
+saved, in Debug and Release; and the time from a pick in *FOUND* to the device's rows, against the
+mock.
+
+### 76.8 Not built
+
+XML (ARS); saving unasked (ARV); editing a preset's nodes inside Go.dot - the file is edited in an
+editor, and one that does not read says why in the PRESET menu; finding MIDI devices, which have
+nothing to announce (their presets are written by hand); host names (`.local`) and IPv6 - a device is
+an IPv4 address; a value at the top of a description (an address of one part, `/volume`), which no
+device's root matches (`tree::prefixMatchLength`, as for any described device); a saved preset linked
+back to the device it was saved from; the web console's own Network tab.
