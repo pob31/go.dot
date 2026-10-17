@@ -825,12 +825,13 @@ function release() {
     press ends. */
 let pressedInABox = false;
 
-document.addEventListener("mousedown", (event) => {
+document.addEventListener("pointerdown", (event) => {
   pressedInABox = !!(event.target.closest
                        && event.target.closest("input, select, textarea, [contenteditable]"));
 }, true);
 
-document.addEventListener("mouseup", () => { pressedInABox = false; }, true);
+document.addEventListener("pointerup", () => { pressedInABox = false; }, true);
+document.addEventListener("pointercancel", () => { pressedInABox = false; }, true);
 
 document.addEventListener("dragstart", (event) => {
   if (pressedInABox) {

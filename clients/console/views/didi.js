@@ -21,7 +21,7 @@ import { tree } from "../plumbing/tree.js";
 import { selection } from "../model/selection.js";
 import { folded } from "../model/remember.js";
 import { goList, isCart, shownList } from "../model/lists.js";
-import { el, esc, cueName, shownName } from "./common.js";
+import { el, esc, cueName, shownName, byFinger } from "./common.js";
 import { refreshFields } from "./values.js";
 import { reconcile } from "./reconcile.js";
 import { view } from "./view.js";
@@ -382,7 +382,7 @@ function cueRow(id, depth, section, rail, standby, out) {
       pane draws from - so the list a drop counts in is the list a reader is
       looking at, which is the only way the arithmetic can be checked by eye. */
   out.push({ key: "cue:" + id, html:
-    '<div class="row" data-pick="' + id + '" draggable="true"' +
+    '<div class="row" data-pick="' + id + '" draggable="' + (byFinger() ? "false" : "true") + '"' +
       (section ? ' data-in="' + section + '" style="--rail:' + rail + '"' : "") +
       (revealing("cue:" + id) ? ' data-flash="yes"' : "") +
       ' data-standby="' + (id === standby ? "yes" : "no") + '"' +

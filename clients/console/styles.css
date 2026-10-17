@@ -383,7 +383,7 @@ button {
   background: var(--panel-high); border: 1px solid var(--rule); border-radius: 4px;
   padding: 4px 10px; cursor: pointer;
 }
-button:hover:not(:disabled) { border-color: var(--ink-faint); }
+@media (hover: hover) { button:hover:not(:disabled) { border-color: var(--ink-faint); } }
 button:disabled { color: var(--ink-off); cursor: default; }
 
 /*  GO IS NOT A BUTTON LIKE THE OTHERS, and it is the one place on this page
@@ -392,7 +392,7 @@ button:disabled { color: var(--ink-off); cursor: default; }
     capitals. */
 #go { background: var(--standby); color: #1b1206; border-color: var(--standby);
       font-weight: 700; letter-spacing: .12em; padding: 5px 26px; }
-#go:hover { filter: brightness(1.08); }
+@media (hover: hover) { #go:hover { filter: brightness(1.08); } }
 
 #transport .hint { color: var(--ink-faint); font-size: var(--t-10); margin-left: auto; }
 
@@ -473,7 +473,7 @@ button:disabled { color: var(--ink-off); cursor: default; }
   border-bottom: none; border-radius: 4px 4px 0 0;
   color: var(--ink-dim); cursor: pointer;
 }
-.list-tab:hover { color: var(--ink); }
+@media (hover: hover) { .list-tab:hover { color: var(--ink); } }
 .list-tab[data-focused="yes"] {
   background: var(--panel); border-color: var(--rule); color: var(--ink);
 }
@@ -516,7 +516,7 @@ button:disabled { color: var(--ink-off); cursor: default; }
   color: var(--ink); background: transparent; border-radius: 3px;
   border: 1px solid transparent; padding: 1px 4px;
 }
-.when input:hover { border-color: var(--rule); }
+@media (hover: hover) { .when input:hover { border-color: var(--rule); } }
 .when input:focus { border-color: var(--picked); background: var(--ground); outline: none; }
 .when input::placeholder { color: var(--ink-off); }
 .row[data-enabled="no"] .when input { color: var(--ink-faint); }
@@ -571,7 +571,7 @@ button:disabled { color: var(--ink-off); cursor: default; }
     outranks a plain declaration whatever the two weigh. */
 .row[data-in] { background: var(--panel-in); }
 
-.row:hover { background: var(--panel-high); }
+@media (hover: hover) { .row:hover { background: var(--panel-high); } }
 
 /*  THE STANDBY, and colour is not the only thing saying so (§4.8): a wedge in
     the gutter, a rule down the left edge, the row a shade lighter, and the
@@ -637,9 +637,9 @@ button:disabled { color: var(--ink-off); cursor: default; }
 .gutter { color: var(--ink-faint); font-size: var(--t-11);
           align-self: stretch; display: flex; align-items: center; justify-content: center; }
 .gutter[data-park] { cursor: pointer; }
-.gutter[data-park]:hover::before { content: "\25B8"; color: var(--standby); }
-.row:hover { border-left-color: var(--rule); }
-.row:hover[data-standby="yes"] { border-left-color: var(--standby); }
+@media (hover: hover) { .gutter[data-park]:hover::before { content: "\25B8"; color: var(--standby); } }
+@media (hover: hover) { .row:hover { border-left-color: var(--rule); } }
+@media (hover: hover) { .row:hover[data-standby="yes"] { border-left-color: var(--standby); } }
 
 .number { color: var(--ink-dim); text-align: right; font-size: var(--t-12); }
 
@@ -649,7 +649,7 @@ button:disabled { color: var(--ink-off); cursor: default; }
 
 .twist { width: calc(12px * var(--type)); color: var(--ink-faint); cursor: pointer; user-select: none;
          font-size: var(--t-9); flex: none; }
-.twist:hover { color: var(--ink); }
+@media (hover: hover) { .twist:hover { color: var(--ink); } }
 
 .kind {
   flex: none; font-size: var(--t-9); letter-spacing: .07em; text-transform: uppercase;
@@ -713,7 +713,7 @@ button:disabled { color: var(--ink-off); cursor: default; }
 .tail .flag.preset { color: var(--picked); text-transform: none; letter-spacing: 0;
                      cursor: help; }
 .tail .flag.preset[data-reveal] { cursor: pointer; }
-.tail .flag.preset[data-reveal]:hover { text-decoration: underline; filter: brightness(1.15); }
+@media (hover: hover) { .tail .flag.preset[data-reveal]:hover { text-decoration: underline; filter: brightness(1.15); } }
 .row.derived .name .text, .row.derived .number { font-style: italic; color: var(--ink-faint); }
 .row.derived .tail .flag { color: var(--picked); }
 .tail .standby-word { color: var(--standby); }
@@ -800,7 +800,7 @@ button:disabled { color: var(--ink-off); cursor: default; }
 }
 .band[data-fold] > .word { color: var(--ink-dim); }
 .band[data-fold] > .count { color: var(--ink-faint); letter-spacing: 0; }
-.band[data-fold]:hover > .word, .band[data-fold]:hover > .twist { color: var(--ink); }
+@media (hover: hover) { .band[data-fold]:hover > .word, .band[data-fold]:hover > .twist { color: var(--ink); } }
 
 /*  The top edge, and the rail coming down out of its left end to meet the first
     row of the section. It is drawn above the word rather than beside it, so the
@@ -1172,7 +1172,7 @@ button:disabled { color: var(--ink-off); cursor: default; }
   display: flex; align-items: baseline; gap: 8px; padding: 2px 0;
   font-size: var(--t-12); cursor: pointer; color: var(--ink-dim);
 }
-.trigger-row:hover { color: var(--ink); }
+@media (hover: hover) { .trigger-row:hover { color: var(--ink); } }
 .trigger-row[data-picked="yes"] { color: #fff; }
 .trigger-row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trigger-row .off { color: var(--ink-faint); text-decoration: line-through; }
@@ -1199,14 +1199,14 @@ details.derived > summary::-webkit-details-marker { display: none; }
     wherever somebody meets one on this page. */
 details.derived > summary::before { content: "\25B8"; margin-right: 6px; }
 details.derived[open] > summary::before { content: "\25BE"; }
-details.derived > summary:hover { color: var(--ink); }
+@media (hover: hover) { details.derived > summary:hover { color: var(--ink); } }
 
 .back { font-size: var(--t-11); color: var(--waiting); cursor: pointer; }
-.back:hover { text-decoration: underline; }
+@media (hover: hover) { .back:hover { text-decoration: underline; } }
 
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .actions .danger { border-color: #5a2b28; color: #e0918b; }
-.actions .danger:hover { border-color: var(--failed); }
+@media (hover: hover) { .actions .danger:hover { border-color: var(--failed); } }
 
 /* -------------------------------------------------------- empty states */
 /*  PRD §4.7: easter eggs live where idle eyes wander - a splash, an About, an
@@ -1214,3 +1214,43 @@ details.derived > summary:hover { color: var(--ink); }
 .empty { padding: 42px 20px; text-align: center; color: var(--ink-faint); }
 .empty .line { font-size: var(--t-15); font-style: italic; color: var(--ink-dim); }
 .empty .under { font-size: var(--t-11); margin-top: 8px; }
+
+/*  BY A FINGER (namespace draft §75, WT.2, ARL).
+
+    WHERE THE PAGE'S OWN GESTURES LIVE, the browser's are given up and nowhere
+    else: the panes scroll up and down and still pinch to zoom, so a sideways
+    swipe on a run or a sideways drag on a number reaches the page instead of
+    panning it; a tap anywhere is a tap at once, with no wait for a second tap
+    that would zoom. Everything else keeps the browser's own gestures.
+
+    ON A COARSE POINTER - a finger, as on a tablet - everything that is pressed
+    is a finger wide (44 px, Apple's and Android's own minimum), and what a
+    mouse finds by hovering is shown: the gutter's park wedge, faintly, on
+    every row. A long press does not open the system's callout or select the
+    text under it: the page has a long press of its own. */
+.scroll { touch-action: pan-y pinch-zoom; }
+button, .row, .run, .gutter, .list-tab, .band, input, select, a { touch-action: manipulation; }
+
+@media (pointer: coarse) {
+  :root { --row: max(44px, calc(26px * var(--type))); }
+
+  #app { --cue-grid: minmax(0, 44px) minmax(0, calc(62px * var(--type)))
+                     minmax(0, 1fr) minmax(0, auto)
+                     minmax(0, var(--when)) minmax(0, var(--when)) minmax(0, var(--when));
+         --cue-grid-narrow: minmax(0, 44px) minmax(0, calc(62px * var(--type)))
+                            minmax(0, 1fr) minmax(0, auto); }
+
+  button { min-height: 44px; min-width: 44px; padding: 8px 14px; }
+  .run .meta button { min-height: 40px; padding: 6px 14px; }
+  .list-tab { min-height: 44px; }
+  input, select { min-height: 36px; }
+  .run { min-height: 44px; align-items: center; }
+
+  .gutter[data-park]::before { content: "\25B8"; color: var(--ink-off); }
+  .row[data-standby="yes"] .gutter::before { color: var(--standby); }
+
+  .twist { min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; }
+
+  .row, .run, .band, .gutter, .list-tab { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .row { -webkit-user-drag: none; }
+}

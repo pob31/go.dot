@@ -43,4 +43,11 @@ function cueName(id) {
   return said || id;
 }
 
-export { el, esc, cueName, shownName };
+/*  WHETHER THE PAGE IS WORKED BY A FINGER (namespace draft §75, ARL): the
+    browser's word for a primary pointer as coarse as a finger - an iPad's, a
+    tablet's - and false where there is no such word to ask, as under a test. */
+function byFinger() {
+  return typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+}
+
+export { el, esc, cueName, shownName, byFinger };
