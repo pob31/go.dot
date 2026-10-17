@@ -30711,9 +30711,9 @@ every one has a button or a command beside it (§4.11, PRD §3.17).
 - **The cue list.** A long press opens a cue's sheet - fire now, park the standby here, flag; the
   gutter is a finger wide and always shows where to park; a *Pick several* switch makes each tap add
   a cue to the pick or take it away.
-- **Numbers.** A number box dragged up or down moves the number from where it is - a level along the
-  fader's travel, anything else by the master dial's law - finer the further the finger is to the
-  side; a tap still types.
+- **Numbers.** A number box dragged sideways moves the number from where it is - a level along the
+  fader's travel, anything else by the master dial's law - finer the further the finger is above or
+  below the box; up and down stay the pane's scroll, and a tap still types.
 - **The aim.** Its slider moves from where the finger lands, finer the further off it the finger goes.
 
 ### 75.2 Decisions
@@ -30725,7 +30725,7 @@ every one has a button or a command beside it (§4.11, PRD §3.17).
 | **ARJ** | **A *Pick several* switch** in the cue list's header: while it is on, a tap adds a cue to the pick or takes it away, and a long press still opens the sheet. | the author's (offered as "A Pick several switch", recommended) |
 | **ARK** | **Two-finger load-to-time later.** This round the aim's slider moves from the finger, with the cross-axis gain; one finger holding where the show is while another sets where to land is a round of its own. | the author's (offered as "Later", recommended) |
 | **ARL** | **One set of gestures for finger and mouse**: pointer events throughout. A coarse pointer (`pointer: coarse`) makes targets a finger wide - rows, buttons and the gutter 44 px - and shows what a mouse finds by hovering. The page takes the gestures it uses away from the browser where it uses them (`touch-action`) and leaves the browser's own zoom everywhere else. | mine |
-| **ARM** | **The app's numbers, as the app has them** (§68): a swipe kills past 0.6 of the row's width, either way, and slides back if the run is still there 1.5 s on; a long press is 500 ms; the playhead moves 1:1 within its strip and at half the rate for every 40 px above or below it, down to 1/256, seeks at most every 200 ms and a scene only as the finger lifts; a number's drag halves its rate for every 48 px to the side, down to 1/256; PANIC's second press within 750 ms; a value the page sent is shown for up to 1.5 s until the engine agrees. | mine |
+| **ARM** | **The app's numbers, as the app has them** (§68): a swipe kills past 0.6 of the row's width, either way, and slides back if the run is still there 1.5 s on; a long press is 500 ms; the playhead moves 1:1 within its strip and at half the rate for every 40 px above or below it, down to 1/256, seeks at most every 200 ms and a scene only as the finger lifts; a number's drag, sideways, halves its rate for every 48 px above or below the box, down to 1/256, a level's whole travel 240 px and a detent of the dial 8 px; PANIC's second press within 750 ms; a value the page sent is shown for up to 1.5 s until the engine agrees. | mine |
 | **ARN** | **A number dragged is held as a fader is held**: `node.touch` as the finger goes down, the value at most every 20 ms, the last one and `node.release` as it lifts - so the touch table gates the page as it gates a surface, and one Undo takes the drag back. | mine |
 | **ARO** | **No dragging rows to reorder on a coarse pointer**: iPadOS starts a drag on a long press, which is the sheet's gesture here. The inspector's arrows move a cue, as they always could. | mine |
 | **ARP** | **The page's words are the app's** where the app has them - the running sheet, PANIC, Doh!, Fire now, Park the standby here, Flag; the page's own new words are owed the author's look. | mine |

@@ -32,7 +32,9 @@
 import { str, dbl } from "../plumbing/osc.js";
 import { tree } from "../plumbing/tree.js";
 import { gesture } from "./table.js";
-import { swipeKills, SLOP_PX, LONG_PRESS_MS, SWIPE_BACK_MS, Scrub, outside, rateText, EDGE_PX } from "../model/touch.js";
+import { swipeKills, SLOP_PX, LONG_PRESS_MS, SWIPE_BACK_MS, Scrub, outside, rateText, EDGE_PX,
+         LevelDrag, DialDrag, isLevel, numberText, aimMoved, WRITE_EVERY_MS } from "../model/touch.js";
+import { setNode } from "../plumbing/link.js";
 import { runsHold, runSheet, spanOf } from "../views/gogo.js";
 import { cueSheet } from "../views/didi.js";
 import { byFinger } from "../views/common.js";
@@ -325,5 +327,158 @@ document.addEventListener("contextmenu", (event) => {
   if (byFinger() && event.target.closest && event.target.closest(".row[data-pick], .run, [data-pill]"))
     event.preventDefault();
 });
+
+/*  A NUMBER DRAGGED (namespace draft §75, WT.7, ARN): a box of one cue's
+    number, pressed and moved sideways, moves the number from where it is - a
+    level along the fader's travel, anything else by the master dial's law -
+    finer the further the finger is above or below the box, and is held as a
+    fader is: `node.touch` as it starts, the value at most every 20 ms, the
+    last and `node.release` as the finger lifts, so one Undo takes the whole
+    drag back. Up or down first is the pane's scroll; a press that does not
+    move is the box's, to type in. A box for several cues is not dragged: they
+    hold different numbers, as the desktop's wheel says. */
+let numberPress = null;
+
+function rangeOf(address) {
+  const node = tree.node(address);
+  if (!node) return null;
+
+  const range = Array.isArray(node.RANGE) && node.RANGE.length ? node.RANGE[0] : {};
+  const unit = Array.isArray(node.UNIT) && node.UNIT.length ? String(node.UNIT[0]) : "";
+
+  return { integer: "ih".indexOf(node.TYPE) >= 0 && node.TYPE !== "", min: Number(range.MIN), max: Number(range.MAX), unit };
+}
+
+document.addEventListener("pointerdown", (event) => {
+  if (event.button > 0 || !event.target.closest) return;
+
+  const box = event.target.closest('input[type="number"][data-set]');
+
+  if (!box || box.disabled || box.readOnly || box.dataset.all || box === document.activeElement) return;
+
+  const range = rangeOf(box.dataset.set);
+  const start = Number(box.value);
+
+  if (!range || !Number.isFinite(start)) return;
+
+  numberPress = { pointer: event.pointerId, box, range, start, x: event.clientX, y: event.clientY,
+                  dragging: false, drag: null, lastX: event.clientX, sentAt: 0, sent: "", mouse: event.pointerType === "mouse" };
+
+  //  A mouse puts its caret in the box at once; held back until the press is known to be no drag.
+  if (numberPress.mouse) event.preventDefault();
+}, true);
+
+document.addEventListener("pointermove", (event) => {
+  if (!numberPress || event.pointerId !== numberPress.pointer) return;
+
+  const held = numberPress;
+  const dx = event.clientX - held.x;
+  const dy = event.clientY - held.y;
+
+  if (!held.dragging) {
+    if (Math.abs(dx) <= SLOP_PX && Math.abs(dy) <= SLOP_PX) return;
+
+    if (Math.abs(dy) >= Math.abs(dx)) {
+      numberPress = null;
+      return;
+    }
+
+    held.dragging = true;
+    held.drag = isLevel(held.range) ? new LevelDrag(held.start) : new DialDrag(held.range, held.start);
+    held.box.dataset.dirty = "yes";
+    held.box.dataset.dragging = "yes";
+    held.box.blur();
+    try { held.box.setPointerCapture(event.pointerId); } catch (problem) { /* a pointer gone already */ }
+    gesture("hold-number", [str(held.box.dataset.set)]);
+  }
+
+  const rect = held.box.getBoundingClientRect();
+  const value = held.drag.move(event.clientX - held.lastX, outside(event.clientY, rect.top, rect.bottom));
+  held.lastX = event.clientX;
+
+  const text = numberText(value, held.range.integer);
+  held.box.value = text;
+
+  const now = performance.now();
+  if (text !== held.sent && now - held.sentAt >= WRITE_EVERY_MS) {
+    setNode(held.box.dataset.set, text);
+    held.sent = text;
+    held.sentAt = now;
+  }
+
+  event.preventDefault();
+}, true);
+
+function letGoOfNumber(event, typed) {
+  if (!numberPress || event.pointerId !== numberPress.pointer) return;
+
+  const held = numberPress;
+  numberPress = null;
+
+  if (!held.dragging) {
+    //  A mouse's click on the box, held back above: now the box is the caret's.
+    if (typed && held.mouse) {
+      held.box.focus();
+      held.box.select();
+    }
+    return;
+  }
+
+  const text = held.box.value;
+  if (text !== held.sent) setNode(held.box.dataset.set, text);
+  gesture("let-go-number", [str(held.box.dataset.set)]);
+
+  delete held.box.dataset.dirty;
+  delete held.box.dataset.dragging;
+  held.box.dataset.sent = text;
+  held.box.dataset.sentAt = String(Date.now());
+  swallowNextClick();
+}
+
+document.addEventListener("pointerup", (event) => letGoOfNumber(event, true), true);
+document.addEventListener("pointercancel", (event) => letGoOfNumber(event, false), true);
+
+/*  THE AIM FROM THE FINGER (namespace draft §75, WT.7, ARK): the slider no
+    longer jumps to where it is touched; it moves from where it was by the
+    finger's travel, finer the further off the slider the finger goes - and
+    says so through the events the page already listens to, `input` as it
+    moves and `change` as it lets go. */
+let aimPress = null;
+
+document.addEventListener("pointerdown", (event) => {
+  if (event.button > 0 || !event.target || event.target.id !== "aim-offset") return;
+
+  const slider = event.target;
+  aimPress = { pointer: event.pointerId, slider, start: Number(slider.value), x: event.clientX };
+  try { slider.setPointerCapture(event.pointerId); } catch (problem) { /* a pointer gone already */ }
+  slider.focus();
+  event.preventDefault();
+}, true);
+
+document.addEventListener("pointermove", (event) => {
+  if (!aimPress || event.pointerId !== aimPress.pointer) return;
+
+  const slider = aimPress.slider;
+  const rect = slider.getBoundingClientRect();
+  const value = aimMoved(aimPress.start, event.clientX - aimPress.x, outside(event.clientY, rect.top, rect.bottom),
+                         { min: Number(slider.min), max: Number(slider.max), step: Number(slider.step), width: rect.width });
+
+  if (String(value) !== slider.value) {
+    slider.value = String(value);
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  event.preventDefault();
+}, true);
+
+function letGoOfAim(event) {
+  if (!aimPress || event.pointerId !== aimPress.pointer) return;
+  const slider = aimPress.slider;
+  aimPress = null;
+  slider.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+document.addEventListener("pointerup", letGoOfAim, true);
+document.addEventListener("pointercancel", letGoOfAim, true);
 
 export { tapPill, holdPill };

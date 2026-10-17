@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 
 import {
   Panic, Scrub, LevelDrag, DialDrag, rateFor, rateText, outside, swipeKills, dialTurned,
-  fractionForDb, dbForFraction, isLevel, roundedTo, SILENCE_DB,
+  fractionForDb, dbForFraction, isLevel, roundedTo, SILENCE_DB, numberText, aimMoved,
 } from "../../clients/console/model/touch.js";
 
 const near = (actual, wanted, within = 1e-9) =>
@@ -128,4 +128,17 @@ test("any other number turns by the master dial's law, a detent every 8 px, the 
 
   assert.ok(isLevel({ min: -120, max: 12, unit: "dB" }));
   assert.ok(!isLevel({ min: -24, max: 24, unit: "dB" }));
+});
+
+test("a number is sent as a box shows it, and the aim moves from the finger, finer off the slider", () => {
+  assert.equal(numberText(0.1 + 0.2 + 0.3, false), "0.6");
+  assert.equal(numberText(-3.14159, false), "-3.142");
+  assert.equal(numberText(3.6, true), "4");
+
+  const slider = { min: -1, max: 60, step: 0.5, width: 244 };
+  assert.equal(aimMoved(10, 0, 0, slider), 10);
+  assert.equal(aimMoved(10, 40, 0, slider), 20);         // 61 s over 244 px: a quarter of a second a pixel
+  assert.equal(aimMoved(10, 40, 48, slider), 15);        // half the rate 48 px off it
+  assert.equal(aimMoved(10, -1000, 0, slider), -1);      // never before "before"
+  assert.equal(aimMoved(10, 0.8, 0, slider), 10);        // kept to its half-second steps
 });

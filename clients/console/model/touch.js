@@ -379,6 +379,24 @@ export class DialDrag {
   }
 }
 
+/*  A NUMBER AS A BOX SHOWS IT AND THE ENGINE IS SENT IT: a whole number
+    whole, anything else to a thousandth with no tail - "0.6", never
+    "0.6000000000000001" - in no locale's spelling. */
+export function numberText(value, integer) {
+  if (integer) return String(Math.round(value));
+  return String(Number(value.toFixed(3)));
+}
+
+/*  THE AIM'S SLIDER FROM THE FINGER (ARK): the offset it started at, moved by
+    its span across the slider's width a pixel, at the rate the finger's
+    distance off it gives, kept to its step and its ends. */
+export function aimMoved(start, dx, distance, { min, max, step, width }) {
+  const span = max - min;
+  const moved = start + dx * (span / Math.max(1, width)) * rateFor(distance, NUMBER_UNIT_PX);
+  const stepped = step > 0 ? min + Math.round((moved - min) / step) * step : moved;
+  return clamp(stepped, min, max);
+}
+
 /** Whether a number's row is a LEVEL - a decibel row reaching silence - which drags along the fader. */
 export function isLevel(range) {
   return range.unit === "dB" && Number.isFinite(range.min) && range.min <= SILENCE_DB;

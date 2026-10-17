@@ -1319,3 +1319,10 @@ button, .row, .run, .gutter, .list-tab, .band, input, select, a { touch-action: 
 .scrub .ghost { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
                 font-size: var(--t-10); color: var(--standby); pointer-events: none; }
 @media (pointer: coarse) { .scrub { height: 40px; } }
+
+/*  A NUMBER BOX IS DRAGGED SIDEWAYS (namespace draft §75, WT.7): up and down
+    stay the pane's scroll; held, the box says so. The aim's slider moves from
+    the finger, and is wholly the page's to drag. */
+input[type="number"][data-set] { touch-action: pan-y pinch-zoom; }
+input[type="number"][data-dragging="yes"] { outline: 2px solid var(--standby); cursor: ew-resize; }
+#aim-offset { touch-action: none; }

@@ -18,6 +18,8 @@
     "panic-kill":   { "command": "run.killAll",      "args": [],                     "where": "PANIC pressed again within 0.75 s (namespace draft 75)" },
     "park":         { "command": "standby.set",      "args": ["s"],                  "where": "a row's left edge, 'standby here' in the inspector, or Park the standby here in a cue's sheet" },
     "fire":         { "command": "cue.fire",         "args": ["s"],                  "where": "Fire now in a cue's sheet, a long press on its row (namespace draft 75)" },
+    "hold-number":  { "command": "node.touch",       "args": ["s"],                  "where": "a number box as a finger starts dragging it sideways (namespace draft 75)" },
+    "let-go-number": { "command": "node.release",    "args": ["s"],                  "where": "that finger lifting (namespace draft 75)" },
     "focus-list":   { "command": "list.focus",       "args": ["s"],                  "where": "a list's tab" },
     "new-list":     { "command": "list.create",      "args": ["s"],                  "where": "the + tab" },
     "new-cart":     { "command": "list.create",      "args": ["s", "s", "s", "s"],   "where": "the + cart tab: a list born a cart (namespace draft 74)" },
