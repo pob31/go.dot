@@ -45,9 +45,11 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/log/Replay.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -1508,6 +1510,622 @@ TEST_CASE ("go.doh: a bank the GO closed, fired again, does not run its header a
 
     CHECK (rig.runsOf (lights) == 1u);
     CHECK (rig.liveRunOf (rig.bankA) != nullptr);
+}
+
+//==============================================================================
+/*  A BANK THE GO'S STOP CUE DISARMED, AND ITS CLIPS (the author, 2026-10-17,
+    namespace draft §77). A GO on a stop cue aimed at a bank cut every clip it
+    was playing, and Doh! brought back neither: the scene put-back refused any
+    group armed until stopped (L14), and the clips the bank's own job ended
+    were recorded nowhere. The author's answers: the bank is armed again, its
+    header passed over, and each clip that was playing comes back on its strip
+    where it would be now, fading in over the panic fade at its fader's level;
+    a hold clip only while the hand that held it has not let go; and a stop cue
+    aimed at one clip of a bank brings that clip back the same way. Written
+    first and run on d69188f9: each case below failed. */
+namespace
+{
+    /*  Parked through the COMMAND, so a replay is given the pointer too. */
+    void parkOn (Rig& rig, const std::string& cueId)
+    {
+        REQUIRE (rig.send ("standby.set", { osc::Value::string (cueId) }).rejected == 0);
+        rig.tickOnce();
+    }
+
+    void goOn (Rig& rig, const std::string& cueId)
+    {
+        parkOn (rig, cueId);
+        REQUIRE (rig.send ("go").rejected == 0);
+    }
+
+    /*  `Rig::arm`, by GO from a pointer parked through the command. */
+    void armByGo (Rig& rig, const std::string& bank)
+    {
+        goOn (rig, bank);
+
+        const auto& members = rig.membersOf[bank];
+        REQUIRE (rig.tickUntil ([&rig, &members]
+                                {
+                                    return std::all_of (members.begin(), members.end(),
+                                                        [&rig] (const std::string& m)
+                                                        { return rig.liveRunOf (m) != nullptr; });
+                                }));
+
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+        rig.tickOnce();
+    }
+
+    /*  A transport cue at the foot of the list, aimed at `target`. */
+    std::string stopCueFor (Rig& rig, const std::string& target)
+    {
+        const auto stop = rig.document.createCue (rig.listId, 3, "transport", "Disarm").id;
+        rig.set ("/godot/cue/" + stop + "/target", target);
+        return stop;
+    }
+
+    std::string liveIdOf (const Rig& rig, const std::string& cueId)
+    {
+        const auto* run = rig.liveRunOf (cueId);
+        return run != nullptr ? run->id : std::string {};
+    }
+
+    std::size_t liveRunsOf (const Rig& rig, const std::string& cueId)
+    {
+        return static_cast<std::size_t> (std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                                                        [&cueId] (const cue::Run& run)
+                                                        { return run.cue == cueId && ! run.isFinished(); }));
+    }
+
+    /*  The arguments of the last applied record of a command, as strings. */
+    std::vector<std::string> lastApplied (Rig& rig, const char* command)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+            if (record.kind == LogRecord::Kind::applied && record.command == command)
+            {
+                out.clear();
+
+                for (const auto& arg : record.args)
+                    out.push_back (arg.isString() ? arg.getString() : std::string ("?"));
+            }
+
+        return out;
+    }
+
+    std::string reportOf (const Rig& rig)
+    {
+        return rig.runner.listState().dohReport().text;
+    }
+
+    bool says (const std::string& text, const std::string& part)
+    {
+        return text.find (part) != std::string::npos;
+    }
+
+    /*  `wfg replay`: the show as it ended and the session's records, no audio
+        side and no hooks, must reach the same runs - on the same strips, held
+        by the same hands, at the same trims. */
+    void replaysTheSame (Rig& session, const std::map<std::string, double>& lengths)
+    {
+        const auto show = doc::CanonicalXml::write (session.document);
+        const auto original = LogFile::parse (session.engine.log().contents());
+        REQUIRE (original.errors.empty());
+
+        Rig fresh;
+        fresh.runner.setPlayer (nullptr);
+        REQUIRE (doc::CanonicalXml::read (show, fresh.document).ok);
+        fresh.runner.setMediaDurations (&lengths);
+
+        const auto result = replay (fresh.engine, original);
+
+        for (const auto& mismatch : result.mismatches)
+            MESSAGE (mismatch);
+
+        CHECK (result.ok);
+
+        for (const auto& run : session.runs.all())
+        {
+            INFO ("run " << run.id << " of " << run.cue);
+            const auto* again = fresh.runs.find (run.id);
+            REQUIRE (again != nullptr);
+            CHECK (again->state == run.state);
+            CHECK (again->goSerial == run.goSerial);
+            CHECK (again->parent == run.parent);
+            CHECK (again->strip == run.strip);
+            CHECK (again->held == run.held);
+            CHECK (again->heldBy == run.heldBy);
+            CHECK (again->trim == doctest::Approx (run.trim));
+            CHECK (again->startOffset == doctest::Approx (run.startOffset));
+        }
+
+        CHECK (fresh.runner.listState().dohReport().text == session.runner.listState().dohReport().text);
+    }
+
+    /*  Every member but the first armed again on its own strip, waiting. */
+    void restArmedOnTheirStrips (Rig& rig, const std::string& bank)
+    {
+        const auto& members = rig.membersOf[bank];
+
+        REQUIRE (rig.tickUntil ([&rig, &members]
+                                {
+                                    return std::all_of (members.begin() + 1, members.end(),
+                                                        [&rig] (const std::string& m)
+                                                        { return rig.liveRunOf (m) != nullptr; });
+                                }));
+
+        for (std::size_t i = 1; i < members.size(); ++i)
+        {
+            const auto* member = rig.liveRunOf (members[i]);
+            REQUIRE (member != nullptr);
+            CHECK (member->state == cue::runState::armed);
+            CHECK_FALSE (member->launchRequested);
+            CHECK (rig.holds (member, rig.strips[i]));
+        }
+    }
+
+    const std::map<std::string, double> thirtySeconds { { "clip0.wav", 30.0 }, { "clip1.wav", 30.0 },
+                                                         { "clip2.wav", 30.0 }, { "clip3.wav", 30.0 } };
+}
+
+TEST_CASE ("go.doh: a bank the GO's stop cue disarmed is armed again, and its clip comes back where it would be now, fading in")
+{
+    Rig rig;
+    rig.runner.setMediaDurations (&thirtySeconds);
+    const auto& members = rig.membersOf[rig.bankA];
+    const auto stop = stopCueFor (rig, rig.bankA);
+
+    armByGo (rig, rig.bankA);
+    const auto oldBank = liveIdOf (rig, rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    rig.sound (members[0]);
+
+    const auto clip = liveIdOf (rig, members[0]);
+    const auto started = rig.runs.find (clip)->startedAtTick;
+    const auto trim = rig.runs.find (clip)->trim;
+    REQUIRE (started >= 0);
+
+    for (int n = 0; n < 50; ++n)
+        rig.tickOnce();
+
+    goOn (rig, stop);
+    REQUIRE (rig.tickUntil ([&rig, &oldBank] { return rig.runs.find (oldBank)->isFinished(); }));
+    REQUIRE (rig.runs.find (clip)->isFinished());
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    const auto dohTick = rig.tick;
+    REQUIRE (rig.send ("go.doh").rejected == 0);
+
+    /*  THE BANK, ARMED AGAIN: a run of nobody's GO, its identifier on the
+        Doh's record before its clip's. */
+    const auto bank = liveIdOf (rig, rig.bankA);
+    REQUIRE_FALSE (bank.empty());
+    CHECK (bank != oldBank);
+    CHECK (rig.runs.find (bank)->goSerial == 0u);
+
+    /*  ITS CLIP, under it on its strip, at the second it would have reached,
+        asked to launch, arriving over the panic fade at its fader's level. */
+    const auto again = liveIdOf (rig, members[0]);
+    REQUIRE_FALSE (again.empty());
+    CHECK (again != clip);
+
+    {
+        const auto* run = rig.runs.find (again);
+        CHECK (run->parent == bank);
+        CHECK (run->sampler);
+        CHECK (rig.holds (run, rig.strips[0]));
+        CHECK (run->trim == doctest::Approx (trim));
+        CHECK (run->resumes);
+        CHECK (run->arrivalTicks == 50);
+        CHECK (run->launchRequested);
+        CHECK (run->goSerial == 0u);
+        CHECK (run->startOffset == doctest::Approx (static_cast<double> (dohTick - started) / 50.0).epsilon (0.02));
+    }
+
+    CHECK (lastApplied (rig, "go.doh") == std::vector<std::string> { bank, again });
+
+    /*  THE OTHERS, ARMED AGAIN WHERE THEY WERE, and nothing of them launched. */
+    restArmedOnTheirStrips (rig, rig.bankA);
+
+    /*  AND IT FADES IN: once its arm lands and its launch is placed, one job
+        from silence to its level, over the panic fade. */
+    rig.audio.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&rig, &again] { return ! rig.runs.find (again)->launchRequested; }));
+    rig.tickOnce();
+
+    const auto fading = std::any_of (rig.runner.fades().begin(), rig.runner.fades().end(),
+                                     [&again] (const cue::FadeJob& job)
+                                     { return job.target == again && ! job.retired && job.ticksTotal == 50; });
+    CHECK (fading);
+
+    CHECK (says (reportOf (rig), "armed again"));
+    CHECK (says (reportOf (rig), "put back where it would be now"));
+    CHECK_FALSE (says (reportOf (rig), "not started again"));
+
+    replaysTheSame (rig, thirtySeconds);
+}
+
+TEST_CASE ("go.doh: a bank a stop cue faded out comes back at the level it had")
+{
+    Rig rig;
+    rig.runner.setMediaDurations (&thirtySeconds);
+    const auto& members = rig.membersOf[rig.bankA];
+    const auto stop = stopCueFor (rig, rig.bankA);
+    rig.set ("/godot/cue/" + stop + "/verb", "fade");
+    rig.set ("/godot/cue/" + stop + "/duration", "1");
+
+    armByGo (rig, rig.bankA);
+    const auto oldBank = liveIdOf (rig, rig.bankA);
+    const auto levelBefore = rig.runs.find (oldBank)->ownLevel;
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    rig.sound (members[0]);
+    const auto clip = liveIdOf (rig, members[0]);
+
+    goOn (rig, stop);
+    REQUIRE (rig.tickUntil ([&rig, &oldBank] { return rig.runs.find (oldBank)->isFinished(); }));
+    REQUIRE (rig.runs.find (clip)->isFinished());
+
+    REQUIRE (rig.send ("go.doh").rejected == 0);
+
+    const auto bank = liveIdOf (rig, rig.bankA);
+    REQUIRE_FALSE (bank.empty());
+    CHECK (bank != oldBank);
+    CHECK (rig.runs.find (bank)->ownLevel == doctest::Approx (levelBefore));
+
+    const auto again = liveIdOf (rig, members[0]);
+    REQUIRE_FALSE (again.empty());
+    CHECK (again != clip);
+    CHECK (rig.runs.find (again)->launchRequested);
+}
+
+TEST_CASE ("go.doh: a bank still running its footer comes back, with its clip, once it has ended")
+{
+    Rig rig;
+    rig.runner.setMediaDurations (&thirtySeconds);
+    const auto& members = rig.membersOf[rig.bankA];
+    const auto stop = stopCueFor (rig, rig.bankA);
+
+    const auto footer = rig.document.createRole (rig.bankA, "footer");
+    REQUIRE (footer.ok);
+    const auto note = rig.document.createCue (footer.id, 0, "memo", "Lights down").id;
+    rig.set ("/godot/cue/" + note + "/preWait", "1");
+
+    armByGo (rig, rig.bankA);
+    const auto oldBank = liveIdOf (rig, rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    rig.sound (members[0]);
+    const auto clip = liveIdOf (rig, members[0]);
+    const auto started = rig.runs.find (clip)->startedAtTick;
+
+    goOn (rig, stop);
+    REQUIRE (rig.tickUntil ([&rig, &clip] { return rig.runs.find (clip)->isFinished(); }));
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    /*  STILL IN ITS FOOTER AT THE DOH: nothing is made yet. */
+    REQUIRE_FALSE (rig.runs.find (oldBank)->isFinished());
+    const auto dohTick = rig.tick;
+    REQUIRE (rig.send ("go.doh").rejected == 0);
+
+    CHECK (liveIdOf (rig, rig.bankA) == oldBank);
+    CHECK (liveIdOf (rig, members[0]).empty());
+
+    /*  ONCE IT HAS ENDED, `go.dohRelaunch` arms it again and its clip with it. */
+    REQUIRE (rig.tickUntil ([&rig, &oldBank]
+                            {
+                                const auto now = liveIdOf (rig, rig.bankA);
+                                return ! now.empty() && now != oldBank;
+                            }));
+
+    const auto relaunchTick = rig.tick - 1;
+    const auto bank = liveIdOf (rig, rig.bankA);
+    const auto again = liveIdOf (rig, members[0]);
+    REQUIRE_FALSE (again.empty());
+    CHECK (again != clip);
+    CHECK (rig.runs.find (again)->parent == bank);
+    CHECK (rig.runs.find (again)->launchRequested);
+
+    /*  Counted to the relaunch, not to the press. */
+    const auto offset = rig.runs.find (again)->startOffset;
+    CHECK (offset > static_cast<double> (dohTick - started) / 50.0 + 0.5);
+    CHECK (offset == doctest::Approx (static_cast<double> (relaunchTick - started) / 50.0).epsilon (0.05));
+
+    CHECK (lastApplied (rig, "go.dohRelaunch") == std::vector<std::string> { oldBank, bank, again });
+
+    restArmedOnTheirStrips (rig, rig.bankA);
+    replaysTheSame (rig, thirtySeconds);
+}
+
+TEST_CASE ("go.doh: a clip that would have ended by now, or that had ended before the GO, is not put back")
+{
+    std::map<std::string, double> lengths { { "clip0.wav", 2.0 }, { "clip1.wav", 30.0 },
+                                            { "clip2.wav", 30.0 }, { "clip3.wav", 30.0 } };
+    Rig rig;
+    rig.runner.setMediaDurations (&lengths);
+    const auto& members = rig.membersOf[rig.bankA];
+    const auto stop = stopCueFor (rig, rig.bankA);
+
+    armByGo (rig, rig.bankA);
+    const auto oldBank = liveIdOf (rig, rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    rig.sound (members[0]);
+
+    SUBCASE ("would have ended by now: two seconds of file, the Doh past them")
+    {
+        for (int n = 0; n < 60; ++n)
+            rig.tickOnce();
+
+        goOn (rig, stop);
+        REQUIRE (rig.tickUntil ([&rig, &oldBank] { return rig.runs.find (oldBank)->isFinished(); }));
+
+        for (int n = 0; n < 40; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.send ("go.doh").rejected == 0);
+        rig.tickOnce();
+
+        CHECK (says (reportOf (rig), "would have ended by now"));
+    }
+
+    SUBCASE ("ended on its own before the GO")
+    {
+        rig.silence (members[0]);
+        REQUIRE (rig.tickUntil ([&rig, &members]
+                                {
+                                    const auto* run = rig.liveRunOf (members[0]);
+                                    return run != nullptr && run->state == cue::runState::armed;
+                                }));
+
+        goOn (rig, stop);
+        REQUIRE (rig.tickUntil ([&rig, &oldBank] { return rig.runs.find (oldBank)->isFinished(); }));
+
+        REQUIRE (rig.send ("go.doh").rejected == 0);
+        rig.tickOnce();
+    }
+
+    /*  THE BANK COMES BACK EITHER WAY, every member armed and waiting. */
+    const auto bank = liveIdOf (rig, rig.bankA);
+    REQUIRE_FALSE (bank.empty());
+    CHECK (bank != oldBank);
+
+    REQUIRE (rig.tickUntil ([&rig, &members] { return rig.liveRunOf (members[0]) != nullptr; }));
+    CHECK_FALSE (rig.liveRunOf (members[0])->launchRequested);
+    CHECK_FALSE (rig.liveRunOf (members[0])->resumes);
+    restArmedOnTheirStrips (rig, rig.bankA);
+}
+
+TEST_CASE ("go.doh: strips a bank had lost before the GO stay lost, and the bank that took them keeps them")
+{
+    Rig rig;
+    rig.runner.setMediaDurations (&thirtySeconds);
+    const auto& a = rig.membersOf[rig.bankA];
+    const auto& b = rig.membersOf[rig.bankB];
+    const auto stop = stopCueFor (rig, rig.bankA);
+    rig.set ("/godot/cue/" + rig.bankB + "/takeover", "strip");
+
+    armByGo (rig, rig.bankA);
+    const auto oldBank = liveIdOf (rig, rig.bankA);
+
+    /*  Bank B takes the first two strips, and A keeps the other two. */
+    armByGo (rig, rig.bankB);
+    REQUIRE (rig.tickUntil ([&rig, &b]
+                            {
+                                return rig.holds (rig.liveRunOf (b[0]), rig.strips[0])
+                                         && rig.holds (rig.liveRunOf (b[1]), rig.strips[1]);
+                            }));
+    const auto lostBefore = rig.runs.find (oldBank)->lostStrips;
+    REQUIRE (lostBefore.size() == 2u);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[2]) });
+    rig.sound (a[2]);
+
+    goOn (rig, stop);
+    REQUIRE (rig.tickUntil ([&rig, &oldBank] { return rig.runs.find (oldBank)->isFinished(); }));
+    REQUIRE (rig.send ("go.doh").rejected == 0);
+
+    const auto bank = liveIdOf (rig, rig.bankA);
+    REQUIRE_FALSE (bank.empty());
+    CHECK (rig.runs.find (bank)->lostStrips == lostBefore);
+
+    const auto bankB = rig.liveRunOf (rig.bankB);
+    REQUIRE (bankB != nullptr);
+    CHECK_FALSE (bankB->closing);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.holds (rig.liveRunOf (b[0]), rig.strips[0]));
+    CHECK (rig.holds (rig.liveRunOf (b[1]), rig.strips[1]));
+
+    const auto* clip = rig.liveRunOf (a[2]);
+    REQUIRE (clip != nullptr);
+    CHECK (clip->launchRequested);
+    CHECK (rig.holds (clip, rig.strips[2]));
+}
+
+TEST_CASE ("go.doh: a bank one GO both closed and stopped is armed again once")
+{
+    Rig rig;
+    rig.runner.setMediaDurations (&thirtySeconds);
+    const auto& a = rig.membersOf[rig.bankA];
+
+    /*  Bank B takes over the whole desk, and its header stops bank A. */
+    const auto header = rig.document.createRole (rig.bankB, "header");
+    REQUIRE (header.ok);
+    const auto out = rig.document.createCue (header.id, 0, "transport", "A out").id;
+    rig.set ("/godot/cue/" + out + "/target", rig.bankA);
+
+    armByGo (rig, rig.bankA);
+    const auto oldBank = liveIdOf (rig, rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    rig.sound (a[0]);
+
+    armByGo (rig, rig.bankB);
+    REQUIRE (rig.tickUntil ([&rig, &oldBank] { return rig.runs.find (oldBank)->isFinished(); }));
+
+    REQUIRE (rig.send ("go.doh").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (liveRunsOf (rig, rig.bankA) == 1u);
+    CHECK (liveRunsOf (rig, a[0]) == 1u);
+
+    /*  And the clip the stop ended, playing out under the close, is back. */
+    REQUIRE (rig.liveRunOf (a[0]) != nullptr);
+    CHECK (rig.liveRunOf (a[0])->resumes);
+}
+
+TEST_CASE ("go.doh: a hold clip comes back held by the same hand, unless that hand let go")
+{
+    Rig rig;
+    rig.runner.setMediaDurations (&thirtySeconds);
+    const auto& members = rig.membersOf[rig.bankA];
+    const auto stop = stopCueFor (rig, rig.bankA);
+    rig.set ("/godot/cue/" + members[0] + "/release", "hold");
+
+    armByGo (rig, rig.bankA);
+    const auto oldBank = liveIdOf (rig, rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "surfX");
+    rig.sound (members[0]);
+    REQUIRE (rig.liveRunOf (members[0])->held);
+
+    SUBCASE ("held all along: back, held by the hand, and its release lets it go")
+    {
+        goOn (rig, stop);
+        REQUIRE (rig.tickUntil ([&rig, &oldBank] { return rig.runs.find (oldBank)->isFinished(); }));
+        REQUIRE (rig.send ("go.doh").rejected == 0);
+
+        const auto again = liveIdOf (rig, members[0]);
+        REQUIRE_FALSE (again.empty());
+        CHECK (rig.runs.find (again)->held);
+        CHECK (rig.runs.find (again)->heldBy == "surfX");
+        CHECK (rig.runs.find (again)->launchRequested);
+
+        rig.sound (members[0]);
+        REQUIRE (rig.send ("strip.release", { osc::Value::string (rig.strips[0]) }, "surfX").rejected == 0);
+        CHECK (rig.runs.find (again)->stopAsked);
+
+        replaysTheSame (rig, thirtySeconds);
+    }
+
+    SUBCASE ("let go while the bank was stopped: not put back")
+    {
+        goOn (rig, stop);
+        REQUIRE (rig.tickUntil ([&rig, &oldBank] { return rig.runs.find (oldBank)->isFinished(); }));
+
+        REQUIRE (rig.send ("strip.release", { osc::Value::string (rig.strips[0]) }, "surfX").rejected == 0);
+        REQUIRE (rig.send ("go.doh").rejected == 0);
+        rig.tickOnce();
+
+        CHECK_FALSE (liveIdOf (rig, rig.bankA).empty());
+        REQUIRE (rig.tickUntil ([&rig, &members] { return rig.liveRunOf (members[0]) != nullptr; }));
+        CHECK_FALSE (rig.liveRunOf (members[0])->launchRequested);
+        CHECK (says (reportOf (rig), "let go"));
+    }
+
+    SUBCASE ("let go between the Doh and the end of the bank's footer: not put back")
+    {
+        const auto footer = rig.document.createRole (rig.bankA, "footer");
+        REQUIRE (footer.ok);
+        const auto note = rig.document.createCue (footer.id, 0, "memo", "Lights down").id;
+        rig.set ("/godot/cue/" + note + "/preWait", "1");
+
+        goOn (rig, stop);
+        REQUIRE (rig.tickUntil ([&rig, &members] { return rig.liveRunOf (members[0]) == nullptr; }));
+        REQUIRE_FALSE (rig.runs.find (oldBank)->isFinished());
+
+        REQUIRE (rig.send ("go.doh").rejected == 0);
+        REQUIRE (rig.send ("strip.release", { osc::Value::string (rig.strips[0]) }, "surfX").rejected == 0);
+
+        REQUIRE (rig.tickUntil ([&rig, &oldBank]
+                                {
+                                    const auto now = liveIdOf (rig, rig.bankA);
+                                    return ! now.empty() && now != oldBank;
+                                }));
+
+        REQUIRE (rig.tickUntil ([&rig, &members] { return rig.liveRunOf (members[0]) != nullptr; }));
+        CHECK_FALSE (rig.liveRunOf (members[0])->launchRequested);
+    }
+}
+
+TEST_CASE ("go.doh: a clip the GO's stop cue stopped alone comes back on its strip, in the bank still armed")
+{
+    Rig rig;
+    rig.runner.setMediaDurations (&thirtySeconds);
+    const auto& members = rig.membersOf[rig.bankA];
+    const auto stop = stopCueFor (rig, members[0]);
+
+    armByGo (rig, rig.bankA);
+    const auto bank = liveIdOf (rig, rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    rig.sound (members[0]);
+
+    const auto clip = liveIdOf (rig, members[0]);
+    const auto started = rig.runs.find (clip)->startedAtTick;
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    goOn (rig, stop);
+    REQUIRE (rig.tickUntil ([&rig, &clip] { return rig.runs.find (clip)->isFinished(); }));
+
+    /*  THE BANK HAS ARMED THE MEMBER AGAIN ON ITS STRIP, idle. */
+    REQUIRE (rig.tickUntil ([&rig, &members, &clip]
+                            {
+                                const auto* run = rig.liveRunOf (members[0]);
+                                return run != nullptr && run->id != clip && run->state == cue::runState::armed;
+                            }));
+    const auto idle = liveIdOf (rig, members[0]);
+
+    SUBCASE ("nobody touched it since: it comes back where it would be now")
+    {
+        const auto dohTick = rig.tick;
+        REQUIRE (rig.send ("go.doh").rejected == 0);
+
+        CHECK (liveIdOf (rig, rig.bankA) == bank);
+        CHECK (rig.runs.find (idle)->isFinished());
+
+        const auto again = liveIdOf (rig, members[0]);
+        REQUIRE_FALSE (again.empty());
+        CHECK (again != clip);
+        CHECK (again != idle);
+        CHECK (liveRunsOf (rig, members[0]) == 1u);
+
+        const auto* run = rig.runs.find (again);
+        CHECK (run->parent == bank);
+        CHECK (rig.holds (run, rig.strips[0]));
+        CHECK (run->launchRequested);
+        CHECK (run->resumes);
+        CHECK (run->arrivalTicks == 50);
+        CHECK (run->startOffset == doctest::Approx (static_cast<double> (dohTick - started) / 50.0).epsilon (0.02));
+
+        replaysTheSame (rig, thirtySeconds);
+    }
+
+    SUBCASE ("pressed again since the GO: running again already, and left")
+    {
+        rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+        REQUIRE (rig.runs.find (idle)->launchRequested);
+
+        REQUIRE (rig.send ("go.doh").rejected == 0);
+        rig.tickOnce();
+
+        CHECK (liveIdOf (rig, members[0]) == idle);
+        CHECK (liveRunsOf (rig, members[0]) == 1u);
+        CHECK (says (reportOf (rig), "running again already"));
+    }
 }
 
 //==============================================================================

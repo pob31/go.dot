@@ -5120,8 +5120,11 @@ namespace wfg::cue
 
             /*  A SAMPLER GROUP ARMING TAKES OVER (PRD §3.27): with
                 `takeover=group` every other armed sampler group is closed, in
-                this handler, so a replay closes the same ones. */
-            if (isSampler (groupMode (cue)))
+                this handler, so a replay closes the same ones. NOT A BANK A
+                DOH ARMS AGAIN (namespace draft §77): a bank that lived beside
+                it before the GO lives beside it again, and closing it would be
+                a change the Doh made, not one it took back. */
+            if (isSampler (groupMode (cue)) && ! makingForPutBack)
                 takeOverFrom (runId, cue);
 
             GroupJob job;
@@ -11533,6 +11536,15 @@ namespace wfg::cue
             back.nextId = nextId;
             back.goRuns = ofTheGo;
 
+            /*  A STRIP A MEMBER OF THE GO'S TOOK from another bank, given back
+                to it FIRST (namespace draft §77): a bank the GO stopped, armed
+                again by the stops below, keeps lost only what it had lost
+                before the GO. */
+            for (const auto& [holder, strip] : changes.lostStrips)
+                if (auto* group = runs.find (holder))
+                    group->lostStrips.erase (std::remove (group->lostStrips.begin(), group->lostStrips.end(), strip),
+                                             group->lostStrips.end());
+
             putBackLevels (back, changes);
             putBackStops (engine, back, changes);
             putBackFlagsBanksTakes (engine, back, changes);
@@ -12318,8 +12330,16 @@ namespace wfg::cue
                     continue;
                 }
 
+                /*  A BANK THE GO BOTH CLOSED AND STOPPED (namespace draft §77):
+                    its close was the GO's too, and is undone here, so the bank
+                    is armed again by its stop's put-back - once; the close's
+                    own put-back below finds it running again. */
+                if (std::find (changes.closedSamplers.begin(), changes.closedSamplers.end(), target->id)
+                      != changes.closedSamplers.end())
+                    target->closing = false;
+
                 if (target->endedAtTick >= stop.goTick)
-                    relaunchScene (engine, back, target->id, leftCuesUnder (target->cue), stop.levelBefore);
+                    relaunchScene (engine, back, target->id, leftCuesUnder (target->cue), stop.levelBefore, stop.goTick);
 
                 continue;
             }
@@ -12360,6 +12380,12 @@ namespace wfg::cue
         if (! cue.isValid())
             return false;
 
+        /*  A CLIP OF A BANK (namespace draft §77): the bank armed it again on
+            its strip the moment it ended, so it is made again there, in place
+            of that idle arm, and not where a scene's member would be. */
+        if (target->sampler)
+            return relaunchMember (engine, back, stop, before);
+
         const auto sends = kind == "osc" || kind == "midi";
         const auto sound = kind == "media" || kind == "mic";
 
@@ -12387,23 +12413,10 @@ namespace wfg::cue
         std::map<std::string, std::string> runFor;
         std::string act;
 
-        for (auto at = target->parent; ! at.empty();)
+        if (! underActsAPersonRuns (target->parent, above, runFor, act))
         {
-            const auto* group = runs.find (at);
-
-            if (group == nullptr || group->isFinished() || group->stopAsked
-                  || ! isManualGroup (document.findById (group->cue)))
-            {
-                back.items.push_back (label + ": stopped by the GO inside a scene - not started again");
-                return false;
-            }
-
-            if (act.empty())
-                act = group->id;
-
-            runFor[group->cue] = group->id;
-            above.insert (above.begin(), group->cue);
-            at = group->parent;
+            back.items.push_back (label + ": stopped by the GO inside a scene - not started again");
+            return false;
         }
 
         PlannedRun wants;
@@ -12492,21 +12505,11 @@ namespace wfg::cue
         {
             /*  AT THE LEVEL IT WOULD HAVE NOW: where the fade moving it before
                 the GO would have it, carried on from there; else where it was. */
-            auto level = stop.levelBefore;
+            std::optional<FadeSegment> rest;
+            const auto level = levelWouldBe (stop, before, back.tick, rest);
 
-            if (before.has_value() && ! before->movesRate && before->ticksTotal > 0)
-            {
-                const auto done = before->ticksDone + (back.tick - stop.goTick);
-                const auto progress = std::clamp (static_cast<double> (done) / before->ticksTotal, 0.0, 1.0);
-
-                level = before->points.empty() ? fadeLevelDb (before->fromDb, before->toDb, progress, before->curve)
-                                               : fadeLevelDb (before->fromDb, before->points, progress);
-
-                const auto rest = before->ticksTotal - done;
-
-                if (rest > 0)
-                    arrival.carryOn[cueId] = { before->toDb, static_cast<int> (rest), before->curve, {}, false };
-            }
+            if (rest.has_value())
+                arrival.carryOn[cueId] = *rest;
 
             if (! stop.wasWaiting)
                 arrival.levels[cueId] = level;
@@ -12542,7 +12545,7 @@ namespace wfg::cue
     }
 
     bool Runner::relaunchScene (Engine& engine, PutBack& back, const std::string& groupRun,
-                                const std::set<std::string>& left, double levelBefore)
+                                const std::set<std::string>& left, double levelBefore, std::int64_t goTick)
     {
         const auto* scene = runs.find (groupRun);
 
@@ -12561,6 +12564,12 @@ namespace wfg::cue
             return false;
         }
 
+        /*  A SAMPLER BANK HAS NO SECOND TO BE PUT BACK AT, and needs none
+            (namespace draft §77): it is armed again, and what its hands were
+            playing comes back where it would be now. */
+        if (group.isValid() && isSampler (groupMode (group)))
+            return relaunchBank (engine, back, groupRun, levelBefore, goTick);
+
         /*  ONLY A SCENE THE WALK TIMES AS WRITTEN - a timeline or an automatic
             sequence that plays once, its members in order - has a second to be
             put back at (L14). */
@@ -12575,26 +12584,10 @@ namespace wfg::cue
         std::map<std::string, std::string> runFor;
         std::string act;
 
-        for (auto at = scene->parent; ! at.empty();)
+        if (! underActsAPersonRuns (scene->parent, above, runFor, act))
         {
-            const auto* up = runs.find (at);
-
-            /*  UNDER RUNNING ACTS A PERSON RUNS, as a cue is (D3's review, OC):
-                a scene a sequence or a timeline runs is that scene's, which
-                went on when the stop ended it - seated again it would play
-                beside the member that came next. */
-            if (up == nullptr || up->isFinished() || up->stopAsked || ! isManualGroup (document.findById (up->cue)))
-            {
-                back.items.push_back (label + ": stopped by the GO inside a scene - not started again");
-                return false;
-            }
-
-            if (act.empty())
-                act = up->id;
-
-            runFor[up->cue] = up->id;
-            above.insert (above.begin(), up->cue);
-            at = up->parent;
+            back.items.push_back (label + ": stopped by the GO inside a scene - not started again");
+            return false;
         }
 
         /*  THE SECOND IT WOULD HAVE REACHED NOW, had the GO not stopped it. */
@@ -12755,6 +12748,344 @@ namespace wfg::cue
         return true;
     }
 
+    bool Runner::underActsAPersonRuns (const std::string& parentRun, std::vector<std::string>& above,
+                                       std::map<std::string, std::string>& runFor, std::string& act) const
+    {
+        /*  UNDER RUNNING ACTS A PERSON RUNS (D3's review, OC): a cue or a scene
+            a sequence or a timeline runs is that scene's, which went on when
+            the stop ended it - seated again it would play beside the member
+            that came next (L14). */
+        for (auto at = parentRun; ! at.empty();)
+        {
+            const auto* group = runs.find (at);
+
+            if (group == nullptr || group->isFinished() || group->stopAsked
+                  || ! isManualGroup (document.findById (group->cue)))
+                return false;
+
+            if (act.empty())
+                act = group->id;
+
+            runFor[group->cue] = group->id;
+            above.insert (above.begin(), group->cue);
+            at = group->parent;
+        }
+
+        return true;
+    }
+
+    double Runner::levelWouldBe (const GoStop& stop, const std::optional<FadeJob>& before, std::int64_t tick,
+                                 std::optional<FadeSegment>& rest) const
+    {
+        auto level = stop.levelBefore;
+
+        if (before.has_value() && ! before->movesRate && before->ticksTotal > 0)
+        {
+            const auto done = before->ticksDone + (tick - stop.goTick);
+            const auto progress = std::clamp (static_cast<double> (done) / before->ticksTotal, 0.0, 1.0);
+
+            level = before->points.empty() ? fadeLevelDb (before->fromDb, before->toDb, progress, before->curve)
+                                           : fadeLevelDb (before->fromDb, before->points, progress);
+
+            const auto left = before->ticksTotal - done;
+
+            if (left > 0)
+                rest = FadeSegment { before->toDb, static_cast<int> (left), before->curve, {}, false };
+        }
+
+        return level;
+    }
+
+    std::string Runner::armBankAgain (Engine& engine, PutBack& back, const std::string& bankCue,
+                                      const std::string& parent, const std::vector<std::string>& lostStrips)
+    {
+        /*  ITS IDENTIFIER FIRST, drawn whether or not the cue is still there,
+            so the record carries the same draws either way. */
+        const auto id = back.nextId (parent, bankCue);
+        const auto bankNode = document.findById (bankCue);
+
+        if (! bankNode.isValid())
+            return {};
+
+        /*  NOBODY'S GO, through its arm as well as its making: the arm closes
+            no other bank (`fireKind`'s takeover reads the flag, §77). */
+        makingForPutBack = true;
+        createRun (id, bankCue, "group", parent);
+
+        if (auto* made = runs.find (id))
+            made->postWaitTicks = ticksFor (numberOf (bankNode, "postWait"));
+
+        fireKind (engine, back.tick, bankNode, "group", id);
+        makingForPutBack = false;
+
+        /*  THE STRIPS IT HAD LOST BEFORE THE GO STAY LOST (§77): the bank that
+            took them keeps them, and nothing of this one is armed there. */
+        if (auto* made = runs.find (id))
+            made->lostStrips = lostStrips;
+
+        for (auto& job : scheduled)
+            if (job.run == id && ! job.retired)
+                job.prepared = membersOf (bankNode.getChildWithName ("Header"));
+
+        if (! parent.empty())
+            adoptIntoParentJob (parent, id);
+
+        return id;
+    }
+
+    Runner::StoppedClip Runner::stoppedClipOf (const Run& clip, std::int64_t tick, double levelDb) const
+    {
+        StoppedClip copy;
+        copy.cue = clip.cue;
+        copy.strip = clip.strip;
+        copy.held = clip.held;
+        copy.heldBy = clip.heldBy;
+        copy.trim = clip.trim;
+        copy.levelDb = levelDb;
+
+        /*  WHERE IT WOULD BE NOW, in its file: from its own start at its cue's
+            speed, as K8 counts a paused bed - and a member its bank armed
+            carries no origin of its own, so from where its cue begins. A slice
+            at the in-point of the one it was in (L1). */
+        copy.point = countedPoint (clip, tick);
+
+        if (copy.point.range >= 0)
+            copy.point.from = 0.0;
+        else if (clip.armedOrigin <= 0.0)
+            copy.point.from += numberOf (document.findById (clip.cue), "startOffset");
+
+        return copy;
+    }
+
+    bool Runner::relaunchBank (Engine& engine, PutBack& back, const std::string& bankRun,
+                               double levelBefore, std::int64_t goTick)
+    {
+        const auto* old = runs.find (bankRun);
+
+        if (old == nullptr)
+            return false;
+
+        /*  COPIED BEFORE ANYTHING IS MADE: making a run can move the table. */
+        const auto bankCue = old->cue;
+        const auto label = cueLabel (bankCue);
+        const auto lost = old->lostStrips;
+        const auto parentRun = old->parent;
+
+        /*  NEVER ARMED - a bank the horizon had only made ready: nothing to arm
+            again. CLOSED BEFORE THE GO by a bank that took over the desk: armed
+            again, it would take back the strips it had given up. */
+        if (! hasLaunchEvidence (*old))
+            return false;
+
+        if (old->closing)
+        {
+            back.items.push_back (label + ": stopped by the GO after another bank had taken over - not armed again");
+            return false;
+        }
+
+        std::vector<std::string> above;
+        std::map<std::string, std::string> runFor;
+        std::string act;
+
+        if (! underActsAPersonRuns (parentRun, above, runFor, act))
+        {
+            back.items.push_back (label + ": stopped by the GO inside a scene - not started again");
+            return false;
+        }
+
+        /*  EACH CLIP ITS STOP ENDED WHILE IT SOUNDED: a sound of the bank's,
+            heard, ended since the GO by the stop its bank's job sent it - an
+            abort's mark, where its own end, a release or a MUTE leave none - on
+            a strip the bank still had. A picture is said. */
+        std::vector<StoppedClip> clips;
+
+        for (const auto* child : runs.childrenOf (bankRun))
+        {
+            if (! child->sampler || child->startedAtTick < 0 || ! child->isFinished()
+                  || child->endedAtTick < goTick || ! child->stopEndsWait || child->killed
+                  || std::find (lost.begin(), lost.end(), child->strip) != lost.end())
+                continue;
+
+            if (child->kind == "media")
+                clips.push_back (stoppedClipOf (*child, back.tick, child->ownLevel));
+            else if (child->kind == "video")
+                back.items.push_back (cueLabel (child->cue) + ": a picture the GO stopped - not put back");
+        }
+
+        /*  THE BANK, ARMED AGAIN at the level it had when the GO stopped it
+            (OG): a bank a stop faded out comes back as it was before the fade. */
+        const auto id = armBankAgain (engine, back, bankCue, act, lost);
+
+        if (id.empty())
+            return false;
+
+        if (auto* made = runs.find (id))
+            made->ownLevel = levelBefore;
+
+        back.items.push_back (label + ": armed again");
+
+        for (const auto& clip : clips)
+            if (clipComesBack (back, clip, goTick))
+                relaunchClip (engine, back, id, clip);
+
+        return true;
+    }
+
+    bool Runner::relaunchMember (Engine& engine, PutBack& back, const GoStop& stop,
+                                 const std::optional<FadeJob>& before)
+    {
+        const auto* target = runs.find (stop.target);
+
+        if (target == nullptr)
+            return false;
+
+        const auto cueId = target->cue;
+        const auto bankRun = target->parent;
+        const auto label = cueLabel (cueId);
+
+        if (target->kind != "media")
+        {
+            if (target->kind == "video")
+                back.items.push_back (label + ": a picture the GO stopped - not put back");
+
+            return false;
+        }
+
+        if (target->startedAtTick < 0)
+        {
+            back.items.push_back (label + ": stopped by the GO while it was still arming - not started again");
+            return false;
+        }
+
+        /*  ITS BANK STILL ARMED AS IT WAS, and still holding its strip. */
+        const auto* bank = runs.find (bankRun);
+
+        if (bank == nullptr || bank->isFinished() || bank->stopAsked || bank->closing
+              || std::find (bank->lostStrips.begin(), bank->lostStrips.end(), target->strip) != bank->lostStrips.end())
+        {
+            back.items.push_back (label + ": its bank is no longer armed as it was - not put back");
+            return false;
+        }
+
+        /*  AT THE LEVEL IT WOULD HAVE NOW, as a cue the GO stopped (D3). */
+        std::optional<FadeSegment> rest;
+        auto clip = stoppedClipOf (*target, back.tick, levelWouldBe (stop, before, back.tick, rest));
+        clip.carryOn = rest;
+
+        /*  THE IDLE ARM ITS BANK MADE when it ended gives it its place; one
+            pressed again since is the performer's (OB). */
+        std::string idle;
+
+        if (const auto* now = liveOtherRunOf (cueId, stop.target); now != nullptr)
+        {
+            if (now->parent != bankRun || now->state != runState::armed || now->launchRequested)
+            {
+                back.items.push_back (label + ": running again already - not put back");
+                return false;
+            }
+
+            idle = now->id;
+        }
+
+        if (! clipComesBack (back, clip, stop.goTick))
+            return false;
+
+        if (! idle.empty())
+            endHere (idle, back.tick);
+
+        relaunchClip (engine, back, bankRun, clip);
+        return true;
+    }
+
+    bool Runner::clipComesBack (PutBack& back, const StoppedClip& clip, std::int64_t goTick) const
+    {
+        const auto cue = document.findById (clip.cue);
+        const auto label = cueLabel (clip.cue);
+
+        if (! cue.isValid())
+            return false;
+
+        /*  NOT IF IT WOULD HAVE RUN OUT BY NOW (ruling 16). */
+        if (! notOver (cue, clip.point.range, clip.point.from))
+        {
+            back.items.push_back (label + ": would have ended by now - not put back");
+            return false;
+        }
+
+        /*  A HOLD CLIP IS ITS HAND'S (the author, 2026-10-17): it comes back
+            only while the hand that held it has not let go of its strip since
+            the GO. */
+        if (clip.held)
+            if (const auto found = lettingGo.find ({ clip.strip, clip.heldBy });
+                found != lettingGo.end() && found->second >= goTick)
+            {
+                back.items.push_back (label + ": let go since the GO - not put back");
+                return false;
+            }
+
+        return true;
+    }
+
+    void Runner::relaunchClip (Engine& engine, PutBack& back, const std::string& bankRun, const StoppedClip& clip)
+    {
+        const auto cue = document.findById (clip.cue);
+        const auto id = back.nextId (bankRun, clip.cue);
+
+        if (! cue.isValid())
+            return;
+
+        makingForPutBack = true;
+        createRun (id, clip.cue, "media", bankRun);
+        makingForPutBack = false;
+
+        auto* run = runs.find (id);
+
+        if (run == nullptr)
+            return;
+
+        /*  A MEMBER OF ITS BANK, as the bank's own arm makes one (`spawnChild`):
+            on its strip, at its fader's level - and held by the hand that held
+            it, so that hand's release lets it go. */
+        run->sampler = true;
+        run->trim = clip.trim;
+        run->held = clip.held;
+        run->heldBy = clip.heldBy;
+        run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
+        claimStripFor (*run, clip.strip);
+
+        /*  WHERE IT WOULD BE NOW, launched at once - a hand's press passes over
+            a pre-wait, and so does this - and fading in over the panic fade to
+            the level it had, as a cue the GO stopped does (D3). */
+        DohRoot root;
+        root.kind = DohRoot::Kind::media;
+        root.cue = clip.cue;
+        root.offset = clip.point.from;
+        root.range = clip.point.range;
+        root.levelDb = clip.levelDb;
+        armAtRoot (*run, root, cue);
+
+        run->arrivalTicks = std::max (back.fadeTicks, 1);
+        run->arrivalThen = clip.carryOn;
+
+        /*  ITS SOUND'S DELAY IS BEHIND IT, part way into its file (namespace
+            draft §70, AOV). */
+        if (clip.point.range >= 0 || clip.point.from > numberOf (cue, "startOffset"))
+        {
+            run->delayRead = true;
+            run->soundDelay = 0;
+        }
+
+        run->launchRequested = true;
+        run->launchRequestedAtTick = back.tick;
+
+        /*  ARMED NOW ON A STRIP THAT IS FREE; on one still held, its bank arms
+            it when the strip lands, as it arms any member waiting for one. */
+        if (std::find (run->claims.begin(), run->claims.end(), clip.strip) != run->claims.end())
+            armMedia (engine, cue, id);
+
+        back.items.push_back (cueLabel (clip.cue) + ": put back where it would be now");
+    }
+
     void Runner::putBackFlagsBanksTakes (Engine& engine, PutBack& back, const GoChanges& changes)
     {
         /*  d. AN ADVANCE OR A BOUNDARY STOP the GO asked, as it was: withdrawn
@@ -12770,7 +13101,8 @@ namespace wfg::cue
 
         /*  e. A BANK THE GO CLOSED opens again; one that has finished since is
             fired again, nobody's GO - its identifier drawn here. A strip a
-            member of the GO's took from another bank is given back to it. */
+            member of the GO's took from another bank was given back to it
+            before the stops (namespace draft §77). */
         for (const auto& bankRun : changes.closedSamplers)
         {
             auto* bank = runs.find (bankRun);
@@ -12784,43 +13116,24 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  ARMED AGAIN ALREADY, by the put-back of a stop the GO also aimed
+                at it (§77): once is the bank as it was. */
+            if (liveOtherRunOf (bank->cue, bankRun) != nullptr)
+                continue;
+
             /*  ARMED AGAIN AS IT WAS, not entered again (D3's review, OD): its
                 header had run before the GO, and run again it sent a device
                 left to its operator its cues a second time - so it is passed
                 over, as a seat passes over the header of a scene it seats; and
                 under the act it sat in, while that act runs. */
             const auto bankCue = bank->cue;
-            const auto bankNode = document.findById (bankCue);
+            const auto lost = bank->lostStrips;
             const auto* above = runs.find (bank->parent);
             const auto parent = above != nullptr && ! above->isFinished() ? bank->parent : std::string {};
-            const auto id = back.nextId (parent, bankCue);
 
-            if (! bankNode.isValid())
-                continue;
-
-            makingForPutBack = true;
-            createRun (id, bankCue, "group", parent);
-            makingForPutBack = false;
-
-            if (auto* made = runs.find (id))
-                made->postWaitTicks = ticksFor (numberOf (bankNode, "postWait"));
-
-            fireKind (engine, back.tick, bankNode, "group", id);
-
-            for (auto& job : scheduled)
-                if (job.run == id && ! job.retired)
-                    job.prepared = membersOf (bankNode.getChildWithName ("Header"));
-
-            if (! parent.empty())
-                adoptIntoParentJob (parent, id);
-
-            back.items.push_back (cueLabel (bankCue) + ": armed again");
+            if (! armBankAgain (engine, back, bankCue, parent, lost).empty())
+                back.items.push_back (cueLabel (bankCue) + ": armed again");
         }
-
-        for (const auto& [holder, strip] : changes.lostStrips)
-            if (auto* group = runs.find (holder))
-                group->lostStrips.erase (std::remove (group->lostStrips.begin(), group->lostStrips.end(), strip),
-                                         group->lostStrips.end());
 
         /*  f. A TAKE PRESS, BY ITS EXACT INVERSE - newest first, and only while
             the take is still where the press left it (GU). A pass or a layer it
@@ -12902,7 +13215,7 @@ namespace wfg::cue
         back.fadeSeconds = seconds;
         back.nextId = nextId;
 
-        relaunchScene (engine, back, groupRun, pending.left, pending.levelBefore);
+        relaunchScene (engine, back, groupRun, pending.left, pending.levelBefore, pending.goTick);
 
         /*  AND IT ALWAYS SAYS WHAT BECAME OF IT (D3's review): the Doh's report
             promised it would come back, and that promise is replaced. */
@@ -13313,6 +13626,11 @@ namespace wfg::cue
         if (! strip.isValid() || strip.getType().toString() != "Strip")
             return reason::unknownId;
 
+        /*  NOTED, WHATEVER IT LETS GO OF (namespace draft §77): a hold clip a
+            Doh would bring back is its hand's only while that hand has not let
+            go since the GO - and by then its strip may hold nothing. */
+        lettingGo[{ stripId, origin }] = tick;
+
         const auto* holding = runs.holderOf (stripId);
 
         if (holding == nullptr)
@@ -13481,6 +13799,14 @@ namespace wfg::cue
             releaseStrip (engine, tick, candidate.strip, origin);
             return;
         }
+
+        /*  NOTHING OF IT ON A STRIP: the release is noted all the same, on the
+            strip its bank places it on (§77) - a hold clip of it a Doh would
+            bring back has been let go of. */
+        if (const auto cue = document.findById (cueId); cue.isValid())
+            if (const auto group = cue.getParent(); group.isValid() && group.hasType ("Group") && isSampler (groupMode (group)))
+                if (const auto stripId = stripForMember (group, cueId); ! stripId.empty())
+                    lettingGo[{ stripId, origin }] = tick;
     }
 
     std::vector<CurveTarget> Runner::curveTargetsOf (const juce::ValueTree& cue) const

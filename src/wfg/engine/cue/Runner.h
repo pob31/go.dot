@@ -4555,7 +4555,72 @@ namespace wfg::cue
         bool relaunchStopped (Engine& engine, PutBack& back, const GoStop& stop,
                               const std::optional<FadeJob>& before);
         bool relaunchScene (Engine& engine, PutBack& back, const std::string& groupRun,
-                            const std::set<std::string>& left, double levelBefore);
+                            const std::set<std::string>& left, double levelBefore, std::int64_t goTick);
+
+        /*  WHERE A RELAUNCH SITS: at the top of its list, or under running acts
+            a person runs (D3's review, OC). Fills the acts above it, outermost
+            first, each cue's run, and the nearest; answers whether it may sit
+            there at all. */
+        bool underActsAPersonRuns (const std::string& parentRun, std::vector<std::string>& above,
+                                   std::map<std::string, std::string>& runFor, std::string& act) const;
+
+        /*  A SAMPLER BANK ARMED AGAIN BY A PUT-BACK, nobody's GO: its header
+            passed over (OD), the strips it had lost before the GO still lost,
+            under `parent` while that runs. It closes no other bank - one that
+            lived beside it before the GO lives beside it again. Answers its
+            identifier, drawn whether or not the cue is still there. */
+        std::string armBankAgain (Engine& engine, PutBack& back, const std::string& bankCue,
+                                  const std::string& parent, const std::vector<std::string>& lostStrips);
+
+        /*  A CLIP A BANK HELD WHEN THE GO STOPPED IT (namespace draft §77),
+            copied before anything is made - making a run can move the table:
+            its strip and its hand, its trim and its level, and where it would
+            be now. */
+        struct StoppedClip
+        {
+            std::string cue, strip, heldBy;
+            bool held = false;
+            double trim = 0.0, levelDb = 0.0;
+            ResumePoint point;
+            std::optional<FadeSegment> carryOn;
+        };
+
+        /*  A clip's copy, at the level it would come back to; where it would be
+            at `tick`, counted from its own start. */
+        StoppedClip stoppedClipOf (const Run& clip, std::int64_t tick, double levelDb) const;
+
+        /*  WHERE A STOPPED CUE'S LEVEL WOULD BE AT `tick`: the fade moving it
+            before the GO carried on, the rest of that fade in `rest`; else
+            where it was. */
+        double levelWouldBe (const GoStop& stop, const std::optional<FadeJob>& before, std::int64_t tick,
+                             std::optional<FadeSegment>& rest) const;
+
+        /*  A BANK THE GO'S STOP CUE DISARMED, armed again, and each clip its
+            stop ended while it sounded back on its strip where it would be now
+            (namespace draft §77). */
+        bool relaunchBank (Engine& engine, PutBack& back, const std::string& bankRun,
+                           double levelBefore, std::int64_t goTick);
+
+        /*  A CLIP OF A BANK STILL ARMED that the GO's stop cue stopped on its
+            own, back on its strip where it would be now (§77). */
+        bool relaunchMember (Engine& engine, PutBack& back, const GoStop& stop,
+                             const std::optional<FadeJob>& before);
+
+        /*  Whether a stopped clip comes back: not if it would have ended by
+            now, nor a hold clip whose hand has let go of its strip since the
+            GO. What it says when not. */
+        bool clipComesBack (PutBack& back, const StoppedClip& clip, std::int64_t goTick) const;
+
+        /*  The clip made again under `bankRun`, on its strip, launched where it
+            would be now and fading in over the panic fade. */
+        void relaunchClip (Engine& engine, PutBack& back, const std::string& bankRun, const StoppedClip& clip);
+
+        /*  WHEN A HAND LAST LET GO OF A STRIP, by strip and by origin: the tick
+            its release was applied, whether or not anything held the strip then
+            - a hold clip a Doh would bring back comes back only if its hand has
+            not let go since the GO (§77). Handler state: `strip.release` and a
+            release by name write it. Not carried by a follower's seat. */
+        std::map<std::pair<std::string, std::string>, std::int64_t> lettingGo;
 
         /*  The newest live run of a cue other than `except`, as decision N
             would see it: what a relaunch would play beside. */
